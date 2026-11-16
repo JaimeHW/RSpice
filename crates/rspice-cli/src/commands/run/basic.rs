@@ -1305,9 +1305,15 @@ fn finish_transient_products(
     // evaluated on the exact accepted trajectory. Re-evaluating them
     // here would measure the decimated expansion and report different
     // numbers than the same deck run without `--compress`.
-    let measurements = match post_results {
-        Some(post) => post.measurements.clone(),
-        None => rspice_core::analysis::evaluate_tran_measurements_with_abort(
+    let plan = stored.as_ref().and_then(|stored| stored.plan);
+    let measurements = match (
+        post_results,
+        plan.and_then(|plan| plan.measurements.as_ref()),
+    ) {
+        (Some(post), _) => post.measurements.clone(),
+        // A streamed run was measured from its store.
+        (None, Some(measured)) => measured.clone(),
+        (None, None) => rspice_core::analysis::evaluate_tran_measurements_with_abort(
             ctx.netlist,
             result,
             &crate::abort::ProcessAbort,
@@ -1363,7 +1369,6 @@ fn finish_transient_products(
 
     // Perform checked SAVE/PRINT materialization independently of
     // file publication, matching OP and DC behavior.
-    let plan = stored.as_ref().and_then(|stored| stored.plan);
     let mut signals = match plan {
         Some(plan) => plan.signals.clone(),
         None => transient_export_signals(

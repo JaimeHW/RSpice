@@ -27,6 +27,9 @@ pub(crate) mod continuous;
 pub(crate) mod events;
 mod fourier;
 mod spectrum;
+pub(crate) mod stream;
+
+pub use stream::TranMeasureStream;
 
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
 /// it walks, the dependent signals it can name, and the index at which each
@@ -854,6 +857,9 @@ pub struct MeasureEngine {
     /// the waveform's interpolated value there, as LTspice and QSPICE read
     /// the window. ngspice and Xyce weigh only the samples inside it.
     interpolate_extrema_window_ends: bool,
+    /// The statements a streamed evaluation plans or has read, in place of evaluating them
+    /// over the slices (see [`stream`]).
+    streamed: Option<std::sync::Arc<stream::StreamedStatements>>,
 }
 
 impl MeasureEngine {
@@ -863,7 +869,15 @@ impl MeasureEngine {
             use_legacy_tran_trig_targ: false,
             events: None,
             interpolate_extrema_window_ends: false,
+            streamed: None,
         }
+    }
+
+    pub(crate) fn set_streamed(
+        &mut self,
+        streamed: Option<std::sync::Arc<stream::StreamedStatements>>,
+    ) {
+        self.streamed = streamed;
     }
 
     pub(crate) fn set_use_legacy_tran_trig_targ(&mut self, enabled: bool) {
@@ -1070,15 +1084,32 @@ impl MeasureEngine {
                     } else {
                         signal_maps[index]
                     };
+                    let data = MeasureData {
+                        axis: time,
+                        signals,
+                        segment_starts,
+                    };
                     match with_earlier_results(m, &results) {
-                        Ok(statement) => self.evaluate_one(
-                            &statement,
-                            MeasureData {
-                                axis: time,
-                                signals,
-                                segment_starts,
-                            },
-                        ),
+                        Ok(statement) => match self.streamed.as_deref() {
+                            Some(stream::StreamedStatements::Plan(planned)) => {
+                                let spec = stream::plan(self, &statement, data);
+                                if let Some(slot) = planned
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .get_mut(index)
+                                {
+                                    *slot = spec;
+                                }
+                                MeasureResult::failed_for_statement(m, "planned for streaming")
+                            }
+                            Some(stream::StreamedStatements::Results(streamed)) => {
+                                match streamed.get(index) {
+                                    Some(Some(result)) => result.clone().check_contract(&statement),
+                                    _ => self.evaluate_one(&statement, data),
+                                }
+                            }
+                            None => self.evaluate_one(&statement, data),
+                        },
                         Err(error) => MeasureResult::failed_for_statement(m, &error),
                     }
                 }
@@ -1705,6 +1736,12 @@ impl MeasureEngine {
             .windows(2)
             .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
             .unwrap_or(true);
+        Self::window_bounds(ascending, from, to)
+    }
+
+    /// The `[lower, upper]` window `FROM` and `TO` name on an axis that runs up when
+    /// `ascending`: a missing end is open on its own side.
+    fn window_bounds(ascending: bool, from: Option<Value>, to: Option<Value>) -> (Value, Value) {
         match (from, to) {
             (Some(from), Some(to)) => (from, to),
             (Some(from), None) if ascending => (from, Value::INFINITY),
@@ -2013,14 +2050,7 @@ impl MeasureEngine {
             .first()
             .zip(time.last())
             .is_none_or(|(first, last)| last >= first);
-        let (lower, upper) = match (from, to) {
-            (Some(from), Some(to)) => (from, to),
-            (Some(from), None) if ascending => (from, Value::INFINITY),
-            (Some(from), None) => (Value::NEG_INFINITY, from),
-            (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
-            (None, Some(to)) => (to, Value::INFINITY),
-            (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
-        };
+        let (lower, upper) = Self::window_bounds(ascending, from, to);
         if lower > upper {
             return MeasureResult::failed(name, "Empty range");
         }
@@ -2057,14 +2087,7 @@ impl MeasureEngine {
             .first()
             .zip(time.last())
             .is_none_or(|(first, last)| last >= first);
-        let (lower, upper) = match (from, to) {
-            (Some(from), Some(to)) => (from, to),
-            (Some(from), None) if ascending => (from, Value::INFINITY),
-            (Some(from), None) => (Value::NEG_INFINITY, from),
-            (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
-            (None, Some(to)) => (to, Value::INFINITY),
-            (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
-        };
+        let (lower, upper) = Self::window_bounds(ascending, from, to);
         if lower > upper {
             return MeasureResult::failed(name, "Empty range");
         }

@@ -337,4 +337,12 @@ impl Engine {
         lead_power::record_lead_power(&requests, result);
         Ok(())
     }
+
+    /// Whether [`Self::finish_transient_from_rows`] leaves a result read back from its rows as
+    /// it is: the deck has no `.FFT` card and asks for no lead power, so the rows' columns are
+    /// every signal the result has.
+    pub fn transient_rows_are_whole(&self, netlist: &Netlist) -> bool {
+        netlist.fft_analyses.is_empty()
+            && lead_power::requested_lead_power(netlist).is_ok_and(|requests| requests.is_empty())
+    }
 }

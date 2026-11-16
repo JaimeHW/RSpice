@@ -54,6 +54,7 @@ fn first_ordered_pair(pair: &[Value]) -> Option<bool> {
 }
 
 use super::error::SimulationError;
+use super::measure::stream::StreamedStatements;
 use super::measure::{
     AcceptedRowAtMatch, ContinuousMeasureResult, DelayConditionTracker, EdgeType,
     ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
@@ -6203,6 +6204,7 @@ fn evaluate_noise_measurements_with_parameters(
         use_legacy_tran_trig_targ: false,
         events: None,
         interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+        streamed: None,
     };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
@@ -6318,6 +6320,7 @@ fn evaluate_statements_with_segment_starts(
     engine.set_use_legacy_tran_trig_targ(policy.use_legacy_tran_trig_targ);
     engine.set_event_operands(policy.events.cloned());
     engine.set_interpolate_extrema_window_ends(policy.interpolate_extrema_window_ends);
+    engine.set_streamed(policy.streamed.cloned());
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -6344,6 +6347,8 @@ struct MeasureEvaluationPolicy<'a> {
     events: Option<&'a Arc<EventOperands>>,
     /// See [`measures_interpolate_extrema_window_ends`].
     interpolate_extrema_window_ends: bool,
+    /// A streamed transient evaluation's plan or results (see [`super::measure::stream`]).
+    streamed: Option<&'a Arc<StreamedStatements>>,
 }
 
 /// Whether a MIN, MAX or PP window end between samples adds the interpolated
@@ -6376,6 +6381,7 @@ fn evaluate_statements_with_equation_traces(
         use_legacy_tran_trig_targ,
         events,
         interpolate_extrema_window_ends,
+        streamed,
     } = policy;
     let statement_dependencies = statements
         .iter()
@@ -6499,6 +6505,7 @@ fn evaluate_statements_with_equation_traces(
     engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
     engine.set_event_operands(events.cloned());
     engine.set_interpolate_extrema_window_ends(interpolate_extrema_window_ends);
+    engine.set_streamed(streamed.cloned());
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -6967,15 +6974,27 @@ pub fn evaluate_tran_measurements_with_abort(
     result: &TransientResult,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_tran_measurements_directed(netlist, result, None, abort)
+}
+
+/// [`evaluate_tran_measurements_with_abort`], with the statements of a streamed evaluation
+/// planned or read from its pass instead of evaluated over `result`'s waveforms.
+pub(crate) fn evaluate_tran_measurements_directed(
+    netlist: &Netlist,
+    result: &TransientResult,
+    streamed: Option<&Arc<StreamedStatements>>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
     let signals = retained_transient_signal_map(result);
-    let mut measurements = evaluate_tran_measurements_with_signals_and_abort(
+    let mut measurements = evaluate_tran_measurements_with_signals_directed(
         netlist,
         &result.time,
         &signals,
         Some(result),
+        streamed,
         abort,
     )?;
     for measurement in &mut measurements {
@@ -7190,6 +7209,24 @@ pub(crate) fn evaluate_tran_measurements_with_signals_and_abort(
     current_result: Option<&TransientResult>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_tran_measurements_with_signals_directed(
+        netlist,
+        time,
+        source_signals,
+        current_result,
+        None,
+        abort,
+    )
+}
+
+fn evaluate_tran_measurements_with_signals_directed(
+    netlist: &Netlist,
+    time: &[Value],
+    source_signals: &HashMap<String, &[Value]>,
+    current_result: Option<&TransientResult>,
+    streamed: Option<&Arc<StreamedStatements>>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
@@ -7267,6 +7304,7 @@ pub(crate) fn evaluate_tran_measurements_with_signals_and_abort(
         use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
         events: events.as_ref(),
         interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+        streamed,
     };
     let mut results = match &live_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
@@ -7466,6 +7504,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
         use_legacy_tran_trig_targ: false,
         events: None,
         interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+        streamed: None,
     };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
@@ -7704,6 +7743,7 @@ fn evaluate_ac_measurements_with_parameters(
         use_legacy_tran_trig_targ: false,
         events: None,
         interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+        streamed: None,
     };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
@@ -7795,6 +7835,7 @@ pub fn evaluate_op_measurements_with_abort(
         use_legacy_tran_trig_targ: false,
         events: None,
         interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+        streamed: None,
     };
     let mut results = evaluate_statements(
         &statements,

@@ -13,6 +13,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rspice_core::AbortSignal;
+use rspice_core::analysis::{MeasureResult, TranMeasureStream};
 use rspice_core::engine::{
     ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint, TransientEnd,
     TransientResult, TransientStartupMode, TransientState,
@@ -741,11 +743,13 @@ impl StoredTransient {
     /// How the outputs can read this run straight from its store, or `None` when they need it in
     /// memory.
     ///
-    /// They can when the deck measures and asserts nothing, checks no `.VEC` file's expected
-    /// outputs, prints no table of its own, keeps every accepted step, and asks for a rawfile, a
-    /// delimited table, an event dump or nothing; and when every output signal is one of the
-    /// store's columns, value for value. That last is checked by projecting the first chunk
-    /// exactly as the whole run would be.
+    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, prints
+    /// no table of its own, keeps every accepted step, and asks for a rawfile, a delimited
+    /// table, an event dump or nothing; when every output signal is one of the store's columns,
+    /// value for value; and when its `.MEASURE TRAN` statements, if any, read only the store's
+    /// columns in forms measured in one pass over the rows. The signals are checked by
+    /// projecting the first chunk exactly as the whole run would be, and the statements by
+    /// planning them against the same chunk; they are then measured from the store.
     pub(super) fn stream_plan(
         &mut self,
         ctx: &RunContext<'_>,
@@ -773,10 +777,13 @@ impl StoredTransient {
         let parameters = !self.rows.parameters.is_empty();
         if !format_streams
             || parameters
-            || !netlist.fft_analyses.is_empty()
+            || !ctx.engine.transient_rows_are_whole(netlist)
             || prints
             || !every_step
-            || !netlist.measurements.is_empty()
+            || netlist
+                .measurements
+                .iter()
+                .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
             || !netlist.assertions.is_empty()
             || !netlist.vector_files.is_empty()
             || rows == 0
@@ -791,9 +798,94 @@ impl StoredTransient {
             .next()
             .map_or(0, |span| span.1);
         self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
-        let plan = probe_plan(ctx, &self.shell, &self.rows.targets);
+        let plan = probe_plan(ctx, &self.shell, &self.rows.targets).and_then(|plan| {
+            let Some(mut plan) = plan else {
+                return Ok(None);
+            };
+            let measures = netlist
+                .measurements
+                .iter()
+                .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"));
+            if measures {
+                let Some(measurements) = self.measure(ctx)? else {
+                    log::debug!("the transient's .MEASURE TRAN statements read it back whole");
+                    return Ok(None);
+                };
+                log::debug!(
+                    "the transient's {} .MEASURE TRAN statements were measured from its store",
+                    measurements.len()
+                );
+                plan.measurements = Some(measurements);
+            }
+            Ok(Some(plan))
+        });
         self.rows.clear(&mut self.shell);
         plan
+    }
+
+    /// The deck's `.MEASURE TRAN` results, measured in one pass over the store's rows (after
+    /// one over their axis) with the first chunk's rows in the shell; `None` when a statement
+    /// needs the run in memory.
+    fn measure(&mut self, ctx: &RunContext<'_>) -> Result<Option<Vec<MeasureResult>>, CliError> {
+        let failed = |source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient measurement projection".to_string()),
+        };
+        let abort = &crate::abort::ProcessAbort;
+        let columns = self
+            .rows
+            .targets
+            .iter()
+            .map(|&target| stream_column(&self.shell, target))
+            .collect::<Vec<_>>();
+        let Some(mut stream) =
+            TranMeasureStream::plan(ctx.netlist, &self.shell, &columns, abort).map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        let rows = &mut self.rows;
+        let chunks = rows.reader.chunk_spans().len();
+        let read = |error| store_error(&rows.store.dir, error);
+        let mut x = Vec::new();
+        for chunk in 0..chunks {
+            if abort.is_aborted() {
+                return Err(failed(rspice_core::SimulationError::Aborted));
+            }
+            rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
+            stream.axis(&x);
+        }
+        let slots = stream.columns().to_vec();
+        let mut values = vec![Vec::new(); slots.len()];
+        for chunk in 0..chunks {
+            if abort.is_aborted() {
+                return Err(failed(rspice_core::SimulationError::Aborted));
+            }
+            rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
+            for (&slot, values) in slots.iter().zip(&mut values) {
+                rows.reader
+                    .read_chunk_slot(chunk, slot, values)
+                    .map_err(read)?;
+            }
+            let columns = values.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            stream.rows(&x, &columns);
+        }
+        stream
+            .finish(ctx.netlist, &self.shell, abort)
+            .map_err(failed)
+    }
+}
+
+/// The result column a slot's values fill, as an output reads it; `None` for one an output
+/// reads only from a run read back.
+fn stream_column(shell: &TransientResult, target: SlotTarget) -> Option<&[f64]> {
+    match target {
+        SlotTarget::Voltage(node) => shell.voltages.get(node).map(Vec::as_slice),
+        SlotTarget::Current(branch) => shell.branch_currents.get(branch).map(Vec::as_slice),
+        SlotTarget::DeviceOp(index) => shell
+            .device_op_traces
+            .get(index)
+            .map(|trace| trace.values.as_slice()),
+        SlotTarget::Parameter(_) | SlotTarget::StepSize | SlotTarget::Store(_) => None,
     }
 }
 
@@ -939,6 +1031,8 @@ pub(super) struct StreamPlan {
     /// Named and typed as the in-memory projection names them, without samples.
     pub(super) signals: Vec<ScalarSignal>,
     slots: Vec<usize>,
+    /// The deck's `.MEASURE TRAN` results, measured from the store; `None` when it has none.
+    pub(super) measurements: Option<Vec<MeasureResult>>,
 }
 
 /// Project the probe rows in `shell` and keep the plan only when every projected signal is a
@@ -948,13 +1042,7 @@ fn probe_plan(
     shell: &TransientResult,
     targets: &[SlotTarget],
 ) -> Result<Option<StreamPlan>, CliError> {
-    let column = |target: SlotTarget| match target {
-        SlotTarget::Voltage(node) => shell.voltages.get(node),
-        SlotTarget::Current(branch) => shell.branch_currents.get(branch),
-        SlotTarget::DeviceOp(index) => shell.device_op_traces.get(index).map(|trace| &trace.values),
-        // An output that reads these reads the run back.
-        SlotTarget::Parameter(_) | SlotTarget::StepSize | SlotTarget::Store(_) => None,
-    };
+    let column = |target: SlotTarget| stream_column(shell, target);
     let inventory = match rspice_core::execution::transient_projection_signals(shell) {
         Ok(inventory) => inventory,
         Err(_) => return Ok(None),
@@ -1002,7 +1090,11 @@ fn probe_plan(
         signal.values = Vec::new();
         slots.push(slot);
     }
-    Ok(Some(StreamPlan { signals, slots }))
+    Ok(Some(StreamPlan {
+        signals,
+        slots,
+        measurements: None,
+    }))
 }
 
 impl StoredRows {

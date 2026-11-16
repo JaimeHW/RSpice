@@ -13,15 +13,26 @@ c1 out 0 100p
 .end
 ";
 
-/// The same circuit with a measurement, whose run is read back from its store into memory
-/// before its outputs are written.
+/// The same circuit with a measurement of an expression, which is a waveform of its own, so the
+/// run is read back from its store into memory before its outputs are written.
 const RC_MEASURED: &str = "rc step
 v1 in 0 pulse(0 1 10n 1n 1n 200n 400n)
 r1 in out 1k
 c1 out 0 100p
 .tran 5n 2u
-.meas tran vmax max v(out)
+.meas tran vmax max par('2*v(out)')
 .end
+";
+
+/// Measurements that read the run's own columns, which are measured in one pass over its store.
+const RC_MEASURES: &str = ".meas tran vavg avg v(out)
+.meas tran vmax max v(out) from=100n
+.meas tran rise trig v(out) val=0.1 rise=1 targ v(out) val=0.8 rise=1
+.meas tran vat find v(out) at=333n
+.meas tran fall when v(out)=0.5 fall=2
+.meas tran slope deriv v(out) when v(in)=0.5 rise=last
+.meas tran charge integ i(v1) from=0 to=1u
+.meas tran both param='vavg+vmax'
 ";
 
 fn run(args: &[&str]) {
@@ -61,6 +72,50 @@ fn a_streamed_output_is_byte_identical_to_the_same_run_read_back_into_memory() {
             std::fs::read(&read_back).unwrap(),
             "{format}: the streamed table differs from the table read back"
         );
+    }
+}
+
+#[test]
+fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
+    let dir = test_dir("results-store-measured");
+    let streamed = dir.join("streamed.cir");
+    let read_back = dir.join("read_back.cir");
+    let body = RC.trim_end_matches(".end\n");
+    std::fs::write(&streamed, format!("{body}{RC_MEASURES}.end\n")).unwrap();
+    // An expression's measurement reads the run in memory, and the others with it.
+    std::fs::write(
+        &read_back,
+        format!("{body}{RC_MEASURES}.meas tran twice max par('2*v(out)')\n.end\n"),
+    )
+    .unwrap();
+    let measured = |deck: &std::path::Path, file: &str| {
+        let path = dir.join(file);
+        run(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "--meas-file",
+            path.to_str().unwrap(),
+        ]);
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        json["measurements"].as_array().unwrap().clone()
+    };
+    let streamed = measured(&streamed, "streamed.json");
+    let read_back = measured(&read_back, "read_back.json");
+    assert_eq!(streamed.len(), 8);
+    for measurement in &streamed {
+        let twin = read_back
+            .iter()
+            .find(|twin| twin["name"] == measurement["name"])
+            .unwrap();
+        assert!(measurement["value"].is_number(), "{measurement}");
+        for field in ["value", "raw_value", "event_axis", "error", "passed"] {
+            assert_eq!(
+                measurement[field], twin[field],
+                "{field}: {measurement} {twin}"
+            );
+        }
     }
 }
 
