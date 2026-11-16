@@ -639,7 +639,6 @@ impl Instance {
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6f14f9515ad7f1086e193d5fd1bd0d011953cc51136de1cba576cd00f1194a71";
-	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
 		Self::try_new_with_parameters(nodes, &[]).expect("invalid generated Verilog-A instance defaults")

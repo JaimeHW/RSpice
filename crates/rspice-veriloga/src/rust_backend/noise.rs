@@ -1564,9 +1564,9 @@ fn emit_noise_statements(
                     .expect("write noise loop increment");
                 writeln!(
                     out,
-                    "{body_padding}    if {statement_prefix}_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS {{ ctx.report_analog_loop_limit(\"noise\", {statement_prefix}_iterations, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }}"
+                    "{body_padding}    if ctx.analog_loop_aborted(\"noise\", {statement_prefix}_iterations) {{ break; }}"
                 )
-                .expect("write noise loop bound");
+                .expect("write noise loop abort poll");
                 writeln!(out, "{body_padding}}}").expect("write noise loop end");
                 if active_sources.is_some() {
                     writeln!(out, "{padding}}}").expect("write noise loop activity guard end");
@@ -2072,7 +2072,7 @@ mod tests {
     #[test]
     fn return_inside_a_string_literal_is_not_detected() {
         assert!(!fragment_contains_return(
-            "ctx.report_analog_loop_limit(\"return\", n, limit);"
+            "ctx.analog_loop_aborted(\"return\", n);"
         ));
         assert!(!fragment_contains_return(
             "let q: &str = \"a return b\"; let y = 1.0;"
@@ -2089,12 +2089,10 @@ mod tests {
     }
 
     #[test]
-    fn the_emitted_loop_limit_report_is_accepted() {
-        // Exactly what emit_noise_statements writes for an analog loop bound.
+    fn the_emitted_loop_abort_poll_is_accepted() {
+        // Exactly what emit_noise_statements writes for an analog loop's poll.
         assert!(!fragment_contains_return(
-            "    if p_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS \
-             { ctx.report_analog_loop_limit(\"noise\", p_iterations, \
-             Self::MAX_ANALOG_LOOP_ITERATIONS); break; }"
+            "    if ctx.analog_loop_aborted(\"noise\", p_iterations) { break; }"
         ));
     }
 

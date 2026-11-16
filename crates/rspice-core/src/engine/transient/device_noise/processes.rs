@@ -512,11 +512,14 @@ fn collect_generated_device(
             circuit.generated_simulation_parameters,
             periodic,
         )
-        .map_err(|err| {
-            SimulationError::Circuit(format!(
+        .map_err(|err| match err {
+            crate::device::veriloga_builtins::BuiltinNoiseEvaluationError::Aborted => {
+                SimulationError::Aborted
+            }
+            err => SimulationError::Circuit(format!(
                 "Generated Verilog-A device '{instance}' coherent noise evaluation failed at \
                  {frequency:e} Hz: {err}"
-            ))
+            )),
         })?;
     for process in evaluated
         .into_iter()

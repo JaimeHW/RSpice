@@ -1724,11 +1724,14 @@ impl Engine {
                     circuit.num_nodes(),
                     circuit.generated_simulation_parameters,
                 )
-                .map_err(|err| {
-                    SimulationError::Circuit(format!(
+                .map_err(|err| match err {
+                    crate::device::veriloga_builtins::BuiltinNoiseEvaluationError::Aborted => {
+                        SimulationError::Aborted
+                    }
+                    err => SimulationError::Circuit(format!(
                         "Generated Verilog-A device '{}' noise evaluation failed: {err}",
                         device.instance_name
-                    ))
+                    )),
                 })?;
             for source in evaluated {
                 noise_sources.push(Self::generated_noise_source(

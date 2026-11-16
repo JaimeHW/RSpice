@@ -511,7 +511,6 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {checkpoint_model_identity:?};\n"
     ));
-    out.push_str("    pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;\n");
     out.push('\n');
     out.push_str("    pub fn new(nodes: &[usize]) -> Self {\n");
     out.push_str("        Self::try_new_with_parameters(nodes, &[]).expect(\"invalid generated Verilog-A instance defaults\")\n");

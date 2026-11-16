@@ -379,10 +379,9 @@ pub enum GeneratedEvaluationError {
         site: u32,
         source: AnalogEffectError,
     },
-    AnalogLoopLimit {
+    /// An analog loop's poll found the run stopped (Stop or a time limit).
+    Aborted {
         phase: &'static str,
-        iterations: usize,
-        limit: usize,
     },
     DdtCandidate {
         slot: usize,
@@ -447,14 +446,9 @@ impl std::fmt::Display for GeneratedEvaluationError {
                     "generated Verilog-A system task at site {site} failed: {source}"
                 )
             }
-            Self::AnalogLoopLimit {
-                phase,
-                iterations,
-                limit,
-            } => write!(
-                f,
-                "generated Verilog-A {phase} exceeded its analog-loop limit: {iterations} iterations (limit {limit})"
-            ),
+            Self::Aborted { phase } => {
+                write!(f, "generated Verilog-A {phase} was stopped inside an analog loop")
+            }
             Self::DdtCandidate { slot, source } => {
                 write!(f, "generated Verilog-A ddt slot {slot} failed: {source}")
             }
@@ -763,10 +757,6 @@ pub enum GeneratedNoiseEvaluationError {
         re: Value,
         im: Value,
     },
-    AnalogLoopLimit {
-        iterations: usize,
-        limit: usize,
-    },
 }
 
 impl std::fmt::Display for GeneratedNoiseEvaluationError {
@@ -834,10 +824,6 @@ impl std::fmt::Display for GeneratedNoiseEvaluationError {
             } => write!(
                 f,
                 "generated Verilog-A noise process {process} injection {injection} produced non-finite gain ({re}, {im})"
-            ),
-            Self::AnalogLoopLimit { iterations, limit } => write!(
-                f,
-                "generated Verilog-A noise evaluation exceeded its analog-loop limit: {iterations} iterations (limit {limit})"
             ),
         }
     }
@@ -1206,16 +1192,32 @@ impl<'a> GeneratedEvalContext<'a> {
             && (!self.analysis_smallsig() || self.analysis_phase.is_equilibrium())
     }
 
+    /// Whether an analog loop that has made `iterations` trips should stop
+    /// because the run was stopped.
+    ///
+    /// A loop runs until its condition clears; this is how a loop whose
+    /// condition never clears still ends on the user's Stop or the run's time
+    /// limit. It polls the run's abort hook once every
+    /// [`loop_abort::POLL_INTERVAL`] trips, so a trip pays one mask and
+    /// compare; an aborted poll is recorded as the evaluation's error for the
+    /// caller to report as a stopped run.
     #[inline]
-    pub fn report_analog_loop_limit(&self, phase: &'static str, iterations: usize, limit: usize) {
+    pub fn analog_loop_aborted(&self, phase: &'static str, iterations: usize) -> bool {
+        iterations & (loop_abort::POLL_INTERVAL as usize - 1) == 0
+            && self.poll_analog_loop_abort(phase)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn poll_analog_loop_abort(&self, phase: &'static str) -> bool {
+        if !loop_abort::aborted() {
+            return false;
+        }
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
-                .set(Some(GeneratedEvaluationError::AnalogLoopLimit {
-                    phase,
-                    iterations,
-                    limit,
-                }));
+                .set(Some(GeneratedEvaluationError::Aborted { phase }));
         }
+        true
     }
 
     #[inline]

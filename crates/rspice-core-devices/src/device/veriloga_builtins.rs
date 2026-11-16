@@ -327,6 +327,8 @@ pub enum BuiltinNoiseEvaluationError {
         mechanism: &'static str,
         source: GeneratedNoiseEvaluationError,
     },
+    /// An analog loop found the run stopped while the sources were evaluated.
+    Aborted,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -349,6 +351,7 @@ impl std::fmt::Display for BuiltinNoiseEvaluationError {
                 f,
                 "noise source {index} ('{mechanism}') evaluation failed: {source}"
             ),
+            Self::Aborted => f.write_str("noise evaluation was stopped inside an analog loop"),
         }
     }
 }
@@ -359,6 +362,7 @@ impl std::error::Error for BuiltinNoiseEvaluationError {
         match self {
             Self::Topology { source, .. } => Some(source),
             Self::Evaluation { source, .. } => Some(source),
+            Self::Aborted => None,
         }
     }
 }
@@ -2268,7 +2272,6 @@ impl BuiltinVerilogAInstance {
                     | GeneratedNoiseEvaluationError::InjectionProcessMismatch { process, .. } => {
                         (*process, "<grouped process>")
                     }
-                    GeneratedNoiseEvaluationError::AnalogLoopLimit { .. } => (0, "<analog loop>"),
                 };
                 BuiltinNoiseEvaluationError::Evaluation {
                     index,
@@ -2276,20 +2279,12 @@ impl BuiltinVerilogAInstance {
                     source,
                 }
             })?;
-        // Analog-loop limits are recorded on the context rather than returned,
+        // A stopped run is recorded on the context rather than returned,
         // because generated noise schedules are split into helpers that cannot
-        // propagate a `Result`. A limit means the operating point the PSDs were
-        // evaluated at never settled, so it outranks any per-source problem the
-        // visitor saw.
-        if let Some(GeneratedEvaluationError::AnalogLoopLimit {
-            iterations, limit, ..
-        }) = ctx.take_evaluation_error()
-        {
-            return Err(BuiltinNoiseEvaluationError::Evaluation {
-                index: 0,
-                mechanism: "<analog loop>",
-                source: GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations, limit },
-            });
+        // propagate a `Result`. It outranks any per-source problem the visitor
+        // saw: the loop that saw it broke off, so what followed is not a result.
+        if let Some(GeneratedEvaluationError::Aborted { .. }) = ctx.take_evaluation_error() {
+            return Err(BuiltinNoiseEvaluationError::Aborted);
         }
         if let Some(error) = visitor_error {
             return Err(error);
@@ -2498,7 +2493,6 @@ impl BuiltinVerilogAInstance {
                         (0, "<device multiplicity>")
                     }
                     GeneratedNoiseEvaluationError::InvalidFrequency { .. } => (0, "<frequency>"),
-                    GeneratedNoiseEvaluationError::AnalogLoopLimit { .. } => (0, "<analog loop>"),
                 };
                 BuiltinNoiseEvaluationError::Evaluation {
                     index,
@@ -2506,15 +2500,8 @@ impl BuiltinVerilogAInstance {
                     source,
                 }
             })?;
-        if let Some(GeneratedEvaluationError::AnalogLoopLimit {
-            iterations, limit, ..
-        }) = ctx.take_evaluation_error()
-        {
-            return Err(BuiltinNoiseEvaluationError::Evaluation {
-                index: 0,
-                mechanism: "<analog loop>",
-                source: GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations, limit },
-            });
+        if let Some(GeneratedEvaluationError::Aborted { .. }) = ctx.take_evaluation_error() {
+            return Err(BuiltinNoiseEvaluationError::Aborted);
         }
         if let Some(error) = visitor_error {
             return Err(error);
@@ -4635,15 +4622,17 @@ mod tests {
         let ctx =
             GeneratedEvalContext::with_analysis(&voltages, 300.15, 1, GeneratedAnalysisKind::Dc);
 
-        ctx.report_analog_loop_limit("transient stamp", 11, 10);
-        ctx.report_analog_loop_limit("later helper", 21, 20);
+        rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || {
+            // A trip between polls does not look.
+            assert!(!ctx.analog_loop_aborted("transient stamp", 1));
+            assert!(ctx.analog_loop_aborted("transient stamp", 0));
+            assert!(ctx.analog_loop_aborted("later helper", 1 << 16));
+        });
 
         assert_eq!(
             ctx.take_evaluation_error(),
-            Some(GeneratedEvaluationError::AnalogLoopLimit {
+            Some(GeneratedEvaluationError::Aborted {
                 phase: "transient stamp",
-                iterations: 11,
-                limit: 10,
             })
         );
         assert_eq!(ctx.take_evaluation_error(), None);
