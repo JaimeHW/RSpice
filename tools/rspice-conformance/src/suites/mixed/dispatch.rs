@@ -345,10 +345,19 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         std::collections::HashSet::new();
     let mut artifacts = HashMap::new();
     let mut active: Vec<ActiveTask> = Vec::new();
-    let fail = |active: &mut Vec<ActiveTask>, result: CaseResult, error: ErrorRecord| {
+    // Each task's engine lines, by task, so the case states them in task
+    // order rather than in the order members happened to finish.
+    let mut logs: Vec<Vec<String>> = vec![Vec::new(); order.len()];
+    let fail = |active: &mut Vec<ActiveTask>,
+                logs: &mut Vec<Vec<String>>,
+                mut result: CaseResult,
+                error: ErrorRecord| {
         for task in active.iter_mut() {
             task.runner.abort();
         }
+        result
+            .warnings
+            .extend(member_warnings(std::mem::take(logs)));
         result.failed(error)
     };
     loop {
@@ -366,13 +375,23 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
             let resolved = match task.resolve_dependency_artifacts(&artifacts) {
                 Ok(resolved) => resolved,
                 Err(error) => {
-                    return fail(&mut active, result, harness_error(error.to_string()));
+                    return fail(
+                        &mut active,
+                        &mut logs,
+                        result,
+                        harness_error(error.to_string()),
+                    );
                 }
             };
             let producer = match resolved.artifact_producer() {
                 Ok(producer) => producer,
                 Err(error) => {
-                    return fail(&mut active, result, harness_error(error.to_string()));
+                    return fail(
+                        &mut active,
+                        &mut logs,
+                        result,
+                        harness_error(error.to_string()),
+                    );
                 }
             };
             let runner = match request.worker {
@@ -381,7 +400,9 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                         Some(worker) => worker,
                         None => match worker_host::WorkerHost::start(web_dir) {
                             Ok(worker) => worker,
-                            Err(error) => return fail(&mut active, result, harness_error(error)),
+                            Err(error) => {
+                                return fail(&mut active, &mut logs, result, harness_error(error));
+                            }
                         },
                     };
                     TaskRun::Worker(worker_host::WorkerTask::start(worker, resolved, abort))
@@ -389,7 +410,7 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                 None => {
                     let mut runner = runners.pop().unwrap_or_default();
                     if let Err(error) = runner.start_prepared(resolved, false) {
-                        return fail(&mut active, result, simulation_error(&error));
+                        return fail(&mut active, &mut logs, result, simulation_error(&error));
                     }
                     TaskRun::Native(runner)
                 }
@@ -412,24 +433,19 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         let mut index = 0;
         while index < active.len() {
             let Some(outcome) = active[index].runner.poll_result() else {
-                for line in active[index].runner.drain_engine_log() {
-                    if result.warnings.len() < 64 {
-                        result.warnings.push(line);
-                    }
-                }
+                let lines = active[index].runner.drain_engine_log();
+                logs[order[&active[index].instance]].extend(lines);
                 index += 1;
                 continue;
             };
             let mut done = active.swap_remove(index);
+            // What the task logged after the last poll that found it running.
+            logs[order[&done.instance]].extend(done.runner.drain_engine_log());
             if let Some(backends) = done.runner.backends() {
                 result.backends.get_or_insert_default().merge(&backends);
             }
             if let TaskRun::Worker(task) = &mut done.runner {
-                for line in task.take_log() {
-                    if result.warnings.len() < 64 {
-                        result.warnings.push(line);
-                    }
-                }
+                logs[order[&done.instance]].extend(task.take_log());
                 workers.extend(task.take_worker());
             }
             let simulated = match outcome {
@@ -442,9 +458,11 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                         stage: Some("execution".into()),
                         ..Default::default()
                     };
-                    return fail(&mut active, result, error);
+                    return fail(&mut active, &mut logs, result, error);
                 }
-                Err(error) => return fail(&mut active, result, simulation_error(&error)),
+                Err(error) => {
+                    return fail(&mut active, &mut logs, result, simulation_error(&error));
+                }
             };
             let checkpoints = done.runner.take_task_transient_checkpoints();
             if let TaskRun::Native(runner) = done.runner {
@@ -460,7 +478,12 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    return fail(&mut active, result, harness_error(error.to_string()));
+                    return fail(
+                        &mut active,
+                        &mut logs,
+                        result,
+                        harness_error(error.to_string()),
+                    );
                 }
             }
             observations[order[&done.instance]] = Some(observation(&simulated, &done.label));
@@ -468,9 +491,98 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    result.warnings.extend(member_warnings(logs));
     result.results = observations.into_iter().flatten().collect();
     family.gather(&mut result.results);
     result
+}
+
+/// A case's engine lines, in task order, one row per distinct line.
+///
+/// A family's members run side by side, so the order they finish in, and so
+/// the order their lines arrive in, is the threads' timing. The case states
+/// each task's lines in task order instead, so one deck states one list
+/// however many threads ran it. A line the engine logged inside a Monte Carlo
+/// sample carries that sample's point (`sample 3: ...`), and every sample that
+/// said the same thing is one row naming how many did and which, the way a
+/// simulator reports one diagnostic raised at many points: nothing is dropped,
+/// and the list is as long as the distinct things said. A row stands where its
+/// first line stood.
+fn member_warnings(logs: Vec<Vec<String>>) -> Vec<String> {
+    let mut rows: Vec<(String, BTreeSet<u64>, usize)> = Vec::new();
+    let mut row_of: HashMap<(bool, String), usize> = HashMap::new();
+    for line in logs.into_iter().flatten() {
+        let (sample, text) = match sample_point(&line) {
+            Some((sample, text)) => (Some(sample), text.to_owned()),
+            None => (None, line),
+        };
+        let row = *row_of
+            .entry((sample.is_some(), text.clone()))
+            .or_insert_with(|| {
+                rows.push((text, BTreeSet::new(), 0));
+                rows.len() - 1
+            });
+        let (_, samples, count) = &mut rows[row];
+        samples.extend(sample);
+        *count += 1;
+    }
+    rows.into_iter()
+        .map(|(text, samples, count)| {
+            let repeated = count > samples.len().max(1);
+            match (samples.first(), samples.len()) {
+                (None, _) if repeated => format!("{text} ({count} times)"),
+                (None, _) => text,
+                (Some(sample), 1) if repeated => format!("sample {sample}, {count} times: {text}"),
+                (Some(sample), 1) => format!("sample {sample}: {text}"),
+                (Some(_), points) => {
+                    let named = sample_ranges(&samples);
+                    let times = if repeated {
+                        format!(", {count} times")
+                    } else {
+                        String::new()
+                    };
+                    format!("{points} samples ({named}){times}: {text}")
+                }
+            }
+        })
+        .collect()
+}
+
+/// The Monte Carlo sample an engine line was logged inside, as the engine
+/// names the point (`sample <n>: `, counted from one), and what was said
+/// there.
+fn sample_point(line: &str) -> Option<(u64, &str)> {
+    let (number, text) = line.strip_prefix("sample ")?.split_once(": ")?;
+    // As the engine writes it: no sign, no leading zero, so a row restates a
+    // line exactly.
+    if !number.starts_with(|digit: char| ('1'..='9').contains(&digit))
+        || !number.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((number.parse().ok()?, text))
+}
+
+/// `1-3, 5, 7-8`.
+fn sample_ranges(samples: &BTreeSet<u64>) -> String {
+    let mut ranges: Vec<(u64, u64)> = Vec::new();
+    for &sample in samples {
+        match ranges.last_mut() {
+            Some((_, last)) if *last + 1 == sample => *last = sample,
+            _ => ranges.push((sample, sample)),
+        }
+    }
+    ranges
+        .iter()
+        .map(|&(first, last)| {
+            if first == last {
+                first.to_string()
+            } else {
+                format!("{first}-{last}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A dispatched task and what it needs when it finishes.
@@ -1420,6 +1532,71 @@ mod worker_host;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A case's engine lines are its tasks' in task order, one row per
+    /// distinct line, and a row names every sample that said it.
+    #[test]
+    fn engine_lines_are_one_row_per_distinct_line_naming_its_samples() {
+        let member = |sample: u64| {
+            vec![
+                format!(
+                    "sample {sample}: statistical expression functions seeded with {} (.options seed)",
+                    1000 + sample
+                ),
+                format!("sample {sample}: Transient UIC startup: skipping the operating point"),
+                format!(
+                    "sample {sample}: Node UP_N has no DC path; holding it alone\nthrough GMIN = 1e-15 S."
+                ),
+            ]
+        };
+        let rows = member_warnings((1..=70).map(member).collect());
+        assert_eq!(rows.len(), 72, "{rows:#?}");
+        assert_eq!(
+            rows[0],
+            "sample 1: statistical expression functions seeded with 1001 (.options seed)"
+        );
+        assert_eq!(
+            rows[1],
+            "70 samples (1-70): Transient UIC startup: skipping the operating point"
+        );
+        assert_eq!(
+            rows[2],
+            "70 samples (1-70): Node UP_N has no DC path; holding it alone\nthrough GMIN = 1e-15 S."
+        );
+        assert_eq!(
+            rows[71],
+            "sample 70: statistical expression functions seeded with 1070 (.options seed)"
+        );
+
+        let lines = |lines: &[&str]| {
+            lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+        };
+        let rows = member_warnings(vec![
+            lines(&["Circuit: 3 nodes", "sample 1: clamped"]),
+            lines(&["Circuit: 3 nodes", "sample 2: clamped", "sample 2: clamped"]),
+            lines(&["Circuit: 3 nodes", "sample 3: once"]),
+            lines(&["sample 4: clamped", "sample 4: twice", "sample 4: twice"]),
+            lines(&[
+                "sample 5: clamped",
+                "sample 08: not a point",
+                "sample x: neither",
+            ]),
+        ]);
+        assert_eq!(
+            rows,
+            [
+                "Circuit: 3 nodes (3 times)",
+                "4 samples (1-2, 4-5), 5 times: clamped",
+                "sample 3: once",
+                "sample 4, 2 times: twice",
+                "sample 08: not a point",
+                "sample x: neither",
+            ]
+        );
+    }
 
     #[test]
     fn cards_strip_with_their_continuations_and_keep_the_title() {
