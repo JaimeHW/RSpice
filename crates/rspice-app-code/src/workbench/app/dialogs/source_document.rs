@@ -163,6 +163,8 @@ pub struct DocumentFacts {
     imported_by: Vec<String>,
     history: Vec<RevisionRow>,
     block_reason: Option<&'static str>,
+    /// Why the document cannot be deleted, when it cannot.
+    delete_refusal: Option<String>,
 }
 
 struct RevisionRow {
@@ -342,6 +344,7 @@ fn document_facts(
         validation_current: bundle.validation_is_current(),
         imports: dependency_paths(bundle, &logical_path, true),
         imported_by: dependency_paths(bundle, &logical_path, false),
+        delete_refusal: super::source_file_form::delete_refusal(bundle, &logical_path, messages),
         history,
         block_reason: code_workspace::source_file_mutation_block_reason_in(
             model, code, platform, language,
@@ -398,7 +401,10 @@ const ASSIGNABLE_AUTOMATION_ROLES: [Option<crate::state::ProjectSourceRole>; 4] 
 ///
 /// The picker resolves a selection by matching the label it drew, so the label
 /// has to come from the same locale the row was painted in.
-fn role_label(messages: MessageCatalog, role: Option<crate::state::ProjectSourceRole>) -> String {
+pub(super) fn role_label(
+    messages: MessageCatalog,
+    role: Option<crate::state::ProjectSourceRole>,
+) -> String {
     messages.text(
         role.map_or(MessageId::CodeSourceRoleOrdinary, |role| match role {
             crate::state::ProjectSourceRole::VerilogABuildProfile => {
@@ -451,6 +457,9 @@ pub(in crate::workbench) fn render_source_document_dialog(
     if code.source_workspace_dialog.is_some() {
         return render_source_workspace_dialog(code, wb.messages(), ctx);
     }
+    if code.source_file_dialog.is_some() {
+        return super::source_file_form::render(code, model, platform, wb.messages(), ctx);
+    }
     if !code.source_document_dialog {
         return None;
     }
@@ -502,7 +511,6 @@ pub(in crate::workbench) fn render_source_document_dialog(
     );
     match action {
         LifecycleAction::None => {}
-        LifecycleAction::Cancel => code.source_file_dialog = None,
         LifecycleAction::SelectRevision(revision) => {
             if let Some(history) = code.source_history.as_mut() {
                 history.selected_revision = Some(revision);
@@ -541,22 +549,26 @@ pub fn apply_lifecycle_action(
     // draft happens to be open would put one inside the other's section.
     let (outcome, report) = match action {
         // Nothing to carry out, or a choice the form applies over the Code
-        // workspace's own state (Cancel, SelectRevision, CloseHistory):
-        // the form never hands these over.
+        // workspace's own state (SelectRevision, CloseHistory): the form
+        // never hands these over.
         LifecycleAction::None
-        | LifecycleAction::Cancel
         | LifecycleAction::SelectRevision(_)
         | LifecycleAction::CloseHistory => return,
-        LifecycleAction::Begin(file_action) => (
-            code_workspace::open_source_file_dialog(
+        LifecycleAction::Begin(file_action) => {
+            let outcome = code_workspace::open_source_file_dialog(
                 parts,
                 language,
                 file_action,
                 logical_path,
                 logical_path,
-            ),
-            Report::Console,
-        ),
+            );
+            if outcome.is_ok() {
+                // The transaction's own form takes over; this dialog would
+                // only sit behind it.
+                parts.code.source_document_dialog = false;
+            }
+            (outcome, Report::Console)
+        }
         LifecycleAction::Commit => (
             code_workspace::commit_source_file_dialog(parts).map(|_| ()),
             Report::FileTransaction,
@@ -889,9 +901,6 @@ fn lifecycle_body(
             action = chosen;
         }
         operations(ui, facts, &mut action, messages);
-        if let Some(chosen) = operation_review(ui, code, messages) {
-            action = chosen;
-        }
         includes(ui, facts, messages);
         if let Some(chosen) = revision_history(ui, code, facts, messages) {
             action = chosen;
@@ -1622,10 +1631,12 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
             MessageId::CodeSourceEnvironmentLockMutationBlocked,
         ));
     }
-    // The root is the closure's entry document. Removing it would leave a
-    // bundle with nothing to enter through, so the service refuses.
-    (candidate == CodeSourceFileAction::Delete && facts.is_root)
-        .then_some(Refusal::Stated(MessageId::CodeSourceRootDeleteBlocked))
+    // The main file, a file a role binds and a file that still includes
+    // another: the bundle refuses to delete each, and says why first.
+    if candidate == CodeSourceFileAction::Delete {
+        return facts.delete_refusal.clone().map(Refusal::Delete);
+    }
+    None
 }
 
 /// Why an operation is refused, and who owns the wording.
@@ -1633,10 +1644,12 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
 /// A rule this surface restates is catalog copy. A rule the source-graph
 /// service already answered with is that service's sentence, passed through
 /// unaltered so the two can never disagree about the reason.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Refusal {
     Stated(MessageId),
     Service(&'static str),
+    /// The delete form's own refusal, already worded.
+    Delete(String),
 }
 
 impl Refusal {
@@ -1644,97 +1657,9 @@ impl Refusal {
         match self {
             Self::Stated(id) => messages.text(id),
             Self::Service(reason) => reason.to_owned(),
+            Self::Delete(reason) => reason,
         }
     }
-}
-
-/// The open file transaction, drawn where the operation buttons are so the
-/// proposed path and its failure reason stay together.
-fn operation_review(
-    ui: &mut Ui,
-    code: &mut CodeWorkspaceRuntimeState,
-    messages: MessageCatalog,
-) -> Option<LifecycleAction> {
-    let t = Tokens::get(ui.ctx());
-    let draft = code.source_file_dialog.as_mut()?;
-    let (title, commit) = match draft.action {
-        CodeSourceFileAction::New => (
-            MessageId::CodeSourceCreateTitle,
-            MessageId::CodeSourceCreatePrimary,
-        ),
-        CodeSourceFileAction::Rename => (
-            MessageId::CodeSourceRenameTitle,
-            MessageId::CodeSourceRenamePrimary,
-        ),
-        CodeSourceFileAction::Move => (
-            MessageId::CodeSourceMoveTitle,
-            MessageId::CodeSourceMovePrimary,
-        ),
-        CodeSourceFileAction::Duplicate => (
-            MessageId::CodeSourceDuplicateTitle,
-            MessageId::CodeSourceDuplicatePrimary,
-        ),
-        CodeSourceFileAction::Delete => (
-            MessageId::CodeSourceDeleteTitle,
-            MessageId::CodeSourceDeletePrimary,
-        ),
-    };
-    let deleting = draft.action == CodeSourceFileAction::Delete;
-    let mut action = None;
-    dialog_section(ui, &messages.text(title), None, |ui| {
-        if deleting {
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourceRemoving),
-                &draft.source_path,
-            );
-        } else {
-            property_row_input(
-                ui,
-                &messages.text(MessageId::CodeSourceLogicalPath),
-                &mut draft.proposed_path,
-                draft.error.is_some(),
-            );
-        }
-        property_row(
-            ui,
-            &messages.text(MessageId::CodeSourceAgainst),
-            &messages.format(
-                MessageId::CodeSourceAgainstRevision,
-                &[
-                    ("revision", &draft.bundle_revision.to_string()),
-                    ("digest", &short_digest(draft.closure_digest)),
-                ],
-            ),
-        );
-        if let Some(error) = draft.error.as_deref() {
-            toned_inspector_copy(ui, error, t.color.err);
-        }
-        section_block_gap(ui);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if Button::new(&messages.text(commit))
-                .accent()
-                .destructive(deleting)
-                .enabled(deleting || !draft.proposed_path.trim().is_empty())
-                .show(ui)
-                .clicked()
-            {
-                action = Some(LifecycleAction::Commit);
-            }
-            if Button::new(&messages.text(MessageId::CommonCancel))
-                .ghost()
-                .show(ui)
-                .clicked()
-            {
-                action = Some(LifecycleAction::Cancel);
-            }
-        });
-        if deleting {
-            muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
-        }
-    });
-    action
 }
 
 fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {

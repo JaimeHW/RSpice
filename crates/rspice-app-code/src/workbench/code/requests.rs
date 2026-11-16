@@ -195,6 +195,8 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             action,
             path,
         } => {
+            // The transaction's own form opens; Manage source document is
+            // not behind it.
             let opened = code_workspace::open_source_file_dialog_in_bundle(
                 &mut CodeFeature::workspace_parts(cx),
                 language,
@@ -202,16 +204,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 action,
                 &path,
                 &path,
-            )
-            .and_then(|()| {
-                source_document::open_source_document_dialog_in(
-                    cx.wb.workspace,
-                    cx.model,
-                    &mut cx.state.code_workspace,
-                    &cx.state.netlist,
-                    cx.platform,
-                )
-            });
+            );
             if let Err(error) = opened {
                 cx.state.code_workspace.source_file_dialog = None;
                 cx.wb.prompt(error);

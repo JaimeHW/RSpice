@@ -816,6 +816,7 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
 mod compile_controls;
 mod contrast;
 mod editing;
+mod file_forms;
 mod keyboard_reach;
 mod language_tools;
 mod size_and_zoom;

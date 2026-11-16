@@ -17,7 +17,7 @@
 
 use super::rail;
 use super::*;
-use egui::{Response, ScrollArea, Ui, Vec2};
+use egui::{Key, Modifiers, Response, ScrollArea, Ui, Vec2};
 
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
@@ -25,6 +25,7 @@ use crate::ui::tokens::{self, Tokens};
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::app::dialogs::source_document::leaf_name;
+use crate::workbench::app::dialogs::source_file_form::delete_refusal;
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
@@ -49,7 +50,7 @@ pub(crate) struct SourceRail<'a> {
 pub(crate) enum RailAction {
     /// Say why the rail's choice could not be carried out.
     Prompt(String),
-    /// Open the source lifecycle dialog at `action`'s review for `path`.
+    /// Open `action`'s form for `path`.
     FileAction {
         language: ProjectSourceLanguage,
         bundle_id: ProjectSourceId,
@@ -64,9 +65,15 @@ pub(crate) enum RailAction {
 pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAction> {
     let language = ProjectSourceLanguage::VerilogA;
     let reference = parts.model.workspace.content.active_view.clone();
+    let messages = parts.messages;
     let actions = active_bundle(parts.model, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
-        root: bundle.root().logical_path().to_owned(),
+        delete_refusals: std::iter::once(bundle.root().logical_path())
+            .chain(bundle.files().iter().map(|file| file.logical_path()))
+            .filter_map(|path| {
+                delete_refusal(bundle, path, messages).map(|reason| (path.to_owned(), reason))
+            })
+            .collect(),
         writable: !parts.model.active_view_read_only()
             && code_workspace::source_file_mutation_block_reason_in(
                 parts.model,
@@ -127,29 +134,30 @@ struct Rail {
 /// New, rename and delete for a bundle's files, offered by the rail that
 /// lists them.
 ///
-/// Each opens the source lifecycle dialog at its review, the same transaction
-/// Manage Source Document offers: rewriting a bundle's file graph is reviewed
-/// and committed, never applied by a single click in a list. The controls are
-/// neutral; danger is the confirmation's to state.
+/// Each opens its own form, the same one Manage source document opens:
+/// rewriting a bundle's file graph is confirmed and committed, never applied
+/// by a single click in a list. The controls are neutral; danger is the
+/// form's to state.
 struct FileActions {
     bundle_id: ProjectSourceId,
-    root: String,
+    /// The files the bundle refuses to delete, and why.
+    delete_refusals: Vec<(String, String)>,
     writable: bool,
 }
 
 impl FileActions {
-    /// Why `action` cannot apply to `path`, when it cannot. The root is the
-    /// closure's entry and the service refuses to delete it, so the control
-    /// says so before the click rather than after it.
-    fn refusal(
-        &self,
-        action: CodeSourceFileAction,
-        path: &str,
-        messages: MessageCatalog,
-    ) -> Option<String> {
-        (action == CodeSourceFileAction::Delete
-            && crate::state::project_source_paths_equal(path, &self.root))
-        .then(|| messages.text(MessageId::CodeSourceRootDeleteBlocked))
+    /// Why `action` cannot apply to `path`, when it cannot. The bundle
+    /// refuses to delete its main file, a file a role binds and a file that
+    /// still includes another, so the control says so before the click
+    /// rather than after it.
+    fn refusal(&self, action: CodeSourceFileAction, path: &str) -> Option<String> {
+        if action != CodeSourceFileAction::Delete {
+            return None;
+        }
+        self.delete_refusals
+            .iter()
+            .find(|(refused, _)| crate::state::project_source_paths_equal(refused, path))
+            .map(|(_, reason)| reason.clone())
     }
 }
 
@@ -205,7 +213,7 @@ fn header_file_actions(
     let mut requested = None;
     for (label, action, icon) in FILE_ACTIONS.into_iter().rev() {
         let label = messages.text(label);
-        let refusal = actions.refusal(action, active, messages);
+        let refusal = actions.refusal(action, active);
         let response = strip
             .add_enabled_ui(actions.writable && refusal.is_none(), |ui| {
                 crate::workbench::design_system::icon_button(
@@ -242,7 +250,8 @@ fn header_file_actions(
     requested
 }
 
-/// Rename and delete for one row, from its context menu.
+/// New, rename and delete for one row, from its context menu. A new file is
+/// included from the row's.
 fn row_file_actions(
     response: &Response,
     actions: &FileActions,
@@ -252,8 +261,8 @@ fn row_file_actions(
     let mut requested = None;
     let (popup, _) = row_context_menu(response);
     popup.show(|ui| {
-        for (label, action, _) in FILE_ACTIONS.into_iter().skip(1) {
-            let refusal = actions.refusal(action, path, messages);
+        for (label, action, _) in FILE_ACTIONS {
+            let refusal = actions.refusal(action, path);
             let item = ui.add_enabled(
                 actions.writable && refusal.is_none(),
                 egui::Button::new(messages.text(label)),
@@ -355,6 +364,8 @@ fn select(
 enum RailRequest {
     Select(String),
     FileAction(CodeSourceFileAction, String),
+    /// Say why a key's file operation is refused.
+    Refused(String),
     /// Add files from disk to the bundle, beside `path`.
     AddFiles(String),
     /// Edit `path` with its caret on `line`.
@@ -422,6 +433,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
         Some(RailRequest::Select(path)) => {
             select(parts.model, parts.code_workspace, language, &path);
         }
+        Some(RailRequest::Refused(reason)) => return Some(RailAction::Prompt(reason)),
         Some(RailRequest::FileAction(action, path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
                 return Some(RailAction::FileAction {
@@ -529,13 +541,43 @@ fn files_section(
         if response.clicked() {
             *request = Some(RailRequest::Select(row.logical_path.clone()));
         }
-        if let Some(file_actions) = rail.actions.as_ref()
-            && let Some(action) =
+        if let Some(file_actions) = rail.actions.as_ref() {
+            if let Some(action) =
                 row_file_actions(&response, file_actions, &row.logical_path, messages)
-        {
-            *request = Some(RailRequest::FileAction(action, row.logical_path.clone()));
+            {
+                *request = Some(RailRequest::FileAction(action, row.logical_path.clone()));
+            }
+            if let Some(keyed) = row_file_keys(ui, &response, file_actions, &row.logical_path) {
+                *request = Some(keyed);
+            }
         }
     }
+}
+
+/// F2 renames the file row holding the keyboard and Delete deletes it, as in
+/// every file list. A refused delete says why rather than doing nothing.
+fn row_file_keys(
+    ui: &Ui,
+    response: &Response,
+    actions: &FileActions,
+    path: &str,
+) -> Option<RailRequest> {
+    if !actions.writable || !response.has_focus() {
+        return None;
+    }
+    if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F2)) {
+        return Some(RailRequest::FileAction(
+            CodeSourceFileAction::Rename,
+            path.to_owned(),
+        ));
+    }
+    if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Delete)) {
+        return Some(match actions.refusal(CodeSourceFileAction::Delete, path) {
+            Some(reason) => RailRequest::Refused(reason),
+            None => RailRequest::FileAction(CodeSourceFileAction::Delete, path.to_owned()),
+        });
+    }
+    None
 }
 
 /// Every include the file pulls in and where it resolved. A project file

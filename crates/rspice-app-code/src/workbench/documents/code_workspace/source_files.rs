@@ -519,22 +519,31 @@ pub fn open_source_file_dialog_in_bundle(
     if action == CodeSourceFileAction::Delete
         && crate::state::project_source_paths_equal(source_path, bundle.root().logical_path())
     {
-        return Err("The bundle root cannot be deleted; replace or rename it instead.".to_owned());
+        return Err(
+            "The main file can't be deleted. Rename it or replace its source instead.".to_owned(),
+        );
     }
     // A Verilog-A file is added by writing its `include into the file that
     // includes it. A file a role binds — the build profile — is
     // configuration, and a directive written into it would corrupt it, so a
     // new file asked for from there is included from the main file instead.
-    let importer_path = if matches!(
-        action,
-        CodeSourceFileAction::New | CodeSourceFileAction::Duplicate
-    ) && language == ProjectSourceLanguage::VerilogA
+    // A copy stands beside its original: it is included from the file that
+    // includes the original, rather than from the original itself.
+    let veriloga = language == ProjectSourceLanguage::VerilogA;
+    let importer_path = if veriloga && action == CodeSourceFileAction::Duplicate {
+        veriloga_includers_of(bundle, source_path)
+            .into_iter()
+            .find(|includer| bundle.role_for_path(includer).is_none())
+            .unwrap_or_else(|| bundle.root().logical_path().to_owned())
+    } else if veriloga
+        && action == CodeSourceFileAction::New
         && bundle.role_for_path(importer_path).is_some()
     {
-        bundle.root().logical_path()
+        bundle.root().logical_path().to_owned()
     } else {
-        importer_path
+        importer_path.to_owned()
     };
+    let importer_path = importer_path.as_str();
     let proposed_path = match action {
         CodeSourceFileAction::New => {
             unique_suggestion(bundle, importer_path, default_file_name(language))
@@ -617,6 +626,10 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     }
 
     let proposed = draft.proposed_path.trim();
+    let after_delete = veriloga_includers_of(bundle, &draft.source_path)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| bundle.root().logical_path().to_owned());
     let changed = match draft.action {
         CodeSourceFileAction::New => {
             let file =
@@ -663,8 +676,10 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         return Ok("Nothing changed.".to_owned());
     }
 
+    // A deleted file leaves the reader on the file that included it, else
+    // on the main file.
     let selected_path = match draft.action {
-        CodeSourceFileAction::Delete => draft.importer_path.clone(),
+        CodeSourceFileAction::Delete => after_delete,
         _ => proposed.to_owned(),
     };
     match draft.language {
@@ -2049,7 +2064,7 @@ mod tests {
             &root,
         )
         .unwrap_err();
-        assert!(error.contains("bundle root cannot be deleted"));
+        assert!(error.contains("main file can't be deleted"), "{error}");
         assert!(harness.state.code_workspace.source_file_dialog.is_none());
     }
 

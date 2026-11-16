@@ -144,7 +144,8 @@ pub enum CodeRequest {
     },
     /// Pick the file again for the netlist include with this identity.
     RelinkNetlistDependency(String),
-    /// Open the source lifecycle dialog at `action`'s review for `path`.
+    /// Open `action`'s form for `path`: the file it renames or deletes, or
+    /// the file a new one is included from.
     SourceFileAction {
         language: ProjectSourceLanguage,
         bundle_id: crate::state::ProjectSourceId,
@@ -347,7 +348,6 @@ pub enum LifecycleAction {
     None,
     Begin(CodeSourceFileAction),
     Commit,
-    Cancel,
     OpenHistory,
     SelectRevision(u64),
     Restore,

@@ -143,6 +143,7 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
         is_open: |code| {
             code.code_workspace.source_document_dialog
                 || code.code_workspace.source_workspace_dialog.is_some()
+                || code.code_workspace.source_file_dialog.is_some()
         },
         render: CodeFeature::render_source_document_dialog,
     },
@@ -681,7 +682,8 @@ impl CodeFeature {
     }
 
     /// The source document dialogs: the Automation workspace's draft, else
-    /// the lifecycle of the document on the page in front.
+    /// the open file transaction's form, else the lifecycle of the document
+    /// on the page in front.
     fn render_source_document_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let code = &mut *cx.state;
         if let Some(request) = source_document::render_source_document_dialog(

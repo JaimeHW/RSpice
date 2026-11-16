@@ -74,6 +74,7 @@ pub mod workbench {
                 pub mod veriloga_import;
             }
             pub mod source_document;
+            pub(crate) mod source_file_form;
             pub mod source_find;
             pub mod source_language_tools;
             pub mod veriloga_build_settings;
