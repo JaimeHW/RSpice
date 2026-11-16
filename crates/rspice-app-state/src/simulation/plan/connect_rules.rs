@@ -504,13 +504,11 @@ pub fn declared_blocks(
 ) -> Vec<DeclaredConnectRules> {
     let mut blocks = Vec::new();
     for bundle in sources.iter_bundles() {
+        let origin = DeclaredIn::Project(bundle.id());
+        let root = bundle.root();
+        blocks_in(root.content(), &origin, root.logical_path(), &mut blocks);
         for file in bundle.files() {
-            blocks_in(
-                file.content(),
-                &DeclaredIn::Project(bundle.id()),
-                file.logical_path(),
-                &mut blocks,
-            );
+            blocks_in(file.content(), &origin, file.logical_path(), &mut blocks);
         }
     }
     for binding in bindings {
@@ -533,6 +531,13 @@ pub fn declared_blocks(
 }
 
 /// Push the blocks `content` declares.
+///
+/// The source is read as the engine reads it, preprocessed: a file that
+/// declares its own connect modules includes the standard headers for their
+/// disciplines, and unexpanded it does not compile. Each line is the one in
+/// `content` itself. An included header is written in place, so a block
+/// stands its header's length further down the expanded text; the block's
+/// own `connectrules` line says by how much, and its statements move with it.
 fn blocks_in(
     content: &str,
     origin: &DeclaredIn,
@@ -542,34 +547,84 @@ fn blocks_in(
     if !content.contains("connectrules") {
         return;
     }
+    let Ok(expanded) =
+        rspice_veriloga::preprocessor::Preprocessor::new().preprocess_source(content)
+    else {
+        return;
+    };
     let Ok(specification) = rspice_veriloga::VerilogACompiler::default()
-        .connect_specification_from_preprocessed(content)
+        .connect_specification_from_preprocessed(&expanded)
     else {
         return;
     };
     let line_of = |offset: usize| {
-        content
+        expanded
             .get(..offset)
             .map_or(1, |head| head.matches('\n').count() + 1)
     };
     for block in specification.rules.blocks() {
+        let expanded_line = line_of(block.span.start as usize);
+        let line = declaration_line(content, &block.name).unwrap_or(expanded_line);
+        let in_content = |offset: usize| (line_of(offset) + line).saturating_sub(expanded_line);
         blocks.push(DeclaredConnectRules {
             name: block.name.to_string(),
             origin: origin.clone(),
             logical_path: logical_path.to_owned(),
-            line: line_of(block.span.start as usize),
-            statements: statements_of(content, &block.name)
+            line,
+            statements: statements_of(&expanded, &block.name)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(statement, offset)| (statement, line_of(offset)))
+                .map(|(statement, offset)| (statement, in_content(offset)))
                 .collect(),
         });
     }
 }
 
+/// The 1-based line of `content` that opens block `name`:
+/// `connectrules name;`, as written.
+fn declaration_line(content: &str, name: &str) -> Option<usize> {
+    content
+        .lines()
+        .position(|line| {
+            line.trim_start()
+                .strip_prefix("connectrules")
+                .filter(|rest| rest.starts_with(char::is_whitespace))
+                .and_then(|rest| rest.trim_start().strip_prefix(name))
+                .is_some_and(|rest| rest.trim_start().starts_with(';'))
+        })
+        .map(|index| index + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A block in a source that includes the standard headers, as every file
+    /// declaring its own connect modules does, is listed at its own line, its
+    /// statements at theirs.
+    #[test]
+    fn a_block_beside_an_included_header_is_listed_at_its_own_lines() {
+        let source = "`include \"disciplines.vams\"\nmodule moded(p, n);\n  inout p, n;\n  \
+                      electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n\
+                      connectrules Mine;\n  connect a2d #(.vsup(2.0));\nendconnectrules\n";
+        let mut blocks = Vec::new();
+        blocks_in(
+            source,
+            &DeclaredIn::Library("rules".to_owned()),
+            "moded.va",
+            &mut blocks,
+        );
+        let [block] = blocks.as_slice() else {
+            panic!("one block: {blocks:#?}");
+        };
+        assert_eq!((block.name.as_str(), block.line), ("Mine", 7));
+        let lines: Vec<(&str, usize)> = block
+            .statements
+            .iter()
+            .map(|(statement, line)| (statement.module.as_str(), *line))
+            .collect();
+        assert_eq!(lines, [("a2d", 8)]);
+    }
 
     #[test]
     fn a_block_started_from_a_shipped_set_carries_its_values_as_the_sets() {
