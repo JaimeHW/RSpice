@@ -1517,10 +1517,6 @@ const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[
          sealed bounds it prints",
     ),
     (
-        "workbench/hardcopy/report_authoring.rs",
-        "the report summary's passing count, which the sheet's counts replace",
-    ),
-    (
         "workbench/documents/code_workspace/automation/evidence.rs",
         "the automation page's run evidence, which goes with the page",
     ),
