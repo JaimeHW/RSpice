@@ -321,6 +321,40 @@ fn a_stored_session_reopens_on_its_verify_view() {
     }
 }
 
+/// The shell's filter field narrows the open view's rows, so it names them:
+/// specifications on the views listed by specification, checks on the rest.
+#[test]
+fn the_filter_field_names_the_rows_of_the_open_view() {
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::host::Host;
+
+    let mut app = RSpiceApp::test_instance();
+    for (page, placeholder) in [
+        (
+            VerificationPage::Specifications,
+            "Filter specifications\u{2026}",
+        ),
+        (VerificationPage::Corners, "Filter specifications\u{2026}"),
+        (
+            VerificationPage::MonteCarlo,
+            "Filter specifications\u{2026}",
+        ),
+        (VerificationPage::Checks, "Filter checks\u{2026}"),
+        (VerificationPage::Reference, "Filter checks\u{2026}"),
+    ] {
+        app.state.simulate.verification_page = page;
+        assert_eq!(
+            app.navigator_section(Workspace::Verify).placeholder,
+            placeholder,
+            "{page:?}"
+        );
+    }
+    assert_eq!(
+        app.navigator_section(Workspace::Simulate).placeholder,
+        "Filter setup\u{2026}"
+    );
+}
+
 /// Every seeded page opens with a 36 px toolbar whose title starts on the
 /// panel inset, then a table of 24 px head and rows directly under it, with
 /// every right-aligned column ending on one edge and nothing past the insets.

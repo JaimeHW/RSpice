@@ -37,7 +37,7 @@ use rspice_app_sheets::workbench::sheets::SheetsFeature;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
-use rspice_app_state::state::{CellViewRef, ViewType};
+use rspice_app_state::state::{CellViewRef, VerificationPage, ViewType};
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_state::workbench::app_state::waivers::WaiverTarget;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -579,7 +579,13 @@ impl Host for RSpiceApp {
             Workspace::Simulate => "Filter setup…",
             Workspace::Stimulus => "Search definitions…",
             Workspace::Results => "Find signal, expression or run…",
-            Workspace::Verify => "Filter flows, specs or samples…",
+            // The filter narrows the open view's rows, so it names them.
+            Workspace::Verify => match app.state.simulate.verification_page {
+                VerificationPage::Specifications
+                | VerificationPage::Corners
+                | VerificationPage::MonteCarlo => "Filter specifications…",
+                VerificationPage::Checks | VerificationPage::Reference => "Filter checks…",
+            },
             Workspace::Models => "Search model, device or library…",
             Workspace::Netlist => "Find symbol or line…",
         };
