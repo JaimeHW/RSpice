@@ -136,9 +136,7 @@ impl PreparedEventCircuit<'_> {
         };
         for line in &self.circuit.tlines {
             check_abort(abort)?;
-            if line.history_storage_values() == 0
-                || time - line.delay() > line.accepted_history_time()
-            {
+            if !line.history_reaches(time) {
                 return Err(error(format!(
                     "transmission line '{}': physical event exceeds its accepted delay history",
                     line.name

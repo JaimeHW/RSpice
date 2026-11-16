@@ -697,3 +697,57 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
         assert!((at(far, time) - v_far).abs() < 1.0e-6, "v(far) at {time:e}");
     }
 }
+
+#[test]
+fn a_short_line_reaches_each_arrival_when_the_steps_are_as_long_as_its_delay() {
+    // Nothing but the line's own arrivals limits the steps here, so each
+    // one ends a delay after the last. The 3 ns arrival rounds up a unit in
+    // the last place, past `3 ns - TD`, and was refused as reaching beyond
+    // accepted history.
+    let deck = Netlist::parse(
+        "short line\nV1 in 0 SIN(0 1 1meg)\nR1 in a 30\nT1 a 0 b 0 Z0=75 TD=1n\nR2 b 0 300\n.end\n",
+    )
+    .unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&deck, 10e-9, 1e-6)
+        .unwrap();
+    // The closed form: the source wave and its reflections between the
+    // mismatched ends, each round trip two delays later.
+    let (rs, z0, rl, td): (f64, f64, f64, f64) = (30.0, 75.0, 300.0, 1e-9);
+    let (launch, source_reflection, load_reflection) =
+        (z0 / (rs + z0), (rs - z0) / (rs + z0), (rl - z0) / (rl + z0));
+    let forward = |t: f64| {
+        (0..)
+            .map(|trip| t - 2.0 * f64::from(trip) * td)
+            .take_while(|&delayed| delayed >= 0.0)
+            .zip(0..)
+            .map(|(delayed, trip)| {
+                (source_reflection * load_reflection).powi(trip)
+                    * launch
+                    * (std::f64::consts::TAU * 1e6 * delayed).sin()
+            })
+            .sum::<f64>()
+    };
+    let near = result.try_voltage_waveform_named("a").unwrap();
+    let far = result.try_voltage_waveform_named("b").unwrap();
+    for (index, &time) in result.time.iter().enumerate() {
+        for (node, voltage, expected) in [
+            (
+                "a",
+                near[index],
+                forward(time) + load_reflection * forward(time - 2.0 * td),
+            ),
+            (
+                "b",
+                far[index],
+                (1.0 + load_reflection) * forward(time - td),
+            ),
+        ] {
+            assert!(
+                (voltage - expected).abs() < 1e-12,
+                "v({node}) at {time:e}: {voltage:e} vs {expected:e}"
+            );
+        }
+    }
+    assert_eq!(result.time.last(), Some(&10e-9));
+}

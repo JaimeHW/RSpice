@@ -309,6 +309,15 @@ impl TransmissionLine {
         self.distributed_rlc_cache.set(None);
     }
 
+    /// Whether accepted history reaches the delayed clock of a port equation
+    /// at `time`: the newest accepted sample's own arrival, rounded as event
+    /// arrivals are, is not before it. `time - delay` rounds past that sample
+    /// at an arrival whose sum rounded up, and must not refuse it.
+    #[doc(hidden)]
+    pub fn history_reaches(&self, time: Value) -> bool {
+        !self.state_history.is_empty() && time <= arrival(self.current_time, self.td)
+    }
+
     /// Next exactly owned delayed event, including a slope-only corner.
     #[doc(hidden)]
     pub fn next_history_event_arrival_after(&self, time: Value) -> Result<Option<Value>, String> {
