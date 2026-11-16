@@ -11,7 +11,9 @@ use rspice_core::analysis::transient::{
     DigitalTrace, RealTrace, TransientDeviceOpTrace, TransientResult, TransientStoreTrace,
 };
 use rspice_core::engine::{TRANSIENT_SHELL_ANNOTATION, decode_transient_shell};
+use rspice_core::execution::{EventPoints, EventProjectionError, EventSource};
 use rspice_core::solver::InstanceUnknown;
+use rspice_core::xspice::DigitalValue;
 use rspice_core::{CurrentImpulseOwner, CurrentImpulseTrace, VoltageImpulseTrace};
 use rspice_results_store::{Schema, SegmentIo, SegmentReader, StoreError};
 
@@ -230,8 +232,38 @@ pub fn fill_events<I: SegmentIo>(
     reader: &mut SegmentReader<I>,
     shell: &mut TransientResult,
 ) -> Result<(), StoreError> {
+    fill_events_of(reader, shell, |_| true)
+}
+
+/// [`fill_events`] of the impulse traces alone. The digital and real event traces stay in the
+/// store, for [`StoreEvents`] to read or [`fill_event_traces`] to read back.
+pub fn fill_impulses<I: SegmentIo>(
+    reader: &mut SegmentReader<I>,
+    shell: &mut TransientResult,
+) -> Result<(), StoreError> {
+    fill_events_of(reader, shell, |quantity| !is_event_trace(quantity))
+}
+
+/// [`fill_events`] of the digital and real event traces alone.
+pub fn fill_event_traces<I: SegmentIo>(
+    reader: &mut SegmentReader<I>,
+    shell: &mut TransientResult,
+) -> Result<(), StoreError> {
+    fill_events_of(reader, shell, is_event_trace)
+}
+
+/// Whether a store signal of `quantity` is a digital or real event trace.
+fn is_event_trace(quantity: &str) -> bool {
+    matches!(quantity, "digital" | "real_event")
+}
+
+/// [`fill_events`] of the event signals whose quantity `read` takes.
+fn fill_events_of<I: SegmentIo>(
+    reader: &mut SegmentReader<I>,
+    shell: &mut TransientResult,
+    read: impl Fn(&str) -> bool,
+) -> Result<(), StoreError> {
     use rspice_core::analysis::transient::{DigitalTracePoint, RealTracePoint};
-    use rspice_core::xspice::DigitalValue;
     use rspice_core::{
         CurrentImpulseOwner, CurrentImpulsePoint, ImpulseDerivative, VoltageImpulsePoint,
     };
@@ -241,7 +273,7 @@ pub fn fill_events<I: SegmentIo>(
         .signals
         .iter()
         .enumerate()
-        .filter(|(_, signal)| signal.kind.slots() == 0)
+        .filter(|(_, signal)| signal.kind.slots() == 0 && read(&signal.quantity))
         .map(|(id, signal)| {
             (
                 id,
@@ -377,6 +409,141 @@ pub fn fill_events<I: SegmentIo>(
             .collect()
     }
     Ok(())
+}
+
+/// A stored transient's digital and real event histories, read from its segment one `EVENTS`
+/// frame at a time rather than held: the [`EventSource`] of the traces a shell names, each with
+/// the points [`fill_event_traces`] would read into it.
+pub struct StoreEvents<I: SegmentIo> {
+    reader: SegmentReader<I>,
+    /// Per digital trace of the shell, its store signal, if the store has one, and its node.
+    digital: Vec<(Option<usize>, String)>,
+    /// Per real event trace of the shell, likewise.
+    real: Vec<(Option<usize>, String)>,
+}
+
+impl<I: SegmentIo> StoreEvents<I> {
+    /// The histories of `shell`'s event traces in the segment `reader` reads.
+    pub fn new(reader: SegmentReader<I>, shell: &TransientResult) -> Self {
+        let mut digital: Vec<(Option<usize>, String)> = shell
+            .digital_traces
+            .iter()
+            .map(|trace| (None, trace.node_name.clone()))
+            .collect();
+        let mut real: Vec<(Option<usize>, String)> = shell
+            .real_traces
+            .iter()
+            .map(|trace| (None, trace.node_name.clone()))
+            .collect();
+        // As [`fill_event_traces`] reads them: each signal fills the first trace of its name,
+        // and a later signal of the same name replaces what an earlier one filled.
+        for (id, signal) in reader.schema().signals.iter().enumerate() {
+            if signal.kind.slots() != 0 {
+                continue;
+            }
+            let traces = match signal.quantity.as_str() {
+                "digital" => &mut digital,
+                "real_event" => &mut real,
+                _ => continue,
+            };
+            if let Some(trace) = traces.iter_mut().find(|(_, node)| *node == signal.name) {
+                trace.0 = Some(id);
+            }
+        }
+        Self {
+            reader,
+            digital,
+            real,
+        }
+    }
+
+    /// The changes of store signal `signal` in commit order, a frame at a time.
+    fn changes(
+        &self,
+        signal: Option<usize>,
+    ) -> impl Iterator<Item = Result<rspice_results_store::EventChange, StoreError>> + '_ {
+        let (signal, mut frames, mut failed) =
+            match signal.map(|signal| (signal, self.reader.event_frames(signal))) {
+                Some((signal, Ok(frames))) => (signal, frames, None),
+                Some((signal, Err(error))) => (signal, 0, Some(error)),
+                None => (0, 0, None),
+            };
+        let mut next = 0;
+        // The open frame, last change first.
+        let mut open: Vec<rspice_results_store::EventChange> = Vec::new();
+        std::iter::from_fn(move || {
+            loop {
+                if let Some(error) = failed.take() {
+                    return Some(Err(error));
+                }
+                if let Some(change) = open.pop() {
+                    return Some(Ok(change));
+                }
+                if next >= frames {
+                    return None;
+                }
+                if let Err(error) = self.reader.read_event_frame(signal, next, &mut open) {
+                    frames = 0;
+                    return Some(Err(error));
+                }
+                open.reverse();
+                next += 1;
+            }
+        })
+    }
+
+    fn count(&self, signal: Option<usize>) -> usize {
+        signal
+            .and_then(|signal| self.reader.event_count(signal).ok())
+            .map_or(0, |count| usize::try_from(count).unwrap_or(usize::MAX))
+    }
+}
+
+impl<I: SegmentIo> EventSource for StoreEvents<I> {
+    fn digital(&self, index: usize) -> EventPoints<'_, DigitalValue> {
+        let (signal, node) = self
+            .digital
+            .get(index)
+            .map_or((None, ""), |(signal, node)| (*signal, node.as_str()));
+        Box::new(self.changes(signal).map(move |change| {
+            let change = change.map_err(|error| unreadable(node, &error.to_string()))?;
+            DigitalValue::from_store_strength(change.strength)
+                .map(|value| (change.time, value))
+                .ok_or_else(|| unreadable(node, "the store holds a digital change it cannot"))
+        }))
+    }
+
+    fn real(&self, index: usize) -> EventPoints<'_, f64> {
+        let (signal, node) = self
+            .real
+            .get(index)
+            .map_or((None, ""), |(signal, node)| (*signal, node.as_str()));
+        Box::new(self.changes(signal).map(move |change| {
+            let change = change.map_err(|error| unreadable(node, &error.to_string()))?;
+            match change.value {
+                rspice_results_store::EventValue::Real(value) => Ok((change.time, value)),
+                _ => Err(unreadable(
+                    node,
+                    "the store holds a real event change it cannot",
+                )),
+            }
+        }))
+    }
+
+    fn digital_count(&self, index: usize) -> usize {
+        self.count(self.digital.get(index).and_then(|trace| trace.0))
+    }
+
+    fn real_count(&self, index: usize) -> usize {
+        self.count(self.real.get(index).and_then(|trace| trace.0))
+    }
+}
+
+fn unreadable(node: &str, reason: &str) -> EventProjectionError {
+    EventProjectionError::Source {
+        node: node.to_owned(),
+        reason: reason.to_owned(),
+    }
 }
 
 /// Each slot's place in the result: the store's voltages are the saved nodes in node order, then

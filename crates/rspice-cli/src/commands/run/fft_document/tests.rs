@@ -349,8 +349,7 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
             scale: vec![0.0],
             columns: Vec::new(),
         }),
-        events: Vec::new(),
-        buses: Vec::new(),
+        events: Box::new(super::super::basic::EventPlots::none()),
     };
     write_transient_fft_output_pair(
         &transient_path,

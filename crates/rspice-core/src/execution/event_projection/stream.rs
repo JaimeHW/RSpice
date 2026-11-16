@@ -22,6 +22,10 @@ pub trait EventSource {
     fn digital(&self, index: usize) -> EventPoints<'_, DigitalValue>;
     /// The points of the real trace at `index` among the traces the dump is given.
     fn real(&self, index: usize) -> EventPoints<'_, Value>;
+    /// How many points [`Self::digital`] gives for `index`.
+    fn digital_count(&self, index: usize) -> usize;
+    /// How many points [`Self::real`] gives for `index`.
+    fn real_count(&self, index: usize) -> usize;
 }
 
 /// The traces' own points, for a dump of histories held in memory.
@@ -50,6 +54,16 @@ impl EventSource for HeldEvents<'_> {
                 .flat_map(|trace| trace.points.iter())
                 .map(|point| Ok((point.time, point.value))),
         )
+    }
+
+    fn digital_count(&self, index: usize) -> usize {
+        self.digital
+            .get(index)
+            .map_or(0, |trace| trace.points.len())
+    }
+
+    fn real_count(&self, index: usize) -> usize {
+        self.real.get(index).map_or(0, |trace| trace.points.len())
     }
 }
 

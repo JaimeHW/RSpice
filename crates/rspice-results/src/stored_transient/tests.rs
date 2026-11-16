@@ -156,10 +156,9 @@ fn stored_and_live(deck: &str, tstop: f64, max_step: f64) -> (TransientResult, T
     (run.shell, memory)
 }
 
-#[test]
-fn a_reopened_mixed_run_dumps_the_live_runs_vcd_byte_for_byte() {
-    let dir = std::env::temp_dir().join(format!("rspice-stored-vcd-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+/// A deck with a Verilog-A bus and an HDL-observed net, its sources written in `dir`.
+fn mixed_bus_deck(dir: &std::path::Path) -> String {
+    std::fs::create_dir_all(dir).unwrap();
     let vector = dir.join("vector.va");
     std::fs::write(
         &vector,
@@ -176,14 +175,20 @@ fn a_reopened_mixed_run_dumps_the_live_runs_vcd_byte_for_byte() {
          initial o = 0;\nalways @(in) o = in;\nendmodule\n",
     )
     .unwrap();
-    let deck = format!(
+    format!(
         "* a bus and an HDL-observed net, stored\n\
          x1 p 0 count#1 count#0 vector_mixed\nrp p 0 1meg\n\
          v1 in 0 pwl(0 0 10n 0 17n 2.9 20n 2.9 27n 0)\nx2 in o rx\nr1 o 0 1k\n\
          .va \"{}\" vector_mixed\n.hdl \"{}\" module=rx\n.end\n",
         vector.display(),
         reader.display()
-    );
+    )
+}
+
+#[test]
+fn a_reopened_mixed_run_dumps_the_live_runs_vcd_byte_for_byte() {
+    let dir = std::env::temp_dir().join(format!("rspice-stored-vcd-{}", std::process::id()));
+    let deck = mixed_bus_deck(&dir);
     let (opened, memory) = stored_and_live(&deck, 40e-9, 1e-9);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!memory.digital_buses.is_empty(), "the deck declares a bus");
@@ -215,4 +220,92 @@ fn a_reopened_mixed_run_dumps_the_live_runs_vcd_byte_for_byte() {
     );
     assert_eq!(opened.hdl_sources, memory.hdl_sources);
     assert_eq!(opened.digital_buses, memory.digital_buses);
+}
+
+/// A dump read from the store a frame at a time is the dump of the traces read back whole, and
+/// each trace's points are counted as the store counts them.
+#[test]
+fn a_stored_run_s_events_dump_from_the_store_as_from_the_traces_read_back() {
+    let dir = std::env::temp_dir().join(format!("rspice-store-events-{}", std::process::id()));
+    let deck = mixed_bus_deck(&dir);
+    let netlist = Netlist::parse(&deck).unwrap();
+    let mut sink = StoreSink::new(MemoryIo::new());
+    Engine::default()
+        .run_tran_into_sink_with_startup_mode_and_abort(
+            &netlist,
+            40e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let bytes = sink.into_io().unwrap().into_bytes();
+    let held = StoredTransientRun::open(MemoryIo::from_bytes(bytes.clone())).unwrap();
+    let shell = &held.shell;
+    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes)).unwrap();
+    let mut empty = transient_shell(reader.schema()).unwrap();
+    fill_impulses(&mut reader, &mut empty).unwrap();
+    assert!(
+        empty
+            .digital_traces
+            .iter()
+            .all(|trace| trace.points.is_empty()),
+        "an impulse fill leaves the digital traces in the store"
+    );
+    let stored = StoreEvents::new(reader, shell);
+    for (index, trace) in shell.digital_traces.iter().enumerate() {
+        assert_eq!(stored.digital_count(index), trace.points.len());
+        let points = stored
+            .digital(index)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let expected = trace
+            .points
+            .iter()
+            .map(|point| (point.time, point.value))
+            .collect::<Vec<_>>();
+        assert_eq!(points, expected, "{}", trace.node_name);
+    }
+    assert!(
+        shell
+            .digital_traces
+            .iter()
+            .any(|trace| trace.points.len() > 1)
+    );
+    let dump = |source| {
+        let stream = rspice_core::execution::event_vcd_stream(
+            "tran",
+            &shell.digital_traces,
+            &shell.real_traces,
+            &shell.digital_buses,
+            source,
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        rspice_core::io::write_vcd_streamed::<rspice_core::io::VcdError>(
+            &mut bytes,
+            stream.header(),
+            stream.changes().map(|change| Ok(change.unwrap())),
+        )
+        .unwrap();
+        bytes
+    };
+    let from_store = dump(stored);
+    let document = rspice_core::execution::event_vcd_document(
+        "tran",
+        &shell.digital_traces,
+        &shell.real_traces,
+        &shell.digital_buses,
+    )
+    .unwrap();
+    let mut whole = Vec::new();
+    rspice_core::io::write_vcd(&mut whole, &document).unwrap();
+    assert!(
+        from_store == whole,
+        "the store's dump differs:\n{}\n---\n{}",
+        String::from_utf8_lossy(&from_store),
+        String::from_utf8_lossy(&whole)
+    );
 }

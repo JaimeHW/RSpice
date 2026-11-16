@@ -422,6 +422,15 @@ impl RawExporter {
         &self,
         write: impl FnOnce(&RawPlotLayout<'_>) -> io::Result<R>,
     ) -> io::Result<R> {
+        self.with_layout_of(self.data.len(), write)
+    }
+
+    /// [`Self::with_layout`] of a plot of `points` points whose data is not held here.
+    fn with_layout_of<R>(
+        &self,
+        points: usize,
+        write: impl FnOnce(&RawPlotLayout<'_>) -> io::Result<R>,
+    ) -> io::Result<R> {
         let date = chrono_date();
         let mut options = Vec::new();
         if let Some(metadata) = &self.metadata {
@@ -440,7 +449,7 @@ impl RawExporter {
             complex: false,
             logarithmic: false,
             variables: &variables,
-            points: self.data.len(),
+            points,
         })
     }
 
@@ -667,24 +676,81 @@ pub fn write_event_plots<W: Write + ?Sized>(
     format: RawFormat,
 ) -> io::Result<()> {
     for timeline in timelines {
-        if timeline.kind == RawEventKind::Bus {
+        check_event_plot(timeline.kind, &timeline.node_name, timeline.times.len())?;
+        if timeline.values.len() != timeline.times.len() {
             return Err(invalid_data(format!(
-                "'{}' is declared as a bus but carries one column; a bus plot is written from a RawBusTimeline",
-                timeline.node_name
+                "raw export variable {} has {} samples but time axis has {}",
+                timeline.kind.variable_name(&timeline.node_name),
+                timeline.values.len(),
+                timeline.times.len()
             )));
         }
-        checked_event_node_name(&timeline.node_name)?;
-        if timeline.times.is_empty() {
-            return Err(invalid_data(format!(
-                "event plot for '{}' carries no events; a plot declaring zero points has no boundary a reader can find",
-                timeline.node_name
-            )));
-        }
-        let mut exporter = RawExporter::new_event_plot(timeline.kind, &timeline.node_name);
-        exporter.metadata = timeline.hdl_time_precision.map(hdl_time_precision_metadata);
-        exporter.add_transient_data(&timeline.times, std::slice::from_ref(&timeline.values))?;
-        exporter.write(writer, format)?;
+        write_event_plot_streamed(
+            writer,
+            timeline.kind,
+            &timeline.node_name,
+            timeline.hdl_time_precision,
+            timeline.times.len(),
+            format,
+            |point| (timeline.times[point], timeline.values[point]),
+        )?;
     }
+    write_bus_plots(writer, buses, format)
+}
+
+/// One node's event plot as [`write_event_plots`] writes it, its `points` events read through
+/// `event` rather than held: `event(point)` is the point's `(time, value)`. The points are asked
+/// for in order from the first, twice: once for the scale's `forward` flag before the header,
+/// and once as they are written.
+pub fn write_event_plot_streamed<W: Write + ?Sized>(
+    writer: &mut W,
+    kind: RawEventKind,
+    node_name: &str,
+    hdl_time_precision: Option<Value>,
+    points: usize,
+    format: RawFormat,
+    mut event: impl FnMut(usize) -> (Value, Value),
+) -> io::Result<()> {
+    check_event_plot(kind, node_name, points)?;
+    let mut exporter = RawExporter::new_event_plot(kind, node_name);
+    exporter.metadata = hdl_time_precision.map(hdl_time_precision_metadata);
+    exporter.with_layout_of(points, |layout| {
+        write_raw_plot(
+            writer,
+            layout,
+            format,
+            write_raw_exponent,
+            |point, variable| {
+                let (time, value) = event(point);
+                (if variable == 0 { time } else { value }, 0.0)
+            },
+        )
+    })
+}
+
+/// Refuse a node plot a reader could not read back: a bus's, which has a plot of its own, one
+/// whose name a declaration cannot carry, or one of no points.
+fn check_event_plot(kind: RawEventKind, node_name: &str, points: usize) -> io::Result<()> {
+    if kind == RawEventKind::Bus {
+        return Err(invalid_data(format!(
+            "'{node_name}' is declared as a bus but carries one column; a bus plot is written from a RawBusTimeline"
+        )));
+    }
+    checked_event_node_name(node_name)?;
+    if points == 0 {
+        return Err(invalid_data(format!(
+            "event plot for '{node_name}' carries no events; a plot declaring zero points has no boundary a reader can find"
+        )));
+    }
+    Ok(())
+}
+
+/// Append bus plots to an open rawfile, as [`write_event_plots`] does after its node plots.
+pub fn write_bus_plots<W: Write + ?Sized>(
+    writer: &mut W,
+    buses: &[RawBusTimeline],
+    format: RawFormat,
+) -> io::Result<()> {
     for bus in buses {
         if bus.members.len() != bus.values.len() {
             return Err(invalid_data(format!(

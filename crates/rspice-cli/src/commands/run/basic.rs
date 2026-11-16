@@ -12,6 +12,7 @@
 
 use super::RunContext;
 use super::shared::map_hdf5_output_error;
+use super::stored_transient::RunEvents;
 use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
 use crate::commands::publish;
 use crate::commands::run_signals::{
@@ -1099,6 +1100,14 @@ fn finish_stored_transient(
     } else {
         None
     };
+    // A caller that reads the run gets its event histories with it; one that reads nothing
+    // leaves them in the store.
+    if !matches!(store, TransientStore::Streamed)
+        && let Err(error) = stored.hold_events()
+    {
+        let _ = stored.rows.publish(None, false);
+        return Err(error);
+    }
     let super::stored_transient::StoredTransient { shell, rows } = stored;
     super::stored_transient::record_store(rows, published.as_deref(), keep)?;
     Ok(compressed.unwrap_or(TransientOutcome {
@@ -1484,6 +1493,15 @@ fn finish_transient_products(
                 projection.times().to_vec()
             }
         };
+        // The run's event histories: in its store, for a streamed run that has not read them
+        // back, and otherwise in its traces.
+        let run_events = || match stored.as_deref() {
+            Some(stored) => stored.rows.events(result),
+            None => Ok(RunEvents::Held(rspice_core::execution::HeldEvents {
+                digital: &result.digital_traces,
+                real: &result.real_traces,
+            })),
+        };
         let document = match ctx.format {
             OutputFormat::Hdf5 => {
                 let mut data = Hdf5SimulationData::new();
@@ -1544,6 +1562,7 @@ fn finish_transient_products(
                 }
                 TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_stream(
                     &output_path,
+                    run_events()?,
                     &result.digital_traces,
                     &result.real_traces,
                     // `--expand-buses` asks for the members as
@@ -1566,17 +1585,7 @@ fn finish_transient_products(
                         output_time,
                         &mut signals,
                     )),
-                    events: rspice_core::execution::transient_event_plots(
-                        &result.digital_traces,
-                        &result.real_traces,
-                    ),
-                    buses: rspice_core::execution::transient_bus_plots(
-                        &result.digital_traces,
-                        &result.digital_buses,
-                    )
-                    .map_err(|error| {
-                        crate::commands::waveform_io::conversion_error(&output_path, error)
-                    })?,
+                    events: Box::new(EventPlots::new(&output_path, result, run_events()?)?),
                 }
             }
         };
@@ -1601,11 +1610,7 @@ fn finish_transient_products(
             publish::artifact(&output_path, |writer| {
                 match (&document, streamed_rows, plan, stored) {
                     (
-                        TransientOutputDocument::Table {
-                            table,
-                            events,
-                            buses,
-                        },
+                        TransientOutputDocument::Table { table, events },
                         Some((first, points)),
                         Some(plan),
                         Some(stored),
@@ -1625,7 +1630,7 @@ fn finish_transient_products(
                             |row, variable| cursor.value(row, variable),
                         )?;
                         cursor.finish(&output_path)?;
-                        write_raw_event_plots(writer, &output_path, ctx.format, events, buses)
+                        write_raw_event_plots(writer, &output_path, ctx.format, events)
                     }
                     (
                         TransientOutputDocument::Hdf5(data),
@@ -1735,8 +1740,7 @@ fn write_raw_event_plots(
     writer: &mut dyn std::io::Write,
     path: &Path,
     format: OutputFormat,
-    events: &[rspice_core::io::RawEventTimeline],
-    buses: &[rspice_core::io::RawBusTimeline],
+    plots: &EventPlots<'_>,
 ) -> Result<(), CliError> {
     let raw_format = match format {
         OutputFormat::Raw => rspice_core::io::RawFormat::Binary,
@@ -1747,8 +1751,22 @@ fn write_raw_event_plots(
         | OutputFormat::Hdf5
         | OutputFormat::Vcd => return Ok(()),
     };
-    rspice_core::io::write_event_plots(writer, events, buses, raw_format)
-        .map_err(|error| CliError::output_error(path, error))
+    rspice_core::execution::write_transient_event_plots(
+        writer,
+        plots.digital,
+        plots.real,
+        plots.buses,
+        &plots.events,
+        raw_format,
+    )
+    .map_err(|error| match error {
+        rspice_core::execution::EventPlotWriteError::Io(error) => {
+            CliError::output_error(path, error)
+        }
+        rspice_core::execution::EventPlotWriteError::Plot(error) => {
+            crate::commands::waveform_io::conversion_error(path, error)
+        }
+    })
 }
 
 pub(super) enum TransientOutputDocument<'r> {
@@ -1763,11 +1781,8 @@ pub(super) enum TransientOutputDocument<'r> {
     /// table already holds and nothing more.
     Table {
         table: Box<super::export::ExportTable>,
-        events: Vec<rspice_core::io::RawEventTimeline>,
-        /// The declared buses, as their own plot family. The member plots are
-        /// in `events` and stay the authoritative copy; these carry the
-        /// grouping and the bit order, which nothing else in a rawfile does.
-        buses: Vec<rspice_core::io::RawBusTimeline>,
+        /// The run's event histories, read as their plots are written.
+        events: Box<EventPlots<'r>>,
     },
     /// The shared typed result document, published for `-f json`.
     Typed(Box<rspice_core::execution::AnalysisResultDocument>),
@@ -1777,7 +1792,52 @@ pub(super) enum TransientOutputDocument<'r> {
     /// the analysis grid is what the other formats are for, and an event dump
     /// is for the times the events actually happened. Its changes are read from the run's
     /// traces as it is written.
-    Vcd(Box<rspice_core::execution::EventVcdStream<rspice_core::execution::HeldEvents<'r>>>),
+    Vcd(Box<rspice_core::execution::EventVcdStream<RunEvents<'r>>>),
+}
+
+/// A transient's event histories as a rawfile's event plots: a plot per node with events, then a
+/// plot per declared bus. The member plots stay the authoritative copy; a bus plot carries the
+/// grouping and the bit order, which nothing else in a rawfile does.
+pub(super) struct EventPlots<'r> {
+    digital: &'r [rspice_core::engine::DigitalTrace],
+    real: &'r [rspice_core::engine::RealTrace],
+    buses: &'r [rspice_core::engine::DigitalBusDeclaration],
+    events: RunEvents<'r>,
+}
+
+impl<'r> EventPlots<'r> {
+    /// The plots of `result`'s histories, read from `events`, refusing the bus the projected
+    /// plots refuse, with its numbers, before a byte is written.
+    pub(super) fn new(
+        path: &Path,
+        result: &'r rspice_core::analysis::transient::TransientResult,
+        events: RunEvents<'r>,
+    ) -> Result<Self, CliError> {
+        for bus in &result.digital_buses {
+            rspice_core::execution::transient_bus_plot(&result.digital_traces, bus, &events)
+                .map_err(|error| crate::commands::waveform_io::conversion_error(path, error))?;
+        }
+        Ok(Self {
+            digital: &result.digital_traces,
+            real: &result.real_traces,
+            buses: &result.digital_buses,
+            events,
+        })
+    }
+
+    /// No event plots.
+    #[cfg(test)]
+    pub(super) fn none() -> Self {
+        Self {
+            digital: &[],
+            real: &[],
+            buses: &[],
+            events: RunEvents::Held(rspice_core::execution::HeldEvents {
+                digital: &[],
+                real: &[],
+            }),
+        }
+    }
 }
 
 impl TransientOutputDocument<'_> {
@@ -1792,13 +1852,9 @@ impl TransientOutputDocument<'_> {
         match self {
             Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
                 .map_err(|error| map_hdf5_output_error(path, error)),
-            Self::Table {
-                table,
-                events,
-                buses,
-            } => {
+            Self::Table { table, events } => {
                 table.write_to(writer, path, format)?;
-                write_raw_event_plots(writer, path, format, events, buses)
+                write_raw_event_plots(writer, path, format, events)
             }
             Self::Vcd(events) => crate::commands::vcd_io::write_event_stream(writer, path, events),
             Self::Typed(document) => {

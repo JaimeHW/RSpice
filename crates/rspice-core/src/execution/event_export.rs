@@ -52,8 +52,9 @@ use crate::engine::{
     RealTrace, RealTracePoint, canonical_event_name, validate_digital_bus_table,
 };
 use crate::execution::event_bus::{
-    BusMemberHistory, BusReassemblyTooLarge, bus_events, split_bus_notation,
+    BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events, split_bus_notation,
 };
+use crate::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
 use crate::io::raw_export::{
     HDL_TIME_PRECISION_KEY, RawBusTimeline, RawEventKind, RawEventTimeline,
 };
@@ -160,6 +161,21 @@ pub enum EventPlotError {
         /// The budget that refused it.
         source: BusReassemblyTooLarge,
     },
+
+    /// A history could not be read from where its points are kept.
+    #[error(transparent)]
+    Events(EventProjectionError),
+}
+
+/// Why a transient's event plots could not be written.
+#[derive(Debug, Error)]
+pub enum EventPlotWriteError {
+    /// The writer failed, or a plot could not be written as a reader would read it back.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// A bus could not be reassembled, or a history could not be read.
+    #[error(transparent)]
+    Plot(#[from] EventPlotError),
 }
 
 /// The event histories one rawfile's appended plots carry.
@@ -240,55 +256,216 @@ pub fn transient_bus_plots(
     digital_traces: &[DigitalTrace],
     digital_buses: &[DigitalBusDeclaration],
 ) -> Result<Vec<RawBusTimeline>, EventPlotError> {
-    let mut plots = Vec::new();
-    for bus in digital_buses {
-        let histories: Vec<Vec<(Value, u8)>> = bus
-            .members
-            .iter()
-            .map(|member| {
-                let key = canonical_event_name(member);
-                digital_traces
-                    .iter()
-                    .find(|trace| canonical_event_name(&trace.node_name) == key)
-                    .map(|trace| {
-                        trace
-                            .points
-                            .iter()
-                            .map(|point| (point.time, point.value.event_code()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            })
-            .collect();
-        let members: Vec<BusMemberHistory<'_>> = histories
-            .iter()
-            .map(|points| BusMemberHistory { points })
-            .collect();
-        let events = bus_events(&members).map_err(|source| EventPlotError::BusTooLarge {
+    let source = HeldEvents {
+        digital: digital_traces,
+        real: &[],
+    };
+    digital_buses
+        .iter()
+        .filter_map(|bus| transient_bus_plot(digital_traces, bus, &source).transpose())
+        .collect()
+}
+
+/// [`transient_bus_plots`]' plot of one bus, its members' points read from `source`; `None` for
+/// a bus with no events. A bus whose members hold more changes than one reassembly does is
+/// refused with [`bus_events`]' numbers before a point is read.
+pub fn transient_bus_plot<S: EventSource>(
+    digital_traces: &[DigitalTrace],
+    bus: &DigitalBusDeclaration,
+    source: &S,
+) -> Result<Option<RawBusTimeline>, EventPlotError> {
+    let traces: Vec<Option<usize>> = bus
+        .members
+        .iter()
+        .map(|member| {
+            let key = canonical_event_name(member);
+            digital_traces
+                .iter()
+                .position(|trace| canonical_event_name(&trace.node_name) == key)
+        })
+        .collect();
+    let total = traces
+        .iter()
+        .flatten()
+        .map(|&trace| source.digital_count(trace))
+        .fold(0usize, usize::saturating_add);
+    if total > MAX_BUS_EVENT_CELLS {
+        return Err(EventPlotError::BusTooLarge {
             bus: bus.name.clone(),
-            source,
-        })?;
-        if events.is_empty() {
-            continue;
-        }
-        let mut times = Vec::with_capacity(events.len());
-        let mut columns = vec![Vec::with_capacity(events.len()); bus.members.len()];
-        for (time, codes) in events {
-            times.push(time);
-            for (column, code) in columns.iter_mut().zip(codes) {
-                column.push(Value::from(code.unwrap_or(unobserved_event_code())));
-            }
-        }
-        plots.push(RawBusTimeline {
-            name: bus.name.clone(),
-            msb: bus.msb,
-            lsb: bus.lsb,
-            members: bus.members.clone(),
-            times,
-            values: columns,
+            source: BusReassemblyTooLarge {
+                width: traces.len(),
+                cells: total,
+            },
         });
     }
-    Ok(plots)
+    let histories: Vec<Vec<(Value, u8)>> = traces
+        .iter()
+        .map(|trace| match trace {
+            Some(trace) => source
+                .digital(*trace)
+                .map(|point| point.map(|(time, value)| (time, value.event_code())))
+                .collect(),
+            None => Ok(Vec::new()),
+        })
+        .collect::<Result<_, _>>()
+        .map_err(EventPlotError::Events)?;
+    let members: Vec<BusMemberHistory<'_>> = histories
+        .iter()
+        .map(|points| BusMemberHistory { points })
+        .collect();
+    let events = bus_events(&members).map_err(|source| EventPlotError::BusTooLarge {
+        bus: bus.name.clone(),
+        source,
+    })?;
+    if events.is_empty() {
+        return Ok(None);
+    }
+    let mut times = Vec::with_capacity(events.len());
+    let mut columns = vec![Vec::with_capacity(events.len()); bus.members.len()];
+    for (time, codes) in events {
+        times.push(time);
+        for (column, code) in columns.iter_mut().zip(codes) {
+            column.push(Value::from(code.unwrap_or(unobserved_event_code())));
+        }
+    }
+    Ok(Some(RawBusTimeline {
+        name: bus.name.clone(),
+        msb: bus.msb,
+        lsb: bus.lsb,
+        members: bus.members.clone(),
+        times,
+        values: columns,
+    }))
+}
+
+/// [`crate::io::write_event_plots`] of [`transient_event_plots`] and [`transient_bus_plots`],
+/// with every point read from `source` as it is written: a node's history is never held, and a
+/// bus's only while its plot is written.
+pub fn write_transient_event_plots<S: EventSource, W: std::io::Write + ?Sized>(
+    writer: &mut W,
+    digital_traces: &[DigitalTrace],
+    real_traces: &[RealTrace],
+    digital_buses: &[DigitalBusDeclaration],
+    source: &S,
+    format: crate::io::RawFormat,
+) -> Result<(), EventPlotWriteError> {
+    for (index, trace) in digital_traces.iter().enumerate() {
+        let points = source.digital_count(index);
+        if points == 0 {
+            continue;
+        }
+        let mut cursor = PointCursor::new(points, || source.digital(index));
+        crate::io::write_event_plot_streamed(
+            writer,
+            RawEventKind::Digital,
+            &trace.node_name,
+            trace.hdl_time_precision,
+            points,
+            format,
+            |point| {
+                cursor
+                    .at(point)
+                    .map_or((Value::NAN, Value::NAN), |(time, value)| {
+                        (time, Value::from(value.event_code()))
+                    })
+            },
+        )?;
+        cursor.finish(&trace.node_name)?;
+    }
+    for (index, trace) in real_traces.iter().enumerate() {
+        let points = source.real_count(index);
+        if points == 0 {
+            continue;
+        }
+        let mut cursor = PointCursor::new(points, || source.real(index));
+        crate::io::write_event_plot_streamed(
+            writer,
+            RawEventKind::Real,
+            &trace.node_name,
+            None,
+            points,
+            format,
+            |point| cursor.at(point).unwrap_or((Value::NAN, Value::NAN)),
+        )?;
+        cursor.finish(&trace.node_name)?;
+    }
+    for bus in digital_buses {
+        if let Some(plot) = transient_bus_plot(digital_traces, bus, source)? {
+            crate::io::write_bus_plots(writer, std::slice::from_ref(&plot), format)?;
+        }
+    }
+    Ok(())
+}
+
+/// One trace's points read in order, and from the first again when an earlier one is asked for.
+struct PointCursor<'s, T, F> {
+    points: usize,
+    open: F,
+    read: EventPoints<'s, T>,
+    /// How many points have been read since the trace was last opened.
+    next: usize,
+    current: Option<(Value, T)>,
+    failed: Option<Option<EventProjectionError>>,
+}
+
+impl<'s, T: Copy, F: Fn() -> EventPoints<'s, T>> PointCursor<'s, T, F> {
+    fn new(points: usize, open: F) -> Self {
+        let read = open();
+        Self {
+            points,
+            open,
+            read,
+            next: 0,
+            current: None,
+            failed: None,
+        }
+    }
+
+    /// Point `point`, or `None` once the trace could not be read.
+    fn at(&mut self, point: usize) -> Option<(Value, T)> {
+        if self.failed.is_some() {
+            return None;
+        }
+        if point + 1 == self.next {
+            return self.current;
+        }
+        if point < self.next {
+            self.read = (self.open)();
+            self.next = 0;
+        }
+        while self.next <= point {
+            match self.read.next() {
+                Some(Ok(read)) => {
+                    self.current = Some(read);
+                    self.next += 1;
+                }
+                Some(Err(error)) => {
+                    self.failed = Some(Some(error));
+                    return None;
+                }
+                None => {
+                    self.failed = Some(None);
+                    return None;
+                }
+            }
+        }
+        self.current
+    }
+
+    /// Why `node`'s trace could not be read, if it could not.
+    fn finish(self, node: &str) -> Result<(), EventPlotError> {
+        match self.failed {
+            None => Ok(()),
+            Some(Some(error)) => Err(EventPlotError::Events(error)),
+            Some(None) => Err(EventPlotError::Events(EventProjectionError::Source {
+                node: node.to_owned(),
+                reason: format!(
+                    "its history ends before the {} points it counts",
+                    self.points
+                ),
+            })),
+        }
+    }
 }
 
 /// The code a member with no recorded point yet is written as: unknown, at
@@ -843,6 +1020,59 @@ mod bus_tests {
         )
         .expect("write event and bus plots");
         bytes
+    }
+
+    /// The plots written from a source as it is read are the plots of the projected timelines,
+    /// byte for byte but the wall-clock `Date:` lines, in both encodings, with an empty trace,
+    /// an HDL-observed one, a real one and a bus.
+    #[test]
+    fn plots_written_from_their_source_are_the_projected_plots() {
+        let (mut traces, buses) = two_bit_fixture();
+        traces.push(trace("quiet", &[]));
+        let mut hdl = trace(
+            "hdl",
+            &[(0.0, DigitalValue::zero()), (1.5e-9, DigitalValue::one())],
+        );
+        hdl.hdl_time_precision = Some(1.0e-12);
+        traces.push(hdl);
+        let real = vec![RealTrace {
+            node_name: "level".to_string(),
+            points: vec![
+                RealTracePoint {
+                    time: 0.0,
+                    value: 0.25,
+                },
+                RealTracePoint {
+                    time: 3.0e-9,
+                    value: -1.5,
+                },
+            ],
+        }];
+        let undated = |bytes: Vec<u8>| -> Vec<u8> {
+            bytes
+                .split(|&byte| byte == b'\n')
+                .filter(|line| !line.starts_with(b"Date: "))
+                .collect::<Vec<_>>()
+                .join(&b'\n')
+        };
+        for format in [RawFormat::Ascii, RawFormat::Binary] {
+            let mut projected = Vec::new();
+            write_event_plots(
+                &mut projected,
+                &transient_event_plots(&traces, &real),
+                &transient_bus_plots(&traces, &buses).unwrap(),
+                format,
+            )
+            .unwrap();
+            let mut streamed = Vec::new();
+            let source = HeldEvents {
+                digital: &traces,
+                real: &real,
+            };
+            write_transient_event_plots(&mut streamed, &traces, &real, &buses, &source, format)
+                .unwrap();
+            assert!(undated(streamed) == undated(projected), "{format:?}");
+        }
     }
 
     #[test]

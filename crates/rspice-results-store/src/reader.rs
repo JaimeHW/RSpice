@@ -1011,6 +1011,41 @@ impl<I: SegmentIo> SegmentReader<I> {
         StoreError::OutOfRange(format!("signal {signal} is not an event signal"))
     }
 
+    /// How many `EVENTS` frames event signal `signal` has. Its changes are those of frame 0,
+    /// then frame 1, and so on ([`Self::read_event_frame`]), so a reader can walk a signal's
+    /// whole history holding one frame of it.
+    pub fn event_frames(&self, signal: usize) -> Result<usize, StoreError> {
+        let position = self
+            .event_position(signal as u32)
+            .ok_or_else(|| Self::not_event(signal))?;
+        Ok(self.catalogue.events.get(position).map_or(0, Vec::len))
+    }
+
+    /// The changes of event signal `signal`'s `frame`-th `EVENTS` frame, in commit order, into
+    /// `out`, which is emptied first.
+    pub fn read_event_frame(
+        &self,
+        signal: usize,
+        frame: usize,
+        out: &mut Vec<EventChange>,
+    ) -> Result<(), StoreError> {
+        let position = self
+            .event_position(signal as u32)
+            .ok_or_else(|| Self::not_event(signal))?;
+        let kind = self.event_signals[position].1;
+        let frame = self
+            .catalogue
+            .events
+            .get(position)
+            .and_then(|frames| frames.get(frame))
+            .ok_or_else(|| {
+                StoreError::OutOfRange(format!("event signal {signal} has no frame {frame}"))
+            })?;
+        let (_, payload) = self.read_frame(frame.offset)?;
+        out.clear();
+        decode_events(&payload, frame.offset, kind, out)
+    }
+
     /// The changes of event signal `signal` with time in `t0 ..= t1`, in commit order.
     pub fn events(
         &mut self,

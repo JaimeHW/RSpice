@@ -230,6 +230,39 @@ fn event_changes_read_back_with_x_z_and_strength() {
     assert!(reader.events(99, 0.0, 1.0).is_err());
 }
 
+/// A signal's frames, read one at a time in order, are its whole history.
+#[test]
+fn a_signal_s_frames_read_in_order_are_its_history() {
+    let (steps, after) = run(1000, 5000, 11);
+    let (_, io) = write(writer(64), &steps, &after, usize::MAX, usize::MAX);
+    let reader = SegmentReader::open(io).unwrap();
+    let mut frame = Vec::new();
+    for signal in EVENT_SIGNALS {
+        let frames = reader.event_frames(signal as usize).unwrap();
+        let mut read = Vec::new();
+        for index in 0..frames {
+            reader
+                .read_event_frame(signal as usize, index, &mut frame)
+                .unwrap();
+            assert!(!frame.is_empty(), "signal {signal} frame {index}");
+            read.extend(frame.iter().map(key));
+        }
+        assert_eq!(read, stream(&steps, &after, signal), "signal {signal}");
+        assert!(
+            reader
+                .read_event_frame(signal as usize, frames, &mut frame)
+                .is_err()
+        );
+    }
+    assert!(
+        EVENT_SIGNALS
+            .iter()
+            .any(|&signal| { reader.event_frames(signal as usize).unwrap() > 1 })
+    );
+    assert!(reader.event_frames(0).is_err());
+    assert!(reader.read_event_frame(99, 0, &mut frame).is_err());
+}
+
 #[test]
 fn event_bytes_do_not_depend_on_how_changes_are_pushed_or_synced() {
     let (steps, after) = run(700, 300, 12);

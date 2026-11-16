@@ -54,7 +54,8 @@ pub use event_bus::{
     split_bus_notation,
 };
 pub use event_export::{
-    EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,
+    EventPlotError, EventPlotWriteError, RawEventTraces, decode_event_plots, transient_bus_plot,
+    transient_bus_plots, transient_event_plots, write_transient_event_plots,
 };
 pub use event_projection::{
     EventPoints, EventProjectionError, EventSource, EventVcdStream, HeldEvents, VcdEventHistories,

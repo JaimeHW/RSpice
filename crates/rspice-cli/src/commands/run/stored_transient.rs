@@ -21,11 +21,13 @@ use rspice_core::engine::{
     ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint, TransientEnd,
     TransientResult, TransientStartupMode, TransientState,
 };
+use rspice_core::execution::{EventPoints, EventSource, HeldEvents};
 use rspice_core::netlist::{AnalysisCommand, OutputDirectiveKind};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
+use rspice_core::xspice::DigitalValue;
 use rspice_results::stored_transient::{
-    SlotTarget, clear_rows, fill_events, fill_rows, fill_span, first_non_finite,
-    instance_parameters, slot_name, slot_targets,
+    SlotTarget, StoreEvents, clear_rows, fill_event_traces, fill_impulses, fill_rows, fill_span,
+    first_non_finite, instance_parameters, slot_name, slot_targets,
 };
 use rspice_results_store::{
     FileIo, FreeSpace, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError,
@@ -56,6 +58,8 @@ pub(super) struct StoredRows {
     receipt: SinkReceipt,
     /// The storage filled and the run ended at its last whole chunk.
     stopped: Option<SinkStop>,
+    /// The digital and real event histories are in the shell's traces, not only in the store.
+    events_held: bool,
 }
 
 /// A store directory, under a private name while its run is open.
@@ -336,7 +340,9 @@ pub(super) fn run_with<T: StoreRunEnd>(
         }
     };
     let mut shell = shell;
-    if let Err(error) = fill_events(&mut reader, &mut shell) {
+    // The digital and real event histories stay in the store until an output reads them there
+    // or asks for them in memory ([`StoredTransient::hold_events`]).
+    if let Err(error) = fill_impulses(&mut reader, &mut shell) {
         let failure = store_error(&store.dir, error);
         drop(reader);
         store.discard();
@@ -351,6 +357,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
             targets,
             receipt,
             stopped,
+            events_held: false,
         },
     };
     Ok((stored, end))
@@ -448,9 +455,22 @@ fn reopen_beside_output(
 pub(super) type FourierRecords = Vec<(usize, Vec<FourierRecord>)>;
 
 impl StoredTransient {
+    /// Read the run's digital and real event histories from the store into the shell's traces,
+    /// once, for what reads them in memory: a read-back, a measurement, a `.FOUR` card, and the
+    /// caller of a run it hands back.
+    pub(super) fn hold_events(&mut self) -> Result<(), CliError> {
+        if !self.rows.events_held {
+            fill_event_traces(&mut self.rows.reader, &mut self.shell)
+                .map_err(|error| store_error(&self.rows.store.dir, error))?;
+            self.rows.events_held = true;
+        }
+        Ok(())
+    }
+
     /// Read every row back into the result and complete the outputs that read whole waveforms
     /// (`.FFT`, lead power), after which it equals the in-memory run's.
     pub(super) fn read_back(&mut self, ctx: &RunContext<'_>, tstop: f64) -> Result<(), CliError> {
+        self.hold_events()?;
         let rows = self.rows.rows();
         self.rows.fill(&mut self.shell, 0, rows)?;
         let parameters = std::mem::take(&mut self.rows.parameters);
@@ -493,7 +513,7 @@ impl StoredTransient {
     /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, prints
     /// no table of its own, keeps every accepted step, and asks for a rawfile, a delimited
     /// table, an event dump or nothing; when every output signal is one of the store's columns,
-    /// value for value; and when its `.MEASURE TRAN` statements, if any, read only the store's
+    /// value for value, or, for an event dump, a column sampled from an event trace; and when its `.MEASURE TRAN` statements, if any, read only the store's
     /// columns in forms measured in one pass over the rows. The signals are checked by
     /// projecting the first chunk exactly as the whole run would be, and the statements by
     /// planning them against the same chunk; they are then measured from the store.
@@ -546,7 +566,17 @@ impl StoredTransient {
             .next()
             .map_or(0, |span| span.1);
         self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
-        let plan = probe_plan(ctx, &self.shell, &self.rows.targets).and_then(|plan| {
+        // An event dump writes no table, so a column sampled from an event trace need not be
+        // one of the store's.
+        let event_dump = ctx.output.is_some() && matches!(ctx.format, OutputFormat::Vcd);
+        let events = if event_dump {
+            Some(self.rows.events(&self.shell)?)
+        } else {
+            None
+        };
+        let plan = probe_plan(ctx, &self.shell, &self.rows.targets, events.as_ref());
+        drop(events);
+        let plan = plan.and_then(|plan| {
             let Some(mut plan) = plan else {
                 return Ok(None);
             };
@@ -555,6 +585,7 @@ impl StoredTransient {
                 .iter()
                 .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"));
             if measures {
+                self.hold_events()?;
                 let Some(measurements) = self.measure(ctx)? else {
                     log::debug!("the transient's .MEASURE TRAN statements read it back whole");
                     return Ok(None);
@@ -658,6 +689,7 @@ impl StoredTransient {
     ) -> Result<Option<FourierRecords>, CliError> {
         let netlist = ctx.netlist;
         let abort = &crate::abort::ProcessAbort;
+        self.hold_events()?;
         let indices = ctx.fourier_cards_for_current_transient()?;
         let mut whole = self.shell.voltage_impulses.is_some()
             || self.shell.current_impulses.is_some()
@@ -906,9 +938,48 @@ pub(crate) fn stores_left() -> Vec<StoreRecord> {
 }
 
 /// The output signals of a streamed run and the store slot each one reads.
+/// Where a transient's outputs read its event histories.
+pub(super) enum RunEvents<'r> {
+    /// The traces' own points.
+    Held(HeldEvents<'r>),
+    /// The run's store, a frame at a time.
+    Stored(Box<StoreEvents<FileIo>>),
+}
+
+impl EventSource for RunEvents<'_> {
+    fn digital(&self, index: usize) -> EventPoints<'_, DigitalValue> {
+        match self {
+            Self::Held(events) => events.digital(index),
+            Self::Stored(events) => events.digital(index),
+        }
+    }
+
+    fn real(&self, index: usize) -> EventPoints<'_, f64> {
+        match self {
+            Self::Held(events) => events.real(index),
+            Self::Stored(events) => events.real(index),
+        }
+    }
+
+    fn digital_count(&self, index: usize) -> usize {
+        match self {
+            Self::Held(events) => events.digital_count(index),
+            Self::Stored(events) => events.digital_count(index),
+        }
+    }
+
+    fn real_count(&self, index: usize) -> usize {
+        match self {
+            Self::Held(events) => events.real_count(index),
+            Self::Stored(events) => events.real_count(index),
+        }
+    }
+}
+
 pub(super) struct StreamPlan {
     /// Named and typed as the in-memory projection names them, without samples.
     pub(super) signals: Vec<ScalarSignal>,
+    /// Each signal's value slot in the store; none for an event dump, which reads no rows.
     slots: Vec<usize>,
     /// The deck's `.MEASURE TRAN` results, measured from the store; `None` when it has none.
     pub(super) measurements: Option<Vec<MeasureResult>>,
@@ -916,10 +987,16 @@ pub(super) struct StreamPlan {
 
 /// Project the probe rows in `shell` and keep the plan only when every projected signal is a
 /// store column under its own name with its own values.
+///
+/// For an event dump, which writes no table, `events` holds the run's event histories, and a
+/// signal may instead be a column sampled from one (`D(node)`, `E(node)`): the in-memory route
+/// only checks those columns' values finite, which a digital level always is, and a real event
+/// value is wherever every one of them is. The plan then reads no rows, and has no slots.
 fn probe_plan(
     ctx: &RunContext<'_>,
     shell: &TransientResult,
     targets: &[SlotTarget],
+    events: Option<&RunEvents<'_>>,
 ) -> Result<Option<StreamPlan>, CliError> {
     let column = |target: SlotTarget| stream_column(shell, target);
     let inventory = match rspice_core::execution::transient_projection_signals(shell) {
@@ -949,9 +1026,42 @@ fn probe_plan(
         // The run read back whole reports the same failure the in-memory run would.
         return Ok(None);
     };
+    let event_columns: std::collections::HashSet<String> = match events {
+        Some(_) => shell
+            .digital_traces
+            .iter()
+            .map(|trace| format!("D({})", trace.node_name))
+            .collect(),
+        None => std::collections::HashSet::new(),
+    };
+    let real_columns: std::collections::HashSet<String> = match events {
+        Some(_) => shell
+            .real_traces
+            .iter()
+            .map(|trace| format!("E({})", trace.node_name))
+            .collect(),
+        None => std::collections::HashSet::new(),
+    };
+    let mut real_checked = false;
     let mut slots = Vec::with_capacity(signals.len());
     for signal in &mut signals {
         let Some(&Some(slot)) = by_name.get(signal.display_name.as_str()) else {
+            if event_columns.contains(&signal.display_name) {
+                signal.values = Vec::new();
+                continue;
+            }
+            if let Some(events) = events
+                && real_columns.contains(&signal.display_name)
+            {
+                if !real_checked {
+                    if !real_events_finite(events, shell.real_traces.len()) {
+                        return Ok(None);
+                    }
+                    real_checked = true;
+                }
+                signal.values = Vec::new();
+                continue;
+            }
             return Ok(None);
         };
         let Some(values) = column(targets[slot]) else {
@@ -969,11 +1079,23 @@ fn probe_plan(
         signal.values = Vec::new();
         slots.push(slot);
     }
+    if events.is_some() {
+        slots.clear();
+    }
     Ok(Some(StreamPlan {
         signals,
         slots,
         measurements: None,
     }))
+}
+
+/// Whether every value of the `traces` real event traces in `events` reads as finite.
+fn real_events_finite(events: &RunEvents<'_>, traces: usize) -> bool {
+    (0..traces).all(|trace| {
+        events
+            .real(trace)
+            .all(|point| point.is_ok_and(|(_, value)| value.is_finite()))
+    })
 }
 
 impl StoredRows {
@@ -997,6 +1119,23 @@ impl StoredRows {
             .read_x(rows - 1, 1)
             .map(|x| x.first().copied())
             .map_err(|error| store_error(&dir, error))
+    }
+
+    /// Where an output reads `shell`'s event histories: the shell's traces once they are held,
+    /// and until then the store, through a reader of its own so that the rows' reader stays free.
+    pub(super) fn events<'r>(&self, shell: &'r TransientResult) -> Result<RunEvents<'r>, CliError> {
+        if self.events_held {
+            return Ok(RunEvents::Held(HeldEvents {
+                digital: &shell.digital_traces,
+                real: &shell.real_traces,
+            }));
+        }
+        let segment = self.store.dir.join(StoreDir::segment_name(0));
+        let reader = FileIo::open(&segment)
+            .map_err(StoreError::from)
+            .and_then(SegmentReader::open)
+            .map_err(|error| store_error(&self.store.dir, error))?;
+        Ok(RunEvents::Stored(Box::new(StoreEvents::new(reader, shell))))
     }
 
     /// Move rows `first .. first + count` into `result`'s time and saved columns.

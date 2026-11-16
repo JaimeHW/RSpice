@@ -135,6 +135,15 @@ pub enum EventProjectionError {
         time: Value,
     },
 
+    /// A history could not be read from where its points are kept, such as a results store.
+    #[error("the events of node '{node}' could not be read: {reason}")]
+    Source {
+        /// The node whose history could not be read.
+        node: String,
+        /// Why.
+        reason: String,
+    },
+
     /// A real event value was infinite or NaN.
     #[error("node '{node}' has a non-finite value at {time} s")]
     NonFiniteValue {

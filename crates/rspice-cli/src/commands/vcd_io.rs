@@ -29,7 +29,7 @@ use rspice_core::engine::{
     DigitalBusDeclaration, DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint,
 };
 use rspice_core::execution::{
-    EventProjectionError, EventSource, EventVcdStream, HeldEvents, RawEventTraces, ResultPayload,
+    EventProjectionError, EventSource, EventVcdStream, RawEventTraces, ResultPayload,
     event_vcd_document, event_vcd_stream, split_bus_notation,
 };
 use rspice_core::io::{
@@ -138,25 +138,22 @@ pub(crate) fn event_document(
         .map_err(|error| projection_error(path, &error))
 }
 
-/// [`event_document`]'s dump, with its changes read from the traces while it is written
-/// rather than gathered into a document first: the histories are checked here, and refused as
-/// the document refuses them.
-pub(crate) fn event_stream<'t>(
+/// [`event_document`]'s dump of the traces, with their points read from `source` while it is
+/// written rather than gathered into a document first: the histories are checked here, and
+/// refused as the document refuses them.
+pub(crate) fn event_stream<S: EventSource>(
     path: &Path,
-    digital_traces: &'t [DigitalTrace],
-    real_traces: &'t [RealTrace],
+    source: S,
+    digital_traces: &[DigitalTrace],
+    real_traces: &[RealTrace],
     digital_buses: &[DigitalBusDeclaration],
-) -> Result<EventVcdStream<HeldEvents<'t>>, CliError> {
-    let held = HeldEvents {
-        digital: digital_traces,
-        real: real_traces,
-    };
+) -> Result<EventVcdStream<S>, CliError> {
     event_vcd_stream(
         EVENT_SCOPE,
         digital_traces,
         real_traces,
         digital_buses,
-        held,
+        source,
     )
     .map_err(|error| projection_error(path, &error))
 }

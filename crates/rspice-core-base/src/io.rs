@@ -50,7 +50,7 @@ pub use ltspice_raw::{
 };
 pub use raw_export::{
     RawBusTimeline, RawEventKind, RawEventTimeline, RawExporter, RawFormat, RawVariable,
-    VariableType, write_event_plots,
+    VariableType, write_bus_plots, write_event_plot_streamed, write_event_plots,
 };
 pub use vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdDumpOff, VcdError, VcdMagnitude,
