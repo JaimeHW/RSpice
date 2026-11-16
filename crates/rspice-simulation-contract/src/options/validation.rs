@@ -17,6 +17,8 @@ pub enum ValidationError {
     InvalidTemperature(&'static str, f64),
     /// A connect-rule block name that is not a simple identifier.
     InvalidConnectRules(String),
+    /// The run's own connect-rule block cannot be written as stated.
+    InvalidConnectRuleBlock(String),
 }
 
 impl fmt::Display for ValidationError {
@@ -47,6 +49,9 @@ impl fmt::Display for ValidationError {
                 f,
                 "connectrules must name a connect-rule block by a simple identifier, got '{block}'"
             ),
+            ValidationError::InvalidConnectRuleBlock(problem) => {
+                write!(f, "connect rules: {problem}")
+            }
         }
     }
 }

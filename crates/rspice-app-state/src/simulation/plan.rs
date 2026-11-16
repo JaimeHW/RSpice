@@ -6,6 +6,7 @@
 //! its authority boundary.
 
 mod config;
+pub mod connect_rules;
 #[cfg(test)]
 mod model_app_tests;
 mod options_draft;

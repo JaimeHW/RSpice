@@ -37,6 +37,9 @@ pub struct OptionsDialogState {
     pub rshunt: String,
     /// Empty names no connect-rule block.
     pub connect_rules: String,
+    /// The run's own connect-rule block, edited cell by cell on the Connect
+    /// rules page; see [`super::connect_rules`].
+    pub connect_rule_block: Option<rspice_simulation_contract::options::RunConnectRules>,
     pub pivrel: String,
     pub pivtol: String,
     pub gmin_stepping: bool,
@@ -92,6 +95,7 @@ impl OptionsDialogState {
             gmin: format_si_value(opts.gmin),
             rshunt: opts.rshunt.map(format_si_value).unwrap_or_default(),
             connect_rules: opts.connect_rules.clone().unwrap_or_default(),
+            connect_rule_block: opts.connect_rule_block.clone(),
             pivrel: format_si_value(opts.pivrel),
             pivtol: format_si_value(opts.pivtol),
             gmin_stepping: opts.gmin_stepping,
@@ -192,6 +196,7 @@ impl OptionsDialogState {
             gmin,
             rshunt,
             connect_rules,
+            connect_rule_block: self.connect_rule_block.clone(),
             damping: DampingStrategy::all()[self.damping.min(DampingStrategy::all().len() - 1)],
             method: IntegrationMethod::all()[self.method.min(IntegrationMethod::all().len() - 1)],
             solver: MatrixSolver::all()[self.solver.min(MatrixSolver::all().len() - 1)],

@@ -84,6 +84,13 @@ pub struct SimulationOptions {
     /// clears it. Not serialized while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_rules: Option<String>,
+    /// The run's own connect-rule block, written into the deck as a
+    /// `.CONNECTRULES` card while [`Self::connect_rules`] names it. Kept when
+    /// another block is selected, so choosing it again restores its values.
+    /// Like the selection it decides the circuit, so a preset neither sets
+    /// nor clears it. Not serialized while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_rule_block: Option<super::RunConnectRules>,
     pub damping: DampingStrategy,
     pub method: IntegrationMethod,
     pub solver: MatrixSolver,
@@ -151,6 +158,8 @@ struct PersistedSimulationOptions {
     rshunt: Option<f64>,
     #[serde(default)]
     connect_rules: Option<String>,
+    #[serde(default)]
+    connect_rule_block: Option<super::RunConnectRules>,
     damping: DampingStrategy,
     method: IntegrationMethod,
     solver: MatrixSolver,
@@ -189,6 +198,7 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             gmin: fields.gmin,
             rshunt: fields.rshunt,
             connect_rules: fields.connect_rules,
+            connect_rule_block: fields.connect_rule_block,
             damping: fields.damping,
             method: fields.method,
             solver: fields.solver,
@@ -229,6 +239,7 @@ impl Default for SimulationOptions {
             gmin: 1e-12,
             rshunt: None,
             connect_rules: None,
+            connect_rule_block: None,
             damping: DampingStrategy::VoltageLimiting,
             method: IntegrationMethod::Trap,
             solver: MatrixSolver::Lu,
@@ -326,6 +337,9 @@ impl SimulationOptions {
             preset.source_simulator = self.source_simulator;
             preset.rshunt = self.rshunt;
             preset.connect_rules.clone_from(&self.connect_rules);
+            preset
+                .connect_rule_block
+                .clone_from(&self.connect_rule_block);
             serde_json::to_vec(&preset)
                 .ok()
                 .filter(|preset| *preset == current)
@@ -511,6 +525,14 @@ impl SimulationOptions {
         {
             errors.push(ValidationError::InvalidConnectRules(block.clone()));
         }
+        if let Some(block) = &self.connect_rule_block {
+            errors.extend(
+                block
+                    .problems()
+                    .into_iter()
+                    .map(ValidationError::InvalidConnectRuleBlock),
+            );
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -671,13 +693,24 @@ impl SimulationOptions {
             lines.append(&mut timeint);
         }
 
+        // The run's own block, while the selection names it: the deck then
+        // carries every value it converts with.
+        if let Some(block) = &self.connect_rule_block
+            && self.connect_rules.as_deref() == Some(block.name.as_str())
+        {
+            if lines.len() == 1 && lines[0] == ".OPTIONS" {
+                lines.clear();
+            }
+            lines.push(block.card());
+        }
+
         lines.join("\n")
     }
 }
 
 /// A Verilog-AMS simple identifier: a letter or underscore, then letters,
 /// digits, underscores and dollar signs.
-fn is_simple_identifier(name: &str) -> bool {
+pub(super) fn is_simple_identifier(name: &str) -> bool {
     let mut characters = name.chars();
     characters
         .next()
