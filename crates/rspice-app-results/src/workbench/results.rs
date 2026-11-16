@@ -39,6 +39,8 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::workflows::result_import_workflow::import_result_dataset;
 use crate::workbench::{ResultViewer, SurfaceId};
 use rspice_results::feature_search::Direction;
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
+use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_results_ui::session::ViewGesture;
 use rspice_results_ui::waves::navigation::CursorJump;
 
@@ -89,6 +91,46 @@ impl ResultsFeature {
         if follow_notification_action(cx.model, cx.wb, action) {
             cx.execute(ids::OPEN_RUN_IN_RESULTS);
         }
+    }
+}
+
+/// What the shell's drains hand the results feature once a call has
+/// returned, each written as the part that raised it once wrote the results
+/// workspace in place.
+impl ResultsFeature {
+    /// Start the open waveform view again from Results ▸ Waveform defaults,
+    /// as a change to them asks.
+    pub fn apply_waveform_defaults(cx: &mut Cx<'_, Self>) {
+        cx.state
+            .start_waveform_viewer_session(&cx.model.preferences);
+    }
+
+    /// Show the waveforms a hand-off into Results names, each as its dataset
+    /// shows it, with `selected` the selected trace and no cursor left
+    /// standing.
+    pub fn show_waveforms(
+        cx: &mut Cx<'_, Self>,
+        visibility: Vec<(SourceWaveformPresentationKey, bool)>,
+        selected: Option<SelectedResultTrace>,
+    ) {
+        let results = &mut cx.state.results;
+        results.reveal_waveforms(visibility);
+        results.session.selected_trace = selected;
+        results.session.clear_cursors();
+    }
+
+    /// Narrow the open family form to the members `filter` names.
+    pub fn set_family_filter(cx: &mut Cx<'_, Self>, filter: String) {
+        crate::workbench::documents::result_document::set_family_filter(
+            &mut cx.state.result_document_dialog,
+            filter,
+        );
+    }
+
+    /// Hold that the failure banner of run `run_sequence`, or of none, has
+    /// its sites marked on the schematic.
+    pub fn mark_failure_run(cx: &mut Cx<'_, Self>, run_sequence: Option<u64>) {
+        cx.state.results.marked_failure_run = run_sequence;
     }
 }
 

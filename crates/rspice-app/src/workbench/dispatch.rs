@@ -34,10 +34,14 @@ use rspice_app_code::workbench::code::requests as code_requests;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
 use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
+use rspice_app_design::workbench::design::DesignFeature;
 use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
+use rspice_app_models::workbench::models::ModelsFeature;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_results::workbench::results::ResultsFeature;
+use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
@@ -51,7 +55,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, StageComponentTuning, SubcircuitSymbolSource, VoidVerilogAEvidence,
+    ShowWaveforms, StageComponentTuning, VoidVerilogAEvidence,
 };
 
 /// Who carries out a command once the prologue has let it through.
@@ -346,20 +350,14 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, FollowSchematicGrid| {
-                let state = &mut app.state;
-                state.design.follow_schematic_grid(&state.model);
-            },
+            |app, FollowSchematicGrid| DesignFeature::follow_schematic_grid(&mut features::cx(app)),
         );
         self.state.take_shortcut_resolver_reset();
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ApplyWaveformDefaults| {
-                let state = &mut app.state;
-                state
-                    .results
-                    .start_waveform_viewer_session(&state.model.preferences);
+                ResultsFeature::apply_waveform_defaults(&mut features::cx(app));
             },
         );
         requests::drain(
@@ -371,10 +369,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, SelectAnalysisInstance(instance)| {
-                rspice_app_simulate::workbench::simulate::select_analysis_instance(
-                    &mut app.state.simulate,
-                    instance,
-                );
+                SimulateFeature::select_analysis_instance(&mut features::cx(app), instance);
             },
         );
         requests::drain(
@@ -412,11 +407,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, OpenStimulusDefinition(definition)| {
-                rspice_app_design::workbench::app::dialogs::stimulus_link::show_stimulus_definition(
-                    &mut app.state.design.selected_stimulus_definition,
-                    &mut app.state.workbench,
-                    &definition,
-                );
+                DesignFeature::show_stimulus_definition(&mut features::cx(app), &definition);
             },
         );
         requests::drain(
@@ -439,27 +430,21 @@ impl RSpiceApp {
                  visibility,
                  selected,
              }| {
-                let results = &mut app.state.results.results;
-                results.reveal_waveforms(visibility);
-                results.session.selected_trace = selected;
-                results.session.clear_cursors();
+                ResultsFeature::show_waveforms(&mut features::cx(app), visibility, selected);
             },
         );
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, SetFamilyFilter(filter)| {
-                rspice_app_results::workbench::documents::result_document::set_family_filter(
-                    &mut app.state.results.result_document_dialog,
-                    filter,
-                );
+                ResultsFeature::set_family_filter(&mut features::cx(app), filter);
             },
         );
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ShowSchematicAnnotations(annotations)| {
-                app.state.design.schematic_visibility.annotations = annotations;
+                DesignFeature::show_schematic_annotations(&mut features::cx(app), annotations);
             },
         );
         requests::drain(
@@ -470,7 +455,7 @@ impl RSpiceApp {
                     &mut app.state.model,
                     &mut app.state.workbench,
                 ) {
-                    app.state.results.results.marked_failure_run = run_sequence;
+                    ResultsFeature::mark_failure_run(&mut features::cx(app), run_sequence);
                 }
             },
         );
@@ -506,79 +491,17 @@ impl RSpiceApp {
                         &model,
                     )
                     .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
-                app.state.models.models_view.note_receipt(result);
+                ModelsFeature::note_receipt(&mut features::cx(app), result);
             },
         );
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, request: OpenSymbolAuthoring| match request {
-                OpenSymbolAuthoring::ModelBound => {
-                    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(
-                        &mut app.state.design.create_model_bound_symbol,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                        app.state.models.selected_model.as_deref(),
-                    );
-                }
-                OpenSymbolAuthoring::ParameterForm(None) => {
-                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog(
-                        &mut app.state.design.symbol_parameter_form,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                        &app.state.platform,
-                    );
-                }
-                OpenSymbolAuthoring::ParameterForm(Some(target)) => {
-                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog_for(
-                        &mut app.state.design.symbol_parameter_form,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                        &app.state.platform,
-                        target,
-                    );
-                }
-                OpenSymbolAuthoring::Import(None) => {
-                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog(
-                        &mut app.state.design.symbol_import,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                        &app.state.platform,
-                    );
-                }
-                OpenSymbolAuthoring::Import(Some(binding_source)) => {
-                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog_for(
-                        &mut app.state.design.symbol_import,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                        &app.state.platform,
-                        Some(&binding_source),
-                    );
-                }
-                OpenSymbolAuthoring::SubcircuitBound(source) => {
-                    let SubcircuitSymbolSource {
-                        library,
-                        subcircuit,
-                        source_path,
-                        ordered_ports,
-                        description,
-                        section,
-                        parameter_defaults,
-                        opened_receipt,
-                    } = *source;
-                    let result = rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_subcircuit_bound_symbol_dialog(
-                        &mut app.state.design.create_model_bound_symbol,
-                        &app.state.model,
-                        library,
-                        subcircuit,
-                        source_path,
-                        ordered_ports,
-                        description,
-                        section,
-                        parameter_defaults,
-                    )
-                    .map(|()| opened_receipt);
-                    app.state.models.models_view.note_receipt(result);
+            |app, request: OpenSymbolAuthoring| {
+                if let Some(result) =
+                    DesignFeature::open_symbol_authoring(&mut features::cx(app), request)
+                {
+                    ModelsFeature::note_receipt(&mut features::cx(app), result);
                 }
             },
         );
@@ -596,8 +519,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ShowProjectModels| {
-                app.state.models.models_view.catalog_scope =
-                    rspice_app_models::workbench::models::workspace_state::ModelsCatalogScope::Project;
+                ModelsFeature::show_project_models(&mut features::cx(app));
                 app.execute_command_key(ids::MODELS_CATALOG);
             },
         );
@@ -634,7 +556,7 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, ClearSelectedModel| app.state.models.clear_selected_model(),
+            |app, ClearSelectedModel| ModelsFeature::clear_selected_model(&mut features::cx(app)),
         );
         requests::drain(
             self,

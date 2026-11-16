@@ -479,7 +479,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "3",
         &[
             "|app, FollowSchematicGrid|",
-            "state.design.follow_schematic_grid(&state.model)",
+            "DesignFeature::follow_schematic_grid(&mut features::cx(app))",
         ],
     ),
     ("4", &["self.state.take_shortcut_resolver_reset()"]),
@@ -487,7 +487,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "5",
         &[
             "|app, ApplyWaveformDefaults|",
-            "state.results.start_waveform_viewer_session(&state.model.preferences)",
+            "ResultsFeature::apply_waveform_defaults(&mut features::cx(app));",
         ],
     ),
     (
@@ -498,8 +498,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "7",
         &[
             "|app, SelectAnalysisInstance(instance)|",
-            "rspice_app_simulate::workbench::simulate::select_analysis_instance(",
-            "&mut app.state.simulate,",
+            "SimulateFeature::select_analysis_instance(&mut features::cx(app), instance);",
         ],
     ),
     (
@@ -522,11 +521,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8.2",
         &[
             "|app, OpenStimulusDefinition(definition)|",
-            "rspice_app_design::workbench::app::dialogs::stimulus_link::show_stimulus_definition(\
-             &mut app.state.design.selected_stimulus_definition,\
-             &mut app.state.workbench,\
-             &definition,\
-             );",
+            "DesignFeature::show_stimulus_definition(&mut features::cx(app), &definition);",
         ],
     ),
     (
@@ -541,23 +536,21 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "9",
         &[
             "|app, ShowWaveforms { visibility, selected, }|",
-            "results.reveal_waveforms(visibility);",
-            "results.session.selected_trace = selected;",
-            "results.session.clear_cursors();",
+            "ResultsFeature::show_waveforms(&mut features::cx(app), visibility, selected);",
         ],
     ),
     (
         "10",
         &[
             "|app, SetFamilyFilter(filter)|",
-            "rspice_app_results::workbench::documents::result_document::set_family_filter(",
+            "ResultsFeature::set_family_filter(&mut features::cx(app), filter);",
         ],
     ),
     (
         "11",
         &[
             "|app, ShowSchematicAnnotations(annotations)|",
-            "app.state.design.schematic_visibility.annotations = annotations;",
+            "DesignFeature::show_schematic_annotations(&mut features::cx(app), annotations);",
         ],
     ),
     (
@@ -568,7 +561,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
              &mut app.state.model,\
              &mut app.state.workbench,\
              ) {",
-            "app.state.results.results.marked_failure_run = run_sequence;",
+            "ResultsFeature::mark_failure_run(&mut features::cx(app), run_sequence);",
         ],
     ),
     (
@@ -587,47 +580,15 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         &[
             "|app, BindComponentModel { component_id, library, model, }|",
             "rspice_app_design::workbench::design::inspector::bind_component_model_from_catalog(",
-            "app.state.models.models_view.note_receipt(result);",
+            "ModelsFeature::note_receipt(&mut features::cx(app), result);",
         ],
     ),
     (
         "16",
         &[
-            "|app, request: OpenSymbolAuthoring| match request {",
-            "rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(\
-             &mut app.state.design.create_model_bound_symbol,\
-             &app.state.model,\
-             &mut app.state.workbench,\
-             app.state.models.selected_model.as_deref(),\
-             );",
-            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog(\
-             &mut app.state.design.symbol_parameter_form,\
-             &app.state.model,\
-             &mut app.state.workbench,\
-             &app.state.platform,\
-             );",
-            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog_for(\
-             &mut app.state.design.symbol_parameter_form,\
-             &app.state.model,\
-             &mut app.state.workbench,\
-             &app.state.platform,\
-             target,\
-             );",
-            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog(\
-             &mut app.state.design.symbol_import,\
-             &app.state.model,\
-             &mut app.state.workbench,\
-             &app.state.platform,\
-             );",
-            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog_for(\
-             &mut app.state.design.symbol_import,\
-             &app.state.model,\
-             &mut app.state.workbench,\
-             &app.state.platform,\
-             Some(&binding_source),\
-             );",
-            "rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_subcircuit_bound_symbol_dialog(",
-            "app.state.models.models_view.note_receipt(result);",
+            "|app, request: OpenSymbolAuthoring| {",
+            "DesignFeature::open_symbol_authoring(&mut features::cx(app), request)",
+            "ModelsFeature::note_receipt(&mut features::cx(app), result);",
         ],
     ),
     (
@@ -642,7 +603,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "18",
         &[
             "|app, ShowProjectModels|",
-            "app.state.models.models_view.catalog_scope =",
+            "ModelsFeature::show_project_models(&mut features::cx(app));",
             "app.execute_command_key(ids::MODELS_CATALOG);",
         ],
     ),
@@ -666,7 +627,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "20.01",
-        &["|app, ClearSelectedModel| app.state.models.clear_selected_model()"],
+        &["|app, ClearSelectedModel| ModelsFeature::clear_selected_model(&mut features::cx(app))"],
     ),
     (
         "20.02",

@@ -91,7 +91,9 @@ use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
     FeatureSurface, NoHandles, Reads, held_back,
 };
-use crate::workbench::framework::requests::FocusPlacementSearch;
+use crate::workbench::framework::requests::{
+    FocusPlacementSearch, OpenSymbolAuthoring, SubcircuitSymbolSource,
+};
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::{Drawer, WorkbenchSession, Workspace};
 use commands::DesignCommand;
@@ -1425,6 +1427,117 @@ impl DesignFeature {
         // line: the armed cursor is the answer, and a sentence about it
         // outlives the arm.
         rspice_schematic_editor::view::canvas::request_focus(ctx);
+    }
+}
+
+/// What the shell's drains hand design once a call has returned, each
+/// written as the part that raised it once wrote the design slot in place.
+impl DesignFeature {
+    /// Snap what the schematic's new grid leaves off it, as a changed grid
+    /// asks.
+    pub fn follow_schematic_grid(cx: &mut Cx<'_, Self>) {
+        cx.state.follow_schematic_grid(cx.model);
+    }
+
+    /// Select stimulus definition `name` in the Stimulus Library and bring
+    /// its workspace forward.
+    pub fn show_stimulus_definition(cx: &mut Cx<'_, Self>, name: &str) {
+        stimulus_link::show_stimulus_definition(
+            &mut cx.state.selected_stimulus_definition,
+            cx.wb,
+            name,
+        );
+    }
+
+    /// Show `annotations` on the schematic, as a result viewer that locates
+    /// something on it asks.
+    pub fn show_schematic_annotations(
+        cx: &mut Cx<'_, Self>,
+        annotations: SchematicAnnotationVisibility,
+    ) {
+        cx.state.schematic_visibility.annotations = annotations;
+    }
+
+    /// Open the symbol authoring `request` names, a symbol bound to a model
+    /// on the model the Models workspace selected. A symbol made on a
+    /// subcircuit answers with its receipt, which the Models workspace's
+    /// banner shows; every other answers `None`.
+    pub fn open_symbol_authoring(
+        cx: &mut Cx<'_, Self>,
+        request: OpenSymbolAuthoring,
+    ) -> Option<Result<String, String>> {
+        let design = &mut *cx.state;
+        match request {
+            OpenSymbolAuthoring::ModelBound => {
+                create_model_bound_symbol::open_create_model_bound_symbol_dialog(
+                    &mut design.create_model_bound_symbol,
+                    cx.model,
+                    cx.wb,
+                    cx.peers.models().selected_model(),
+                );
+            }
+            OpenSymbolAuthoring::ParameterForm(None) => {
+                symbol_definition::open_symbol_parameter_form_dialog(
+                    &mut design.symbol_parameter_form,
+                    cx.model,
+                    cx.wb,
+                    cx.platform,
+                );
+            }
+            OpenSymbolAuthoring::ParameterForm(Some(target)) => {
+                symbol_definition::open_symbol_parameter_form_dialog_for(
+                    &mut design.symbol_parameter_form,
+                    cx.model,
+                    cx.wb,
+                    cx.platform,
+                    target,
+                );
+            }
+            OpenSymbolAuthoring::Import(None) => {
+                symbol_definition::open_symbol_import_dialog(
+                    &mut design.symbol_import,
+                    cx.model,
+                    cx.wb,
+                    cx.platform,
+                );
+            }
+            OpenSymbolAuthoring::Import(Some(binding_source)) => {
+                symbol_definition::open_symbol_import_dialog_for(
+                    &mut design.symbol_import,
+                    cx.model,
+                    cx.wb,
+                    cx.platform,
+                    Some(&binding_source),
+                );
+            }
+            OpenSymbolAuthoring::SubcircuitBound(source) => {
+                let SubcircuitSymbolSource {
+                    library,
+                    subcircuit,
+                    source_path,
+                    ordered_ports,
+                    description,
+                    section,
+                    parameter_defaults,
+                    opened_receipt,
+                } = *source;
+                return Some(
+                    create_model_bound_symbol::open_create_subcircuit_bound_symbol_dialog(
+                        &mut design.create_model_bound_symbol,
+                        cx.model,
+                        library,
+                        subcircuit,
+                        source_path,
+                        ordered_ports,
+                        description,
+                        section,
+                        parameter_defaults,
+                    )
+                    .map(|()| opened_receipt),
+                );
+            }
+        }
+        None
     }
 }
 

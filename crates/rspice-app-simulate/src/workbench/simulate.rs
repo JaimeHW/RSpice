@@ -210,12 +210,15 @@ pub fn record_plan_refusal(cx: &mut Cx<'_, SimulateFeature>, message: impl Into<
     }
 }
 
-/// Select analysis instance `instance` on the Analyses page, or none.
-pub fn select_analysis_instance(
-    state: &mut SimulateState,
-    instance: Option<crate::product::AnalysisInstanceId>,
-) {
-    state.active_analysis_instance = instance;
+impl SimulateFeature {
+    /// Select analysis instance `instance` on the Analyses page, or none, as
+    /// a results command asks.
+    pub fn select_analysis_instance(
+        cx: &mut Cx<'_, Self>,
+        instance: Option<crate::product::AnalysisInstanceId>,
+    ) {
+        cx.state.active_analysis_instance = instance;
+    }
 }
 
 /// Show the run history on its own route.
