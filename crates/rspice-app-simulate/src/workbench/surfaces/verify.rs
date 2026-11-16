@@ -292,6 +292,12 @@ fn verification_plan_id(model: &Model) -> Option<crate::product::SimulationPlanI
         .map(|plan| plan.id())
 }
 
+/// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
+/// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
+fn takes_si_prefix(unit: &str) -> bool {
+    !(unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
+}
+
 /// A measured value in engineering notation with its unit: four significant
 /// digits, an SI prefix where the unit takes one, never a bare exponent.
 fn format_value(value: f64, unit: &str) -> String {

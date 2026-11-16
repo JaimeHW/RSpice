@@ -23,7 +23,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::surfaces::verify::specification_edit::{edit_policy, monte_carlo_gate_label};
 
-use super::compact_readout;
+use super::super::compact_readout;
 
 const NOMINAL: [(NominalFailurePolicy, &str); 2] = [
     (NominalFailurePolicy::Block, "Block plan acceptance"),
