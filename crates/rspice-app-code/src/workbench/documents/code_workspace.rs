@@ -75,7 +75,7 @@ pub use source_files::{
     poll_automation_source_import, request_automation_source_import,
     source_bundle_contains_document, source_bundle_document_is_editable_in,
     source_document_is_editable, source_file_mutation_block_reason,
-    source_file_mutation_block_reason_in,
+    source_file_mutation_block_reason_in, veriloga_include_hosts, veriloga_includers_of,
 };
 pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,

@@ -521,6 +521,20 @@ pub fn open_source_file_dialog_in_bundle(
     {
         return Err("The bundle root cannot be deleted; replace or rename it instead.".to_owned());
     }
+    // A Verilog-A file is added by writing its `include into the file that
+    // includes it. A file a role binds — the build profile — is
+    // configuration, and a directive written into it would corrupt it, so a
+    // new file asked for from there is included from the main file instead.
+    let importer_path = if matches!(
+        action,
+        CodeSourceFileAction::New | CodeSourceFileAction::Duplicate
+    ) && language == ProjectSourceLanguage::VerilogA
+        && bundle.role_for_path(importer_path).is_some()
+    {
+        bundle.root().logical_path()
+    } else {
+        importer_path
+    };
     let proposed_path = match action {
         CodeSourceFileAction::New => {
             unique_suggestion(bundle, importer_path, default_file_name(language))
@@ -646,7 +660,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     };
     if !changed {
         parts.code.source_file_dialog = None;
-        return Ok("No source-file changes were required.".to_owned());
+        return Ok("Nothing changed.".to_owned());
     }
 
     let selected_path = match draft.action {
@@ -672,17 +686,17 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     }
     parts.code.source_file_dialog = None;
     let message = match draft.action {
-        CodeSourceFileAction::New => format!("Created project source '{proposed}'."),
+        CodeSourceFileAction::New => format!("Created {proposed}."),
         CodeSourceFileAction::Duplicate => {
-            format!("Duplicated '{}' as '{proposed}'.", draft.source_path)
+            format!("Duplicated {} as {proposed}.", draft.source_path)
         }
         CodeSourceFileAction::Rename => {
-            format!("Renamed '{}' to '{proposed}'.", draft.source_path)
+            format!("Renamed {} to {proposed}.", draft.source_path)
         }
         CodeSourceFileAction::Move => {
-            format!("Moved '{}' to '{proposed}'.", draft.source_path)
+            format!("Moved {} to {proposed}.", draft.source_path)
         }
-        CodeSourceFileAction::Delete => format!("Deleted project source '{}'.", draft.source_path),
+        CodeSourceFileAction::Delete => format!("Deleted {}.", draft.source_path),
     };
     parts
         .model
@@ -1282,13 +1296,42 @@ fn unique_suggestion(
     format!("{requested}.new")
 }
 
+/// The files a new or duplicated Verilog-A file can be included from: the
+/// main file and every other file no role binds, main file first. A file a
+/// role binds is configuration, and an `include written into it would
+/// corrupt it.
+pub fn veriloga_include_hosts(bundle: &ProjectSourceBundle) -> Vec<String> {
+    std::iter::once(bundle.root().logical_path())
+        .chain(
+            bundle
+                .files()
+                .iter()
+                .map(ProjectSourceFile::logical_path)
+                .filter(|path| bundle.role_for_path(path).is_none()),
+        )
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The files whose `include of `logical_path` a rename rewrites or a delete
+/// removes, in the bundle's order.
+pub fn veriloga_includers_of(bundle: &ProjectSourceBundle, logical_path: &str) -> Vec<String> {
+    bundle
+        .dependencies()
+        .iter()
+        .filter(|edge| crate::state::project_source_paths_equal(edge.imported(), logical_path))
+        .map(|edge| edge.importer().to_owned())
+        .collect()
+}
+
+/// What a new file starts with. A Verilog-A file is included ahead of
+/// everything in the file that includes it, so it brings the standard
+/// headers it needs with it and compiles on its own terms; the reader's
+/// caret goes under them.
 fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
     match language {
-        ProjectSourceLanguage::VerilogA if path.to_ascii_lowercase().ends_with(".vams") => {
-            "// Project-owned Verilog-A definitions.\n".to_owned()
-        }
         ProjectSourceLanguage::VerilogA => {
-            "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n// Add project-owned Verilog-A declarations here.\n".to_owned()
+            "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n".to_owned()
         }
         ProjectSourceLanguage::RSpiceAutomation
             if path.to_ascii_lowercase().ends_with(".yaml")
