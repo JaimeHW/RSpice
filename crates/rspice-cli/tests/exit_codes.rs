@@ -1119,7 +1119,20 @@ fn timeout_exits_one_twenty_four() {
         "timeout must stop the run promptly"
     );
 
-    let fatal: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    // Machine-readable stderr is one record per line: the warnings come first (this run's
+    // results store warns that the run likely outgrows its volume), the fatal record last.
+    let records: Vec<serde_json::Value> = String::from_utf8(output.stderr)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let (fatal, warnings) = records.split_last().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .all(|record| record["schema"] == "rspice.diagnostic"),
+        "{records:?}"
+    );
     assert_eq!(fatal["error"]["category"], "timeout");
     let summary = common::read_json(&summary);
     assert_eq!(summary["status"], "timed_out");

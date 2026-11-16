@@ -194,11 +194,14 @@ fn continuous_evaluator_limits_reach_every_cli_analysis_route() {
             );
             let summary: serde_json::Value = serde_json::from_slice(&exact.stdout).unwrap();
             assert_eq!(summary["counts"]["measurements"], 300);
-            assert_limit_at(
-                &run(&source, 800, &[]),
-                800,
-                &format!("{analysis} continuous measurement projection"),
-            );
+            // A transient's continuous measures read its run, which its results store bounds,
+            // under no result-value cap; the report that keeps their 300 values is held to it.
+            let stage = if analysis == "TRAN" {
+                "Report retention".to_owned()
+            } else {
+                format!("{analysis} continuous measurement projection")
+            };
+            assert_limit_at(&run(&source, 800, &[]), 800, &stage);
             if analysis == "TRAN" && !control {
                 let compressed = run(&source, 901, &["--compress"]);
                 assert!(

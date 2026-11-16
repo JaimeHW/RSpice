@@ -47,17 +47,27 @@ fn summary_includes_special_format_and_companion_artifacts_exactly_once() {
             .iter()
             .map(|path| std::path::PathBuf::from(path.as_str().unwrap()))
             .collect();
-        let actual: std::collections::BTreeSet<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| {
-                path.file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with("results")
-            })
-            .collect();
+        let (stores, actual): (std::collections::BTreeSet<_>, std::collections::BTreeSet<_>) =
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("results")
+                })
+                .partition(|path| path.extension().is_some_and(|extension| extension == "rsr"));
         assert!(!actual.is_empty());
+        // A transient's results store is left beside its output and named once, as a store.
+        let listed_stores: std::collections::BTreeSet<_> = summary["stores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|store| std::path::PathBuf::from(store["path"].as_str().unwrap()))
+            .collect();
+        assert_eq!(listed_stores, stores, "{filename}");
+        assert_eq!(summary["stores"].as_array().unwrap().len(), stores.len());
         assert_eq!(listed_paths, actual, "{filename}");
         assert_eq!(listed.len(), actual.len(), "no duplicate manifest entries");
         assert_eq!(summary["counts"]["outputs"], actual.len());

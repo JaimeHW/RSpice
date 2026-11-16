@@ -669,7 +669,6 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
         "[resources]\nmax_result_values=1024\n",
     )
     .unwrap();
-    std::fs::write(&destination, "previous result").unwrap();
     document["tasks"] = json!([{ "id": "bias", "analysis": "DcOp" }, { "id": "orbit", "depends_on": ["bias"], "analysis": {"Pss": {
         "fundamental_freq": 1000.0, "tone_sources": ["V1"],
         "tstab_periods": 0, "points_per_period": 64,
@@ -677,6 +676,7 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
     }}}]);
     let study_path = save(&root, &document);
     for study in [false, true] {
+        std::fs::write(&destination, "previous result").unwrap();
         std::fs::write(
             &path,
             format!(
@@ -712,6 +712,19 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
                 ],
             )
         };
+        if !study {
+            // A transient's rows go to its results store, which the disk bounds, not the
+            // result-value cap: the run writes all 10,001 sampled points.
+            assert!(output.status.success(), "{output:?}");
+            let published = std::fs::read(&destination).unwrap();
+            assert!(
+                published
+                    .windows(b"No. Points: 10001\n".len())
+                    .any(|line| line == b"No. Points: 10001\n"),
+                "the rawfile holds every sampled point"
+            );
+            continue;
+        }
         assert_eq!(output.status.code(), Some(75), "study={study}: {output:?}");
         let error: Value = serde_json::from_slice(&output.stderr).unwrap();
         assert_eq!(error["error"]["resource"], "result_values", "{error}");
