@@ -2089,6 +2089,33 @@ impl EventScheduler {
         self.count_delta_cycle(bound)
     }
 
+    /// Count one pass of a code-model settle at `bound`, refusing the settle
+    /// once more than `passes` of them have left outputs changing.
+    ///
+    /// This is ngspice's `max_event_passes` (xspice/evt/evtiter.c), and it
+    /// is counted as ngspice counts it: per settle, which `first` opens, not
+    /// per instant, since one instant is settled again by every Newton
+    /// iteration and every retried step that lands on it. What fired is
+    /// counted again from the end of the settle's first pass, so a refusal
+    /// names what went round in it rather than what earlier settles of the
+    /// same instant fired.
+    pub(crate) fn note_settle_pass(
+        &mut self,
+        bound: Instant,
+        first: bool,
+        passes: u32,
+    ) -> Result<(), SchedulerError> {
+        self.check_sequence_state()?;
+        self.open_due_slot(bound);
+        if first {
+            self.slot_delta_cycles = 0;
+            self.slot_events_executed = 0;
+            self.queues.clear_activations();
+        }
+        self.limits.max_delta_cycles_per_tick = passes;
+        self.count_delta_cycle(bound)
+    }
+
     /// Record that the open slot resumed work deferred by a zero delay
     /// (`#0`). Returns how many such resumptions the slot has had, this one
     /// included.

@@ -157,6 +157,12 @@ pub(crate) struct XspiceActiveWave {
     /// between. Set only by the standalone XSPICE acceptance, whose rollback
     /// image restores every instance on any failure.
     restored_by_caller: bool,
+    /// The pass about to run carries values an HDL design drove onto shared
+    /// nets (set where they are observed). The design settles in delta cycles
+    /// of its own, each handing the code models one pass, and how long it
+    /// takes is not this network's to bound: the passes are counted again
+    /// from here (see `max_event_passes`).
+    inputs_from_hdl: bool,
 }
 
 impl XspiceActiveWave {
@@ -776,9 +782,12 @@ fn xspice_event_settling_message(
         return format!("XSPICE event scheduling failed at time {time:e}: {error}");
     };
     let ceiling = match diagnostic.cause {
-        OscillationCause::DeltaCycleLimit => {
-            format!("{} delta cycles", diagnostic.delta_cycle_limit)
-        }
+        // ngspice's `max_event_passes`.
+        OscillationCause::DeltaCycleLimit => format!(
+            "{} passes (its event outputs and one more, which a network \
+             without a loop settles within)",
+            diagnostic.delta_cycle_limit
+        ),
         OscillationCause::EventLimit => format!("{} events", diagnostic.event_limit),
         OscillationCause::RepeatedState { period } => format!(
             "{} delta cycles (its state repeats every {period})",
@@ -802,7 +811,7 @@ fn xspice_event_settling_message(
     };
     format!(
         "XSPICE event network did not settle at time {time:e} within {ceiling} \
-         after {} delta cycles and {} events ({busiest})",
+         after {} passes and {} events ({busiest})",
         diagnostic.delta_cycles, diagnostic.events_executed
     )
 }
@@ -1559,6 +1568,7 @@ impl CircuitData {
             interpolated: false,
             analog_feedback: false,
             restored_by_caller: false,
+            inputs_from_hdl: false,
         })
     }
 
@@ -1610,9 +1620,10 @@ impl CircuitData {
     #[cfg(feature = "veriloga")]
     pub(crate) fn observe_xspice_shared_digital_inputs(
         &mut self,
-        wave: &XspiceActiveWave,
+        wave: &mut XspiceActiveWave,
         values: &[(NodeId, crate::xspice::DigitalValue)],
     ) {
+        wave.inputs_from_hdl |= !values.is_empty();
         self.xspice_touched_digital_nodes.clear();
         for &(node, value) in values {
             if node == 0 {
@@ -1669,9 +1680,10 @@ impl CircuitData {
     #[cfg(feature = "veriloga")]
     pub(crate) fn observe_xspice_shared_real_inputs(
         &mut self,
-        wave: &XspiceActiveWave,
+        wave: &mut XspiceActiveWave,
         values: &[(NodeId, Value)],
     ) {
+        wave.inputs_from_hdl |= !values.is_empty();
         self.xspice_touched_real_nodes.clear();
         for &(node, value) in values {
             if node == 0 {
@@ -1752,6 +1764,7 @@ impl CircuitData {
         let current_source_values = &wave.current_source_values;
         let analog_transitions = &mut wave.analog_transitions;
         let pass = wave.pass;
+        let opens_settle = std::mem::take(&mut wave.inputs_from_hdl) || pass == 0;
         let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
         let dispatch = self
@@ -1759,6 +1772,7 @@ impl CircuitData {
             .xspice_event_dispatch
             .as_ref()
             .expect("prepared event wave");
+        let max_event_passes = dispatch.max_event_passes();
         // Non-transient evaluations run every model body, as before. Only
         // transient event-only models can use dirty-input dispatch.
         let dirty_dispatch_applies = analysis == crate::xspice::AnalysisType::Transient;
@@ -2049,15 +2063,20 @@ impl CircuitData {
             return Ok(false);
         }
 
-        // Something moved, so another delta cycle is owed. The scheduler
-        // is what decides the network has stopped converging.
+        // Something moved, so another pass is owed. The scheduler is what
+        // decides the network has stopped converging: past ngspice's
+        // `max_event_passes` of this wave.
         //
         // Unguarded on purpose: reaching here means a drain returned
         // `true`, which it can only do past its emptiness check, so the
         // scheduler is already unshared and this mutable view copies
         // nothing.
         // The slot is the one the drains opened, at the same bound.
-        if let Err(error) = event_queue.make_mut().note_delta_cycle(drain_through) {
+        if let Err(error) =
+            event_queue
+                .make_mut()
+                .note_settle_pass(drain_through, opens_settle, max_event_passes)
+        {
             let message = xspice_event_settling_message(time, &error);
             if self.xspice_evaluation_error.is_none() {
                 self.xspice_evaluation_error = Some(message.clone());
@@ -6712,6 +6731,58 @@ endmodule"#;
         assert!(err.contains("intentional failure"));
     }
 
+    /// An event that has to pass through every gate of a zero-delay chain
+    /// changes outputs in one pass per gate, as many passes as the circuit
+    /// has event outputs, within ngspice's `max_event_passes` (one more) and
+    /// refused under any smaller bound. The gates are registered from the
+    /// far end, so a pass, which runs them in registration order, moves the
+    /// change one gate on.
+    #[test]
+    fn a_zero_delay_chain_through_every_output_settles_within_the_passes() {
+        const GATES: usize = 8;
+        let mut circuit = CircuitData::new();
+        for node in 0..=GATES {
+            circuit.get_or_create_node(&format!("n{node}"));
+        }
+        for gate in (1..=GATES).rev() {
+            let mut instance = XspiceInstance::new(
+                format!("Ainv{gate}"),
+                Arc::new(crate::xspice::models::DigitalInverter),
+                vec![
+                    PortConnection::Digital(gate),
+                    PortConnection::Digital(gate + 1),
+                ],
+                &[("rise_delay".into(), 0.0), ("fall_delay".into(), 0.0)],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("an inverter");
+            instance.init().expect("an inverter initializes");
+            circuit.add_xspice_instance(instance);
+        }
+        circuit.scheduler.xspice_event_queue.make_mut().schedule(
+            0.0,
+            1,
+            "in",
+            "Asource",
+            0,
+            EventValue::Digital(DigitalValue::zero()),
+        );
+        circuit
+            .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
+            .expect("a chain without a loop settles");
+        assert_eq!(
+            circuit
+                .scheduler
+                .xspice_event_values
+                .digital_values
+                .get(&(GATES + 1)),
+            Some(&DigitalValue::zero()),
+            "the change reached the end of the chain"
+        );
+    }
+
     #[test]
     fn evaluate_xspice_reports_nonsettling_zero_delay_event_network() {
         let mut circuit = CircuitData::new();
@@ -6731,7 +6802,7 @@ endmodule"#;
 
         assert!(err.contains("XSPICE event network did not settle"), "{err}");
         assert!(
-            err.contains("delta cycles"),
+            err.contains("within 2 passes (its event outputs and one more"),
             "the ceiling that tripped must be named: {err}"
         );
         assert!(

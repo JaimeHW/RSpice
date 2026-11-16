@@ -787,6 +787,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         }
         let mut observed = Vec::new();
         let mut observed_real = Vec::new();
+        wave.inputs_from_hdl |= !self.pending.is_empty();
         while let Some(change) = self.pending.pop_front() {
             match change {
                 ExternalNetChange::Bits(change) => {

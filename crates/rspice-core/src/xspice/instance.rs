@@ -2636,6 +2636,36 @@ impl XspiceInstance {
         })
     }
 
+    /// The event outputs this instance drives: one per connected scalar
+    /// digital or real output port, and one per element of a vector one.
+    ///
+    /// This is what ngspice counts as an output of the event-driven circuit
+    /// (`EVToutput_insert`, xspice/evt/evttermi.c), and what bounds how many
+    /// passes an event settle may take.
+    #[doc(hidden)]
+    pub fn event_output_count(&self) -> usize {
+        self.ports
+            .iter()
+            .zip(self.connections.iter())
+            .filter(|(port, _)| {
+                matches!(
+                    port.direction,
+                    super::PortDirection::Out | super::PortDirection::InOut
+                )
+            })
+            .map(|(_, connection)| match connection {
+                PortConnection::Digital(_)
+                | PortConnection::DigitalInverted(_)
+                | PortConnection::Real(_) => 1,
+                PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
+                    nodes.len()
+                }
+                PortConnection::DigitalVectorMapped(elements) => elements.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+
     /// Whether the XSPICE matrix stamp can read anything from this instance
     /// besides explicitly queued stamps: it has an analog connection or an
     /// analog port. An instance with neither has no current probe, no analog

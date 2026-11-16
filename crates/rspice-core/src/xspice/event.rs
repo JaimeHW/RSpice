@@ -122,7 +122,14 @@ impl XspiceEventScheduler {
     #[doc(hidden)]
     pub fn new() -> Self {
         Self {
-            inner: EventScheduler::new(SchedulerLimits::default()),
+            // A settle is bounded by its passes (`note_settle_pass`), each of
+            // which runs only the events already due, so neither count has a
+            // ceiling of its own.
+            inner: EventScheduler::new(SchedulerLimits {
+                max_delta_cycles_per_tick: u32::MAX,
+                max_events_per_tick: u64::MAX,
+                ..SchedulerLimits::default()
+            }),
             #[cfg(feature = "veriloga")]
             lattice: None,
         }
@@ -363,8 +370,9 @@ impl XspiceEventScheduler {
 
     /// Execute every event due at or before `time`, in event order.
     ///
-    /// Failure means the tick did not settle; see
-    /// [`XspiceEventScheduler::note_delta_cycle`].
+    /// Failure means the run was stopped or the queue's order failed; a
+    /// settle that does not quiet is refused by
+    /// [`XspiceEventScheduler::note_settle_pass`].
     #[doc(hidden)]
     pub fn run_due_events<F>(&mut self, time: Value, mut sink: F) -> Result<(), SchedulerError>
     where
@@ -419,17 +427,24 @@ impl XspiceEventScheduler {
         Ok(())
     }
 
-    /// Mark one iteration of the settle loop at `time`.
+    /// Mark one pass of a settle at `time` that left outputs changing;
+    /// `first` opens the settle.
     ///
-    /// Delta settling is unbounded, so this is what turns a zero-delay loop
-    /// into an [`SchedulerError::Oscillation`] naming its busiest drivers
-    /// rather than a hang.
+    /// Past `passes` of them (ngspice's `max_event_passes`) the network is
+    /// going round, and this turns the zero-delay loop into an
+    /// [`SchedulerError::Oscillation`] naming its busiest drivers rather
+    /// than a hang.
     #[doc(hidden)]
-    pub fn note_delta_cycle(&mut self, time: Value) -> Result<(), SchedulerError> {
+    pub fn note_settle_pass(
+        &mut self,
+        time: Value,
+        first: bool,
+        passes: u32,
+    ) -> Result<(), SchedulerError> {
         let Some(bound) = Instant::from_seconds(time) else {
             return Ok(());
         };
-        self.inner.note_delta_cycle(bound)
+        self.inner.note_settle_pass(bound, first, passes)
     }
 
     /// Number of pending events.
@@ -1131,6 +1146,8 @@ mod tests {
         ));
     }
 
+    /// ngspice's bound: a settle may take as many passes as the circuit has
+    /// event outputs, plus one, with outputs still changing.
     #[test]
     fn a_settle_loop_that_never_quiets_is_diagnosed() {
         let mut scheduler = XspiceEventScheduler::new();
@@ -1151,7 +1168,7 @@ mod tests {
             scheduler
                 .run_due_events(1.0e-9, |_| {})
                 .expect("the drain itself settles");
-            if let Err(error) = scheduler.note_delta_cycle(1.0e-9) {
+            if let Err(error) = scheduler.note_settle_pass(1.0e-9, cycle == 0, 2) {
                 reported = Some(error);
                 break;
             }
@@ -1169,5 +1186,24 @@ mod tests {
             "an XSPICE instant sits on no declared grid, so it names no tick"
         );
         assert_eq!(diagnostic.entities[0].0.instance, "an_oscillator");
+        assert_eq!(diagnostic.delta_cycle_limit, 2);
+        assert_eq!(
+            diagnostic.delta_cycles, 3,
+            "the third changing pass is refused"
+        );
+    }
+
+    /// Every settle of one instant counts its own passes: a Newton iteration
+    /// that settles the instant again starts from none.
+    #[test]
+    fn each_settle_of_an_instant_counts_its_own_passes() {
+        let mut scheduler = XspiceEventScheduler::new();
+        for _settle in 0..100 {
+            for pass in 0..2 {
+                scheduler
+                    .note_settle_pass(1.0e-9, pass == 0, 2)
+                    .expect("two passes are within the bound");
+            }
+        }
     }
 }

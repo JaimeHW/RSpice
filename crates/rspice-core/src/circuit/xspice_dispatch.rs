@@ -157,6 +157,9 @@ pub(crate) struct XspiceEventDispatch {
     /// analog input.
     #[cfg(feature = "veriloga")]
     analog_facing: [Vec<NodeId>; 2],
+    /// Passes one event settle may take with outputs still changing; see
+    /// [`Self::max_event_passes`].
+    max_event_passes: u32,
 }
 
 impl XspiceEventDispatch {
@@ -169,7 +172,9 @@ impl XspiceEventDispatch {
         let mut dirty_dispatched = Vec::with_capacity(instances.len());
         let mut continuous_output_instances = Vec::new();
         let mut analog_stamp_instances = Vec::new();
+        let mut event_outputs = 0usize;
         for (index, instance) in instances.iter().enumerate() {
+            event_outputs += instance.event_output_count();
             let index = index as u32;
             if instance.drives_continuous_outputs() {
                 continuous_output_instances.push(index);
@@ -223,7 +228,19 @@ impl XspiceEventDispatch {
             analog_stamp_instances,
             #[cfg(feature = "veriloga")]
             analog_facing,
+            max_event_passes: u32::try_from(event_outputs)
+                .map_or(u32::MAX, |outputs| outputs.saturating_add(1)),
         }
+    }
+
+    /// Passes one event settle may take with outputs still changing before
+    /// it is refused: ngspice's `max_event_passes`, one more than the event
+    /// outputs in the circuit (xspice/evt/evtinit.c `EVTinit_limits`). Each
+    /// pass moves an event at least one output further, so a network without
+    /// a loop settles within it; one that does not is going round.
+    #[inline]
+    pub(crate) fn max_event_passes(&self) -> u32 {
+        self.max_event_passes
     }
 
     /// The instances whose driven outputs can read as anything but zero, in
