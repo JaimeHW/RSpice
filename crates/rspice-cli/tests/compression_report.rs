@@ -156,27 +156,47 @@ fn run_post_process_deck(
         .to_str()
         .expect("UTF-8 run directory")
         .to_string();
-    std::fs::read_dir(&run_directory)
+    let mut artifacts = std::collections::BTreeMap::new();
+    for path in std::fs::read_dir(&run_directory)
         .expect("list post-process artifacts")
         .map(|entry| entry.expect("directory entry").path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("out."))
-        })
-        .map(|path| {
-            let suffix = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .expect("UTF-8 artifact name")
-                .trim_start_matches("out.")
-                .to_string();
-            let text = std::fs::read_to_string(&path)
-                .expect("post-process artifacts are text")
-                .replace(&own_directory, "<run>");
-            (suffix, text.into_bytes())
-        })
-        .collect()
+    {
+        let Some(suffix) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("out."))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if path.is_dir() {
+            // The transient's results store, `out.tran-001.rsr/`: every file as written, since
+            // the rows a run stores are the same whatever its published waveform keeps of them.
+            let mut pending = vec![(path, suffix)];
+            while let Some((directory, prefix)) = pending.pop() {
+                for member in std::fs::read_dir(&directory).expect("list the results store") {
+                    let member = member.expect("store entry").path();
+                    let name = member
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .expect("UTF-8 store member name");
+                    let key = format!("{prefix}/{name}");
+                    if member.is_dir() {
+                        pending.push((member, key));
+                    } else {
+                        let bytes = std::fs::read(&member).expect("read a store member");
+                        artifacts.insert(key, bytes);
+                    }
+                }
+            }
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .expect("post-process artifacts are text")
+            .replace(&own_directory, "<run>");
+        artifacts.insert(suffix, text.into_bytes());
+    }
+    artifacts
 }
 
 /// `.MEASURE`, `.FOUR`, and `.FFT` are evaluated on the accepted trajectory,
@@ -238,6 +258,17 @@ fn post_process_artifacts_are_byte_identical_with_and_without_compression() {
             plain.keys().collect::<Vec<_>>()
         );
     }
+    // And the store both runs left, whose rows compression never touches.
+    assert!(
+        plain
+            .keys()
+            .any(|suffix| suffix.starts_with("tran-001.rsr/"))
+            && compressed
+                .keys()
+                .any(|suffix| suffix.starts_with("tran-001.rsr/")),
+        "a run left no results store: {:?}",
+        compressed.keys().collect::<Vec<_>>()
+    );
 }
 
 #[test]

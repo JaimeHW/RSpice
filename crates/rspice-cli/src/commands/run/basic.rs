@@ -994,24 +994,25 @@ pub(super) fn run_transient(
             Err(e) => Err(e),
         }
     } else if ctx.compress {
-        let result = ctx.engine.run_tran_compressed_with_startup_mode_and_abort(
-            ctx.netlist,
+        // Compression decides what the published waveform keeps, not where the rows live while
+        // the run goes: they go to the store like any other run's, and the compressed output is
+        // written from the trajectory read back from it once the run is over.
+        let stored = super::stored_transient::run(
+            ctx,
             tstop,
+            tstep,
             internal_max_step,
             startup_mode,
-            compression_config(),
             &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
-        match result {
-            Ok(compressed) => {
-                report_compression(ctx, &compressed, "Transient complete (compressed)")?;
-                compression_report = Some(compressed.compression_report.clone());
-                post_results = Some(compressed.post_results.clone());
-                Ok(expand_compressed(compressed, "transient result")?)
-            }
-            Err(e) => Err(e),
-        }
+        return finish_stored_transient(
+            ctx,
+            stored?,
+            (tstart, tstop),
+            store,
+            Some(&compression_config()),
+        );
     } else if !state_times.is_empty() {
         // The `ACTIMES=` cards that share this run: it lands on their times,
         // captures each state there for them, and runs on to its stop.
@@ -1038,7 +1039,7 @@ pub(super) fn run_transient(
             &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
-        return finish_stored_transient(ctx, stored?, tstart, tstop, store);
+        return finish_stored_transient(ctx, stored?, (tstart, tstop), store, None);
     };
 
     match result {
@@ -1085,12 +1086,17 @@ pub(super) enum TransientStore {
 /// and then ends as stopped; an output that cannot be written for the shortened run is a
 /// warning, since the stop is what the run reports. When writing the outputs fills the disk, the
 /// store keeps the rows the outputs could not take and the run ends as stopped the same way.
+///
+/// With `compression`, the outputs are the compressed waveform of the trajectory read back from
+/// the store, and its post-processing products are the ones evaluated on that whole trajectory.
+/// A run its storage stopped publishes what it kept uncompressed, since the stop is what it
+/// reports.
 fn finish_stored_transient(
     ctx: &RunContext<'_>,
     mut stored: super::stored_transient::StoredTransient,
-    tstart: f64,
-    tstop: f64,
+    (tstart, tstop): (f64, f64),
     store: TransientStore,
+    compression: Option<&rspice_core::engine::CompressionConfig>,
 ) -> Result<TransientOutcome, CliError> {
     let stopped = stored.rows.stopped();
     let tstop = if stopped {
@@ -1098,9 +1104,14 @@ fn finish_stored_transient(
     } else {
         tstop
     };
+    let mut compressed = None;
     // A run stopped before its first whole chunk kept nothing to publish.
     let (published, written) = if stopped && stored.rows.rows() == 0 {
         (None, Ok(()))
+    } else if let Some(compression) = compression.filter(|_| !stopped) {
+        let (published, written) =
+            publish_compressed_transient(ctx, &mut stored, (tstart, tstop), compression);
+        (published, written.map(|outcome| compressed = Some(outcome)))
     } else {
         publish_stored_transient(ctx, &mut stored, tstart, tstop, store)
     };
@@ -1130,10 +1141,71 @@ fn finish_stored_transient(
         }
     }
     super::stored_transient::record_store(rows, published.as_deref(), keep)?;
-    Ok(TransientOutcome {
+    Ok(compressed.unwrap_or(TransientOutcome {
         result: shell,
         post_results: None,
-    })
+    }))
+}
+
+/// Write a stored transient's compressed outputs: read the whole trajectory back, compress it,
+/// and publish the compressed waveform with the products evaluated on the trajectory. Returns
+/// the output it was published to, which a failed write names too, and the published result.
+fn publish_compressed_transient(
+    ctx: &RunContext<'_>,
+    stored: &mut super::stored_transient::StoredTransient,
+    (tstart, tstop): (f64, f64),
+    compression: &rspice_core::engine::CompressionConfig,
+) -> (
+    Option<std::path::PathBuf>,
+    Result<TransientOutcome, CliError>,
+) {
+    let compressed = stored.read_back(ctx, tstop).and_then(|()| {
+        ctx.engine
+            .compress_transient_result_with_abort(
+                ctx.netlist,
+                &stored.shell,
+                compression,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Transient".to_string()),
+            })
+    });
+    let compressed = match compressed.and_then(|compressed| {
+        report_compression(ctx, &compressed, "Transient complete (compressed)")?;
+        Ok(compressed)
+    }) {
+        Ok(compressed) => compressed,
+        Err(error) => return (None, Err(error)),
+    };
+    let compression_report = compressed.compression_report.clone();
+    let post_results = compressed.post_results.clone();
+    let result = match expand_compressed(compressed, "transient result") {
+        Ok(result) => result,
+        Err(error) => return (None, Err(error)),
+    };
+    let mut output = super::stored_transient::StoredOutput {
+        rows: &mut stored.rows,
+        plan: None,
+        published: None,
+    };
+    let written = finish_transient_outputs(
+        ctx,
+        &result,
+        tstart,
+        tstop,
+        Some(&post_results),
+        Some(&compression_report),
+        Some(&mut output),
+    );
+    (
+        output.published,
+        written.map(|()| TransientOutcome {
+            result,
+            post_results: Some(post_results),
+        }),
+    )
 }
 
 /// Write a stored transient's outputs. Returns the output it was published to, which a failed

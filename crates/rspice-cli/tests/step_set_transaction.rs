@@ -226,6 +226,16 @@ fn a_timeout_between_coordinates_publishes_the_whole_set_or_nothing() {
                     "a cancelled sweep left staging files: {:?}",
                     staging_files(cancelled_directory.path())
                 );
+                // Each finished coordinate's results store belonged to the
+                // set, so it went with it, under its private name or its own.
+                let stores = names_in(cancelled_directory.path())
+                    .into_iter()
+                    .filter(|name| name.ends_with(".rsr"))
+                    .collect::<Vec<_>>();
+                assert!(
+                    stores.is_empty(),
+                    "a cancelled sweep left results stores: {stores:?}"
+                );
                 if exported_coordinate_count(&cancelled) > 0 {
                     // The interesting case: coordinates completed and were
                     // discarded rather than published as a shorter sweep.

@@ -653,12 +653,16 @@ fn hex(digest: [u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// The stores this process's runs left, by path.
+/// The stores this process's runs left, by path. A store an abandoned axis set took with it is
+/// not one of them.
 pub(crate) fn stores_left() -> Vec<StoreRecord> {
-    let mut stores = STORES
+    let mut stores: Vec<StoreRecord> = STORES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
+        .iter()
+        .filter(|record| record.path.is_dir())
+        .cloned()
+        .collect();
     stores.sort_by(|a, b| a.path.cmp(&b.path));
     stores
 }
@@ -1081,28 +1085,10 @@ impl RunStore {
             self.discard();
             return Ok(None);
         };
+        // A store joins the publication its output joins: an axis set's stores are placed with
+        // the set's artifacts, or not at all.
         let target = store_path_beside(output);
-        if target.exists() {
-            let earlier_store = target.is_dir() && target.join(StoreDir::MANIFEST).is_file();
-            if !earlier_store {
-                self.discard();
-                return Err(CliError::output_error(
-                    &target,
-                    std::io::Error::new(
-                        std::io::ErrorKind::AlreadyExists,
-                        "the results store would replace something that is not a results store",
-                    ),
-                ));
-            }
-            if let Err(error) = std::fs::remove_dir_all(&target) {
-                self.discard();
-                return Err(CliError::output_error(&target, error));
-            }
-        }
-        if let Err(error) = std::fs::rename(&self.dir, &target) {
-            self.discard();
-            return Err(CliError::output_error(&target, error));
-        }
+        crate::commands::publish::directory(&self.dir, &target, place_store)?;
         Ok(Some(target))
     }
 
@@ -1111,6 +1097,47 @@ impl RunStore {
         // is what the caller reports.
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Move the store at `staged` to `target`, replacing an earlier results store there but nothing
+/// else. A store that cannot be placed is deleted.
+fn place_store(staged: &Path, target: &Path) -> Result<(), CliError> {
+    let discard = || {
+        let _ = std::fs::remove_dir_all(staged);
+    };
+    if target.exists() {
+        let earlier_store = target.is_dir() && target.join(StoreDir::MANIFEST).is_file();
+        if !earlier_store {
+            discard();
+            return Err(CliError::output_error(
+                target,
+                std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "the results store would replace something that is not a results store",
+                ),
+            ));
+        }
+        if let Err(error) = std::fs::remove_dir_all(target) {
+            discard();
+            return Err(CliError::output_error(target, error));
+        }
+    }
+    if let Err(error) = std::fs::rename(staged, target) {
+        discard();
+        return Err(CliError::output_error(target, error));
+    }
+    Ok(())
+}
+
+/// The store a run of this process left beside `output`, if one did.
+pub(crate) fn store_left_beside(output: &Path) -> Option<PathBuf> {
+    let target = store_path_beside(output);
+    STORES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|record| record.path == target)
+        .then_some(target)
 }
 
 /// `out.raw` keeps its store in `out.rsr/`.

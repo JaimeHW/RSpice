@@ -74,7 +74,21 @@ impl Write for QuotaWriter<'_> {
 #[derive(Debug)]
 pub struct RunTransactionState {
     set: Mutex<AtomicArtifactSet>,
+    /// Directories that join the set: each staged under a private name, and the step that puts
+    /// it at its destination once the files have committed.
+    directories: Mutex<Vec<StagedDirectory>>,
 }
+
+/// A directory staged for a transaction, such as a run's results store.
+#[derive(Debug)]
+struct StagedDirectory {
+    staged: std::path::PathBuf,
+    destination: std::path::PathBuf,
+    place: PlaceDirectory,
+}
+
+/// Put the directory staged at the first path at the second, replacing what it may replace.
+pub type PlaceDirectory = fn(&Path, &Path) -> Result<(), CliError>;
 
 impl RunTransactionState {
     fn adopt(&self, staged: StagedArtifact, manifest: bool) -> Result<(), CliError> {
@@ -115,6 +129,7 @@ pub struct EnteredTransaction {
 pub fn begin() -> Result<RunTransaction, CliError> {
     let state = Arc::new(RunTransactionState {
         set: Mutex::new(AtomicArtifactSet::new()),
+        directories: Mutex::new(Vec::new()),
     });
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
@@ -158,8 +173,21 @@ impl RunTransaction {
             .next()
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        set.commit()
-            .map_err(|error| map_set_error(&destination, &error))
+        let directories = state.take_directories();
+        if let Err(error) = set.commit() {
+            discard_directories(directories);
+            return Err(map_set_error(&destination, &error));
+        }
+        // The directories follow the files they belong to. One that cannot be placed fails the
+        // run; those after it are not left under their private names.
+        let mut directories = directories.into_iter();
+        for directory in directories.by_ref() {
+            if let Err(error) = (directory.place)(&directory.staged, &directory.destination) {
+                discard_directories(directories.collect());
+                return Err(error);
+            }
+        }
+        Ok(())
     }
 
     /// Detach this transaction from the thread and hand back its state.
@@ -180,9 +208,52 @@ impl RunTransaction {
 
 impl Drop for RunTransaction {
     fn drop(&mut self) {
-        // Abandoning the set removes every staging file; the destinations
-        // keep the bytes they had before the run started.
-        self.close();
+        // Abandoning the set removes every staging file and staged directory;
+        // the destinations keep what they had before the run started.
+        if let Some(state) = self.close() {
+            discard_directories(state.take_directories());
+        }
+    }
+}
+
+impl RunTransactionState {
+    fn take_directories(&self) -> Vec<StagedDirectory> {
+        std::mem::take(
+            &mut *self
+                .directories
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+fn discard_directories(directories: Vec<StagedDirectory>) {
+    for directory in directories {
+        // A directory that cannot be removed stays under its private name.
+        let _ = std::fs::remove_dir_all(&directory.staged);
+    }
+}
+
+/// Publish the directory staged at `staged` to `destination`, through `place`.
+///
+/// With a transaction open on this thread the directory joins it: it is placed once every file
+/// of the set has committed, and removed if the set is abandoned. Otherwise it is placed before
+/// this returns.
+pub fn directory(staged: &Path, destination: &Path, place: PlaceDirectory) -> Result<(), CliError> {
+    match current() {
+        Some(state) => {
+            state
+                .directories
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(StagedDirectory {
+                    staged: staged.to_path_buf(),
+                    destination: destination.to_path_buf(),
+                    place,
+                });
+            Ok(())
+        }
+        None => place(staged, destination),
     }
 }
 

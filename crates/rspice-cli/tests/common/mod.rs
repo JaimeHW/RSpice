@@ -371,6 +371,9 @@ pub struct AxisCoordinate {
     pub tag: String,
     /// Artifacts this coordinate published, in publication order.
     pub artifacts: Vec<PathBuf>,
+    /// The results stores its transients left, one directory beside each
+    /// transient artifact.
+    pub stores: Vec<PathBuf>,
 }
 
 impl AxisCoordinate {
@@ -472,6 +475,12 @@ impl AxisRunSet {
                     .iter()
                     .map(|name| directory.join(name.as_str().expect("artifact name")))
                     .collect(),
+                stores: coordinate["stores"]
+                    .as_array()
+                    .expect("coordinate stores")
+                    .iter()
+                    .map(|name| directory.join(name.as_str().expect("store name")))
+                    .collect(),
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -523,11 +532,17 @@ impl AxisRunSet {
     }
 
     /// Everything a completed axis run leaves in its output directory: every
-    /// coordinate artifact, the coordinate schema union, and this manifest.
+    /// coordinate artifact and results store, the coordinate schema union, and
+    /// this manifest.
     // Not every test binary compares directory contents.
     #[allow(dead_code)]
     pub fn published_files(&self, requested: &Path) -> Vec<PathBuf> {
         let mut files = self.artifacts();
+        files.extend(
+            self.coordinates
+                .iter()
+                .flat_map(|coordinate| coordinate.stores.iter().cloned()),
+        );
         files.push(axis_schema_manifest_path(requested));
         files.push(axis_run_set_path(requested));
         files.sort();

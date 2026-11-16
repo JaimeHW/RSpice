@@ -107,8 +107,19 @@ fn multi_temperature_wraps_every_authored_analysis_without_extra_runs() {
             2,
             "each temperature wraps both authored analyses: {coordinate:?}"
         );
-        coordinate.artifact("tran-001");
+        // The transient's rows are in its results store, which the manifest
+        // names beside the artifact written from it; the AC analysis has none.
+        let transient = coordinate.artifact("tran-001");
         coordinate.artifact("ac-001");
+        assert_eq!(
+            coordinate.stores,
+            [transient.with_extension("rsr")],
+            "each temperature's transient leaves one store: {coordinate:?}"
+        );
+        assert!(
+            coordinate.stores[0].join("manifest.rsm").is_file(),
+            "the store the manifest names is a complete results store: {coordinate:?}"
+        );
     }
 
     for path in &expected {

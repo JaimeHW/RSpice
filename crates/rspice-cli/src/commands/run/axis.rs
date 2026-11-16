@@ -648,6 +648,8 @@ fn run_implicit_step_op_table(
             set_coordinates.push(AxisSetCoordinate {
                 identity: ArtifactCoordinate::from_run_coordinate(&run.canonical),
                 artifacts: vec![path.clone()],
+                // An operating point stores no rows.
+                stores: Vec::new(),
             });
             outputs.push(path);
         }
@@ -1198,6 +1200,11 @@ pub(super) fn run_deck(
         reports.push(outcome.report);
         coordinates.push(AxisSetCoordinate {
             identity: ArtifactCoordinate::from_run_coordinate(canonical_coordinate),
+            stores: outcome
+                .outputs
+                .iter()
+                .filter_map(|artifact| super::stored_transient::store_left_beside(artifact))
+                .collect(),
             artifacts: outcome.outputs.clone(),
         });
         outputs.extend(outcome.outputs);
@@ -1288,6 +1295,8 @@ pub(super) struct CoordinatePublication {
 pub(super) struct AxisSetCoordinate {
     pub(super) identity: ArtifactCoordinate,
     pub(super) artifacts: Vec<PathBuf>,
+    /// The results stores its transients left beside their artifacts.
+    pub(super) stores: Vec<PathBuf>,
 }
 
 /// Describe the complete coordinate set as the last member of its own
@@ -1304,28 +1313,32 @@ fn write_axis_set_manifest(
     let coordinate_documents = coordinates
         .iter()
         .map(|coordinate| {
-            let artifacts = coordinate
-                .artifacts
-                .iter()
-                .map(|artifact| {
-                    artifact
-                        .file_name()
-                        .and_then(std::ffi::OsStr::to_str)
-                        .map(str::to_owned)
-                        .ok_or_else(|| CliError::InternalError {
-                            message: format!(
-                                "coordinate artifact '{}' has no portable UTF-8 filename",
-                                artifact.display()
-                            ),
-                        })
-                })
-                .collect::<Result<Vec<_>, CliError>>()?;
+            let names = |paths: &[PathBuf]| {
+                paths
+                    .iter()
+                    .map(|artifact| {
+                        artifact
+                            .file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .map(str::to_owned)
+                            .ok_or_else(|| CliError::InternalError {
+                                message: format!(
+                                    "coordinate artifact '{}' has no portable UTF-8 filename",
+                                    artifact.display()
+                                ),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, CliError>>()
+            };
+            let artifacts = names(&coordinate.artifacts)?;
+            let stores = names(&coordinate.stores)?;
             Ok(serde_json::json!({
                 "coordinate_id": coordinate.identity.id,
                 "ordinal": coordinate.identity.ordinal,
                 "tag": coordinate.identity.tag,
                 "assignment": coordinate.identity.assignment,
                 "artifacts": artifacts,
+                "stores": stores,
             }))
         })
         .collect::<Result<Vec<_>, CliError>>()?;
