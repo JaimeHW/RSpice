@@ -17,7 +17,7 @@ pub mod encoder;
 mod image;
 mod verifier;
 
-pub use image::StoredNativeImage;
+pub(crate) use image::StoredX64Image;
 pub(crate) use image::X64Image;
 #[cfg(all(windows, target_arch = "x86_64"))]
 use image::X64RuntimeFunction;

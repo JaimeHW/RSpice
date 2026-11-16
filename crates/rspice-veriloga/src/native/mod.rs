@@ -137,9 +137,8 @@ pub(crate) use abi::{NativeRuntimeError, NativeRuntimeErrorKind};
 pub(crate) use model::NativeRequiredStorage;
 pub(crate) use model::NativeStampKernelIo;
 pub use model::{NativeModel, PlanStats};
-pub use stored::{NativeImageKey, NativeImageStore, install_native_image_store};
+pub use stored::{NativeImageKey, NativeImageStore, StoredNativeImage, install_native_image_store};
 pub use target::{Architecture, TargetSpec};
-pub use x64::StoredNativeImage;
 
 /// How many instructions an entry may hold and still be inlined into a fused
 /// kernel rather than called there.
@@ -275,6 +274,15 @@ pub(crate) fn evaluation_image(
                 x64::emit_model_with_canonical_ir(model, artifact)
             })
         }
+        #[cfg(target_arch = "aarch64")]
+        Architecture::AArch64 => {
+            stored::install_through_store(stored::installed_store(), key, model, || {
+                validate_native_coverage(model)?;
+                let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)?;
+                aarch64::emit_model_plan(model, &plan)
+            })
+        }
+        #[cfg(not(target_arch = "aarch64"))]
         Architecture::AArch64 => compile_native_with_canonical_ir(model, artifact),
     }
 }
@@ -293,6 +301,14 @@ pub(crate) fn observation_image(
                 x64::emit_observation_image(model, &plan)
             })
         }
+        #[cfg(target_arch = "aarch64")]
+        Architecture::AArch64 => {
+            stored::install_through_store(stored::installed_store(), key, model, || {
+                let plan = crate::jit::plan_builder::build_observation_plan(model, artifact)?;
+                aarch64::emit_observation_image(model, &plan)
+            })
+        }
+        #[cfg(not(target_arch = "aarch64"))]
         Architecture::AArch64 => compile_observation_image_with_canonical_ir(model, artifact),
     }
 }

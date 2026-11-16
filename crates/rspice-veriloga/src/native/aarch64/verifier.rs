@@ -26,6 +26,14 @@ pub(crate) struct DirectBranch {
 pub(crate) struct VerifiedA64Code {
     pub(crate) direct_branches: Vec<DirectBranch>,
     pub(crate) code_bytes: usize,
+    /// Where each helper call loads its target: the offset of the MOVZ of a
+    /// `MOVZ/MOVK/MOVK/MOVK X16` run that `BLR X16` follows. The four
+    /// immediates are the helper's address, the one part of the code another
+    /// process has to rewrite.
+    pub(crate) helper_address_sites: Vec<usize>,
+    /// `BLR`s that are neither such a helper call nor an authenticated image
+    /// call. An image holding one cannot be relocated.
+    pub(crate) unrelocatable_calls: usize,
 }
 
 pub(crate) fn verify_exact_function(bytes: &[u8], entry_kind: &str) -> JitResult<VerifiedA64Code> {
@@ -48,10 +56,20 @@ pub(crate) fn verify_exact_function_at(
     let mut literal_targets = Vec::new();
     let mut islands: Vec<(usize, usize)> = Vec::new();
     let mut code_bytes = None;
+    let mut helper_address_sites = Vec::new();
+    let mut unrelocatable_calls = 0_usize;
+    // The BLR the last recognised call sequence ends in.
+    let mut announced_call = None;
     let mut offset = 0_usize;
     while offset < bytes.len() {
         let chunk = &bytes[offset..offset + 4];
         let instruction = u32::from_le_bytes(chunk.try_into().expect("four-byte A64 word"));
+        if is_helper_call_at(bytes, offset) {
+            helper_address_sites.push(offset);
+            announced_call = Some(offset + HELPER_CALL_BLR_OFFSET);
+        } else if instruction & 0xFFFF_FC1F == 0xD63F_0000 && announced_call != Some(offset) {
+            unrelocatable_calls += 1;
+        }
         match classify(instruction) {
             InstructionClass::Ordinary => {}
             InstructionClass::LiteralIsland { data_words } => {
@@ -105,6 +123,7 @@ pub(crate) fn verify_exact_function_at(
                     target_offset,
                     kind: DirectBranchKind::Call,
                 });
+                announced_call = Some(offset + 8);
             }
             InstructionClass::Unknown => {
                 return Err(verifier_error(format!(
@@ -194,7 +213,49 @@ pub(crate) fn verify_exact_function_at(
     Ok(VerifiedA64Code {
         direct_branches,
         code_bytes,
+        helper_address_sites,
+        unrelocatable_calls,
     })
+}
+
+/// Bytes from a helper call's MOVZ to its `BLR X16`.
+pub(crate) const HELPER_CALL_BLR_OFFSET: usize = 16;
+
+/// Whether `offset` begins `MOVZ X16, #a; MOVK X16, #b, LSL 16;
+/// MOVK X16, #c, LSL 32; MOVK X16, #d, LSL 48; BLR X16`.
+pub(crate) fn is_helper_call_at(bytes: &[u8], offset: usize) -> bool {
+    const SHAPE: [(u32, u32); 5] = [
+        (0xFFE0_001F, 0xD280_0010),
+        (0xFFE0_001F, 0xF2A0_0010),
+        (0xFFE0_001F, 0xF2C0_0010),
+        (0xFFE0_001F, 0xF2E0_0010),
+        (0xFFFF_FFFF, 0xD63F_0200),
+    ];
+    SHAPE.iter().enumerate().all(|(index, &(mask, value))| {
+        read_word(bytes, offset + index * 4).is_some_and(|word| word & mask == value)
+    })
+}
+
+/// The 64-bit value a helper call at `offset` loads.
+pub(crate) fn helper_call_address(bytes: &[u8], offset: usize) -> Option<u64> {
+    (0..4).try_fold(0_u64, |value, index| {
+        let word = read_word(bytes, offset + index * 4)?;
+        Some(value | (u64::from((word >> 5) & 0xFFFF) << (16 * index)))
+    })
+}
+
+/// Rewrite the value a helper call at `offset` loads, keeping its shape.
+pub(crate) fn set_helper_call_address(bytes: &mut [u8], offset: usize, value: u64) -> Option<()> {
+    for index in 0..4 {
+        let at = offset + index * 4;
+        let word = read_word(bytes, at)?;
+        let halfword = ((value >> (16 * index)) & 0xFFFF) as u32;
+        let patched = (word & !(0xFFFF << 5)) | (halfword << 5);
+        bytes
+            .get_mut(at..at + 4)?
+            .copy_from_slice(&patched.to_le_bytes());
+    }
+    Some(())
 }
 
 /// Prove that an announced run of inline constants is data the code jumps

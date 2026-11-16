@@ -16,7 +16,7 @@ use super::unwind::{A64UnwindFunction, analyze_function};
 use super::verifier::{DirectBranchKind, VerifiedA64Code, verify_exact_function_at};
 use crate::native::assignment::{NativeAssignment, chunk_ranges, shareable_batch_ranges};
 use crate::native::expr::{NativeProgram, native_op_name};
-use crate::native::model::{CodeOffset, NativeEntryStarts};
+use crate::native::model::CodeOffset;
 use crate::native::plan_program::{PlanProgram, PlanProgramRef};
 use crate::native::ssa::{AssignmentProgram, Program};
 use crate::native::value_cache::ValueEntryCache;
@@ -53,6 +53,19 @@ struct FunctionLayout {
     end: usize,
     entry_kind: Box<str>,
     verified: VerifiedA64Code,
+}
+
+/// A verified image, its entry starts, unwind data and what storing it needs.
+pub(crate) struct A64FinishedImage {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) entry_starts: Vec<CodeOffset>,
+    pub(crate) unwind_functions: Vec<A64UnwindFunction>,
+    /// Each function's byte range, in image order.
+    pub(crate) functions: Vec<(u32, u32)>,
+    /// Image offsets of each helper call's address load.
+    pub(crate) helper_address_sites: Vec<usize>,
+    /// Calls no other process could relocate.
+    pub(crate) unrelocatable_calls: usize,
 }
 
 #[derive(Debug, Default)]
@@ -496,7 +509,82 @@ impl A64ImageBuilder {
         Ok(offset)
     }
 
-    pub(super) fn finish(self) -> JitResult<(Vec<u8>, NativeEntryStarts, Vec<A64UnwindFunction>)> {
+    #[cfg(test)]
+    pub(super) fn finish(
+        self,
+    ) -> JitResult<(
+        Vec<u8>,
+        crate::native::model::NativeEntryStarts,
+        Vec<A64UnwindFunction>,
+    )> {
+        let finished = self.finish_image()?;
+        Ok((
+            finished.bytes,
+            crate::native::model::NativeEntryStarts::new(finished.entry_starts),
+            finished.unwind_functions,
+        ))
+    }
+
+    /// A builder over an image another process published, each function
+    /// verified again exactly as [`Self::append_function_at`] verifies a
+    /// fresh one. `functions` are the image's function ranges in order; what
+    /// lies between them must be the NOP padding the builder writes.
+    pub(super) fn from_published(image: Vec<u8>, functions: &[(u32, u32)]) -> JitResult<Self> {
+        const ENTRY_KIND: &str = "stored image function";
+        let mut layouts = Vec::with_capacity(functions.len());
+        let mut previous_end = 0_usize;
+        for &(start, end) in functions {
+            let (start, end) = (start as usize, end as usize);
+            if start % ENTRY_ALIGNMENT != 0
+                || start < previous_end
+                || end <= start
+                || end > image.len()
+            {
+                return Err(relocation_error(format!(
+                    "stored AArch64 function {start}..{end} after byte {previous_end} \
+                     in an image of {} bytes",
+                    image.len()
+                )));
+            }
+            if image[previous_end..start]
+                .chunks(A64_NOP.len())
+                .any(|word| word != A64_NOP)
+            {
+                return Err(relocation_error(format!(
+                    "stored AArch64 image has code outside a function at bytes {previous_end}..{start}"
+                )));
+            }
+            let bytes = &image[start..end];
+            if bytes.get(..A64_BTI_C.len()) != Some(A64_BTI_C.as_slice()) {
+                return Err(relocation_error(format!(
+                    "stored AArch64 function at byte {start} does not begin with BTI C"
+                )));
+            }
+            let verified = verify_exact_function_at(bytes, ENTRY_KIND, start)?;
+            layouts.push(FunctionLayout {
+                start: CodeOffset::new(start),
+                end,
+                entry_kind: ENTRY_KIND.into(),
+                verified,
+            });
+            previous_end = end;
+        }
+        if previous_end != image.len() {
+            return Err(relocation_error(format!(
+                "stored AArch64 image has {} bytes past its last function",
+                image.len() - previous_end
+            )));
+        }
+        Ok(Self {
+            image,
+            functions: layouts,
+            value_entries: ValueEntryCache::default(),
+        })
+    }
+
+    /// The finished image with what storing it needs: its function ranges and
+    /// where its helper calls load their targets.
+    pub(super) fn finish_image(self) -> JitResult<A64FinishedImage> {
         if self.functions.is_empty() {
             return Err(internal_error(
                 "cannot publish an empty AArch64 executable image",
@@ -544,7 +632,17 @@ impl A64ImageBuilder {
         }
 
         let mut unwind_functions = Vec::with_capacity(self.functions.len());
+        let mut helper_address_sites = Vec::new();
+        let mut unrelocatable_calls = 0_usize;
         for function in &self.functions {
+            helper_address_sites.extend(
+                function
+                    .verified
+                    .helper_address_sites
+                    .iter()
+                    .map(|site| function.start.as_usize() + site),
+            );
+            unrelocatable_calls += function.verified.unrelocatable_calls;
             if function.end > self.image.len() || function.start.as_usize() >= function.end {
                 return Err(internal_error(
                     "AArch64 function range is outside its image",
@@ -581,7 +679,26 @@ impl A64ImageBuilder {
             )?);
         }
 
-        Ok((self.image, NativeEntryStarts::new(starts), unwind_functions))
+        let functions = self
+            .functions
+            .iter()
+            .map(|function| {
+                Ok((
+                    u32::try_from(function.start.as_usize())
+                        .map_err(|_| internal_error("AArch64 image past 4 GiB"))?,
+                    u32::try_from(function.end)
+                        .map_err(|_| internal_error("AArch64 image past 4 GiB"))?,
+                ))
+            })
+            .collect::<JitResult<Vec<_>>>()?;
+        Ok(A64FinishedImage {
+            bytes: self.image,
+            entry_starts: starts,
+            unwind_functions,
+            functions,
+            helper_address_sites,
+            unrelocatable_calls,
+        })
     }
 }
 

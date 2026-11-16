@@ -9,21 +9,15 @@
 //! such an address is never recorded; the decoder that verifies an image finds
 //! them, in the image that was stored and again in the image that is loaded.
 
-use super::super::abi::call_helper_addresses;
-use super::super::model::{
-    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
-    NativeRequiredStorage,
-};
-use super::super::model_plan::NativeAssignmentCoverage;
+use super::super::model::{NativeEntryStarts, NativeModel, NativeRequiredStorage};
 use super::super::runtime::ExecutableMemory;
 #[cfg(all(windows, target_arch = "x86_64"))]
 use super::super::runtime::WindowsX64RuntimeFunction;
+use super::super::stored::{CallHelpers, StorableImage, StoredMachineImage, StoredNativeImage};
 use super::verify_x64_image_layout;
 use crate::codegen::CompiledModel;
 use crate::native::{JitError, JitResult};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
 const ADDRESS_BYTES: usize = 8;
 
@@ -44,16 +38,7 @@ pub(super) struct X64RuntimeFunction {
     pub(super) unwind_info_address: u32,
 }
 
-/// What an image needs besides its bytes to become a [`NativeModel`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct X64ImageLayout {
-    pub(super) entries: NativeEntryOffsets,
-    pub(super) entry_starts: Vec<CodeOffset>,
-    pub(super) current_dependencies: NativeCurrentDependencies,
-    pub(super) prelude_slots: usize,
-    pub(super) assignment_coverage: NativeAssignmentCoverage,
-    pub(super) one_step_dae_split_safe: bool,
-}
+pub(super) use super::super::stored::StoredImageLayout as X64ImageLayout;
 
 /// An emitted and verified image that is not executable yet.
 pub(crate) struct X64Image {
@@ -65,14 +50,11 @@ pub(crate) struct X64Image {
     calls: X64ImageCalls,
 }
 
-/// A compiled native image another process can install.
-///
-/// It is only ever read back by the build that wrote it: the caller files it
-/// under that build's identity.
+/// An x64 image another process can install.
 #[derive(Serialize, Deserialize)]
-pub struct StoredNativeImage {
+pub(crate) struct StoredX64Image {
     /// [`X64Image::bytes`] with each helper address replaced by its position.
-    #[serde(with = "image_bytes")]
+    #[serde(with = "super::super::stored::image_bytes")]
     bytes: Vec<u8>,
     code_len: usize,
     runtime_functions: Vec<X64RuntimeFunction>,
@@ -133,7 +115,7 @@ impl X64Image {
 
     /// The image with every helper address replaced by the helper's position,
     /// or `None` when it calls something no other process could find.
-    pub(crate) fn to_stored(&self) -> Option<StoredNativeImage> {
+    fn to_stored_image(&self) -> Option<StoredX64Image> {
         if self.calls.other != 0 {
             return None;
         }
@@ -145,7 +127,7 @@ impl X64Image {
             let position = helpers.position(address)?;
             slot.copy_from_slice(&(position as u64).to_le_bytes());
         }
-        Some(StoredNativeImage {
+        Some(StoredX64Image {
             bytes,
             code_len: self.code_len,
             runtime_functions: self.runtime_functions.clone(),
@@ -155,8 +137,8 @@ impl X64Image {
 
     /// Verify a stored image as freshly emitted code is verified, then give
     /// each helper call this process's address for that helper.
-    pub(crate) fn from_stored(stored: StoredNativeImage, model: &CompiledModel) -> JitResult<Self> {
-        let StoredNativeImage {
+    fn from_stored_image(stored: StoredX64Image, model: &CompiledModel) -> JitResult<Self> {
+        let StoredX64Image {
             mut bytes,
             code_len,
             runtime_functions,
@@ -201,6 +183,30 @@ impl X64Image {
     }
 }
 
+impl StorableImage for X64Image {
+    fn install(self, model: &CompiledModel) -> JitResult<NativeModel> {
+        X64Image::install(self, model)
+    }
+
+    fn to_stored(&self) -> Option<StoredNativeImage> {
+        self.to_stored_image()
+            .map(|image| StoredNativeImage::new(StoredMachineImage::X64(image)))
+    }
+
+    fn from_stored(stored: StoredNativeImage, model: &CompiledModel) -> JitResult<Self> {
+        let refused = |detail: String| JitError::Verifier {
+            model: model.name.clone(),
+            detail: format!("stored native image: {detail}").into(),
+        };
+        match stored.into_machine().map_err(refused)? {
+            StoredMachineImage::X64(image) => Self::from_stored_image(image, model),
+            StoredMachineImage::AArch64(_) => {
+                Err(refused("an AArch64 image on an x64 host".into()))
+            }
+        }
+    }
+}
+
 /// The unwind table of a stored image must describe its own code, in order,
 /// and point into its own unwind data, as `append_windows_x64_unwind_metadata`
 /// writes it. Off Windows an image has none.
@@ -236,81 +242,6 @@ fn validate_runtime_functions(
         previous_end = end;
     }
     Ok(())
-}
-
-/// Every function compiled code may call, by address and by position.
-struct CallHelpers {
-    addresses: &'static [usize],
-    positions: HashMap<usize, usize>,
-}
-
-impl CallHelpers {
-    fn get() -> &'static Self {
-        static HELPERS: OnceLock<CallHelpers> = OnceLock::new();
-        HELPERS.get_or_init(|| {
-            let addresses = call_helper_addresses();
-            let mut positions = HashMap::with_capacity(addresses.len());
-            for (position, &address) in addresses.iter().enumerate() {
-                // A linker may fold helpers with identical code into one;
-                // either position then names the same code.
-                positions.entry(address).or_insert(position);
-            }
-            Self {
-                addresses,
-                positions,
-            }
-        })
-    }
-
-    fn position(&self, address: usize) -> Option<usize> {
-        self.positions.get(&address).copied()
-    }
-
-    fn address(&self, position: usize) -> Option<usize> {
-        self.addresses.get(position).copied()
-    }
-}
-
-/// The image as one byte string rather than a sequence of numbers.
-mod image_bytes {
-    use serde::de::{Error, SeqAccess, Visitor};
-    use serde::{Deserializer, Serializer};
-
-    pub(super) fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes)
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Vec<u8>, D::Error> {
-        struct Bytes;
-
-        impl<'de> Visitor<'de> for Bytes {
-            type Value = Vec<u8>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("an image byte string")
-            }
-
-            fn visit_bytes<E: Error>(self, bytes: &[u8]) -> Result<Vec<u8>, E> {
-                Ok(bytes.to_vec())
-            }
-
-            fn visit_byte_buf<E: Error>(self, bytes: Vec<u8>) -> Result<Vec<u8>, E> {
-                Ok(bytes)
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut items: A) -> Result<Vec<u8>, A::Error> {
-                let mut bytes = Vec::with_capacity(items.size_hint().unwrap_or(0));
-                while let Some(byte) = items.next_element()? {
-                    bytes.push(byte);
-                }
-                Ok(bytes)
-            }
-        }
-
-        deserializer.deserialize_byte_buf(Bytes)
-    }
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
@@ -359,12 +290,13 @@ endmodule
             "the fixture calls helpers: {:?}",
             image.calls
         );
-        let stored = image.to_stored().expect("every helper is listed");
+        let stored = image.to_stored_image().expect("every helper is listed");
         for &offset in &image.calls.absolute {
             assert!(address_at(&stored.bytes, offset) < CALL_HELPER_NAMES.len() as u64);
         }
 
-        let restored = X64Image::from_stored(stored, &model).expect("restore the stored image");
+        let restored =
+            X64Image::from_stored_image(stored, &model).expect("restore the stored image");
         assert_eq!(restored.bytes, image.bytes);
         assert_eq!(restored.code_len, image.code_len);
         assert_eq!(restored.runtime_functions, image.runtime_functions);
@@ -380,24 +312,24 @@ endmodule
         let (model, image) = emitted();
         let offset = image.calls.absolute[0];
 
-        let mut stored = image.to_stored().expect("store");
+        let mut stored = image.to_stored_image().expect("store");
         stored.bytes[offset..offset + ADDRESS_BYTES].copy_from_slice(&u64::MAX.to_le_bytes());
-        let error = X64Image::from_stored(stored, &model)
+        let error = X64Image::from_stored_image(stored, &model)
             .err()
             .expect("an unknown helper is refused");
         assert!(error.to_string().contains("names helper"), "{error}");
 
         // The call after the address becomes `ud2`, which no image holds.
-        let mut stored = image.to_stored().expect("store");
+        let mut stored = image.to_stored_image().expect("store");
         let call = offset + ADDRESS_BYTES;
         stored.bytes[call..call + 2].copy_from_slice(&[0x0F, 0x0B]);
-        assert!(X64Image::from_stored(stored, &model).is_err());
+        assert!(X64Image::from_stored_image(stored, &model).is_err());
 
-        let mut stored = image.to_stored().expect("store");
+        let mut stored = image.to_stored_image().expect("store");
         stored.code_len = stored.bytes.len() + 1;
-        assert!(X64Image::from_stored(stored, &model).is_err());
+        assert!(X64Image::from_stored_image(stored, &model).is_err());
 
-        let mut stored = image.to_stored().expect("store");
+        let mut stored = image.to_stored_image().expect("store");
         let misplaced = X64RuntimeFunction {
             begin_address: 0,
             end_address: 1,
@@ -407,7 +339,7 @@ endmodule
             Some(function) => function.unwind_info_address = 1,
             None => stored.runtime_functions.push(misplaced),
         }
-        assert!(X64Image::from_stored(stored, &model).is_err());
+        assert!(X64Image::from_stored_image(stored, &model).is_err());
     }
 
     /// A helper missing from the list cannot be named by a stored image, so

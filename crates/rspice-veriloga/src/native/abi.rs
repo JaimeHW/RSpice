@@ -3771,13 +3771,16 @@ macro_rules! call_helpers {
         /// A stored native image names its call targets by position in this
         /// list, because their addresses move with every process that loads
         /// this library.
-        #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+        #[cfg_attr(
+            not(any(target_arch = "x86_64", target_arch = "aarch64")),
+            allow(dead_code)
+        )]
         pub(crate) fn call_helper_addresses() -> &'static [usize] {
             static ADDRESSES: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
             ADDRESSES.get_or_init(|| vec![$($helper as *const () as usize),*])
         }
 
-        #[cfg(all(test, target_arch = "x86_64"))]
+        #[cfg(all(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
         pub(super) const CALL_HELPER_NAMES: &[&str] = &[$(stringify!($helper)),*];
     };
 }

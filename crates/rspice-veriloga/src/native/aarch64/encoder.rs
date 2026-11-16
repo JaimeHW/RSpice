@@ -241,6 +241,16 @@ impl A64Encoder {
         Ok(())
     }
 
+    /// `value` as MOVZ and all three MOVKs, zero halfwords included, so the
+    /// four immediates can later be rewritten with any other 64-bit value.
+    pub(crate) fn mov_u64_fixed(&mut self, destination: XReg, value: u64) -> JitResult<()> {
+        self.movz_x(destination, value as u16, 0)?;
+        for shift in [16_u8, 32, 48] {
+            self.movk_x(destination, ((value >> shift) & 0xffff) as u16, shift)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn mov_x(&mut self, destination: XReg, source: XReg) -> JitResult<()> {
         require_general_register(destination, "MOV destination")?;
         require_general_register(source, "MOV source")?;

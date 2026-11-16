@@ -283,11 +283,7 @@ pub(crate) fn compile_segmented_indexed_assignment_driver(
     compiler.emit_variable_base_pointer(XReg::X0, base)?;
     compiler.encoder.mov_u64(XReg::X1, len as u64)?;
     compiler.encoder.mov_u64(XReg::X2, lower as u64)?;
-    compiler.encoder.mov_u64(
-        HOST_ABI.indirect_call_scratch,
-        rspice_dynamic_variable_slot_native as *const () as usize as u64,
-    )?;
-    compiler.encoder.blr(HOST_ABI.indirect_call_scratch);
+    compiler.emit_helper_call(rspice_dynamic_variable_slot_native as *const () as usize as u64)?;
     let invalid = compiler.encoder.cbz_placeholder(XReg::X0)?;
     compiler.stack_store_x(XReg::X0, pointer_offset)?;
     let slot_ready = compiler.encoder.b_placeholder();
@@ -1073,11 +1069,7 @@ impl FunctionCompiler {
                 .str_d_unsigned(logical_register(index)?, XReg::Sp, index * WORD_BYTES)?;
         }
         self.encoder.mov_x(XReg::X0, self.context_register())?;
-        self.encoder.mov_u64(
-            HOST_ABI.indirect_call_scratch,
-            rspice_native_loop_poll as *const () as usize as u64,
-        )?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(rspice_native_loop_poll as *const () as usize as u64)?;
         self.encoder.mov_x(XReg::X9, XReg::X0)?;
         for index in 0..A64_ALLOCATABLE_VALUE_REGISTERS {
             self.encoder
@@ -1273,9 +1265,7 @@ impl FunctionCompiler {
     fn emit_task_helper(&mut self, site: u32, helper: usize) -> JitResult<()> {
         self.encoder.mov_x(XReg::X0, self.context_register())?;
         self.encoder.mov_u64(XReg::X1, u64::from(site))?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as u64)?;
         Ok(())
     }
 
@@ -1369,11 +1359,7 @@ impl FunctionCompiler {
         self.emit_variable_base_pointer(XReg::X0, base)?;
         self.encoder.mov_u64(XReg::X1, len as u64)?;
         self.encoder.mov_u64(XReg::X2, lower as u64)?;
-        self.encoder.mov_u64(
-            HOST_ABI.indirect_call_scratch,
-            rspice_dynamic_variable_slot_native as *const () as usize as u64,
-        )?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(rspice_dynamic_variable_slot_native as *const () as usize as u64)?;
         let invalid = self.encoder.cbz_placeholder(XReg::X0)?;
         self.stack_store_x(XReg::X0, slot_offset)?;
         let slot_ready = self.encoder.b_placeholder();
@@ -1525,11 +1511,9 @@ impl FunctionCompiler {
             .mov_x(HOST_ABI.entry_context, self.context_register())?;
         self.encoder
             .mov_u64(HOST_ABI.entry_variables, stamp_index as u64)?;
-        self.encoder.mov_u64(
-            HOST_ABI.indirect_call_scratch,
+        self.emit_helper_call(
             rspice_native_non_finite_contribution_error as *const () as usize as u64,
         )?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
         self.early_returns.push(self.encoder.b_placeholder());
 
         let finite_target = self.encoder.position();
@@ -1755,11 +1739,9 @@ impl FunctionCompiler {
                 self.encoder.mov_x(XReg::X0, self.context_register())?;
                 self.encoder.mov_u64(XReg::X1, len as u64)?;
                 self.encoder.mov_u64(XReg::X2, lower as u64)?;
-                self.encoder.mov_u64(
-                    HOST_ABI.indirect_call_scratch,
+                self.emit_helper_call(
                     rspice_checked_array_index_native as *const () as usize as u64,
                 )?;
-                self.encoder.blr(HOST_ABI.indirect_call_scratch);
                 if prepared.result != DReg::D0 {
                     self.encoder.fmov_d(prepared.result, DReg::D0);
                 }
@@ -2045,9 +2027,7 @@ impl FunctionCompiler {
         if source != DReg::D0 {
             self.encoder.fmov_d(DReg::D0, source);
         }
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as usize as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as usize as u64)?;
         if result != DReg::D0 {
             self.encoder.fmov_d(result, DReg::D0);
         }
@@ -2074,9 +2054,7 @@ impl FunctionCompiler {
             self.encoder.fmov_d(DReg::D1, right);
         }
         self.encoder.fmov_d_x(DReg::D0, XReg::X17)?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as usize as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as usize as u64)?;
         if result != DReg::D0 {
             self.encoder.fmov_d(result, DReg::D0);
         }
@@ -2100,9 +2078,7 @@ impl FunctionCompiler {
         }
         self.encoder.mov_x(XReg::X0, self.context_register())?;
         self.encoder.mov_u64(XReg::X1, state_id as u64)?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as u64)?;
         if prepared.result != DReg::D0 {
             self.encoder.fmov_d(prepared.result, DReg::D0);
         }
@@ -2131,9 +2107,7 @@ impl FunctionCompiler {
         self.encoder.add_x_imm(XReg::X0, XReg::Sp, 0)?;
         self.encoder.mov_x(XReg::X1, self.context_register())?;
         self.encoder.mov_u64(XReg::X2, call.descriptor as u64)?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, call.helper as usize as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(call.helper as usize as u64)?;
         self.adjust_stack(frame_bytes, true)
     }
 
@@ -2168,9 +2142,7 @@ impl FunctionCompiler {
         self.encoder.add_x_imm(XReg::X0, XReg::Sp, 0)?;
         self.encoder.mov_x(XReg::X1, self.context_register())?;
         self.encoder.mov_u64(XReg::X2, state_id as u64)?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as u64)?;
         self.adjust_stack(call_frame_bytes, true)?;
         if prepared.result != DReg::D0 {
             self.encoder.fmov_d(prepared.result, DReg::D0);
@@ -2488,11 +2460,7 @@ impl FunctionCompiler {
         self.emit_variable_base_pointer(XReg::X0, base)?;
         self.encoder.mov_u64(XReg::X1, len as u64)?;
         self.encoder.mov_u64(XReg::X2, lower as u64)?;
-        self.encoder.mov_u64(
-            HOST_ABI.indirect_call_scratch,
-            rspice_dynamic_variable_slot_native as *const () as usize as u64,
-        )?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(rspice_dynamic_variable_slot_native as *const () as usize as u64)?;
         let invalid = self.encoder.cbz_placeholder(XReg::X0)?;
         self.encoder.ldr_d_unsigned(prepared.result, XReg::X0, 0)?;
         self.adjust_stack(call_frame_bytes, true)?;
@@ -2540,11 +2508,7 @@ impl FunctionCompiler {
         self.encoder.mov_x(XReg::X0, self.context_register())?;
         self.encoder.mov_u64(XReg::X1, len as u64)?;
         self.encoder.mov_u64(XReg::X2, lower as u64)?;
-        self.encoder.mov_u64(
-            HOST_ABI.indirect_call_scratch,
-            rspice_native_dynamic_variable_error as *const () as usize as u64,
-        )?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(rspice_native_dynamic_variable_error as *const () as usize as u64)?;
         self.early_returns.push(self.encoder.b_placeholder());
         Ok(())
     }
@@ -2645,9 +2609,7 @@ impl FunctionCompiler {
 
     fn emit_void_error_early_return(&mut self, helper: usize) -> JitResult<()> {
         self.encoder.mov_x(XReg::X0, self.context_register())?;
-        self.encoder
-            .mov_u64(HOST_ABI.indirect_call_scratch, helper as u64)?;
-        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.emit_helper_call(helper as u64)?;
         self.emit_literal(DReg::D0, 0.0)?;
         self.early_returns.push(self.encoder.b_placeholder());
         Ok(())
@@ -3097,6 +3059,17 @@ impl FunctionCompiler {
             self.encoder.mov_u64(XReg::X10, offset as u64)?;
             self.encoder.add_x(destination, destination, XReg::X10)?;
         }
+        Ok(())
+    }
+
+    /// Call `helper` through X16, its address written as one MOVZ and three
+    /// MOVKs whatever its value. That fixed shape is what lets a stored image
+    /// carry the helper's position in the four immediates and the process that
+    /// loads it write its own address back.
+    fn emit_helper_call(&mut self, helper: u64) -> JitResult<()> {
+        self.encoder
+            .mov_u64_fixed(HOST_ABI.indirect_call_scratch, helper)?;
+        self.encoder.blr(HOST_ABI.indirect_call_scratch);
         Ok(())
     }
 
