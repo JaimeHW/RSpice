@@ -57,7 +57,7 @@ pub const STUDIO_BASELINES: [StudioBaseline; 10] = [
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "e228fd07b73d47c60aee93efa4c4bc5262af52b40ad9f4808fc493ef38c69c2f",
+        fingerprint: "a5cd4bd60164df54ac511e6138ff3fc227bfdd1d0df3c72561a7ee3ed94e1a39",
     },
     StudioBaseline {
         name: "studio-save",

@@ -91,6 +91,17 @@ pub struct SimulationOptions {
     /// nor clears it. Not serialized while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_rule_block: Option<super::RunConnectRules>,
+    /// Nets held at a voltage while the operating point a transient starts
+    /// from is solved, written as `.IC` cards. Like the connect rules they
+    /// decide where the circuit starts rather than the numerics, so a preset
+    /// neither sets nor clears them. Not serialized while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub initial_conditions: Vec<super::NodeVoltage>,
+    /// Nets the operating point's search starts from, written as
+    /// `.NODESET` cards; kept across presets as the initial conditions are.
+    /// Not serialized while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodesets: Vec<super::NodeVoltage>,
     pub damping: DampingStrategy,
     pub method: IntegrationMethod,
     pub solver: MatrixSolver,
@@ -160,6 +171,10 @@ struct PersistedSimulationOptions {
     connect_rules: Option<String>,
     #[serde(default)]
     connect_rule_block: Option<super::RunConnectRules>,
+    #[serde(default)]
+    initial_conditions: Vec<super::NodeVoltage>,
+    #[serde(default)]
+    nodesets: Vec<super::NodeVoltage>,
     damping: DampingStrategy,
     method: IntegrationMethod,
     solver: MatrixSolver,
@@ -199,6 +214,8 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             rshunt: fields.rshunt,
             connect_rules: fields.connect_rules,
             connect_rule_block: fields.connect_rule_block,
+            initial_conditions: fields.initial_conditions,
+            nodesets: fields.nodesets,
             damping: fields.damping,
             method: fields.method,
             solver: fields.solver,
@@ -240,6 +257,8 @@ impl Default for SimulationOptions {
             rshunt: None,
             connect_rules: None,
             connect_rule_block: None,
+            initial_conditions: Vec::new(),
+            nodesets: Vec::new(),
             damping: DampingStrategy::VoltageLimiting,
             method: IntegrationMethod::Trap,
             solver: MatrixSolver::Lu,
@@ -340,6 +359,10 @@ impl SimulationOptions {
             preset
                 .connect_rule_block
                 .clone_from(&self.connect_rule_block);
+            preset
+                .initial_conditions
+                .clone_from(&self.initial_conditions);
+            preset.nodesets.clone_from(&self.nodesets);
             serde_json::to_vec(&preset)
                 .ok()
                 .filter(|preset| *preset == current)
@@ -533,6 +556,19 @@ impl SimulationOptions {
                     .map(ValidationError::InvalidConnectRuleBlock),
             );
         }
+        for (kind, rows) in [
+            (
+                super::StartupKind::InitialCondition,
+                &self.initial_conditions,
+            ),
+            (super::StartupKind::NodeSet, &self.nodesets),
+        ] {
+            errors.extend(
+                super::startup_problems(kind, rows)
+                    .into_iter()
+                    .map(ValidationError::InvalidStartupRow),
+            );
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -702,6 +738,24 @@ impl SimulationOptions {
                 lines.clear();
             }
             lines.push(block.card());
+        }
+
+        // Where the run starts: one card per net.
+        let startup = super::startup_cards(
+            super::StartupKind::InitialCondition,
+            &self.initial_conditions,
+        )
+        .into_iter()
+        .chain(super::startup_cards(
+            super::StartupKind::NodeSet,
+            &self.nodesets,
+        ))
+        .collect::<Vec<_>>();
+        if !startup.is_empty() {
+            if lines.len() == 1 && lines[0] == ".OPTIONS" {
+                lines.clear();
+            }
+            lines.extend(startup);
         }
 
         lines.join("\n")

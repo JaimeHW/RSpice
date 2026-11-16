@@ -11,6 +11,7 @@ use crate::sweeps::CornerRunConfig;
 
 pub mod dependencies;
 mod include_search;
+pub mod startup_nets;
 pub use include_search::{IncludeSearchChain, IncludeSearchEntry};
 
 pub mod measurements;

@@ -275,6 +275,10 @@ where
             &hierarchy,
         ),
     );
+    crate::netlist_preparation::startup_nets::check_startup_nets(
+        &inputs.analysis.sim_setup.options,
+        &design_nets,
+    )?;
     let occurrences =
         projection_occurrence_nets(inputs.libraries, &execution_projection, design_nets);
     let (mut effective_saved_outputs, used_automatic_outputs, capture_membership) =

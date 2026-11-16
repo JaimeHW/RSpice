@@ -5,6 +5,7 @@ mod connect_rules;
 mod enums;
 mod model;
 mod si;
+mod startup;
 mod validation;
 
 pub use compatibility::{SimulationCompatibility, SourceSimulator};
@@ -16,4 +17,7 @@ pub use enums::{DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolv
 pub use model::{NamedPreset, SimulationOptions};
 pub(crate) use si::format_freq;
 pub use si::{ParseError, format_si_value, parse_si_value};
+pub use startup::{
+    NodeVoltage, StartupKind, is_ground, net_name_problem, startup_cards, startup_problems,
+};
 pub use validation::ValidationError;

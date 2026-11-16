@@ -19,6 +19,8 @@ pub enum ValidationError {
     InvalidConnectRules(String),
     /// The run's own connect-rule block cannot be written as stated.
     InvalidConnectRuleBlock(String),
+    /// An initial condition or nodeset no deck can carry as stated.
+    InvalidStartupRow(String),
 }
 
 impl fmt::Display for ValidationError {
@@ -52,6 +54,7 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidConnectRuleBlock(problem) => {
                 write!(f, "connect rules: {problem}")
             }
+            ValidationError::InvalidStartupRow(problem) => f.write_str(problem),
         }
     }
 }

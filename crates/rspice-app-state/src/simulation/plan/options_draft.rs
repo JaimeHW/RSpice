@@ -40,6 +40,11 @@ pub struct OptionsDialogState {
     /// The run's own connect-rule block, edited cell by cell on the Connect
     /// rules page; see [`super::connect_rules`].
     pub connect_rule_block: Option<rspice_simulation_contract::options::RunConnectRules>,
+    /// The nets the run's transient starts held at, edited row by row on
+    /// the Solver page.
+    pub initial_conditions: Vec<rspice_simulation_contract::options::NodeVoltage>,
+    /// The nets the operating point's search starts from.
+    pub nodesets: Vec<rspice_simulation_contract::options::NodeVoltage>,
     pub pivrel: String,
     pub pivtol: String,
     pub gmin_stepping: bool,
@@ -96,6 +101,8 @@ impl OptionsDialogState {
             rshunt: opts.rshunt.map(format_si_value).unwrap_or_default(),
             connect_rules: opts.connect_rules.clone().unwrap_or_default(),
             connect_rule_block: opts.connect_rule_block.clone(),
+            initial_conditions: opts.initial_conditions.clone(),
+            nodesets: opts.nodesets.clone(),
             pivrel: format_si_value(opts.pivrel),
             pivtol: format_si_value(opts.pivtol),
             gmin_stepping: opts.gmin_stepping,
@@ -197,6 +204,8 @@ impl OptionsDialogState {
             rshunt,
             connect_rules,
             connect_rule_block: self.connect_rule_block.clone(),
+            initial_conditions: self.initial_conditions.clone(),
+            nodesets: self.nodesets.clone(),
             damping: DampingStrategy::all()[self.damping.min(DampingStrategy::all().len() - 1)],
             method: IntegrationMethod::all()[self.method.min(IntegrationMethod::all().len() - 1)],
             solver: MatrixSolver::all()[self.solver.min(MatrixSolver::all().len() - 1)],

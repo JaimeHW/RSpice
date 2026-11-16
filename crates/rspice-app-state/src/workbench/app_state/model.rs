@@ -216,6 +216,27 @@ impl Model {
         Some(crate::state::SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis))
     }
 
+    /// The nets of the plan's simulation root, as the design names them: the
+    /// nets an initial condition or nodeset can name. Retained by the
+    /// design projection, so asking each frame costs a lookup.
+    pub fn simulation_root_nets(
+        &self,
+    ) -> Result<std::sync::Arc<Vec<rspice_design::connectivity::summary::DesignNet>>, String> {
+        let projection = self
+            .workspace
+            .configuration_execution_projection(
+                &self.library_manager,
+                &self.workspace.content.active_view,
+                &self.schematic,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(rspice_design::connectivity::summary::projection_nets(
+            self.library_manager.catalog(),
+            &projection,
+            &projection.root().key(),
+        ))
+    }
+
     /// The folders searched for includes after every project's own paths.
     pub fn library_folders(&self) -> &[std::path::PathBuf] {
         self.preferences

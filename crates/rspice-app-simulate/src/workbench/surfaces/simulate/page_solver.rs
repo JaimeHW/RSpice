@@ -52,6 +52,8 @@ use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
 
+mod startup;
+
 use super::advanced_options::REVEAL_ACTION;
 use super::page_kit::{
     CARD_PAD_X, RowPress, Tone, card, card_body, card_head_row, card_note, card_row, cell_ui,
@@ -81,6 +83,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     policy_strip(ui, cx);
     compatibility_policy(ui, cx);
     card_row(ui, cx, convergence_criteria, continuation_ladder);
+    startup::show(ui, cx);
     card_row(ui, cx, iteration_budgets, time_integration);
     card_row(ui, cx, matrix_policy, |ui, cx| {
         if temperature_reference(ui, &mut cx.model.sim_setup) {
@@ -227,6 +230,13 @@ fn policy_strip(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         options
             .connect_rule_block
             .clone_from(&cx.model.sim_setup.options.connect_rule_block);
+        // Nor where the circuit starts.
+        options
+            .initial_conditions
+            .clone_from(&cx.model.sim_setup.options.initial_conditions);
+        options
+            .nodesets
+            .clone_from(&cx.model.sim_setup.options.nodesets);
         cx.model.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
         apply_options(cx, &options);
     }

@@ -661,6 +661,16 @@ impl SimulationController {
             model.library_manager.catalog(),
             &projection,
         );
+        let options = &model.sim_setup.options;
+        if !options.initial_conditions.is_empty() || !options.nodesets.is_empty() {
+            rspice_simulation::netlist_preparation::startup_nets::check_startup_nets(
+                options,
+                &rspice_design::connectivity::summary::design_nets_with_hierarchy(
+                    root_schematic,
+                    &hierarchy,
+                ),
+            )?;
+        }
         let source_data = project_netlist_source_data(model);
         let plan = model
             .sim_setup
