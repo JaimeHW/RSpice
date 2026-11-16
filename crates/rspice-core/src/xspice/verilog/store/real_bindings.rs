@@ -429,6 +429,10 @@ impl DigitalSignalStore {
         std::mem::take(&mut self.external_changes)
     }
 
+    pub(crate) fn has_external_changes(&self) -> bool {
+        !self.external_changes.is_empty()
+    }
+
     /// Install both value domains before computed event expressions observe any
     /// changed signal. The caller validates identities and scheduler limits first.
     pub(crate) fn publish_external_bank(

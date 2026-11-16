@@ -162,6 +162,8 @@ mod traced;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 #[doc(hidden)]
 pub use drive_edges::DriveEdgeReport;
+#[cfg(test)]
+pub(crate) use shared::COPY_EVERY_ENDPOINT;
 use shared::MixedDigital;
 #[doc(hidden)]
 pub use shared::checkpoint as coordinator_checkpoint;

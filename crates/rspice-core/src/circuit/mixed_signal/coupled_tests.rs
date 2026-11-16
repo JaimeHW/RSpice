@@ -46,6 +46,9 @@ struct ResourceProbe {
     resource: Arc<ProbeResource>,
     ports: Vec<PortSpec>,
     phase: crate::xspice::EvaluationPhase,
+    /// Whether an accepted step is evaluated too, for a fixture whose trials
+    /// follow an accepted first step.
+    accepts_steps: bool,
     /// What the model imposes on its output port. A voltage output is the
     /// case that makes the accepted step project its result back into the
     /// solution and settle the boundary again.
@@ -66,7 +69,10 @@ impl CodeModel for ResourceProbe {
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        if ctx.evaluation_phase() != self.phase {
+        if ctx.evaluation_phase() != self.phase
+            && !(self.accepts_steps
+                && ctx.evaluation_phase() == crate::xspice::EvaluationPhase::AcceptedStep)
+        {
             return Err(CmError::EvaluationError(
                 "unexpected circuit evaluation phase".into(),
             ));
@@ -120,6 +126,21 @@ fn fixture(
 fn fixture_with(
     phase: crate::xspice::EvaluationPhase,
     voltage_output: bool,
+) -> (
+    crate::CircuitData,
+    crate::solver::StaticMatrix,
+    Vec<f64>,
+    Arc<ProbeResource>,
+) {
+    fixture_accepting(phase, voltage_output, false)
+}
+
+/// [`fixture_with`], whose probe also evaluates accepted steps when
+/// `accepts_steps` is set.
+fn fixture_accepting(
+    phase: crate::xspice::EvaluationPhase,
+    voltage_output: bool,
+    accepts_steps: bool,
 ) -> (
     crate::CircuitData,
     crate::solver::StaticMatrix,
@@ -214,6 +235,7 @@ endmodule
             Arc::new(ResourceProbe {
                 resource: resource.clone(),
                 phase,
+                accepts_steps,
                 output: if voltage_output { 0.75 } else { 0.0 },
                 ports: vec![PortSpec::output(
                     "out",
@@ -644,18 +666,21 @@ fn coupled_acceptance_evaluates_each_model_once_across_a_voltage_projection() {
     }
 }
 
-/// The linked digital host is deep-copied once per trial, and no more.
+/// The linked digital host is deep-copied once per trial that writes it, and
+/// no more.
 ///
 /// `mixed_trial_copy_ratchet` in `xspice::verilog::mixed` pins the standalone
 /// host, whose rollback image is copied only when something is due. The
 /// coordinator's is a different measurement: once an XSPICE instance is
-/// enrolled on a shared net every Newton trial runs the causal lane, and the
-/// causal lane writes the event clock and the delta-cycle tally whether or not
-/// the participant has anything to say — so the copy the trial image defers is
-/// taken every time. That is the cost pinned here: one image of the shared
-/// host per trial, plus one per model view whose published values moved. A
-/// change that makes it two per trial has doubled the per-iteration cost of
-/// every coupled deck, and nothing else in the suite would notice.
+/// enrolled on a shared net every Newton trial runs the causal lane at its
+/// endpoint. That lane copies the image only when the host has something due
+/// or the participant writes; a quiet endpoint holds its event clock beside
+/// the shared image instead (see `a_quiet_endpoint_settle_answers_as_the_copying_one`).
+/// These trials run at `t = 0`, where the initial blocks are due in every one,
+/// so each takes its copy. That is the cost pinned here: one image of the
+/// shared host per trial, plus one per model view whose published values
+/// moved. A change that makes it two per trial has doubled the per-iteration
+/// cost of every coupled deck, and nothing else in the suite would notice.
 #[test]
 fn coupled_trial_copy_ratchet() {
     const TRIALS: u64 = 8;
@@ -685,6 +710,91 @@ fn coupled_trial_copy_ratchet() {
          every coupled deck; a fall means either the trial genuinely stopped \
          needing the image or the work moved somewhere nothing counts it.",
         counts.mixed_trial_deep_copies
+    );
+}
+
+/// An endpoint settle that leaves the shared host uncopied answers exactly as
+/// the copying settle it replaces: the same stamps at every trial, through
+/// trials whose boundary holds and trials whose boundary moves, and fewer
+/// copies.
+///
+/// The trials run after an accepted first step, at a time no digital timer is
+/// due at. At `t = 0` the initial blocks are due in every trial, so the host
+/// is written before its endpoint and there is no quiet endpoint to take.
+#[test]
+fn a_quiet_endpoint_settle_answers_as_the_copying_one() {
+    use crate::xspice::verilog::COPY_EVERY_ENDPOINT;
+    let coeff = crate::numerics::integration::CompanionCoefficients::backward_euler();
+    let companion = || XspiceCompanionPolicy {
+        coefficients: &coeff,
+        xyce_one_step_order2: false,
+    };
+    let run = |copy_every: bool| {
+        COPY_EVERY_ENDPOINT.with(|flag| flag.set(copy_every));
+        let (mut circuit, mut matrix, mut solution, _) =
+            fixture_accepting(crate::xspice::EvaluationPhase::CircuitTrial, false, true);
+        let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+        let rollback = circuit.capture_xspice_acceptance();
+        circuit
+            .accept_mixed_transient_with(
+                &crate::abort_signal::NoAbort,
+                0.0,
+                0.0,
+                &mut solution,
+                companion(),
+                true,
+                false,
+                Some(rollback.resources()),
+                false,
+                &mut Vec::new(),
+                |_, _, _, _| Ok(()),
+            )
+            .unwrap();
+        rollback.resources().commit();
+        crate::xspice::settle_cost::reset();
+        let mut stamps = Vec::new();
+        for level in [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0] {
+            solution[stimulus] = level;
+            matrix.values_mut().fill(0.0);
+            let mut rhs = vec![0.0; solution.len()];
+            circuit.stamp_transient_linear_direct(&mut matrix, &mut rhs);
+            circuit
+                .stamp_mixed_transient_trial(
+                    &crate::abort_signal::NoAbort,
+                    &mut matrix,
+                    &mut rhs,
+                    1e-9,
+                    1e-9,
+                    &solution,
+                    companion(),
+                    false,
+                    false,
+                )
+                .unwrap();
+            stamps.push((
+                rhs.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
+                matrix
+                    .values_mut()
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        COPY_EVERY_ENDPOINT.with(|flag| flag.set(false));
+        (
+            stamps,
+            crate::xspice::settle_cost::counts().mixed_trial_deep_copies,
+        )
+    };
+    let (copying, copied) = run(true);
+    let (quiet, quiet_copies) = run(false);
+    assert_eq!(
+        quiet, copying,
+        "the quiet settle must stamp what the copying one stamps"
+    );
+    assert!(
+        quiet_copies < copied,
+        "{quiet_copies} copies with quiet endpoints against {copied} without"
     );
 }
 

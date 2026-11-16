@@ -198,12 +198,16 @@ impl MixedDigitalCoordinator {
             .accepted_time
             .ok_or("coordinator has no accepted timepoint")?;
         self.validate_checkpoint_history(time)?;
-        self.digital.validate_checkpoint_time(time)?;
+        let budget = self.checkpoint_budget(limits)?;
+        let digital = self.digital.settled(|digital| {
+            digital.validate_checkpoint_time(time)?;
+            digital.checkpoint(budget)
+        })?;
         Ok(CoordinatorCheckpoint {
             version: 1,
             topology: self.checkpoint_topology()?,
             time: time.to_bits(),
-            digital: self.digital.checkpoint(self.checkpoint_budget(limits)?)?,
+            digital,
             observers: self
                 .accepted_observers
                 .iter()
@@ -253,7 +257,7 @@ impl MixedDigitalCoordinator {
             .collect();
         restored.validate_checkpoint_history(time)?;
         restored.digital =
-            MixedCell::new(self.digital.restored_checkpoint(&image.digital, limits)?);
+            SharedDigital::new(self.digital.restored_checkpoint(&image.digital, limits)?);
         restored.digital.validate_checkpoint_time(time)?;
         restored.enabled = true;
         restored.accepted_time = Some(time);

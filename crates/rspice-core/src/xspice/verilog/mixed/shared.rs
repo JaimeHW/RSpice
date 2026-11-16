@@ -1,5 +1,5 @@
 //! Circuit ownership of digital execution and per-model observation banks.
-use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
+use super::super::host::{DeferredHost, DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
 #[doc(hidden)]
@@ -238,7 +238,7 @@ impl MixedDigital {
 #[derive(Clone)]
 #[doc(hidden)]
 pub struct MixedDigitalCoordinator {
-    digital: MixedCell<DigitalHost>,
+    digital: SharedDigital,
     /// The image the last trial left behind, refilled by the next trial's
     /// first write instead of a fresh copy of the host.
     ///
@@ -345,7 +345,7 @@ impl<'a> CoordinatorFinish<'a> {
 #[doc(hidden)]
 pub struct CoordinatorEquilibriumImage {
     topology: [u8; 32],
-    digital: MixedCell<DigitalHost>,
+    digital: SharedDigital,
     observers: Vec<AbsDeltaState>,
     probes: Vec<Option<f64>>,
 }
@@ -704,7 +704,7 @@ impl MixedDigitalCoordinator {
             } else {
                 probes.clone()
             },
-            digital: MixedCell::new(digital),
+            digital: SharedDigital::new(digital),
             spare: MixedSpare::default(),
             maps,
             instance_of_process,
@@ -798,7 +798,7 @@ impl MixedDigitalCoordinator {
             accepted_observers: vec![AbsDeltaState::default(); self.accepted_observers.len()],
             accepted_observation_probes: vec![None; self.accepted_observation_probes.len()],
             max_interval_events: self.max_interval_events,
-            digital: MixedCell::new(self.digital.fresh()),
+            digital: SharedDigital::new(self.digital.fresh()),
             spare: MixedSpare::default(),
             maps: self.maps.clone(),
             instance_of_process: self.instance_of_process.clone(),
@@ -1333,7 +1333,7 @@ pub struct SharedTrialCursor {
     observation_refinement: Option<f64>,
     /// Work persists across repeated settlement within this trial.
     observation_work: usize,
-    rollback: Option<MixedCell<DigitalHost>>,
+    rollback: Option<SharedDigital>,
     time: f64,
     tick: u64,
     /// The highest tick this trial has published an A/D bank at, carried for
@@ -1352,6 +1352,187 @@ pub struct SharedTrialCursor {
     /// trial's tick when it opened. Read once, at the only instant it is
     /// readable — see `MixedSignalHost::note_scheduled_activation`.
     scheduled_activation: bool,
+}
+
+/// The coordinator's digital host, shared copy-on-write with the trial images
+/// that may restore it, and the event clock a quiet endpoint settle opened
+/// without copying it.
+///
+/// An endpoint settle in which nothing is due writes exactly one thing of the
+/// host's own: the event clock it opens at the trial's endpoint (see
+/// [`DigitalHost::endpoint_settle_is_idle`]). Holding that clock here, beside
+/// the image rather than in it, is what lets such a trial leave the payload a
+/// rollback image shares untouched. The pair is the host: every mutable view
+/// writes the held clock into the image before anything else, every capture
+/// (`Clone`) carries it, and a read of the image that can see the clock goes
+/// through [`Self::settled`].
+#[derive(Clone)]
+pub(crate) struct SharedDigital {
+    image: MixedCell<DigitalHost>,
+    clock: Option<rspice_veriloga::canonical_ir::DigitalClock>,
+}
+
+impl std::ops::Deref for SharedDigital {
+    type Target = DigitalHost;
+
+    #[inline]
+    fn deref(&self) -> &DigitalHost {
+        &self.image
+    }
+}
+
+impl SharedDigital {
+    pub(crate) fn new(host: DigitalHost) -> Self {
+        Self {
+            image: MixedCell::new(host),
+            clock: None,
+        }
+    }
+
+    pub(crate) fn make_mut(&mut self) -> &mut DigitalHost {
+        let host = self.image.make_mut();
+        if let Some(clock) = self.clock.take() {
+            host.adopt_event_clock(clock);
+        }
+        host
+    }
+
+    fn make_mut_recycling(&mut self, spare: &mut MixedSpare<DigitalHost>) -> &mut DigitalHost {
+        let host = self.image.make_mut_recycling(spare);
+        if let Some(clock) = self.clock.take() {
+            host.adopt_event_clock(clock);
+        }
+        host
+    }
+
+    fn retire(self, spare: &mut MixedSpare<DigitalHost>) {
+        self.image.retire(spare);
+    }
+
+    /// Whether a capture still shares the image, so a write would copy it.
+    fn is_shared(&self) -> bool {
+        Arc::strong_count(&self.image.0) > 1
+    }
+
+    /// Read the host with its held clock in place: the image itself when no
+    /// clock is held, otherwise a copy of it with the clock written. Only
+    /// checkpoints read the clock outside a settle.
+    fn settled<R>(&self, read: impl FnOnce(&DigitalHost) -> R) -> R {
+        match self.clock {
+            None => read(&self.image),
+            Some(clock) => {
+                let mut host = DigitalHost::clone(&self.image);
+                host.adopt_event_clock(clock);
+                read(&host)
+            }
+        }
+    }
+}
+
+/// Whether an endpoint settle may leave a shared image uncopied. Tests turn it
+/// off to compare the quiet settle with the copying one it replaces.
+fn quiet_endpoints() -> bool {
+    #[cfg(test)]
+    {
+        !COPY_EVERY_ENDPOINT.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        true
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static COPY_EVERY_ENDPOINT: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Settle an empty analog bank at `tick` through the Active lane, as
+/// [`DigitalHost::force_many_from_analog_with`] does after
+/// [`DigitalHost::sample_analog_probes`], without copying a shared image the
+/// settle leaves as it found it.
+///
+/// Every trial with an event participant runs this at its endpoint, whether
+/// or not anything is due there. When the host is idle at `tick` (see
+/// [`DigitalHost::endpoint_settle_is_idle`]) and the probe bank already holds
+/// `probes`, the participant's wave runs against the shared image through a
+/// deferred exchange. A wave that writes nothing and has nothing more to do
+/// leaves the settle nothing to do either — no dispatch, no region, no dump
+/// record — so what is left of it is the event clock, held beside the image.
+/// Anything else takes the mutable view at that point: the opening writes are
+/// made as the copying settle makes them, and the settle goes on from the
+/// wave's return, so the image it leaves is the copying settle's.
+fn settle_endpoint(
+    digital: &mut SharedDigital,
+    spare: &mut MixedSpare<DigitalHost>,
+    probes: &[Option<f64>],
+    tick: u64,
+    seconds: f64,
+    participant: &mut CircuitAnalogParticipant<'_, '_>,
+) -> Result<(), DigitalRunError> {
+    if !(quiet_endpoints()
+        && digital.is_shared()
+        && digital.endpoint_settle_is_idle(tick)
+        && digital.analog_samples_match(probes))
+    {
+        let host = digital.make_mut_recycling(spare);
+        host.sample_analog_probes(probes);
+        return host.force_many_from_analog_with(&[], tick, seconds, participant);
+    }
+    let mut endpoint = EndpointSettle {
+        digital,
+        spare,
+        probes,
+        tick,
+        seconds,
+        begun: false,
+    };
+    let wave = participant.settle_active(&mut DigitalActiveExchange::deferred(
+        &mut endpoint,
+        tick,
+        seconds,
+    ));
+    match wave {
+        Ok(false) if !endpoint.begun => {
+            endpoint.digital.clock = Some(rspice_veriloga::canonical_ir::DigitalClock {
+                tick,
+                absolute_seconds: seconds,
+            });
+            Ok(())
+        }
+        Ok(more) => endpoint
+            .unique()
+            .resume_endpoint_settle(tick, more, participant),
+        Err(error) => Err(endpoint.unique().fail_endpoint_settle(error)),
+    }
+}
+
+/// The host of an endpoint settle that has not yet written: see
+/// [`settle_endpoint`].
+struct EndpointSettle<'a> {
+    digital: &'a mut SharedDigital,
+    spare: &'a mut MixedSpare<DigitalHost>,
+    probes: &'a [Option<f64>],
+    tick: u64,
+    seconds: f64,
+    /// Whether the mutable view has been taken and the opening writes made.
+    begun: bool,
+}
+
+impl DeferredHost for EndpointSettle<'_> {
+    fn shared(&self) -> &DigitalHost {
+        self.digital
+    }
+
+    fn unique(&mut self) -> &mut DigitalHost {
+        let begun = std::mem::replace(&mut self.begun, true);
+        let host = self.digital.make_mut_recycling(self.spare);
+        if !begun {
+            host.begin_endpoint_settle(self.tick, self.seconds, self.probes);
+        }
+        host
+    }
 }
 
 struct CircuitAnalogParticipant<'a, 'p> {
@@ -1533,12 +1714,14 @@ impl MixedDigitalCoordinator {
             let tick = hdl_tick(wake, |at| at.coincident_ceil_tick(lattice))?
                 .max(cursor.tick)
                 .max(cursor.published_tick);
-            let digital = coordinator
-                .digital
-                .make_mut_recycling(&mut coordinator.spare);
-            digital.sample_analog_probes(&coordinator.probes);
-            let advanced =
-                digital.force_many_from_analog_with(&[], tick, cursor.time, &mut participant);
+            let advanced = settle_endpoint(
+                &mut coordinator.digital,
+                &mut coordinator.spare,
+                &coordinator.probes,
+                tick,
+                cursor.time,
+                &mut participant,
+            );
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
@@ -1571,10 +1754,10 @@ impl MixedDigitalCoordinator {
             solution,
             external: Some(external),
         };
-        let digital = self.digital.make_mut_recycling(&mut self.spare);
-        digital.sample_analog_probes(&self.probes);
-        let result = digital.force_many_from_analog_with(
-            &[],
+        let result = settle_endpoint(
+            &mut self.digital,
+            &mut self.spare,
+            &self.probes,
             cursor.published_tick,
             cursor.time,
             &mut participant,

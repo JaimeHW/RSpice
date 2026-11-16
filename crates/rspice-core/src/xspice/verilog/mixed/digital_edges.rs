@@ -168,7 +168,7 @@ pub(super) fn watch_enrolled(
 
 /// Clear the shared store's latch before a trial images it, so the image a
 /// rejection restores holds no edge either.
-pub(super) fn open_trial(digital: &mut MixedCell<DigitalHost>) {
+pub(super) fn open_trial(digital: &mut super::shared::SharedDigital) {
     if digital.analog_edges().is_raised() {
         digital.make_mut().analog_edges_mut().clear();
     }

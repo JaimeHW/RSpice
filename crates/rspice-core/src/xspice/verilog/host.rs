@@ -71,6 +71,8 @@ mod oscillation;
 mod paths;
 mod repetition;
 mod threads;
+pub(crate) use coupled::DeferredHost;
+use coupled::ExchangeHost;
 use coupled::NoActiveParticipant;
 #[doc(hidden)]
 pub use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
@@ -1319,6 +1321,86 @@ impl DigitalHost {
         result
     }
 
+    /// Whether an endpoint settle at `tick` that publishes no analog bank finds
+    /// nothing of this host's own to do: no process due or deferred, no analog
+    /// waiter, no later region holding work, nothing to dispatch and nothing
+    /// for the dump to record.
+    ///
+    /// What such a settle can still change is what its participant's Active
+    /// wave writes, and the event clock it opens; see
+    /// [`Self::begin_endpoint_settle`].
+    pub(crate) fn endpoint_settle_is_idle(&self, tick: u64) -> bool {
+        self.elaboration_closed
+            && self.instant_of(tick).is_ok()
+            && !self.finished_before(tick)
+            && self.analog_ready.is_none()
+            && self.deferred_start.is_empty()
+            && self.analog_waiters.is_empty()
+            && self.inactive.is_empty()
+            && !self.effects.monitor_region_pending()
+            && self.effects.end_of_step_is_idle()
+            && self.store.dispatch_is_idle()
+    }
+
+    /// The writes an endpoint settle that publishes no analog bank makes before
+    /// its participant's first Active wave, made as
+    /// [`Self::force_many_from_analog_at`] and [`Self::settle_with`] make them
+    /// on an idle host: the probe bank, the event clock at `seconds`, and the
+    /// Active-lane markers. The dispatch between them has nothing to do.
+    pub(crate) fn begin_endpoint_settle(
+        &mut self,
+        tick: u64,
+        seconds: f64,
+        probes: &[Option<f64>],
+    ) {
+        debug_assert!(self.endpoint_settle_is_idle(tick));
+        self.store.sample_analog_probes(probes);
+        self.store
+            .set_activation_clock(rspice_veriloga::canonical_ir::DigitalClock {
+                tick,
+                absolute_seconds: seconds,
+            });
+        self.analog_ready = Some(Vec::new());
+        self.analog_activation_seconds = Some(seconds);
+        self.analog_exchange_seconds = Some(seconds);
+    }
+
+    /// Finish an endpoint settle begun by [`Self::begin_endpoint_settle`] whose
+    /// first Active wave already ran, returning `more`: the rest of the
+    /// settle, its error reporting and its closing writes, exactly as
+    /// [`Self::force_many_from_analog_with`] makes them.
+    pub(crate) fn resume_endpoint_settle(
+        &mut self,
+        tick: u64,
+        more: bool,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
+    ) -> Result<(), DigitalRunError> {
+        let mut fired = std::mem::take(&mut self.fired);
+        fired.clear();
+        let outcome = self.settle_into(tick, &mut fired, participant, Some(more));
+        fired.clear();
+        self.fired = fired;
+        self.checkpoint_failed |= outcome.is_err();
+        let result = outcome.map_err(|error| self.explain_oscillation(error));
+        self.end_endpoint_settle();
+        result
+    }
+
+    /// Report an error the first Active wave of an endpoint settle begun by
+    /// [`Self::begin_endpoint_settle`] raised, as the settle reports one.
+    pub(crate) fn fail_endpoint_settle(&mut self, error: DigitalRunError) -> DigitalRunError {
+        self.checkpoint_failed = true;
+        let error = self.explain_oscillation(error);
+        self.end_endpoint_settle();
+        error
+    }
+
+    fn end_endpoint_settle(&mut self) {
+        self.analog_ready = None;
+        self.analog_activation_seconds = None;
+        self.analog_exchange_seconds = None;
+    }
+
     /// Publish one converged analog solution's probe values into the store.
     ///
     /// Call this immediately before anything that can run a process, so that
@@ -1328,6 +1410,16 @@ impl DigitalHost {
     /// through a settle would give two processes in one slot two answers.
     pub(crate) fn sample_analog_probes(&mut self, values: &[Option<f64>]) {
         self.store.sample_analog_probes(values);
+    }
+
+    /// Whether [`Self::sample_analog_probes`] with `values` changes nothing.
+    pub(crate) fn analog_samples_match(&self, values: &[Option<f64>]) -> bool {
+        self.store.analog_samples_match(values)
+    }
+
+    /// Write the event clock an endpoint settle left outside the image.
+    pub(crate) fn adopt_event_clock(&mut self, clock: rspice_veriloga::canonical_ir::DigitalClock) {
+        self.store.set_activation_clock(clock);
     }
 
     /// Write a real net from outside the design and settle the consequences.
@@ -1395,99 +1487,35 @@ impl DigitalHost {
         // whole host — cannot hold a borrow of the drain buffer, and put back
         // on the way out so the next tick reuses its capacity.
         let mut fired = std::mem::take(&mut self.fired);
-        let outcome = self.settle_into(tick, &mut fired, participant);
+        let outcome = self.settle_into(tick, &mut fired, participant, None);
         fired.clear();
         self.fired = fired;
         self.checkpoint_failed |= outcome.is_err();
         outcome.map_err(|error| self.explain_oscillation(error))
     }
 
+    /// `resumed` carries what the participant returned when the first pass's
+    /// Active wave already ran outside this call; see
+    /// [`Self::resume_endpoint_settle`].
     fn settle_into(
         &mut self,
         tick: u64,
         fired: &mut Vec<TargetId>,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
+        mut resumed: Option<bool>,
     ) -> Result<(), DigitalRunError> {
         let bound = self.instant_of(tick)?;
         let resolution = self.resolution;
         let mut search = RepetitionSearch::default();
         loop {
-            fired.clear();
-            if let Some(ready) = self.analog_ready.as_mut() {
-                fired.append(ready);
-                for target in fired.iter() {
-                    self.scheduler
-                        .note_external_activation(bound, *target)
-                        .map_err(|error| name_oscillating_tick(resolution, error))?;
-                }
-            } else {
-                self.scheduler
-                    .run_due_event_targets(bound, fired)
-                    .map_err(|error| name_oscillating_tick(resolution, error))?;
-            }
-
-            if !fired.is_empty() {
-                // Read rather than drained: the buffer belongs to the caller,
-                // which is what lets it be reused across delta cycles, and it
-                // is reachable from neither `self` nor the kernel while a
-                // process runs.
-                for target in fired.iter() {
-                    if *target == self.nba_target {
-                        while self
-                            .delayed_updates
-                            .first_key_value()
-                            .is_some_and(|(due, _)| *due <= tick)
-                        {
-                            let (_, updates) = self.delayed_updates.pop_first().unwrap();
-                            for update in updates {
-                                self.store.release_delayed_update(update);
-                            }
-                        }
-                        continue;
-                    }
-                    if self
-                        .charge
-                        .as_ref()
-                        .is_some_and(|timers| timers.target == *target)
-                    {
-                        self.fire_charge(tick)?;
-                        continue;
-                    }
-                    if self
-                        .pending
-                        .as_ref()
-                        .is_some_and(|pending| pending.target == *target)
-                    {
-                        self.fire_pending_drives(tick)?;
-                        continue;
-                    }
-                    if self.check_timer == Some(*target) {
-                        self.fire_check_timers(tick)?;
-                        continue;
-                    }
-                    let index = self.process_of_target[usize::from(*target)];
-                    if self.withdrawn.remove(&index) {
-                        continue;
-                    }
-                    self.run_process(index, tick)?;
-                    self.dispatch(tick)?;
-                }
-                self.withdrawn.clear();
-            }
-
-            // External Active work and its HDL consequences must quiet before
-            // inactive or nonblocking work may advance. A participant returns
-            // after one wave, so feedback through HDL can interrupt its settle.
-            self.set_event_clock(tick, None)?;
             // The participant's own time base, not the event clock's: it is
             // assembling a continuous candidate, and the only instant it has a
             // solution for is the analog endpoint.
             let physical_seconds = self.analog_exchange_seconds.unwrap_or(bound.seconds());
-            let more = participant.settle_active(&mut DigitalActiveExchange {
-                host: self,
-                tick,
-                physical_seconds,
-            })?;
+            let more = match resumed.take() {
+                Some(more) => more,
+                None => self.settle_wave(tick, bound, fired, participant, physical_seconds)?,
+            };
             self.dispatch(tick)?;
             let active = match &self.analog_ready {
                 Some(ready) => !ready.is_empty(),
@@ -1505,7 +1533,7 @@ impl DigitalHost {
                     }
                 } else if !self.analog_waiters.is_empty() {
                     participant.sample_analog(&mut DigitalActiveExchange {
-                        host: self,
+                        host: ExchangeHost::Owned(self),
                         tick,
                         physical_seconds,
                     })?;
@@ -1550,6 +1578,92 @@ impl DigitalHost {
                 return Err(name_oscillating_tick(resolution, error).into());
             }
         }
+    }
+
+    /// One pass's due work and the participant's Active wave: everything a
+    /// settle pass does before it dispatches what the wave changed. Returns
+    /// whether the participant has more to do.
+    fn settle_wave(
+        &mut self,
+        tick: u64,
+        bound: Instant,
+        fired: &mut Vec<TargetId>,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
+        physical_seconds: f64,
+    ) -> Result<bool, DigitalRunError> {
+        let resolution = self.resolution;
+        fired.clear();
+        if let Some(ready) = self.analog_ready.as_mut() {
+            fired.append(ready);
+            for target in fired.iter() {
+                self.scheduler
+                    .note_external_activation(bound, *target)
+                    .map_err(|error| name_oscillating_tick(resolution, error))?;
+            }
+        } else {
+            self.scheduler
+                .run_due_event_targets(bound, fired)
+                .map_err(|error| name_oscillating_tick(resolution, error))?;
+        }
+
+        if !fired.is_empty() {
+            // Read rather than drained: the buffer belongs to the caller,
+            // which is what lets it be reused across delta cycles, and it
+            // is reachable from neither `self` nor the kernel while a
+            // process runs.
+            for target in fired.iter() {
+                if *target == self.nba_target {
+                    while self
+                        .delayed_updates
+                        .first_key_value()
+                        .is_some_and(|(due, _)| *due <= tick)
+                    {
+                        let (_, updates) = self.delayed_updates.pop_first().unwrap();
+                        for update in updates {
+                            self.store.release_delayed_update(update);
+                        }
+                    }
+                    continue;
+                }
+                if self
+                    .charge
+                    .as_ref()
+                    .is_some_and(|timers| timers.target == *target)
+                {
+                    self.fire_charge(tick)?;
+                    continue;
+                }
+                if self
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.target == *target)
+                {
+                    self.fire_pending_drives(tick)?;
+                    continue;
+                }
+                if self.check_timer == Some(*target) {
+                    self.fire_check_timers(tick)?;
+                    continue;
+                }
+                let index = self.process_of_target[usize::from(*target)];
+                if self.withdrawn.remove(&index) {
+                    continue;
+                }
+                self.run_process(index, tick)?;
+                self.dispatch(tick)?;
+            }
+            self.withdrawn.clear();
+        }
+
+        // External Active work and its HDL consequences must quiet before
+        // inactive or nonblocking work may advance. A participant returns
+        // after one wave, so feedback through HDL can interrupt its settle.
+        self.set_event_clock(tick, None)?;
+        participant.settle_active(&mut DigitalActiveExchange {
+            host: ExchangeHost::Owned(self),
+            tick,
+            physical_seconds,
+        })
     }
 
     /// Promote the earliest non-empty region after the active one.

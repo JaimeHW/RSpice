@@ -98,9 +98,58 @@ pub trait DigitalActiveParticipant {
 /// its enrolled outputs, but cannot advance HDL time or promote a later region.
 #[doc(hidden)]
 pub struct DigitalActiveExchange<'a> {
-    pub(super) host: &'a mut DigitalHost,
+    pub(super) host: ExchangeHost<'a>,
     pub(super) tick: u64,
     pub(super) physical_seconds: f64,
+}
+
+/// The host an exchange reads and writes: one already taken mutably, or one a
+/// rollback image may still share, taken mutably only by the first write.
+///
+/// A participant that only reads — a converter whose inputs did not cross —
+/// then leaves the shared image as it found it, and the trial copies nothing.
+pub(crate) enum ExchangeHost<'a> {
+    Owned(&'a mut DigitalHost),
+    Deferred(&'a mut dyn DeferredHost),
+}
+
+/// A host whose mutable view is taken on demand; see [`ExchangeHost`].
+pub(crate) trait DeferredHost {
+    fn shared(&self) -> &DigitalHost;
+    /// The host as the settle would hold it at this point: the image copied
+    /// if a capture still shares it, and the settle's own opening writes made.
+    fn unique(&mut self) -> &mut DigitalHost;
+}
+
+impl<'a> DigitalActiveExchange<'a> {
+    /// An exchange whose host is taken mutably only by the first write.
+    pub(crate) fn deferred(
+        host: &'a mut dyn DeferredHost,
+        tick: u64,
+        physical_seconds: f64,
+    ) -> Self {
+        Self {
+            host: ExchangeHost::Deferred(host),
+            tick,
+            physical_seconds,
+        }
+    }
+}
+
+impl ExchangeHost<'_> {
+    fn get(&self) -> &DigitalHost {
+        match self {
+            Self::Owned(host) => host,
+            Self::Deferred(host) => host.shared(),
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut DigitalHost {
+        match self {
+            Self::Owned(host) => host,
+            Self::Deferred(host) => host.unique(),
+        }
+    }
 }
 
 impl DigitalActiveExchange<'_> {
@@ -110,33 +159,36 @@ impl DigitalActiveExchange<'_> {
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
     ) -> Result<(), DigitalRunError> {
-        self.host.check_forces(drives)?;
+        self.host.get().check_forces(drives)?;
+        if drives.is_empty() {
+            return Ok(());
+        }
+        let host = self.host.get_mut();
         for (signal, value) in drives {
-            self.host
-                .store
-                .force(*signal, value.clone(), &self.host.plan)?;
+            host.store.force(*signal, value.clone(), &host.plan)?;
         }
         Ok(())
     }
 
     pub(crate) fn require_standalone_execution(&self) -> Result<(), DigitalRunError> {
-        self.host.require_standalone_execution()
+        self.host.get().require_standalone_execution()
     }
     pub(crate) fn read_signal(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
-        self.host.read(signal)
+        self.host.get().read(signal)
     }
 
     #[doc(hidden)]
     pub fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
-        self.host.read_real(signal)
+        self.host.get().read_real(signal)
     }
     pub(crate) fn analog_edge(&self, signal: DigitalSignalId) -> u8 {
-        self.host.analog_edges().seen(signal)
+        self.host.get().analog_edges().seen(signal)
     }
     pub(crate) fn analog_sample_requests(&self) -> Vec<DigitalAnalogProbeId> {
         let mut probes = BTreeSet::new();
-        for index in &self.host.analog_waiters {
-            if let ProcessStatus::AwaitingAnalog(probe) = self.host.slots[*index].status {
+        let host = self.host.get();
+        for index in &host.analog_waiters {
+            if let ProcessStatus::AwaitingAnalog(probe) = host.slots[*index].status {
                 probes.insert(probe);
             }
         }
@@ -151,27 +203,30 @@ impl DigitalActiveExchange<'_> {
         use rspice_veriloga::canonical_ir::digital::DigitalAnalogQuantity;
         let mut seen = BTreeSet::new();
         for &(id, value) in samples {
-            let valid = self
-                .host
-                .plan
-                .analog_probe(id)
-                .is_some_and(|probe| match probe.quantity {
-                    DigitalAnalogQuantity::RealVariable => value.is_finite(),
-                    DigitalAnalogQuantity::IntegerVariable => {
-                        value.is_finite()
-                            && value.fract() == 0.0
-                            && value >= i32::MIN as f64
-                            && value <= i32::MAX as f64
-                    }
-                    _ => false,
-                });
+            let valid =
+                self.host
+                    .get()
+                    .plan
+                    .analog_probe(id)
+                    .is_some_and(|probe| match probe.quantity {
+                        DigitalAnalogQuantity::RealVariable => value.is_finite(),
+                        DigitalAnalogQuantity::IntegerVariable => {
+                            value.is_finite()
+                                && value.fract() == 0.0
+                                && value >= i32::MIN as f64
+                                && value <= i32::MAX as f64
+                        }
+                        _ => false,
+                    });
             if !valid || !seen.insert(id) {
                 return Err(DigitalRunError::ExternalExecution {
                     detail: format!("invalid or repeated analog-variable sample {id}: {value}"),
                 });
             }
         }
-        self.host.store.sample_analog_variables(samples);
+        if !samples.is_empty() {
+            self.host.get_mut().store.sample_analog_variables(samples);
+        }
         Ok(())
     }
     #[cfg(test)]
@@ -185,12 +240,11 @@ impl DigitalActiveExchange<'_> {
     }
     #[doc(hidden)]
     pub fn read_net(&self, net: usize) -> Result<DigitalValue, DigitalRunError> {
-        self.host
-            .store
-            .connected_value(net)
-            .ok_or_else(|| DigitalRunError::ExternalExecution {
+        self.host.get().store.connected_value(net).ok_or_else(|| {
+            DigitalRunError::ExternalExecution {
                 detail: format!("unknown shared digital net {net}"),
-            })
+            }
+        })
     }
     /// What a converter on the shared net `net` converts, at its strength
     /// levels: the design's drive with every XSPICE driver of the net but
@@ -201,37 +255,44 @@ impl DigitalActiveExchange<'_> {
         net: usize,
         excluded: &[ExternalBitDriverId],
     ) -> Option<crate::xspice::verilog::store::BitDrive> {
-        self.host.store.connected_drive(net, excluded)
+        self.host.get().store.connected_drive(net, excluded)
     }
     #[doc(hidden)]
     pub fn read_other_drivers(
         &self,
         driver: ExternalBitDriverId,
     ) -> Result<DigitalValue, DigitalRunError> {
-        self.host.store.other_driver_value(driver).ok_or_else(|| {
-            DigitalRunError::ExternalExecution {
+        self.host
+            .get()
+            .store
+            .other_driver_value(driver)
+            .ok_or_else(|| DigitalRunError::ExternalExecution {
                 detail: format!("unknown external bit observer {}", driver.index()),
-            }
-        })
+            })
     }
     /// Whether the net a receiving real driver samples into is driven by its
     /// own drivers.
     #[doc(hidden)]
     pub fn read_real_drive(&self, driver: ExternalRealDriverId) -> Result<bool, DigitalRunError> {
-        self.host.store.real_fallback_driven(driver).ok_or_else(|| {
-            DigitalRunError::ExternalExecution {
+        self.host
+            .get()
+            .store
+            .real_fallback_driven(driver)
+            .ok_or_else(|| DigitalRunError::ExternalExecution {
                 detail: format!("unknown receiving real driver {}", driver.index()),
-            }
-        })
+            })
     }
     #[cfg(test)]
     #[doc(hidden)]
     pub fn take_changes(&mut self) -> Vec<DigitalBitChange> {
-        self.host.store.take_external_bit_changes()
+        self.host.get_mut().store.take_external_bit_changes()
     }
     #[doc(hidden)]
     pub fn take_event_changes(&mut self) -> Vec<ExternalNetChange> {
-        self.host.store.take_external_changes()
+        if !self.host.get().store.has_external_changes() {
+            return Vec::new();
+        }
+        self.host.get_mut().store.take_external_changes()
     }
     #[cfg(test)]
     #[doc(hidden)]
@@ -247,29 +308,34 @@ impl DigitalActiveExchange<'_> {
         drives: &[(ExternalBitDriverId, DigitalValue)],
         reals: &[(ExternalRealDriverId, f64)],
     ) -> Result<(), DigitalRunError> {
-        self.host
+        let shared = self.host.get();
+        shared
             .store
             .check_external_drives(drives)
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
-        self.host
+        shared
             .store
             .check_external_real_drives(reals)
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
-        let at = self.host.instant_of(self.tick)?;
-        let resolution = self.host.resolution;
+        // An empty bank publishes nothing and activates nothing.
+        if drives.is_empty() && reals.is_empty() {
+            return Ok(());
+        }
+        let tick = self.tick;
+        let host = self.host.get_mut();
+        let at = host.instant_of(tick)?;
+        let resolution = host.resolution;
         for (driver, _) in drives {
-            self.host
-                .scheduler
-                .note_external_activation(at, self.host.external_targets[driver.index()])
+            host.scheduler
+                .note_external_activation(at, host.external_targets[driver.index()])
                 .map_err(|error| super::name_oscillating_tick(resolution, error))?;
         }
         for (driver, _) in reals {
-            self.host
-                .scheduler
-                .note_external_activation(at, self.host.external_real_targets[driver.index()])
+            host.scheduler
+                .note_external_activation(at, host.external_real_targets[driver.index()])
                 .map_err(|error| super::name_oscillating_tick(resolution, error))?;
         }
-        self.host.store.publish_external_bank(drives, reals);
+        host.store.publish_external_bank(drives, reals);
         Ok(())
     }
 }
@@ -284,7 +350,7 @@ impl DigitalActiveParticipant for NoActiveParticipant {
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError> {
-        exchange.host.require_standalone_execution()?;
+        exchange.host.get().require_standalone_execution()?;
         Ok(false)
     }
 }

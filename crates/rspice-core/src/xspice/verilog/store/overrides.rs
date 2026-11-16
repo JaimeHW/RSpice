@@ -573,6 +573,11 @@ impl DigitalSignalStore {
         Ok(())
     }
 
+    /// Whether [`Self::settle_overrides`] has nothing to re-evaluate.
+    pub(super) fn overrides_settled(&self) -> bool {
+        self.overrides.pending.is_empty() && self.overrides.error.is_none()
+    }
+
     /// The override layer for the host image's `forces` section; `None`
     /// when nothing is overridden.
     pub(crate) fn checkpoint_overrides(&self) -> Result<Option<OverridesImage>, String> {

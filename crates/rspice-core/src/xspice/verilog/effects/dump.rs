@@ -1282,6 +1282,16 @@ impl HdlEffects {
         self.dump_write(plan, site, clock, text);
     }
 
+    /// Whether [`Self::end_of_step`] would leave everything as it is.
+    pub(crate) fn end_of_step_is_idle(&self) -> bool {
+        self.traced.dirty.is_empty()
+            && match self.dump.phase {
+                DumpPhase::Selecting(_) => false,
+                DumpPhase::Dumping => self.dump.dirty.is_empty(),
+                DumpPhase::Idle | DumpPhase::Stopped => true,
+            }
+    }
+
     /// The end of a time step: write the header once the selection's step
     /// ends, and every change after it; and publish the traced variables
     /// that changed.

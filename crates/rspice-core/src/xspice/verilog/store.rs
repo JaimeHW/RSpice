@@ -906,6 +906,43 @@ impl DigitalSignalStore {
         }
     }
 
+    /// Whether [`Self::sample_analog_probes`] with `values` would leave the
+    /// bank exactly as it is.
+    pub(crate) fn analog_samples_match(&self, values: &[Option<f64>]) -> bool {
+        values.len() == self.analog_samples.len()
+            && self
+                .analog_samples
+                .iter()
+                .zip(values)
+                .enumerate()
+                .all(|(index, (held, value))| {
+                    let sampled = if self
+                        .analog_variable_probes
+                        .iter()
+                        .any(|id| usize::from(*id) == index)
+                    {
+                        None
+                    } else {
+                        *value
+                    };
+                    held.map(f64::to_bits) == sampled.map(f64::to_bits)
+                })
+    }
+
+    /// Whether a host's dispatch round would find nothing pending: no
+    /// transition, deferred update, override, charge or delay request, and no
+    /// error waiting to be reported.
+    pub(crate) fn dispatch_is_idle(&self) -> bool {
+        self.sequence.is_some()
+            && self.transitions.is_empty()
+            && self.expression_error.is_none()
+            && self.deferred.is_empty()
+            && self.overrides_settled()
+            && !self.has_charge_refusal()
+            && !self.has_charge_changes()
+            && !self.has_delay_requests()
+    }
+
     pub(crate) fn sample_analog_variables(&mut self, samples: &[(DigitalAnalogProbeId, f64)]) {
         for &(id, value) in samples {
             self.analog_samples[usize::from(id)] = Some(value);

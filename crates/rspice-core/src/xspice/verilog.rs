@@ -94,6 +94,8 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
+#[cfg(test)]
+pub(crate) use mixed::COPY_EVERY_ENDPOINT;
 #[doc(hidden)]
 pub use mixed::checkpoint as participant_checkpoint;
 #[doc(hidden)]
