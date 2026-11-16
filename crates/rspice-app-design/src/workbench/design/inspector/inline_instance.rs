@@ -755,7 +755,7 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
 
     section_header(ui, "Net identity", None);
     property_row(ui, "Scope", &scope);
-    property_row(ui, "Kind", domain.label());
+    property_row(ui, "Kind", &net.kind_label());
     if let Some(declaration) = &off_sheet {
         property_row(
             ui,

@@ -90,6 +90,32 @@ impl DesignNet {
     pub const fn is_port(&self) -> bool {
         self.port.is_some()
     }
+
+    /// `true` when the net is one pin that nothing reaches: no wire, no other
+    /// pin, no port, no name. The design check finds that pin not connected,
+    /// and the deck gives it a node of its own.
+    pub fn is_unconnected_pin(&self) -> bool {
+        self.class != NetClass::Ground
+            && self.port.is_none()
+            && !self.authored_name
+            && self.wire_ids.is_empty()
+            && self.terminals.len() == 1
+    }
+
+    /// The words the net's kind is shown in. A pin nothing reaches shows what
+    /// the pin carries and that it is not connected, as the design check
+    /// words it, rather than the converter a run would give its lone node.
+    pub fn kind_label(&self) -> std::borrow::Cow<'static, str> {
+        if !self.is_unconnected_pin() {
+            return self.domain.label().into();
+        }
+        let carrier = match self.domain {
+            NetDomain::Logic | NetDomain::Mixed(EventOnlyNetKind::Digital) => PortCarrier::Logic,
+            NetDomain::Real | NetDomain::Mixed(EventOnlyNetKind::Real) => PortCarrier::Real,
+            NetDomain::Electrical | NetDomain::LogicAndReal => PortCarrier::Electrical,
+        };
+        format!("{} · not connected", carrier.label()).into()
+    }
 }
 
 /// Live net summary: connectivity + ports + labels + ground, no instance

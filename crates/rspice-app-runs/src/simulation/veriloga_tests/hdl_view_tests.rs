@@ -699,7 +699,7 @@ fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
 
 /// Each net's kind as the rail and the net inspector read it: from the
 /// configured design, before anything has run.
-fn net_kinds(state: &RunTestHost) -> Vec<(String, &'static str)> {
+fn net_kinds(state: &RunTestHost) -> Vec<(String, String)> {
     let model = &state.model;
     let projection = model
         .workspace
@@ -715,7 +715,7 @@ fn net_kinds(state: &RunTestHost) -> Vec<(String, &'static str)> {
         &model.workspace.content.active_view.key(),
     )
     .iter()
-    .map(|net| (net.name.to_ascii_lowercase(), net.domain.label()))
+    .map(|net| (net.name.to_ascii_lowercase(), net.kind_label().into_owned()))
     .collect()
 }
 
@@ -727,11 +727,11 @@ fn net_kinds(state: &RunTestHost) -> Vec<(String, &'static str)> {
 fn a_net_reads_its_kind_before_a_run() {
     let mut state = design();
     let kinds = net_kinds(&state);
-    let kind = |kinds: &[(String, &'static str)], name: &str| {
+    let kind = |kinds: &[(String, String)], name: &str| {
         kinds
             .iter()
             .find(|(net, _)| net == name)
-            .map(|(_, kind)| *kind)
+            .map(|(_, kind)| kind.clone())
             .unwrap_or_else(|| panic!("no net {name} in {kinds:?}"))
     };
     assert_eq!(kind(&kinds, "d"), "logic", "{kinds:?}");
@@ -749,8 +749,34 @@ fn a_net_reads_its_kind_before_a_run() {
     let kinds = net_kinds(&state);
     assert_eq!(kind(&kinds, "d"), "mixed (converter at run)", "{kinds:?}");
 
-    let kinds = net_kinds(&bus_design());
+    let mut state = bus_design();
+    let kinds = net_kinds(&state);
     assert_eq!(kind(&kinds, "mode#1"), "logic", "{kinds:?}");
     assert_eq!(kind(&kinds, "mode#0"), "logic", "{kinds:?}");
     assert_eq!(kind(&kinds, "p"), "electrical", "{kinds:?}");
+
+    // A bus pin nothing reaches is a logic pin that is not connected, as
+    // the design check words it, not a net with a converter on it.
+    let moded = CellViewRef::new(LIBRARY, "moded", ViewType::VerilogAms.display_name());
+    let open = place(
+        &mut state,
+        &moded,
+        "XO",
+        Point::new(900, 300),
+        &[("p", "p"), ("n", "0")],
+    );
+    assert_eq!(open.len(), 1, "{open:?}");
+    state.sync_active_schematic_to_workspace();
+    let added: Vec<_> = net_kinds(&state)
+        .into_iter()
+        .filter(|net| !kinds.contains(net))
+        .collect();
+    assert_eq!(
+        added
+            .iter()
+            .map(|(_, kind)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["logic · not connected"],
+        "{added:?}"
+    );
 }
