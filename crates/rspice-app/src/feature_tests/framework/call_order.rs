@@ -508,8 +508,8 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     (
         "7.1",
         &[
-            "|app, OpenInVerify { page, specification, }|",
-            "open_in_verify(app, page, specification)",
+            "|app, OpenInVerify { page, specification, check, }|",
+            "open_in_verify(app, page, specification, check)",
         ],
     ),
     (

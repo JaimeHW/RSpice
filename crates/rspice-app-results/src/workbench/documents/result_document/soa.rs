@@ -205,7 +205,18 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
     state.results.session.soa_rule_filter = response.filter;
     if response.open_check {
-        super::open_in_verify(state, crate::state::VerificationPage::Checks, None);
+        let check = response
+            .selection
+            .as_ref()
+            .and_then(|selection| verify_check(&state.model.simulation, selection));
+        state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::OpenInVerify {
+                page: crate::state::VerificationPage::Checks,
+                specification: None,
+                check,
+            });
     }
     state.results.session.soa_stress_trace_open = response.trace_open;
     if response.selection != state.results.session.selected_soa_rule {
@@ -220,6 +231,23 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if let Some(selection) = response.cross_probe {
         apply_schematic_cross_probe(state, &selection);
     }
+}
+
+/// The check Verify lists for the rule `selection` names, when it is a rule
+/// of the analysis on screen: the Checks view knows a check by its analysis's
+/// place in the run, its device and its parameter.
+fn verify_check(
+    simulation: &crate::state::SimulationState,
+    selection: &SoaRuleSelection,
+) -> Option<crate::workbench::framework::requests::SoaCheckRef> {
+    let run = simulation.active_run()?;
+    let analysis = simulation.view.active_analysis_idx?;
+    let shown = AnalysisPresentationKey::new(run.dataset_id, run.analyses.get(analysis)?);
+    (shown == selection.analysis).then(|| crate::workbench::framework::requests::SoaCheckRef {
+        analysis,
+        device: selection.device_id.clone(),
+        parameter: selection.parameter,
+    })
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
@@ -371,6 +399,38 @@ mod tests {
     pub(super) fn active_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
         let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    /// A rule's limit line names the check Verify lists for it: the shown
+    /// analysis's place in the run, the device and the parameter. A rule of
+    /// another analysis names none.
+    #[test]
+    fn a_limit_line_names_the_check_verify_lists() {
+        let mut state = soa_state(2, 32, 3.0);
+        let mut donor = soa_state(1, 8, 3.0);
+        let second = donor.model.simulation.retained.runs[0].analyses.remove(0);
+        state.model.simulation.retained.runs[0].add_analysis(second);
+        let selection = |analysis| SoaRuleSelection {
+            analysis,
+            device_id: "M0001".to_owned(),
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+        };
+        assert_eq!(
+            verify_check(&state.model.simulation, &selection(active_key(&state))),
+            Some(crate::workbench::framework::requests::SoaCheckRef {
+                analysis: 0,
+                device: "M0001".to_owned(),
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+            })
+        );
+        let other = {
+            let run = state.model.simulation.active_run().expect("retained run");
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1])
+        };
+        assert_eq!(
+            verify_check(&state.model.simulation, &selection(other)),
+            None
+        );
     }
 
     #[test]

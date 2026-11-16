@@ -380,7 +380,8 @@ impl RSpiceApp {
              OpenInVerify {
                  page,
                  specification,
-             }| open_in_verify(app, page, specification),
+                 check,
+             }| open_in_verify(app, page, specification, check),
         );
         requests::drain(
             self,

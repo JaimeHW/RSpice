@@ -592,6 +592,7 @@ pub(super) fn open_in_verify(
         .push(crate::workbench::framework::requests::OpenInVerify {
             page,
             specification,
+            check: None,
         });
 }
 

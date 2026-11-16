@@ -178,6 +178,94 @@ fn corners_keeps_its_summary_in_view_on_a_wide_run() {
     }
 }
 
+/// An SOA rule's limit line in Results opens Verify's Checks view with that
+/// rule's check selected, as a specification's limit line selects its
+/// specification, showing every check again when the violations filter hid
+/// it. A check the run does not hold is said, and selects nothing.
+#[test]
+fn an_soa_limit_line_selects_its_check_in_verify() {
+    use super::verify_fixtures::soa_app;
+    use rspice_app_simulate::workbench::surfaces::verify::raster::VerifyStage as _;
+    use rspice_app_simulate::workbench::surfaces::verify::raster::{page_input, page_pass};
+    use rspice_app_state::state::{AnalysisResultPayload, SoaParameterEvidence};
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::requests::{OpenInVerify, SoaCheckRef};
+
+    let mut app = soa_app();
+    app.state.workbench.activate(Workspace::Results);
+    app.state.simulate.verification.checks_violations_only = true;
+    let analysis = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("the SOA run")
+        .analyses
+        .iter()
+        .position(|analysis| {
+            matches!(
+                analysis.result_payload,
+                Some(AnalysisResultPayload::Soa { .. })
+            )
+        })
+        .expect("an SOA analysis");
+    let follow = |app: &mut RSpiceApp, device: &str| {
+        app.state.workbench.outbox.push(OpenInVerify {
+            page: VerificationPage::Checks,
+            specification: None,
+            check: Some(SoaCheckRef {
+                analysis,
+                device: device.to_owned(),
+                parameter: SoaParameterEvidence::DrainCurrent,
+            }),
+        });
+        app.after_contribution();
+        assert_eq!(app.state.workbench.workspace, Workspace::Verify);
+        assert_eq!(
+            app.state.simulate.verification_page,
+            VerificationPage::Checks
+        );
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut selected = Vec::new();
+        for _ in 0..2 {
+            let (output, _) = page_pass(&ctx, page_input(Vec::new()), |ui| app.draw(ui));
+            selected = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                // A selected row is announced toggled on.
+                .filter(|(_, node)| node.toggled() == Some(egui::accesskit::Toggled::True))
+                .filter_map(|(_, node)| node.label().map(str::to_owned))
+                .collect::<Vec<_>>();
+        }
+        selected
+    };
+
+    // M4's drain current passes, so the violations filter hid its row.
+    let selected = follow(&mut app, "M4");
+    assert!(!app.state.simulate.verification.checks_violations_only);
+    assert!(
+        matches!(selected.as_slice(), [row] if row.contains("M4") && row.contains("ID max")),
+        "{selected:?}"
+    );
+
+    let selected = follow(&mut app, "M9");
+    assert!(
+        app.state
+            .prompt_text()
+            .is_some_and(|text| text.contains("M9")),
+        "a check the run does not hold is said"
+    );
+    assert!(
+        matches!(selected.as_slice(), [row] if row.contains("M4")),
+        "and the selection stays: {selected:?}"
+    );
+}
+
 /// A stored session reopens on the Verify view it was left on, stored and
 /// read back the way the application does it.
 #[test]

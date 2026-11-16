@@ -80,6 +80,24 @@ fn phone_width(ctx: &egui::Context) -> bool {
     WidthClass::for_width(ctx.content_rect().width()) == WidthClass::Phone
 }
 
+/// Select in the Checks view the SOA check `check` names, as a result's
+/// limit line asks; when the run Verify reads holds no such check, say so.
+pub fn select_soa_check(
+    model: &Model,
+    simulate: &mut SimulateState,
+    check: &crate::workbench::framework::requests::SoaCheckRef,
+) -> Result<(), String> {
+    if checks::select_soa_check(model, &mut simulate.verification, check) {
+        Ok(())
+    } else {
+        Err(format!(
+            "This run holds no {} check on {}.",
+            soa_parameter_display(check.parameter),
+            check.device
+        ))
+    }
+}
+
 /// The run the plan compares other runs against, by its identity.
 pub fn reference_run(model: &Model, simulate: &SimulateState) -> Option<crate::product::RunId> {
     active_regression_baseline(model, simulate)

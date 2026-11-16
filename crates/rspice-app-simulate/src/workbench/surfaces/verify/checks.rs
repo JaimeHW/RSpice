@@ -17,7 +17,7 @@ use super::table::{Cell, Column, ContextRequest, DataTable, RowKey, SortKey, Ver
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, action_menu, empty_line};
 use super::*;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::requests::RevealExecutedDeck;
+use crate::workbench::framework::requests::{RevealExecutedDeck, SoaCheckRef};
 use crate::workbench::state::CheckRowOrder;
 
 /// The toolbar's one action.
@@ -129,6 +129,42 @@ pub(crate) fn selected_check<'m>(
     }
     let index = *order.rows.get(session.checks_table.selected_row()?)?;
     model.simulation.verification_checks().rows.get(index)
+}
+
+/// Select the SOA check `check` names in the Checks view, showing every check
+/// again when the violations filter hides it. Whether the run Verify reads
+/// holds that check; when it does not, the selection is left as it was.
+pub(crate) fn select_soa_check(
+    model: &Model,
+    session: &mut VerificationSessionState,
+    check: &SoaCheckRef,
+) -> bool {
+    let checks = model.simulation.verification_checks();
+    let Some(index) = checks.rows.iter().position(|row| {
+        row.analysis == check.analysis
+            && matches!(&row.check, Check::Soa(soa)
+                if soa.device == check.device && soa.parameter == check.parameter)
+    }) else {
+        return false;
+    };
+    if session.checks_violations_only && !checks.rows[index].status.is_violation() {
+        session.checks_violations_only = false;
+    }
+    let revision = model.simulation.verification_revision();
+    order_rows(
+        &mut session.checks_rows,
+        checks,
+        revision,
+        session.checks_violations_only,
+    );
+    let order = &session.checks_rows;
+    let Some(position) = order.rows.iter().position(|row| *row == index) else {
+        return false;
+    };
+    session
+        .checks_table
+        .select(position, order.keys.get(position).cloned());
+    true
 }
 
 /// Build the shown order again when the checks or the filter changed since

@@ -32,6 +32,7 @@ use rspice_app_state::state::{DrawnObject, PreflightRemediation};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::requests::SoaCheckRef;
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -335,22 +336,33 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
 /// Open Verify's Specifications view with the specification measured as
 /// `measurement` selected, or as the reader left it when there is none.
 pub(crate) fn open_specification(app: &mut RSpiceApp, measurement: Option<String>) {
-    open_in_verify(app, VerificationPage::Specifications, measurement);
+    open_in_verify(app, VerificationPage::Specifications, measurement, None);
 }
 
 /// Open Verify on `page` with the specification measured as `measurement`
-/// selected, or as the reader left it when there is none. Every route that
-/// leaves for one specification comes through here: the status bar's run
-/// segment, a preflight finding and a result's requirement line.
+/// selected, or the SOA check `check` names, or as the reader left it when
+/// there is neither. Every route that leaves for one specification or check
+/// comes through here: the status bar's run segment, a preflight finding and
+/// a result's requirement line.
 ///
 /// A result spells a measurement as its producer did, so it is matched to
-/// the sheet's row without regard to case; one the sheet holds no row for is
-/// said rather than selected.
+/// the sheet's row without regard to case; a measurement or a check the run
+/// holds no row for is said rather than selected.
 pub(crate) fn open_in_verify(
     app: &mut RSpiceApp,
     page: VerificationPage,
     measurement: Option<String>,
+    check: Option<SoaCheckRef>,
 ) {
+    if let Some(check) = check
+        && let Err(problem) = rspice_app_simulate::workbench::surfaces::verify::select_soa_check(
+            &app.state.model,
+            &mut app.state.simulate,
+            &check,
+        )
+    {
+        app.state.prompt(problem);
+    }
     if let Some(measurement) = measurement {
         let row = app
             .state

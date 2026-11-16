@@ -242,12 +242,23 @@ impl Request for SelectAnalysisInstance {
 }
 
 /// Open Verify on `page`, with the specification measured as `specification`
-/// selected when it names one. Raised by a requirement line on a result, and
-/// taken straight after the call that raised it.
+/// selected when it names one, or the SOA check `check` names. Raised by a
+/// requirement line on a result, and taken straight after the call that
+/// raised it.
 #[derive(Clone, Debug)]
 pub struct OpenInVerify {
     pub page: crate::state::VerificationPage,
     pub specification: Option<String>,
+    pub check: Option<SoaCheckRef>,
+}
+
+/// One SOA check of the active run, as the Checks view lists it: a device's
+/// rule on one parameter, from the analysis at `analysis` in the run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoaCheckRef {
+    pub analysis: usize,
+    pub device: String,
+    pub parameter: crate::state::SoaParameterEvidence,
 }
 
 impl Request for OpenInVerify {

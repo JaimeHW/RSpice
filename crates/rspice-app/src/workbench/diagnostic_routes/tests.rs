@@ -642,6 +642,7 @@ fn a_requirement_line_opens_its_row_in_verify() {
         app.state.workbench.outbox.push(OpenInVerify {
             page,
             specification: specification.map(str::to_owned),
+            check: None,
         });
         app.after_contribution();
         assert_eq!(
