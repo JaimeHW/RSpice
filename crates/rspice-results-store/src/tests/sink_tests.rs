@@ -202,3 +202,39 @@ fn a_resumed_run_appends_to_the_segment_it_continues() {
         Err(StoreError::Corrupt { .. })
     ));
 }
+
+/// A segment in a file reopens writable for the run that resumes it, and the file it finishes is
+/// the uninterrupted run's.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_segment_file_reopens_writable_for_the_run_that_resumes_it() {
+    use crate::FileIo;
+    let meta = sink::RunMeta::default();
+    let x: Vec<f64> = (0..1200).map(|row| row as f64 * 1e-9).collect();
+    let run = |sink: &mut dyn ResultSink, rows: std::ops::Range<usize>| {
+        sink.begin(&schema(), &meta).unwrap();
+        for at in rows {
+            sink.row(x[at], &[(at as f64 * 0.01).cos(), at as f64])
+                .unwrap();
+        }
+        sink.end(sink::RunStatus::Completed).unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "rspice-store-reopen-writable-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("000000.rsr");
+    let mut whole = StoreSink::new(MemoryIo::new());
+    let whole_receipt = run(&mut whole, 0..x.len());
+    let mut first = StoreSink::new(FileIo::create(&path).unwrap());
+    run(&mut first, 0..700);
+    drop(first);
+    // A segment opened only for reading cannot take the resumed rows.
+    assert!(StoreSink::appending(FileIo::open(&path).unwrap(), x[699]).is_err());
+    let mut resumed = StoreSink::appending(FileIo::open_writable(&path).unwrap(), x[699]).unwrap();
+    assert_eq!(run(&mut resumed, 699..x.len()), whole_receipt);
+    drop(resumed);
+    assert!(std::fs::read(&path).unwrap() == whole.into_io().unwrap().bytes());
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -153,6 +153,16 @@ impl FileIo {
         })
     }
 
+    /// Open an existing segment for reading and writing, as a resumed run that appends to it
+    /// does (see [`crate::StoreSink::appending`]).
+    pub fn open_writable(path: &std::path::Path) -> io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)?;
+        Ok(Self { file })
+    }
+
     pub fn into_inner(self) -> std::fs::File {
         self.file
     }
