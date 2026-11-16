@@ -1792,10 +1792,6 @@ pub fn revert_document_model(
                 .clear();
             RevertFollowUp::ResultHistory(baseline.file.result_presentation)
         }
-        ProjectDocumentId::VerificationSpecifications => {
-            state.model.workspace.content.specs = baseline.file.workspace.specs;
-            RevertFollowUp::None
-        }
         ProjectDocumentId::StimulusLibrary => {
             state.model.workspace.content.stimulus_library =
                 baseline.file.workspace.stimulus_library;

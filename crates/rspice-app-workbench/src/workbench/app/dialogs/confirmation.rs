@@ -343,7 +343,6 @@ fn document_icon(document: &ProjectDocumentId) -> WorkbenchIcon {
         ProjectDocumentId::CellView(_) => WorkbenchIcon::Design,
         ProjectDocumentId::SimulationPlan => WorkbenchIcon::Simulate,
         ProjectDocumentId::ResultHistory => WorkbenchIcon::Results,
-        ProjectDocumentId::VerificationSpecifications => WorkbenchIcon::Verify,
         ProjectDocumentId::ModelCatalog => WorkbenchIcon::Models,
         ProjectDocumentId::NetlistSource => WorkbenchIcon::Netlist,
         ProjectDocumentId::StimulusLibrary => WorkbenchIcon::Source,

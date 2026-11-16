@@ -64,9 +64,6 @@ impl ProjectFile {
                 self.workspace.visualization_documents =
                     working.workspace.visualization_documents.clone();
             }
-            ProjectDocumentId::VerificationSpecifications => {
-                self.workspace.specs = working.workspace.specs.clone();
-            }
             ProjectDocumentId::StimulusLibrary => {
                 self.workspace.stimulus_library = working.workspace.stimulus_library.clone();
             }

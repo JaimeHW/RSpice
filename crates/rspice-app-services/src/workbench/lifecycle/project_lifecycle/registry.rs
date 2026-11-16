@@ -323,7 +323,6 @@ mod tests {
             Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
-        assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
     }
 
     #[test]

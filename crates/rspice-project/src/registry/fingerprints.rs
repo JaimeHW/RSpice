@@ -112,12 +112,6 @@ fn document_digests_with_results_cache(
         ProjectDocumentId::StimulusLibrary,
         digest(&project.workspace.stimulus_library)?,
     );
-    documents.insert(
-        ProjectDocumentId::VerificationSpecifications,
-        // Retained as a stable registry identity for older callers. Current
-        // specifications participate in the simulation-plan payload digest.
-        digest(&())?,
-    );
     let code_workspace_sources = project
         .workspace
         .project_sources
