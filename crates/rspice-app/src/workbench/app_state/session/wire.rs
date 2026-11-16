@@ -97,7 +97,7 @@ pub(in crate::workbench) struct UiSessionWire {
     browser_spoken_feedback: bool,
     #[serde(default)]
     text_locale: rspice_app_workbench::workbench::localization::UiTextLocale,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "known_or_default")]
     result_viewer: rspice_app_results::workbench::documents::result_document::ResultViewer,
     /// Bit periods the reader pinned eyes to, for results that carry prepared
     /// provenance. Legacy keys name a run-local analysis id that a later

@@ -31,7 +31,7 @@ closure.
 | `smith_chart`, `polar`, `network_matrix` | Smith chart and polar views of retained S-parameter and complex responses; network-matrix cells |
 | `eye_diagram`, `events` | Eye diagrams over `rspice-core` waveform folding and `rspice-results` mask compliance; digital and real event tables and bus controls |
 | `histogram`, `scatter`, `box_violin`, `sensitivity`, `optimization` | Monte Carlo histograms, scatter correlation with trial brushing, and box and violin plots against requirements; sensitivity and mismatch contribution sheets; optimization convergence |
-| `op_inspector`, `specs`, `soa` | The operating-point sheet; the specification result table and inspector; SOA rule projections and stress history |
+| `op_inspector`, `soa` | The operating-point sheet; SOA rule projections and stress history |
 
 ## Boundaries
 
@@ -54,8 +54,8 @@ closure.
   `smith_chart::SmithChartState` and `histogram::HistogramState`.
 - A viewer's `show`, which paints the document well, and its `right_panel`,
   which paints the inspector: `fft::view`, `nyquist::view`,
-  `smith_chart::view`, `histogram::view`, `eye_diagram::view`,
-  `op_inspector` and `specs`.
+  `smith_chart::view`, `histogram::view`, `eye_diagram::view` and
+  `op_inspector`.
 - `chrome::viewer_tab` and `chrome::viewer_picker` for the viewer strip.
 - `create_document::show` with a `CreateDocumentHost`, which returns a create
   request the host revalidates and commits.

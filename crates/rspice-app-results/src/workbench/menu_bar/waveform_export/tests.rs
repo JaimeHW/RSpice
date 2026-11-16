@@ -211,34 +211,6 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
     let op_csv = &op_io.text_files.borrow()[0].1;
     assert!(op_csv.contains("node_voltage,V(out),,,value,1.25000000000000000e0,V"));
 
-    let mut specs_state = state_with_typed_result(
-        AnalysisResult::new(1, AnalysisType::Transient, "Transient")
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
-    );
-    specs_state
-        .model
-        .workspace
-        .content
-        .specs
-        .push(crate::state::SpecEntry {
-            measurement: "gain".to_owned(),
-            expression: "max V(out)".to_owned(),
-            min: Some(1.0),
-            max: Some(2.0),
-            unit: "V/V".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
-        });
-    activate_result_document(&mut specs_state, crate::workbench::ResultViewer::Specs);
-    let specs_io = MockExportWorkflowIo::default();
-    action_export_dataset_with_io(
-        &mut specs_state.results_parts(),
-        &specs_io,
-        &DatasetExportChoice::default(),
-    );
-    let specs = &specs_io.text_files.borrow()[0].1;
-    assert!(specs.contains("gain,max V(out),1.50000000000000000e0"));
-    assert!(specs.contains(",pass,"));
-
     let optimization = AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
         .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
             best_objectives: Vec::new(),

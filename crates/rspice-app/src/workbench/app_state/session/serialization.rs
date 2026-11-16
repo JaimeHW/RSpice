@@ -672,6 +672,32 @@ mod tests {
         );
     }
 
+    /// A Results viewer this build lacks reads as the default viewer, and
+    /// the rest of the session is kept.
+    #[test]
+    fn a_session_left_on_a_viewer_this_build_lacks_restores_on_the_default_viewer() {
+        use rspice_app_results::workbench::documents::result_document::ResultViewer;
+        use rspice_app_state::state::VerificationPage;
+
+        let mut state = AppState::default();
+        state.results.results.session.viewer = ResultViewer::Table;
+        state.simulate.verification_page = VerificationPage::Reference;
+        let session = saved_session(&mut state);
+        let stored = "\"result_viewer\":\"Table\"";
+        assert!(session.contains(stored), "the session names its viewer");
+
+        let restored = relaunch(session.replace(stored, "\"result_viewer\":\"Specs\""));
+        assert_eq!(
+            restored.results.results.session.viewer,
+            ResultViewer::default()
+        );
+        assert_eq!(
+            restored.simulate.verification_page,
+            VerificationPage::Reference,
+            "the rest of the session is kept"
+        );
+    }
+
     #[test]
     fn the_session_records_whether_a_project_is_open() {
         let mut closed = AppState::default();

@@ -582,7 +582,7 @@ pub fn retained_result_artifacts(
             measurement
                 .value
                 .map(|value| crate::ui::plot::fmt_si(value, "", 4)),
-            ResultViewer::Specs,
+            ResultViewer::Table,
         );
     }
     let mut counts = std::collections::HashMap::with_capacity(artifacts.len());

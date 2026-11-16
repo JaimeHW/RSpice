@@ -241,10 +241,10 @@ fn every_menu_row_has_its_own_access_key_in_every_context() {
 }
 
 /// The Verify menu is its views in navigation order, each under its one name,
-/// then the specification matrix, every row with a letter of its own.
+/// every row with a letter of its own.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_verify_menu_lists_its_views_then_the_specification_matrix() {
+fn the_verify_menu_lists_its_views_in_navigation_order() {
     let app = title_test_app();
     let rows = menu_entries::resolve_menu_rows(
         application_menu_entries(ApplicationMenu::Verify),
@@ -275,11 +275,10 @@ fn the_verify_menu_lists_its_views_then_the_specification_matrix() {
             "Monte Carlo",
             "Checks",
             "Reference",
-            "Specification matrix\u{2026}",
         ]
     );
     assert_eq!(
-        labels[..5],
+        labels,
         VerificationPage::NAVIGATION.map(VerificationPage::label)
     );
     let mut keys = rows.iter().map(|(_, key)| *key).collect::<Vec<_>>();

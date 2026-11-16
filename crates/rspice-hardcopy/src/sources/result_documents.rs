@@ -7,8 +7,6 @@ use rspice_results::{
     manifest::ManifestViewModel,
     result_digest::ResultDigestEncoding,
     run::SimulationRun,
-    specification::SpecEntry,
-    specification::report::{resolved_specifications, result_rows},
     waveform::RetainedWaveform,
 };
 use rspice_vocabulary::product::{ObjectRevision, ProjectId};
@@ -20,24 +18,6 @@ fn require_terminal_run<A>(run: &SimulationRun<A>) -> Result<(), HardcopySourceE
             "dataset {} belongs to a non-terminal run",
             run.dataset_id,
         )));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_result_specifications(
-    specs: &[SpecEntry],
-) -> Result<(), HardcopySourceError> {
-    if specs.len() > 10_000 {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "prepared specification count exceeds the governed limit".to_owned(),
-        ));
-    }
-    for (index, spec) in specs.iter().enumerate() {
-        spec.validate().map_err(|error| {
-            HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "prepared specification {index} is invalid: {error}"
-            ))
-        })?;
     }
     Ok(())
 }
@@ -207,56 +187,6 @@ pub fn resolve_results_manifest_source<A: AsRef<AnalysisResult<W>>, W: AsRef<Ret
     )
 }
 
-pub fn resolve_results_specs_source<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
-    source_key: String,
-    project_id: ProjectId,
-    scope: HardcopyScope,
-    run: &SimulationRun<A>,
-    specs: &[SpecEntry],
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    require_terminal_run(run)?;
-    validate_result_specifications(specs)?;
-    validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
-    if !matches!(
-        &scope,
-        HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
-    ) {
-        return Err(HardcopySourceError::UnsupportedScope(scope));
-    }
-    let table = specifications_table(run, specs);
-    if table.rows.is_empty() {
-        return Err(HardcopySourceError::MissingViewerEvidence("specifications"));
-    }
-    let semantic_document =
-        HardcopySemanticDocument::ResultSummary(Box::new(SemanticResultSummary {
-            viewer: ResultViewer::Specs,
-            title: table.title.clone(),
-            tables: vec![table],
-            payload: None,
-        }));
-    let content_digest = canonical_digest(
-        b"rspice-hardcopy-results-specifications-v1",
-        &(
-            run.dataset_id,
-            run.run_id,
-            run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT),
-            specs,
-            &semantic_document,
-        ),
-    )?;
-    resolve_semantic_source(
-        results_specs_identity(&source_key, project_id, run, specs)?,
-        content_digest,
-        HardcopyDocumentKind::PlotOrWorksheet,
-        scope,
-        semantic_document,
-        SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
-        )?,
-    )
-}
-
 fn semantic_manifest_summary(manifest: &ManifestViewModel) -> SemanticResultSummary {
     let inventory = SemanticTable {
         title: format!("Frozen analysis inventory · {}", manifest.run_label),
@@ -393,31 +323,6 @@ pub fn results_manifest_identity<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedW
     )
 }
 
-pub fn results_specs_identity<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
-    source_key: &str,
-    project_id: ProjectId,
-    run: &SimulationRun<A>,
-    specs: &[SpecEntry],
-) -> Result<HardcopySourceIdentity, HardcopySourceError> {
-    let specs_digest = canonical_digest(b"rspice-results-specifications-v1", &specs)?;
-    let mut identity_name = Vec::with_capacity(112);
-    identity_name.extend_from_slice(b"rspice-results-specifications-v1");
-    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(
-        run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT)
-            .as_bytes(),
-    );
-    identity_name.extend_from_slice(specs_digest.as_bytes());
-    HardcopySourceIdentity::try_new(
-        source_key,
-        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        ObjectRevision::INITIAL,
-        format!("Results · {} · Specifications", run.label),
-    )
-}
-
 pub fn results_stack_identity<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
     source_key: &str,
     project_id: ProjectId,
@@ -454,81 +359,4 @@ pub fn results_stack_identity<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWave
         ObjectRevision::INITIAL,
         format!("Results · {} · {}", run.label, viewer.label()),
     )
-}
-
-/// Renderer-neutral table projection shared with semantic hardcopy. This is
-/// deliberately run-level: the sheet judges every retained source, not only
-/// whichever analysis happens to be selected globally.
-///
-/// `workspace_specs` is the legacy fallback only, exactly as in
-/// the CSV projection: what is printed is the contract the run froze.
-fn specifications_table<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
-    run: &SimulationRun<A>,
-    workspace_specs: &[SpecEntry],
-) -> SemanticTable {
-    let specs = resolved_specifications(run, workspace_specs);
-    let result_rows = result_rows(run, &specs);
-    let rows = result_rows
-        .iter()
-        .map(|row| {
-            let spec = specs
-                .iter()
-                .find(|spec| spec.measurement.eq_ignore_ascii_case(&row.measurement));
-            let bounds = spec.map_or_else(
-                || "not specified".to_owned(),
-                |spec| match (spec.min, spec.max) {
-                    (Some(minimum), Some(maximum)) => {
-                        format!(
-                            "{} <= value <= {}",
-                            exact_value(minimum),
-                            exact_value(maximum)
-                        )
-                    }
-                    (Some(minimum), None) => format!("value >= {}", exact_value(minimum)),
-                    (None, Some(maximum)) => format!("value <= {}", exact_value(maximum)),
-                    (None, None) => "tracked without bounds".to_owned(),
-                },
-            );
-            let scope = spec
-                .map(|spec| {
-                    serde_json::to_string(&spec.scope).unwrap_or_else(|_| "unavailable".to_owned())
-                })
-                .unwrap_or_default();
-            vec![
-                row.measurement.clone(),
-                row.expression.clone(),
-                row.value.map_or_else(String::new, exact_value),
-                bounds,
-                row.margin.map_or_else(String::new, exact_value),
-                row.unit.clone(),
-                scope,
-                row.worst_corner.clone().unwrap_or_default(),
-                row.status.label().to_owned(),
-                row.detail.clone(),
-            ]
-        })
-        .collect();
-    SemanticTable {
-        title: format!("Specifications · {}", run.label),
-        columns: [
-            "Measurement",
-            "Expression",
-            "Value",
-            "Bounds",
-            "Margin",
-            "Unit",
-            "Scope",
-            "Worst corner",
-            "Status",
-            "Detail",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        rows,
-    }
-}
-
-fn exact_value(value: f64) -> String {
-    format!("{value:.17e}")
 }

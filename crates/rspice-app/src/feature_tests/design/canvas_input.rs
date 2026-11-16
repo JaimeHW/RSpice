@@ -150,6 +150,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
 #[test]
 fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() {
     let mut state = AppState::default();
+    state.simulate.verification_page = rspice_app_state::state::VerificationPage::Corners;
     state
         .model
         .schematic
@@ -173,13 +174,12 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
     crate::workbench::commands::answer_surface_requests(&mut state);
     assert_eq!(
         state.workbench.workspace,
-        rspice_app_state::workbench::workspace::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Verify
     );
     assert_eq!(
-        state.results.results.session.viewer,
-        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs
+        state.simulate.verification_page,
+        rspice_app_state::state::VerificationPage::Specifications
     );
-    assert!(state.results.results.session.spec_drafts.is_some());
 
     state
         .model

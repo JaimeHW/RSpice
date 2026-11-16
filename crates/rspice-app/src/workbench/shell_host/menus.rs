@@ -718,20 +718,17 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Events), "Event history").access('E'),
     MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area").access('A'),
     MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization").access('O'),
-    MenuEntry::offered(viewer(ResultViewer::Specs), "Specification results").access('U'),
     MenuEntry::offered(viewer(ResultViewer::Table), "Sample table").access('L'),
     MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest").access('M'),
 ];
 
-/// Verify: its views in the order its navigator lists them, then the
-/// specification matrix they check against.
+/// Verify: its views in the order its navigator lists them.
 const VERIFY_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Verify(VerificationPage::Specifications)).access('S'),
     simulate(SimulateCommand::Verify(VerificationPage::Corners)).access('C'),
     simulate(SimulateCommand::Verify(VerificationPage::MonteCarlo)).access('M'),
     simulate(SimulateCommand::Verify(VerificationPage::Checks)).access('K'),
     simulate(SimulateCommand::Verify(VerificationPage::Reference)).access('R'),
-    results(ResultsCommand::EditSpecifications).access('X'),
 ];
 
 /// Tools: the libraries and models a design draws on, then the editors for
@@ -983,7 +980,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
     match ResultsCommand::from_key(key)? {
         ResultsCommand::ImportResultDataset => Some(WorkbenchIcon::Folder),
         ResultsCommand::WaveformCalculator => Some(WorkbenchIcon::Sliders),
-        ResultsCommand::EditSpecifications => Some(WorkbenchIcon::Target),
         ResultsCommand::CompareResultDatasets => Some(WorkbenchIcon::Compare),
         ResultsCommand::ExportWaveformsCsv => Some(WorkbenchIcon::Export),
         _ => None,

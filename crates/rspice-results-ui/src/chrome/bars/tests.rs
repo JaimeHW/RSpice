@@ -16,10 +16,6 @@ impl SheetBarHost for FilterHost {
     fn operating_point_filter(&mut self) -> &mut String {
         &mut self.filter
     }
-    fn specification_editing(&self) -> bool {
-        false
-    }
-    fn request(&mut self, _: SpecificationAction) {}
     fn instrument(&mut self, _: &mut Ui) {}
     fn eye_actions(&mut self, _: &mut Ui) {}
     fn table_actions(&mut self, _: &mut Ui) {}

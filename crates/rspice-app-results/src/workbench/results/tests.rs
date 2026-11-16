@@ -79,7 +79,7 @@ fn whole_frame(
     let mut controller = crate::simulation::SimulationController::new();
     ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            result_document::show(ui, parts, &mut controller, None);
+            result_document::show(ui, parts, &mut controller);
         });
     })
     .shapes

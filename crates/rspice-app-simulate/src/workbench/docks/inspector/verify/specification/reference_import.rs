@@ -152,12 +152,12 @@ impl ReferenceImport {
         }
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(super) fn is_pending(&self) -> bool {
         self.pending.is_some()
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(super) fn await_exchange(&mut self, exchange: Box<dyn ReferenceExchange>) {
         self.pending = Some(exchange);
         self.message = None;
@@ -166,7 +166,7 @@ impl ReferenceImport {
 
 #[cfg(test)]
 mod tests {
-    use super::super::SpecDraft;
+    use super::super::draft::SpecDraft;
     use super::*;
 
     #[derive(Debug)]
@@ -187,10 +187,8 @@ mod tests {
         let mut copy = live.clone();
         assert!(!copy.reference_exchange_pending());
 
-        let mut authored = SpecDraft {
-            measurement: "gain".to_owned(),
-            ..SpecDraft::default()
-        };
+        let mut authored = SpecDraft::default();
+        authored.measurement = "gain".to_owned();
         let definition = authored
             .parse()
             .expect("a tracked measurement parses")

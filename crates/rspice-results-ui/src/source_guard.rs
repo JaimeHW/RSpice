@@ -158,7 +158,7 @@ fn no_shipped_viewer_paints_status_in_colour_or_with_a_dot() {
     }
     // A guard that found nothing to read passes forever; make sure it read
     // the surfaces it exists for.
-    for expected in ["chrome.rs", "specs.rs", "op_inspector.rs", "plot.rs"] {
+    for expected in ["chrome.rs", "op_inspector.rs", "plot.rs"] {
         assert!(
             scanned.iter().any(|path| path.ends_with(expected)),
             "the scan never reached {expected}"

@@ -172,7 +172,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         ResultsCommand::ResultViewer(
             rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
         ),
-        ResultsCommand::EditSpecifications,
     ] {
         assert!(
             command

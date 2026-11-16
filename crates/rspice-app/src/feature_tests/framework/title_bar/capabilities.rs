@@ -218,7 +218,6 @@ fn waveform_sheet_app() -> (
 
 /// One frame of the Results workspace, `time` seconds into the session.
 fn results_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
-    let selected_specification = app.state.simulate.selected_specification.clone();
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
@@ -233,7 +232,6 @@ fn results_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
                 ui,
                 &mut app.state.results_parts(),
                 &mut app.simulation_controller,
-                selected_specification.as_deref(),
             );
         },
     );

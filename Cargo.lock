@@ -6156,7 +6156,6 @@ dependencies = [
  "egui",
  "egui_extras",
  "num-complex",
- "rspice-core",
  "rspice-results",
  "rspice-ui-kit",
  "rspice-vocabulary",

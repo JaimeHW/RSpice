@@ -761,3 +761,24 @@ mod monte_carlo_gate_tests {
         assert!(gate.clears(0, 0));
     }
 }
+
+#[cfg(test)]
+mod spec_entry_tests {
+    use super::SpecEntry;
+
+    /// A specification stored before the measurement's expression was kept
+    /// reads with no expression, and writes none back.
+    #[test]
+    fn a_stored_specification_without_an_expression_reads_and_writes_none() {
+        let spec: SpecEntry =
+            serde_json::from_str(r#"{"measurement":"gain","min":1.0,"max":2.0,"unit":"V/V"}"#)
+                .expect("the stored specification reads");
+
+        assert!(spec.expression.is_empty());
+        assert!(
+            !serde_json::to_string(&spec)
+                .expect("the specification writes")
+                .contains("expression")
+        );
+    }
+}

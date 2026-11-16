@@ -88,12 +88,11 @@ fn drive_frame(body: impl FnMut(&mut egui::Ui)) {
 
 fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
     drive_frame(|ui| {
-        super::with_surface_parts(app, |state, run_controller, selected_specification| {
+        super::with_surface_parts(app, |state, run_controller| {
             rspice_app_results::workbench::documents::result_document::show_persistent_document(
                 ui,
                 state,
                 run_controller,
-                selected_specification,
                 document_id,
             )
         })
@@ -727,12 +726,11 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
     apply_family_slice(&mut app, "time <= 0.5");
     assert_eq!(app.state.results.results.session.family_policies.len(), 1);
     drive_frame(|ui| {
-        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+        super::with_surface_parts(&mut app, |state, run_controller| {
             rspice_app_results::workbench::documents::result_document::show(
                 ui,
                 state,
                 run_controller,
-                selected_specification,
             )
         })
     });
@@ -998,12 +996,11 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
     );
 
     drive_frame(|ui| {
-        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+        super::with_surface_parts(&mut app, |state, run_controller| {
             rspice_app_results::workbench::documents::result_document::show(
                 ui,
                 state,
                 run_controller,
-                selected_specification,
             )
         })
     });

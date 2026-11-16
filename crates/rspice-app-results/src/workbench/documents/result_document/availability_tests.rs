@@ -562,43 +562,6 @@ fn the_op_tab_is_offered_only_where_the_op_sheet_renders() {
     assert!(viewer_availability(operating_point.results_reads(), ResultViewer::Op).available);
 }
 
-/// The specs tab speaks for the run the sheet reads, which is the active one.
-///
-/// `specs::show`, its right panel and the hardcopy projection all resolve
-/// `active_run()`. Offering the tab because *some* retained run measured
-/// something put the reader on a sheet that then reported no measured
-/// results, with the evidence sitting in a run they are not looking at.
-#[test]
-fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
-    let mut measured = SimulationRun::new(1);
-    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-    analysis.measurements = vec![rspice_core::MeasureResult::success("trise", 1.0e-9)];
-    measured.add_analysis(analysis);
-
-    let mut unmeasured = SimulationRun::new(2);
-    unmeasured.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
-        ]),
-    );
-
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.retained.runs = vec![measured, unmeasured].into();
-    assert!(state.model.workspace.content.specs.is_empty());
-
-    assert!(state.model.simulation.select_run(0));
-    assert!(
-        viewer_availability(state.results_reads(), ResultViewer::Specs).available,
-        "the run the sheet reads holds a measurement"
-    );
-
-    assert!(state.model.simulation.select_run(1));
-    assert!(
-        !viewer_availability(state.results_reads(), ResultViewer::Specs).available,
-        "the tab was offered for a measurement in a run the sheet never reads"
-    );
-}
-
 #[test]
 fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
     let payload = AnalysisResultPayload::Sensitivity {
@@ -664,7 +627,6 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
             ResultViewer::TransferFunction,
             ResultViewer::Contribution,
             ResultViewer::Op,
-            ResultViewer::Specs,
             ResultViewer::Table,
             ResultViewer::Hist,
             ResultViewer::Scatter,
@@ -679,21 +641,15 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
 }
 
 #[test]
-fn specification_authoring_is_reachable_before_the_first_dataset() {
-    assert!(!viewer_requires_retained_results(ResultViewer::Specs));
+fn only_the_manifest_draws_without_a_retained_dataset() {
     assert!(!viewer_requires_retained_results(ResultViewer::Manifest));
     assert!(viewer_requires_retained_results(ResultViewer::Waves));
     assert!(viewer_requires_retained_results(ResultViewer::Op));
-
-    let mut state = ResultsTestHost::default();
-    state.results.results.session.viewer = ResultViewer::Specs;
-    specs::open_editor(&mut state.results_parts());
-    assert!(result_stage_bar_visible(state.results_reads()));
 }
 
 #[test]
 fn structured_result_controls_have_a_reachable_40_px_strip() {
-    for viewer in [ResultViewer::Op, ResultViewer::Specs, ResultViewer::Table] {
+    for viewer in [ResultViewer::Op, ResultViewer::Table] {
         assert!(viewer_has_structured_strip(viewer), "{viewer:?}");
         assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
     }

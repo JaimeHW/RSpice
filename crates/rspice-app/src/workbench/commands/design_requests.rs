@@ -11,7 +11,8 @@
 use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use rspice_app_results::workbench::documents::result_document::open_specification_editor;
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// Carry out what the design surface asked of another feature's workspace,
 /// as the surface once did in place.
@@ -23,8 +24,9 @@ pub(in crate::workbench) fn answer_surface_request(
         DesignSurfaceRequest::ShowOperatingPoint { device } => {
             state.results.show_operating_point(device);
         }
-        DesignSurfaceRequest::OpenSpecificationEditor => {
-            open_specification_editor(&mut state.results_parts());
+        DesignSurfaceRequest::OpenSpecifications => {
+            state.simulate.verification_page = VerificationPage::Specifications;
+            state.workbench.activate(Workspace::Verify);
         }
         DesignSurfaceRequest::NewVerilogADevice => {
             open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);

@@ -132,7 +132,6 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         | ResultViewer::NetworkMatrix
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
-        | ResultViewer::Specs
         | ResultViewer::Table
         | ResultViewer::Soa
         | ResultViewer::Optimization

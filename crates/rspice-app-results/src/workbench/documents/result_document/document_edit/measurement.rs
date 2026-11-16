@@ -732,7 +732,6 @@ mod tests {
                         ui,
                         &mut host.results_parts(),
                         &mut controller,
-                        None,
                         document,
                     );
                 });

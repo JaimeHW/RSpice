@@ -76,8 +76,8 @@ pub enum DesignSurfaceRequest {
     /// `device`, which is empty when the selected report does not hold the
     /// clicked device.
     ShowOperatingPoint { device: String },
-    /// Open the project's specification editor, for a requirement link.
-    OpenSpecificationEditor,
+    /// Open Verify's Specifications view, for a requirement link.
+    OpenSpecifications,
     /// Open the code feature's New Verilog-A device form, for the canvas
     /// menu's New Verilog-A device.
     NewVerilogADevice,

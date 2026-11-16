@@ -10,15 +10,18 @@
 //! and the verdict — because every one of them is the run's, not the
 //! reader's to change.
 
+mod draft;
+mod measurement_builder;
+mod reference_import;
+
+pub(crate) use draft::SpecDraft;
+
 use egui::Ui;
 use rspice_results::specification::{
     MeasurementReferenceSource, SpecPointScope, SpecificationDefinition, SpecificationRole,
 };
 use rspice_results::specification_verdict::SpecificationVerdictStatus;
 use rspice_results::verification::{CellStatus, Row, RowStatus, Sheet};
-use rspice_results_ui::specs::editor::{
-    ComparisonDraftKind, ReferenceCompletion, ReferenceExchange, SpecDraft, measurement_authoring,
-};
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
@@ -36,6 +39,8 @@ use crate::workbench::surfaces::verify::specification_edit::{
     definition_index, edit_specifications, plan_definition,
 };
 use crate::workbench::surfaces::verify::specifications::{status_word, worst_at};
+use draft::{ComparisonDraftKind, measurement_authoring};
+use reference_import::{ReferenceCompletion, ReferenceExchange};
 
 pub(super) fn specifications(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let definition = cx

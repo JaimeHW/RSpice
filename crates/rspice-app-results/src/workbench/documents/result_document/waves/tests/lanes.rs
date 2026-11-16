@@ -487,7 +487,6 @@ fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultD
                 ui,
                 &mut state.results_parts(),
                 &mut controller,
-                None,
                 document,
             );
         });

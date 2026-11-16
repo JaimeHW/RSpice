@@ -30,16 +30,6 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
         ),
         Err(HardcopySourceError::UnretainedResult(_))
     ));
-    assert!(matches!(
-        resolve_results_specs_source(
-            "specifications".to_owned(),
-            ProjectId::new(),
-            HardcopyScope::ActiveDocument,
-            &run,
-            &[]
-        ),
-        Err(HardcopySourceError::UnretainedResult(_))
-    ));
     run.lifecycle = SimulationRunLifecycle::Completed;
     assert!(matches!(
         RetainedQuickViewSource::try_new(&run, 8, |_| true),
@@ -49,7 +39,7 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
     // Schema 8 controls written before the service extraction. Optional overlay
     // and histogram viewport/measurement fields retain their original defaults.
     let legacy = r#"{
-        "viewer": "Waves", "specs": [], "fft_selected_source": null,
+        "viewer": "Waves", "fft_selected_source": null,
         "fft_normalization": "peak", "fft_window": "hanning",
         "fft_input_fidelity": "reference", "fft_time_window_auto": true,
         "fft_time_window_start": 0.0, "fft_time_window_end": 1.0,

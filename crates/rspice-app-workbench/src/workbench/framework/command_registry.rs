@@ -660,7 +660,6 @@ pub mod ids {
         DESELECT_ALL = "deselect-all";
         DESIGN_WORKSPACE = "design";
         DUPLICATE = "duplicate-selection";
-        EDIT_SPECIFICATIONS = "specifications";
         EXPORT_RESULTS = "export-results";
         EXPRESSION_DIAGNOSTICS = "expression-diagnostics";
         FAMILY_SLICING = "family-slicing";
@@ -691,7 +690,6 @@ pub mod ids {
         RESULTS_WORKSPACE = "results";
         RESULT_OPERATING_POINT = "result-operating-point";
         RESULT_SAFE_OPERATING_AREA = "result-safe-operating-area";
-        RESULT_SPECIFICATIONS = "result-specifications";
         RESULT_WAVEFORMS = "waveforms";
         RUN_SIMULATION = "start-run";
         SAVE = "save-project";

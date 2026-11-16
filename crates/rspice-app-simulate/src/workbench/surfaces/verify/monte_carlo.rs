@@ -31,7 +31,7 @@ use super::table::{
 };
 use super::toolbar::{PageToolbar, RunChoice, Summary, empty_line};
 use super::*;
-use crate::workbench::framework::command_registry::ids;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// The share of the body the table may take before its rows scroll; the
 /// detail fills everything under it.
@@ -612,7 +612,7 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 Some("Open specifications"),
             )
         {
-            cx.execute(ids::EDIT_SPECIFICATIONS);
+            cx.execute(SimulateCommand::Verify(VerificationPage::Specifications).key());
         }
         return;
     };

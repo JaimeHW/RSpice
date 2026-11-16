@@ -11,7 +11,7 @@
 pub mod calculator;
 pub mod commands;
 mod expression_diagnostics;
-pub mod surface;
+mod surface;
 
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::commands::result_navigation::{
@@ -21,7 +21,7 @@ use crate::workbench::commands::result_navigation::{
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     cursor_jump_availability, family_available, fit_gesture_available, jump_cursor, linked_cursors,
-    open_create_document, open_dataset_browser, open_specification_editor, place_marker_at_cursor,
+    open_create_document, open_dataset_browser, place_marker_at_cursor,
     request_view_gesture, viewer_is_available, viewer_unavailability_reason,
     zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
@@ -193,12 +193,7 @@ fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
         &mut cx.runs.preflight,
         cx.commands,
     );
-    surface::show(
-        ui,
-        &mut parts,
-        cx.handles.run_controller,
-        cx.peers.simulate().selected_specification(),
-    );
+    surface::show(ui, &mut parts, cx.handles.run_controller);
     render_create_result_document(cx, ui.ctx());
     render_result_document_dialog(cx, ui.ctx());
 }
@@ -217,7 +212,6 @@ fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
         ui,
         &mut parts,
         cx.handles.run_controller,
-        cx.peers.simulate().selected_specification(),
     );
 }
 
@@ -520,7 +514,7 @@ impl CommandSet for ResultsCommand {
                 .map_or_else(CommandAvailability::Disabled, |_| {
                     CommandAvailability::Available
                 }),
-            Self::WaveformCalculator | Self::EditSpecifications => CommandAvailability::Available,
+            Self::WaveformCalculator => CommandAvailability::Available,
             Self::ExpressionDiagnostics => {
                 available_or(retained.has_results(), "no result dataset is available")
             }
@@ -642,7 +636,6 @@ impl CommandSet for ResultsCommand {
                     cx.wb.activate(Workspace::Results);
                 }
             }
-            Self::EditSpecifications => open_specification_editor(&mut results_parts(cx)),
             Self::AddVisualizationPane => {
                 crate::workbench::documents::result_document::open_add_pane(&mut results_parts(cx));
             }

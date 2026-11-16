@@ -16,20 +16,6 @@ use rspice_app_workbench::workbench::framework::command_registry::{
 };
 
 #[test]
-fn edit_specifications_opens_the_real_results_editor() {
-    let mut app = RSpiceApp::test_instance();
-
-    app.execute_command_key(ResultsCommand::EditSpecifications.key());
-
-    assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert_eq!(
-        app.state.results.results.session.viewer,
-        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs
-    );
-    assert!(app.state.results.results.session.spec_drafts.is_some());
-}
-
-#[test]
 fn generic_results_command_opens_the_workspace_without_a_dataset() {
     let mut app = RSpiceApp::test_instance();
     let command = ResultsCommand::ResultViewer(

@@ -207,7 +207,6 @@ fn interactive_result_viewers_keep_canonical_document_identity() {
         ResultViewer::NoiseContrib,
         ResultViewer::Contribution,
         ResultViewer::TransferFunction,
-        ResultViewer::Specs,
         ResultViewer::Table,
         ResultViewer::Nyquist,
         ResultViewer::Smith,

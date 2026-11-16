@@ -50,8 +50,6 @@ pub enum ResultViewer {
     Contribution,
     /// Scalar DC transfer gain and input/output resistances.
     TransferFunction,
-    /// Measurements × runs matrix against spec bounds.
-    Specs,
     /// The retained samples of one analysis, as rows.
     Table,
     /// Nyquist loop-gain stability surface.
@@ -97,7 +95,6 @@ impl ResultViewer {
             ResultViewer::NoiseContrib => "NOISE",
             ResultViewer::Contribution => "SENS",
             ResultViewer::TransferFunction => "XF",
-            ResultViewer::Specs => "SPECS",
             ResultViewer::Table => "TABLE",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
@@ -113,7 +110,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 24] = [
+    const PRIMARY: [ResultViewer; 23] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -128,7 +125,6 @@ impl ResultViewer {
         ResultViewer::TransferFunction,
         ResultViewer::Contribution,
         ResultViewer::Op,
-        ResultViewer::Specs,
         ResultViewer::Table,
         ResultViewer::Hist,
         ResultViewer::Scatter,
@@ -165,7 +161,6 @@ impl ResultViewer {
             ResultViewer::NoiseContrib => "Noise",
             ResultViewer::Contribution => "Sensitivity",
             ResultViewer::TransferFunction => "XF",
-            ResultViewer::Specs => "Specs",
             ResultViewer::Table => "Table",
             ResultViewer::Nyquist => "Nyquist",
             ResultViewer::Smith => "Smith",
@@ -204,7 +199,7 @@ impl ResultViewer {
             ResultViewer::PhaseNoise => "viewer-phase-noise",
             ResultViewer::Eye => "eye-viewer",
             ResultViewer::Hist => "viewer-histogram",
-            ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
+            ResultViewer::Op | ResultViewer::Table => "viewer-table",
             ResultViewer::Contribution => "viewer-contribution",
             ResultViewer::TransferFunction => "viewer-transfer-function",
             ResultViewer::Smith => "viewer-smith",
@@ -221,14 +216,10 @@ impl ResultViewer {
 
     /// The sheet that draws a retained pane bound to this viewer document.
     ///
-    /// The inverse of [`Self::viewer_document_id`] is not one-to-one — three
-    /// sheets render `viewer-table` — so the choice has to be made once, here.
-    /// It was made twice instead, and the two answers differed: the persistent
-    /// document layer drew the Table sheet and the Studio drew Specs, so the
-    /// same pane showed exact samples in one surface and a specification matrix
-    /// in the other. Table is the truthful answer, because
-    /// `renderer_supports_analysis` admits a `viewer-table` pane on retained
-    /// waveforms — which is what Table reads and what Specs does not.
+    /// The inverse of [`Self::viewer_document_id`] is not one-to-one — two
+    /// sheets render `viewer-table` — so the choice is made once, here. Table
+    /// is the answer, because `renderer_supports_analysis` admits a
+    /// `viewer-table` pane on retained waveforms, which is what Table reads.
     pub fn from_viewer_document_id(id: &str) -> Option<Self> {
         Some(match id {
             "viewer-waveform" => ResultViewer::Waves,

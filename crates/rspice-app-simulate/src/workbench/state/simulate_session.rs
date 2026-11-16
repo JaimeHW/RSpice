@@ -1,7 +1,6 @@
 //! What the Simulate and Verify workspaces keep for the session and for
 //! themselves alone: the verification review's working state, the run-set
-//! budgets being typed, the specification evidence filter and the Jobs
-//! manager's view.
+//! budgets being typed and the Jobs manager's view.
 //!
 //! None of it is evidence or project configuration. Of what is here, the
 //! session keeps only the regression baseline and how Corners is arranged;
@@ -134,7 +133,7 @@ pub struct SpecificationInspectorDraft {
     /// The plan revision it was taken at: a change from anywhere else takes a
     /// fresh draft rather than leaving stale words over a new definition.
     pub revision: Option<crate::product::ObjectRevision>,
-    pub draft: rspice_results_ui::specs::editor::SpecDraft,
+    pub draft: crate::workbench::docks::inspector::verify::SpecDraft,
 }
 
 /// Two drafts are the same draft when they edit the same specification at the

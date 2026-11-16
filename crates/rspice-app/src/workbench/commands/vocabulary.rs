@@ -646,10 +646,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     )
     .key(),
     ResultsCommand::ResultViewer(
-        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs,
-    )
-    .key(),
-    ResultsCommand::ResultViewer(
         rspice_app_results::workbench::documents::result_document::ResultViewer::Table,
     )
     .key(),
@@ -697,7 +693,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
         rspice_app_results::workbench::documents::result_document::ResultViewer::Manifest,
     )
     .key(),
-    ResultsCommand::EditSpecifications.key(),
     SimulateCommand::Verify(VerificationPage::MonteCarlo).key(),
     SimulateCommand::Verify(VerificationPage::Checks).key(),
     SimulateCommand::Verify(VerificationPage::Reference).key(),

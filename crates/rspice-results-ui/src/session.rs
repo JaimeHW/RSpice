@@ -8,7 +8,6 @@ use crate::{
     presentation::PlotView,
     selection::{ResultBrowserSelectionKey, SelectedResultTrace},
     soa::{SoaRuleFilter, SoaRuleSelection},
-    specs::editor::SpecDraft,
 };
 use rspice_results::{
     events::projection::BusRadix,
@@ -685,8 +684,6 @@ pub struct ResultViewerState {
     /// only moves on commit, so a half-typed bound never rescales the plot
     /// under the reader's hands. Transient.
     pub axis_limit_draft: Option<(ResultViewer, PaneAxis, String)>,
-    /// Open spec-editor rows (None = matrix view). Transient.
-    pub spec_drafts: Option<Vec<SpecDraft>>,
     /// SOA rule whose evidence the inspector reports. Transient.
     pub selected_soa_rule: Option<SoaRuleSelection>,
     /// Verdict filter applied to the SOA rule table. Transient.

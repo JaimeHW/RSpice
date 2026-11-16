@@ -235,7 +235,6 @@ pub(super) fn document_frame(
                 ui,
                 &mut state.results_parts(),
                 &mut controller,
-                None,
                 document,
             );
         });

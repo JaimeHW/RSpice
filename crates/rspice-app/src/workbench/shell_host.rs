@@ -1324,7 +1324,6 @@ mod tests {
         use rspice_app_results::workbench::results::commands::ResultsCommand;
         for (id, command) in [
             (ids::CALCULATOR, ResultsCommand::WaveformCalculator),
-            (ids::EDIT_SPECIFICATIONS, ResultsCommand::EditSpecifications),
             (ids::EXPORT_RESULTS, ResultsCommand::ExportWaveformsCsv),
             (
                 ids::EXPRESSION_DIAGNOSTICS,
@@ -1336,10 +1335,6 @@ mod tests {
             (
                 ids::RESULT_OPERATING_POINT,
                 ResultsCommand::ResultViewer(ResultViewer::Op),
-            ),
-            (
-                ids::RESULT_SPECIFICATIONS,
-                ResultsCommand::ResultViewer(ResultViewer::Specs),
             ),
             (
                 ids::RESULT_WAVEFORMS,

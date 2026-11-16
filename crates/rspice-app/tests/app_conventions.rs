@@ -1525,7 +1525,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
                 "persistent_document",
             ),
             ("workbench/documents/result_document.rs", "smith"),
-            ("workbench/documents/result_document.rs", "specs"),
             ("workbench/documents/result_document.rs", "test_fixtures"),
             ("workbench/documents/result_document.rs", "view_context"),
             ("workbench/documents/result_document.rs", "waves"),
@@ -1547,7 +1546,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ),
             ("workbench/results.rs", "calculator"),
             ("workbench/results.rs", "commands"),
-            ("workbench/results.rs", "surface"),
         ],
     ),
     (

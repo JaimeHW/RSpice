@@ -118,7 +118,6 @@ fn capture_results_quick_view_presentation(
     ResultsQuickViewPresentation::try_new(
         reads.results.result_viewer(),
         overlay,
-        reads.model.active_run_specifications(),
         QuickFftSettings {
             selected_source: fft.selected_source.clone(),
             normalization: fft.normalization,
@@ -582,9 +581,9 @@ pub fn prepare_retained_hardcopy_resolution(
         if source_key == result_key {
             require_active_result_document(reads, run.dataset_id)?;
             let viewer = displayed.viewer;
-            let prepared_run = if matches!(viewer, ResultViewer::Manifest | ResultViewer::Specs) {
-                // Dataset-native report sheets judge the complete immutable
-                // run, including missing rows and cross-analysis worst cases.
+            let prepared_run = if viewer == ResultViewer::Manifest {
+                // The dataset-native manifest states the complete immutable
+                // run.
                 run.clone()
             } else if rspice_results::result_presentation::viewer_uses_wave_stack(viewer) {
                 if displayed.analysis_indices.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS {
@@ -765,22 +764,6 @@ pub fn active_app_hardcopy_source_available(
     }
 }
 
-/// Resolve an exact ordered source set with a caller-provided retained-source
-/// lookup. This is the state-facing boundary used both by project persistence
-/// and by worker-owned source snapshots.
-/// Whether the requirement set this run is judged against is empty.
-///
-/// The run-scoped spelling of the sheet's `resolved_specifications`: a
-/// dispatched run carries the requirements it froze, and only a legacy
-/// dataset from before prepared-run receipts falls back to the workspace's
-/// live contract.
-fn resolved_run_specifications_are_empty(model: &Model, run: &SimulationRun) -> bool {
-    run.prepared_receipt().map_or_else(
-        || model.workspace.content.specs.is_empty(),
-        |receipt| receipt.specifications().is_empty(),
-    )
-}
-
 pub fn quick_result_availability(
     model: &Model,
     results: &dyn ResultsPort,
@@ -798,27 +781,6 @@ pub fn quick_result_availability(
         // Manifest hardcopy is bound to the terminal dataset as a whole and
         // must not require an arbitrarily selected analysis.
         return RetainedHardcopySourceAvailability::Available;
-    }
-    if viewer == ResultViewer::Specs {
-        // The requirement set a dispatched run was judged against is the one
-        // it froze into its receipt, and that is what the capture writes —
-        // `capture_results_quick_view_presentation` resolves it through the
-        // shared `run_specifications`. Offering the page on the workspace's
-        // currently authored set instead made the two disagree in both
-        // directions: a receipt-backed run whose frozen requirements had since
-        // been deleted from the workspace was refused a page it could fill,
-        // and a run prepared with no requirements at all was offered one that
-        // resolves to an empty table the moment a limit is authored.
-        let has_evidence = !resolved_run_specifications_are_empty(model, run)
-            || run
-                .analyses
-                .iter()
-                .any(|analysis| !analysis.measurements.is_empty());
-        return if has_evidence {
-            RetainedHardcopySourceAvailability::Available
-        } else {
-            unavailable("the dataset has no specifications or retained measurements".to_owned())
-        };
     }
     let Some(index) = quick_result_analysis_index(model, run, viewer) else {
         return unavailable(format!(
@@ -913,13 +875,6 @@ pub fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::TransferFunction { .. })
         ),
-        ResultViewer::Specs => {
-            !analysis.measurements.is_empty()
-                || matches!(
-                    analysis.result_payload.as_ref(),
-                    Some(AnalysisResultPayload::ScalarMeasurements { .. })
-                )
-        }
         ResultViewer::PoleZero => matches!(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::PoleZero { .. })

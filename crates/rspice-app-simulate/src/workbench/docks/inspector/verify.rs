@@ -11,6 +11,8 @@ mod point;
 mod reference;
 mod specification;
 
+pub(crate) use specification::SpecDraft;
+
 use egui::Ui;
 
 use crate::state::VerificationPage;

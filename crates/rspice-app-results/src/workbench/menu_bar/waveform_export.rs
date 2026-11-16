@@ -615,14 +615,6 @@ fn prepare_active_sheet_csv(
             };
             Some(sheet)
         }
-        // The workspace contract is handed over as the legacy fallback only:
-        // the sheet judges the run against the requirements the run froze, and
-        // `export_specs_csv` resolves that itself so this arm cannot write a
-        // bound the sheet never showed.
-        ResultViewer::Specs => Some(result_document::export_specs_csv(
-            displayed.run(state)?,
-            &state.model.workspace.content.specs,
-        )),
         ResultViewer::Optimization => {
             result_document::export_optimization_csv(displayed.primary_analysis(state)?)
         }

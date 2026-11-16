@@ -33,11 +33,6 @@ pub struct ResultsState {
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: crate::workbench::documents::result_document::ResultsState,
 
-    /// One-shot request to open the canonical specification authoring surface.
-    /// Runtime-only and owned by navigation rather than Results presentation:
-    /// activating the destination document is allowed to reconcile viewer UI,
-    /// but must not erase the route that caused that activation.
-    pub specification_editor_route_pending: bool,
     /// Runtime-only draft for the project-owned result-document transaction.
     pub create_result_document: rspice_results_ui::create_document::CreateResultDocumentDialogState,
     /// Runtime-only draft of the form open over a project result document.
@@ -103,7 +98,6 @@ impl ResultsState {
             result_document_dialog: &mut self.result_document_dialog,
             create_result_document: &mut self.create_result_document,
             result_import: &mut self.result_import,
-            specification_editor_route_pending: &mut self.specification_editor_route_pending,
             model,
             workbench,
             platform,
@@ -170,7 +164,6 @@ impl ResultsState {
         self.results_seen_version = 0;
         self.results.clear_design_scoped_state();
         self.start_waveform_view_from_preferences(preferences);
-        self.specification_editor_route_pending = false;
     }
 
     /// The results feature's part of replacing the project: its

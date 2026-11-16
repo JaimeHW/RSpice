@@ -463,7 +463,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Event history | result-events |  | hidden",
             "  Safe operating area | result-safe-operating-area |  | hidden",
             "  Optimization | result-optimization |  | hidden",
-            "  Specification results | result-specifications |  | hidden",
             "  Sample table | result-table |  | hidden",
             "  Dataset manifest | result-manifest |  | hidden",
             "---",
@@ -489,7 +488,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Monte Carlo | verify-monte-carlo |  | on",
             "Checks | verify-checks |  | on",
             "Reference | verify-reference |  | on",
-            "Specification matrix… | specifications |  | on",
         ],
     ),
     (

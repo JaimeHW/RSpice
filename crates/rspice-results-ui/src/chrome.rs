@@ -33,7 +33,6 @@ const fn viewer_tab_icon(viewer: ResultViewer) -> WorkbenchIcon {
         ResultViewer::Op
         | ResultViewer::NetworkMatrix
         | ResultViewer::TransferFunction
-        | ResultViewer::Specs
         | ResultViewer::Soa
         | ResultViewer::Events
         | ResultViewer::Table => WorkbenchIcon::Grid,

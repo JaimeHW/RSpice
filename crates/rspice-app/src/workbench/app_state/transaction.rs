@@ -19,8 +19,8 @@ impl AppState {
     /// A project transaction replaces project data, never the runtime sessions
     /// a clone deliberately leaves out. Those move from the live state into the
     /// candidate first: the hardcopy session and its in-flight print, export or
-    /// publish, every reference picker a specification draft is waiting on,
-    /// and the notices reported and not yet toasted, ahead of any the
+    /// publish, the reference picker the inspector's specification draft is
+    /// waiting on, and the notices reported and not yet toasted, ahead of any the
     /// transaction reported itself. Everything else is the candidate's.
     pub(crate) fn commit_candidate(&mut self, mut candidate: AppState) {
         std::mem::swap(
@@ -29,13 +29,10 @@ impl AppState {
         );
         self.model.carry_unshown_notices_into(&mut candidate.model);
         if let (Some(committed), Some(live)) = (
-            candidate.results.results.session.spec_drafts.as_mut(),
-            self.results.results.session.spec_drafts.as_mut(),
-        ) && committed.len() == live.len()
-        {
-            for (committed, live) in committed.iter_mut().zip(live) {
-                committed.adopt_reference_exchange(live);
-            }
+            candidate.simulate.verification.specification_draft.as_mut(),
+            self.simulate.verification.specification_draft.as_mut(),
+        ) {
+            committed.draft.adopt_reference_exchange(&mut live.draft);
         }
         *self = candidate;
     }

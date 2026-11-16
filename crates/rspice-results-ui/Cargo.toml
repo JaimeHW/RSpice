@@ -24,8 +24,4 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# The measurement builder's tests check the cards it writes against the
-# engine's own parser and measure engine; the viewers name the engine's result
-# types only through rspice-results.
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-ui-kit = { workspace = true, features = ["plot", "test-support"] }

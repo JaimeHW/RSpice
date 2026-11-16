@@ -1,13 +1,12 @@
 //! Retained-source controls and application transactions for Results bars.
 
 use super::{
-    ResultViewer, ResultsParts, Ui, eye, instrument, sheet_domain_controls, sheet_purpose, specs,
-    table,
+    ResultViewer, ResultsParts, Ui, eye, instrument, sheet_domain_controls, sheet_purpose, table,
 };
 use crate::workbench::framework::requests::{ExportCsv, ExportFigure};
 use rspice_results_ui::chrome::{
     ExportRequests,
-    bars::{self, SheetBarHost, SpecificationAction},
+    bars::{self, SheetBarHost},
 };
 
 pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
@@ -44,37 +43,6 @@ impl SheetBarHost for Host<'_, '_> {
     }
     fn operating_point_filter(&mut self) -> &mut String {
         &mut self.0.results.session.op_filter
-    }
-    fn specification_editing(&self) -> bool {
-        self.0.results.session.spec_drafts.is_some()
-    }
-    fn request(&mut self, action: SpecificationAction) {
-        let state = &mut *self.0;
-        match action {
-            SpecificationAction::Discard => {
-                state.results.session.spec_drafts = None;
-                *state.specification_editor_route_pending = false;
-                // With no retained dataset there is no read-only Specs
-                // evidence sheet to fall back to. Move to the ordinary
-                // empty Results landing so the destination boundary does
-                // not immediately reopen the editor the user dismissed.
-                let selected_plan_dataset = state
-                    .model
-                    .sim_setup
-                    .stable_analysis_plan()
-                    .ok()
-                    .and_then(|plan| state.model.simulation.active_run_for_plan(plan.id()));
-                if selected_plan_dataset.is_none() {
-                    state.results.session.viewer = ResultViewer::Waves;
-                }
-            }
-            SpecificationAction::Apply => {
-                if !specs::apply_drafts(state) {
-                    state.prompt("Specs not applied: fix the invalid bound first.");
-                }
-            }
-            SpecificationAction::Edit => specs::open_editor(state),
-        }
     }
     fn instrument(&mut self, ui: &mut Ui) {
         instrument::show(ui, self.0);

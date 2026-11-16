@@ -57,7 +57,7 @@ impl PopulationLimit {
     }
 
     /// Signed distance to the nearest bound: positive inside, negative out.
-    /// The same quantity the Specs sheet calls the margin.
+    /// The same quantity Verify's Specifications view calls the margin.
     pub fn signed_margin(&self, value: f64) -> Option<f64> {
         self.specification.signed_margin(value)
     }

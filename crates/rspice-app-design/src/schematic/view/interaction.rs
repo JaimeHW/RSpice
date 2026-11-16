@@ -403,16 +403,16 @@ pub fn activate_requirement_link(
         }
         Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
             let reference = reference.to_owned();
-            // The results workspace opens its editor once the surface has
+            // Verify turns to its Specifications view once the surface has
             // drawn. The workspace itself opens now, so the rest of the
-            // frame reads the route it read when the editor opened here.
+            // frame reads the route it will show.
             state
                 .workbench
                 .outbox
-                .push(DesignSurfaceRequest::OpenSpecificationEditor);
+                .push(DesignSurfaceRequest::OpenSpecifications);
             state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Results);
+                .activate(crate::workbench::state::Workspace::Verify);
             state.prompt(format!(
                 "Opened project specifications for requirement {reference}."
             ));

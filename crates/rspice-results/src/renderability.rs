@@ -599,13 +599,6 @@ pub fn viewer_can_render(
                 Some(AnalysisResultPayload::TransferFunction { .. })
             )
         }
-        ResultViewer::Specs => {
-            !analysis.measurements.is_empty()
-                || matches!(
-                    analysis.result_payload,
-                    Some(AnalysisResultPayload::ScalarMeasurements { .. })
-                )
-        }
         ResultViewer::Table => {
             !analysis.waveforms.is_empty()
                 || operating_point_evidence_is_renderable(analysis)

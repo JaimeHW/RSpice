@@ -352,10 +352,6 @@ pub(crate) fn classify_viewer(
         return ResultOperationalStatus::canonical(ResultOperationalState::NoProject, true);
     }
 
-    // Specifications owns an authoring route before any result exists.
-    let authoring_without_dataset = viewer == ResultViewer::Specs
-        && (state.results.session.spec_drafts.is_some()
-            || !state.model.workspace.content.specs.is_empty());
     let Some(run_index) = state
         .model
         .simulation
@@ -363,11 +359,7 @@ pub(crate) fn classify_viewer(
         .active_run_idx
         .filter(|index| state.model.simulation.retained.runs.get(*index).is_some())
     else {
-        return if authoring_without_dataset {
-            ResultOperationalStatus::canonical(ResultOperationalState::Complete, false)
-        } else {
-            ResultOperationalStatus::canonical(ResultOperationalState::NoDataset, true)
-        };
+        return ResultOperationalStatus::canonical(ResultOperationalState::NoDataset, true);
     };
 
     let (run_has_data, analysis_keys) = {

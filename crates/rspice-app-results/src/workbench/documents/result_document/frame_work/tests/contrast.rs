@@ -57,7 +57,6 @@ fn unreadable(viewer: ResultViewer, mut state: ResultsTestHost) -> Vec<String> {
                             ui,
                             &mut state.results_parts(),
                             &mut controller,
-                            None,
                         );
                     });
                 },
@@ -472,7 +471,6 @@ fn document_frames(
                                 ui,
                                 &mut state.results_parts(),
                                 &mut controller,
-                                None,
                                 document,
                             );
                         });

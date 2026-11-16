@@ -836,7 +836,7 @@ pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     if sheet.rows.is_empty() {
         let text = format!("No specification to verify across these {points} points.");
         if empty_line(ui, &text, Some("Open specifications")) {
-            cx.execute(ids::EDIT_SPECIFICATIONS);
+            cx.execute(SimulateCommand::Verify(VerificationPage::Specifications).key());
         }
         return;
     }

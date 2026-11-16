@@ -42,20 +42,12 @@ const PAGE_PICKER_WIDTH: f32 = 150.0;
 /// Air on either side of the page picker, the inset a viewer tab keeps.
 const PAGE_PICKER_GUTTER: f32 = 8.0;
 
-pub enum SpecificationAction {
-    Discard,
-    Apply,
-    Edit,
-}
-
 /// Source-aware sheet controls and immediate application transactions.
 pub trait SheetBarHost {
     fn viewer(&self) -> ResultViewer;
     fn export(&mut self, requests: ExportRequests);
     fn fft_summary(&self) -> Option<String>;
     fn operating_point_filter(&mut self) -> &mut String;
-    fn specification_editing(&self) -> bool;
-    fn request(&mut self, action: SpecificationAction);
     fn instrument(&mut self, ui: &mut Ui);
     fn eye_actions(&mut self, ui: &mut Ui);
     fn table_actions(&mut self, ui: &mut Ui);
@@ -72,7 +64,7 @@ pub const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
 pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
     matches!(
         viewer,
-        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table
+        ResultViewer::Op | ResultViewer::Table
     )
 }
 
@@ -263,7 +255,6 @@ fn show_structured_result_strip(ui: &mut Ui, host: &mut impl SheetBarHost) {
     let t = Tokens::get(ui.ctx());
     let title = match host.viewer() {
         ResultViewer::Op => "Operating point · DC solution",
-        ResultViewer::Specs => "Specifications",
         ResultViewer::Table => "Exact retained samples",
         _ => return,
     };
@@ -343,18 +334,6 @@ fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
         }
         ResultViewer::Eye => host.eye_actions(ui),
         ResultViewer::Op => operating_point_filter(ui, host.operating_point_filter()),
-        ResultViewer::Specs => {
-            if host.specification_editing() {
-                if ui.button("Discard").clicked() {
-                    host.request(SpecificationAction::Discard);
-                }
-                if ui.button("Apply").clicked() {
-                    host.request(SpecificationAction::Apply);
-                }
-            } else if ui.button("Edit specs…").clicked() {
-                host.request(SpecificationAction::Edit);
-            }
-        }
         ResultViewer::Table => host.table_actions(ui),
         _ => {}
     }

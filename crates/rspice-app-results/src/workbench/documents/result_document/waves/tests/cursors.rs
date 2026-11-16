@@ -83,7 +83,7 @@ fn whole_frame(
     let mut controller = crate::simulation::SimulationController::new();
     ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            super::super::super::show(ui, parts, &mut controller, None);
+            super::super::super::show(ui, parts, &mut controller);
         });
     })
     .shapes
@@ -991,11 +991,11 @@ fn write_the_cursor_pictures() {
         let mut controller = crate::simulation::SimulationController::new();
         for _ in 0..2 {
             let _ = rspice_ui_kit::raster::render(FRAME, |ui, _| {
-                super::super::super::show(ui, &mut state.results_parts(), &mut controller, None);
+                super::super::super::show(ui, &mut state.results_parts(), &mut controller);
             });
         }
         let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
-            super::super::super::show(ui, &mut state.results_parts(), &mut controller, None);
+            super::super::super::show(ui, &mut state.results_parts(), &mut controller);
         });
         std::fs::write(
             format!("{directory}/{name}.png"),

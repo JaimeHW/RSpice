@@ -60,7 +60,6 @@ pub fn show(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     document_id: ResultDocumentId,
 ) {
     // A document that cannot advance onto the newest run is still a document
@@ -213,7 +212,6 @@ pub fn show(
                     ui,
                     state,
                     run_controller,
-                    selected_specification,
                     ResultViewer::Manifest,
                     None,
                 );
@@ -223,7 +221,6 @@ pub fn show(
                     ui,
                     state,
                     run_controller,
-                    selected_specification,
                     page,
                     active_pane_id,
                     active_viewer,
@@ -711,7 +708,6 @@ fn render_page(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     page: &PageProjection,
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
@@ -734,7 +730,6 @@ fn render_page(
                 ui,
                 state,
                 run_controller,
-                selected_specification,
                 &page.panes[index],
                 active_pane_id,
                 active_viewer,
@@ -747,7 +742,6 @@ fn render_pane(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     pane: &PaneProjection,
     active_pane_id: u64,
     active_viewer: Option<ResultViewer>,
@@ -780,7 +774,6 @@ fn render_pane(
                     ui,
                     state,
                     run_controller,
-                    selected_specification,
                     pane,
                     viewer,
                     is_active,
@@ -866,7 +859,6 @@ fn render_pane_viewer(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
@@ -928,14 +920,7 @@ fn render_pane_viewer(
         unavailable_surface(ui, &pane.title, &reason);
         return;
     }
-    super::show_persistent_pane_viewer(
-        ui,
-        state,
-        run_controller,
-        selected_specification,
-        viewer,
-        family,
-    );
+    super::show_persistent_pane_viewer(ui, state, run_controller, viewer, family);
     capture_pane_presentation(state, pane, viewer);
 }
 

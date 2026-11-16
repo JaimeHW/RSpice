@@ -39,7 +39,6 @@ mod sensitivity;
 pub(crate) mod signal_sets;
 pub mod smith;
 mod soa;
-pub mod specs;
 mod table;
 mod transfer_function;
 pub mod view_context;
@@ -61,42 +60,7 @@ pub(crate) use manifest::export_csv as export_manifest_csv;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
-pub(crate) use specs::export_csv as export_specs_csv;
 pub(crate) use view_history::{zoom_previous, zoom_previous_available};
-
-/// Route to the one surface that authors specification limits.
-///
-/// The whole route, not just the document: the editor is a Results viewer, so
-/// opening it without selecting that viewer and activating Results arms a
-/// surface nobody is looking at. Three call sites had written those three
-/// steps out identically, which is three places for the route to drift from
-/// the one editor it is supposed to protect.
-pub fn open_specification_editor(state: &mut ResultsParts<'_>) {
-    // Route transitions and persistent-document activation are reconciled at
-    // frame boundaries. Carry a one-shot intent separately from `viewer` and
-    // the draft rows so those projections cannot erase the requested editor
-    // before the Results destination gets its first frame.
-    *state.specification_editor_route_pending = true;
-    state.results.session.viewer = crate::workbench::ResultViewer::Specs;
-    specs::open_editor(state);
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Results);
-}
-
-/// Consume a specification-authoring route at the Results destination.
-///
-/// This deliberately reconstructs both projections after document/viewer
-/// reconciliation. Returning `true` lets the surface give the editor
-/// precedence over an active persistent result document in the same frame.
-pub fn consume_pending_specification_editor(state: &mut ResultsParts<'_>) -> bool {
-    if !std::mem::take(state.specification_editor_route_pending) {
-        return false;
-    }
-    state.results.session.viewer = crate::workbench::ResultViewer::Specs;
-    specs::open_editor(state);
-    true
-}
 
 pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     harmonic_balance::analysis_is_renderable(analysis)
@@ -512,8 +476,8 @@ pub(crate) fn request_view_gesture(results: &mut ResultsState, gesture: ViewGest
 
 /// Whether the active sheet has a viewport that fitting can release.
 ///
-/// Every plot sheet does; the structured documents (OP, specs, table, XF,
-/// manifest) have no viewport at all and must not offer the gesture.
+/// Every plot sheet does; the structured documents (OP, table, XF, manifest)
+/// have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: ResultsReads<'_>) -> bool {
     state.model.simulation.retained.has_results()
         && viewer_draws_a_pane(state.results.session.viewer)
@@ -521,14 +485,13 @@ pub(crate) fn fit_gesture_available(state: ResultsReads<'_>) -> bool {
 
 /// Whether this sheet draws a plot pane at all.
 ///
-/// The evidence tables (OP, specs, sample table, event history, manifest) and
+/// The evidence tables (OP, sample table, event history, manifest) and
 /// the scalar transfer-function readout draw no axes, so they have no
 /// viewport, no fit, and no limit mask to report.
 pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
     !matches!(
         viewer,
         ResultViewer::Op
-            | ResultViewer::Specs
             | ResultViewer::Table
             | ResultViewer::Events
             | ResultViewer::TransferFunction
@@ -662,11 +625,10 @@ pub struct ResultsParts<'a> {
     pub(crate) result_document_dialog: &'a mut Option<ResultDocumentDialog>,
     pub(crate) create_result_document: &'a mut CreateResultDocumentDialogState,
     pub(crate) result_import: &'a mut import::ResultImportDialogState,
-    pub(crate) specification_editor_route_pending: &'a mut bool,
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) platform: &'a PlatformState,
-    /// The run preflight, which an edit to the plan's specifications drops.
+    /// The run preflight, which an edit to the plan drops.
     pub(crate) preflight:
         &'a mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
     /// Every command the application registers: what a chord pressed over
@@ -1621,16 +1583,9 @@ pub fn show(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
 ) {
     results_keymap(ui, state);
-    show_with_chrome(
-        ui,
-        state,
-        run_controller,
-        selected_specification,
-        ResultChrome::Full,
-    );
+    show_with_chrome(ui, state, run_controller, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), state);
     view_history::observe(ui, state, view_history::WaveSheet::QuickView);
 }
@@ -1824,19 +1779,12 @@ pub fn show_persistent_document(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     document_id: crate::product::ResultDocumentId,
 ) {
     // A project-owned document is the same workspace with a retained page
     // layout, so it answers the same keys and owns the same marker dialog.
     results_keymap(ui, state);
-    persistent_document::show(
-        ui,
-        state,
-        run_controller,
-        selected_specification,
-        document_id,
-    );
+    persistent_document::show(ui, state, run_controller, document_id);
     waves::marker_dialog::show(ui.ctx(), state);
     view_history::observe(ui, state, view_history::WaveSheet::Document(document_id));
 }
@@ -1860,15 +1808,8 @@ pub fn show_compact_split(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
 ) {
-    show_with_chrome(
-        ui,
-        state,
-        run_controller,
-        selected_specification,
-        ResultChrome::CompactSplit,
-    );
+    show_with_chrome(ui, state, run_controller, ResultChrome::CompactSplit);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1881,7 +1822,6 @@ fn show_with_chrome(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     chrome: ResultChrome,
 ) {
     // Every quick-style entry into the workspace leaves the persistent
@@ -1933,7 +1873,7 @@ fn show_with_chrome(
     let well_height = (available.height() - strip_height).max(0.0);
     ui.allocate_ui(egui::vec2(available.width(), well_height), |ui| {
         ui.set_min_height(well_height);
-        show_viewer_well(ui, state, run_controller, selected_specification, chrome);
+        show_viewer_well(ui, state, run_controller, chrome);
     });
     if strip_height > 0.0 {
         waves::readout_strip(ui, state, strip_height);
@@ -1942,24 +1882,22 @@ fn show_with_chrome(
 
 /// Whether the active viewer owns a stage-local bar below the viewer tabs.
 ///
-/// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP,
-/// Specs, and Table use the mockup's 40 px structured-document strip. XF and
-/// Manifest own no controls there and therefore collapse the row completely.
+/// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP and
+/// Table use the mockup's 40 px structured-document strip. XF and Manifest
+/// own no controls there and therefore collapse the row completely.
 fn result_stage_bar_visible(state: ResultsReads<'_>) -> bool {
-    (state.results.session.viewer == ResultViewer::Specs
-        && state.results.session.spec_drafts.is_some())
-        || (state
-            .model
-            .simulation
-            .active_run()
-            .is_some_and(|run| !run.analyses.is_empty())
-            && viewer_has_sheet_bar(state.results.session.viewer))
+    state
+        .model
+        .simulation
+        .active_run()
+        .is_some_and(|run| !run.analyses.is_empty())
+        && viewer_has_sheet_bar(state.results.session.viewer)
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
 ///
 /// Only the cursor-bearing waveform viewers carry a readout; structured
-/// documents (OP, specs, tables) have no cursor to report.
+/// documents (OP, tables) have no cursor to report.
 fn readout_strip_height(state: &mut ResultsParts<'_>) -> f32 {
     match state.results.session.viewer {
         ResultViewer::Waves
@@ -2028,7 +1966,6 @@ pub fn show_persistent_pane_viewer(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     viewer: ResultViewer,
     family: Option<SourceSampleSelection>,
 ) {
@@ -2049,13 +1986,7 @@ pub fn show_persistent_pane_viewer(
     results.session.hidden_family_traces = hidden;
     prepare_viewer_state(state);
     state.results.session.viewer = viewer;
-    show_viewer_well(
-        ui,
-        state,
-        run_controller,
-        selected_specification,
-        ResultChrome::Full,
-    );
+    show_viewer_well(ui, state, run_controller, ResultChrome::Full);
 }
 
 pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
@@ -2199,7 +2130,6 @@ fn show_viewer_well(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    selected_specification: Option<&str>,
     chrome: ResultChrome,
 ) {
     apply_pending_view_gesture(ui, state);
@@ -2264,9 +2194,6 @@ fn show_viewer_well(
         ResultViewer::NoiseContrib => waves::show_noise(ui, state),
         ResultViewer::Contribution => sensitivity::show(ui, state),
         ResultViewer::TransferFunction => transfer_function::show(ui, state),
-        ResultViewer::Specs => {
-            specs::show(ui, state, selected_specification);
-        }
         ResultViewer::Table => table::show(ui, state),
         ResultViewer::Nyquist => nyquist::show(ui, state),
         ResultViewer::Smith => smith::show(ui, state),
@@ -2300,14 +2227,10 @@ fn show_viewer_well(
     }
 }
 
-/// Whether this viewer is meaningless without a retained result dataset.
-///
-/// Specifications is deliberately excluded: it owns the plan's requirement
-/// editor and must remain usable before the first run. Treating every Results
-/// viewer except Manifest as dataset-only made the Simulation Studio's
-/// authoring handoff open an invisible editor behind the empty-result hint.
+/// Whether this viewer is meaningless without a retained result dataset:
+/// every one but the Manifest.
 const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
-    !matches!(viewer, ResultViewer::Manifest | ResultViewer::Specs)
+    !matches!(viewer, ResultViewer::Manifest)
 }
 
 /// Split projection of the mockup's viewer-tab row. Run binding, output
@@ -2678,22 +2601,6 @@ pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
                 )
             }
         }
-        ResultViewer::Specs => {
-            // The active run, not the history. The sheet reads `active_run()`
-            // and nothing else, so scanning every retained run offered a tab
-            // whose sheet then reported "no measured results" — the measured
-            // results were in a run the reader is not looking at.
-            let has_measurements = active_run.is_some_and(|run| {
-                run.analyses
-                    .iter()
-                    .any(|analysis| !analysis.measurements.is_empty())
-            });
-            if !state.model.workspace.content.specs.is_empty() || has_measurements {
-                ViewerAvailability::available("Specification or measurement data is available")
-            } else {
-                ViewerAvailability::unavailable("Requires specifications or measured results")
-            }
-        }
         ResultViewer::Table => {
             // The table reads whatever the WAVES stage can plot: if a strip
             // exists, its retained samples can be listed.
@@ -2899,7 +2806,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ResultViewer::Op => op_inspector::right_panel(ui, state),
         ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
         ResultViewer::Contribution => sensitivity::right_panel(ui, state),
-        ResultViewer::Specs => specs::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),

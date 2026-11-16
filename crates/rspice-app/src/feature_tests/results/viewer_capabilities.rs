@@ -203,8 +203,6 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
         index: 0,
         name: "M1".to_string(),
     });
-    results.session.spec_drafts = Some(Vec::new());
-    state.results.specification_editor_route_pending = true;
 
     state.clear_design_execution_context();
     let results = &state.results.results;
@@ -225,6 +223,4 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
     assert!(results.session.op_sort.is_empty());
     assert!(results.session.op_collapsed.is_empty());
     assert_eq!(results.session.op_selected, None);
-    assert!(results.session.spec_drafts.is_none());
-    assert!(!state.results.specification_editor_route_pending);
 }

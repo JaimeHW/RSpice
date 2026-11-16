@@ -329,3 +329,57 @@ fn a_removed_specification_hands_its_selection_to_no_other() {
         "{words:?}"
     );
 }
+
+/// A draft edits the properties its rows show and keeps the rest of the
+/// definition it was taken from: its identity, the requirement table it was
+/// imported from, its waiver, its producer, its comparison and its scope.
+#[test]
+fn a_draft_keeps_what_its_rows_do_not_show() {
+    use rspice_results::specification::{SpecificationSource, SpecificationWaiver};
+
+    let producer = AnalysisInstanceId::new();
+    let entry = SpecEntry {
+        measurement: "offset".to_owned(),
+        expression: "avg V(out)".to_owned(),
+        min: Some(-0.1),
+        max: Some(0.1),
+        unit: "V".to_owned(),
+        scope: SpecPointScope::Nominal,
+    };
+    let mut definition =
+        SpecificationDefinition::from_legacy(crate::product::SimulationPlanId::new(), 0, &entry);
+    definition.requirement_key = "REQ-OFFSET-1".to_owned();
+    definition.comparison = SpecificationComparison::EqualWithin {
+        target: 0.0,
+        tolerance: 0.1,
+    };
+    definition.guard_band = Some(0.01);
+    definition.role = SpecificationRole::Review;
+    definition.producing_analysis = Some(producer);
+    definition.source = Some(SpecificationSource {
+        logical_path: "requirements/analog.csv".to_owned(),
+        row: 12,
+        imported_revision: "req-19".to_owned(),
+        source_digest: crate::product::ContentDigest::from_bytes([0x71; 32]),
+    });
+    definition.waiver = Some(SpecificationWaiver {
+        reference: "WVR-7".to_owned(),
+        owner: "Analog lead".to_owned(),
+        rationale: "Characterization disposition".to_owned(),
+    });
+
+    let mut draft = SpecDraft::from_definition(&definition);
+    draft.requirement_name = "Input-referred offset".to_owned();
+    let retained = draft
+        .parse()
+        .expect("the draft is a definition")
+        .expect("a named measurement is kept");
+
+    assert_eq!(retained.id, definition.id);
+    assert_eq!(retained.requirement_name, "Input-referred offset");
+    assert_eq!(retained.comparison, definition.comparison);
+    assert_eq!(retained.source, definition.source);
+    assert_eq!(retained.waiver, definition.waiver);
+    assert_eq!(retained.producing_analysis, Some(producer));
+    assert_eq!(retained.scope, SpecPointScope::Nominal);
+}

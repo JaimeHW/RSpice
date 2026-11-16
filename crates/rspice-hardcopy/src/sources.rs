@@ -46,8 +46,7 @@ pub use quick_plot::{
 };
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_documents::{
-    resolve_results_manifest_source, resolve_results_quick_view_stack,
-    resolve_results_specs_source, results_manifest_identity, results_specs_identity,
+    resolve_results_manifest_source, resolve_results_quick_view_stack, results_manifest_identity,
     results_stack_identity,
 };
 pub use result_summary::semantic_result_summary;

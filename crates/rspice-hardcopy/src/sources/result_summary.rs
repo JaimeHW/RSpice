@@ -306,54 +306,6 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
                 ],
             });
         }
-        ResultViewer::Specs => {
-            if !analysis.measurements.is_empty() {
-                tables.push(SemanticTable {
-                    title: "Measurements and specifications".to_owned(),
-                    columns: vec![
-                        "Measurement".to_owned(),
-                        "Value".to_owned(),
-                        "Expected".to_owned(),
-                        "Tolerance".to_owned(),
-                        "Status".to_owned(),
-                    ],
-                    rows: analysis
-                        .measurements
-                        .iter()
-                        .map(|measurement| {
-                            vec![
-                                measurement.name.clone(),
-                                measurement
-                                    .value
-                                    .map_or_else(|| "not available".to_owned(), exact_number),
-                                measurement
-                                    .expected
-                                    .map_or_else(|| "—".to_owned(), exact_number),
-                                measurement
-                                    .tolerance
-                                    .map_or_else(|| "—".to_owned(), exact_number),
-                                if measurement.passed { "pass" } else { "fail" }.to_owned(),
-                            ]
-                        })
-                        .collect(),
-                });
-            } else if let Some(AnalysisResultPayload::ScalarMeasurements { values }) =
-                &analysis.result_payload
-            {
-                tables.push(SemanticTable {
-                    title: "Scalar measurements".to_owned(),
-                    columns: vec!["Measurement".to_owned(), "Value".to_owned()],
-                    rows: values
-                        .iter()
-                        .map(|(name, value)| vec![name.clone(), exact_number(*value)])
-                        .collect(),
-                });
-            } else {
-                return Err(HardcopySourceError::MissingViewerEvidence(
-                    "measurement/specification",
-                ));
-            }
-        }
         ResultViewer::Table => {
             let Some(payload) = analysis.result_payload.as_ref() else {
                 return Err(HardcopySourceError::MissingViewerEvidence(

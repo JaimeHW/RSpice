@@ -60,12 +60,11 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
             egui::Panel::right("inspector")
                 .show(ctx, |ui| right_panel(ui, &mut app.state.results_parts()));
             egui::CentralPanel::default().show(ctx, |ui| {
-                super::with_surface_parts(app, |state, run_controller, selected_specification| {
+                super::with_surface_parts(app, |state, run_controller| {
                     show_persistent_pane_viewer(
                         ui,
                         state,
                         run_controller,
-                        selected_specification,
                         viewer,
                         None,
                     )
@@ -115,8 +114,8 @@ fn sheet_route_nodes(
                     .show(ctx, |ui| {
                         super::with_surface_parts(
                             &mut app,
-                            |state, run_controller, selected_specification| {
-                                show(ui, state, run_controller, selected_specification)
+                            |state, run_controller| {
+                                show(ui, state, run_controller)
                             },
                         )
                     });
@@ -146,12 +145,11 @@ fn drawn_shape_count(app: &mut RSpiceApp, viewer: ResultViewer) -> usize {
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                super::with_surface_parts(app, |state, run_controller, selected_specification| {
+                super::with_surface_parts(app, |state, run_controller| {
                     show_persistent_pane_viewer(
                         ui,
                         state,
                         run_controller,
-                        selected_specification,
                         viewer,
                         None,
                     )
@@ -644,12 +642,11 @@ fn every_sheet_draws_at_a_touch_composition() {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     super::with_surface_parts(
                         &mut app,
-                        |state, run_controller, selected_specification| {
+                        |state, run_controller| {
                             show_persistent_pane_viewer(
                                 ui,
                                 state,
                                 run_controller,
-                                selected_specification,
                                 viewer,
                                 None,
                             )
@@ -780,22 +777,6 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 ],
             }),
         ResultViewer::TransferFunction => transfer_function_analysis(),
-        ResultViewer::Specs => {
-            app.state
-                .model
-                .workspace
-                .content
-                .specs
-                .push(rspice_app_state::state::SpecEntry {
-                    measurement: "V(out)".to_owned(),
-                    expression: String::new(),
-                    min: Some(-2.0),
-                    max: Some(5.0),
-                    unit: "V".to_owned(),
-                    scope: rspice_app_state::state::SpecPointScope::AllPoints,
-                });
-            transient_analysis()
-        }
         ResultViewer::PoleZero => AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
             .with_result_payload(AnalysisResultPayload::PoleZero {
                 poles: vec![rspice_app_state::state::ComplexResultValue {

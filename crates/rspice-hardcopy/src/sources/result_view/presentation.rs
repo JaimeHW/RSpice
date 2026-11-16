@@ -4,7 +4,6 @@ use super::*;
 use rspice_results::fft::pipeline::{FftInputOptions, FftTimeWindow};
 use rspice_results::fft::{InputFidelity, data::SpectrumNormalization, window::WindowFunction};
 use rspice_results::histogram::HistogramDisplayMode;
-use rspice_results::specification::SpecEntry;
 use serde::{Deserialize, Serialize};
 
 /// FFT controls read at capture time, without viewer caches or runtime state.
@@ -76,7 +75,6 @@ pub struct ResultsQuickViewPresentation {
     /// is not the page they reviewed.
     #[serde(default)]
     pub(super) overlay: RetainedQuickViewOverlays,
-    pub(super) specs: Vec<SpecEntry>,
     pub(super) fft_selected_source: Option<String>,
     fft_normalization: PreparedFftNormalization,
     fft_window: PreparedFftWindow,
@@ -105,7 +103,6 @@ impl ResultsQuickViewPresentation {
     pub fn try_new(
         viewer: ResultViewer,
         overlay: RetainedQuickViewOverlays,
-        specs: Vec<SpecEntry>,
         fft: QuickFftSettings,
         histogram: QuickHistogramSettings,
     ) -> Result<Self, HardcopySourceError> {
@@ -117,7 +114,6 @@ impl ResultsQuickViewPresentation {
         let captured = Self {
             viewer,
             overlay,
-            specs,
             fft_selected_source: fft.selected_source,
             fft_normalization: match fft.normalization {
                 SpectrumNormalization::Peak => PreparedFftNormalization::Peak,
@@ -172,7 +168,6 @@ impl ResultsQuickViewPresentation {
                 ));
             }
         }
-        super::super::result_documents::validate_result_specifications(&self.specs)?;
         validate_optional_label(
             "prepared FFT source",
             self.fft_selected_source.as_deref(),
@@ -215,9 +210,6 @@ impl ResultsQuickViewPresentation {
 
     pub fn viewer(&self) -> ResultViewer {
         self.viewer
-    }
-    pub fn specs(&self) -> &[SpecEntry] {
-        &self.specs
     }
 
     pub(super) fn fft_normalization(&self) -> SpectrumNormalization {
@@ -289,7 +281,6 @@ mod tests {
             let prepared = ResultsQuickViewPresentation::try_new(
                 ResultViewer::Hist,
                 RetainedQuickViewOverlays::default(),
-                Vec::new(),
                 QuickFftSettings {
                     selected_source: None,
                     normalization: SpectrumNormalization::Peak,

@@ -47,7 +47,6 @@ pub enum ResultsCommand {
     MeasurementLibrary,
     FamilySlicing,
     ResultViewer(ResultViewer),
-    EditSpecifications,
     AddVisualizationPane,
     VisualizationDocumentProperties,
     /// Move the stepping cursor to the largest sample of the trace it reads.
@@ -98,7 +97,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 50] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -127,7 +126,6 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::NoiseContrib),
         Self::ResultViewer(ResultViewer::Contribution),
         Self::ResultViewer(ResultViewer::TransferFunction),
-        Self::ResultViewer(ResultViewer::Specs),
         Self::ResultViewer(ResultViewer::Table),
         Self::ResultViewer(ResultViewer::Nyquist),
         Self::ResultViewer(ResultViewer::Smith),
@@ -140,7 +138,6 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::Soa),
         Self::ResultViewer(ResultViewer::Optimization),
         Self::ResultViewer(ResultViewer::Manifest),
-        Self::EditSpecifications,
         Self::AddVisualizationPane,
         Self::VisualizationDocumentProperties,
         Self::CursorToMaximum,
@@ -178,7 +175,6 @@ impl ResultsCommand {
             Self::MeasurementLibrary => ids::MEASUREMENT_LIBRARY,
             Self::FamilySlicing => ids::FAMILY_SLICING,
             Self::ResultViewer(viewer) => viewer_key(viewer),
-            Self::EditSpecifications => ids::EDIT_SPECIFICATIONS,
             Self::AddVisualizationPane => CommandKey::new("visualization-add-pane"),
             Self::VisualizationDocumentProperties => CommandKey::new("plot-properties"),
             Self::CursorToMaximum => CommandKey::new("cursor-to-maximum"),
@@ -315,13 +311,6 @@ impl ResultsCommand {
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
-            Self::EditSpecifications => (
-                "Specification matrix…",
-                "Verify",
-                PROJECT,
-                ShortcutContext::VerificationWorkspace,
-                NONE,
-            ),
             Self::AddVisualizationPane => (
                 "Add pane…",
                 "Results",
@@ -396,7 +385,6 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
         ResultViewer::NoiseContrib => CommandKey::new("result-noise"),
         ResultViewer::Contribution => CommandKey::new("result-sensitivity-contribution"),
         ResultViewer::TransferFunction => CommandKey::new("result-transfer-function"),
-        ResultViewer::Specs => ids::RESULT_SPECIFICATIONS,
         ResultViewer::Table => CommandKey::new("result-table"),
         ResultViewer::Nyquist => CommandKey::new("result-nyquist"),
         ResultViewer::Smith => CommandKey::new("result-smith"),
@@ -431,7 +419,6 @@ const fn viewer_label(viewer: ResultViewer) -> &'static str {
         ResultViewer::NoiseContrib => "Open noise-contribution viewer",
         ResultViewer::Contribution => "Open sensitivity-contribution viewer",
         ResultViewer::TransferFunction => "Open transfer-function viewer",
-        ResultViewer::Specs => "Open specification results",
         ResultViewer::Table => "Open sample table",
         ResultViewer::Nyquist => "Open Nyquist viewer",
         ResultViewer::Smith => "Open Smith-chart viewer",
