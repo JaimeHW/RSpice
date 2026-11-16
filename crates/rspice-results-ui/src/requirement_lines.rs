@@ -85,6 +85,7 @@ pub fn follow(
             .on_hover_cursor(CursorIcon::PointingHand)
             .on_hover_text(action.as_str());
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Link, true, action.as_str()));
+        rspice_ui_kit::theme::paint_focus_ring(ui, &response, target);
         if response.clicked() {
             followed = Some(index);
         }

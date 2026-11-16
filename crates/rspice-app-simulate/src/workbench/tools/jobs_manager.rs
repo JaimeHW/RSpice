@@ -1095,6 +1095,7 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Optio
                 ),
             )
         });
+        theme::paint_focus_ring(ui, &checks, status);
         if checks.clicked() {
             action = Some(RunRowAction::Verify(VerificationPage::Checks));
         }
@@ -2164,7 +2165,7 @@ mod tests {
         let bounds_of = |label: &str| {
             nodes
                 .iter()
-                .find(|(_, node)| node.label().as_deref() == Some(label))
+                .find(|(_, node)| node.label() == Some(label))
                 .and_then(|(_, node)| node.bounds())
                 .unwrap_or_else(|| panic!("the manifest offers {label}"))
         };
