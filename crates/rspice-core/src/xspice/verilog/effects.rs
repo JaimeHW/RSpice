@@ -156,7 +156,7 @@ pub(crate) enum CallOrigin {
 }
 
 /// The effects half of a running digital design.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct HdlEffects {
     config: Arc<HdlEffectsConfig>,
     /// Records not yet released to a sink.
@@ -182,6 +182,99 @@ pub(crate) struct HdlEffects {
     /// The variables the run publishes as traces; run wiring, not design
     /// state, so a checkpoint neither saves nor restores it.
     traced: dump::TracedVariables,
+}
+
+/// Written out so that `clone_from` refills what a trial image already holds:
+/// the host's image is refilled from the accepted one before every candidate
+/// that writes it (`host/image.rs`), and the derived form freed and
+/// reallocated every journal, queue, file table and dump buffer to copy them,
+/// most of which a step leaves empty or unchanged.
+impl Clone for HdlEffects {
+    fn clone(&self) -> Self {
+        let Self {
+            config,
+            journal,
+            random_seed,
+            urandom,
+            time_format,
+            monitor,
+            queue,
+            monitor_queued,
+            finish,
+            severities,
+            design_precision,
+            files,
+            file_monitors,
+            next_monitor_serial,
+            evaluating,
+            dump,
+            traced,
+        } = self;
+        Self {
+            config: config.clone(),
+            journal: journal.clone(),
+            random_seed: *random_seed,
+            urandom: urandom.clone(),
+            time_format: time_format.clone(),
+            monitor: monitor.clone(),
+            queue: queue.clone(),
+            monitor_queued: *monitor_queued,
+            finish: finish.clone(),
+            severities: *severities,
+            design_precision: *design_precision,
+            files: files.clone(),
+            file_monitors: file_monitors.clone(),
+            next_monitor_serial: *next_monitor_serial,
+            evaluating: *evaluating,
+            dump: dump.clone(),
+            traced: traced.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            config,
+            journal,
+            random_seed,
+            urandom,
+            time_format,
+            monitor,
+            queue,
+            monitor_queued,
+            finish,
+            severities,
+            design_precision,
+            files,
+            file_monitors,
+            next_monitor_serial,
+            evaluating,
+            dump,
+            traced,
+        } = self;
+        config.clone_from(&source.config);
+        journal.clone_from(&source.journal);
+        *random_seed = source.random_seed;
+        urandom.clone_from(&source.urandom);
+        time_format.clone_from(&source.time_format);
+        monitor.clone_from(&source.monitor);
+        queue.clone_from(&source.queue);
+        *monitor_queued = source.monitor_queued;
+        finish.clone_from(&source.finish);
+        *severities = source.severities;
+        *design_precision = source.design_precision;
+        files.clone_from(&source.files);
+        file_monitors.clone_from(&source.file_monitors);
+        *next_monitor_serial = source.next_monitor_serial;
+        *evaluating = source.evaluating;
+        dump.clone_from(&source.dump);
+        traced.clone_from(&source.traced);
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            format!("{self:?}"),
+            format!("{source:?}"),
+            "refilled HDL effects differ from their source"
+        );
+    }
 }
 
 impl HdlEffects {

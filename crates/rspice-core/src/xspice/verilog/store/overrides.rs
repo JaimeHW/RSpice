@@ -90,7 +90,7 @@ impl SignalOverride {
 }
 
 /// Every override in effect, with the bookkeeping that keeps them continuous.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Overrides {
     signals: BTreeMap<DigitalSignalId, SignalOverride>,
     /// Active sites by operand.
@@ -101,6 +101,48 @@ pub(crate) struct Overrides {
     pending: BTreeSet<u32>,
     error: Option<DigitalEvalError>,
     scratch: DigitalEvalScratch,
+}
+
+impl Clone for Overrides {
+    fn clone(&self) -> Self {
+        let Self {
+            signals,
+            inputs,
+            active,
+            pending,
+            error,
+            scratch,
+        } = self;
+        Self {
+            signals: signals.clone(),
+            inputs: inputs.clone(),
+            active: active.clone(),
+            pending: pending.clone(),
+            error: error.clone(),
+            scratch: scratch.clone(),
+        }
+    }
+
+    /// Every field is overwritten with `source`'s, reusing what this layer
+    /// already holds — except the interpreter's scratch, which is storage,
+    /// never state, as the host's own is (`host/image.rs`): a trial image
+    /// refilled from the accepted one keeps its own rather than copying the
+    /// derived programs it caches.
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            signals,
+            inputs,
+            active,
+            pending,
+            error,
+            scratch: _,
+        } = self;
+        signals.clone_from(&source.signals);
+        inputs.clone_from(&source.inputs);
+        active.clone_from(&source.active);
+        pending.clone_from(&source.pending);
+        error.clone_from(&source.error);
+    }
 }
 
 impl Overrides {

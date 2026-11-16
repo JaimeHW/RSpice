@@ -119,7 +119,7 @@ pub(crate) enum Dumped {
 }
 
 /// The dump of one run, which is also its checkpoint image.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Dump {
     /// The name `$dumpfile` gave, as written.
@@ -156,6 +156,89 @@ pub(crate) struct Dump {
     /// The design as the dump lays it out, built at the first `$dumpvars`.
     #[serde(skip)]
     tree: Option<Arc<DumpTree>>,
+}
+
+/// Written out so that `clone_from` refills the buffers a trial image already
+/// holds: the host's image is refilled from the accepted one before every
+/// candidate that writes it (`host/image.rs`), and the derived form freed and
+/// reallocated every list and name set here to copy them.
+impl Clone for Dump {
+    fn clone(&self) -> Self {
+        let Self {
+            name,
+            path,
+            phase,
+            vars,
+            by_signal,
+            dirty,
+            scheduled,
+            last,
+            recording,
+            limit,
+            written,
+            time,
+            header,
+            scanned,
+            named,
+            tree,
+        } = self;
+        Self {
+            name: name.clone(),
+            path: path.clone(),
+            phase: *phase,
+            vars: vars.clone(),
+            by_signal: Arc::clone(by_signal),
+            dirty: dirty.clone(),
+            scheduled: scheduled.clone(),
+            last: last.clone(),
+            recording: *recording,
+            limit: *limit,
+            written: *written,
+            time: *time,
+            header: header.clone(),
+            scanned: scanned.clone(),
+            named: named.clone(),
+            tree: tree.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            name,
+            path,
+            phase,
+            vars,
+            by_signal,
+            dirty,
+            scheduled,
+            last,
+            recording,
+            limit,
+            written,
+            time,
+            header,
+            scanned,
+            named,
+            tree,
+        } = self;
+        name.clone_from(&source.name);
+        path.clone_from(&source.path);
+        *phase = source.phase;
+        vars.clone_from(&source.vars);
+        by_signal.clone_from(&source.by_signal);
+        dirty.clone_from(&source.dirty);
+        scheduled.clone_from(&source.scheduled);
+        last.clone_from(&source.last);
+        *recording = source.recording;
+        *limit = source.limit;
+        *written = source.written;
+        *time = source.time;
+        header.clone_from(&source.header);
+        scanned.clone_from(&source.scanned);
+        named.clone_from(&source.named);
+        tree.clone_from(&source.tree);
+        debug_assert!(*self == *source, "a refilled dump differs from its source");
+    }
 }
 
 impl Default for Dump {
