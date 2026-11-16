@@ -967,11 +967,7 @@ impl FunctionCompiler {
                     ValueLocation::Spill(slot) => {
                         let mut used = A64_ALLOCATED_REGISTER_MASK;
                         let register = take_temporary(&mut used)?;
-                        self.encoder.ldr_d_unsigned(
-                            register,
-                            XReg::Sp,
-                            spill_slot_offset(slot)?,
-                        )?;
+                        self.spill_load_d(register, slot)?;
                         register
                     }
                 };
@@ -1118,13 +1114,11 @@ impl FunctionCompiler {
             }
             (ValueLocation::Register(source), ValueLocation::Spill(slot)) => {
                 let source = logical_register(source)?;
-                self.encoder
-                    .str_d_unsigned(source, XReg::Sp, spill_slot_offset(slot)?)?;
+                self.spill_store_d(source, slot)?;
             }
             (ValueLocation::Spill(slot), ValueLocation::Register(destination)) => {
                 let destination = logical_register(destination)?;
-                self.encoder
-                    .ldr_d_unsigned(destination, XReg::Sp, spill_slot_offset(slot)?)?;
+                self.spill_load_d(destination, slot)?;
             }
             (ValueLocation::Spill(source), ValueLocation::Spill(destination)) => {
                 if source == destination {
@@ -1134,10 +1128,8 @@ impl FunctionCompiler {
                 // leaves volatile, so a temporary here costs no prologue save.
                 let mut used = A64_ALLOCATED_REGISTER_MASK;
                 let scratch = take_temporary(&mut used)?;
-                self.encoder
-                    .ldr_d_unsigned(scratch, XReg::Sp, spill_slot_offset(source)?)?;
-                self.encoder
-                    .str_d_unsigned(scratch, XReg::Sp, spill_slot_offset(destination)?)?;
+                self.spill_load_d(scratch, source)?;
+                self.spill_store_d(scratch, destination)?;
             }
         }
         Ok(())
@@ -1182,16 +1174,13 @@ impl FunctionCompiler {
                     self.encoder.fmov_d(logical_register(register)?, DReg::D0);
                     Ok(())
                 }
-                ValueLocation::Spill(slot) => {
-                    self.stack_store_d(DReg::D0, spill_slot_offset(slot)?)
-                }
+                ValueLocation::Spill(slot) => self.spill_store_d(DReg::D0, slot),
             };
         }
         let mut prepared = self.prepare_instruction(allocated)?;
         self.emit_op(instruction.op(), &mut prepared)?;
         if let ValueLocation::Spill(slot) = allocated.result() {
-            self.encoder
-                .str_d_unsigned(prepared.result, XReg::Sp, spill_slot_offset(slot)?)?;
+            self.spill_store_d(prepared.result, slot)?;
         }
         Ok(())
     }
@@ -1455,10 +1444,7 @@ impl FunctionCompiler {
                     self.encoder.fmov_d(destination, source);
                 }
             }
-            ValueLocation::Spill(slot) => {
-                self.encoder
-                    .ldr_d_unsigned(destination, XReg::Sp, spill_slot_offset(slot)?)?
-            }
+            ValueLocation::Spill(slot) => self.spill_load_d(destination, slot)?,
         }
         Ok(destination)
     }
@@ -1600,8 +1586,7 @@ impl FunctionCompiler {
                 ValueLocation::Register(index) => logical_register(index)?,
                 ValueLocation::Spill(slot) => {
                     let register = take_temporary(&mut used_mask)?;
-                    self.encoder
-                        .ldr_d_unsigned(register, XReg::Sp, spill_slot_offset(slot)?)?;
+                    self.spill_load_d(register, slot)?;
                     register
                 }
             };
@@ -3003,10 +2988,7 @@ impl FunctionCompiler {
                     self.encoder.fmov_d(HOST_ABI.result, source);
                 }
             }
-            ValueLocation::Spill(slot) => {
-                self.encoder
-                    .ldr_d_unsigned(HOST_ABI.result, XReg::Sp, spill_slot_offset(slot)?)?
-            }
+            ValueLocation::Spill(slot) => self.spill_load_d(HOST_ABI.result, slot)?,
         }
         self.emit_epilogue()?;
         self.finish_bytes()
@@ -3054,39 +3036,59 @@ impl FunctionCompiler {
     }
 
     fn stack_store_d(&mut self, source: DReg, offset: usize) -> JitResult<()> {
-        if offset % WORD_BYTES == 0 && offset / WORD_BYTES <= 4095 {
-            self.encoder.str_d_unsigned(source, XReg::Sp, offset)
-        } else {
-            self.emit_stack_address(XReg::X11, offset)?;
-            self.encoder.str_d_unsigned(source, XReg::X11, 0)
-        }
+        let (base, offset) = self.stack_operand(offset)?;
+        self.encoder.str_d_unsigned(source, base, offset)
     }
 
     fn stack_load_d(&mut self, destination: DReg, offset: usize) -> JitResult<()> {
-        if offset % WORD_BYTES == 0 && offset / WORD_BYTES <= 4095 {
-            self.encoder.ldr_d_unsigned(destination, XReg::Sp, offset)
-        } else {
-            self.emit_stack_address(XReg::X11, offset)?;
-            self.encoder.ldr_d_unsigned(destination, XReg::X11, 0)
-        }
+        let (base, offset) = self.stack_operand(offset)?;
+        self.encoder.ldr_d_unsigned(destination, base, offset)
     }
 
     fn stack_store_x(&mut self, source: XReg, offset: usize) -> JitResult<()> {
-        if offset % WORD_BYTES == 0 && offset / WORD_BYTES <= 4095 {
-            self.encoder.str_x_unsigned(source, XReg::Sp, offset)
-        } else {
-            self.emit_stack_address(XReg::X11, offset)?;
-            self.encoder.str_x_unsigned(source, XReg::X11, 0)
-        }
+        let (base, offset) = self.stack_operand(offset)?;
+        self.encoder.str_x_unsigned(source, base, offset)
     }
 
     fn stack_load_x(&mut self, destination: XReg, offset: usize) -> JitResult<()> {
-        if offset % WORD_BYTES == 0 && offset / WORD_BYTES <= 4095 {
-            self.encoder.ldr_x_unsigned(destination, XReg::Sp, offset)
-        } else {
-            self.emit_stack_address(XReg::X11, offset)?;
-            self.encoder.ldr_x_unsigned(destination, XReg::X11, 0)
+        let (base, offset) = self.stack_operand(offset)?;
+        self.encoder.ldr_x_unsigned(destination, base, offset)
+    }
+
+    fn spill_store_d(&mut self, source: DReg, slot: usize) -> JitResult<()> {
+        self.stack_store_d(source, spill_slot_offset(slot)?)
+    }
+
+    fn spill_load_d(&mut self, destination: DReg, slot: usize) -> JitResult<()> {
+        self.stack_load_d(destination, spill_slot_offset(slot)?)
+    }
+
+    /// The base and scaled unsigned offset of an eight-byte access `offset`
+    /// bytes above SP.
+    ///
+    /// The scaled 12-bit offset of `ldr`/`str` reaches 4,095 doublewords from
+    /// SP. Past that, `add x11, sp, #page, lsl #12` reaches every 4 KiB page
+    /// below 16 MiB and the access carries the low twelve bits; past 16 MiB
+    /// [`Self::emit_stack_address`] materializes the whole offset, through X10.
+    ///
+    /// X11 (and X10) are free here because the register allocator hands out
+    /// value registers from the D bank only, and every emitter that writes X10
+    /// or X11 consumes it before it returns: none holds either across a stack
+    /// access, a spill access or a call into another emitter.
+    fn stack_operand(&mut self, offset: usize) -> JitResult<(XReg, usize)> {
+        if offset % WORD_BYTES == 0 {
+            if offset / WORD_BYTES <= 4095 {
+                return Ok((XReg::Sp, offset));
+            }
+            if let Ok(page) = u16::try_from(offset >> 12)
+                && page <= 4095
+            {
+                self.encoder.add_x_imm_shift12(XReg::X11, XReg::Sp, page)?;
+                return Ok((XReg::X11, offset & 0xfff));
+            }
         }
+        self.emit_stack_address(XReg::X11, offset)?;
+        Ok((XReg::X11, 0))
     }
 
     fn emit_stack_address(&mut self, destination: XReg, offset: usize) -> JitResult<()> {
@@ -3551,16 +3553,11 @@ fn aligned_frame_bytes(spill_slot_count: usize) -> JitResult<usize> {
         .ok_or_else(|| register_allocation_error("AArch64 aligned spill-frame size overflow"))
 }
 
+/// A spill slot's byte offset above SP. Every slot is reachable: past the
+/// scaled 12-bit reach the access goes through [`FunctionCompiler::stack_operand`].
 fn spill_slot_offset(slot: usize) -> JitResult<usize> {
-    let offset = slot
-        .checked_mul(WORD_BYTES)
-        .ok_or_else(|| register_allocation_error("AArch64 spill-slot byte offset overflow"))?;
-    if offset / WORD_BYTES > 4095 {
-        return Err(register_allocation_error(format!(
-            "AArch64 spill slot {slot} exceeds the scaled imm12 frame range"
-        )));
-    }
-    Ok(offset)
+    slot.checked_mul(WORD_BYTES)
+        .ok_or_else(|| register_allocation_error("AArch64 spill-slot byte offset overflow"))
 }
 
 fn value_slot_offset(slot: usize) -> JitResult<usize> {
@@ -4640,6 +4637,62 @@ mod tests {
         assert_eq!(variables, [11.0]);
         assert_eq!(currents, [-1.0, -2.0]);
         assert!(context.take_runtime_error().is_some());
+    }
+
+    /// Every spill slot is reachable: within the 4,095 doublewords a scaled
+    /// 12-bit offset reaches from SP, past it through one shifted `add`, and
+    /// past the 16 MiB that shifted `add` reaches with the whole offset
+    /// materialized. Each slot holds its own power of two and the result leaves
+    /// through the deepest slot, so a slot that aliased another, or an access
+    /// that missed the frame, changes the sum.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn spill_slots_past_both_offset_reaches_round_trip() {
+        const SHIFTED_ADD_REACH_SLOTS: usize = (4096 << 12) / 8;
+        let slots = [
+            0,
+            4_095,
+            4_096,
+            4_607,
+            SHIFTED_ADD_REACH_SLOTS - 1,
+            SHIFTED_ADD_REACH_SLOTS,
+            SHIFTED_ADD_REACH_SLOTS + 4_097,
+        ];
+        let deepest = slots[slots.len() - 1];
+        let result = std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let frame_bytes = super::aligned_frame_bytes(deepest + 1).expect("frame size");
+                let mut compiler = FunctionCompiler::new(frame_bytes, false).expect("frame");
+                for (index, slot) in slots.iter().copied().enumerate() {
+                    compiler
+                        .emit_literal(DReg::D0, f64::from(1_u32 << index))
+                        .expect("literal");
+                    compiler.spill_store_d(DReg::D0, slot).expect("spill store");
+                }
+                compiler.emit_literal(DReg::D0, 0.0).expect("literal");
+                for slot in slots {
+                    compiler.spill_load_d(DReg::D1, slot).expect("spill load");
+                    compiler.encoder.fadd_d(DReg::D0, DReg::D0, DReg::D1);
+                }
+                compiler
+                    .spill_store_d(DReg::D0, deepest)
+                    .expect("spill store");
+                let bytes = compiler
+                    .finish(ValueLocation::Spill(deepest))
+                    .expect("finish");
+                verify_exact_function(&bytes, "deep spill frame").expect("verified");
+                let memory = ExecutableMemory::allocate(&bytes).expect("publish deep spill frame");
+                let entry: extern "C" fn(*const EvalContext, *const f64) -> f64 = unsafe {
+                    std::mem::transmute(memory.ptr_at(0).expect("deep spill frame entry"))
+                };
+                let context = EvalContext::empty_for_test();
+                entry(&context, [0.0_f64].as_ptr())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(result, f64::from((1_u32 << slots.len()) - 1));
     }
 
     #[cfg(target_arch = "aarch64")]

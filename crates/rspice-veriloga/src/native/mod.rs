@@ -434,46 +434,15 @@ endmodule
     /// chain: selecting all of them would walk fifty million conditions.
     /// Release only, as the release `native::` run in CI has it: compiling
     /// the chain and building its 10,000-diamond device takes about sixteen
-    /// minutes unoptimized.
+    /// minutes unoptimized. On AArch64 its frame runs past the 4,095 spill
+    /// slots a scaled 12-bit offset reaches from SP.
     #[test]
-    #[cfg(all(not(debug_assertions), not(target_arch = "aarch64")))]
+    #[cfg(not(debug_assertions))]
     fn a_10000_arm_conditional_chain_runs_natively() {
         select_conditional_chain_arms(
             10_000,
             (0..10_000).step_by(97).chain([9_999, 10_000]).collect(),
         );
-    }
-
-    /// On AArch64 the 10,000-arm chain needs spill slots past the 4,095
-    /// eight-byte slots a scaled 12-bit `ldr`/`str` offset reaches from the
-    /// stack pointer, and the JIT refuses the device by name rather than
-    /// address a frame it cannot reach. Release only, as above.
-    #[test]
-    #[cfg(all(not(debug_assertions), target_arch = "aarch64"))]
-    fn a_10000_arm_conditional_chain_is_refused_by_name_on_aarch64() {
-        std::thread::Builder::new()
-            .stack_size(1024 * 1024)
-            .spawn(|| {
-                let report = VerilogACompiler::new(CompilerOptions::default())
-                    .compile_runtime(&conditional_chain_source(10_000), None)
-                    .expect("a chain of any length compiles");
-                let error = crate::device::VerilogADevice::try_new_with_canonical_ir(
-                    "X",
-                    report.model,
-                    &report.canonical_ir,
-                    &[1, 0],
-                )
-                .err()
-                .expect("the frame is past the AArch64 spill-slot reach");
-                let message = format!("{error:?}");
-                assert!(
-                    message.contains("exceeds the scaled imm12 frame range"),
-                    "{message}"
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
     }
 
     #[test]
