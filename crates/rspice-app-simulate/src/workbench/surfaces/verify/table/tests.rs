@@ -80,7 +80,7 @@ fn named_row(row: usize) -> Vec<Cell> {
     vec![
         Cell::text(format!("Row {row}")),
         Cell::number(format!("{row}.0")).sort_by(SortKey::Number(row as f64)),
-        Cell::verdict(if row % 3 == 0 {
+        Cell::verdict(if row.is_multiple_of(3) {
             Verdict::Fail
         } else {
             Verdict::Pass
