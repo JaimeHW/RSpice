@@ -17,45 +17,107 @@ pub(super) fn project(stop: &str) -> RunTestHost {
     );
     drawing.project_model("buck", "dbody", "D", &[("is", 1e-12), ("rs", 10e-3)]);
 
-    // The power stage of net/stage.cir: ideal switches with a low-side body
-    // diode, the inductor and its DCR, the output capacitor and its ESR, and
-    // a 2 ohm load stepping to 1 ohm at 500 us.
+    // The power stage of net/stage.cir, left to right along its rail: the
+    // input supply, the ideal switches with the low side's body diode, the
+    // inductor and its DCR, the output capacitor and its ESR, and a 2 ohm
+    // load stepping to 1 ohm at 500 us.
     let source = ComponentType::VoltageSource;
     let pwl = ComponentType::VoltageSourcePwl;
     let switch = ComponentType::VSwitch;
     let resistor = ComponentType::Resistor;
+    let capacitor = ComponentType::Capacitor;
     let power = "vt=2.5 vh=0.1 ron=20m roff=1e9";
-    drawing.part(source, "vin", "5", "", &["vin", "0"]);
-    drawing.part(switch, "shs", "", power, &["vin", "sw", "ghs", "0"]);
-    drawing.part(switch, "sls", "", power, &["sw", "0", "gls", "0"]);
-    drawing.part(ComponentType::Diode, "dls", "dbody", "", &["0", "sw"]);
-    drawing.part(ComponentType::Inductor, "lbuck", "{lv}", "", &["sw", "lx"]);
-    drawing.part(resistor, "rdcr", "20m", "", &["lx", "vout"]);
-    drawing.part(
-        ComponentType::Capacitor,
-        "cout",
-        "{cv}",
+    let d = &mut drawing;
+    let vin = d.part(source, "vin", "5", "", (40, 200), UPRIGHT);
+    d.earth(vin[1]);
+    d.wire(&[vin[0], at(40, 120)]);
+    d.name(at(40, 120), "vin", NetLabelSide::Right);
+    let shs = d.part(switch, "shs", "", power, (160, 120), UPRIGHT);
+    d.wire(&[at(40, 120), shs[0]]);
+    d.tag(shs[2], Out::Right, "ghs");
+    d.earth(shs[3]);
+    let sls = d.part(switch, "sls", "", power, (240, 200), TURNED);
+    // Down from the switching node beside the low side's name, into its
+    // drain end from the left.
+    d.wire(&[shs[1], at(220, 120)]);
+    d.wire(&[at(220, 120), at(220, 180), sls[0]]);
+    d.name(at(220, 120), "sw", NetLabelSide::Right);
+    d.earth(sls[1]);
+    d.tag(sls[2], Out::Right, "gls");
+    d.earth_left(sls[3]);
+    let dls = d.part(ComponentType::Diode, "dls", "dbody", "", (360, 200), THREE);
+    d.wire(&[at(220, 120), at(360, 120)]);
+    d.wire(&[at(360, 120), dls[1]]);
+    d.earth(dls[0]);
+    let lbuck = d.part(
+        ComponentType::Inductor,
+        "lbuck",
+        "{lv}",
         "",
-        &["vout", "ce"],
+        (400, 120),
+        UPRIGHT,
     );
-    drawing.part(resistor, "resr", "10m", "", &["ce", "0"]);
-    drawing.part(resistor, "rload", "2", "", &["vout", "0"]);
+    d.wire(&[at(360, 120), lbuck[0]]);
+    let rdcr = d.part(resistor, "rdcr", "20m", "", (480, 120), UPRIGHT);
+    d.wire(&[lbuck[1], rdcr[0]]);
+    d.name(lbuck[1], "lx", NetLabelSide::Right);
+    let cout = d.part(capacitor, "cout", "{cv}", "", (580, 200), TURNED);
+    d.wire(&[rdcr[1], at(580, 120)]);
+    d.wire(&[at(580, 120), cout[0]]);
+    let resr = d.part(resistor, "resr", "10m", "", (580, 300), TURNED);
+    // The capacitor's ESR node, named halfway down to its resistor.
+    let esr = at(580, 250);
+    d.wire(&[cout[1], esr]);
+    d.wire(&[esr, resr[0]]);
+    d.name(esr, "ce", NetLabelSide::Right);
+    d.earth(resr[1]);
+    let rload = d.part(resistor, "rload", "2", "", (680, 200), TURNED);
+    d.wire(&[at(580, 120), at(680, 120)]);
+    d.wire(&[at(680, 120), rload[0]]);
+    d.earth(rload[1]);
+    // The load step: a switch, driven by its own step source, adds a second
+    // 2 ohm load.
     let step = "vt=0.5 vh=0.1 ron=1m roff=1e9";
-    drawing.part(switch, "sload", "", step, &["vout", "lo2", "gstep", "0"]);
-    drawing.part(resistor, "rload2", "2", "", &["lo2", "0"]);
-    drawing.part(pwl, "vstep", "0 0 500u 0 500.01u 1", "", &["gstep", "0"]);
-    // The gate drives' supply, sagging from 5 V to 3.5 V and recovering,
-    // and the two 1 nF gates.
-    let sag = "0 5 1.0m 5 1.1m 3.5 1.3m 3.5 1.4m 5";
-    drawing.part(pwl, "vdrv", sag, "", &["vdrv", "0"]);
-    drawing.part(ComponentType::Capacitor, "cghs", "1n", "", &["ghs", "0"]);
-    drawing.part(ComponentType::Capacitor, "cgls", "1n", "", &["gls", "0"]);
-    drawing.ground();
+    let sload = d.part(switch, "sload", "", step, (800, 200), UPRIGHT);
+    d.wire(&[at(680, 120), at(760, 120)]);
+    d.wire(&[at(760, 120), at(760, 200), sload[0]]);
+    d.name(at(760, 120), "vout", NetLabelSide::Right);
+    d.earth(sload[3]);
+    let rload2 = d.part(resistor, "rload2", "2", "", (820, 280), TURNED);
+    let lo2 = at(820, 230);
+    d.wire(&[sload[1], lo2]);
+    d.wire(&[lo2, rload2[0]]);
+    d.name(lo2, "lo2", NetLabelSide::Right);
+    d.earth(rload2[1]);
+    let vstep = d.part(
+        pwl,
+        "vstep",
+        "0 0 500u 0 500.01u 1",
+        "",
+        (920, 260),
+        UPRIGHT,
+    );
+    d.wire(&[sload[2], at(920, 180)]);
+    d.wire(&[at(920, 180), vstep[0]]);
+    d.name(at(920, 180), "gstep", NetLabelSide::Right);
+    d.earth(vstep[1]);
 
-    drawing.instance(
+    // The gate drive, below: the drives' supply, sagging from 5 V to 3.5 V
+    // and recovering, the two 1 nF gates, and the controller.
+    let sag = "0 5 1.0m 5 1.1m 3.5 1.3m 3.5 1.4m 5";
+    let vdrv = d.part(pwl, "vdrv", sag, "", (560, 420), UPRIGHT);
+    d.tag(vdrv[0], Out::Up, "vdrv");
+    d.earth(vdrv[1]);
+    let cghs = d.part(capacitor, "cghs", "1n", "", (300, 420), TURNED);
+    d.tag(cghs[0], Out::Up, "ghs");
+    d.earth(cghs[1]);
+    let cgls = d.part(capacitor, "cgls", "1n", "", (400, 420), TURNED);
+    d.tag(cgls[0], Out::Up, "gls");
+    d.earth(cgls[1]);
+    d.instance(
         &control,
         "xctrl",
-        0,
+        (120, 420),
         &[("fb", "vout"), ("hs", "ghs"), ("ls", "gls")],
     );
 

@@ -13,42 +13,70 @@ use crate::state::PortDirectionType;
 /// filter's three capacitors at 2.5 V from the start; drawn, each capacitor
 /// states that initial voltage itself.
 fn loop_filter(drawing: &mut Drawing) -> CellViewRef {
-    drawing.port("u1n", PortDirectionType::InputAnalog);
-    drawing.port("d1", PortDirectionType::InputAnalog);
-    drawing.port("vout", PortDirectionType::OutputAnalog);
+    use NetLabelSide::{Above, Right};
+    let d = drawing;
+    // The pump's two gates come in on the left; the filtered control
+    // voltage leaves on the right.
+    let u1n = d.port("u1n", PortDirectionType::InputAnalog, (-20, 200), HALF);
+    let d1 = d.port("d1", PortDirectionType::InputAnalog, (-20, 320), HALF);
+    let vout = d.port("vout", PortDirectionType::OutputAnalog, (760, 260), UPRIGHT);
     let (resistor, capacitor) = (ComponentType::Resistor, ComponentType::Capacitor);
-    drawing.part(
-        ComponentType::VoltageSource,
-        "vdd",
-        "{vcc}",
-        "",
-        &["dd", "0"],
-    );
-    drawing.part(ComponentType::VoltageSource, "vss", "0", "", &["ss", "0"]);
+    let source = ComponentType::VoltageSource;
+    // The pump's rails.
+    let vdd = d.part(source, "vdd", "{vcc}", "", (60, 100), UPRIGHT);
+    d.earth(vdd[1]);
+    d.wire(&[vdd[0], at(60, 60)]);
+    d.name(at(60, 60), "dd", Right);
+    let vss = d.part(source, "vss", "0", "", (60, 440), UPRIGHT);
+    d.earth(vss[1]);
+    // The pump: the PMOS sources charge from the upper rail, the NMOS sinks
+    // it to the lower one, both onto dra.
     let n = "w=12u l=0.35u as=24p ad=24p ps=28u pd=28u";
-    drawing.part(
-        ComponentType::Nmos,
-        "mnd",
-        "N1",
-        n,
-        &["dra", "d1", "ss", "ss"],
-    );
+    let mnd = d.part(ComponentType::Nmos, "mnd", "N1", n, (240, 320), UPRIGHT);
     let p = "w=24u l=0.35u as=48p ad=48p ps=52u pd=52u";
-    drawing.part(
-        ComponentType::Pmos,
-        "mpd",
-        "P1",
-        p,
-        &["dra", "u1n", "dd", "dd"],
-    );
-    drawing.part(resistor, "r1", "{r1v}", "", &["dra", "int1"]);
-    drawing.part(resistor, "r2", "200", "", &["int1", "c1"]);
-    drawing.part(capacitor, "c1", "{c1v}", "ic=2.5", &["c1", "0"]);
-    drawing.part(capacitor, "c2", "5n", "ic=2.5", &["int1", "0"]);
-    drawing.part(resistor, "r3", "50", "", &["int1", "vout"]);
-    drawing.part(capacitor, "c3", "0.5n", "ic=2.5", &["vout", "0"]);
-    drawing.ground();
-    drawing.master("loopf_mx")
+    let mpd = d.part(ComponentType::Pmos, "mpd", "P1", p, (240, 200), FLIPPED);
+    d.wire(&[at(60, 60), at(260, 60)]);
+    d.wire(&[at(260, 60), mpd[2]]);
+    for (bulk, source) in [(mpd[3], mpd[2]), (mnd[3], mnd[2])] {
+        d.wire(&[bulk, at(bulk.x + 20, bulk.y)]);
+        d.wire(&[at(bulk.x + 20, bulk.y), at(source.x + 20, source.y)]);
+        d.wire(&[at(source.x + 20, source.y), source]);
+    }
+    // The ports name the gates' nets.
+    d.wire(&[u1n, mpd[1]]);
+    d.wire(&[d1, mnd[1]]);
+    d.wire(&[mpd[0], at(260, 260)]);
+    d.wire(&[at(260, 260), mnd[0]]);
+    d.wire(&[mnd[2], at(260, 400)]);
+    d.wire(&[at(260, 400), at(60, 400)]);
+    d.wire(&[at(60, 400), vss[0]]);
+    d.name(at(60, 400), "ss", Right);
+    // The third-order filter.
+    let r1 = d.part(resistor, "r1", "{r1v}", "", (340, 260), UPRIGHT);
+    d.wire(&[at(260, 260), at(290, 260)]);
+    d.wire(&[at(290, 260), r1[0]]);
+    d.name(at(290, 260), "dra", Above);
+    let r2 = d.part(resistor, "r2", "200", "", (400, 340), TURNED);
+    d.wire(&[r1[1], at(400, 260)]);
+    d.wire(&[at(400, 260), r2[0]]);
+    d.name(at(400, 260), "int1", Above);
+    let c1 = d.part(capacitor, "c1", "{c1v}", "ic=2.5", (400, 420), TURNED);
+    d.wire(&[r2[1], at(400, 380)]);
+    d.wire(&[at(400, 380), c1[0]]);
+    d.name(at(400, 380), "c1", Right);
+    d.earth(c1[1]);
+    let c2 = d.part(capacitor, "c2", "5n", "ic=2.5", (480, 340), TURNED);
+    d.wire(&[at(400, 260), at(480, 260)]);
+    d.wire(&[at(480, 260), c2[0]]);
+    d.earth(c2[1]);
+    let r3 = d.part(resistor, "r3", "50", "", (560, 260), UPRIGHT);
+    d.wire(&[at(480, 260), r3[0]]);
+    let c3 = d.part(capacitor, "c3", "0.5n", "ic=2.5", (660, 340), TURNED);
+    d.wire(&[r3[1], at(660, 260)]);
+    d.wire(&[at(660, 260), c3[0]]);
+    d.wire(&[at(660, 260), vout]);
+    d.earth(c3[1]);
+    d.master("loopf_mx")
 }
 
 /// The project as an engineer draws it, its transient running to `stop`
@@ -60,53 +88,78 @@ pub(super) fn project(stop: &str) -> RunTestHost {
     let vco = drawing.source_view("vco_pwl", ViewType::VerilogA, "c02-pll/net/vco_pwl.va");
     let pfd = drawing.source_view("div20_pfd", ViewType::Verilog, "c02-pll/net/div20_pfd.v");
 
-    // The 10 MHz reference, and the bridges onto the event side at 0.5 V.
+    // The forward path left to right along the top: the 10 MHz reference
+    // and its bridge onto the event side at 0.5 V, the phase-frequency
+    // detector, the loop filter and the VCO. The feedback path below: the
+    // VCO's bridge and the divide-by-2 back to the detector; beside it the
+    // D/As the deck plots the divider and the reference through.
+    use NetLabelSide::{Above, Below, Right};
+    let d = &mut drawing;
     let reference = "v1=0 v2=3.3 td=10n tr=1n tf=1n pw=50n per=100n";
-    drawing.part(
+    let vref = d.part(
         ComponentType::VoltageSourcePulse,
         "vref",
         "",
         reference,
-        &["ref", "0"],
+        (40, 240),
+        UPRIGHT,
     );
+    d.earth(vref[1]);
     let adc = "in_low=0.5 in_high=0.5";
     let bridge = ComponentType::XspiceAdcBridge;
-    drawing.part(bridge, "abridgeref", "", adc, &["ref", "d_ref"]);
-    drawing.part(bridge, "abridgevco", "", adc, &["vco_out", "d_vco"]);
-    // The D/A the deck plots the divider and the reference through.
+    let abridgeref = d.part(bridge, "abridgeref", "", adc, (200, 200), UPRIGHT);
+    d.wire(&[vref[0], at(40, 200)]);
+    d.wire(&[at(40, 200), abridgeref[0]]);
+    d.name(at(40, 200), "ref", Right);
+    let abridgevco = d.part(bridge, "abridgevco", "", adc, (360, 340), UPRIGHT);
+    d.tag(abridgevco[0], Out::Left, "vco_out");
     let dac = "out_low=0 out_high=1 out_undef=0.5 input_load=5e-12 t_rise=1e-10 t_fall=1e-10";
     let plot = ComponentType::XspiceDacBridge;
-    drawing.part(plot, "abridgew1", "", dac, &["d_divout", "s1"]);
-    drawing.part(plot, "abridgew2", "", dac, &["d_ref", "s2"]);
-    drawing.ground();
+    for (name, input, output, y) in [
+        ("abridgew1", "d_divout", "s1", 340),
+        ("abridgew2", "d_ref", "s2", 420),
+    ] {
+        let pins = d.part(plot, name, "", dac, (720, y), UPRIGHT);
+        d.tag(pins[0], Out::Left, input);
+        d.tag(pins[1], Out::Right, output);
+    }
 
-    drawing.instance(&vco, "xvco", 0, &[("cont", "cont"), ("out", "vco_out")]);
+    let oscillator = d.instance(&vco, "xvco", (680, 180), &[("out", "vco_out")]);
     let divide = "div_factor=2 high_cycles=1 i_count=0 rise_delay=1e-10 fall_delay=1e-10";
-    drawing.shelf_xspice(
+    let divider = d.shelf_xspice(
         "rspice.xspice.d_fdiv",
         "adiv2",
         divide,
-        1,
-        &[("freq_in", "d_vco"), ("freq_out", "d_div2")],
+        (480, 340),
+        &[("freq_out", "d_div2")],
     );
-    drawing.instance(
-        &pfd,
-        "xpfd",
-        2,
-        &[
-            ("clkin", "d_div2"),
-            ("ref", "d_ref"),
-            ("up_n", "up_n"),
-            ("dn", "dn"),
-            ("divo", "d_divout"),
-        ],
-    );
-    drawing.instance(
-        &filter,
-        "xlf",
-        3,
-        &[("u1n", "up_n"), ("d1", "dn"), ("vout", "cont")],
-    );
+    d.wire(&[abridgevco[1], at(400, 340)]);
+    d.wire(&[at(400, 340), Drawing::pin_of(&divider, "freq_in")]);
+    d.name(at(400, 340), "d_vco", Above);
+    let detector = d.instance(&pfd, "xpfd", (360, 190), &[("clkin", "d_div2")]);
+    // The divided clock leaves downward, clear of the pump's two lines.
+    let divided = Drawing::pin_of(&detector, "divo");
+    let turn = at(divided.x + 20, divided.y);
+    d.wire(&[divided, turn, at(turn.x, turn.y + 30)]);
+    d.name(at(turn.x, turn.y + 30), "d_divout", Below);
+    d.wire(&[abridgeref[1], at(260, 200)]);
+    d.wire(&[at(260, 200), Drawing::pin_of(&detector, "ref")]);
+    d.name(at(260, 200), "d_ref", Above);
+    let filter = d.instance(&filter, "xlf", (520, 180), &[]);
+    for (from, to, net) in [("up_n", "u1n", "up_n"), ("dn", "d1", "dn")] {
+        let (from, to) = (
+            Drawing::pin_of(&detector, from),
+            Drawing::pin_of(&filter, to),
+        );
+        let middle = at(440, from.y);
+        d.wire(&[from, middle]);
+        d.wire(&[middle, to]);
+        d.name(middle, net, Above);
+    }
+    let control = Drawing::pin_of(&filter, "vout");
+    d.wire(&[control, at(600, control.y)]);
+    d.wire(&[at(600, control.y), Drawing::pin_of(&oscillator, "cont")]);
+    d.name(at(600, control.y), "cont", Above);
 
     drawing.variable("vcc", "3.3");
     drawing.variable("r1v", "300");

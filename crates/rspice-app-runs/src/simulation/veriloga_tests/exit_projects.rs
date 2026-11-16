@@ -20,6 +20,8 @@ use crate::state::{
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, compile_project_bundle_receipt,
 };
+use rspice_design::schematic::net_label::NetLabelSide;
+use rspice_design::schematic::rotation::Rotation;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::run::SimulationRunLifecycle;
 
@@ -43,13 +45,68 @@ fn corpus_text(relative: &str) -> String {
 struct Drawing {
     state: RunTestHost,
     library: &'static str,
-    slot: i32,
     measurements: Vec<rspice_results::specification::SpecificationDefinition>,
 }
 
-/// Grid pitch between parts on a sheet: clear of every two- and
-/// four-terminal body and its labelled stubs.
-const PITCH: i32 = 400;
+/// How far a labelled stub runs out of a pin: one 2.5 mm grid step's worth
+/// of wire, four sheet units each.
+const STUB: i32 = 20;
+
+/// How a part is turned and flipped as it is placed: the Rotate command's
+/// quarter turns, clockwise on the sheet, after Flip horizontal and Flip
+/// vertical.
+#[derive(Debug, Clone, Copy)]
+struct Orient(Rotation, bool, bool);
+
+/// As the shelf places it.
+const UPRIGHT: Orient = Orient(Rotation::R0, false, false);
+/// A quarter turn: a horizontal two-terminal part stood upright, its first
+/// pin on top.
+const TURNED: Orient = Orient(Rotation::R90, false, false);
+/// Half a turn: a source with its `+` at the bottom.
+const HALF: Orient = Orient(Rotation::R180, false, false);
+/// Three quarters: a source lying with its `+` on the left, a two-terminal
+/// part stood with its first pin at the bottom.
+const THREE: Orient = Orient(Rotation::R270, false, false);
+/// Flipped left to right: a transistor gated from the right.
+const MIRRORED: Orient = Orient(Rotation::R0, true, false);
+/// Flipped top to bottom: a PMOS with its source up at the rail.
+const FLIPPED: Orient = Orient(Rotation::R0, false, true);
+
+/// Shorthand for a point on the sheet.
+const fn at(x: i32, y: i32) -> Point {
+    Point::new(x, y)
+}
+
+/// Which way a pin's stub runs out of its part.
+#[derive(Debug, Clone, Copy)]
+enum Out {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl Out {
+    const fn step(self) -> (i32, i32) {
+        match self {
+            Self::Left => (-1, 0),
+            Self::Right => (1, 0),
+            Self::Up => (0, -1),
+            Self::Down => (0, 1),
+        }
+    }
+
+    /// Where a label at the stub's end reads, clear of the stub.
+    const fn side(self) -> NetLabelSide {
+        match self {
+            Self::Left => NetLabelSide::Left,
+            Self::Right => NetLabelSide::Right,
+            Self::Up => NetLabelSide::Above,
+            Self::Down => NetLabelSide::Below,
+        }
+    }
+}
 
 impl Drawing {
     fn new(library: &'static str) -> Self {
@@ -61,7 +118,6 @@ impl Drawing {
         Self {
             state,
             library,
-            slot: 0,
             measurements: Vec::new(),
         }
     }
@@ -116,44 +172,23 @@ impl Drawing {
         reference
     }
 
-    /// The next free place on the sheet.
-    fn next_origin(&mut self) -> Point {
-        let slot = self.slot;
-        self.slot += 1;
-        Point::new((slot % 12) * PITCH, (slot / 12) * PITCH)
-    }
-
-    /// Wire each terminal out from its body's edge to a stub carrying its
-    /// net's label: left from a pin on the left edge, up from one on the
-    /// top, and so on, so no stub meets another pin.
-    fn label(&mut self, terminals: Vec<(Point, &str)>) {
-        let xs = || terminals.iter().map(|(at, _)| at.x);
-        let ys = || terminals.iter().map(|(at, _)| at.y);
-        let (left, right) = (xs().min().unwrap_or(0), xs().max().unwrap_or(0));
-        let (top, bottom) = (ys().min().unwrap_or(0), ys().max().unwrap_or(0));
-        let centre = Point::new((left + right) / 2, (top + bottom) / 2);
-        for (at, net) in &terminals {
-            let (dx, dy) = if left == right {
-                (0, (at.y - centre.y).signum())
-            } else if top == bottom || at.x == left || at.x == right {
-                ((at.x - centre.x).signum(), 0)
-            } else {
-                (0, (at.y - centre.y).signum())
-            };
-            let out = Point::new(at.x + dx * 20, at.y + dy * 20);
-            let schematic = &mut self.state.model.schematic;
-            schematic
-                .add_wire(vec![*at, out])
-                .expect("the stub commits");
-            schematic.add_net_label(out, (*net).to_owned());
-        }
-    }
-
     /// A device of `kind` named `name`, with its value and instance
-    /// parameters, its terminals on `nets` in order.
-    fn part(&mut self, kind: ComponentType, name: &str, value: &str, params: &str, nets: &[&str]) {
-        let origin = self.next_origin();
-        let id = self.state.model.schematic.add_component(kind, origin);
+    /// parameters, its origin at `at`, turned and flipped as `orient` says. Its pins, in terminal order: the
+    /// sheet's wires and labels connect them.
+    fn part(
+        &mut self,
+        kind: ComponentType,
+        name: &str,
+        value: &str,
+        params: &str,
+        at: (i32, i32),
+        orient: Orient,
+    ) -> Vec<Point> {
+        let id = self
+            .state
+            .model
+            .schematic
+            .add_component(kind, Point::new(at.0, at.1));
         let component = self
             .state
             .model
@@ -166,20 +201,76 @@ impl Drawing {
         component.name = name.to_owned();
         component.value = value.to_owned();
         component.params = params.to_owned();
-        let terminals = rspice_design::schematic::component_edit::legacy_terminal_points(component);
-        assert_eq!(terminals.len(), nets.len(), "{name}: one net per terminal");
-        self.label(terminals.into_iter().zip(nets.iter().copied()).collect());
+        let Orient(rotation, mirror_h, mirror_v) = orient;
+        component.rotation = rotation;
+        component.mirror_h = mirror_h;
+        component.mirror_v = mirror_v;
+        rspice_design::schematic::component_edit::legacy_terminal_points(component)
     }
 
-    /// The sheet's ground symbol, on the net `0`.
-    fn ground(&mut self) {
-        self.part(ComponentType::Ground, "GND", "", "", &["0"]);
+    /// A wire through `points`.
+    fn wire(&mut self, points: &[Point]) {
+        self.state
+            .model
+            .schematic
+            .add_wire(points.to_vec())
+            .expect("the wire commits");
+    }
+
+    /// The net's label at `at`, which stands on a pin or a wire's end, its
+    /// name on `side`.
+    fn name(&mut self, at: Point, net: &str, side: NetLabelSide) {
+        let schematic = &mut self.state.model.schematic;
+        let id = schematic.add_net_label(at, net.to_owned());
+        schematic
+            .document_mut_for_test()
+            .net_labels
+            .iter_mut()
+            .find(|label| label.id == id)
+            .expect("the label")
+            .side = side;
+    }
+
+    /// A short stub out of `pin` towards `out`, its net's label at its end.
+    fn tag(&mut self, pin: Point, out: Out, net: &str) {
+        let (dx, dy) = out.step();
+        let end = Point::new(pin.x + dx * STUB, pin.y + dy * STUB);
+        self.wire(&[pin, end]);
+        self.name(end, net, out.side());
+    }
+
+    /// A ground symbol on `pin`, drawn below it.
+    fn earth(&mut self, pin: Point) {
+        self.state
+            .model
+            .schematic
+            .add_component(ComponentType::Ground, Point::new(pin.x, pin.y + 10));
+    }
+
+    /// A ground symbol on `pin`, turned to point left, away from a part on
+    /// its right.
+    fn earth_left(&mut self, pin: Point) {
+        let schematic = &mut self.state.model.schematic;
+        let id = schematic.add_component(ComponentType::Ground, Point::new(pin.x - 10, pin.y));
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the ground")
+            .rotation = Rotation::R90;
     }
 
     /// An instance `name` of the view `reference`, placed as the library
-    /// browser places it, each pin on the net `nets` gives it, in a row of
-    /// its own below the devices.
-    fn instance(&mut self, reference: &CellViewRef, name: &str, row: i32, nets: &[(&str, &str)]) {
+    /// browser places it with its origin at `at`; each pin `tags` names is
+    /// wired out to its net's label. Every pin, by name.
+    fn instance(
+        &mut self,
+        reference: &CellViewRef,
+        name: &str,
+        at: (i32, i32),
+        tags: &[(&str, &str)],
+    ) -> Vec<(String, Point)> {
         let model = &self.state.model;
         let candidate = crate::state::library_cell_placement_candidates(
             &model.library_manager,
@@ -193,20 +284,21 @@ impl Drawing {
         })
         .unwrap_or_else(|| panic!("the browser offers {}", reference.display_path()));
         assert!(candidate.ready, "{name}: {}", candidate.unavailable_reason);
-        self.place(candidate.binding, name, "", row, nets);
+        self.place(candidate.binding, name, "", at, tags)
     }
 
     /// The built-in XSPICE code model the shelf lists as `stable_id`
     /// (Digital event-driven), placed from the shelf as `name` with the model
-    /// parameters `params`, each pin on the net `nets` gives it.
+    /// parameters `params` at `at`; each pin `tags` names is wired out to its
+    /// net's label. Every pin, by name.
     fn shelf_xspice(
         &mut self,
         stable_id: &str,
         name: &str,
         params: &str,
-        row: i32,
-        nets: &[(&str, &str)],
-    ) {
+        at: (i32, i32),
+        tags: &[(&str, &str)],
+    ) -> Vec<(String, Point)> {
         use rspice_design::schematic::device_catalog::{
             builtin_xspice_library_binding, engine_only_xspice_devices,
         };
@@ -216,20 +308,21 @@ impl Drawing {
             .unwrap_or_else(|| panic!("the shelf lists {stable_id}"));
         let binding = builtin_xspice_library_binding(descriptor)
             .unwrap_or_else(|error| panic!("{stable_id}: {error}"));
-        self.place(binding, name, params, row, nets);
+        self.place(binding, name, params, at, tags)
     }
 
-    /// Place `binding` as `name` with `params`, in row `row` below the
-    /// devices, each pin wired out to the net `nets` gives it.
+    /// Place `binding` as `name` with `params` at `at`. Each pin `tags`
+    /// names is wired out to its net's label, as blocks are connected; the
+    /// caller wires the rest. Every pin, by name.
     fn place(
         &mut self,
         binding: crate::state::LibraryCellInstance,
         name: &str,
         params: &str,
-        row: i32,
-        nets: &[(&str, &str)],
-    ) {
-        let origin = Point::new(row * 1200, -1600);
+        at: (i32, i32),
+        tags: &[(&str, &str)],
+    ) -> Vec<(String, Point)> {
+        let origin = Point::new(at.0, at.1);
         let model = &mut self.state.model;
         let id = model.schematic.add_library_cell_component(origin, binding);
         let component = model
@@ -247,49 +340,64 @@ impl Drawing {
             .as_ref()
             .expect("a cell instance")
             .terminal_order;
-        // Where the pins stand on the symbol the sheet draws for the cell.
+        // Where the pins stand on the symbol the sheet draws for the cell,
+        // each under its port's name.
         let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
             model.library_manager.catalog(),
             &model.workspace.content.schematic_buffers,
         );
-        let net_of = |pin: &str| {
-            nets.iter()
-                .find(|(port, _)| port.eq_ignore_ascii_case(pin))
-                .map(|(_, net)| *net)
-        };
-        let terminals = rspice_design::connectivity::terminal_positions(&component, &|binding| {
+        let pins = rspice_design::connectivity::terminal_positions(&component, &|binding| {
             resolver.resolve_binding(binding)
         })
         .into_iter()
         .enumerate()
         .map(|(index, (pin, at))| {
-            let net = net_of(&pin)
-                .or_else(|| order.get(index).and_then(|port| net_of(port)))
-                .unwrap_or_else(|| panic!("{name}: no net for {pin}"));
-            (at, net)
+            // A symbol with numbered pins answers in the binding's terminal
+            // order.
+            let port = if order.iter().any(|port| port.eq_ignore_ascii_case(&pin)) {
+                pin
+            } else {
+                order.get(index).cloned().unwrap_or(pin)
+            };
+            (port, at)
         })
         .collect::<Vec<_>>();
         // A pin on a side edge of the symbol is wired out sideways, away from
-        // the body, and one on its top or bottom edge out vertically: pins
-        // stand 20 apart along an edge, so a stub along the edge would land
-        // on the next pin.
-        for (at, net) in terminals {
-            let (dx, dy) = if at.x == origin.x {
-                (0, (at.y - origin.y).signum())
-            } else {
-                ((at.x - origin.x).signum(), 0)
+        // the body, and one on its top or bottom edge out vertically.
+        for (pin, at) in &pins {
+            let Some((_, net)) = tags.iter().find(|(port, _)| port.eq_ignore_ascii_case(pin))
+            else {
+                continue;
             };
-            let out = Point::new(at.x + dx * 20, at.y + dy * 20);
-            let schematic = &mut self.state.model.schematic;
-            schematic.add_wire(vec![at, out]).expect("the stub commits");
-            schematic.add_net_label(out, net.to_owned());
+            let out = if at.x == origin.x {
+                if at.y < origin.y { Out::Up } else { Out::Down }
+            } else if at.x < origin.x {
+                Out::Left
+            } else {
+                Out::Right
+            };
+            self.tag(*at, out, net);
         }
+        pins
     }
 
-    /// An interface port `name` of the sheet being drawn, on the net of
-    /// the same name.
-    fn port(&mut self, name: &str, direction: crate::state::PortDirectionType) {
-        let origin = self.next_origin();
+    /// The pin `name` of a placed block.
+    fn pin_of(pins: &[(String, Point)], name: &str) -> Point {
+        pins.iter()
+            .find(|(pin, _)| pin.eq_ignore_ascii_case(name))
+            .map(|(_, at)| *at)
+            .unwrap_or_else(|| panic!("no pin {name}"))
+    }
+
+    /// An interface port `name` of the sheet being drawn, at `at` and turned
+    /// as `orient` says. Its terminal: the caller wires it to its net.
+    fn port(
+        &mut self,
+        name: &str,
+        direction: crate::state::PortDirectionType,
+        at: (i32, i32),
+        orient: Orient,
+    ) -> Point {
         let schematic = &mut self.state.model.schematic;
         let pending = crate::state::PendingPortPlacement::new(
             name,
@@ -299,16 +407,76 @@ impl Drawing {
             schematic.next_interface_order(),
         );
         let id = schematic
-            .place_pending_port(origin, pending)
+            .place_pending_port(Point::new(at.0, at.1), pending)
             .unwrap_or_else(|error| panic!("port {name}: {error}"));
         let port = schematic
-            .document()
+            .document_mut_for_test()
             .components
-            .iter()
+            .iter_mut()
             .find(|component| component.id == id)
             .expect("the port");
-        let terminals = rspice_design::schematic::component_edit::legacy_terminal_points(port);
-        self.label(terminals.into_iter().map(|at| (at, name)).collect());
+        let Orient(rotation, mirror_h, mirror_v) = orient;
+        port.rotation = rotation;
+        port.mirror_h = mirror_h;
+        port.mirror_v = mirror_v;
+        rspice_design::schematic::component_edit::legacy_terminal_points(port)[0]
+    }
+
+    /// Put the sheet drawn so far on ISO A3 landscape paper, as Sheet
+    /// format does on a sheet's first edit: the sheet becomes the
+    /// schematic's own governed sheet, holding everything drawn on it.
+    fn a3_sheet(&mut self) {
+        use rspice_design_model::SchematicPageOrientation;
+        use rspice_design_model::design_management::{
+            AuthoredDrawingSheetSize, DrawingSheetInheritance, DrawingSheetStandard,
+            DrawingSheetTitleFieldId,
+        };
+        let model = &mut self.state.model;
+        let document = model.schematic.document();
+        let mut objects = std::collections::BTreeSet::new();
+        objects.extend(document.components.iter().map(|object| object.id));
+        objects.extend(document.wires.iter().map(|object| object.id));
+        objects.extend(document.junctions.iter().map(|object| object.id));
+        objects.extend(document.net_labels.iter().map(|object| object.id));
+        let owner = model.workspace.content.active_key();
+        let drawn = model.active_drawing_sheet();
+        let name = drawn.sheet_name;
+        let format = drawn
+            .format
+            .try_update(|draft| {
+                let title = draft
+                    .title_block
+                    .fields
+                    .entry(DrawingSheetTitleFieldId::SheetTitle)
+                    .or_default();
+                if title.value.trim().is_empty() {
+                    title.value.clone_from(&name);
+                }
+                draft.authored_size = AuthoredDrawingSheetSize::Standard {
+                    standard: DrawingSheetStandard::IsoA3,
+                };
+                draft.orientation = SchematicPageOrientation::Landscape;
+                draft.inheritance = DrawingSheetInheritance::Explicit;
+            })
+            .expect("A3 landscape");
+        let mut candidate = (*model.workspace.content.design_management).clone();
+        let sheet = candidate
+            .bootstrap_for_cell_view(&owner, name, objects)
+            .expect("the sheet is governed");
+        let catalog = candidate.sheet_catalog_mut(&owner).expect("its catalog");
+        let revision = catalog.find(sheet).expect("the sheet").revision();
+        catalog
+            .update_sheet_page_format(sheet, revision, format)
+            .expect("A3 landscape");
+        let schematics = model
+            .prepare_design_management_schematic_transaction(&candidate)
+            .expect("the sheet's schematic transaction");
+        model
+            .workspace
+            .content
+            .replace_design_management(candidate)
+            .expect("the catalog commits");
+        model.apply_design_management_schematic_transaction(&schematics);
     }
 
     /// Make the sheet drawn so far the schematic of the cell `cell`, draw
@@ -338,7 +506,6 @@ impl Drawing {
             .and_then(|mut library| library.store_symbol_document(cell, "symbol", &document))
             .expect("the symbol view")
             .expect("the symbol stores");
-        self.slot = 0;
         reference
     }
 
