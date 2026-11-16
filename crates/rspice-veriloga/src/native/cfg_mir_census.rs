@@ -1216,9 +1216,22 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             }
             (Some(error), None) => {
                 tally.reference_refused += 1;
+                // Whether the CFG route's trial would have solved here: a
+                // refusal the reference makes over a value no entry reads is
+                // one this route no longer makes, and the entries say whether
+                // the equations were finite without it.
+                let (mut finite, mut not_finite, mut failed) = (0_usize, 0_usize, 0_usize);
+                for entry in &positions {
+                    match run_entry(&cfg_native, *entry, &context, cfg_variables.as_ptr()) {
+                        Some(value) if value.is_finite() => finite += 1,
+                        Some(_) => not_finite += 1,
+                        None => failed += 1,
+                    }
+                }
                 println!(
                     "cfg-mir model={module} point={index} reference_refused \
-                     stage=assignments detail={error}"
+                     stage=assignments detail={error} cfg_entries_finite={finite} \
+                     cfg_entries_not_finite={not_finite} cfg_entries_failed={failed}"
                 );
                 continue;
             }
@@ -1476,6 +1489,12 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             "cfg-mir model={module} below_significance={insignificant_here} \
              max_deviation={insignificant_worst:.3e} case[{}]",
             case.describe()
+        );
+    }
+    if cfg_plan.report.report_only_derivatives > 0 {
+        println!(
+            "cfg-mir model={module} report_only_derivatives={}",
+            cfg_plan.report.report_only_derivatives
         );
     }
     if !model.noise_sources.is_empty() {

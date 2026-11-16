@@ -216,8 +216,9 @@ use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
 use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CfgBlock, CfgFunction, CfgInstruction, CfgStateAllocation,
-    CfgTerminator, CfgValueKind, MirModel, ValueId, differentiate, prune_cfg_to_outputs,
+    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction,
+    CfgStateAllocation, CfgTerminator, CfgValue, CfgValueKind, CfgValueType, MirModel, ValueId,
+    differentiate, prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
@@ -423,6 +424,10 @@ pub(crate) struct CfgPlanReport {
     /// nothing more. `None` means either that a prelude was built or that the
     /// module had no publishable entry to build one from.
     pub(crate) prelude_refused: Option<CfgPlanRefusal>,
+    /// `ddx` results the source-evaluation prelude computes only for the
+    /// operating-point report, and so evaluates without failing the trial on
+    /// a non-finite operand; see [`release_report_only_derivative_checks`].
+    pub(crate) report_only_derivatives: usize,
 }
 
 /// One value entry's position in the plan, for a message that names it.
@@ -1251,6 +1256,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // other bodies publish ordinary retained writes and branch kinds here.
     // Required candidates cannot fall back to uninitialized storage.
     let mut candidate_publications = Vec::new();
+    let mut read_back_publications = Vec::new();
     if source_evaluation {
         for (variable, output) in artifact.hir.variables.iter().zip(&cfg.observation_roots) {
             if !variable.is_state
@@ -1279,6 +1285,26 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                     CfgPlanRefusal::PreludeLiveCurrent,
                     "source publication requires a later contribution current".into(),
                 ));
+            }
+            // A name something reads back during the run: the next evaluation
+            // (state, a retained input, a switch branch's kind) or a
+            // discrete-domain reader. Every other name is published for the
+            // operating-point report and nothing else.
+            if variable.is_state
+                || variable.retains_input
+                || model
+                    .evaluation_input_variables
+                    .binary_search(&slot)
+                    .is_ok()
+                || model.switch_branch_variables.binary_search(&slot).is_ok()
+                || model.event_state_variables.binary_search(&slot).is_ok()
+                || artifact
+                    .mir
+                    .digital_observations
+                    .binary_search_by(|name| name.as_str().cmp(variable.name.as_str()))
+                    .is_ok()
+            {
+                read_back_publications.push(value);
             }
             candidate_publications.push((value, slot));
         }
@@ -1334,6 +1360,25 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     } else {
         Vec::new()
     };
+    // The source-evaluation prelude publishes every name the module declares,
+    // so it computes the operating-point outputs in every trial. A `ddx` among
+    // them must not fail that trial: nothing the trial solves reads it. Only
+    // the prelude's copy is relaxed; every cone lowered below keeps its checks.
+    let relaxed_prelude = source_evaluation.then(|| {
+        let solved: Vec<ValueId> = prelude_entries
+            .iter()
+            .map(|(_, value)| *value)
+            .chain(read_back_publications.iter().copied())
+            .chain(task_effects.iter().copied())
+            .collect();
+        release_report_only_derivative_checks(&scalarized.function, &solved)
+    });
+    report.report_only_derivatives = relaxed_prelude
+        .as_ref()
+        .map_or(0, |(_, released)| *released);
+    let prelude_function = relaxed_prelude
+        .as_ref()
+        .map_or(&scalarized.function, |(function, _)| function);
     let prelude = if prelude_entries.is_empty()
         && candidate_publications.is_empty()
         && task_effects.is_empty()
@@ -1343,7 +1388,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         let built = if candidate_publications.is_empty() && task_effects.is_empty() {
             CfgPrelude::build(
                 module.as_str(),
-                &scalarized.function,
+                prelude_function,
                 &prelude_entries,
                 &state,
                 &bindings,
@@ -1352,7 +1397,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         } else {
             CfgPrelude::build_with_variables(
                 module.as_str(),
-                &scalarized.function,
+                prelude_function,
                 &prelude_entries,
                 &state,
                 &bindings,
@@ -1708,6 +1753,140 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     })
 }
 
+/// A copy of `function` in which every `ddx` that nothing in `solved` reads
+/// returns its derivative unchecked, and how many such `ddx` there were.
+///
+/// A `ddx` lowers to `CheckedValue(primal, derivative)`, which fails the
+/// evaluation when either operand is not finite, so that the Newton trial is
+/// retried. That is right for a derivative the trial solves with. It is wrong
+/// for one whose only reader is a name published for the operating-point
+/// report, such as BSIM-SOI's `GM = ddx(IDS, V(gi))` and its capacitance
+/// matrix: nothing the trial solves reads it, and refusing the trial over it
+/// refuses an iterate whose equations are finite. ngspice-46 computes those
+/// outputs in every load (`src/osdi/osdiload.c:146` sets `CALC_OP`
+/// unconditionally), Xyce 7.10 computes them in `updateIntermediateVars`,
+/// which every Newton iteration's `updatePrimaryState` calls
+/// (`N_DEV_ADMSbsimcmg_111.C:24117` and `:44148`), and neither checks them;
+/// OpenVAF lowers `ddx` to the plain derivative (`hir_lower/src/expr.rs:594`).
+/// The derivative is what they report, finite or not, and so is it here.
+///
+/// Besides `solved`, the evaluation reads every branch condition, so a
+/// derivative that decides control flow keeps its check, and every
+/// instruction that is not pure arithmetic: an analog operator's state, an
+/// event detector, an index, a task. A `ddx` none of those reach is read only
+/// by the report.
+fn release_report_only_derivative_checks(
+    function: &CfgFunction,
+    solved: &[ValueId],
+) -> (CfgFunction, usize) {
+    let mut live = vec![false; function.values.len()];
+    let mut worklist: Vec<ValueId> = Vec::new();
+    let mark = |id: ValueId, live: &mut Vec<bool>, worklist: &mut Vec<ValueId>| {
+        if !live[usize::from(id)] {
+            live[usize::from(id)] = true;
+            worklist.push(id);
+        }
+    };
+    for &value in solved {
+        mark(value, &mut live, &mut worklist);
+    }
+    // Every edge's arguments, by the block they enter, so a merge reached
+    // below finds what supplies it without rescanning the function.
+    let mut merges: HashMap<ValueId, (usize, usize)> = HashMap::new();
+    let mut incoming: Vec<Vec<&[ValueId]>> = vec![Vec::new(); function.blocks.len()];
+    for (index, block) in function.blocks.iter().enumerate() {
+        for (position, param) in block.params.iter().enumerate() {
+            merges.insert(*param, (index, position));
+        }
+        for instruction in &block.instructions {
+            let pure = match &function.value(instruction.result).kind {
+                CfgValueKind::Binary { op, .. } => *op != CfgBinaryOp::DiscreteValue,
+                CfgValueKind::Unary { .. }
+                | CfgValueKind::Select { .. }
+                | CfgValueKind::SumProductsDiv { .. } => true,
+                _ => false,
+            };
+            if !pure {
+                mark(instruction.result, &mut live, &mut worklist);
+            }
+        }
+        match &block.terminator {
+            CfgTerminator::Jump { target, args } => incoming[usize::from(*target)].push(args),
+            CfgTerminator::Branch {
+                condition,
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+            } => {
+                mark(*condition, &mut live, &mut worklist);
+                incoming[usize::from(*then_target)].push(then_args);
+                incoming[usize::from(*else_target)].push(else_args);
+            }
+            CfgTerminator::Wait {
+                wait,
+                resume,
+                resume_args,
+            } => {
+                for operand in wait.operands() {
+                    mark(operand, &mut live, &mut worklist);
+                }
+                incoming[usize::from(*resume)].push(resume_args);
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+    // A merge is read when something reads it, and then so is the argument
+    // every edge into it supplies.
+    while let Some(id) = worklist.pop() {
+        for operand in function.value(id).kind.operands() {
+            mark(operand, &mut live, &mut worklist);
+        }
+        if let Some(&(block, position)) = merges.get(&id) {
+            for args in &incoming[block] {
+                if let Some(&argument) = args.get(position) {
+                    mark(argument, &mut live, &mut worklist);
+                }
+            }
+        }
+    }
+
+    let mut relaxed = function.clone();
+    let mut one = None;
+    let mut released = 0;
+    for (index, value) in function.values.iter().enumerate() {
+        let CfgValueKind::Binary {
+            op: CfgBinaryOp::CheckedValue,
+            right: derivative,
+            ..
+        } = value.kind
+        else {
+            continue;
+        };
+        if live[index] {
+            continue;
+        }
+        // `1 * d` is `d` exactly, NaN and infinities included: the identity
+        // the derivative pass already writes for a single-term `ddx`.
+        let one = *one.get_or_insert_with(|| {
+            let id = ValueId::from(relaxed.values.len());
+            relaxed.values.push(CfgValue {
+                id,
+                value_type: CfgValueType::Real,
+                kind: CfgValueKind::RealConstant(1.0),
+            });
+            id
+        });
+        relaxed.values[index].kind = CfgValueKind::Binary {
+            op: CfgBinaryOp::Mul,
+            left: one,
+            right: derivative,
+        };
+        released += 1;
+    }
+    (relaxed, released)
+}
+
 /// The plan every backend compiles.
 ///
 /// x64, AArch64 and the WASM JIT all enter here, and what they get is the CFG
@@ -1943,6 +2122,47 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
         (model, artifact)
+    }
+
+    /// BSIM-SOI's operating-point block in miniature. A `$strobe` makes the
+    /// body a source evaluation, whose prelude publishes every name in every
+    /// trial. `gm` is one of those names and nothing the trial solves reads
+    /// it; `gd` is a conductance the trial stamps.
+    #[test]
+    fn a_ddx_only_the_operating_point_report_reads_is_not_checked_in_the_trial() {
+        let (model, artifact) = compile(
+            "module report_gm(d, g, s); inout d, g, s; electrical d, g, s;
+             real ids, gm, gd;
+             analog begin
+               @(initial_step) $strobe(\"bias\");
+               ids = 1.0e-3 * V(g, s) * V(d, s);
+               gm = ddx(ids, V(g));
+               gd = ddx(ids, V(d));
+               I(d, s) <+ ids;
+               I(g, s) <+ gd * V(g, s);
+             end endmodule",
+        );
+        assert!(crate::jit::plan_builder::requires_source_evaluation(&model));
+        let built = build_model_plan_from_canonical_cfg(&model, &artifact)
+            .expect("the body has a canonical plan");
+        assert_eq!(built.report.report_only_derivatives, 1);
+        let prelude = built
+            .plan
+            .prelude
+            .as_ref()
+            .expect("a source evaluation publishes through a prelude");
+        let crate::jit::plan_program::PlanProgram::Blocks(body) = &prelude.program else {
+            panic!("a canonical prelude is a block program");
+        };
+        let checked = body
+            .ssa()
+            .instructions()
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.op(), crate::jit::expr::NativeOp::CheckedValue)
+            })
+            .count();
+        assert_eq!(checked, 1, "only the stamped conductance's ddx is checked");
     }
 
     #[test]
