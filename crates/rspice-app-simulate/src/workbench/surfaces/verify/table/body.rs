@@ -240,7 +240,11 @@ impl DataTable<'_> {
             if let Some(text) = _painted
                 && column.align == Align::Right
             {
-                super::super::raster::probe(ui, &format!("table.right.{column_index}"), text);
+                super::super::raster::probe(
+                    ui,
+                    &format!("table.right.{}.{column_index}", self.id),
+                    text,
+                );
             }
             // The row's wash is the selection. A cell is boxed only where it
             // edits, so the box says what Enter opens; a cell that only reads
