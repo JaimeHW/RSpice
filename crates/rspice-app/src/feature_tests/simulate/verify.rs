@@ -330,6 +330,7 @@ fn seeded_verify_pages_follow_the_table_grammar() {
     use rspice_app_simulate::workbench::surfaces::verify::raster::{PAGE_WIDTH, page_geometry};
 
     for (page, app) in [
+        (VerificationPage::Specifications, corner_app()),
         (VerificationPage::MonteCarlo, monte_carlo_app()),
         (VerificationPage::Corners, corner_app()),
         (VerificationPage::Checks, soa_app()),

@@ -10,9 +10,8 @@ use egui::Ui;
 use crate::state::SimulationPage;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    MissingMeasurementPolicy, MonteCarloSpecificationGate, NominalFailurePolicy,
-    RegressionSpecificationPolicy, SpecEntry, SpecPointScope, SpecificationDefinition,
-    SpecificationPolicy, SpecificationRole,
+    MonteCarloSpecificationGate, SpecEntry, SpecPointScope, SpecificationDefinition,
+    SpecificationRole,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
@@ -24,8 +23,8 @@ use crate::workbench::state::SpecificationEvidenceFilter;
 use crate::ui::widgets::{Button, select};
 
 use super::page_kit::{
-    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,
-    field_pair, filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
+    RowPress, Tone, card, card_body, card_head_row, card_note, card_with_head, field_pair,
+    filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
 };
 use super::workflows::commit_plan_change;
 
@@ -69,12 +68,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         }
     };
     registry(ui, cx, &payload);
-    card_row(
-        ui,
-        cx,
-        |ui, cx| selected_record(ui, cx, &payload),
-        |ui, cx| evaluation_policy(ui, cx, &payload),
-    );
+    selected_record(ui, cx, &payload);
 }
 
 /// What the page says instead of a registry when the plan will not resolve.
@@ -1143,236 +1137,6 @@ fn evidence_coverage(
             evidence.retained_measurements
         ),
     }
-}
-
-fn monte_carlo_policy_label(policy: &MonteCarloSpecificationGate) -> String {
-    match policy {
-        MonteCarloSpecificationGate::NotGated => "Not gated".to_owned(),
-        MonteCarloSpecificationGate::YieldAtLeast { percent } => {
-            format!("Yield at least {percent}%")
-        }
-    }
-}
-
-fn evaluation_policy(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, SimulateFeature>,
-    payload: &SimulationPlanPayload,
-) {
-    let dataset = super::output_evidence::selected_plan_dataset(cx.model).map_or_else(
-        || {
-            cx.model.simulation.active_run().map_or_else(
-                || "none · no dataset is loaded".to_owned(),
-                |run| format!("Run {} · belongs to another plan or a manual deck", run.id),
-            )
-        },
-        |run| {
-            let Some(receipt) = run.prepared_receipt() else {
-                return format!(
-                    "Run {} · legacy dataset · plan ownership was not retained",
-                    run.id
-                );
-            };
-            // The stamp annotates, never blocks. An unqualified model's output
-            // is still a result an engineer needs to read — characterizing a
-            // new device is exactly the case that produces one — but it is not
-            // a result a sign-off package may cite, and the dataset row is
-            // where anyone about to cite it is looking.
-            //
-            // The reason comes off the receipt rather than being reconstructed
-            // from the model count, because a preview-engine run is refused
-            // too: this row read "NOT SIGN-OFF · 0 unqualified model(s)" for
-            // one, which states the verdict and denies the cause.
-            receipt.sign_off_blocker().map_or_else(
-                || format!("Run {} · this plan", run.id),
-                |blocker| format!("Run {} · this plan · NOT SIGN-OFF · {blocker}", run.id),
-            )
-        },
-    );
-    let acceptance = super::output_evidence::selected_plan_dataset(cx.model).map_or_else(
-        || {
-            if cx.model.simulation.active_run().is_some() {
-                "not evaluated · active dataset does not belong to this plan".to_owned()
-            } else {
-                "not evaluated · no dataset is loaded".to_owned()
-            }
-        },
-        |run| {
-            if run.specification_verdicts().is_none() {
-                "pending · the selected run has no terminal verdict".to_owned()
-            } else if run.specification_acceptance_is_blocked() {
-                "blocked by its frozen requirement policy".to_owned()
-            } else {
-                "not blocked by its frozen requirement policy".to_owned()
-            }
-        },
-    );
-    let policy = payload.specification_policy.clone();
-    let nominal_options = vec![
-        "Block plan acceptance".to_owned(),
-        "Record disposition for review".to_owned(),
-    ];
-    let missing_options = vec![
-        "Fail closed".to_owned(),
-        "Report unmapped for review".to_owned(),
-    ];
-    let regression_options = vec!["Limits and waveforms".to_owned(), "Limits only".to_owned()];
-    let monte_carlo_options = [
-        "Not gated".to_owned(),
-        "Yield at least 95%".to_owned(),
-        "Yield at least 99%".to_owned(),
-        "Yield at least 99.9%".to_owned(),
-    ];
-    let nominal_current = match policy.nominal_failure {
-        NominalFailurePolicy::Block => nominal_options[0].as_str(),
-        NominalFailurePolicy::RecordDisposition => nominal_options[1].as_str(),
-    };
-    let missing_current = match policy.missing_measurement {
-        MissingMeasurementPolicy::FailClosed => missing_options[0].as_str(),
-        MissingMeasurementPolicy::ReportUnmapped => missing_options[1].as_str(),
-    };
-    let regression_current = match policy.regression {
-        RegressionSpecificationPolicy::LimitAndWaveform => regression_options[0].as_str(),
-        RegressionSpecificationPolicy::LimitOnly => regression_options[1].as_str(),
-    };
-    let monte_carlo_current = monte_carlo_policy_label(&policy.monte_carlo);
-    let mut picked_nominal = None;
-    let mut picked_missing = None;
-    let mut picked_regression = None;
-    let mut picked_monte_carlo = None;
-    card(ui, "Evaluation policy", None, |ui| {
-        card_body(ui, |ui| {
-            rule_row(ui, "Dataset", &dataset);
-            rule_row(ui, "Dataset acceptance", &acceptance);
-            rule_row(
-                ui,
-                "Specifications in this plan",
-                &payload.specs.len().to_string(),
-            );
-            field_pair(
-                ui,
-                ("Nominal failure", &mut |ui: &mut Ui, width: f32| {
-                    picked_nominal = select(
-                        ui,
-                        "simulation-plan.spec-policy.nominal-failure",
-                        "Nominal failure",
-                        nominal_current,
-                        &nominal_options,
-                        width,
-                    );
-                }),
-                Some(("Missing measurement", &mut |ui: &mut Ui, width: f32| {
-                    picked_missing = select(
-                        ui,
-                        "simulation-plan.spec-policy.missing-measurement",
-                        "Missing measurement",
-                        missing_current,
-                        &missing_options,
-                        width,
-                    );
-                })),
-            );
-            field_pair(
-                ui,
-                ("Monte Carlo gate", &mut |ui: &mut Ui, width: f32| {
-                    picked_monte_carlo = select(
-                        ui,
-                        "simulation-plan.spec-policy.monte-carlo",
-                        "Monte Carlo gate",
-                        &monte_carlo_current,
-                        &monte_carlo_options,
-                        width,
-                    );
-                }),
-                Some(("Regression check", &mut |ui: &mut Ui, width: f32| {
-                    picked_regression = select(
-                        ui,
-                        "simulation-plan.spec-policy.regression",
-                        "Regression check",
-                        regression_current,
-                        &regression_options,
-                        width,
-                    );
-                })),
-            );
-        });
-        card_note(
-            ui,
-            "This policy is plan-owned and frozen into every prepared run. Changing it creates \
-                 a new plan revision; earlier verdicts keep using the policy recorded with their \
-                 run.",
-        );
-    });
-
-    let mut edited = policy.clone();
-    if let Some(index) = picked_nominal {
-        edited.nominal_failure = match index {
-            0 => NominalFailurePolicy::Block,
-            _ => NominalFailurePolicy::RecordDisposition,
-        };
-    }
-    if let Some(index) = picked_missing {
-        edited.missing_measurement = match index {
-            0 => MissingMeasurementPolicy::FailClosed,
-            _ => MissingMeasurementPolicy::ReportUnmapped,
-        };
-    }
-    if let Some(index) = picked_regression {
-        edited.regression = match index {
-            0 => RegressionSpecificationPolicy::LimitAndWaveform,
-            _ => RegressionSpecificationPolicy::LimitOnly,
-        };
-    }
-    if let Some(index) = picked_monte_carlo {
-        edited.monte_carlo = match index {
-            0 => MonteCarloSpecificationGate::NotGated,
-            1 => MonteCarloSpecificationGate::YieldAtLeast { percent: 95.0 },
-            2 => MonteCarloSpecificationGate::YieldAtLeast { percent: 99.0 },
-            _ => MonteCarloSpecificationGate::YieldAtLeast { percent: 99.9 },
-        };
-    }
-    if !edited.bitwise_eq(&policy) {
-        commit_specification_policy(cx, edited);
-    }
-}
-
-pub(super) fn commit_specification_policy(
-    cx: &mut Cx<'_, SimulateFeature>,
-    policy: SpecificationPolicy,
-) {
-    let Ok(plan_id) = cx
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .map(|plan| plan.id())
-    else {
-        return;
-    };
-    let detail = format!(
-        "Updated specification evaluation policy: nominal {}, missing {}, Monte Carlo {}, regression {}.",
-        match policy.nominal_failure {
-            NominalFailurePolicy::Block => "blocks acceptance",
-            NominalFailurePolicy::RecordDisposition => "records a review disposition",
-        },
-        match policy.missing_measurement {
-            MissingMeasurementPolicy::FailClosed => "fails closed",
-            MissingMeasurementPolicy::ReportUnmapped => "reports unmapped for review",
-        },
-        monte_carlo_policy_label(&policy.monte_carlo),
-        match policy.regression {
-            RegressionSpecificationPolicy::LimitAndWaveform => "checks limits and waveforms",
-            RegressionSpecificationPolicy::LimitOnly => "checks limits only",
-        }
-    );
-    commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
-        policy.validate()?;
-        let payload = workspace
-            .content
-            .plan_data_mut(plan_id)
-            .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
-        payload.specification_policy = policy;
-        Ok(())
-    });
 }
 
 #[cfg(test)]

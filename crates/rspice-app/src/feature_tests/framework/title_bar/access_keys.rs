@@ -270,6 +270,7 @@ fn the_verify_menu_lists_its_views_then_the_specification_matrix() {
     assert_eq!(
         labels,
         [
+            "Specifications",
             "Corners",
             "Monte Carlo",
             "Checks",
@@ -278,7 +279,7 @@ fn the_verify_menu_lists_its_views_then_the_specification_matrix() {
         ]
     );
     assert_eq!(
-        labels[..4],
+        labels[..5],
         VerificationPage::NAVIGATION.map(VerificationPage::label)
     );
     let mut keys = rows.iter().map(|(_, key)| *key).collect::<Vec<_>>();

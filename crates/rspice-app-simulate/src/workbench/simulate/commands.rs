@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -111,6 +111,7 @@ impl SimulateCommand {
         Self::Page(SimulationPage::ConnectRules),
         Self::Page(SimulationPage::Solver),
         Self::Page(SimulationPage::Save),
+        Self::Verify(VerificationPage::Specifications),
         Self::Verify(VerificationPage::Corners),
         Self::Verify(VerificationPage::MonteCarlo),
         Self::Verify(VerificationPage::Checks),
@@ -142,6 +143,9 @@ impl SimulateCommand {
             Self::Page(SimulationPage::ConnectRules) => CommandKey::new("simulation-connect-rules"),
             Self::Page(SimulationPage::Solver) => CommandKey::new("simulation-solver"),
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
+            Self::Verify(VerificationPage::Specifications) => {
+                CommandKey::new("verify-specifications")
+            }
             Self::Verify(VerificationPage::Corners) => CommandKey::new("verify-corners"),
             Self::Verify(VerificationPage::MonteCarlo) => CommandKey::new("verify-monte-carlo"),
             Self::Verify(VerificationPage::Checks) => CommandKey::new("verify-checks"),

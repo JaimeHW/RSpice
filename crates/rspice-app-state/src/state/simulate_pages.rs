@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 /// view's toolbar and the inspector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum VerificationPage {
+    /// Every specification of the plan judged against the run: where Verify
+    /// opens.
     #[default]
+    Specifications,
     Corners,
     MonteCarlo,
     Checks,
@@ -18,7 +21,8 @@ pub enum VerificationPage {
 }
 
 impl VerificationPage {
-    pub const NAVIGATION: [Self; 4] = [
+    pub const NAVIGATION: [Self; 5] = [
+        Self::Specifications,
         Self::Corners,
         Self::MonteCarlo,
         Self::Checks,
@@ -28,6 +32,7 @@ impl VerificationPage {
     /// The view's one name.
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Specifications => "Specifications",
             Self::Corners => "Corners",
             Self::MonteCarlo => "Monte Carlo",
             Self::Checks => "Checks",

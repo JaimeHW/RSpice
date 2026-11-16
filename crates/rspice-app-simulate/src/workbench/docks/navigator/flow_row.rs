@@ -28,7 +28,11 @@ pub(super) fn flow_row_geometry(detail_lines: usize, has_status: bool) -> (f32, 
     (last_top + (FLOW_ROW_HEIGHT - FLOW_STATUS_TOP), status_top)
 }
 
-pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) -> bool {
+pub(super) fn flow_row(
+    ui: &mut Ui,
+    flow: &VerificationFlowPresentation,
+    selected: bool,
+) -> egui::Response {
     let VerificationFlowPresentation {
         label,
         detail,
@@ -127,7 +131,7 @@ pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selecte
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
+    response
 }
 
 #[cfg(test)]

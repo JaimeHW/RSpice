@@ -23,7 +23,8 @@ fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {
     let simulate = SimulateState::default();
     // The plan opens on the transient analysis's tab, not on the first row.
     assert_eq!(simulate.active_analysis, 1);
-    assert_eq!(simulate.verification_page, VerificationPage::Corners);
+    // Verify opens on its specifications.
+    assert_eq!(simulate.verification_page, VerificationPage::Specifications);
     assert_eq!(simulate.simulation_page, SimulationPage::Analyses);
 
     let project = ProjectState::default();

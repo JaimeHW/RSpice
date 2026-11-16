@@ -4,7 +4,7 @@
 use crate::workbench::docks::inspector::simulation::{
     SimulateInspector, simulate as simulate_inspector,
 };
-use crate::workbench::docks::inspector::verify::{VerifyInspector, verify as verify_inspector};
+use crate::workbench::docks::inspector::verify::verify as verify_inspector;
 use crate::workbench::docks::navigator::simulate::{
     SimulateNavigator, simulate as simulate_navigator,
 };
@@ -12,6 +12,7 @@ use crate::workbench::docks::navigator::verify::{VerifyNavigator, verify as veri
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::Workspace;
+use crate::workbench::surfaces::verify::set_reference_run;
 
 use super::SimulateFeature;
 use super::commands::SimulateCommand;
@@ -22,17 +23,28 @@ use super::commands::SimulateCommand;
 /// command, which the shell answers before the next point draws.
 pub(super) fn show_navigator(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui) {
     if cx.wb.workspace == Workspace::Verify {
-        let opened = verify_navigator(
+        refresh_verification(cx);
+        let asked = verify_navigator(
             ui,
             &VerifyNavigator {
                 model: cx.model,
-                page: cx.state.verification_page,
-                filter: cx.wb.navigator_filter(),
+                simulate: cx.state,
             },
         );
-        if let Some(page) = opened {
+        if let Some(page) = asked.open {
             cx.state.verification_page = page;
             cx.wb.close_drawer();
+        }
+        if let Some(index) = asked.run {
+            let _ = cx.model.simulation.select_run(index);
+        }
+        if let Some(run) = asked.reference {
+            cx.state.verification.action_problem = set_reference_run(cx, run).err();
+        }
+        if let Some(index) = asked.results
+            && cx.model.simulation.select_run(index)
+        {
+            cx.execute(ids::RESULTS_WORKSPACE);
         }
         return;
     }
@@ -58,13 +70,8 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
 /// raised as the command once the inspector has drawn.
 pub(super) fn show_inspector(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui) {
     if cx.wb.workspace == Workspace::Verify {
-        verify_inspector(
-            ui,
-            &VerifyInspector {
-                model: cx.model,
-                page: cx.state.verification_page,
-            },
-        );
+        refresh_verification(cx);
+        verify_inspector(ui, cx);
         return;
     }
     let open_results = simulate_inspector(
@@ -78,6 +85,16 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
     if open_results {
         cx.execute(ids::RESULTS_WORKSPACE);
     }
+}
+
+/// Judge the run Verify reads against the plan as it stands, before a dock
+/// states anything about it: the docks may draw before the view does, and
+/// the judgement is kept until the run, the plan or the project changes.
+fn refresh_verification(cx: &mut Cx<'_, SimulateFeature>) {
+    let model = &mut *cx.model;
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
 }
 
 #[cfg(test)]

@@ -132,6 +132,65 @@ pub enum YieldLimitBound {
     Upper,
 }
 
+/// Which cell of a Specifications row is open for entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecificationCell {
+    Name,
+    Limit,
+}
+
+/// One cell of the Specifications table, open for entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecificationCellDraft {
+    /// The row's measurement, which names the specification within its plan.
+    pub measurement: String,
+    pub cell: SpecificationCell,
+    /// What the reader has typed.
+    pub text: String,
+    /// What the cell said when it opened. Applying it unchanged changes
+    /// nothing, so a limit spelled to four digits is never rounded by a click.
+    pub seed: String,
+    /// Set until the cell first paints, so the field takes the keyboard once.
+    pub focus: bool,
+}
+
+/// What a Specifications menu offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecificationsMenuKind {
+    /// The run's measurements no specification names, then a new one.
+    Add,
+    /// One row's actions, by the row's measurement.
+    Row(String),
+}
+
+/// A menu the Specifications view has open, and where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpecificationsMenu {
+    pub kind: SpecificationsMenuKind,
+    pub position: egui::Pos2,
+}
+
+/// The specification the Verify inspector is editing, as the reader has typed
+/// it so far.
+#[derive(Debug, Clone, Default)]
+pub struct SpecificationInspectorDraft {
+    /// The specification the draft was taken from.
+    pub specification: Option<rspice_vocabulary::product::SpecificationId>,
+    /// The plan revision it was taken at: a change from anywhere else takes a
+    /// fresh draft rather than leaving stale words over a new definition.
+    pub revision: Option<crate::product::ObjectRevision>,
+    pub draft: rspice_results_ui::specs::editor::SpecDraft,
+}
+
+/// Two drafts are the same draft when they edit the same specification at the
+/// same revision: the words in them are the reader's typing, not state a
+/// comparison should read.
+impl PartialEq for SpecificationInspectorDraft {
+    fn eq(&self, other: &Self) -> bool {
+        self.specification == other.specification && self.revision == other.revision
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerificationSessionState {
     #[serde(default)]
@@ -165,6 +224,21 @@ pub struct VerificationSessionState {
     /// leaves nothing here: its result is the page itself.
     #[serde(skip)]
     pub action_problem: Option<String>,
+    /// The Specifications view's table: its selection, sort, scroll and
+    /// filter. Review state only.
+    #[serde(skip)]
+    pub specifications_table: crate::workbench::surfaces::verify::table::TableState,
+    /// The Specifications cell open for entry. Transient: a name or a limit
+    /// is the plan's only once it is applied.
+    #[serde(skip)]
+    pub specification_cell_draft: Option<SpecificationCellDraft>,
+    /// The menu the Specifications view has open.
+    #[serde(skip)]
+    pub specifications_menu: Option<SpecificationsMenu>,
+    /// The inspector's draft of the selected specification. Transient for
+    /// the same reason as the cell draft.
+    #[serde(skip)]
+    pub specification_draft: Option<SpecificationInspectorDraft>,
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses

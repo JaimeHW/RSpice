@@ -1,13 +1,13 @@
-//! What the navigator is allowed to claim about a run it did not execute.
+//! What the navigator is allowed to claim about a run.
 //!
-//! An empty specification set is neutral, not healthy; a finite goal miss is
-//! executed but not passed; a mapping without an active dataset claims no
-//! execution at all. The remaining cases hold the mock's grid and spacing, and
-//! the density switch between desktop and touch.
+//! Each view's second line is counted from what that view draws; the runs
+//! list puts the newest first and marks the reference. The remaining cases
+//! hold the mock's grid and spacing, and the density switch between desktop
+//! and touch.
 
 use super::super::simulate::simulate_nav_meta;
 use super::super::verify::{
-    verification_coverage, verification_flow_presentation, verification_navigator_requires_scroll,
+    VerifyNavigator, verification_flow_presentation, verification_navigator_requires_scroll, verify,
 };
 use super::{FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, flow_row_geometry};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -17,6 +17,12 @@ use crate::state::{
 };
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::simulate::test_host::SimulateTestHost;
+use crate::workbench::slots::SimulateState;
+use crate::workbench::surfaces::verify::raster::sealed_run;
+use crate::workbench::surfaces::verify::set_reference_run;
 use rspice_app_state::workbench::workspace::restore_model_library_manager;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
@@ -77,84 +83,29 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
 #[test]
 fn verification_navigation_lists_every_view_by_its_label() {
     let model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    let labels =
-        VerificationPage::NAVIGATION.map(|page| verification_flow_presentation(&model, page).label);
-    assert_eq!(labels, ["Corners", "Monte Carlo", "Checks", "Reference"]);
+    let simulate = SimulateState::default();
+    let labels = VerificationPage::NAVIGATION
+        .map(|page| verification_flow_presentation(&model, &simulate, page).label);
+    assert_eq!(
+        labels,
+        [
+            "Specifications",
+            "Corners",
+            "Monte Carlo",
+            "Checks",
+            "Reference"
+        ]
+    );
     assert_eq!(
         labels,
         VerificationPage::NAVIGATION.map(|page| page.label().to_owned())
     );
 }
 
+/// The Checks row counts the run's checks as the Checks view lists them, and
+/// leads with the worst one's mark.
 #[test]
-fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
-    let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    model.workspace.content.specs.push(crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(1.0),
-        max: None,
-        unit: "V/V".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    });
-    model.simulation.view.active_run_idx = None;
-
-    let coverage = verification_coverage(&model);
-
-    assert_eq!(coverage.total, 1);
-    assert_eq!(coverage.passed, 0);
-    assert_eq!(coverage.status, "1 spec not measured");
-}
-
-#[test]
-fn empty_specification_set_is_neutral_not_healthy() {
-    let model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    let coverage = verification_coverage(&model);
-
-    assert_eq!(coverage.total, 0);
-    assert_eq!(coverage.status, "No specs");
-}
-
-#[test]
-fn finite_goal_miss_counts_as_executed_but_not_passed() {
-    let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    model.workspace.content.specs.push(crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(41.0),
-        max: None,
-        unit: "V/V".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    });
-    let mut measurement = rspice_core::MeasureResult::success("gain", 40.0);
-    measurement.passed = false;
-    measurement.error = Some("value misses GOAL".to_owned());
-    let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC")
-        .with_measurements(vec![measurement])
-        .with_provenance(
-            crate::state::AnalysisResultProvenance::new(
-                AnalysisInstanceId::new(),
-                ObjectRevision::INITIAL,
-                ContentDigest::from_bytes([0x7b; 32]),
-                Vec::new(),
-            )
-            .expect("test provenance is valid"),
-        );
-    let mut run = SimulationRun::new(1);
-    run.add_analysis(analysis);
-    model.simulation.retained.runs = vec![run].into();
-    model.simulation.view.active_run_idx = Some(0);
-
-    let coverage = verification_coverage(&model);
-    // Measured, so nothing is missing; missed its goal, so it does not pass.
-    assert_eq!(coverage.status, "");
-    assert_eq!(coverage.passed, 0);
-}
-
-/// A run that retains an SOA verdict states it, as an instance's Checks row
-/// does; "verdict unavailable" is said only of evidence that holds none.
-#[test]
-fn the_device_safety_flow_states_the_retained_soa_verdict() {
+fn the_checks_flow_counts_the_checks_the_run_holds() {
     let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
     let evaluation = crate::state::SoaEvaluationEvidence {
         duration: None,
@@ -191,15 +142,22 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
     model.simulation.retained.runs = vec![run].into();
     model.simulation.view.active_run_idx = Some(0);
 
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+    assert_eq!(model.simulation.verification_checks().rows.len(), 1);
+
     let flow =
-        super::super::verify::verification_flow_presentation(&model, VerificationPage::Checks);
-    assert_eq!(flow.status, "9.1% margin");
+        verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
+    assert_eq!(flow.detail, "1 check");
+    assert_eq!(flow.status, "");
+    assert_eq!(flow.problem, Some(crate::ui::widgets::Problem::Warning));
 }
 
 #[test]
 fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-    assert!(verification_navigator_requires_scroll(377.0));
-    assert!(!verification_navigator_requires_scroll(378.0));
+    assert!(verification_navigator_requires_scroll(440.0));
+    assert!(!verification_navigator_requires_scroll(441.0));
     assert!(verification_navigator_requires_scroll(330.0));
     assert!(!verification_navigator_requires_scroll(560.0));
     assert!(!verification_navigator_requires_scroll(700.0));
@@ -251,4 +209,127 @@ fn mc_sample_trail_is_visible_only_for_its_active_provenance_dataset() {
     assert_eq!(active_mc_sample_trail(&simulation), 0);
     simulation.view.active_run_idx = None;
     assert_eq!(active_mc_sample_trail(&simulation), 0);
+}
+
+/// One pass of the Verify navigator over `harness`, with `events` arriving,
+/// and what the reader asked of it.
+fn navigator_pass(
+    ctx: &egui::Context,
+    harness: &mut FeatureHarness<SimulateFeature>,
+    events: Vec<egui::Event>,
+) -> (egui::FullOutput, super::super::verify::VerifyNavigatorAsk) {
+    let model = &mut harness.model;
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+    let mut ask = None;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ask = Some(verify(
+                    ui,
+                    &VerifyNavigator {
+                        model: &harness.model,
+                        simulate: &harness.state,
+                    },
+                ));
+            });
+        },
+    );
+    (output, ask.expect("the navigator drew"))
+}
+
+/// The run rows the navigator announced, top to bottom, as (what it says,
+/// where its middle is).
+fn run_rows(output: egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+    let mut rows = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+        .into_iter()
+        .filter_map(|(_, node)| {
+            let label = node.label()?.to_string();
+            let bounds = node.bounds()?;
+            label.starts_with("Run ").then(|| {
+                (
+                    label,
+                    egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    ),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.1.y.total_cmp(&right.1.y));
+    rows
+}
+
+/// The runs list holds the plan's runs newest first, the reference marked as
+/// such, and picking one asks for it to be the run Verify judges.
+#[test]
+fn the_runs_list_is_newest_first_marks_the_reference_and_picks_a_run() {
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let source = AnalysisInstanceId::new();
+    let measured = |label: &str| {
+        AnalysisResult::new(1, AnalysisType::Ac, label)
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)])
+    };
+    let older = sealed_run(1, plan_id, source, 2, measured("older"));
+    let newer = sealed_run(2, plan_id, source, 2, measured("newer"));
+    let older_id = older.run_id;
+    harness.model.simulation.retained.runs = vec![older, newer].into();
+    assert!(harness.model.simulation.select_run(1));
+    set_reference_run(&mut harness.cx(), older_id).expect("the older run can be the reference");
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let (output, ask) = navigator_pass(&ctx, &mut harness, Vec::new());
+    assert_eq!(ask, Default::default());
+    let rows = run_rows(output);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].0.starts_with("Run 2"), "{rows:?}");
+    assert!(rows[1].0.starts_with("Run 1"), "{rows:?}");
+    assert!(rows[1].0.ends_with("reference"), "{rows:?}");
+    assert!(!rows[0].0.contains("reference"), "{rows:?}");
+    // The run Verify judges states the roll-up its views state.
+    assert!(rows[0].0.contains("no specifications"), "{rows:?}");
+
+    let at = rows[1].1;
+    let (_, ask) = navigator_pass(
+        &ctx,
+        &mut harness,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ],
+    );
+    assert_eq!(ask.run, Some(0), "the older run is the first retained");
 }

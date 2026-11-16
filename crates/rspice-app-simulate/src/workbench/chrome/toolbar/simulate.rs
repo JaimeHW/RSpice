@@ -9,7 +9,6 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
@@ -38,11 +37,13 @@ pub fn simulation_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
     );
 }
 
+/// Verify's specifications are its own first view, so the toolbar opens that
+/// view rather than a second place to edit them.
 pub fn verification_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
         app,
-        ids::EDIT_SPECIFICATIONS,
+        SimulateCommand::Verify(crate::state::VerificationPage::Specifications).key(),
         WorkbenchIcon::Target,
         layout,
     );

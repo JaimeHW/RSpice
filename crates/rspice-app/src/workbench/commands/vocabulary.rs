@@ -405,6 +405,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
         rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
     )
     .key(),
+    SimulateCommand::Verify(VerificationPage::Specifications).key(),
     SimulateCommand::Verify(VerificationPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Models).key(),
     ModelsCommand::ModelCreateProjectCopy.key(),

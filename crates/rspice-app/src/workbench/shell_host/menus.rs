@@ -727,11 +727,12 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
 /// Verify: its views in the order its navigator lists them, then the
 /// specification matrix they check against.
 const VERIFY_MENU: &[MenuEntry] = &[
+    simulate(SimulateCommand::Verify(VerificationPage::Specifications)).access('S'),
     simulate(SimulateCommand::Verify(VerificationPage::Corners)).access('C'),
     simulate(SimulateCommand::Verify(VerificationPage::MonteCarlo)).access('M'),
     simulate(SimulateCommand::Verify(VerificationPage::Checks)).access('K'),
     simulate(SimulateCommand::Verify(VerificationPage::Reference)).access('R'),
-    results(ResultsCommand::EditSpecifications).access('S'),
+    results(ResultsCommand::EditSpecifications).access('X'),
 ];
 
 /// Tools: the libraries and models a design draws on, then the editors for

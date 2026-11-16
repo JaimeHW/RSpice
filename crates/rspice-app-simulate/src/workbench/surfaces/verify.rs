@@ -12,6 +12,8 @@ mod histogram;
 mod regression_contract;
 mod regression_panel;
 pub mod safety;
+pub(crate) mod specification_edit;
+pub(crate) mod specifications;
 pub mod table;
 pub mod toolbar;
 mod yield_page;
@@ -36,6 +38,7 @@ use corners::*;
 use regression_contract::*;
 use regression_panel::*;
 use safety::*;
+use specifications::specifications;
 use yield_page::*;
 
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
@@ -58,6 +61,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
         match page {
+            VerificationPage::Specifications => specifications(ui, cx),
             VerificationPage::Corners => corners(ui, cx),
             VerificationPage::MonteCarlo => yield_page(ui, cx),
             VerificationPage::Checks => device_safety(ui, cx),
@@ -91,6 +95,25 @@ fn run_choice(
 /// Make the run the reader picked on a toolbar the one Verify reads.
 fn select_verification_run(simulation: &mut crate::state::SimulationState, index: usize) {
     let _ = simulation.select_run(index);
+}
+
+/// The run the plan compares other runs against, by its identity.
+pub fn reference_run(model: &Model, simulate: &SimulateState) -> Option<crate::product::RunId> {
+    active_regression_baseline(model, simulate)
+}
+
+/// Whether `run` may become the plan's reference run, and why not when it
+/// may not.
+pub fn reference_eligibility(model: &Model, run: crate::product::RunId) -> Result<(), String> {
+    regression_baseline_eligibility(model, run).map(|_| ())
+}
+
+/// Make `run` the plan's reference run, as one plan change.
+pub fn set_reference_run(
+    cx: &mut Cx<'_, SimulateFeature>,
+    run: crate::product::RunId,
+) -> Result<(), String> {
+    commit_regression_baseline(cx, run)
 }
 
 /// `summary` naming the run it describes, for a toolbar with no run selector

@@ -484,6 +484,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
     (
         ApplicationMenu::Verify,
         &[
+            "Specifications | verify-specifications |  | on",
             "Corners | verify-corners |  | on",
             "Monte Carlo | verify-monte-carlo |  | on",
             "Checks | verify-checks |  | on",

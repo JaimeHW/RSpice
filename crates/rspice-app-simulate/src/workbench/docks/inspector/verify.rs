@@ -1,5 +1,6 @@
-//! The Verify workspace's inspector: the Monte Carlo run and its worst
-//! samples, and a failed corner run.
+//! The Verify workspace's inspector: the selected specification, or the
+//! plan's acceptance settings and the run it judges; the Monte Carlo run and
+//! its worst samples; and a failed corner run.
 
 use egui::{Pos2, Rect, Ui, Vec2};
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
@@ -8,40 +9,42 @@ use rspice_ui_kit::panels::{Problem, panel_inset, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 
 use super::super::super::design_system::property_row;
 use super::compact_readout;
 use crate::state::VerificationPage;
 
-/// What the Verify workspace's inspector reads: the model and the view in
-/// front.
-pub(in crate::workbench) struct VerifyInspector<'a> {
-    pub(in crate::workbench) model: &'a Model,
-    pub(in crate::workbench) page: VerificationPage,
+mod acceptance;
+mod specification;
+
+/// The Verify inspector states only what its view does not: the selected
+/// specification's whole definition, or with none selected the plan's
+/// acceptance settings and the run being judged; the Monte Carlo run's
+/// definition and worst samples; and a corner run that failed. The other
+/// views already show everything there is to say about them.
+pub(in crate::workbench) fn verify(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    match cx.state.verification_page {
+        VerificationPage::Specifications => specification::specifications(ui, cx),
+        VerificationPage::MonteCarlo => yield_details(ui, cx.model),
+        VerificationPage::Corners => failed_corner(ui, cx.model),
+        VerificationPage::Checks | VerificationPage::Reference => {}
+    }
 }
 
-/// The Verify inspector states only what its view does not: the Monte Carlo
-/// run's definition and worst samples, and a corner run that failed. The
-/// other views already show everything there is to say about them.
-pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>) {
-    match inspector.page {
-        VerificationPage::MonteCarlo => yield_details(ui, inspector.model),
-        VerificationPage::Corners => {
-            let failed = inspector.model.simulation.active_run().and_then(|run| {
-                run.analyses.iter().find(|analysis| {
-                    analysis.analysis_type == crate::state::AnalysisType::Corner
-                        && !analysis.success
-                })
-            });
-            if let Some(analysis) = failed {
-                let message = analysis.error_message.as_deref().map_or_else(
-                    || "The corner run failed.".to_owned(),
-                    |error| format!("The corner run failed: {error}"),
-                );
-                crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
-            }
-        }
-        VerificationPage::Checks | VerificationPage::Reference => {}
+fn failed_corner(ui: &mut Ui, model: &Model) {
+    let failed = model.simulation.active_run().and_then(|run| {
+        run.analyses.iter().find(|analysis| {
+            analysis.analysis_type == crate::state::AnalysisType::Corner && !analysis.success
+        })
+    });
+    if let Some(analysis) = failed {
+        let message = analysis.error_message.as_deref().map_or_else(
+            || "The corner run failed.".to_owned(),
+            |error| format!("The corner run failed: {error}"),
+        );
+        crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
     }
 }
 
