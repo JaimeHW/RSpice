@@ -95,6 +95,7 @@ fn refresh_verification(cx: &mut Cx<'_, SimulateFeature>) {
     model
         .simulation
         .refresh_verification(&model.sim_setup, &model.workspace.content);
+    crate::workbench::surfaces::verify::reference::refresh(cx);
 }
 
 #[cfg(test)]

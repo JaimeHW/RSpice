@@ -528,8 +528,9 @@ fn announced(node: &Node) -> String {
 /// is egui's own widget identity, so the plan toolbar drawn on all ten setup
 /// routes is one control and not ten. The zeroes are honest — ten of the eleven
 /// analysis-catalogue fixtures open the same window the eleventh already
-/// contributed, and the Outputs registry's own actions are all disabled over
-/// an empty registry, so its enabled controls are the toolbar's.
+/// contributed, the Outputs registry's own actions are all disabled over an
+/// empty registry, so its enabled controls are the toolbar's, and the
+/// specifications page's acceptance settings are edited in Verify's inspector.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 49),
     ("Analyses/Ac", 6),
@@ -542,7 +543,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
-    ("Specifications", 4),
+    ("Specifications", 0),
     ("RunSet", 31),
     ("Models", 1),
     ("ConnectRules", 2),

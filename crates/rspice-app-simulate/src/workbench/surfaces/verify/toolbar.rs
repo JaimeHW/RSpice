@@ -152,6 +152,9 @@ pub(super) enum RunRole {
     /// The run the page reads against, offered whenever there is one: the
     /// selector is where the reader sees which it is, and changes it.
     Reference,
+    /// The point the page states, offered only when there is a choice to
+    /// make.
+    Point,
 }
 
 impl RunRole {
@@ -160,16 +163,17 @@ impl RunRole {
         match self {
             Self::Read => ("Run", "No run selected"),
             Self::Reference => ("Reference", "No reference"),
+            Self::Point => ("Point", "No point selected"),
         }
     }
 }
 
-/// The runs a page could read, and the one it reads.
+/// What a page's toolbar select chooses among, and the one chosen: the runs
+/// a page could read, the run it reads against, or the point it states.
 #[derive(Debug, Clone, Default)]
 pub(super) struct RunChoice {
-    /// What the select picks, as assistive technology announces it.
-    pub(super) name: &'static str,
-    /// Each candidate's index in the retained run list, and its label.
+    /// Each candidate's index (a retained run, or a point of the run) and its
+    /// label.
     pub(super) candidates: Vec<(usize, String)>,
     pub(super) selected: Option<usize>,
     pub(super) role: RunRole,
@@ -181,7 +185,7 @@ impl RunChoice {
     /// whenever there is a run to choose.
     pub(super) fn offers_choice(&self) -> bool {
         match self.role {
-            RunRole::Read => self.candidates.len() > 1,
+            RunRole::Read | RunRole::Point => self.candidates.len() > 1,
             RunRole::Reference => !self.candidates.is_empty(),
         }
     }

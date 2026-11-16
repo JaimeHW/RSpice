@@ -10,7 +10,7 @@
 use egui::Ui;
 
 use crate::product::RunId;
-use rspice_results::verification::{CellStatus, CheckStatus, Checks, JointYield, RowStatus};
+use rspice_results::verification::{CellStatus, CheckCounts, Checks, JointYield, RowStatus};
 
 use crate::state::SimulationRunLifecycle;
 use crate::ui::tokens::Tokens;
@@ -276,11 +276,14 @@ fn monte_carlo_line(model: &Model) -> (String, Option<Problem>) {
 /// Checks view counts them, a part with nothing to count left out, and no
 /// line at all for a run that evaluated no check.
 pub(in crate::workbench) fn checks_line(checks: &Checks) -> (String, Option<Problem>) {
-    let total = checks.rows.len();
+    let CheckCounts {
+        violations,
+        warnings,
+        total,
+    } = checks.counts();
     if total == 0 {
         return (String::new(), None);
     }
-    let (violations, warnings) = check_counts(checks);
     let counted =
         |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
     let mut parts = Vec::new();
@@ -301,22 +304,9 @@ pub(in crate::workbench) fn checks_line(checks: &Checks) -> (String, Option<Prob
     (parts.join(" \u{b7} "), problem)
 }
 
-/// How many of the run's checks are violations, because they fail or could
-/// not be evaluated, and how many warn.
-fn check_counts(checks: &Checks) -> (usize, usize) {
-    checks
-        .rows
-        .iter()
-        .fold((0, 0), |(violations, warnings), row| match row.status {
-            CheckStatus::Fail | CheckStatus::Error => (violations + 1, warnings),
-            CheckStatus::Warning => (violations, warnings + 1),
-            CheckStatus::Pass | CheckStatus::Info => (violations, warnings),
-        })
-}
-
-/// "1 changed · Run 9": how many checks moved against the reference run in
-/// the comparison of the run Verify judges, or the reference run alone when
-/// that comparison has not been made.
+/// "1 changed · Run 9": how many checks moved against the reference run, as
+/// the Reference view's comparison counts them, or the reference run alone
+/// while the run Verify judges and its reference make no pair.
 fn reference_line(model: &Model, simulate: &SimulateState) -> (String, Option<Problem>) {
     let Some(reference) = reference_run(model, simulate) else {
         return (String::new(), None);
@@ -330,21 +320,10 @@ fn reference_line(model: &Model, simulate: &SimulateState) -> (String, Option<Pr
     else {
         return (String::new(), None);
     };
-    let compared = simulate
-        .verification
-        .regression_comparison
-        .as_ref()
-        .filter(|receipt| {
-            receipt.baseline_run == reference
-                && model
-                    .simulation
-                    .active_run()
-                    .is_some_and(|active| active.run_id == receipt.candidate_run)
-        });
-    match compared {
-        Some(receipt) => (
-            format!("{} changed \u{b7} Run {}", receipt.changed_checks, run.id),
-            (receipt.failed_checks + receipt.failed_waveforms > 0).then_some(Problem::Failure),
+    match simulate.verification.reference.tally() {
+        Some((changed, outside, _)) => (
+            format!("{changed} changed \u{b7} Run {}", run.id),
+            (outside > 0).then_some(Problem::Failure),
         ),
         None => (format!("Run {}", run.id), None),
     }

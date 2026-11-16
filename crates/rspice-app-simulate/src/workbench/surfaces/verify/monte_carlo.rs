@@ -16,15 +16,9 @@
 //! every view judges against, and the run is judged against it again the
 //! frame it changes, with no run.
 
-use rspice_results::number_format::fmt_si_bound;
-use rspice_results::specification::{
-    MonteCarloSpecificationGate, SpecPointScope, SpecificationComparison, SpecificationDefinition,
-};
+use rspice_results::specification::{MonteCarloSpecificationGate, SpecificationComparison};
 use rspice_results::verification::{JointYield, Row, Sheet, Statistics, Trial, YieldCount};
 use rspice_results::yield_analysis::{DistributionStats, monte_carlo_provenance};
-use rspice_vocabulary::quantity::{
-    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
-};
 
 use super::super::super::state::YieldLimitDraft;
 use super::corners::{Evidence, FactSection, limit_text, open_in_results, point_name};
@@ -276,152 +270,11 @@ fn yield_cell(count: Option<YieldCount>, gate: &MonteCarloSpecificationGate) -> 
     }
 }
 
-/// What a typed limit says in `unit`: `None` for an empty cell.
-///
-/// Through the interactive quantity parser under the reader's own policy, so
-/// a cell reads `10 MHz`, `900m` and `40 dB` the way every other field does,
-/// and refuses a spelling the engine would read as another value rather than
-/// quietly taking `10M` for ten milli.
-pub(super) fn parse_limit(
-    text: &str,
-    unit: &str,
-    policy: QuantityPresentationPolicy,
-    locale: UiNumberLocale,
-) -> Result<Option<f64>, String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Ok(None);
-    }
-    let kind = match unit {
-        "s" => QuantityInputKind::Time,
-        "Hz" => QuantityInputKind::Frequency,
-        _ => QuantityInputKind::EngineeringScalar,
-    };
-    let source = if kind == QuantityInputKind::EngineeringScalar && !unit.is_empty() {
-        text.strip_suffix(unit).unwrap_or(text).trim_end()
-    } else {
-        text
-    };
-    parse_ui_quantity(source, kind, policy, locale)
-        .map(Some)
-        .map_err(|error| error.to_string())
-}
-
-/// The bounds a typed limit names, as the cell spells a limit: `≥ 40 dB`,
-/// `≤ 1.2 mA`, `10 dB … 20 dB` (or `..`, `to`), `30 dB ± 1 dB`, nothing to
-/// leave the specification tracked. A bare value moves the one bound the
-/// limit has.
-pub(super) fn parse_bounds(
-    text: &str,
-    comparison: &SpecificationComparison,
-    unit: &str,
-    policy: QuantityPresentationPolicy,
-    locale: UiNumberLocale,
-) -> Result<(Option<f64>, Option<f64>), String> {
-    let value = |text: &str| {
-        parse_limit(text, unit, policy, locale)?.ok_or_else(|| "a bound needs a value".to_owned())
-    };
-    let text = text.trim();
-    if text.is_empty() {
-        return Ok((None, None));
-    }
-    for prefix in ["\u{2265}", ">=", ">"] {
-        if let Some(rest) = text.strip_prefix(prefix) {
-            return Ok((Some(value(rest)?), None));
-        }
-    }
-    for prefix in ["\u{2264}", "<=", "<"] {
-        if let Some(rest) = text.strip_prefix(prefix) {
-            return Ok((None, Some(value(rest)?)));
-        }
-    }
-    if let Some((target, tolerance)) = text.split_once('\u{00b1}') {
-        let (target, tolerance) = (value(target)?, value(tolerance)?.abs());
-        return Ok((Some(target - tolerance), Some(target + tolerance)));
-    }
-    for separator in ["\u{2026}", "...", "..", " to "] {
-        if let Some((low, high)) = text.split_once(separator) {
-            let (low, high) = (value(low)?, value(high)?);
-            if low > high {
-                return Err("the lower bound is above the upper one".to_owned());
-            }
-            return Ok((Some(low), Some(high)));
-        }
-    }
-    let bare = value(text)?;
-    match comparison {
-        SpecificationComparison::Minimum { .. } => Ok((Some(bare), None)),
-        SpecificationComparison::Maximum { .. } => Ok((None, Some(bare))),
-        SpecificationComparison::Tracked
-        | SpecificationComparison::Range { .. }
-        | SpecificationComparison::EqualWithin { .. } => Err(
-            "say which bound it is: \u{2265} 40 dB, \u{2264} 1.2 mA, or 10 \u{2026} 20 dB"
-                .to_owned(),
-        ),
-    }
-}
-
-/// Set `output`'s limit in the plan's governed requirements to `min` and
-/// `max`, either of them absent, and return the line the plan's receipt
-/// states.
-///
-/// The requirement keeps everything this cell does not state: its scope,
-/// role, guard band, producing analysis and expression. A limit left with no
-/// bound stays a tracked requirement: removing a requirement is the
-/// specification editor's to do, not a side effect of clearing a cell.
-pub(super) fn set_limit(
-    workspace: &mut rspice_project::ProjectWorkspace,
-    plan_id: rspice_vocabulary::product::SimulationPlanId,
-    output: &str,
-    (min, max): (Option<f64>, Option<f64>),
-    unit: &str,
-) -> Result<String, String> {
-    let mut definitions = workspace
-        .ensure_active_plan_data(plan_id)
-        .specification_definitions
-        .clone();
-    let existing = definitions
-        .iter()
-        .position(|definition| definition.measurement.eq_ignore_ascii_case(output));
-    let mut entry = existing.map_or_else(
-        || SpecEntry {
-            measurement: output.to_owned(),
-            expression: String::new(),
-            min: None,
-            max: None,
-            unit: unit.to_owned(),
-            scope: SpecPointScope::AllPoints,
-        },
-        |index| definitions[index].projected_entry(),
-    );
-    entry.min = min;
-    entry.max = max;
-    entry.validate()?;
-    match existing {
-        Some(index) => definitions[index].apply_legacy_projection(&entry),
-        None if min.is_some() || max.is_some() => {
-            definitions.push(SpecificationDefinition::new_from_projection(&entry));
-        }
-        None => return Err(format!("{output} has no limit")),
-    }
-    workspace.replace_active_specification_definitions(plan_id, definitions);
-    workspace
-        .validate_simulation_configuration()
-        .map_err(|error| error.to_string())?;
-    let bound = |value: f64| fmt_si_bound(value, &entry.unit);
-    Ok(match (min, max) {
-        (None, None) => format!("Removed the limit of {output}."),
-        (Some(min), None) => format!("Set the limit of {output} to \u{2265} {}.", bound(min)),
-        (None, Some(max)) => format!("Set the limit of {output} to \u{2264} {}.", bound(max)),
-        (Some(min), Some(max)) => format!(
-            "Set the limit of {output} to {} \u{2026} {}.",
-            bound(min),
-            bound(max)
-        ),
-    })
-}
-
 /// Apply what the reader typed into a limit cell, or say why it was not.
+///
+/// The text reads as every limit cell reads it, and the change is the plan's
+/// through the one edit every Verify view makes: one plan change with its
+/// receipt and its step of the setup's history, the run judged again at once.
 fn commit_limit(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &YieldLimitDraft,
@@ -430,20 +283,17 @@ fn commit_limit(
 ) -> Result<(), String> {
     let policy = cx.model.preferences.quantity_presentation_policy();
     let locale = cx.wb.number_locale;
-    let bounds = parse_bounds(&draft.text, comparison, unit, policy, locale)?;
-    let plan_id =
-        verification_plan_id(cx.model).ok_or_else(|| "the plan is not ready".to_owned())?;
-    let mut workspace = cx.model.workspace.clone();
-    let mut setup = cx.model.sim_setup.clone();
-    let detail = set_limit(&mut workspace.content, plan_id, &draft.output, bounds, unit)?;
-    let receipt = setup
-        .commit_active_plan_configuration_change(detail)
-        .map_err(|error| error.to_string())?;
-    cx.model.workspace = workspace;
-    cx.model.sim_setup = setup;
-    invalidate_plan_bound_preflight(cx);
-    cx.model.record_plan_receipt(receipt.status_line());
-    Ok(())
+    let limit = specification_edit::parse_limit(&draft.text, unit, comparison, policy, locale)?;
+    let output = draft.output.clone();
+    specification_edit::edit_specifications(cx, |definitions| {
+        let index = specification_edit::definition_index(definitions, None, &output)
+            .ok_or_else(|| format!("{output} has no specification"))?;
+        Ok(specification_edit::set_limit(
+            &mut definitions[index],
+            limit,
+        ))
+    })
+    .map(|_| ())
 }
 
 /// The trial the reader selected in the failing-trial list: its
@@ -672,7 +522,7 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let rows = sheet.map_or_else(Vec::new, |sheet| monte_carlo_rows(sheet, point));
     let points = sheet.map_or_else(Vec::new, trial_points);
     let choice = RunChoice {
-        name: "Point",
+        role: super::toolbar::RunRole::Point,
         candidates: if points.is_empty() {
             Vec::new()
         } else {

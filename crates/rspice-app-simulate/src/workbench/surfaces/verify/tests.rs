@@ -885,7 +885,7 @@ fn the_worst_retained_point_answers_a_limit() {
         FamilyMemberMeasurements,
     };
 
-    let spec = SpecEntry {
+    let spec = crate::state::SpecEntry {
         measurement: "gain".to_owned(),
         expression: "param=gain".to_owned(),
         min: Some(10.0),

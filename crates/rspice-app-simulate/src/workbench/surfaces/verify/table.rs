@@ -541,27 +541,15 @@ impl<'a> DataTable<'a> {
         self
     }
 
-    /// The row painted with the selection wash.
-    pub(super) fn selected(mut self, selected: Option<usize>) -> Self {
-        self.selected = selected;
-        self
-    }
-
-    /// Rows answer a click.
-    pub(super) fn clickable(mut self) -> Self {
-        self.clickable = true;
-        self
-    }
-
     /// The tallest the table may be, head included; its rows scroll inside.
     pub(super) fn max_height(mut self, max_height: f32) -> Self {
         self.max_height = max_height;
         self
     }
 
-    /// The page's memory of this table: its selection, which takes the place
-    /// of [`Self::selected`], its sort, filter, folded groups and sideways
-    /// scroll. Rows answer a click, and the table takes the keyboard.
+    /// The page's memory of this table: its selection, sort, filter, folded
+    /// groups and sideways scroll. Rows answer a click, and the table takes
+    /// the keyboard.
     pub fn state(mut self, state: &'a mut TableState) -> Self {
         self.state = Some(state);
         self.clickable = true;

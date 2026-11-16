@@ -21,7 +21,6 @@ pub mod toolbar;
 use egui::Ui;
 use sha2::{Digest as _, Sha256};
 
-use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
@@ -69,34 +68,6 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             VerificationPage::Reference => reference_view(ui, cx),
         }
     });
-}
-
-/// The runs a page could read: the run it reads now, and every other run that
-/// holds the page's evidence.
-fn run_choice(
-    model: &Model,
-    holds: impl Fn(&crate::state::SimulationRun) -> bool,
-) -> toolbar::RunChoice {
-    let selected = verification_run_index(model);
-    toolbar::RunChoice {
-        name: "Run",
-        candidates: model
-            .simulation
-            .retained
-            .runs
-            .iter()
-            .enumerate()
-            .filter(|(index, run)| Some(*index) == selected || holds(run))
-            .map(|(index, run)| (index, run.label.clone()))
-            .collect(),
-        selected,
-        role: toolbar::RunRole::Read,
-    }
-}
-
-/// Make the run the reader picked on a toolbar the one Verify reads.
-fn select_verification_run(simulation: &mut crate::state::SimulationState, index: usize) {
-    let _ = simulation.select_run(index);
 }
 
 /// The run the plan compares other runs against, by its identity.
@@ -218,18 +189,6 @@ fn format_scalar(value: f64) -> String {
 fn signed_value(value: f64, unit: &str) -> String {
     let sign = if value >= 0.0 { "+" } else { "" };
     format!("{sign}{}", format_value(value, unit))
-}
-
-fn latest_analysis(
-    model: &Model,
-    analysis_type: crate::state::AnalysisType,
-) -> Option<&crate::state::AnalysisResult> {
-    model.simulation.active_run().and_then(|run| {
-        run.analyses
-            .iter()
-            .rev()
-            .find(|analysis| analysis.analysis_type == analysis_type && verified_analysis(analysis))
-    })
 }
 
 fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {

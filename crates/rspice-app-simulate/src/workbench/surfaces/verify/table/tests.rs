@@ -454,9 +454,7 @@ fn an_unsortable_column_and_a_table_without_state_keep_the_page_order() {
     let status = head(&geometry, 2);
     let stateless = |events| {
         frame(&ctx, WIDTH, events, |ui| {
-            DataTable::new("stateless", &columns, 5)
-                .clickable()
-                .show(ui, named_row)
+            DataTable::new("stateless", &columns, 5).show(ui, named_row)
         })
         .1
     };
@@ -932,10 +930,7 @@ fn a_table_without_state_draws_as_it_always_has() {
     let ctx = context();
     let columns = named_columns();
     let (response, geometry, _) = frame(&ctx, WIDTH, Vec::new(), |ui| {
-        DataTable::new("plain", &columns, 3)
-            .selected(Some(1))
-            .clickable()
-            .show(ui, named_row)
+        DataTable::new("plain", &columns, 3).show(ui, named_row)
     });
     assert!(!response.selection_changed);
     let head = geometry.one("table.head").expect("head");

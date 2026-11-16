@@ -159,13 +159,22 @@ pub(super) fn reference_runs(model: &Model) -> Vec<usize> {
 }
 
 /// Build the comparison again if what it compares changed since it was built.
-pub(super) fn refresh(cx: &mut Cx<'_, SimulateFeature>) {
+pub(crate) fn refresh(cx: &mut Cx<'_, SimulateFeature>) {
     let mut comparison = std::mem::take(&mut cx.state.verification.reference);
     comparison.refresh(cx.model, cx.state);
     cx.state.verification.reference = comparison;
 }
 
 impl ReferenceComparison {
+    /// How many checks changed against the reference run, how many of them
+    /// broke their tolerance, and the reference run's number; `None` while
+    /// the run read and its reference make no pair.
+    pub(crate) fn tally(&self) -> Option<(usize, usize, u64)> {
+        self.compared
+            .as_ref()
+            .map(|compared| (compared.changed, compared.outside, compared.reference_run))
+    }
+
     fn refresh(&mut self, model: &Model, simulate: &SimulateState) {
         self.find_references(model);
         let current = model
