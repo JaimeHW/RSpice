@@ -3642,15 +3642,11 @@ impl Engine {
         abort: &dyn AbortSignal,
         sink: &mut dyn crate::result_sink::ResultSink,
     ) -> Result<SinkTransient, SimulationError> {
-        use crate::result_sink::{ResultSink, RunStatus, SinkStop, StopReason};
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        let cell = std::cell::RefCell::new(sink_route::StopLatch::new(sink));
-        let shared: &std::cell::RefCell<dyn ResultSink + '_> = &cell;
-        let outcome = engine
-            .run_tran_resolved_with_resume(
-                netlist,
+        engine
+            .tran_into_sink(
                 netlist,
                 TransientRunWindow {
                     tstop,
@@ -3659,52 +3655,11 @@ impl Engine {
                     dc_seed: None,
                     integral_trace: None,
                 },
+                sink_route::SinkRunPlan::to_stop(None, FinalCheckpointRetention::Discarded),
                 abort,
-                TransientResumePlan {
-                    resume: None,
-                    resume_validation: ResumeValidation::ExactNetlist,
-                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
-                    scheduled_checkpoint_times: &[],
-                    checkpoint_observer: None,
-                    state_capture: None,
-                    result_sink: Some(shared),
-                },
+                sink,
             )
-            .map(|(result, _, _)| result);
-        let sink_route::StopLatch { sink, begun, stop } = cell.into_inner();
-        match outcome {
-            Ok(result) => {
-                let status = match &stop {
-                    None => RunStatus::Completed,
-                    Some(SinkStop::MemoryFull { .. }) => RunStatus::Stopped(StopReason::MemoryFull),
-                    Some(_) => RunStatus::Stopped(StopReason::DiskFull),
-                };
-                let receipt = sink.end(status).map_err(SimulationError::ResultSink)?;
-                Ok(SinkTransient {
-                    result,
-                    receipt,
-                    stopped: stop,
-                })
-            }
-            Err(error) => {
-                let reason = match &error {
-                    SimulationError::Aborted => StopReason::Cancelled,
-                    SimulationError::TimeLimitExceeded => StopReason::Timeout,
-                    SimulationError::ResultSink(SinkStop::DiskFull { .. }) => StopReason::DiskFull,
-                    SimulationError::ResultSink(SinkStop::MemoryFull { .. }) => {
-                        StopReason::MemoryFull
-                    }
-                    other => StopReason::Failed(other.to_string()),
-                };
-                // The run's own error is the one to report; a sink that also
-                // fails to close has already stopped writing. A sink the run
-                // never began has nothing to end.
-                if begun {
-                    let _ = sink.end(RunStatus::Stopped(reason));
-                }
-                Err(error)
-            }
-        }
+            .map(|(run, _, _)| run)
     }
 
     fn inferred_transient_startup_mode(

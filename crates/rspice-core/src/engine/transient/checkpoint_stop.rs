@@ -7,13 +7,43 @@
 //! histories. A resume to the run's stop then takes every step the run takes with a breakpoint at
 //! the interruption, from the first to the last.
 
+use super::sink_route::{SinkRunPlan, SinkTransient};
 use super::state_capture::TransientStateCapture;
 use super::{
-    FinalCheckpointRetention, ResumeValidation, TransientEnd, TransientResumePlan,
-    TransientRunWindow, TransientStartupMode, validate_transient_window,
+    FinalCheckpointRetention, ResumeValidation, ScheduledTransientCheckpoint, TransientEnd,
+    TransientResumePlan, TransientRunWindow, TransientStartupMode, validate_transient_window,
 };
 use crate::analysis::transient::TransientResult;
+use crate::result_sink::ResultSink;
 use crate::{AbortSignal, Engine, Netlist, SimulationError, Value};
+
+/// Check that `stop` interrupts the run to `tstop` inside its window.
+fn check_interruption(tstop: Value, max_step: Value, stop: Value) -> Result<(), SimulationError> {
+    validate_transient_window(tstop, max_step)?;
+    if !(stop.is_finite() && stop > 0.0 && stop < tstop) {
+        return Err(SimulationError::Circuit(format!(
+            "a transient checkpoint at {stop:e} s must lie inside the run's (0, {tstop:e}) s"
+        )));
+    }
+    Ok(())
+}
+
+/// The end of a run interrupted by a capture: the checkpoint scheduled at the interruption, which
+/// holds the step the run proposed after it, in place of the one the capture's stop kept.
+fn interrupted_end(
+    end: Option<TransientEnd>,
+    mut continued: Vec<ScheduledTransientCheckpoint>,
+) -> Result<TransientEnd, SimulationError> {
+    match (end, continued.pop()) {
+        (Some(TransientEnd::Checkpoint(_)), Some(scheduled)) => {
+            Ok(TransientEnd::Checkpoint(scheduled.checkpoint))
+        }
+        (Some(end), _) => Ok(end),
+        (None, _) => Err(SimulationError::Circuit(
+            "internal transient checkpoint retention contract was not fulfilled".to_string(),
+        )),
+    }
+}
 
 impl Engine {
     /// Run the transient of `netlist` over its window to `tstop` and interrupt it at `stop`,
@@ -31,19 +61,14 @@ impl Engine {
         startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, TransientEnd), SimulationError> {
-        validate_transient_window(tstop, max_step)?;
-        if !(stop.is_finite() && stop > 0.0 && stop < tstop) {
-            return Err(SimulationError::Circuit(format!(
-                "a transient checkpoint at {stop:e} s must lie inside the run's (0, {tstop:e}) s"
-            )));
-        }
+        check_interruption(tstop, max_step, stop)?;
         // The interruption is a hard breakpoint of the run, and the capture there ends it once
         // the checkpoint scheduled at the same time has been taken after the next step's
         // proposal.
         let times = [stop];
         let capture = TransientStateCapture::new(&times, tstop)?;
         let engine = self.resolved_for_netlist(netlist);
-        let (result, end, mut continued) = engine.run_tran_resolved_with_resume(
+        let (result, end, continued) = engine.run_tran_resolved_with_resume(
             netlist,
             netlist,
             TransientRunWindow {
@@ -64,18 +89,42 @@ impl Engine {
                 result_sink: None,
             },
         )?;
-        let end = match (end, continued.pop()) {
-            (Some(TransientEnd::Checkpoint(_)), Some(scheduled)) => {
-                TransientEnd::Checkpoint(scheduled.checkpoint)
-            }
-            (Some(end), _) => end,
-            (None, _) => {
-                return Err(SimulationError::Circuit(
-                    "internal transient checkpoint retention contract was not fulfilled"
-                        .to_string(),
-                ));
-            }
-        };
-        Ok((result, end))
+        Ok((result, interrupted_end(end, continued)?))
+    }
+
+    /// [`Engine::run_tran_checkpointed_at_with_startup_mode_and_abort`] writing every accepted
+    /// point to `sink`, as [`Engine::run_tran_into_sink_with_startup_mode_and_abort`] does. The
+    /// sink is ended with how the run ended, which an interrupted run counts as completed.
+    pub fn run_tran_checkpointed_at_into_sink_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        (tstop, max_step): (Value, Value),
+        stop: Value,
+        startup_mode: TransientStartupMode,
+        abort: &dyn AbortSignal,
+        sink: &mut dyn ResultSink,
+    ) -> Result<(SinkTransient, TransientEnd), SimulationError> {
+        check_interruption(tstop, max_step, stop)?;
+        let times = [stop];
+        let capture = TransientStateCapture::new(&times, tstop)?;
+        let engine = self.resolved_for_netlist(netlist);
+        let (run, end, continued) = engine.tran_into_sink(
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+                dc_seed: None,
+                integral_trace: None,
+            },
+            SinkRunPlan {
+                scheduled_checkpoint_times: &times,
+                state_capture: Some(&capture),
+                ..SinkRunPlan::to_stop(None, FinalCheckpointRetention::Retained)
+            },
+            abort,
+            sink,
+        )?;
+        Ok((run, interrupted_end(end, continued)?))
     }
 }
