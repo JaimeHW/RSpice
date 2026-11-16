@@ -45,6 +45,7 @@ impl CachedResults {
                     // Derived: each frame judges it from the runs and the
                     // plan's limits, both persisted, so it never is.
                     yield_evidence: _,
+                    verification: _,
                 },
             view:
                 crate::state::SimulationViewState {

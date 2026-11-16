@@ -591,6 +591,9 @@ impl RSpiceApp {
         model
             .simulation
             .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
+        model
+            .simulation
+            .refresh_verification(&model.sim_setup, &model.workspace.content);
         #[cfg(target_arch = "wasm32")]
         {
             let messages = self.state.workbench.messages();

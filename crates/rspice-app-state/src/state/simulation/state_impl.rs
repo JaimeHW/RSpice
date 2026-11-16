@@ -182,6 +182,91 @@ impl SimulationState {
         self.view.data_version = self.view.data_version.wrapping_add(1);
     }
 
+    /// Judge the selected run against the active plan's limits and read its
+    /// checks, unless both were built from exactly these inputs.
+    ///
+    /// Every verification view reads this one sheet, so no two can disagree
+    /// about a run. It is built again only when the selected run, its
+    /// evidence or the plan's limits change, by any route; a frame that
+    /// changes none of them judges nothing. A run another plan owns, or a
+    /// manual deck, is shown with its values and no verdict.
+    pub fn refresh_verification(
+        &mut self,
+        setup: &rspice_simulation_contract::setup_state::SimulationSetup,
+        workspace: &rspice_project::ProjectWorkspace,
+    ) {
+        let plan_id = setup.stable_analysis_plan().ok().map(|plan| plan.id());
+        let payload = plan_id.and_then(|plan_id| workspace.plan_data(plan_id));
+        let (specs, definitions, policy) =
+            payload.map_or((workspace.specs.as_slice(), &[][..], None), |payload| {
+                (
+                    payload.specs.as_slice(),
+                    payload.specification_definitions.as_slice(),
+                    Some(&payload.specification_policy),
+                )
+            });
+        let run = self.active_run().map(|run| VerifiedRun::of(run, plan_id));
+        if self.retained.verification.is_built_from(
+            run.as_ref(),
+            plan_id,
+            specs,
+            definitions,
+            policy,
+        ) {
+            return;
+        }
+        let specifications = prepared_limits(specs, definitions);
+        let prepared_policy = policy
+            .and_then(|policy| {
+                rspice_results::specification::PreparedSpecificationPolicy::new(policy.clone()).ok()
+            })
+            .unwrap_or_default();
+        let retained = self.active_run().map(|run| &run.data);
+        let sheet = rspice_results::verification::Sheet::build::<AnalysisResult, RetainedTrace>(
+            &specifications,
+            &prepared_policy,
+            retained,
+            plan_id,
+        );
+        let checks = retained.map_or_else(
+            rspice_results::verification::Checks::default,
+            rspice_results::verification::Checks::of::<AnalysisResult, RetainedTrace>,
+        );
+        let memo = &mut self.retained.verification;
+        memo.basis = Some(VerificationBasis {
+            run,
+            plan_id,
+            specs: specs.to_vec(),
+            definitions: definitions.to_vec(),
+            policy: policy.cloned(),
+        });
+        memo.sheet = Some(sheet);
+        memo.checks = checks;
+        memo.revision = memo.revision.wrapping_add(1);
+    }
+
+    /// The selected run judged against the active plan's limits, as the
+    /// last [`Self::refresh_verification`] built it; `None` before the
+    /// first.
+    #[must_use]
+    pub fn verification_sheet(&self) -> Option<&rspice_results::verification::Sheet> {
+        self.retained.verification.sheet.as_ref()
+    }
+
+    /// Every check the selected run evaluated, as the last
+    /// [`Self::refresh_verification`] read them.
+    #[must_use]
+    pub fn verification_checks(&self) -> &rspice_results::verification::Checks {
+        &self.retained.verification.checks
+    }
+
+    /// Changes each time the sheet and checks are built again, so a view
+    /// that keeps anything drawn from them knows when to draw it again.
+    #[must_use]
+    pub fn verification_revision(&self) -> u64 {
+        self.retained.verification.revision
+    }
+
     /// Request cancellation of the exact execution active at this instant.
     /// Returns the bound identity on success; no unbound abort request is
     /// emitted when the controller has no authoritative active execution.
@@ -834,6 +919,90 @@ fn prepared_limits(
                 PreparedSpecification::from_definition(definition.clone()).ok()
             })
             .collect()
+    }
+}
+
+/// The selected run's verification sheet and checks, and what they were
+/// built from. Derived, never saved: the runs and the plan's limits both
+/// persist, so a loaded project builds it again.
+#[derive(Debug, Clone, Default)]
+pub struct VerificationMemo {
+    basis: Option<VerificationBasis>,
+    sheet: Option<rspice_results::verification::Sheet>,
+    checks: rspice_results::verification::Checks,
+    revision: u64,
+}
+
+impl VerificationMemo {
+    fn is_built_from(
+        &self,
+        run: Option<&VerifiedRun>,
+        plan_id: Option<crate::product::SimulationPlanId>,
+        specs: &[rspice_results::specification::SpecEntry],
+        definitions: &[rspice_results::specification::SpecificationDefinition],
+        policy: Option<&rspice_results::specification::SpecificationPolicy>,
+    ) -> bool {
+        self.basis.as_ref().is_some_and(|basis| {
+            basis.run.as_ref() == run
+                && basis.plan_id == plan_id
+                && basis.specs == specs
+                && basis.definitions == definitions
+                && basis.policy.as_ref() == policy
+        })
+    }
+}
+
+/// The inputs one sheet was built from, compared by value because a limit
+/// can change by any route that edits the plan.
+#[derive(Debug, Clone, PartialEq)]
+struct VerificationBasis {
+    run: Option<VerifiedRun>,
+    plan_id: Option<crate::product::SimulationPlanId>,
+    specs: Vec<rspice_results::specification::SpecEntry>,
+    definitions: Vec<rspice_results::specification::SpecificationDefinition>,
+    policy: Option<rspice_results::specification::SpecificationPolicy>,
+}
+
+/// What of a run its sheet reads: which run, whose evidence it is, how far
+/// it got, and what each analysis retained. A run still running gains
+/// analyses; one that finishes changes its lifecycle.
+#[derive(Debug, Clone, PartialEq)]
+struct VerifiedRun {
+    run_id: RunId,
+    dataset_id: DatasetId,
+    lifecycle: SimulationRunLifecycle,
+    evidence: EvidenceDomain,
+    /// Per analysis: its sequence, whether it succeeded, and how many
+    /// measurements, family members and checks it retained.
+    analyses: Vec<(u64, bool, usize, usize, usize)>,
+}
+
+impl VerifiedRun {
+    fn of(run: &SimulationRun, plan_id: Option<crate::product::SimulationPlanId>) -> Self {
+        Self {
+            run_id: run.run_id,
+            dataset_id: run.dataset_id,
+            lifecycle: run.lifecycle,
+            evidence: run.evidence_domain(plan_id),
+            analyses: run
+                .analyses
+                .iter()
+                .map(|analysis| {
+                    (
+                        analysis.id,
+                        analysis.success,
+                        analysis.measurements.len(),
+                        analysis
+                            .family_metadata
+                            .as_ref()
+                            .map_or(0, |metadata| metadata.member_measurements().len()),
+                        analysis.checks.hdl.len()
+                            + analysis.checks.assertions.len()
+                            + usize::from(analysis.checks.finish.is_some()),
+                    )
+                })
+                .collect(),
+        }
     }
 }
 
@@ -1718,5 +1887,50 @@ mod tests {
             state.view.data_version > version.wrapping_add(1),
             "a replacement that did not state its basis is judged again"
         );
+    }
+
+    /// The verification sheet is built again when a limit is edited, and a
+    /// frame that changes nothing it reads builds nothing.
+    #[test]
+    fn the_verification_sheet_follows_the_limits_and_nothing_else() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(gain_trials(&[12.0, 8.5, 11.0, 10.5]));
+        let mut state = state_with(run);
+        let setup = rspice_simulation_contract::setup_state::SimulationSetup::default();
+        let mut workspace = rspice_project::ProjectWorkspace::default();
+        workspace.specs = vec![gain_floor(10.0)];
+        let yield_of = |state: &SimulationState| {
+            let count = state
+                .verification_sheet()
+                .expect("the sheet was built")
+                .rows[0]
+                .statistics
+                .as_ref()
+                .and_then(|statistics| statistics.yield_count)
+                .expect("a limited row has a yield");
+            (count.passing, count.total)
+        };
+
+        assert!(state.verification_sheet().is_none());
+        state.refresh_verification(&setup, &workspace);
+        assert_eq!(yield_of(&state), (3, 4));
+        assert!(state.verification_checks().rows.is_empty());
+        let revision = state.verification_revision();
+
+        // A frame in which the waveforms moved on and nothing the sheet
+        // reads did.
+        state.view.data_version = state.view.data_version.wrapping_add(1);
+        state.refresh_yield_evidence(&setup, &workspace);
+        state.refresh_verification(&setup, &workspace);
+        assert_eq!(
+            state.verification_revision(),
+            revision,
+            "nothing it reads changed, so nothing was judged again"
+        );
+
+        workspace.specs = vec![gain_floor(11.0)];
+        state.refresh_verification(&setup, &workspace);
+        assert_ne!(state.verification_revision(), revision);
+        assert_eq!(yield_of(&state), (2, 4));
     }
 }

@@ -50,6 +50,9 @@ pub struct RetainedSimulationState {
     /// Atomically replaced yield population and the run that produced it.
     pub yield_evidence: YieldEvidence,
 
+    /// The selected run's verification sheet and checks.
+    pub verification: super::state_impl::VerificationMemo,
+
     /// Simulation run history (newest first, limited to
     /// [`Self::retained_dataset_limit`])
     pub runs: crate::state::RunHistory,
