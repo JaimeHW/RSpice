@@ -3940,7 +3940,7 @@ fn lower_canonical_shadow_program(
 /// `@` read `__fn1_f@result@d0` as variable `__fn1_f` with the axis
 /// `result@d0`, found no such axis, and dropped the shadow: the postfix plan
 /// then never computed it and every derivative through the function read zero.
-fn scalar_derivative_shadow(name: &str) -> Option<(&str, Vec<CanonicalDerivativeAxis>)> {
+pub(crate) fn scalar_derivative_shadow(name: &str) -> Option<(&str, Vec<CanonicalDerivativeAxis>)> {
     name.match_indices('@').find_map(|(at, _)| {
         let base = &name[..at];
         if base.is_empty() {

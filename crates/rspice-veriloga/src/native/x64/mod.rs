@@ -41,9 +41,9 @@ use crate::codegen::CompiledModel;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 use crate::jit::plan_builder::{
     AssignmentRootPolicy, canonical_branch_unknown_runtime_map, checked_logical_index,
-    derivative_shadow_axes_from_suffix, infer_current_terminal_pair, infer_current_unified_pair,
-    live_canonical_assignment_slots, lower_assignment_step, lower_static_condition_program,
-    native_assignment_roots, push_prior_current_probe_aliases, ranges_overlap,
+    infer_current_terminal_pair, infer_current_unified_pair, live_canonical_assignment_slots,
+    lower_assignment_step, lower_static_condition_program, native_assignment_roots,
+    push_prior_current_probe_aliases, ranges_overlap, scalar_derivative_shadow,
 };
 
 const ENTRY_ALIGNMENT: usize = 16;
@@ -1344,10 +1344,9 @@ mod tests {
     use super::{
         AssignmentRootPolicy, MAX_ASSIGNMENT_CHUNK_OPERATIONS, NativeModel, append_assignment_pass,
         assignment_chunk_ranges, canonical_branch_unknown_runtime_map,
-        compile_model_with_canonical_ir, derivative_shadow_axes_from_suffix,
-        live_canonical_assignment_slots, lower_assignment_step, lower_static_condition_program,
-        native_assignment_roots, validate_compiled_entry_shape, verify_x64_function_code,
-        verify_x64_image_layout,
+        compile_model_with_canonical_ir, live_canonical_assignment_slots, lower_assignment_step,
+        lower_static_condition_program, native_assignment_roots, scalar_derivative_shadow,
+        validate_compiled_entry_shape, verify_x64_function_code, verify_x64_image_layout,
     };
     use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, NodeId};
@@ -6053,10 +6052,11 @@ endmodule
         higher_order_shadow_count: &mut usize,
         skipped_nonfinite: &mut usize,
     ) -> Result<(), String> {
-        let derivative_order = variable_name
-            .split_once('@')
-            .and_then(|(_, suffix)| derivative_shadow_axes_from_suffix(suffix))
-            .map_or(0, |axes| axes.len());
+        // An expanded function's result and locals hold an `@` of their own
+        // (`__fn1_f@result@d0`), so the axes are the first `@` tail that
+        // parses as axes, as the postfix plan reads them.
+        let derivative_order =
+            scalar_derivative_shadow(variable_name).map_or(0, |(_, axes)| axes.len());
         if derivative_order <= 1 {
             return assert_close_or_skip_nonfinite(
                 name,
