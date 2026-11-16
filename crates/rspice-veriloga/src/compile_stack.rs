@@ -38,20 +38,25 @@ pub(crate) fn run<T: Send>(work: impl FnOnce() -> T + Send) -> T {
             .take()
             .expect("compile work runs once")
     };
-    std::thread::scope(|scope| {
-        let spawned = std::thread::Builder::new()
-            .name("rspice-veriloga-compile".to_owned())
-            .stack_size(COMPILE_STACK_BYTES)
-            .spawn_scoped(scope, || {
-                ON_COMPILE_STACK.set(true);
-                take()()
-            });
-        match spawned {
-            Ok(thread) => thread
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            Err(_) => take()(),
-        }
+    // The caller's abort hook goes with the work: a constant function or a
+    // loop the phases evaluate (a generate bound, a parameter's value) stops
+    // with the caller's run or job, not only at the next phase.
+    rspice_veriloga_runtime::loop_abort::with_current_hook(|hook| {
+        std::thread::scope(|scope| {
+            let spawned = std::thread::Builder::new()
+                .name("rspice-veriloga-compile".to_owned())
+                .stack_size(COMPILE_STACK_BYTES)
+                .spawn_scoped(scope, || {
+                    ON_COMPILE_STACK.set(true);
+                    rspice_veriloga_runtime::loop_abort::with_hook(hook, take())
+                });
+            match spawned {
+                Ok(thread) => thread
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+                Err(_) => take()(),
+            }
+        })
     })
 }
 
@@ -68,6 +73,13 @@ mod tests {
         });
         assert_eq!(outer.0, outer.1);
         assert_ne!(outer.0, std::thread::current().id());
+    }
+
+    #[test]
+    fn the_callers_abort_hook_reaches_the_compile_thread() {
+        use rspice_veriloga_runtime::loop_abort::{aborted, with_hook};
+        assert!(!run(aborted));
+        assert!(with_hook(&|| true, || run(aborted)));
     }
 
     #[test]

@@ -58,6 +58,24 @@ pub fn with_hook<R>(hook: &(dyn Fn() -> bool + Sync), body: impl FnOnce() -> R) 
     body()
 }
 
+/// Call `body` with this thread's hook, or with one that never aborts when
+/// none is installed.
+///
+/// The hook lives only while `body` runs, so `body` may hand it to a thread
+/// that does part of this thread's work and is joined before `body` returns
+/// (a scoped thread), which installs it with [`with_hook`]: the work there
+/// stops with the run as it would here.
+pub fn with_current_hook<R>(body: impl FnOnce(&(dyn Fn() -> bool + Sync)) -> R) -> R {
+    match HOOK.try_with(Cell::get).ok().flatten() {
+        // SAFETY: a hook in `HOOK` is one `with_hook` installed on this
+        // thread and has not returned from, and it cannot return while
+        // `body`, called from inside it, runs; the borrow handed to `body`
+        // ends with that call.
+        Some(hook) => body(unsafe { hook.as_ref() }),
+        None => body(&|| false),
+    }
+}
+
 /// Whether this thread's run has been told to stop. `false` with no hook
 /// installed.
 pub fn aborted() -> bool {
@@ -95,6 +113,28 @@ mod tests {
             assert!(!aborted());
         });
         assert!(!aborted());
+    }
+
+    #[test]
+    fn a_scoped_thread_handed_the_current_hook_aborts_with_it() {
+        let stop = AtomicBool::new(false);
+        with_hook(&|| stop.load(Ordering::Relaxed), || {
+            super::with_current_hook(|hook| {
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            with_hook(hook, || {
+                                assert!(!aborted());
+                                stop.store(true, Ordering::Relaxed);
+                                assert!(aborted());
+                            });
+                        })
+                        .join()
+                        .expect("the thread finishes");
+                });
+            });
+        });
+        assert!(super::with_current_hook(|hook| !hook()));
     }
 
     #[test]
