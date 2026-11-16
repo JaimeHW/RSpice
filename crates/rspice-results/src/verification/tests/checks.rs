@@ -10,7 +10,7 @@ use crate::analysis_payload::AnalysisResultPayload;
 use crate::analysis_result::{CheckVerdict, HdlDiagnostic, RunChecks};
 use crate::safety::SoaThresholds;
 use crate::soa_evidence::{SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence};
-use crate::verification::{AssertionOutcome, Check, CheckStatus, Checks};
+use crate::verification::{AssertionOutcome, Check, CheckCounts, CheckStatus, Checks};
 
 /// The rows from each analysis's own checks grade it as
 /// [`RunChecks::verdict`] does, so the table cannot call clean a run its
@@ -342,4 +342,40 @@ fn checks_sort_worst_first() {
         .collect::<Vec<_>>();
     assert_eq!(warnings, ["first", "second"]);
     assert_eq!(checks.worst(), CheckStatus::Fail);
+}
+
+/// A failure and a check that could not be evaluated are violations; a
+/// warning is counted apart from them, and a notice and a pass only in the
+/// total.
+#[test]
+fn counts_hold_the_warnings_apart_from_the_violations() {
+    let mut unevaluated = report(AssertLevel::Error, Vec::new());
+    unevaluated.error = Some("V(nope) names no node".into());
+    let run = history(vec![checked(
+        None,
+        RunChecks {
+            hdl: vec![
+                record(HdlSeverity::Warning, "late"),
+                record(HdlSeverity::Warning, "later"),
+                record(HdlSeverity::Error, "out of range"),
+            ],
+            assertions: vec![
+                report(AssertLevel::Notice, vec![violation(1e-9, None)]),
+                report(AssertLevel::Error, Vec::new()),
+                unevaluated,
+            ],
+            ..RunChecks::default()
+        },
+    )]);
+    let checks = Checks::of(&run);
+    assert_eq!(
+        checks.counts(),
+        CheckCounts {
+            violations: 2,
+            warnings: 2,
+            total: 6,
+        }
+    );
+    assert!(!CheckStatus::Warning.is_violation());
+    assert_eq!(Checks::default().counts(), CheckCounts::default());
 }

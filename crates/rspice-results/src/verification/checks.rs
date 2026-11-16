@@ -29,6 +29,28 @@ pub enum CheckStatus {
     Fail,
 }
 
+impl CheckStatus {
+    /// Whether the check was violated: it failed, or it could not be
+    /// evaluated, so the run cannot be called clean over it. A warning is not
+    /// a violation.
+    #[must_use]
+    pub fn is_violation(self) -> bool {
+        matches!(self, Self::Error | Self::Fail)
+    }
+}
+
+/// How many of a run's checks were violated, how many only warned, and how
+/// many there are.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CheckCounts {
+    /// Checks that failed or could not be evaluated.
+    pub violations: usize,
+    /// Checks that warned.
+    pub warnings: usize,
+    /// Every check, whatever it says.
+    pub total: usize,
+}
+
 /// One safe-operating-area rule, evaluated over a whole analysis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SoaCheck {
@@ -192,6 +214,24 @@ impl Checks {
             .map(|row| row.status)
             .max()
             .unwrap_or(CheckStatus::Pass)
+    }
+
+    /// How many rows were violated and how many only warned, out of all of
+    /// them: the one count every view of a run's checks states.
+    #[must_use]
+    pub fn counts(&self) -> CheckCounts {
+        let mut counts = CheckCounts {
+            total: self.rows.len(),
+            ..CheckCounts::default()
+        };
+        for row in &self.rows {
+            if row.status.is_violation() {
+                counts.violations += 1;
+            } else if row.status == CheckStatus::Warning {
+                counts.warnings += 1;
+            }
+        }
+        counts
     }
 }
 

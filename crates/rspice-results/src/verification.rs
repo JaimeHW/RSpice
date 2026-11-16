@@ -17,7 +17,7 @@ mod sheet;
 mod statistics;
 
 pub use checks::{
-    AssertionCheck, AssertionOutcome, Check, CheckRow, CheckStatus, Checks, SoaCheck,
+    AssertionCheck, AssertionOutcome, Check, CheckCounts, CheckRow, CheckStatus, Checks, SoaCheck,
 };
 pub use points::{Point, PointAxis, PointSource};
 pub use sheet::{

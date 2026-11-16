@@ -143,7 +143,7 @@ pub(crate) fn order_rows(
         return;
     }
     let mut rows = (0..checks.rows.len())
-        .filter(|index| !violations_only || is_violation(checks.rows[*index].status))
+        .filter(|index| !violations_only || checks.rows[*index].status.is_violation())
         .collect::<Vec<_>>();
     // Worst status first; within one status the SOA rule with the least room
     // first, and otherwise the run's own order.
@@ -210,42 +210,34 @@ fn room(row: &CheckRow) -> f64 {
     }
 }
 
-/// A check the reader must look at: one that warned, failed or could not be
-/// evaluated.
-pub(super) fn is_violation(status: CheckStatus) -> bool {
-    matches!(
-        status,
-        CheckStatus::Warning | CheckStatus::Error | CheckStatus::Fail
-    )
-}
-
-/// The toolbar's line: how many checks were violated out of how many, behind
-/// a failure's mark when one failed and a warning's when one only warned.
-pub(super) fn checks_summary(checks: &Checks) -> Summary {
-    let total = checks.rows.len();
+/// The toolbar's line: how many checks were violated and how many warned, out
+/// of how many, behind a failure's mark when one was violated and a warning's
+/// when one only warned. A warning is not a violation, so it is counted apart.
+pub(crate) fn checks_summary(checks: &Checks) -> Summary {
+    let counts = checks.counts();
     let plural =
         |count: usize, word: &str| format!("{count} {word}{}", if count == 1 { "" } else { "s" });
-    let violations = checks
-        .rows
-        .iter()
-        .filter(|row| is_violation(row.status))
-        .count();
-    if violations == 0 {
-        return Summary::plain(format!("{}, none violated", plural(total, "check")));
-    }
-    let text = format!(
-        "{} \u{00b7} {}",
-        plural(violations, "violation"),
-        plural(total, "check")
-    );
-    if checks
-        .rows
-        .iter()
-        .any(|row| matches!(row.status, CheckStatus::Error | CheckStatus::Fail))
-    {
-        Summary::failing(text)
+    let warnings = (counts.warnings > 0).then(|| plural(counts.warnings, "warning"));
+    let text = if counts.violations == 0 {
+        let clean = format!("{}, none violated", plural(counts.total, "check"));
+        match warnings {
+            Some(warnings) => format!("{clean} \u{00b7} {warnings}"),
+            None => clean,
+        }
     } else {
+        [Some(plural(counts.violations, "violation")), warnings]
+            .into_iter()
+            .flatten()
+            .chain([plural(counts.total, "check")])
+            .collect::<Vec<_>>()
+            .join(" \u{00b7} ")
+    };
+    if counts.violations > 0 {
+        Summary::failing(text)
+    } else if counts.warnings > 0 {
         Summary::warning(text)
+    } else {
+        Summary::plain(text)
     }
 }
 

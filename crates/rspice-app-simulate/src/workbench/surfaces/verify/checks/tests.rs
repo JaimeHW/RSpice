@@ -79,7 +79,7 @@ fn the_checks_view_lists_every_check_worst_first() {
     let checks = harness.model.simulation.verification_checks();
     assert_eq!(
         checks_summary(checks),
-        Summary::failing("6 violations \u{00b7} 9 checks")
+        Summary::failing("4 violations \u{00b7} 2 warnings \u{00b7} 9 checks")
     );
 }
 
@@ -157,16 +157,17 @@ fn a_run_of_several_points_names_each_rows_point() {
     );
 }
 
-/// Violations only leaves out what passed, and the summary still counts every
-/// check.
+/// Violations only shows the checks the summary counts as violated: a warning
+/// is not a violation, so it is left out with what passed.
 #[test]
-fn violations_only_hides_the_passing_checks() {
+fn violations_only_shows_the_violated_checks() {
     let mut harness = checked_run();
     harness.state.verification.checks_violations_only = true;
     draw(&mut harness);
     let rows = shown(&harness);
-    assert_eq!(rows.len(), 6);
-    assert!(rows.iter().all(|(_, _, status)| *status != "Pass"));
+    let counts = harness.model.simulation.verification_checks().counts();
+    assert_eq!(rows.len(), counts.violations);
+    assert!(rows.iter().all(|(_, _, status)| *status == "Fail"));
 }
 
 /// The shown order is built once per revision of the run's checks and filter:
@@ -188,12 +189,18 @@ fn an_idle_frame_orders_nothing() {
     assert_eq!(order.rows, built.rows, "a new revision is ordered again");
 }
 
-/// A clean run says how many checks it ran, neutral.
+/// A clean run says how many checks it ran, neutral; one whose checks only
+/// warned says so too, and how many warned, behind a warning's mark.
 #[test]
 fn a_clean_run_summary_is_neutral() {
     let mut harness = checked_run();
     draw(&mut harness);
     let mut checks = harness.model.simulation.verification_checks().clone();
+    checks.rows.retain(|row| !row.status.is_violation());
+    assert_eq!(
+        checks_summary(&checks),
+        Summary::warning("5 checks, none violated \u{00b7} 2 warnings")
+    );
     checks
         .rows
         .retain(|row| matches!(row.status, CheckStatus::Pass));
