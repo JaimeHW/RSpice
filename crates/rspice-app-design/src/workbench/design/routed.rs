@@ -509,13 +509,21 @@ fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
     cx.wb.outbox.push(FocusNavigatorSearch);
 }
 
-/// Whether Undo would take a step: on a Simulate page, where the setup's own
-/// history holds one; elsewhere never while the project is read-only or a
-/// schematic edit is under way, and otherwise where the project's history,
-/// the symbol editor's or an editable schematic's holds one.
+/// Whether `workspace` edits the simulation setup, so that its Undo and Redo
+/// step the setup's own history: the Simulate pages, and the Verify views,
+/// whose specification and acceptance edits are plan changes.
+fn steps_the_setup(workspace: Workspace) -> bool {
+    matches!(workspace, Workspace::Simulate | Workspace::Verify)
+}
+
+/// Whether Undo would take a step: on a Simulate page or a Verify view, where
+/// the setup's own history holds one; elsewhere never while the project is
+/// read-only or a schematic edit is under way, and otherwise where the
+/// project's history, the symbol editor's or an editable schematic's holds
+/// one.
 fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
-    if reads.wb.workspace == Workspace::Simulate {
+    if steps_the_setup(reads.wb.workspace) {
         model.can_undo_simulation_setup()
     } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
         false
@@ -535,7 +543,7 @@ fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
 /// Whether Redo would take a step, as [`can_undo`] answers for Undo.
 fn can_redo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
-    if reads.wb.workspace == Workspace::Simulate {
+    if steps_the_setup(reads.wb.workspace) {
         model.can_redo_simulation_setup()
     } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
         false

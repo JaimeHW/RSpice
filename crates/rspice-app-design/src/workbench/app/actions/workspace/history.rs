@@ -224,7 +224,9 @@ fn take_step<H>(
         }
     }
     let mut parts = lend(host);
-    if parts.wb.workspace == Workspace::Simulate {
+    // The Verify views' specification and acceptance edits are plan changes,
+    // steps of the setup's history as the Simulate pages' are.
+    if matches!(parts.wb.workspace, Workspace::Simulate | Workspace::Verify) {
         take_setup_history_step(&mut parts, direction);
         return;
     }

@@ -83,6 +83,26 @@ fn undo_takes_back_the_edit_of_the_place_it_is_pressed_in() {
     assert_eq!(first_value(&page.app), "7");
 }
 
+/// A Verify view edits the plan as the Simulate pages do, so Undo and Redo
+/// there step the setup's history, not the design's.
+#[test]
+fn undo_on_a_verify_view_takes_back_the_setup_edit() {
+    let mut page = Page::open_on(app_with_a_moded_device("").0, SimulationPage::Solver);
+    let setup_before = stored_options(&page.app);
+    page.type_slowly("relative update", "2e-3");
+    let setup_after = stored_options(&page.app);
+    let drawn = first_value(&page.app);
+
+    page.app.state.workbench.activate(Workspace::Verify);
+    assert!(page.app.command_key_enabled(ids::UNDO), "Undo is offered");
+    page.app.execute_command_key(ids::UNDO);
+    assert_eq!(stored_options(&page.app), setup_before);
+    assert_eq!(first_value(&page.app), drawn, "the design is left as it is");
+    assert!(page.app.command_key_enabled(ids::REDO), "Redo is offered");
+    page.app.execute_command_key(ids::REDO);
+    assert_eq!(stored_options(&page.app), setup_after);
+}
+
 /// The Solver page commits through the same plan transaction, so its edits
 /// are steps of the same history: a value typed a keystroke at a time is one
 /// step, Undo puts back exactly the options it replaced, and Redo the ones it
