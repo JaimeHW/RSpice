@@ -85,6 +85,35 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// of `0.0` (PSP 103.4.0's own initialisation), so one constant in each image
 /// changed. Nothing else between `fc035ddf98` and `75ec0848f7` moved a module.
 ///
+/// `d02fe069…` is the census of `8424f74533`, measured from an
+/// `x86_64-apple-darwin` build run under Rosetta, which emits the System V
+/// image the nightly measures: its thirty-four unmoved modules reproduce
+/// nightly 43719595157's per-module digests exactly. Twenty-six modules moved,
+/// at two commits, and every module each one moved is a module its change
+/// reaches:
+/// - `980db0dda8`, in which an analog loop runs until it ends or the run is
+///   stopped, moved the twenty-four modules whose images carry a back edge.
+///   A back edge used to count its trips against the hundred-thousand limit
+///   and call `rspice_native_loop_limit_error` on reaching it; it now counts
+///   to a poll of the run's abort hook every 65,536 trips and calls the poll
+///   helper there, saving the live value registers around the call. Every one
+///   of the twenty-four keeps its helper-call count, one poll call for each
+///   limit-error call it replaced. They grew 91,344 bytes in all: 144 each for
+///   `bsimbulk`, `ekv3_rf`, `hicumL2va` and the ten PSP 102.5, 103.4 and
+///   104.1 builds that move (`PSP102EVA` and `PSPNQS102EVA` keep no back
+///   edge and did not); 288 to 304 for `bsimsoi_va`, the 4.7.0 `bsimsoi` and
+///   the two `l_utsoi`; 3,056 for `hisimsotb_va`; 5,360 for each
+///   `hisimsoi_va`; and 23,056 for each `hisimhv` variant.
+/// - `968734c89f`, in which the native postfix plan computes the derivatives
+///   of an expanded analog function, moved the two modules that keep the
+///   postfix plan: `mvsg_cmc` (1,423,312 to 2,703,968 bytes, 4,671 to 6,570
+///   helper calls) and the `BSIM_SOI_100.1.1` `bsimsoi` (7,686,592 to
+///   7,875,232 bytes, 13,565 to 13,815 helper calls). The plan used to drop
+///   the derivative shadows of a function's output arguments; the code that
+///   now computes them is the growth.
+///
+/// The corpus went from 107,656,654 bytes to 109,217,294.
+///
 /// # How it is re-baselined
 ///
 /// Only with evidence that names the modules that moved and why. The census
@@ -207,7 +236,9 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 ///
 /// `001961cf…` moved to `86d6920e…` at W-F14b, when every back edge of every
 /// block program started counting its trips against the hundred-thousand
-/// iteration limit only an assignment-step loop was held to before.
+/// iteration limit only an assignment-step loop was held to before. That limit
+/// is gone: since `980db0dda8` the counter leads to a poll of the run's abort
+/// hook instead (the `d02fe069…` re-baseline above).
 /// The reading is the sharpest of the four here, because the change has an
 /// exact predicate: a module's image moves **if and only if one of its block
 /// programs has a natural loop**.
@@ -227,9 +258,9 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// twenty-one; the three `hisimsoi_va` variants +2,800/+2,816 for
 /// thirty-seven; the three `hisimhv` variants +12,080 for a hundred and
 /// fifty-nine; and the two `l_utsoi` +1,800/+1,784 for twenty-four. Twenty of
-/// those bytes are the counter's load, increment, store and compare; the other
-/// fifty-five are the call to `rspice_native_loop_limit_error` on the path that
-/// never runs.
+/// those bytes were the counter's load, increment, store and compare; the other
+/// fifty-five were the call to `rspice_native_loop_limit_error` on the path that
+/// never ran.
 ///
 /// The three PSP variants pay more — +3,204, +3,236 and +3,864 for ten, ten and
 /// twelve loops — and the excess is not the guard. Their loop-carrying entries
@@ -379,7 +410,7 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "698ab33cda35e9b08a71ced2f6d6403e5c3096fe6262c1af1475b7977634aa4f";
+    "d02fe069e76d6f248a5c5e966936db8f14f95dec56a7ca974f38ea2e9cf9ba8d";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
