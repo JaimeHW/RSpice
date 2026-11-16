@@ -278,6 +278,7 @@ where
     crate::netlist_preparation::startup_nets::check_startup_nets(
         &inputs.analysis.sim_setup.options,
         &design_nets,
+        &plan_payload.design_variables,
     )?;
     let occurrences =
         projection_occurrence_nets(inputs.libraries, &execution_projection, design_nets);

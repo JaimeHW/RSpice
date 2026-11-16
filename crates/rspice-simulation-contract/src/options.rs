@@ -19,5 +19,6 @@ pub(crate) use si::format_freq;
 pub use si::{ParseError, format_si_value, parse_si_value};
 pub use startup::{
     NodeVoltage, StartupKind, is_ground, net_name_problem, startup_cards, startup_problems,
+    value_problem,
 };
 pub use validation::ValidationError;

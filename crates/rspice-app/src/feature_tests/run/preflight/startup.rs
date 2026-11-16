@@ -177,7 +177,7 @@ fn an_initial_condition_typed_on_the_solver_page_starts_the_transient_there() {
         page.app.state.model.sim_setup.options.initial_conditions,
         [NodeVoltage {
             net: "out".to_owned(),
-            volts: 0.25
+            value: "250m".to_owned()
         }]
     );
     assert!(page.app.state.model.sim_setup.options.nodesets.is_empty());
@@ -223,6 +223,159 @@ fn an_initial_condition_typed_on_the_solver_page_starts_the_transient_there() {
     );
 }
 
+/// The run's transient traces of `net`, one per point the run set swept
+/// `variable` to: the point's value as the run set spells it, its times and
+/// volts.
+fn point_traces(
+    run: &rspice_app_state::state::SimulationRun,
+    variable: &str,
+    net: &str,
+) -> Vec<(String, Vec<f64>, Vec<f64>)> {
+    let name = format!("V({net})");
+    run.analyses
+        .iter()
+        .filter_map(|analysis| {
+            let swept = analysis
+                .provenance
+                .as_ref()?
+                .pvt_point()?
+                .swept_values()
+                .iter()
+                .find(|swept| swept.name == variable)?;
+            let wave = analysis.waveforms.iter().find(|wave| {
+                wave.name.eq_ignore_ascii_case(&name) || wave.name.eq_ignore_ascii_case(net)
+            })?;
+            Some((swept.value.clone(), wave.x.to_vec(), wave.y.to_vec()))
+        })
+        .collect()
+}
+
+/// The RC with a design variable `vstart` of 250 mV, which the run set
+/// sweeps over 0.25 V and 0.5 V.
+fn rc_swept_over_vstart() -> RSpiceApp {
+    use rspice_app_state::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariableSweepEligibility,
+    };
+    use rspice_simulation_contract::run_set::{
+        DESIGN_VARIABLE_SOURCE_PREFIX, RunSetDimension, RunSetDimensionKind,
+    };
+
+    let mut app = rc();
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance has a stable plan")
+        .id();
+    let variable = DesignVariable::new(
+        "vstart",
+        "250mV",
+        DesignVariableQuantity::Voltage,
+        DesignVariableScope::Testbench,
+        "where the capacitor starts",
+        None,
+        DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        DesignVariableOverridePolicy::InheritOwnerOnly,
+    )
+    .expect("a valid design variable");
+    app.state
+        .model
+        .workspace
+        .content
+        .add_design_variable(plan, variable)
+        .expect("the plan accepts it");
+    let mut axis = RunSetDimension::new(
+        "dimension-vstart",
+        RunSetDimensionKind::Parameter,
+        &["0.25", "0.5"],
+        1,
+    );
+    axis.source = format!("{DESIGN_VARIABLE_SOURCE_PREFIX}vstart");
+    app.state.model.sim_setup.run_set.dimensions.push(axis);
+    app
+}
+
+/// An initial condition written as an expression of a design variable moves
+/// with it, as Virtuoso ADE's does: the run set sweeps `vstart` over 0.25 V
+/// and 0.5 V, the row holds `vstart`, the deck carries `.IC V(out)={vstart}`,
+/// and each point's transient starts at its own value and charges toward the
+/// 1 V drive as `1 - (1 - vstart)·exp(-t/RC)`. A name the plan defines no
+/// variable for is refused in place.
+#[test]
+fn an_initial_condition_written_as_a_design_variable_moves_with_its_sweep() {
+    let app = rc_swept_over_vstart();
+    let mut page = Page::open_on(app, SimulationPage::Solver);
+    let before = stored_options(&page.app);
+    page.retype("New initial condition net", "out");
+    page.retype("New initial condition volts", "nosuch/2");
+    assert_eq!(
+        description(&page, "New initial condition volts"),
+        "nosuch is no design variable"
+    );
+    assert_eq!(stored_options(&page.app), before);
+    page.retype("New initial condition volts", "{vstart}");
+    assert_eq!(
+        page.app.state.model.sim_setup.options.initial_conditions,
+        [NodeVoltage {
+            net: "out".to_owned(),
+            value: "vstart".to_owned()
+        }]
+    );
+    page.pass(Vec::new());
+    assert_eq!(
+        page.control("Initial condition 1 volts").value.as_deref(),
+        Some("vstart")
+    );
+    let deck = rspice_app_runs::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
+        &page.app.state.model,
+    )
+    .expect("the deck");
+    assert!(
+        deck.lines().any(|line| line == ".IC V(out)={vstart}"),
+        "{deck}"
+    );
+
+    ran(&mut page.app, "out");
+    let run = page
+        .app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    let points = point_traces(run, "vstart", "out");
+    assert_eq!(
+        points
+            .iter()
+            .map(|(value, _, _)| value.as_str())
+            .collect::<Vec<_>>(),
+        ["0.25", "0.5"],
+        "one transient per point of the sweep"
+    );
+    let tau = 1e3 * 159e-9;
+    for (value, times, volts) in points {
+        let start: f64 = value.parse().expect("a number");
+        let worst = times
+            .iter()
+            .zip(&volts)
+            .map(|(t, v)| (v - (1.0 - (1.0 - start) * (-t / tau).exp())).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            volts[0] == start,
+            "vstart={value}: the transient starts at {}",
+            volts[0]
+        );
+        assert!(
+            worst < 1e-5,
+            "vstart={value}: V(out) against 1 - (1 - vstart) exp(-t/RC): worst {worst:e} V"
+        );
+    }
+}
+
 /// A net the design does not have, ground, or a net already set is refused
 /// where it was typed: the cell keeps the text, its reason on hover, and the
 /// plan is unchanged. A removed row is one step of Undo too.
@@ -242,9 +395,10 @@ fn a_net_a_row_cannot_name_is_refused_in_place() {
         description(&page, "New node set net")
     );
     page.retype("New node set volts", "volts");
-    assert!(
-        !description(&page, "New node set volts").is_empty(),
-        "a value that is no number is refused"
+    assert_eq!(
+        description(&page, "New node set volts"),
+        "volts is no design variable",
+        "a value that is neither a number nor an expression of the plan's variables is refused"
     );
     assert_eq!(stored_options(&page.app), before);
 
@@ -360,7 +514,7 @@ fn a_row_naming_a_net_the_design_lost_refuses_the_run() {
     let mut options = app.state.model.sim_setup.options.clone();
     options.nodesets.push(NodeVoltage {
         net: "gone".to_owned(),
-        volts: 1.0,
+        value: "1".to_owned(),
     });
     app.state.model.sim_setup.commit_options(&options);
     let error = rspice_app_runs::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(

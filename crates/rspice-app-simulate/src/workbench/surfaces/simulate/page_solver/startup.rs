@@ -3,10 +3,12 @@
 //! Two net/value grids side by side, as Virtuoso ADE's Convergence Aids
 //! forms give them: a row names a net of the plan's simulation root as the
 //! design names it, picked from the design's nets (the one selected on the
-//! schematic first) or typed, and its volts. A net the design does not have,
-//! ground, a net that holds no voltage or a net already set is refused in
-//! place: the cell keeps what was typed, ringed, with the reason on its
-//! hover. The rows are the plan's options, written into the deck as `.IC`
+//! schematic first) or typed, and its volts: a number, or an expression of
+//! the plan's design variables, so a corner or a sweep that moves one moves
+//! where the run starts. A net the design does not have, ground, a net that
+//! holds no voltage, a net already set or a variable the plan does not
+//! define is refused in place: the cell keeps what was typed, ringed, with
+//! the reason on its hover. The rows are the plan's options, written into the deck as `.IC`
 //! and `.NODESET` cards, so an edit is one step of the setup's Undo.
 
 use egui::{TextEdit, Ui, vec2};
@@ -18,10 +20,9 @@ use crate::ui::widgets::{IconButton, editable_select_mono, name_control, text_fi
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use rspice_design::connectivity::summary::DesignNet;
-use rspice_simulation::netlist_preparation::startup_nets::startup_net;
-use rspice_simulation_contract::options::{
-    NodeVoltage, StartupKind, format_si_value, parse_si_value,
-};
+use rspice_simulation::netlist_preparation::startup_nets::{startup_net, startup_value};
+use rspice_simulation_contract::design_variable::DesignVariable;
+use rspice_simulation_contract::options::{NodeVoltage, StartupKind};
 
 use super::super::page_kit::{Tone, card, cell_ui, ledger_head_explained, ledger_row_cells};
 use super::{commit_draft, released};
@@ -121,12 +122,12 @@ const NET_HOVER: &str = "A net of the simulation root as the design names it: pi
 fn volts_hover(kind: StartupKind) -> &'static str {
     match kind {
         StartupKind::InitialCondition => {
-            "Held while the operating point a transient starts from is solved, then released \
-             (.IC)."
+            "Volts, or an expression of the design variables. Held while the operating point a \
+             transient starts from is solved, then released (.IC)."
         }
         StartupKind::NodeSet => {
-            "Where the operating point's search starts; the solution settles where the circuit \
-             takes it (.NODESET)."
+            "Volts, or an expression of the design variables. Where the operating point's search \
+             starts; the solution settles where the circuit takes it (.NODESET)."
         }
     }
 }
@@ -172,7 +173,7 @@ fn grid(
             }
             let volts_rect = cells[1].shrink2(pad);
             let mut cell = cell_ui(ui, volts_rect);
-            let shown = row.map_or_else(String::new, |row| format_si_value(row.volts));
+            let shown = row.map_or_else(String::new, |row| row.value.clone());
             if let Some(text) = volts_cell(&mut cell, &name, &shown, volts_rect.width()) {
                 edit = Some(Edit::Volts(place, text));
             }
@@ -202,6 +203,10 @@ fn apply(
     nets: Result<&[DesignNet], &String>,
     edit: Edit,
 ) {
+    let variables = match edit {
+        Edit::Volts(..) => plan_variables(cx.model),
+        _ => Vec::new(),
+    };
     let draft = &mut cx.model.sim_setup.session.options_draft;
     let refusal = match edit {
         Edit::Remove(index) => {
@@ -227,14 +232,14 @@ fn apply(
         }
         Edit::Volts(place, text) => {
             let name = row_name(kind, place);
-            match volts(&text) {
-                Ok(volts) => match place {
+            match startup_value(&text, &variables) {
+                Ok(value) => match place {
                     Some(index) => {
-                        rows_of_mut(kind, draft)[index].volts = volts;
+                        rows_of_mut(kind, draft)[index].value = value;
                         None
                     }
                     None => {
-                        pending_set(ui, &name, Column::Volts, format_si_value(volts));
+                        pending_set(ui, &name, Column::Volts, value);
                         add_when_complete(ui, kind, draft);
                         None
                     }
@@ -284,13 +289,15 @@ fn drawn_net(
     Ok(net.name.clone())
 }
 
-fn volts(text: &str) -> Result<f64, String> {
-    let volts = parse_si_value(text.trim()).map_err(|error| error.to_string())?;
-    if volts.is_finite() {
-        Ok(volts)
-    } else {
-        Err(format!("{text} is not a voltage"))
-    }
+/// The design variables a value can name: the plan's own.
+fn plan_variables(model: &crate::workbench::app_state::Model) -> Vec<DesignVariable> {
+    model
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| model.workspace.content.plan_data(plan.id()))
+        .map(|payload| payload.design_variables.clone())
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Copy)]
@@ -329,13 +336,13 @@ fn add_when_complete(
     draft: &mut crate::simulation::plan::OptionsDialogState,
 ) {
     let name = row_name(kind, None);
-    let (Some(net), Some(Ok(volts))) = (
+    let (Some(net), Some(value)) = (
         pending(ui, &name, Column::Net),
-        pending(ui, &name, Column::Volts).map(|text| volts(&text)),
+        pending(ui, &name, Column::Volts),
     ) else {
         return;
     };
-    rows_of_mut(kind, draft).push(NodeVoltage { net, volts });
+    rows_of_mut(kind, draft).push(NodeVoltage { net, value });
     ui.data_mut(|data| {
         for column in [Column::Net, Column::Volts] {
             data.remove::<String>(cell_id(&name, column).with("pending"));
