@@ -680,6 +680,24 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
     );
 }
 
+/// A component's rows edit it and offer nothing more: parameter tuning left
+/// the product, and with it the Value row's tune action. Nothing the panel
+/// announces names it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn no_component_row_offers_parameter_tuning() {
+    let (mut app, first, _) = two_resistors();
+    let sheet = sheet_connectivity(&app.state.model);
+    let nodes = accesskit_nodes(|ui| component_panel(ui, &mut app.design_cx(), first, &sheet));
+    assert!(nodes.len() > 1);
+    for (_, node) in &nodes {
+        for text in [node.label(), node.value()].into_iter().flatten() {
+            let text = text.to_ascii_lowercase();
+            assert!(!text.contains("tune") && !text.contains("tuning"), "{text}");
+        }
+    }
+}
+
 /// Two resistors on the design workspace, nothing selected.
 #[cfg(not(target_arch = "wasm32"))]
 fn two_resistors() -> (RSpiceApp, u64, u64) {
