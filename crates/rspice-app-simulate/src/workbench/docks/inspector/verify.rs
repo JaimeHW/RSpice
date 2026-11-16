@@ -1,10 +1,14 @@
 //! The Verify workspace's inspector: the selected specification, or the
-//! plan's acceptance settings and the run it judges; the Monte Carlo run and
+//! plan's acceptance settings and the run it judges; the selected Corners
+//! cell's point; the selected failing trial, or else the Monte Carlo run and
 //! its worst samples; and a failed corner run.
+
+mod point;
+mod trial;
 
 use egui::{Pos2, Rect, Ui, Vec2};
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
-use rspice_ui_kit::panels::{Problem, panel_inset, section_header};
+use rspice_ui_kit::panels::{panel_inset, section_header};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -21,30 +25,20 @@ mod specification;
 
 /// The Verify inspector states only what its view does not: the selected
 /// specification's whole definition, or with none selected the plan's
-/// acceptance settings and the run being judged; the Monte Carlo run's
+/// acceptance settings and the run being judged; the conditions behind a
+/// selected Corners cell; a selected trial, or else the Monte Carlo run's
 /// definition and worst samples; and a corner run that failed. The other
 /// views already show everything there is to say about them.
 pub(in crate::workbench) fn verify(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     match cx.state.verification_page {
         VerificationPage::Specifications => specification::specifications(ui, cx),
-        VerificationPage::MonteCarlo => yield_details(ui, cx.model),
-        VerificationPage::Corners => failed_corner(ui, cx.model),
+        VerificationPage::MonteCarlo => {
+            if !trial::show(ui, cx.model, &cx.state.verification) {
+                yield_details(ui, cx.model);
+            }
+        }
+        VerificationPage::Corners => point::show(ui, cx.model, &cx.state.verification),
         VerificationPage::Checks | VerificationPage::Reference => {}
-    }
-}
-
-fn failed_corner(ui: &mut Ui, model: &Model) {
-    let failed = model.simulation.active_run().and_then(|run| {
-        run.analyses.iter().find(|analysis| {
-            analysis.analysis_type == crate::state::AnalysisType::Corner && !analysis.success
-        })
-    });
-    if let Some(analysis) = failed {
-        let message = analysis.error_message.as_deref().map_or_else(
-            || "The corner run failed.".to_owned(),
-            |error| format!("The corner run failed: {error}"),
-        );
-        crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
     }
 }
 

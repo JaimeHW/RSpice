@@ -11,8 +11,6 @@ use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::test_host::SimulateTestHost;
 
-pub(crate) mod yield_histogram;
-
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_with_id(analysis, AnalysisInstanceId::new())
 }
@@ -245,86 +243,6 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
         super::super::super::state::Workspace::Design
     );
     assert!(cross_probe_soa_device(&mut harness.cx(), "M404").is_err());
-}
-
-#[test]
-fn normalized_margin_is_positive_inside_and_negative_outside_bounds() {
-    let spec = SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(10.0),
-        max: Some(20.0),
-        unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    };
-
-    assert_eq!(verification_margin(&spec, 15.0), 5.0);
-    assert_eq!(verification_margin(&spec, 8.0), -2.0);
-    assert_eq!(verification_margin(&spec, 23.0), -3.0);
-    assert_eq!(normalized_margin(&spec, 15.0), Some(0.5));
-    assert_eq!(normalized_margin(&spec, 8.0), Some(-0.2));
-}
-
-#[test]
-fn joint_sample_summary_requires_aligned_trails_and_ands_every_spec() {
-    let make_result = |target: &str, trail: Vec<bool>| {
-        let pass_count = trail.iter().filter(|passes| **passes).count();
-        rspice_results::yield_analysis::YieldResult {
-            spec: rspice_results::yield_analysis::YieldSpec::lower(target, 0.0, ""),
-            total_runs: trail.len(),
-            pass_count,
-            fail_count: trail.len() - pass_count,
-            yield_percent: pass_count as f64 / trail.len() as f64 * 100.0,
-            stats: rspice_results::yield_analysis::DistributionStats::default(),
-            samples: vec![1.0; trail.len()],
-            trail,
-        }
-    };
-    let aligned = [
-        make_result("gain", vec![true, false, false]),
-        make_result("bandwidth", vec![true, false, true]),
-    ];
-    let joint = joint_sample_summary(&aligned).expect("aligned joint trail");
-    assert_eq!(joint.passing, 1);
-    assert_eq!(joint.total, 3);
-    assert_eq!(joint.specification_count, 2);
-    assert!((joint.yield_percent() - 100.0 / 3.0).abs() < 1.0e-12);
-
-    let misaligned = [
-        make_result("gain", vec![true, true]),
-        make_result("bandwidth", vec![true]),
-    ];
-    assert_eq!(joint_sample_summary(&misaligned), None);
-}
-
-#[test]
-fn joint_headline_can_be_lower_than_every_individual_spec_yield() {
-    let make_result = |target: &str, trail: Vec<bool>| {
-        let pass_count = trail.iter().filter(|passes| **passes).count();
-        rspice_results::yield_analysis::YieldResult {
-            spec: rspice_results::yield_analysis::YieldSpec::lower(target, 0.0, ""),
-            total_runs: trail.len(),
-            pass_count,
-            fail_count: trail.len() - pass_count,
-            yield_percent: pass_count as f64 / trail.len() as f64 * 100.0,
-            stats: rspice_results::yield_analysis::DistributionStats::default(),
-            samples: vec![1.0; trail.len()],
-            trail,
-        }
-    };
-    let results = [
-        make_result("gain", vec![true, true, false, true]),
-        make_result("bandwidth", vec![true, false, true, true]),
-    ];
-
-    let joint = joint_sample_summary(&results).expect("aligned joint trail");
-    assert_eq!((joint.passing, joint.total), (2, 4));
-    assert_eq!(joint.yield_percent(), 50.0);
-    assert!(
-        results
-            .iter()
-            .all(|result| result.yield_percent > joint.yield_percent())
-    );
 }
 
 #[test]
@@ -1134,13 +1052,25 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
     }
 
     let mut harness = corner_app();
+    let refresh = |harness: &mut FeatureHarness<SimulateFeature>| {
+        let model = &mut harness.model;
+        model
+            .simulation
+            .refresh_verification(&model.sim_setup, &model.workspace.content);
+    };
+    refresh(&mut harness);
     assert_eq!(
         verification_evidence_domain(&harness.model),
         EvidenceDomain::Legacy,
         "the corner fixture's run predates receipts, which Verify reads"
     );
+    let sheet = harness
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("a sheet");
     assert!(
-        !verification_specs(&harness.model).is_empty(),
+        sheet.is_judged() && sheet.rows.len() == 4,
         "and its four limits are this plan's"
     );
 
@@ -1160,26 +1090,36 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
     harness.model.simulation.retained.runs =
         vec![super::raster::sealed_run(3, other, source, 19, analysis)].into();
     harness.model.simulation.view.active_run_idx = Some(0);
+    refresh(&mut harness);
 
     assert_ne!(other, plan_id);
     assert_eq!(
         verification_evidence_domain(&harness.model),
         EvidenceDomain::AnotherPlan
     );
+    let sheet = harness
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("the run is still the one Verify reads");
     assert!(
-        verification_specs(&harness.model).is_empty(),
+        !sheet.is_judged(),
         "another plan's dataset answers none of this plan's limits"
     );
-    let run = verification_run(&harness.model).expect("the run is still the one Verify reads");
-    let family = latest_analysis(&harness.model, AnalysisType::Corner)
-        .expect("and still holds its corner run");
-    let matrix = corner_matrix(run, family, None, &verification_specs(&harness.model), None);
     assert!(
-        !matrix.rows.is_empty(),
+        sheet.points.len() == 7
+            && sheet
+                .rows
+                .iter()
+                .all(|row| row.cells.iter().all(|cell| cell.value.is_some())),
         "the values the run did measure stay on the page"
     );
     assert!(
-        matrix.rows.iter().all(|row| row.verdict().is_none()),
+        sheet
+            .rows
+            .iter()
+            .flat_map(|row| &row.cells)
+            .all(|cell| { cell.status == rspice_results::verification::CellStatus::Pass }),
         "and nothing in it is judged"
     );
 }
@@ -1191,118 +1131,6 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 // ---------------------------------------------------------------------------
 // The page grammar: corners and SOA
 // ---------------------------------------------------------------------------
-
-use super::table::Verdict;
-
-#[test]
-fn corner_labels_read_back_into_their_point() {
-    assert_eq!(
-        parse_corner_label("SS_1.620000V_-40.000000C"),
-        Some(CornerPoint {
-            process: "SS".to_owned(),
-            voltage: Some(1.62),
-            temperature: -40.0,
-        })
-    );
-    assert_eq!(
-        parse_corner_label("TT_MC_1.00V_27C").map(|point| point.process),
-        Some("TT_MC".to_owned())
-    );
-    assert_eq!(parse_corner_label("Point 3"), None);
-    assert_eq!(parse_corner_label("TT_1.8_27C"), None);
-}
-
-fn fixture_corner_matrix() -> CornerMatrix {
-    let harness = corner_app();
-    let run = verification_run(&harness.model).expect("the fixture selects its run");
-    let family = latest_analysis(&harness.model, AnalysisType::Corner)
-        .expect("the fixture holds a corner run");
-    corner_matrix(
-        run,
-        family,
-        None,
-        &verification_specs(&harness.model),
-        Some(&ReferenceCorner {
-            process: "TT".to_owned(),
-            temperature: 27.0,
-        }),
-    )
-}
-
-#[test]
-fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
-    let matrix = fixture_corner_matrix();
-    assert_eq!(
-        matrix
-            .columns
-            .iter()
-            .map(|column| column.head.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "TT 1.8 V 27 °C",
-            "SS 1.62 V 125 °C",
-            "SS 1.62 V −40 °C",
-            "FF 1.98 V 125 °C",
-            "FF 1.98 V −40 °C",
-            "SF 1.8 V 27 °C",
-            "FS 1.8 V 27 °C",
-        ]
-    );
-    assert_eq!(matrix.columns[1].detail, "SS · 1.62 V · 125 °C");
-    assert_eq!(
-        matrix.nominal,
-        Some(0),
-        "TT at 27 °C is the reference corner"
-    );
-    assert_eq!(matrix.corner_indices(), [1, 2, 3, 4, 5, 6]);
-    assert_eq!(
-        matrix
-            .rows
-            .iter()
-            .map(|row| row.output.as_str())
-            .collect::<Vec<_>>(),
-        ["gain", "bw", "pm", "idd", "V(out)", "V(bias)"],
-        "limited outputs in specification order, then the corner waveforms"
-    );
-    let gain = &matrix.rows[0];
-    assert_eq!(gain.values[1], Some(39.4));
-    assert_eq!(gain.verdict_of(39.4), Some(Verdict::Fail));
-    assert_eq!(gain.verdict(), Some(Verdict::Fail));
-    assert_eq!(matrix.rows[2].verdict_of(47.0), Some(Verdict::Near));
-    assert_eq!(matrix.rows[3].verdict(), Some(Verdict::Near));
-    assert_eq!(matrix.rows[1].verdict(), Some(Verdict::Pass));
-    assert_eq!(
-        matrix.rows[4].verdict(),
-        None,
-        "a node voltage has no limit"
-    );
-    assert_eq!(matrix.rows[4].unit, "V");
-    assert_eq!(
-        matrix.summary(),
-        super::toolbar::Summary::failing(
-            "3 / 4 outputs pass across 7 corners · worst SS 1.62 V 125 °C"
-        )
-    );
-}
-
-#[test]
-fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
-    let harness = corner_app();
-    let run = verification_run(&harness.model).expect("run");
-    let family = latest_analysis(&harness.model, AnalysisType::Corner).expect("corner run");
-    let matrix = corner_matrix(
-        run,
-        family,
-        None,
-        &verification_specs(&harness.model),
-        Some(&ReferenceCorner {
-            process: "TT".to_owned(),
-            temperature: 85.0,
-        }),
-    );
-    assert_eq!(matrix.nominal, None);
-    assert_eq!(matrix.corner_indices().len(), 7);
-}
 
 /// A page with nothing to show is its toolbar and one line saying what
 /// produces data: no table, no tiles.

@@ -322,7 +322,8 @@ fn populate_workbench(
     state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
     state.simulate.verification_page = VerificationPage::Reference;
     state.simulate.simulation_page = SimulationPage::Outputs;
-    state.simulate.verification.corner_compare_nominal = true;
+    state.simulate.verification.corners_transposed = true;
+    state.simulate.verification.corners_failing_only = true;
     state.simulate.verification.regression_baseline_run =
         Some(rspice_app_state::product::RunId::new());
     state.models.models_page = ModelsPage::Bins;

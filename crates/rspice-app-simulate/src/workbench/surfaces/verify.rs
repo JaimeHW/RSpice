@@ -9,6 +9,7 @@
 mod axes;
 mod corners;
 mod histogram;
+mod monte_carlo;
 mod regression_contract;
 mod regression_panel;
 pub mod safety;
@@ -16,7 +17,6 @@ pub(crate) mod specification_edit;
 pub(crate) mod specifications;
 pub mod table;
 pub mod toolbar;
-mod yield_page;
 
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
@@ -35,11 +35,14 @@ use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
 
 use corners::*;
+use monte_carlo::*;
 use regression_contract::*;
 use regression_panel::*;
 use safety::*;
 use specifications::specifications;
-use yield_page::*;
+
+pub(crate) use corners::{FactSection, point_facts};
+pub(crate) use monte_carlo::trial_facts;
 
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let page = cx.state.verification_page;
@@ -63,7 +66,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         match page {
             VerificationPage::Specifications => specifications(ui, cx),
             VerificationPage::Corners => corners(ui, cx),
-            VerificationPage::MonteCarlo => yield_page(ui, cx),
+            VerificationPage::MonteCarlo => monte_carlo(ui, cx),
             VerificationPage::Checks => device_safety(ui, cx),
             VerificationPage::Reference => regression(ui, cx),
         }
@@ -79,6 +82,7 @@ fn run_choice(
 ) -> toolbar::RunChoice {
     let selected = verification_run_index(model);
     toolbar::RunChoice {
+        name: "Run",
         candidates: model
             .simulation
             .retained
@@ -114,18 +118,6 @@ pub fn set_reference_run(
     run: crate::product::RunId,
 ) -> Result<(), String> {
     commit_regression_baseline(cx, run)
-}
-
-/// `summary` naming the run it describes, for a toolbar with no run selector
-/// to name it.
-fn append_run(summary: toolbar::Summary, run: Option<&str>) -> toolbar::Summary {
-    match run {
-        Some(run) => toolbar::Summary {
-            text: format!("{} \u{00b7} {run}", summary.text),
-            ..summary
-        },
-        None => summary,
-    }
 }
 
 /// Record how the action the reader just took went: a refusal is stated under
@@ -164,24 +156,6 @@ fn verification_evidence_domain(model: &Model) -> crate::state::EvidenceDomain {
     model
         .simulation
         .evidence_domain(verification_plan_id(model))
-}
-
-/// The limits the run this page reads may be judged against.
-///
-/// A dataset another plan owns, or a manual deck no plan owns, is not this
-/// plan's evidence: the studio's requirements page has always refused it, and
-/// Verify used to judge it anyway, so one surface reported a margin and the
-/// other reported nothing for the same run and the same limit. The run's own
-/// values stay on the page — they are what it measured — with no verdict
-/// column and the line under the toolbar naming why.
-fn verification_specs(model: &Model) -> Vec<SpecEntry> {
-    if !verification_evidence_domain(model).answers_a_plan_limit() {
-        return Vec::new();
-    }
-    verification_plan_id(model).map_or_else(
-        || model.workspace.content.specs.clone(),
-        |plan_id| model.workspace.content.active_specs(plan_id).to_vec(),
-    )
 }
 
 /// The runs the baseline picker offers, newest first: exactly the runs a
@@ -309,17 +283,6 @@ fn verification_run(model: &Model) -> Option<&crate::state::SimulationRun> {
     verification_run_index(model).and_then(|index| model.simulation.retained.runs.get(index))
 }
 
-fn verification_yield_results(model: &Model) -> &[rspice_results::yield_analysis::YieldResult] {
-    verification_run(model)
-        .and_then(|run| {
-            model
-                .simulation
-                .retained
-                .yield_results_for_dataset(run.dataset_id)
-        })
-        .unwrap_or(&[])
-}
-
 /// The plan whose limits this surface reads, when the plan is stable.
 fn verification_plan_id(model: &Model) -> Option<crate::product::SimulationPlanId> {
     model
@@ -327,84 +290,6 @@ fn verification_plan_id(model: &Model) -> Option<crate::product::SimulationPlanI
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct JointSampleSummary {
-    passing: usize,
-    total: usize,
-    specification_count: usize,
-}
-
-impl JointSampleSummary {
-    fn yield_percent(self) -> f64 {
-        self.passing as f64 / self.total as f64 * 100.0
-    }
-}
-
-fn joint_sample_summary(
-    results: &[rspice_results::yield_analysis::YieldResult],
-) -> Option<JointSampleSummary> {
-    let first = results.first()?;
-    let total = first.total_runs;
-    if total == 0
-        || results
-            .iter()
-            .any(|result| result.total_runs != total || result.trail.len() != total)
-    {
-        return None;
-    }
-    let passing = (0..total)
-        .filter(|index| results.iter().all(|result| result.trail[*index]))
-        .count();
-    Some(JointSampleSummary {
-        passing,
-        total,
-        specification_count: results.len(),
-    })
-}
-
-/// How much room a value has before it breaks the limit. Negative once broken,
-/// and more negative the worse the break, so the minimum is the worst point.
-fn verification_margin(spec: &SpecEntry, value: f64) -> f64 {
-    match (spec.min, spec.max) {
-        (Some(minimum), Some(maximum)) => (value - minimum).min(maximum - value),
-        (Some(minimum), None) => value - minimum,
-        (None, Some(maximum)) => maximum - value,
-        (None, None) => 0.0,
-    }
-}
-
-/// Dimensionless specification margin used for cross-specification ranking.
-/// One-sided limits are normalized by the limit magnitude; ranges are
-/// normalized by their span. Unbounded tracked values have no comparable
-/// margin and are deliberately excluded.
-fn normalized_margin(spec: &SpecEntry, value: f64) -> Option<f64> {
-    const SCALE_FLOOR: f64 = 1.0e-30;
-    match (spec.min, spec.max) {
-        (Some(min), Some(max)) if max > min => {
-            Some((value - min).min(max - value) / (max - min).max(SCALE_FLOOR))
-        }
-        (Some(min), None) => Some((value - min) / min.abs().max(SCALE_FLOOR)),
-        (None, Some(max)) => Some((max - value) / max.abs().max(SCALE_FLOOR)),
-        (Some(_), Some(_)) | (None, None) => None,
-    }
-}
-
-/// A Spec column's cell: the bound, in the notation of the measured values
-/// beside it, and nothing at all for a limit that bounds nothing.
-fn limit_cell(spec: &SpecEntry) -> table::Cell {
-    if spec.min.is_none() && spec.max.is_none() {
-        table::Cell::empty()
-    } else {
-        table::Cell::number(spec.limit_text())
-    }
-}
-
-/// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
-/// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
-fn takes_si_prefix(unit: &str) -> bool {
-    !(unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
 }
 
 /// A measured value in engineering notation with its unit: four significant

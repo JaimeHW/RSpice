@@ -1,699 +1,1023 @@
-//! Process corners: the ADE Assembler detail view of one corner run.
+//! Corners: every specification at every point the run solved.
 //!
-//! Rows are outputs, columns are corners, and a cell is the value that output
-//! took at that corner — coloured only when it breaks its limit or sits within
-//! [`NEAR_LIMIT_FRACTION`] of it. Every value is read from the run itself: the
-//! measurements a corner family's members retained, the measurements of the
-//! point results the run solved for each corner, and the corner waveforms whose
-//! samples line up one-for-one with the corners. Nothing is interpolated and no
-//! row is invented; a corner a row has no value for is an em dash.
+//! One row per specification and one column per point, the nominal point
+//! first, as the ADE Assembler detail view lays a corner run out. The head
+//! names each point without a legend: one band row for each coordinate that
+//! varies across the run but the last, a run of equal neighbours under one
+//! span, and the head row itself stating the last coordinate. Transposed, the
+//! points are the rows, their coordinates the leading columns, and every
+//! specification a column to sort by.
 //!
-//! The nominal column is the run's own reference corner, taken out of the
-//! corner columns rather than repeated beside them. A run that solved no corner
-//! at the reference point has no nominal column at all.
+//! Nothing here judges a value. Every cell is the verification sheet's, and
+//! its colour is the sheet's status for it: a failure, an error and a value
+//! near its limit are marked, a pass is neutral, a point outside the
+//! specification's scope reads "n/a", and a point that gave nothing a dash.
+//! A run-set sweep, a corner family and a sweep family are all points to the
+//! sheet, so all of them fill this view.
 
-use super::table::{Cell, Column, DataTable, Verdict};
-use super::toolbar::{PageToolbar, Summary, ToolbarAction, empty_line};
+use rspice_results::number_format::fmt_si_bound;
+use rspice_results::specification::SpecificationComparison;
+use rspice_results::verification::{
+    Cell as SheetCell, CellStatus, Point, PointAxis, PointSource, Row, RowStatus, Sheet,
+};
+
+use super::table::{Cell, Column, DataTable, RowKey, Selection, SortKey, Span, Verdict};
+use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
 use super::*;
+use crate::state::FamilyMemberId;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::requests::SetFamilyFilter;
 use crate::workbench::simulate::commands::SimulateCommand;
 
-/// A value within this fraction of its limit is near it: of the limit's own
-/// magnitude for a one-sided limit, of the span for a range.
-pub(super) const NEAR_LIMIT_FRACTION: f64 = 0.05;
-/// Least width of a corner or nominal column.
-const CORNER_COLUMN_MIN_W: f32 = 88.0;
+/// The plain arrangement's leading columns: Specification, Limit, Min, Max.
+pub(super) const LEADING: usize = 4;
+/// Of them, the ones that stay put while the points scroll.
+const FROZEN: usize = 2;
+/// Least width of a point or specification column.
+const VALUE_COLUMN_MIN_W: f32 = 88.0;
+/// The word the nominal point's head starts with.
+const NOMINAL: &str = "Nominal";
 
-/// One corner's process, supply and temperature, read back from its label.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct CornerPoint {
-    pub(super) process: String,
-    pub(super) voltage: Option<f64>,
-    pub(super) temperature: f64,
-}
-
-/// Read a corner label of the form `TT_1.80V_27C` back into its point.
-///
-/// The executor writes `{process}_{volts}V_{celsius}C` with as many decimals as
-/// it likes; a label in any other shape is not a point this can name, and the
-/// column keeps the label as written.
-pub(super) fn parse_corner_label(label: &str) -> Option<CornerPoint> {
-    let mut parts = label.rsplitn(3, '_');
-    let temperature = parts.next()?.strip_suffix('C')?.parse::<f64>().ok()?;
-    let voltage = parts.next()?.strip_suffix('V')?.parse::<f64>().ok()?;
-    let process = parts.next()?.trim();
-    (!process.is_empty() && temperature.is_finite() && voltage.is_finite()).then(|| CornerPoint {
-        process: process.to_owned(),
-        voltage: Some(voltage),
-        temperature,
-    })
-}
-
-/// One corner column: its short head, and the full point for its tooltip.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct CornerColumn {
-    pub(super) head: String,
-    pub(super) detail: String,
-    point: Option<CornerPoint>,
-}
-
-/// One output across every corner.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct CornerRow {
-    pub(super) output: String,
-    pub(super) unit: String,
-    pub(super) spec: Option<SpecEntry>,
-    pub(super) values: Vec<Option<f64>>,
-}
-
-impl CornerRow {
-    /// The verdict on one value, when the row has a limit to judge it by.
-    pub(super) fn verdict_of(&self, value: f64) -> Option<Verdict> {
-        self.spec.as_ref().map(|spec| judge(spec, value))
-    }
-
-    /// The row's verdict across every corner it has a value for.
-    pub(super) fn verdict(&self) -> Option<Verdict> {
-        self.values
-            .iter()
-            .flatten()
-            .filter_map(|value| self.verdict_of(*value))
-            .reduce(Verdict::worst)
-    }
-}
-
-/// A value against its limit: a failure, a value near the limit, or a pass.
-pub(super) fn judge(spec: &SpecEntry, value: f64) -> Verdict {
-    if !spec.passes(value) {
-        Verdict::Fail
-    } else if normalized_margin(spec, value).is_some_and(|margin| margin < NEAR_LIMIT_FRACTION) {
-        Verdict::Near
-    } else {
-        Verdict::Pass
-    }
-}
-
-/// The whole matrix one corner run answers.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct CornerMatrix {
-    pub(super) columns: Vec<CornerColumn>,
-    /// The column that is the run's reference corner.
-    pub(super) nominal: Option<usize>,
-    pub(super) rows: Vec<CornerRow>,
-}
-
-impl CornerMatrix {
-    /// The corner columns other than the nominal one, in run order.
-    pub(super) fn corner_indices(&self) -> Vec<usize> {
-        (0..self.columns.len())
-            .filter(|index| Some(*index) != self.nominal)
-            .collect()
-    }
-
-    /// How many limited rows pass and how many have a limit, and the corner
-    /// whose worst failure is worst.
-    fn tally(&self) -> (usize, usize, usize, Option<usize>) {
-        let limited = self
-            .rows
-            .iter()
-            .filter(|row| row.verdict().is_some())
-            .count();
-        let failing = self
-            .rows
-            .iter()
-            .filter(|row| row.verdict() == Some(Verdict::Fail))
-            .count();
-        let near = self
-            .rows
-            .iter()
-            .filter(|row| row.verdict() == Some(Verdict::Near))
-            .count();
-        let worst = self
-            .rows
-            .iter()
-            .filter_map(|row| row.spec.as_ref().map(|spec| (row, spec)))
-            .flat_map(|(row, spec)| {
-                row.values
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(column, value)| {
-                        let value = (*value)?;
-                        (!spec.passes(value)).then(|| {
-                            (
-                                column,
-                                normalized_margin(spec, value).unwrap_or(f64::NEG_INFINITY),
-                            )
-                        })
-                    })
-            })
-            .min_by(|left, right| left.1.total_cmp(&right.1))
-            .map(|(column, _)| column);
-        (limited - failing, limited, near, worst)
-    }
-
-    /// The toolbar's one line about this matrix.
-    pub(super) fn summary(&self) -> Summary {
-        let corners = self.columns.len();
-        let corner_word = if corners == 1 { "corner" } else { "corners" };
-        let (passing, limited, near, worst) = self.tally();
-        if limited == 0 {
-            let outputs = self.rows.len();
-            return Summary::plain(format!(
-                "{outputs} output{} across {corners} {corner_word}",
-                if outputs == 1 { "" } else { "s" }
-            ));
-        }
-        let mut text = format!("{passing} / {limited} outputs pass across {corners} {corner_word}");
-        if let Some(worst) = worst.and_then(|column| self.columns.get(column)) {
-            text.push_str(&format!(" \u{00b7} worst {}", worst.head));
-            return Summary::failing(text);
-        }
-        if near > 0 {
-            text.push_str(&format!(" \u{00b7} {near} near limit"));
-        }
-        Summary::plain(text)
-    }
-}
-
-/// Where the reference corner sits: the plan's reference process at its
-/// reference temperature.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct ReferenceCorner {
-    pub(super) process: String,
-    pub(super) temperature: f64,
-}
-
-fn same_quantity(left: f64, right: f64) -> bool {
-    (left - right).abs() <= 1.0e-9 * left.abs().max(right.abs()).max(1.0)
-}
-
-fn point_matches(
-    column: &CornerPoint,
-    solved: &rspice_results::provenance::AnalysisResultPvtPoint,
-) -> bool {
-    column.process.eq_ignore_ascii_case(solved.process())
-        && same_quantity(column.temperature, solved.temperature_celsius())
-        && match (column.voltage, solved.supply_voltage()) {
-            (Some(left), Some(right)) => same_quantity(left, right),
-            _ => true,
-        }
-}
-
-/// The compact number a corner head spells: as few digits as the value needs.
-fn head_number(value: f64) -> String {
+/// A coordinate as few digits as it needs, with a true minus sign.
+fn coordinate(value: f64) -> String {
     let rounded = (value * 1.0e6).round() / 1.0e6;
     format!("{rounded}").replace('-', "\u{2212}")
 }
 
-fn corner_columns(labels: &[String]) -> Vec<CornerColumn> {
-    let points = labels
-        .iter()
-        .map(|label| parse_corner_label(label))
-        .collect::<Vec<_>>();
-    let all_parsed = points.iter().all(Option::is_some);
-    let distinct = |key: &dyn Fn(&CornerPoint) -> String| {
-        let mut seen = points.iter().flatten().map(key).collect::<Vec<_>>();
-        seen.sort();
-        seen.dedup();
-        seen.len()
-    };
-    let vary_process = distinct(&|point| point.process.to_ascii_uppercase()) > 1;
-    let vary_voltage = distinct(&|point| point.voltage.map_or_else(String::new, head_number)) > 1;
-    let vary_temperature = distinct(&|point| head_number(point.temperature)) > 1;
-    labels
-        .iter()
-        .zip(points)
-        .map(|(label, point)| {
-            let Some(point) = point.filter(|_| all_parsed) else {
-                return CornerColumn {
-                    head: label.clone(),
-                    detail: label.clone(),
-                    point: None,
-                };
-            };
-            let voltage = point
-                .voltage
-                .map(|volts| format!("{} V", head_number(volts)));
-            let temperature = format!("{} \u{00b0}C", head_number(point.temperature));
-            let mut head = Vec::new();
-            if vary_process || !(vary_voltage || vary_temperature) {
-                head.push(point.process.clone());
-            }
-            if vary_voltage && let Some(voltage) = &voltage {
-                head.push(voltage.clone());
-            }
-            if vary_temperature {
-                head.push(temperature.clone());
-            }
-            let detail = [Some(point.process.clone()), voltage, Some(temperature)]
+/// What a point says on one axis, as a head states it: `SS`, `1.62 V`,
+/// `125 °C`, `rload = 2k`.
+pub(super) fn axis_value(point: &Point, axis: &PointAxis) -> Option<String> {
+    match axis {
+        PointAxis::Process => point.process.clone(),
+        PointAxis::Supply => point
+            .supply_voltage
+            .map(|volts| format!("{} V", coordinate(volts))),
+        PointAxis::Temperature => point
+            .temperature_celsius
+            .map(|celsius| format!("{} \u{00b0}C", coordinate(celsius))),
+        PointAxis::Swept { axis, name } => point
+            .swept_values
+            .iter()
+            .find(|value| value.axis == *axis && value.name == *name)
+            .map(|value| format!("{} = {}", value.name, value.value)),
+    }
+}
+
+/// The number an axis value sorts by, where it has one.
+fn axis_number(point: &Point, axis: &PointAxis) -> Option<f64> {
+    match axis {
+        PointAxis::Supply => point.supply_voltage,
+        PointAxis::Temperature => point.temperature_celsius,
+        PointAxis::Process | PointAxis::Swept { .. } => None,
+    }
+}
+
+/// An axis as a column head names it.
+fn axis_name(axis: &PointAxis) -> String {
+    match axis {
+        PointAxis::Process => "Process".to_owned(),
+        PointAxis::Supply => "Supply".to_owned(),
+        PointAxis::Temperature => "Temperature".to_owned(),
+        PointAxis::Swept { name, .. } => name.clone(),
+    }
+}
+
+/// `text` with the nominal mark in front when `point` is the nominal one: the
+/// one way the nominal point is told apart, in either arrangement.
+fn marked(point: &Point, text: String) -> String {
+    match (point.nominal, text.is_empty()) {
+        (false, _) => text,
+        (true, true) => NOMINAL.to_owned(),
+        (true, false) => format!("{NOMINAL} {text}"),
+    }
+}
+
+/// What a point states on the last axis that varies, or its own name when no
+/// axis does: the head row of the plain arrangement, and the last coordinate
+/// of a transposed row.
+fn last_coordinate(point: &Point, axes: &[PointAxis]) -> String {
+    let value = axes
+        .last()
+        .and_then(|axis| axis_value(point, axis))
+        .unwrap_or_else(|| point.label.clone());
+    marked(point, value)
+}
+
+/// A point as a select or a fact names it: its label, or the nominal mark
+/// for a point the run's coordinates do not tell apart.
+pub(super) fn point_name(point: &Point) -> String {
+    if point.label.is_empty() {
+        marked(point, String::new())
+    } else {
+        marked(point, point.label.clone())
+    }
+}
+
+/// Every coordinate a point has, nominal or not, for a tooltip and a file.
+fn point_detail(point: &Point) -> String {
+    if point.nominal {
+        format!("{} ({})", point.detail, NOMINAL.to_lowercase())
+    } else {
+        point.detail.clone()
+    }
+}
+
+/// The plain arrangement's head over the point columns: a band row for each
+/// varying axis but the last, and the head row's words for each point.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PointHeads {
+    pub(super) bands: Vec<Vec<Span>>,
+    pub(super) heads: Vec<String>,
+}
+
+/// The head that names every point without a legend.
+///
+/// A band's span runs over equal neighbours, and never across a span of the
+/// band above it: two columns that share a supply under two processes are two
+/// spans, so every rule in a band row lines up with one in the row above.
+pub(super) fn point_heads(sheet: &Sheet) -> PointHeads {
+    let banded = sheet.axes.len().saturating_sub(1);
+    let bands = (0..banded)
+        .map(|band| {
+            let keys = sheet
+                .points
+                .iter()
+                .map(|point| {
+                    sheet.axes[..=band]
+                        .iter()
+                        .map(|axis| axis_value(point, axis).unwrap_or_default())
+                        .collect::<Vec<_>>()
+                        .join("\u{1f}")
+                })
+                .collect::<Vec<_>>();
+            Span::runs(LEADING, &keys)
                 .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" \u{00b7} ");
-            CornerColumn {
-                head: head.join(" "),
-                detail,
-                point: Some(point),
-            }
+                .map(|span| {
+                    let label = span.label.rsplit('\u{1f}').next().unwrap_or_default();
+                    Span::new(label, span.first, span.last)
+                })
+                .collect()
+        })
+        .collect();
+    PointHeads {
+        bands,
+        heads: sheet
+            .points
+            .iter()
+            .map(|point| last_coordinate(point, &sheet.axes))
+            .collect(),
+    }
+}
+
+const fn is_failing(status: CellStatus) -> bool {
+    matches!(status, CellStatus::Fail | CellStatus::Error)
+}
+
+/// The specifications the plain arrangement lists, by their place in the
+/// sheet: every one, or only those with a failing cell.
+pub(super) fn shown_specifications(sheet: &Sheet, failing_only: bool) -> Vec<usize> {
+    (0..sheet.rows.len())
+        .filter(|row| {
+            !failing_only
+                || sheet.rows[*row]
+                    .cells
+                    .iter()
+                    .any(|cell| is_failing(cell.status))
         })
         .collect()
 }
 
-/// The unit a corner waveform's samples are in: what the producer stated, or
-/// what its name says it is.
-fn waveform_unit(waveform: &crate::state::RetainedTrace) -> String {
-    waveform.unit.clone().unwrap_or_else(|| {
-        let name = waveform.name.trim_start_matches('|');
-        if name.starts_with("V(") {
-            "V".to_owned()
-        } else if name.starts_with("I(") {
-            "A".to_owned()
-        } else {
-            String::new()
-        }
-    })
+/// The points the transposed arrangement lists: every one, or only those
+/// where some specification fails.
+pub(super) fn shown_points(sheet: &Sheet, failing_only: bool) -> Vec<usize> {
+    (0..sheet.points.len())
+        .filter(|point| {
+            !failing_only
+                || sheet.rows.iter().any(|row| {
+                    row.cells
+                        .get(*point)
+                        .is_some_and(|cell| is_failing(cell.status))
+                })
+        })
+        .collect()
 }
 
-/// Build the matrix one corner family and the run that holds it answer.
-///
-/// `plan_labels` names the corners when the family carries no labels of its
-/// own; `specs` are the limits the rows are judged by.
-pub(super) fn corner_matrix(
-    run: &crate::state::SimulationRun,
-    family: &crate::state::AnalysisResult,
-    plan_labels: Option<Vec<String>>,
-    specs: &[SpecEntry],
-    reference: Option<&ReferenceCorner>,
-) -> CornerMatrix {
-    let axis = family
-        .waveforms
-        .first()
-        .map_or(0, |waveform| waveform.x.len());
-    let labels = match &family.family_metadata {
-        Some(crate::state::AnalysisResultFamilyMetadata::Corner { corner_labels, .. })
-            if !corner_labels.is_empty() =>
-        {
-            corner_labels.clone()
+/// How bad a cell's status is, worst highest; `None` for a cell that judged
+/// nothing.
+const fn severity(status: CellStatus) -> Option<u8> {
+    match status {
+        CellStatus::Pass => Some(0),
+        CellStatus::Near => Some(1),
+        CellStatus::Fail => Some(3),
+        CellStatus::Error => Some(4),
+        CellStatus::Excluded | CellStatus::Absent => None,
+    }
+}
+
+/// A point's status: the worst of its cells.
+pub(super) fn point_status(sheet: &Sheet, point: usize) -> Option<CellStatus> {
+    sheet
+        .rows
+        .iter()
+        .filter_map(|row| row.cells.get(point))
+        .map(|cell| cell.status)
+        .filter(|status| severity(*status).is_some())
+        .max_by_key(|status| severity(*status))
+}
+
+/// A limit as its row states it: `≥ 40 dB`, `≤ 1.2 mA`, `10 dB … 20 dB`.
+pub(crate) fn limit_text(row: &Row) -> String {
+    let quantity = |value: f64| fmt_si_bound(value, &row.unit);
+    match &row.comparison {
+        SpecificationComparison::Tracked => String::new(),
+        SpecificationComparison::Minimum { limit } => format!("\u{2265} {}", quantity(*limit)),
+        SpecificationComparison::Maximum { limit } => format!("\u{2264} {}", quantity(*limit)),
+        SpecificationComparison::Range { minimum, maximum } => {
+            format!("{} \u{2026} {}", quantity(*minimum), quantity(*maximum))
         }
-        _ => plan_labels
-            .filter(|labels| axis == 0 || labels.len() == axis)
-            .unwrap_or_else(|| (1..=axis).map(|index| format!("Point {index}")).collect()),
-    };
-    let columns = corner_columns(&labels);
-    let width = columns.len();
-    let spec_for = |name: &str| {
-        specs
-            .iter()
-            .find(|spec| spec.measurement.eq_ignore_ascii_case(name))
-    };
-
-    // Measured outputs, in the order they are first met.
-    let mut measured: Vec<CornerRow> = Vec::new();
-    let mut record = |name: &str, unit: Option<&str>, column: usize, value: f64| {
-        let spec = spec_for(name);
-        let index = measured
-            .iter()
-            .position(|row| row.output.eq_ignore_ascii_case(name))
-            .unwrap_or_else(|| {
-                measured.push(CornerRow {
-                    output: name.to_owned(),
-                    unit: spec
-                        .map(|spec| spec.unit.clone())
-                        .or_else(|| unit.map(str::to_owned))
-                        .unwrap_or_default(),
-                    spec: spec.cloned(),
-                    values: vec![None; width],
-                });
-                measured.len() - 1
-            });
-        let slot = &mut measured[index].values[column];
-        // Two answers for one corner keep the worse against the limit, the
-        // way every other specification join reduces them.
-        *slot = Some(match (*slot, spec) {
-            (Some(held), Some(spec))
-                if verification_margin(spec, held) < verification_margin(spec, value) =>
-            {
-                held
-            }
-            (Some(held), None) => held,
-            _ => value,
-        });
-    };
-
-    if let Some(metadata) = &family.family_metadata {
-        for member in metadata.member_measurements() {
-            let crate::state::FamilyMemberId::Corner { index, label } = &member.member else {
-                continue;
-            };
-            let Some(column) = labels
-                .iter()
-                .position(|candidate| candidate == label)
-                .or(Some(*index))
-                .filter(|column| *column < width)
-            else {
-                continue;
-            };
-            for evidence in member
-                .measurements
-                .iter()
-                .filter(|evidence| evidence.is_measured())
-            {
-                let unit = spec_for(&evidence.name).map_or("", |spec| spec.unit.as_str());
-                if let Ok(Some(value)) = evidence.value_in_unit(unit)
-                    && value.is_finite()
-                {
-                    let native = evidence.unit.as_ref().and_then(|unit| unit.symbol());
-                    record(&evidence.name, native, column, value);
-                }
-            }
+        SpecificationComparison::EqualWithin { target, tolerance } => {
+            format!("{} \u{00b1} {}", quantity(*target), quantity(*tolerance))
         }
     }
+}
 
-    let mut nominal = None;
-    for analysis in run
+/// A limit's cell: its words in mono, the guard band on hover when it has
+/// one, nothing for a specification that only tracks its value.
+fn limit_cell(row: &Row) -> Cell {
+    let text = limit_text(row);
+    if text.is_empty() {
+        return Cell::empty().hint("Tracked: recorded, not judged.");
+    }
+    let cell = Cell::number(text);
+    if row.guard_band > 0.0 {
+        cell.hint(format!(
+            "Judged against the limit tightened by its guard band of {}.",
+            fmt_si_bound(row.guard_band, &row.unit)
+        ))
+    } else {
+        cell
+    }
+}
+
+/// A margin, signed either way, in the specification's unit.
+pub(crate) fn margin_text(margin: f64, unit: &str) -> String {
+    let sign = if margin > 0.0 { "+" } else { "" };
+    format!("{sign}{}", format_value(margin, unit))
+}
+
+/// One sheet cell as the table shows it, inked by its status and nothing
+/// else.
+pub(super) fn value_cell(cell: &SheetCell, unit: &str) -> Cell {
+    let number =
+        |value: f64| Cell::number(format_value(value, unit)).sort_by(SortKey::Number(value));
+    let margin = |shown: Cell| match cell.signed_margin {
+        Some(margin) => shown.hint(format!("Margin {}", margin_text(margin, unit))),
+        None => shown,
+    };
+    match (cell.status, cell.value) {
+        (CellStatus::Pass, Some(value)) => number(value),
+        (CellStatus::Near, Some(value)) => margin(number(value).judged(Verdict::Near)),
+        (CellStatus::Fail, Some(value)) => margin(number(value).judged(Verdict::Fail)),
+        (CellStatus::Fail, None) => Cell::verdict(Verdict::Fail),
+        (CellStatus::Error, value) => Cell::problem(
+            value.map_or_else(|| "Error".to_owned(), |value| format_value(value, unit)),
+            Problem::Failure,
+        )
+        .hint("The measurement failed at this point.")
+        .sort_by(SortKey::Missing),
+        (CellStatus::Excluded, _) => {
+            let mut cell = Cell::absent().hint("Outside this specification's scope.");
+            cell.text = "n/a".to_owned();
+            cell
+        }
+        (CellStatus::Pass | CellStatus::Near | CellStatus::Absent, _) => Cell::absent(),
+    }
+}
+
+/// A point's status as a word, coloured as its worst cell is.
+fn status_cell(status: Option<CellStatus>) -> Cell {
+    match status {
+        Some(CellStatus::Pass) => Cell::verdict(Verdict::Pass),
+        Some(CellStatus::Near) => Cell::verdict(Verdict::Near),
+        Some(CellStatus::Fail) => Cell::verdict(Verdict::Fail),
+        Some(CellStatus::Error) => {
+            Cell::problem("Error", Problem::Failure).sort_by(SortKey::Status(4))
+        }
+        Some(CellStatus::Excluded | CellStatus::Absent) | None => Cell::empty(),
+    }
+}
+
+/// The least and greatest value a row's points gave.
+fn extremes(row: &Row) -> Option<(f64, f64)> {
+    row.cells
+        .iter()
+        .filter_map(|cell| cell.value)
+        .filter(|value| value.is_finite())
+        .fold(None, |held, value| match held {
+            None => Some((value, value)),
+            Some((low, high)) => Some((low.min(value), high.max(value))),
+        })
+}
+
+/// The toolbar's one line: how many points, and what fails where.
+pub(super) fn corners_summary(sheet: &Sheet) -> Summary {
+    let points = format!("{} points", sheet.points.len());
+    let failing_rows = shown_specifications(sheet, true).len();
+    if failing_rows > 0 {
+        let at = shown_points(sheet, true);
+        let place = match at.as_slice() {
+            [point] => point_name(&sheet.points[*point]),
+            several => format!("{} points", several.len()),
+        };
+        let verb = if failing_rows == 1 { "fails" } else { "fail" };
+        return Summary::failing(format!(
+            "{points} \u{00b7} {failing_rows} {verb} at {place}"
+        ));
+    }
+    let near = sheet
+        .rows
+        .iter()
+        .filter(|row| row.cells.iter().any(|cell| cell.status == CellStatus::Near))
+        .count();
+    if near > 0 {
+        return Summary::plain(format!("{points} \u{00b7} {near} near the limit"));
+    }
+    let judged = sheet
+        .rows
+        .iter()
+        .filter(|row| {
+            row.status
+                .is_some_and(|status| status != RowStatus::Tracked)
+        })
+        .count();
+    if judged > 0 {
+        Summary::plain(format!(
+            "{points} \u{00b7} {judged} specification{} pass",
+            if judged == 1 { "" } else { "s" }
+        ))
+    } else {
+        Summary::plain(points)
+    }
+}
+
+/// The transposed arrangement's leading columns: one per varying axis, or
+/// the point's name when nothing varies, then its status.
+pub(super) fn transposed_leading(sheet: &Sheet) -> usize {
+    sheet.axes.len().max(1) + 1
+}
+
+/// The cell the reader selected in Corners: its point, and its
+/// specification when the selection names one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SelectedPoint {
+    pub(crate) point: usize,
+    pub(crate) row: Option<usize>,
+}
+
+/// The cell Corners' selection names, read through either arrangement.
+///
+/// Rows are keyed by their place in the sheet, a specification's in the
+/// plain arrangement and a point's transposed, so the selection is the same
+/// cell however the rows are sorted or filtered.
+pub(crate) fn selected_point(
+    sheet: &Sheet,
+    session: &VerificationSessionState,
+) -> Option<SelectedPoint> {
+    if sheet.points.len() < 2 {
+        return None;
+    }
+    let selection = session.corners_table.selection.as_ref()?;
+    let Some(RowKey::Number(key)) = selection.key else {
+        return None;
+    };
+    let key = usize::try_from(key).ok()?;
+    if session.corners_transposed {
+        let row = selection
+            .column
+            .and_then(|column| column.checked_sub(transposed_leading(sheet)))
+            .filter(|row| *row < sheet.rows.len());
+        (key < sheet.points.len()).then_some(SelectedPoint { point: key, row })
+    } else {
+        let point = selection.column?.checked_sub(LEADING)?;
+        (key < sheet.rows.len() && point < sheet.points.len()).then_some(SelectedPoint {
+            point,
+            row: Some(key),
+        })
+    }
+}
+
+/// The same cell selected in the other arrangement, once the reader turns the
+/// table: a point with no specification has no cell in the plain one.
+fn turned_selection(sheet: &Sheet, selected: SelectedPoint, transposed: bool) -> Option<Selection> {
+    if transposed {
+        Some(Selection {
+            row: selected.point,
+            key: Some(RowKey::Number(selected.point as u64)),
+            column: selected.row.map(|row| transposed_leading(sheet) + row),
+        })
+    } else {
+        let row = selected.row?;
+        Some(Selection {
+            row,
+            key: Some(RowKey::Number(row as u64)),
+            column: Some(LEADING + selected.point),
+        })
+    }
+}
+
+/// Where in the run one cell's value came from: the analysis, and the member
+/// of its family when the point is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Evidence {
+    pub(super) analysis: usize,
+    pub(super) sample: Option<usize>,
+}
+
+/// The analysis behind one cell: of those solved at the point, the one that
+/// produces the specification, else one that measured it, else the first.
+pub(super) fn evidence_at(
+    run: &crate::state::SimulationRun,
+    sheet: &Sheet,
+    row: usize,
+    point: usize,
+) -> Option<Evidence> {
+    let row = sheet.rows.get(row)?;
+    let point = sheet.points.get(point)?;
+    let at = run
         .analyses
         .iter()
-        .filter(|analysis| verified_analysis(analysis))
-    {
-        let Some(solved) = analysis
-            .provenance()
-            .and_then(|provenance| provenance.pvt_point())
-        else {
-            continue;
-        };
-        let Some(column) = columns.iter().position(|column| {
-            column
-                .point
-                .as_ref()
-                .is_some_and(|point| point_matches(point, solved))
-        }) else {
-            continue;
-        };
-        if solved.is_nominal() {
-            nominal = Some(column);
-        }
-        for measurement in analysis
-            .measurements
-            .iter()
-            .filter(|measurement| measurement.passed && measurement.error.is_none())
-        {
-            let unit = spec_for(&measurement.name).map_or("", |spec| spec.unit.as_str());
-            if let Ok(Some(value)) = measurement.value_in_unit(unit)
-                && value.is_finite()
-            {
-                let native = measurement
-                    .units
-                    .as_ref()
-                    .and_then(|units| units.value.symbol());
-                record(&measurement.name, native, column, value);
-            }
-        }
-    }
-
-    let waveforms = family
-        .waveforms
-        .iter()
-        .filter(|waveform| width > 0 && waveform.y.len() == width && waveform.x.len() == width)
-        .map(|waveform| CornerRow {
-            output: waveform.name.clone(),
-            unit: spec_for(&waveform.name)
-                .map_or_else(|| waveform_unit(waveform), |spec| spec.unit.clone()),
-            spec: spec_for(&waveform.name).cloned(),
-            values: waveform
-                .y
-                .iter()
-                .map(|value| value.is_finite().then_some(*value))
-                .collect(),
-        });
-
-    // Limited rows first, in the order the specifications are authored, then
-    // the other measurements, then the corner waveforms.
-    let mut rows = measured.into_iter().chain(waveforms).collect::<Vec<_>>();
-    rows.sort_by_key(|row| {
-        row.spec.as_ref().map_or(usize::MAX, |spec| {
-            specs
-                .iter()
-                .position(|candidate| candidate == spec)
-                .unwrap_or(usize::MAX - 1)
+        .enumerate()
+        .filter_map(|(index, analysis)| {
+            let provenance = analysis.provenance()?;
+            let sample = match &point.source {
+                PointSource::Member(member) => Some(
+                    analysis
+                        .family_metadata
+                        .as_ref()?
+                        .member_measurements()
+                        .iter()
+                        .position(|measured| same_member(&measured.member, member))?,
+                ),
+                PointSource::Attributed(record) => {
+                    (provenance.pvt_point() == Some(record)).then_some(None)?
+                }
+                PointSource::Deck => provenance.pvt_point().is_none().then_some(None)?,
+            };
+            Some((
+                Evidence {
+                    analysis: index,
+                    sample,
+                },
+                analysis,
+            ))
         })
-    });
-
-    let nominal = nominal.or_else(|| {
-        let reference = reference?;
-        let candidates = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, column)| {
-                column.point.as_ref().is_some_and(|point| {
-                    point.process.eq_ignore_ascii_case(&reference.process)
-                        && same_quantity(point.temperature, reference.temperature)
-                })
-            })
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [(index, _)] => Some(*index),
-            several => several
+        .collect::<Vec<_>>();
+    let produces = |analysis: &crate::state::AnalysisResult| {
+        row.producing_analysis.is_some()
+            && analysis
+                .provenance()
+                .map(|provenance| provenance.authored_source_instance_id())
+                == row.producing_analysis
+    };
+    let measured =
+        |(evidence, analysis): &(Evidence, &crate::state::AnalysisResult)| match evidence.sample {
+            Some(sample) => analysis.family_metadata.as_ref().is_some_and(|family| {
+                family
+                    .member_measurements()
+                    .get(sample)
+                    .is_some_and(|member| member.evidence_for(&row.measurement).is_some())
+            }),
+            None => analysis
+                .measurements
                 .iter()
-                .find(|(_, column)| {
-                    column
-                        .point
-                        .as_ref()
-                        .and_then(|point| point.voltage)
-                        .is_some_and(|volts| same_quantity(volts, 1.0))
-                })
-                .map(|(index, _)| *index),
-        }
-    });
+                .any(|measurement| measurement.name.eq_ignore_ascii_case(&row.measurement)),
+        };
+    at.iter()
+        .find(|(_, analysis)| produces(analysis))
+        .or_else(|| at.iter().find(|entry| measured(entry)))
+        .or(at.first())
+        .map(|(evidence, _)| *evidence)
+}
 
-    CornerMatrix {
-        columns,
-        nominal,
-        rows,
+/// Whether two family members are the same point: a corner by its label,
+/// whichever place it had in its family, anything else by its identity.
+fn same_member(left: &FamilyMemberId, right: &FamilyMemberId) -> bool {
+    match (left, right) {
+        (
+            FamilyMemberId::Corner { label: left, .. },
+            FamilyMemberId::Corner { label: right, .. },
+        ) => left == right,
+        _ => left == right,
     }
 }
 
-/// What the corners toolbar can do.
+/// Open one analysis of the run Verify reads in Results, narrowed to one
+/// member of its family when `sample` names one.
+pub(super) fn open_in_results(cx: &mut Cx<'_, SimulateFeature>, evidence: Evidence) {
+    if !cx.model.simulation.select_analysis(evidence.analysis) {
+        record_action(
+            &mut cx.state.verification,
+            Err("Nothing was opened: the analysis is no longer in this run.".to_owned()),
+        );
+        return;
+    }
+    record_action(&mut cx.state.verification, Ok(()));
+    cx.wb.activate(crate::workbench::state::Workspace::Results);
+    if let Some(sample) = evidence.sample {
+        // The family form seeds its filter when its command opens it, so the
+        // member is narrowed to once that command has run.
+        cx.wb
+            .outbox
+            .push(SetFamilyFilter(format!("sample = {}", sample + 1)));
+        cx.execute(ids::FAMILY_SLICING);
+    }
+}
+
+/// One section of what the inspector states about a selection.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FactSection {
+    pub(crate) title: String,
+    pub(crate) rows: Vec<(String, String)>,
+}
+
+/// A cell's status as a word.
+pub(crate) const fn status_word(status: CellStatus) -> &'static str {
+    match status {
+        CellStatus::Pass => "Pass",
+        CellStatus::Near => "Near the limit",
+        CellStatus::Fail => "Fail",
+        CellStatus::Error => "Measurement failed",
+        CellStatus::Excluded => "Outside its scope",
+        CellStatus::Absent => "No value",
+    }
+}
+
+/// What the inspector states of the selected Corners cell: the point's
+/// conditions, then what it gave the specification and where that came from.
+pub(crate) fn point_facts(model: &Model, session: &VerificationSessionState) -> Vec<FactSection> {
+    let Some(sheet) = model.simulation.verification_sheet() else {
+        return Vec::new();
+    };
+    let Some(selected) = selected_point(sheet, session) else {
+        return Vec::new();
+    };
+    let point = &sheet.points[selected.point];
+    let mut conditions = [
+        PointAxis::Process,
+        PointAxis::Supply,
+        PointAxis::Temperature,
+    ]
+    .iter()
+    .filter_map(|axis| Some((axis_name(axis), axis_value(point, axis)?)))
+    .collect::<Vec<_>>();
+    conditions.extend(
+        point
+            .swept_values
+            .iter()
+            .map(|value| (value.name.clone(), value.value.clone())),
+    );
+    conditions.push((
+        NOMINAL.to_owned(),
+        if point.nominal { "Yes" } else { "No" }.to_owned(),
+    ));
+    let mut sections = vec![FactSection {
+        title: point_name(point),
+        rows: conditions,
+    }];
+    if let Some(row_index) = selected.row {
+        let row = &sheet.rows[row_index];
+        let cell = &row.cells[selected.point];
+        let mut rows = vec![(
+            "Value".to_owned(),
+            cell.value.map_or_else(
+                || status_word(cell.status).to_owned(),
+                |value| format_value(value, &row.unit),
+            ),
+        )];
+        if let Some(margin) = cell.signed_margin {
+            rows.push(("Margin".to_owned(), margin_text(margin, &row.unit)));
+        }
+        let limit = limit_text(row);
+        if !limit.is_empty() {
+            rows.push(("Limit".to_owned(), limit));
+        }
+        if sheet.is_judged() {
+            rows.push(("Status".to_owned(), status_word(cell.status).to_owned()));
+        }
+        if let Some(analysis) = model.simulation.active_run().and_then(|run| {
+            let evidence = evidence_at(run, sheet, row_index, selected.point)?;
+            run.analyses.get(evidence.analysis)
+        }) {
+            rows.push(("Analysis".to_owned(), analysis.label.clone()));
+        }
+        sections.push(FactSection {
+            title: row.name.clone(),
+            rows,
+        });
+    }
+    sections
+}
+
+/// The sheet as Corners shows it, as comma-separated values: values in the
+/// specification's unit at full precision, `n/a` outside a specification's
+/// scope, `error` where its measurement failed, nothing where a point gave
+/// nothing. A point is named by every coordinate it has.
+pub(super) fn corners_csv(sheet: &Sheet, transposed: bool, failing_only: bool) -> String {
+    use rspice_formats::table::escape_csv_field as field;
+    let value = |cell: &SheetCell| match (cell.status, cell.value) {
+        (CellStatus::Error, _) => "error".to_owned(),
+        (CellStatus::Excluded, _) => "n/a".to_owned(),
+        (_, Some(value)) => format!("{value}"),
+        (_, None) => String::new(),
+    };
+    let line = |fields: Vec<String>| {
+        fields
+            .iter()
+            .map(|text| field(text))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut lines = Vec::new();
+    if transposed {
+        let mut head = vec!["Point".to_owned()];
+        head.extend(sheet.axes.iter().map(axis_name));
+        head.push("Status".to_owned());
+        head.extend(sheet.rows.iter().map(|row| {
+            if row.unit.is_empty() {
+                row.name.clone()
+            } else {
+                format!("{} ({})", row.name, row.unit)
+            }
+        }));
+        lines.push(line(head));
+        for point in shown_points(sheet, failing_only) {
+            let at = &sheet.points[point];
+            let mut fields = vec![point_detail(at)];
+            fields.extend(
+                sheet
+                    .axes
+                    .iter()
+                    .map(|axis| axis_value(at, axis).unwrap_or_default()),
+            );
+            fields.push(
+                point_status(sheet, point)
+                    .map_or("", status_word)
+                    .to_owned(),
+            );
+            fields.extend(sheet.rows.iter().map(|row| value(&row.cells[point])));
+            lines.push(line(fields));
+        }
+    } else {
+        let mut head = ["Specification", "Unit", "Limit", "Min", "Max"]
+            .map(str::to_owned)
+            .to_vec();
+        head.extend(sheet.points.iter().map(point_detail));
+        lines.push(line(head));
+        for row in shown_specifications(sheet, failing_only) {
+            let row = &sheet.rows[row];
+            let (low, high) = extremes(row)
+                .map_or((String::new(), String::new()), |(low, high)| {
+                    (format!("{low}"), format!("{high}"))
+                });
+            let mut fields = vec![
+                row.name.clone(),
+                row.unit.clone(),
+                limit_text(row),
+                low,
+                high,
+            ];
+            fields.extend(row.cells.iter().map(value));
+            lines.push(line(fields));
+        }
+    }
+    let mut text = lines.join("\r\n");
+    text.push_str("\r\n");
+    text
+}
+
+/// Write the sheet as Corners shows it to a file the reader picks.
+fn export_corners(cx: &mut Cx<'_, SimulateFeature>, csv: &str) {
+    use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+
+    let result: Result<(), String> = (|| {
+        let Some(path) = cx.handles.export_io.show_save_dialog(SaveDialogConfig {
+            title: "Export Corners",
+            default_name: "corners.csv",
+            filter_name: "Comma-separated values",
+            filter_extensions: &["csv"],
+        })?
+        else {
+            return Ok(());
+        };
+        let destination = cx.handles.export_io.observe_destination(&path)?;
+        cx.handles
+            .export_io
+            .write_text_file_observed(&destination, csv)
+    })();
+    record_action(
+        &mut cx.state.verification,
+        result.map_err(|error| format!("The corners were not exported: {error}")),
+    );
+}
+
+/// What the Corners toolbar can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CornerAction {
-    CompareNominal,
+    Transpose,
+    FailingOnly,
     Export,
 }
 
-pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    let runs = run_choice(cx.model, |run| {
-        run.analyses.iter().any(|analysis| {
-            analysis.analysis_type == crate::state::AnalysisType::Corner
-                && verified_analysis(analysis)
-        })
-    });
-    let run_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
-    let reference = ReferenceCorner {
-        process: cx
-            .model
-            .sim_setup
-            .reference_pvt
-            .process
-            .short_name()
-            .to_owned(),
-        temperature: cx.model.sim_setup.reference_pvt.temperature_celsius,
-    };
-    let matrix = latest_analysis(cx.model, crate::state::AnalysisType::Corner)
-        .zip(verification_run(cx.model))
-        .map(|(family, run)| {
-            corner_matrix(
-                run,
-                family,
-                corner_point_labels(cx.model, family),
-                &verification_specs(cx.model),
-                Some(&reference),
-            )
-        });
-    let compare = cx.state.verification.corner_compare_nominal;
+const CORNER_ACTIONS: [CornerAction; 3] = [
+    CornerAction::Transpose,
+    CornerAction::FailingOnly,
+    CornerAction::Export,
+];
 
-    let mut actions = Vec::new();
-    let mut toolbar_actions = Vec::new();
-    if let Some(matrix) = matrix.as_ref().filter(|matrix| !matrix.rows.is_empty()) {
-        if matrix.nominal.is_some() {
-            actions.push(CornerAction::CompareNominal);
-            toolbar_actions.push(ToolbarAction::new("Compare nominal").toggled(compare));
+/// What the reader asked of the table this frame.
+#[derive(Debug, Clone, Copy, Default)]
+struct Asked {
+    /// The cell double-clicked, as a specification and a point of the sheet.
+    open: Option<(usize, usize)>,
+}
+
+pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let session = &cx.state.verification;
+    let (transposed, failing_only) = (session.corners_transposed, session.corners_failing_only);
+    let sheet = cx.model.simulation.verification_sheet();
+    let points = sheet.map_or(0, |sheet| sheet.points.len());
+    let has_rows = sheet.is_some_and(|sheet| points > 1 && !sheet.rows.is_empty());
+    let actions = if has_rows {
+        vec![
+            ToolbarAction::new("Transpose").toggled(transposed),
+            ToolbarAction::new("Failing only").toggled(failing_only),
+            ToolbarAction::new("Export CSV"),
+        ]
+    } else {
+        Vec::new()
+    };
+    let summary = sheet.filter(|_| points > 1).map(|sheet| {
+        if sheet.rows.is_empty() {
+            Summary::plain(format!("{points} points"))
+        } else {
+            corners_summary(sheet)
         }
-        actions.push(CornerAction::Export);
-        toolbar_actions.push(ToolbarAction::new("Export CSV"));
-    }
-    let summary = matrix
-        .as_ref()
-        .filter(|matrix| !matrix.rows.is_empty())
-        .map(|matrix| {
-            let summary = matrix.summary();
-            if runs.offers_choice() {
-                summary
-            } else {
-                append_run(summary, run_name.as_deref())
-            }
-        });
+    });
     let output = PageToolbar {
         title: VerificationPage::Corners.label(),
-        runs: &runs,
+        runs: &RunChoice::default(),
         summary,
-        actions: &toolbar_actions,
+        actions: &actions,
     }
     .show(ui);
-    match output.action.and_then(|index| actions.get(index)) {
-        Some(CornerAction::CompareNominal) => {
-            cx.state.verification.corner_compare_nominal = !compare;
+    let action = output
+        .action
+        .and_then(|index| CORNER_ACTIONS.get(index))
+        .copied();
+    match action {
+        Some(CornerAction::Transpose) => {
+            let turned = sheet.and_then(|sheet| {
+                let selected = selected_point(sheet, &cx.state.verification)?;
+                turned_selection(sheet, selected, !transposed)
+            });
+            let session = &mut cx.state.verification;
+            session.corners_transposed = !transposed;
+            session.corners_table.selection = turned;
+            session.corners_table.sort = None;
+            session.corners_table.scroll_x = 0.0;
         }
-        Some(CornerAction::Export) => export_active_corner_matrix(cx),
+        Some(CornerAction::FailingOnly) => {
+            cx.state.verification.corners_failing_only = !failing_only;
+        }
+        Some(CornerAction::Export) => {
+            if let Some(csv) = sheet.map(|sheet| corners_csv(sheet, transposed, failing_only)) {
+                export_corners(cx, &csv);
+            }
+        }
         None => {}
     }
-    if let Some(index) = output.run {
-        select_verification_run(&mut cx.model.simulation, index);
-    }
     action_problem_line(ui, cx.model, cx.state);
+    // The table is drawn as the reader just left it arranged, so a turned
+    // selection meets the rows it names.
+    let session = &cx.state.verification;
+    let (transposed, failing_only) = (session.corners_transposed, session.corners_failing_only);
 
-    let Some(matrix) = matrix else {
-        let text = run_name.map_or_else(
-            || "No corner run. Enable corners in the run set, then run the plan.".to_owned(),
-            |run| {
-                format!("No corner run in {run}. Enable corners in the run set, then run the plan.")
-            },
-        );
-        if empty_line(ui, &text, Some("Open run set")) {
+    let Some(sheet) = cx
+        .model
+        .simulation
+        .verification_sheet()
+        .filter(|sheet| sheet.points.len() > 1)
+    else {
+        let text = if points == 1 {
+            "This run solved one point. Add process, supply or temperature axes to the run set to \
+             verify across corners."
+        } else {
+            "No run to verify across corners. Add process, supply or temperature axes to the run \
+             set, then run the plan."
+        };
+        if empty_line(ui, text, Some("Open run set")) {
             cx.execute(SimulateCommand::Page(crate::state::SimulationPage::RunSet).key());
         }
         return;
     };
-    if matrix.rows.is_empty() {
-        if empty_line(
-            ui,
-            "This corner run kept no outputs. Add measurements to the plan's outputs, then run it again.",
-            Some("Open outputs"),
-        ) {
-            cx.execute(SimulateCommand::Page(crate::state::SimulationPage::Outputs).key());
+    if sheet.rows.is_empty() {
+        let text = format!("No specification to verify across these {points} points.");
+        if empty_line(ui, &text, Some("Open specifications")) {
+            cx.execute(ids::EDIT_SPECIFICATIONS);
         }
         return;
     }
-    corner_table(ui, &matrix, compare && matrix.nominal.is_some());
+    let shown = if transposed {
+        shown_points(sheet, failing_only)
+    } else {
+        shown_specifications(sheet, failing_only)
+    };
+    if shown.is_empty() {
+        let _ = empty_line(
+            ui,
+            &format!("Nothing fails across these {points} points."),
+            None,
+        );
+        return;
+    }
+    let state = &mut cx.state.verification.corners_table;
+    let asked = if transposed {
+        transposed_table(ui, sheet, &shown, state)
+    } else {
+        plain_table(ui, sheet, &shown, state)
+    };
+    let opened = asked.open.and_then(|(row, point)| {
+        let run = cx.model.simulation.active_run()?;
+        let sheet = cx.model.simulation.verification_sheet()?;
+        evidence_at(run, sheet, row, point)
+    });
+    if let Some(evidence) = opened {
+        open_in_results(cx, evidence);
+    }
 }
 
-fn corner_table(ui: &mut Ui, matrix: &CornerMatrix, compare: bool) {
+/// The width a value column needs for its head.
+fn value_column_width(ui: &Ui, head: &str) -> f32 {
     let t = Tokens::get(ui.ctx());
-    let head_font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    let column_width = |head: &str| {
-        let measured = ui
-            .painter()
-            .layout_no_wrap(head.to_owned(), head_font.clone(), t.color.text)
-            .size()
-            .x;
-        (measured + 20.0).max(CORNER_COLUMN_MIN_W)
-    };
-    let limited = matrix.rows.iter().any(|row| row.spec.is_some());
-    let corners = matrix.corner_indices();
-    let mut columns = vec![Column::name("Output", 150.0)];
-    if limited {
-        columns.push(Column::words("Spec", 104.0));
-    }
-    if let Some(nominal) = matrix.nominal {
-        let column = &matrix.columns[nominal];
-        columns.push(
-            Column::number("Nominal", column_width("Nominal"))
-                .tooltip(format!("Nominal: {}", column.detail)),
-        );
-    }
-    for index in &corners {
-        let column = &matrix.columns[*index];
-        columns
-            .push(Column::number(&column.head, column_width(&column.head)).tooltip(&column.detail));
-    }
-    if limited {
-        columns.push(Column::words("Pass/fail", 70.0));
-    }
-    let height = ui.available_height();
-    DataTable::new("verify.corners.matrix", &columns, matrix.rows.len())
-        .max_height(height)
+    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let measured = ui
+        .painter()
+        .layout_no_wrap(head.to_owned(), font, t.color.text)
+        .size()
+        .x;
+    (measured + 24.0).max(VALUE_COLUMN_MIN_W)
+}
+
+/// Specifications down, points across.
+fn plain_table(
+    ui: &mut Ui,
+    sheet: &Sheet,
+    rows: &[usize],
+    state: &mut super::table::TableState,
+) -> Asked {
+    let heads = point_heads(sheet);
+    let mut columns = vec![
+        Column::name("Specification", 160.0),
+        Column::words("Limit", 112.0),
+        Column::number("Min", 96.0),
+        Column::number("Max", 96.0),
+    ];
+    columns.extend(sheet.points.iter().zip(&heads.heads).map(|(point, head)| {
+        Column::number(head, value_column_width(ui, head)).tooltip(point_detail(point))
+    }));
+    let keys = rows
+        .iter()
+        .map(|row| RowKey::Number(*row as u64))
+        .collect::<Vec<_>>();
+    let response = DataTable::new("verify.corners", &columns, rows.len())
+        .state(state)
+        .keys(&keys)
+        .freeze(FROZEN)
+        .bands(&heads.bands)
+        .cell_selection()
+        .max_height(ui.available_height())
         .show(ui, |index| {
-            let row = &matrix.rows[index];
-            let nominal = matrix.nominal.and_then(|column| row.values[column]);
-            let value_cell = |value: Option<f64>, relative: bool| {
-                let Some(value) = value else {
-                    return Cell::absent();
-                };
-                let text = match nominal.filter(|_| relative) {
-                    Some(reference) => {
-                        let delta = value - reference;
-                        let sign = if delta > 0.0 { "+" } else { "" };
-                        format!("{sign}{}", format_value(delta, &row.unit))
-                    }
-                    None => format_value(value, &row.unit),
-                };
-                let cell = Cell::number(text);
-                match row.verdict_of(value) {
-                    Some(verdict) => cell.judged(verdict),
-                    None => cell,
-                }
+            let row = &sheet.rows[rows[index]];
+            let number = |value: f64| {
+                Cell::number(format_value(value, &row.unit)).sort_by(SortKey::Number(value))
             };
-            let mut cells = vec![Cell::text(&row.output)];
-            if limited {
-                cells.push(row.spec.as_ref().map_or_else(Cell::empty, limit_cell));
-            }
-            if matrix.nominal.is_some() {
-                cells.push(value_cell(nominal, false));
-            }
-            cells.extend(
-                corners
-                    .iter()
-                    .map(|column| value_cell(row.values[*column], compare)),
-            );
-            if limited {
-                cells.push(row.verdict().map_or_else(Cell::empty, Cell::verdict));
-            }
+            let (low, high) = extremes(row)
+                .map_or((Cell::absent(), Cell::absent()), |(low, high)| {
+                    (number(low), number(high))
+                });
+            let name = Cell::text(&row.name);
+            let mut cells = vec![
+                if row.name == row.measurement {
+                    name
+                } else {
+                    name.hint(&row.measurement)
+                },
+                limit_cell(row),
+                low,
+                high,
+            ];
+            cells.extend(row.cells.iter().map(|cell| value_cell(cell, &row.unit)));
             cells
         });
+    Asked {
+        open: response.double_clicked.and_then(|cell| {
+            let point = cell.column?.checked_sub(LEADING)?;
+            Some((*rows.get(cell.row)?, point))
+        }),
+    }
 }
 
-pub(super) fn export_active_corner_matrix(cx: &mut Cx<'_, SimulateFeature>) {
-    let result_id =
-        latest_analysis(cx.model, crate::state::AnalysisType::Corner).map(|result| result.id);
-    let analysis_index = result_id.and_then(|result_id| {
-        cx.model.simulation.active_run().and_then(|run| {
-            run.analyses.iter().position(|analysis| {
-                analysis.id == result_id
-                    && analysis.analysis_type == crate::state::AnalysisType::Corner
-                    && verified_analysis(analysis)
-            })
-        })
-    });
-    if let Some(index) = analysis_index {
-        cx.model.simulation.select_analysis(index);
-        cx.execute(ids::EXPORT_RESULTS);
-        cx.state.verification.action_problem = None;
+/// Points down, specifications across.
+fn transposed_table(
+    ui: &mut Ui,
+    sheet: &Sheet,
+    points: &[usize],
+    state: &mut super::table::TableState,
+) -> Asked {
+    let leading = transposed_leading(sheet);
+    let mut columns = if sheet.axes.is_empty() {
+        vec![Column::name("Point", 160.0)]
     } else {
-        cx.state.verification.action_problem =
-            Some("Nothing to export: this run holds no completed corner result.".to_owned());
-    }
-}
-
-pub(super) fn corner_point_labels(
-    model: &Model,
-    result: &crate::state::AnalysisResult,
-) -> Option<Vec<String>> {
-    use crate::simulation::plan::AnalysisDraft;
-
-    let provenance = result.provenance.as_ref()?;
-    let plan = model.sim_setup.stable_analysis_plan().ok()?;
-    let instance = plan
-        .instances()
-        .iter()
-        .find(|instance| instance.id() == provenance.authored_source_instance_id())?;
-    if instance.modified_revision() != provenance.source_revision() {
-        return None;
-    }
-    let AnalysisDraft::Corner(state) = instance.draft() else {
-        return None;
+        sheet
+            .axes
+            .iter()
+            .map(|axis| {
+                let head = axis_name(axis);
+                match axis {
+                    PointAxis::Process => Column::words(head, 96.0),
+                    _ => {
+                        let width = value_column_width(ui, &head);
+                        Column::number(head, width)
+                    }
+                }
+            })
+            .collect()
     };
-    let labels = state
-        .to_config(&model.sim_setup.run_set, model.sim_setup.reference_pvt)
-        .ok()?
-        .corner_names();
-    let points = result.waveforms.first()?.x.len();
-    (labels.len() == points).then_some(labels)
+    columns.push(Column::words("Status", 72.0));
+    columns.extend(sheet.rows.iter().map(|row| {
+        let limit = limit_text(row);
+        let column = Column::number(&row.name, value_column_width(ui, &row.name));
+        if limit.is_empty() {
+            column
+        } else {
+            column.tooltip(format!("{} \u{00b7} {limit}", row.name))
+        }
+    }));
+    let keys = points
+        .iter()
+        .map(|point| RowKey::Number(*point as u64))
+        .collect::<Vec<_>>();
+    let last_axis = sheet.axes.len().saturating_sub(1);
+    let response = DataTable::new("verify.corners.transposed", &columns, points.len())
+        .state(state)
+        .keys(&keys)
+        .freeze(leading)
+        .cell_selection()
+        .max_height(ui.available_height())
+        .show(ui, |index| {
+            let point_index = points[index];
+            let point = &sheet.points[point_index];
+            let mut cells = if sheet.axes.is_empty() {
+                vec![Cell::text(point_name(point)).hint(point_detail(point))]
+            } else {
+                sheet
+                    .axes
+                    .iter()
+                    .enumerate()
+                    .map(|(position, axis)| {
+                        let words = axis_value(point, axis).unwrap_or_default();
+                        let words = if position == last_axis {
+                            marked(point, words)
+                        } else {
+                            words
+                        };
+                        let cell = match axis {
+                            PointAxis::Process => Cell::text(words),
+                            _ => Cell::number(words),
+                        };
+                        match axis_number(point, axis) {
+                            Some(value) => cell.sort_by(SortKey::Number(value)),
+                            None => cell,
+                        }
+                    })
+                    .collect()
+            };
+            cells.push(status_cell(point_status(sheet, point_index)));
+            cells.extend(
+                sheet
+                    .rows
+                    .iter()
+                    .map(|row| value_cell(&row.cells[point_index], &row.unit)),
+            );
+            cells
+        });
+    Asked {
+        open: response.double_clicked.and_then(|cell| {
+            let row = cell.column?.checked_sub(leading)?;
+            (row < sheet.rows.len()).then_some((row, *points.get(cell.row)?))
+        }),
+    }
 }
+
+#[cfg(test)]
+mod tests;

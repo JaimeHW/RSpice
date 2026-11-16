@@ -177,15 +177,6 @@ impl Verdict {
         }
     }
 
-    /// The worse of two verdicts.
-    pub(super) fn worst(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Fail, _) | (_, Self::Fail) => Self::Fail,
-            (Self::Near, _) | (_, Self::Near) => Self::Near,
-            _ => Self::Pass,
-        }
-    }
-
     /// How bad it is, for a status sort: the higher, the worse.
     pub const fn severity(self) -> u8 {
         match self {

@@ -1,9 +1,9 @@
 //! The Verify pages' fixtures and the page geometry the layout tests measure.
 //!
 //! Each page is measured on a project that has run nothing and on one holding
-//! real retained evidence for that page: a corner run with a failing and a
-//! near-limit cell, forty Monte Carlo samples of which three fail, an SOA run
-//! with two violations, an optimizer's iterations.
+//! real retained evidence for that page: a corner run and a run set's sweep
+//! with a failing and a near-limit cell, forty Monte Carlo samples of which
+//! three fail, an SOA run with two violations, an optimizer's iterations.
 //!
 //! The geometry is published by the widgets themselves through [`probe`], which
 //! exists only in test builds: a measurement read back from the pixels would be
@@ -24,8 +24,6 @@ use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::Workspace;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
-
-use super::verification_yield_results;
 
 pub const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
@@ -153,6 +151,8 @@ impl VerifyStage for FeatureHarness<SimulateFeature> {
     }
 
     fn draw(&mut self, ui: &mut egui::Ui) {
+        // The app's frame judges the selected run before it draws.
+        refresh_verification(&mut self.model);
         super::show(ui, &mut self.cx());
     }
 }
@@ -170,8 +170,56 @@ pub fn page_geometry(mut stage: impl VerifyStage, page: VerificationPage) -> Pag
     geometry
 }
 
+/// Judge the selected run against the plan's limits, as the app's frame does
+/// before it draws.
+pub fn refresh_verification(model: &mut Model) {
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+}
+
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_to(analysis, AnalysisInstanceId::new(), ObjectRevision::INITIAL)
+}
+
+/// `analysis`, as the task of `source` expanded to the run set's `point`
+/// produced it.
+fn attributed_at(
+    analysis: AnalysisResult,
+    source: AnalysisInstanceId,
+    point: crate::state::AnalysisResultPvtPoint,
+) -> AnalysisResult {
+    analysis.with_provenance(
+        crate::state::AnalysisResultProvenance::new(
+            source,
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x5a; 32]),
+            Vec::new(),
+        )
+        .expect("fixture provenance is internally valid")
+        .with_pvt_point(Some(point)),
+    )
+}
+
+/// One point a run set expanded a task to. `TT 1.8 V 27 °C` is the nominal
+/// one.
+fn run_set_point(process: &str, volts: f64, celsius: f64) -> crate::state::AnalysisResultPvtPoint {
+    let nominal = process == "TT" && volts == 1.8 && celsius == 27.0;
+    crate::state::AnalysisResultPvtPoint::new(process, Some(volts), celsius, None, nominal)
+        .expect("a finite point")
+}
+
+/// Make a completed Run 3 of `analyses` the model's one run and the run
+/// Verify reads.
+fn seed_analyses(model: &mut Model, analyses: Vec<AnalysisResult>) {
+    let mut run = SimulationRun::new(3);
+    run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
+        .expect("a finite elapsed time");
+    for analysis in analyses {
+        run.add_analysis(analysis);
+    }
+    model.simulation.retained.runs = vec![run].into();
+    model.simulation.view.active_run_idx = Some(0);
 }
 
 fn attributed_to(
@@ -278,51 +326,86 @@ const MONTE_CARLO_SEED: u64 = 0x1A2B;
 /// A Monte Carlo analysis with one trial per sample, each of which measured
 /// `gain` in dB.
 fn gain_campaign(samples: Vec<f64>) -> AnalysisResult {
-    let count = samples.len() as f64;
-    let mean = samples.iter().sum::<f64>() / count;
-    let std_dev = (samples
+    campaign(
+        MONTE_CARLO_SEED,
+        samples
+            .into_iter()
+            .map(|sample| vec![("gain", "dB", sample)])
+            .collect(),
+    )
+}
+
+/// A Monte Carlo analysis seeded from `seed`, one trial per entry of
+/// `trials`, each measuring its own (name, unit, value)s. Only an output
+/// every trial measured is a variable of the family.
+fn campaign(seed: u64, trials: Vec<Vec<(&str, &str, f64)>>) -> AnalysisResult {
+    let count = trials.len();
+    let names = trials
+        .first()
+        .map(|first| first.iter().map(|(name, _, _)| *name).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let variables = names
         .iter()
-        .map(|sample| (sample - mean).powi(2))
-        .sum::<f64>()
-        / (count - 1.0))
-        .sqrt();
-    let members = samples
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            FamilyMemberMeasurements::new(
-                FamilyMemberId::MonteCarloTrial {
-                    index,
-                    seed: MONTE_CARLO_SEED + index as u64,
-                },
-                vec![FamilyMeasurementEvidence {
-                    unit: Some(rspice_core::analysis::MeasurementUnit::Known(
-                        "dB".to_owned(),
-                    )),
-                    name: "gain".to_owned(),
-                    value: Some(*value),
-                    passed: true,
-                    error: None,
-                }],
-            )
-        })
-        .collect();
-    AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo").with_family_metadata(
-        AnalysisResultFamilyMetadata::MonteCarlo {
-            seed: MONTE_CARLO_SEED,
-            runs_requested: samples.len(),
-            runs_completed: samples.len(),
-            failures: 0,
-            all_converged: true,
-            variables: vec![MonteCarloVariableMetadata {
+        .filter_map(|name| {
+            let samples = trials
+                .iter()
+                .map(|trial| {
+                    trial
+                        .iter()
+                        .find(|(measured, _, _)| measured == name)
+                        .map(|(_, _, value)| *value)
+                })
+                .collect::<Option<Vec<f64>>>()?;
+            let mean = samples.iter().sum::<f64>() / count as f64;
+            let std_dev = (samples
+                .iter()
+                .map(|sample| (sample - mean).powi(2))
+                .sum::<f64>()
+                / (count as f64 - 1.0))
+                .sqrt();
+            Some(MonteCarloVariableMetadata {
                 mean_confidence: None,
-                name: "gain".to_owned(),
+                name: (*name).to_owned(),
                 mean,
                 std_dev,
                 min: samples.iter().copied().fold(f64::INFINITY, f64::min),
                 max: samples.iter().copied().fold(f64::NEG_INFINITY, f64::max),
                 samples,
-            }],
+            })
+        })
+        .collect();
+    let members = trials
+        .iter()
+        .enumerate()
+        .map(|(index, measured)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: seed + index as u64,
+                },
+                measured
+                    .iter()
+                    .map(|(name, unit, value)| FamilyMeasurementEvidence {
+                        unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+                            (*unit).to_owned(),
+                        )),
+                        name: (*name).to_owned(),
+                        value: Some(*value),
+                        passed: true,
+                        error: None,
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo").with_family_metadata(
+        AnalysisResultFamilyMetadata::MonteCarlo {
+            seed,
+            runs_requested: count,
+            runs_completed: count,
+            failures: 0,
+            all_converged: true,
+            variables,
             member_measurements: members,
         },
     )
@@ -363,6 +446,121 @@ pub fn seed_monte_carlo(model: &mut Model) {
     model
         .simulation
         .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
+    refresh_verification(model);
+}
+
+/// Forty gain trials at the nominal point and forty at SS 1.62 V 125 °C, in
+/// one run: three fail at the nominal point and seven at the slow corner.
+pub fn seed_monte_carlo_at_two_points(model: &mut Model) {
+    let source = AnalysisInstanceId::new();
+    let trials = |shift: f64, failing: &[usize], seed: u64| {
+        let samples = (0..40)
+            .map(|index| {
+                let value = if failing.contains(&index) {
+                    39.0 + f64::from(u8::try_from(index % 5).unwrap_or(0)) * 0.15
+                } else {
+                    40.4 + shift + f64::from(u8::try_from(index % 9).unwrap_or(0)) * 0.35
+                };
+                vec![("gain", "dB", value)]
+            })
+            .collect();
+        campaign(seed, samples)
+    };
+    seed_analyses(
+        model,
+        vec![
+            attributed_at(
+                trials(0.0, &[7, 19, 31], MONTE_CARLO_SEED),
+                source,
+                run_set_point("TT", 1.8, 27.0),
+            ),
+            attributed_at(
+                trials(-0.2, &[2, 9, 14, 22, 27, 33, 38], MONTE_CARLO_SEED + 0x100),
+                source,
+                run_set_point("SS", 1.62, 125.0),
+            ),
+        ],
+    );
+    set_limits(model, vec![limit("gain", Some(40.0), None, "dB")]);
+    refresh_verification(model);
+}
+
+/// Forty trials that all measured gain, of which only the first thirty
+/// measured supply current: the two limits were judged over different
+/// trials.
+pub fn seed_monte_carlo_over_different_trials(model: &mut Model) {
+    let trials = (0..40)
+        .map(|index| {
+            let mut measured = vec![(
+                "gain",
+                "dB",
+                40.4 + f64::from(u8::try_from(index % 9).unwrap_or(0)) * 0.35,
+            )];
+            if index < 30 {
+                measured.push((
+                    "idd",
+                    "A",
+                    0.8e-3 + f64::from(u8::try_from(index % 7).unwrap_or(0)) * 0.02e-3,
+                ));
+            }
+            measured
+        })
+        .collect();
+    seed_analyses(model, vec![attributed(campaign(MONTE_CARLO_SEED, trials))]);
+    set_limits(
+        model,
+        vec![
+            limit("gain", Some(40.0), None, "dB"),
+            limit("idd", None, Some(1.2e-3), "A"),
+        ],
+    );
+    refresh_verification(model);
+}
+
+/// A run set's sweep with no corner analysis: one transient analysis at each
+/// point of `processes` × `supplies` × `temperatures`, every one measuring
+/// gain and supply current, against a 40 dB floor and a 1.2 mA ceiling. Gain
+/// fails at SS 1.62 V 125 °C and the current sits near its ceiling at FF
+/// 1.98 V 125 °C, when the sweep holds those points.
+pub fn seed_run_set(model: &mut Model, processes: &[&str], supplies: &[f64], temperatures: &[f64]) {
+    let source = AnalysisInstanceId::new();
+    let mut analyses = Vec::new();
+    for process in processes {
+        for volts in supplies {
+            for celsius in temperatures {
+                let (process, volts, celsius) = (*process, *volts, *celsius);
+                let gain = if (process, volts, celsius) == ("SS", 1.62, 125.0) {
+                    39.4
+                } else {
+                    43.0 + 0.3 * (volts - 1.8) / 0.18 - 0.002 * (celsius - 27.0)
+                };
+                let idd = if (process, volts, celsius) == ("FF", 1.98, 125.0) {
+                    1.16e-3
+                } else {
+                    0.8e-3 + 0.05e-3 * (volts - 1.8) / 0.18 + 0.0005e-3 * (celsius - 27.0)
+                };
+                let id = analyses.len() as u64 + 1;
+                analyses.push(attributed_at(
+                    AnalysisResult::new(id, AnalysisType::Transient, "Transient")
+                        .with_measurements(vec![
+                            rspice_core::MeasureResult::success("gain", gain),
+                            rspice_core::MeasureResult::success("idd", idd),
+                        ]),
+                    source,
+                    run_set_point(process, volts, celsius),
+                ));
+            }
+        }
+    }
+    seed_analyses(model, analyses);
+    set_limits(
+        model,
+        vec![
+            limit("gain", Some(40.0), None, "dB"),
+            limit("idd", None, Some(1.2e-3), "A"),
+        ],
+    );
+    refresh_verification(model);
 }
 
 /// The corners of the corner fixture: process, supply, temperature.
@@ -456,6 +654,7 @@ pub fn seed_corner(model: &mut Model) {
             limit("idd", None, Some(1.2e-3), "A"),
         ],
     );
+    refresh_verification(model);
 }
 
 /// Make `specs` the limits the active plan judges its outputs by.
@@ -630,6 +829,18 @@ pub fn seed_optimization(model: &mut Model) {
     );
 }
 
+/// The yield evidence memo of the run Verify reads, which the inspector and
+/// the session still read.
 pub fn fixture_yield_results(model: &Model) -> Vec<rspice_results::yield_analysis::YieldResult> {
-    verification_yield_results(model).to_vec()
+    model
+        .simulation
+        .active_run()
+        .and_then(|run| {
+            model
+                .simulation
+                .retained
+                .yield_results_for_dataset(run.dataset_id)
+        })
+        .map(<[_]>::to_vec)
+        .unwrap_or_default()
 }

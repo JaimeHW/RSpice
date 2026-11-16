@@ -380,11 +380,16 @@ fn seeded_verify_pages_follow_the_table_grammar() {
         );
         let head = geometry.one("table.head").expect("table head");
         assert_eq!(head.height(), 24.0, "{page:?}");
+        // Band rows naming runs of columns are the head's own top rows.
+        let bands = geometry.all("table.band");
         assert_eq!(
-            head.top(),
+            bands.first().map_or(head.top(), |band| band.top()),
             toolbar.bottom(),
             "{page:?}: nothing between toolbar and table"
         );
+        if let Some(band) = bands.last() {
+            assert_eq!(head.top(), band.bottom(), "{page:?}");
+        }
         let rows = geometry.all("table.row");
         assert!(!rows.is_empty(), "{page:?}");
         assert!(rows.iter().all(|row| row.height() == 24.0), "{page:?}");

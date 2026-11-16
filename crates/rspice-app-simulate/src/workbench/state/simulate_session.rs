@@ -4,7 +4,7 @@
 //! manager's view.
 //!
 //! None of it is evidence or project configuration. Of what is here, the
-//! session keeps only the regression baseline and the corner comparison;
+//! session keeps only the regression baseline and how Corners is arranged;
 //! everything else is rebuilt on reopen.
 
 use super::*;
@@ -110,26 +110,18 @@ pub struct RegressionToleranceDraft {
     pub validation_error: Option<String>,
 }
 
-/// One limit cell of the Monte Carlo yield table, open for entry.
+/// The limit cell of the Monte Carlo table, open for entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YieldLimitDraft {
-    /// The output whose limit is being entered, as the trials name it.
+    /// The measurement whose limit is being entered.
     pub output: String,
-    pub bound: YieldLimitBound,
-    /// What the reader has typed.
+    /// What the reader has typed: `≥ 40 dB`, `≤ 1.2 mA`, `10 … 20 dB`.
     pub text: String,
     /// What the cell said when it opened. Applying it unchanged changes
     /// nothing, so a limit spelled to four digits is never rounded by a click.
     pub seed: String,
     /// Set until the cell first paints, so the field takes the keyboard once.
     pub focus: bool,
-}
-
-/// Which bound of a limit a yield cell states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum YieldLimitBound {
-    Lower,
-    Upper,
 }
 
 /// Which cell of a Specifications row is open for entry.
@@ -195,18 +187,8 @@ impl PartialEq for SpecificationInspectorDraft {
 pub struct VerificationSessionState {
     #[serde(default)]
     pub regression_baseline_run: Option<crate::product::RunId>,
-    /// When enabled, process-corner cells are expressed as exact deltas from
-    /// the revision-matched TT/nominal/room point retained by the active
-    /// corner plan. The flag is review state only; result datasets remain
-    /// immutable.
-    #[serde(default)]
-    pub corner_compare_nominal: bool,
-    /// The Monte Carlo yield row whose histogram the page shows, by the
-    /// specification's measurement name. Review state only.
-    #[serde(skip)]
-    pub yield_selected_spec: Option<String>,
-    /// The yield table's limit cell open for entry. Transient: a limit is
-    /// the plan's only once it is applied.
+    /// The Monte Carlo table's limit cell open for entry. Transient: a limit
+    /// is the plan's only once it is applied.
     #[serde(skip)]
     pub yield_limit_draft: Option<YieldLimitDraft>,
     #[serde(skip)]
@@ -239,6 +221,26 @@ pub struct VerificationSessionState {
     /// the same reason as the cell draft.
     #[serde(skip)]
     pub specification_draft: Option<SpecificationInspectorDraft>,
+    /// The Corners table's selected cell, sort and sideways scroll.
+    #[serde(skip)]
+    pub corners_table: crate::workbench::surfaces::verify::table::TableState,
+    /// Corners lists the points as rows and the specifications as columns.
+    #[serde(default)]
+    pub corners_transposed: bool,
+    /// Corners hides the specifications with no failing cell; transposed,
+    /// the points with none.
+    #[serde(default)]
+    pub corners_failing_only: bool,
+    /// The Monte Carlo table's selected specification, sort and scroll.
+    #[serde(skip)]
+    pub monte_carlo_table: crate::workbench::surfaces::verify::table::TableState,
+    /// The selected specification's failing trials: the selected trial.
+    #[serde(skip)]
+    pub monte_carlo_trials_table: crate::workbench::surfaces::verify::table::TableState,
+    /// The point the Monte Carlo view states its trials at, by its place in
+    /// the run's points; `None` states every point's trials together.
+    #[serde(skip)]
+    pub monte_carlo_point: Option<usize>,
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses

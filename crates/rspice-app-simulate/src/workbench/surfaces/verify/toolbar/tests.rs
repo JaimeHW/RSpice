@@ -29,6 +29,7 @@ fn click(pos: Pos2) -> Vec<Event> {
 
 fn runs() -> RunChoice {
     RunChoice {
+        name: "Run",
         candidates: vec![(0, "Run 7".to_owned()), (1, "Run 8 (reference)".to_owned())],
         selected: Some(0),
     }

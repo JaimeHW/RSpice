@@ -1,11 +1,12 @@
 //! The distribution of one Monte Carlo output, drawn as a histogram.
 //!
-//! Bars are neutral; a bar whose samples break the limit is a muted error
-//! tone. The limit is a solid vertical rule, the mean a thin one, and the mean
+//! Bars are neutral, and the part of a bar that holds failing trials is a
+//! muted error tone stacked at its foot. Which trials fail is the
+//! verification sheet's word, guard band and all; the histogram only counts
+//! them. The limit is a solid vertical rule, the mean a thin one, and the mean
 //! plus and minus three standard deviations thin dashed ones. The bins are laid
-//! so a limit falls on a bin edge — a bar is either wholly inside the limit or
-//! wholly outside it, never a bar of mixed samples painted one colour — and the
-//! axis ticks are engineering notation with the output's unit.
+//! so a limit falls on a bin edge, and the axis ticks are engineering notation
+//! with the output's unit.
 //!
 //! Everything is computed from the exact retained samples. A run that kept no
 //! samples has no histogram.
@@ -30,8 +31,8 @@ pub(super) struct HistogramModel {
     /// Bin edges, one more than there are bins.
     pub(super) edges: Vec<f64>,
     pub(super) counts: Vec<usize>,
-    /// Whether each bin's samples break the limit.
-    pub(super) failing: Vec<bool>,
+    /// Of each bin's samples, how many are failing trials.
+    pub(super) failing: Vec<usize>,
     /// The limits that fall inside the axis.
     pub(super) limits: Vec<f64>,
     pub(super) mean: f64,
@@ -63,19 +64,17 @@ pub(super) fn nice_step(raw: f64) -> f64 {
     nice * magnitude
 }
 
-/// Bin `samples` against `min`/`max` limits.
+/// Bin `samples`, each a value and whether its trial passed, with `limits`
+/// drawn over them.
 ///
 /// Returns `None` when there is no finite sample to bin.
-pub(super) fn histogram_model(
-    samples: &[f64],
-    min: Option<f64>,
-    max: Option<f64>,
-) -> Option<HistogramModel> {
-    let finite = samples
+pub(super) fn histogram_model(samples: &[(f64, bool)], limits: &[f64]) -> Option<HistogramModel> {
+    let judged = samples
         .iter()
         .copied()
-        .filter(|sample| sample.is_finite())
+        .filter(|(sample, _)| sample.is_finite())
         .collect::<Vec<_>>();
+    let finite = judged.iter().map(|(sample, _)| *sample).collect::<Vec<_>>();
     if finite.is_empty() {
         return None;
     }
@@ -93,7 +92,11 @@ pub(super) fn histogram_model(
     };
     let low = finite.iter().copied().fold(f64::INFINITY, f64::min);
     let high = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let limits = [min, max].into_iter().flatten().collect::<Vec<_>>();
+    let limits = limits
+        .iter()
+        .copied()
+        .filter(|limit| limit.is_finite())
+        .collect::<Vec<_>>();
     let mut axis_low = low.min(mean - 3.0 * std_dev);
     let mut axis_high = high.max(mean + 3.0 * std_dev);
     for limit in &limits {
@@ -119,16 +122,14 @@ pub(super) fn histogram_model(
         .map(|index| first + index as f64 * width)
         .collect::<Vec<_>>();
     let mut counts = vec![0; bins];
-    for sample in &finite {
+    let mut failing = vec![0; bins];
+    for (sample, passing) in &judged {
         let index = (((sample - first) / width).floor().max(0.0) as usize).min(bins - 1);
         counts[index] += 1;
+        if !passing {
+            failing[index] += 1;
+        }
     }
-    let passes =
-        |value: f64| min.is_none_or(|min| value >= min) && max.is_none_or(|max| value <= max);
-    let failing = edges
-        .windows(2)
-        .map(|edge| !passes((edge[0] + edge[1]) * 0.5))
-        .collect::<Vec<_>>();
 
     let axis = (edges[0], edges[bins]);
     let tick_step = nice_step((axis.1 - axis.0) / 8.0);
@@ -179,19 +180,13 @@ pub(super) fn paint_histogram(
     #[cfg(any(test, feature = "test-support"))]
     super::raster::probe(ui, "histogram", rect);
     let total = model.counts.iter().sum::<usize>();
-    let failing = model
-        .counts
-        .iter()
-        .zip(&model.failing)
-        .filter(|(_, failing)| **failing)
-        .map(|(count, _)| count)
-        .sum::<usize>();
+    let failing = model.failing.iter().sum::<usize>();
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Other,
             ui.is_enabled(),
             format!(
-                "{output} histogram: {total} samples, {failing} outside the limit; bin counts {}",
+                "{output} histogram: {total} samples, {failing} failing; bin counts {}",
                 model
                     .counts
                     .iter()
@@ -293,7 +288,7 @@ pub(super) fn paint_histogram(
         level += count_step;
     }
 
-    // Bars.
+    // Bars, each bar's failing trials stacked at its foot.
     for ((edge, count), failing) in model
         .edges
         .windows(2)
@@ -303,19 +298,21 @@ pub(super) fn paint_histogram(
         if *count == 0 {
             continue;
         }
-        let bar = Rect::from_min_max(
-            pos2(to_x(edge[0]) + 0.5, to_y(*count)),
-            pos2(to_x(edge[1]) - 0.5, plot.bottom()),
-        );
-        painter.rect_filled(
-            bar,
-            0.0,
-            if *failing {
-                t.color.err.gamma_multiply(0.45)
-            } else {
-                t.color.text_dim.gamma_multiply(0.38)
-            },
-        );
+        let (left, right) = (to_x(edge[0]) + 0.5, to_x(edge[1]) - 0.5);
+        if count > failing {
+            painter.rect_filled(
+                Rect::from_min_max(pos2(left, to_y(*count)), pos2(right, to_y(*failing))),
+                0.0,
+                t.color.text_dim.gamma_multiply(0.38),
+            );
+        }
+        if *failing > 0 {
+            painter.rect_filled(
+                Rect::from_min_max(pos2(left, to_y(*failing)), pos2(right, plot.bottom())),
+                0.0,
+                t.color.err.gamma_multiply(0.45),
+            );
+        }
     }
     painter.hline(
         plot.x_range(),

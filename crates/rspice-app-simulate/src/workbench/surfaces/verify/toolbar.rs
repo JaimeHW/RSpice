@@ -143,9 +143,12 @@ impl<'a> ToolbarAction<'a> {
     }
 }
 
-/// The runs a page could read, and the one it reads.
+/// The runs a page could read, and the one it reads; or, named otherwise,
+/// another one thing the page reads, such as the point it states.
 #[derive(Debug, Clone, Default)]
 pub(super) struct RunChoice {
+    /// What the select picks, as assistive technology announces it.
+    pub(super) name: &'static str,
     /// Each candidate's index in the retained run list, and its label.
     pub(super) candidates: Vec<(usize, String)>,
     pub(super) selected: Option<usize>,
@@ -350,7 +353,7 @@ impl PageToolbar<'_> {
             if let Some(picked) = select(
                 &mut child,
                 "verify.toolbar.run",
-                "Run",
+                self.runs.name,
                 shown,
                 &options,
                 RUN_SELECT_W,

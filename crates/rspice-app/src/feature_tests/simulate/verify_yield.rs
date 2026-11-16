@@ -1,78 +1,9 @@
-//! The Monte Carlo yield page over the whole application: Edit specifications
-//! pressed mid-edit opens on the committed limit through the contribution step,
-//! and a restored session and a reopened project state the same yield.
+//! The Monte Carlo yield over the whole application: a restored session and
+//! a reopened project state the same yield.
 
 use super::verify_fixtures::monte_carlo_app;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use rspice_app_simulate::workbench::state::simulate_session::{YieldLimitBound, YieldLimitDraft};
 use rspice_app_simulate::workbench::surfaces::verify::raster::fixture_yield_results;
-use rspice_app_simulate::workbench::surfaces::verify::raster::{page_input, page_pass};
-use rspice_app_simulate::workbench::surfaces::verify::show;
-use rspice_app_state::state::VerificationPage;
-
-/// Edit specifications pressed while a limit is being typed: the press takes
-/// the cell's focus, so the typed limit is the plan's in that frame, and the
-/// specification editor the press opens holds it rather than the limit the
-/// plan had before.
-#[test]
-fn edit_specifications_pressed_mid_edit_opens_on_the_committed_limit() {
-    let mut app = monte_carlo_app();
-    app.state.simulate.verification_page = VerificationPage::MonteCarlo;
-    let ctx = egui::Context::default();
-    rspice_ui_kit::Theme::default().apply(&ctx);
-    app.state.simulate.verification.yield_limit_draft = Some(YieldLimitDraft {
-        output: "gain".to_owned(),
-        bound: YieldLimitBound::Lower,
-        text: "41 dB".to_owned(),
-        seed: String::new(),
-        focus: true,
-    });
-    let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
-        let (_, geometry) = page_pass(&ctx, page_input(events), |ui| {
-            show(ui, &mut crate::workbench::features::cx(app));
-        });
-        app.after_contribution();
-        geometry
-    };
-    // The cell opens and takes the keyboard.
-    let button = frame(&mut app, Vec::new()).all("toolbar.action")[0].center();
-    let pointer = |pressed| egui::Event::PointerButton {
-        pos: button,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    frame(
-        &mut app,
-        vec![egui::Event::PointerMoved(button), pointer(true)],
-    );
-    assert!(
-        app.state.simulate.verification.yield_limit_draft.is_some(),
-        "the cell is still open while the button is held"
-    );
-    assert!(app.state.results.results.session.spec_drafts.is_none());
-    frame(&mut app, vec![pointer(false)]);
-
-    assert_eq!(app.state.simulate.verification.yield_limit_draft, None);
-    let drafts = app
-        .state
-        .results
-        .results
-        .session
-        .spec_drafts
-        .clone()
-        .expect("the press opened the specification editor");
-    let gain = drafts
-        .iter()
-        .find(|draft| draft.measurement == "gain")
-        .expect("the editor holds the gain specification");
-    assert!(
-        gain.primary_limit.trim().starts_with("41"),
-        "the editor opens on the committed limit, not {:?}",
-        gain.primary_limit
-    );
-}
 
 /// Yield is derived, never stored: the session eframe restores, the same
 /// session read strictly, and the project saved and reopened each judge the
