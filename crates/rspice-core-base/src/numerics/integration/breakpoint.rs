@@ -7,8 +7,7 @@
 
 use crate::Value;
 use std::cmp::Ordering;
-use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BTreeSet;
 use std::ops::Bound::{Excluded, Unbounded};
 
 /// Minimum timestep to use immediately after a breakpoint (for restart behavior)
@@ -173,101 +172,6 @@ impl Ord for BreakpointTimeKey {
     }
 }
 
-/// Copies of a schedule's corners repeated at every multiple of each of a
-/// set of delays, up to a stop time, produced in time order as the run
-/// reaches them ([`BreakpointManager::schedule_delayed_copies`]).
-///
-/// Each origin and delay is one stream whose next copy is the last plus the
-/// delay, summed in the same order as a full enumeration sums it, so every
-/// copy is bit for bit the time that enumeration lists. Only the next copy of
-/// each stream that has started is held.
-#[derive(Debug, Default)]
-struct DelayedCopies {
-    origins: Vec<Value>,
-    delays: Vec<Value>,
-    /// The smallest delay: an origin's first copy is no earlier than this
-    /// after it.
-    shortest: Value,
-    stop: Value,
-    /// `origins[..started]` have their streams in `due`.
-    started: usize,
-    due: BinaryHeap<Reverse<DelayedCopy>>,
-}
-
-/// One stream's next copy. Ordered by time, then as the full enumeration
-/// lists streams: origin by origin, delay by delay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct DelayedCopy {
-    time: BreakpointTimeKey,
-    origin: usize,
-    delay: usize,
-}
-
-impl DelayedCopies {
-    /// The earliest copy not yet taken.
-    fn next(&self) -> Option<Value> {
-        let due = self.due.peek().map(|Reverse(copy)| copy.time.0);
-        let unstarted = self
-            .origins
-            .get(self.started)
-            .map(|origin| origin + self.shortest)
-            .filter(|first| *first <= self.stop);
-        match (due, unstarted) {
-            (Some(due), Some(unstarted)) => Some(due.min(unstarted)),
-            (due, unstarted) => due.or(unstarted),
-        }
-    }
-
-    fn push(&mut self, time: Value, origin: usize, delay: usize) {
-        if time.is_finite() && time <= self.stop {
-            self.due.push(Reverse(DelayedCopy {
-                time: BreakpointTimeKey(time),
-                origin,
-                delay,
-            }));
-        }
-    }
-
-    /// Take every copy at or before `through`, and each later one within
-    /// `reach` of the last taken, in the order a full enumeration lists them:
-    /// origin by origin, delay by delay, multiple by multiple.
-    ///
-    /// Copies within `reach` of one another are taken together, so which of
-    /// two coinciding copies is added first does not depend on where a
-    /// release stopped.
-    fn take_through(&mut self, through: Value, reach: Value) -> Vec<DelayedCopy> {
-        let mut bound = through;
-        let mut taken = Vec::new();
-        loop {
-            while let Some(&origin) = self.origins.get(self.started) {
-                if origin + self.shortest > bound {
-                    break;
-                }
-                for delay in 0..self.delays.len() {
-                    self.push(origin + self.delays[delay], self.started, delay);
-                }
-                self.started += 1;
-            }
-            let Some(&Reverse(copy)) = self.due.peek() else {
-                break;
-            };
-            if copy.time.0 > bound {
-                break;
-            }
-            self.due.pop();
-            self.push(
-                copy.time.0 + self.delays[copy.delay],
-                copy.origin,
-                copy.delay,
-            );
-            bound = bound.max(copy.time.0 + reach);
-            taken.push(copy);
-        }
-        taken.sort_unstable_by_key(|copy| (copy.origin, copy.delay, copy.time));
-        taken
-    }
-}
-
 /// Breakpoint manager for handling discontinuities
 ///
 /// Ensures the solver lands exactly on breakpoints and restarts according to
@@ -328,12 +232,6 @@ pub struct BreakpointManager {
     /// The runtime breakpoints that are landings only: instants the stepper
     /// lands on without restarting ([`Self::replace_landings`]).
     landings: BTreeSet<BreakpointTimeKey>,
-    /// Delayed copies of the schedule not yet added to it
-    /// ([`Self::schedule_delayed_copies`]).
-    delayed: DelayedCopies,
-    /// The stop time and floor [`Self::reconcile_onto_stop`] delivered the
-    /// schedule onto, which a delayed copy added later is delivered onto too.
-    stop_floor: Option<(Value, Value)>,
 }
 
 /// An edge between its landing and its completion.
@@ -400,8 +298,6 @@ impl BreakpointManager {
             model_landings: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
-            delayed: DelayedCopies::default(),
-            stop_floor: None,
         }
     }
 
@@ -435,8 +331,6 @@ impl BreakpointManager {
             model_landings: Vec::new(),
             edge_crossing: None,
             expression_clocks: BTreeSet::new(),
-            delayed: DelayedCopies::default(),
-            stop_floor: None,
         }
     }
 
@@ -539,78 +433,6 @@ impl BreakpointManager {
         })
     }
 
-    /// Repeat every permanent breakpoint now scheduled at each multiple of
-    /// each of `delays` after it, up to `stop`: the arrivals of each source
-    /// corner through a set of transmission lines.
-    ///
-    /// The copies are not listed. They join the schedule as the run comes
-    /// within two breakpoints of them, in the order and with the merging a
-    /// full enumeration gave them (origin by origin, delay by delay, multiple
-    /// by multiple, each multiple the last plus the delay), so the stepper
-    /// lands on the times that enumeration listed however many a long run
-    /// has, and holds only the next copy of each origin and delay. A time
-    /// added after this call keeps its own instant against a copy within the
-    /// merge tolerance of it, where the enumeration kept the copy.
-    #[doc(hidden)]
-    pub fn schedule_delayed_copies(&mut self, delays: &[Value], stop: Value) {
-        let delays = delays
-            .iter()
-            .copied()
-            .filter(|delay| delay.is_finite() && *delay > 0.0)
-            .collect::<Vec<_>>();
-        let Some(shortest) = delays.iter().copied().reduce(Value::min) else {
-            return;
-        };
-        self.settle();
-        if self.breakpoints.is_empty() {
-            return;
-        }
-        self.delayed = DelayedCopies {
-            origins: self.breakpoints.clone(),
-            delays,
-            shortest,
-            stop,
-            started: 0,
-            due: BinaryHeap::new(),
-        };
-        self.release_delayed_copies(Value::NEG_INFINITY);
-    }
-
-    /// Add every delayed copy up to the second breakpoint after `time`, so
-    /// the next breakpoint and the one after it are the full schedule's.
-    fn release_delayed_copies(&mut self, time: Value) {
-        let mut after = time;
-        for _ in 0..2 {
-            let Some(copy) = self.delayed.next() else {
-                return;
-            };
-            let next = self.next_after(after).map_or(copy, |next| next.min(copy));
-            self.add_delayed_copies(next + 2.0 * self.tolerance);
-            let Some(next) = self.next_after(after) else {
-                return;
-            };
-            after = next;
-        }
-    }
-
-    /// Add every delayed copy at or before `through`, and each one chained
-    /// to those within twice the merge tolerance, in enumeration order.
-    fn add_delayed_copies(&mut self, through: Value) {
-        if self.delayed.next().is_none_or(|copy| copy > through) {
-            return;
-        }
-        for copy in self.delayed.take_through(through, 2.0 * self.tolerance) {
-            let time = copy.time.0;
-            if self
-                .stop_floor
-                .is_some_and(|(stop, floor)| coincides_before(time, stop, floor))
-            {
-                continue;
-            }
-            self.add(time);
-        }
-    }
-
     /// Deliver every permanent breakpoint less than one `floor` before `stop`
     /// at `stop` itself ([`coincides_before`]).
     ///
@@ -624,7 +446,6 @@ impl BreakpointManager {
     /// keeps its own instant.
     #[doc(hidden)]
     pub fn reconcile_onto_stop(&mut self, stop: Value, floor: Value) {
-        self.stop_floor = Some((stop, floor));
         self.settle();
         let pending = self.current_index.min(self.breakpoints.len());
         let mut ahead = self.breakpoints.split_off(pending);
@@ -1128,7 +949,6 @@ impl BreakpointManager {
     /// `just_passed_breakpoint` already set, so the next breakpoint is found
     /// strictly after `time`.
     fn restart_after(&mut self, time: Value, approach: Option<Value>) -> Option<Value> {
-        self.release_delayed_copies(time);
         // Landing on the completion of the edge being crossed: the restart it
         // cut is what the stepper was taking.
         let resume = self
@@ -1297,9 +1117,7 @@ impl BreakpointManager {
 
     /// Treat breakpoints at or before `time` as already handled.
     pub fn discard_through(&mut self, time: Value) {
-        self.add_delayed_copies(time + self.tolerance);
         self.pass_through(time);
-        self.release_delayed_copies(time);
         self.remove_runtime_through(time);
         if self
             .edge_crossing
@@ -1385,7 +1203,6 @@ impl BreakpointManager {
     ///
     /// Returns (adjusted_dt, will_land_on_breakpoint)
     pub fn limit_step(&mut self, current_time: Value, proposed_dt: Value) -> (Value, bool) {
-        self.release_delayed_copies(current_time);
         if !current_time.is_finite() || !proposed_dt.is_finite() || proposed_dt <= 0.0 {
             return (proposed_dt, false);
         }
@@ -1518,7 +1335,6 @@ impl BreakpointManager {
 
     /// The sorted breakpoint schedule.
     pub fn times(&mut self) -> &[Value] {
-        self.add_delayed_copies(Value::INFINITY);
         self.settle();
         &self.breakpoints
     }
@@ -1610,117 +1426,6 @@ mod breakpoint_manager_tests {
         assert!(manager.add(5.05e-9));
         assert!(!manager.add(5.05e-9 + 0.5e-15));
         assert_eq!(manager.next_after(5.0e-9 + 1.0e-12), Some(5.05e-9));
-    }
-
-    /// The corners of four PULSE clocks as the transient setup schedules
-    /// them: 1 ns edges, 3 ns wide, a 10 ns period, 2.5 ns apart.
-    fn clock_corners(cycles: usize) -> Vec<Value> {
-        let mut corners = Vec::with_capacity(cycles * 16);
-        for source in 0..4 {
-            let phase = source as Value * 2.5e-9;
-            for cycle in 0..cycles {
-                let start = cycle as Value * 10.0e-9 + phase;
-                corners.extend([start, start + 1.0e-9, start + 4.0e-9, start + 5.0e-9]);
-            }
-        }
-        corners
-    }
-
-    /// The delayed copies listed in full, as the transmission-line setup
-    /// added them before they were produced lazily: origin by origin, delay
-    /// by delay, each multiple the last plus the delay. Returns how many the
-    /// schedule kept.
-    fn enumerate_delayed_copies(
-        manager: &mut BreakpointManager,
-        delays: &[Value],
-        stop: Value,
-    ) -> usize {
-        let origins = manager.times().to_vec();
-        let mut kept = 0;
-        for origin in origins {
-            for &delay in delays {
-                let mut arrival = origin + delay;
-                while arrival.is_finite() && arrival <= stop {
-                    if manager.add(arrival) {
-                        kept += 1;
-                    }
-                    arrival += delay;
-                }
-            }
-        }
-        kept
-    }
-
-    /// Two lines on the four clocks: the lazy copies are the enumerated ones
-    /// bit for bit, both as the schedule lists them and as a stepper landing
-    /// on every breakpoint meets them.
-    fn assert_delayed_copies_are_the_enumeration(
-        cycles: usize,
-        delays: [Value; 2],
-        tolerance: Value,
-    ) -> usize {
-        let stop = cycles as Value * 10.0e-9;
-        let seeded = || {
-            let mut manager = BreakpointManager::new_with_tolerance(tolerance);
-            for corner in clock_corners(cycles) {
-                manager.add(corner);
-            }
-            manager.add(stop);
-            manager
-        };
-        let mut enumerated = seeded();
-        let kept = enumerate_delayed_copies(&mut enumerated, &delays, stop);
-        let expected = enumerated
-            .times()
-            .iter()
-            .map(|time| time.to_bits())
-            .collect::<Vec<_>>();
-
-        let mut listed = seeded();
-        listed.schedule_delayed_copies(&delays, stop);
-        let listed = listed
-            .times()
-            .iter()
-            .map(|time| time.to_bits())
-            .collect::<Vec<_>>();
-        assert!(listed == expected, "the listed schedule differs");
-
-        let mut stepped = seeded();
-        stepped.schedule_delayed_copies(&delays, stop);
-        let mut landed = vec![0.0f64.to_bits()];
-        let mut time = 0.0;
-        loop {
-            stepped.limit_step(time, stop);
-            let Some(next) = stepped.next_after(time) else {
-                break;
-            };
-            assert!(stepped.at_breakpoint(next));
-            stepped.mark_breakpoint_solved(next);
-            landed.push(next.to_bits());
-            time = next;
-        }
-        assert!(landed == expected, "the stepper's landings differ");
-        kept
-    }
-
-    #[test]
-    fn delayed_copies_are_the_enumerated_copies_bit_for_bit() {
-        // Delays on the clocks' 0.1 ns lattice: copies of different corners
-        // meet, so which one the schedule keeps is decided by the order they
-        // were added in.
-        let kept = assert_delayed_copies_are_the_enumeration(40, [1.3e-9, 2.9e-9], 1.0e-15);
-        assert!((3_000..5_000).contains(&kept), "{kept} copies");
-        // Delays off the lattice keep nearly every copy.
-        let off_lattice = [
-            1.0e-9 * std::f64::consts::SQRT_2,
-            0.5e-9 * std::f64::consts::E,
-        ];
-        let kept = assert_delayed_copies_are_the_enumeration(35, off_lattice, 1.0e-15);
-        assert!((100_000..200_000).contains(&kept), "{kept} copies");
-        // ngspice's merge interval for a 1 ns maximum step: over four times
-        // the 200,000 copies the enumeration once stopped at.
-        let kept = assert_delayed_copies_are_the_enumeration(100, off_lattice, 1.0e-19);
-        assert!(kept > 800_000, "{kept} copies");
     }
 
     #[test]

@@ -326,11 +326,6 @@ impl CoupledTransmissionLine {
             .fold(Value::INFINITY, Value::min)
     }
 
-    #[inline]
-    pub fn propagation_delays(&self) -> impl Iterator<Item = Value> + '_ {
-        self.modes.iter().map(TransmissionLine::delay)
-    }
-
     #[doc(hidden)]
     pub fn lossless_frequency_data(&self) -> Option<LosslessCplFrequencyData> {
         self.exact_lossless_frequency_model

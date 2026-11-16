@@ -604,14 +604,13 @@ fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
 }
 
 /// Xyce's TRANSLINE/transline_step deck at its first step, NL=5 and F=0.5 GHz:
-/// a matched 10 ns line driven by a pulse train. The breakpoint schedule carries
-/// the 25 ns corner through the delay by rounded addition, to
-/// 3.4999999999999996e-8 s; the line owns that arrival exactly, rounded up, at
-/// 3.5000000000000002e-8 s. A step stopped on the breakpoint left the arrival a
-/// tail under the solver floor, and fitting that tail halved the interval on
-/// every step, so the run crept onto each arrival through intervals down to
-/// 1e-21 s. The breakpoint is the arrival computed another way, and the step
-/// that reaches it lands on the arrival. Rows are Xyce 7.10's.
+/// a matched 10 ns line driven by a pulse train. The line owns the 25 ns
+/// corner's arrival, rounded up, at 3.5000000000000002e-8 s, ulps after the
+/// rounded sum 3.4999999999999996e-8 s. A stop on the sum would leave the
+/// arrival a tail under the solver floor, and fitting that tail halved the
+/// interval on every step, so a run crept onto each arrival through intervals
+/// down to 1e-21 s. The run lands on the line's own arrival, never on the sum,
+/// with no interval that short. Rows are Xyce 7.10's.
 #[test]
 fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
     use rspice_core::engine::{ConvergenceConfig, TransientStartupMode};
@@ -646,7 +645,7 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
             &NoAbort,
         )
         .unwrap();
-    // The schedule's copy of the 25 ns corner's arrival, and the line's own.
+    // The rounded sum of the 25 ns corner and the delay, and the line's own arrival.
     let breakpoint: f64 = 25.0e-9 + 10.0e-9;
     let arrival: f64 = 25.0e-9_f64.next_up() + 10.0e-9;
     assert!(breakpoint < arrival);

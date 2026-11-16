@@ -5652,10 +5652,6 @@ impl Engine {
             self.config.resource_limits.max_result_values,
         )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
-        Self::collect_transient_tline_breakpoints(&circuit, tstop, &mut breakpoints);
-        // User and output schedules are solver stops, not physical source
-        // edges. Add them only after transmission-line propagation so they
-        // cannot synthesize delayed arrivals.
         Self::add_user_transient_breakpoints(
             &mut breakpoints,
             netlist,

@@ -1,10 +1,6 @@
 //! Source and transmission-line breakpoint scheduling helpers.
 
 use super::*;
-// Only the unit tests below construct these records directly; the
-// production paths in this module receive them already built.
-#[cfg(test)]
-use crate::device::DistributedRlgc;
 
 /// The window breakpoints are scheduled over: the analysis stop time, the
 /// step hint the deck asked for, and the dialect whose scheduling rules apply.
@@ -1495,53 +1491,6 @@ impl Engine {
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
-    pub(super) fn transmission_line_delays(circuit: &crate::circuit::CircuitData) -> Vec<Value> {
-        let mut delays: Vec<Value> = circuit
-            .tlines
-            .iter()
-            // Ngspice TXL and LTRA advance their native histories from accepted
-            // points and schedule arrival breakpoints dynamically from history
-            // derivative changes, not from statically propagated source edges.
-            .filter(|tl| {
-                !tl.is_memoryless_two_port() && !tl.has_txl_runtime() && !tl.has_distributed_rlgc()
-            })
-            .map(crate::device::TransmissionLine::delay)
-            .chain(
-                circuit
-                    .coupled_tlines
-                    .iter()
-                    // Native CPL uses accepted VI history with its own
-                    // interpolation-error limit and a 0.9*min(taul) causality
-                    // cap. Only modal-fallback CPL contributes static arrivals.
-                    .filter(|tl| !tl.uses_native_runtime())
-                    .flat_map(crate::device::CoupledTransmissionLine::propagation_delays),
-            )
-            .filter(|delay| delay.is_finite() && *delay > 0.0)
-            .collect();
-        delays.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        delays.dedup_by(|a, b| {
-            let scale = a.abs().max(b.abs()).max(1.0);
-            (*a - *b).abs() <= scale * 1e-12
-        });
-        delays
-    }
-
-    /// Repeat every breakpoint scheduled so far, the sources' corners, at
-    /// each multiple of each transmission line's delay up to `tstop`: the
-    /// times an edge launched at a corner reaches a line's ports.
-    ///
-    /// The schedule produces these as the run reaches them
-    /// ([`BreakpointManager::schedule_delayed_copies`]) rather than listing
-    /// them, since a long run of a clocked deck has a corner count times a
-    /// multiple count of them.
-    pub(super) fn collect_transient_tline_breakpoints(
-        circuit: &crate::circuit::CircuitData,
-        tstop: Value,
-        breakpoints: &mut BreakpointManager,
-    ) {
-        breakpoints.schedule_delayed_copies(&Self::transmission_line_delays(circuit), tstop);
-    }
-
     #[inline]
     pub(super) fn wave_event_exceeds_tolerance(
         previous: Value,
@@ -2223,56 +2172,6 @@ mod tests {
     }
 
     #[test]
-    fn transmission_line_delays_skip_native_txl_and_ltra_scalar_lines() {
-        let mut circuit = crate::circuit::CircuitData::new();
-
-        circuit.tlines.push(crate::device::TransmissionLine::new(
-            "TLOSSLESS".to_string(),
-            1,
-            0,
-            2,
-            0,
-            50.0,
-            1.0e-9,
-        ));
-
-        let mut txl_line =
-            crate::device::TransmissionLine::new("TTXL".to_string(), 3, 0, 4, 0, 50.0, 4.0e-9);
-        assert!(txl_line.enable_txl_runtime(DistributedRlgc {
-            r: 12.45,
-            l: 8.972e-9,
-            g: 0.0,
-            c: 0.468e-12,
-            len: 16.0
-        }));
-        circuit.tlines.push(txl_line);
-
-        let mut ltra_line =
-            crate::device::TransmissionLine::new("TLTRA".to_string(), 5, 0, 6, 0, 75.0, 5.0e-9);
-        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
-        circuit.tlines.push(ltra_line);
-
-        let coupled = crate::device::CoupledTransmissionLine::new(
-            "PCOUPLED".to_string(),
-            vec![7, 8],
-            0,
-            vec![9, 10],
-            0,
-            &[vec![0.0, 0.0], vec![0.0, 0.0]],
-            &[vec![4.0, 0.0], vec![0.0, 9.0]],
-            &[vec![1.0, 0.0], vec![0.0, 1.0]],
-            &[vec![0.0, 0.0], vec![0.0, 0.0]],
-            1.0e-9,
-        )
-        .expect("valid coupled modal line");
-        circuit.coupled_tlines.push(coupled);
-
-        let delays = Engine::transmission_line_delays(&circuit);
-
-        assert_delays_close(&delays, &[1.0e-9, 2.0e-9, 3.0e-9]);
-    }
-
-    #[test]
     fn pwlts_models_schedule_smoothed_table_time_breakpoints() {
         use std::sync::Arc;
 
@@ -2309,35 +2208,6 @@ mod tests {
         assert_delays_close(
             breakpoints.times(),
             &[0.99e-9, 1.0e-9, 1.01e-9, 1.99e-9, 2.0e-9, 2.01e-9],
-        );
-    }
-
-    #[test]
-    fn propagated_tline_breakpoints_skip_ltra_but_keep_lossless_scalar() {
-        let mut circuit = crate::circuit::CircuitData::new();
-
-        circuit.tlines.push(crate::device::TransmissionLine::new(
-            "TLOSSLESS".to_string(),
-            1,
-            0,
-            2,
-            0,
-            50.0,
-            1.0e-9,
-        ));
-
-        let mut ltra_line =
-            crate::device::TransmissionLine::new("TLTRA".to_string(), 3, 0, 4, 0, 75.0, 5.0e-9);
-        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
-        circuit.tlines.push(ltra_line);
-
-        let mut breakpoints = BreakpointManager::new();
-        breakpoints.add(1.0e-9);
-        Engine::collect_transient_tline_breakpoints(&circuit, 7.0e-9, &mut breakpoints);
-
-        assert_delays_close(
-            breakpoints.times(),
-            &[1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9, 6.0e-9, 7.0e-9],
         );
     }
 
