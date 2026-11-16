@@ -407,37 +407,28 @@ fn coupled_microstrip_selector_params(ctx: &CmContext) -> CmResult<(i64, i64)> {
     ))
 }
 
-fn delay_boundary_breakpoints(ctx: &CmContext, delay: Value) -> CmResult<Vec<Value>> {
+/// Ask the stepper to land on the next multiple of `delay` after now.
+///
+/// An edge launched at time zero reaches the far port at every multiple of
+/// the line's delay, so the line lands on each of them up to the stop time.
+/// The next multiple is worked out from the clock on every evaluation and
+/// requested for the next step, so a run of any length holds one request per
+/// line rather than a list. ngspice's XSPICE line (`tline/cfunc.mod:111-129`)
+/// reads its history at `t - delay` and requests no breakpoint at all.
+fn request_next_delay_boundary(ctx: &mut CmContext, delay: Value) {
     if !delay.is_finite() || delay <= 0.0 {
-        return Ok(Vec::new());
+        return;
     }
-
-    let Some(tstop) = ctx.transient_stop_time() else {
-        return Ok(vec![delay]);
+    let Some(stop) = ctx.transient_stop_time() else {
+        return;
     };
-    if !tstop.is_finite() || tstop < delay {
-        return Ok(Vec::new());
+    // A multiple the clock has reached to within a millionth of the delay
+    // counts as passed, so a step landed early on one asks for the next.
+    let passed = ((ctx.time + delay * 1.0e-6) / delay).floor();
+    let next = (passed + 1.0) * delay;
+    if next.is_finite() && next <= stop {
+        ctx.request_breakpoint(next);
     }
-
-    let max_points = 4096usize;
-    let estimated = (tstop / delay).floor();
-    if !estimated.is_finite() || estimated as usize > max_points {
-        return Ok(vec![delay]);
-    }
-
-    let point_capacity = (estimated as usize).min(max_points);
-    let mut points = Vec::new();
-    points.try_reserve_exact(point_capacity).map_err(|err| {
-        CmError::EvaluationError(format!(
-            "unable to reserve {point_capacity} transmission-line breakpoint(s): {err}"
-        ))
-    })?;
-    let mut time = delay;
-    while time <= tstop && points.len() < max_points {
-        points.push(time);
-        time += delay;
-    }
-    Ok(points)
 }
 
 fn microstrip_propagation_signature(
@@ -2311,6 +2302,7 @@ impl CodeModel for GenericTransmissionLine {
         let impedance = tline_impedance(ctx)?;
         let (in_output, out_output) = if ctx.is_transient() {
             let delay = tline_delay(ctx)?;
+            request_next_delay_boundary(ctx, delay);
             ctx.record_transient_history(
                 "tline",
                 ctx.time,
@@ -2364,10 +2356,6 @@ impl CodeModel for GenericTransmissionLine {
         }
     }
 
-    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        delay_boundary_breakpoints(ctx, tline_delay(ctx)?)
-    }
-
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2416,6 +2404,7 @@ impl CodeModel for MicrostripLine {
         let (port1_output, port2_output) =
             if ctx.is_transient() && mlin_tran_model(ctx)? == TRAN_FULL {
                 let delay = mlin_delay(ctx)?;
+                request_next_delay_boundary(ctx, delay);
                 ctx.record_transient_history(
                     "mlin",
                     ctx.time,
@@ -2469,14 +2458,6 @@ impl CodeModel for MicrostripLine {
         }
     }
 
-    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        if mlin_tran_model(ctx)? == TRAN_FULL {
-            delay_boundary_breakpoints(ctx, mlin_delay(ctx)?)
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2526,6 +2507,7 @@ impl CodeModel for CoupledTransmissionLine {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let outputs = if ctx.is_transient() {
             let delay = cpline_delay(ctx)?;
+            request_next_delay_boundary(ctx, delay);
             ctx.record_transient_history(
                 "cpline",
                 ctx.time,
@@ -2609,10 +2591,6 @@ impl CodeModel for CoupledTransmissionLine {
         }
     }
 
-    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        delay_boundary_breakpoints(ctx, cpline_delay(ctx)?)
-    }
-
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2670,6 +2648,7 @@ impl CodeModel for CoupledMicrostripLine {
         let reference_impedance = (propagation.ze * propagation.zo).sqrt();
         let outputs = if ctx.is_transient() && cpmlin_tran_model(ctx)? == TRAN_FULL {
             let delay = cpmlin_delay(ctx)?;
+            request_next_delay_boundary(ctx, delay);
             ctx.record_transient_history(
                 "cpmlin",
                 ctx.time,
@@ -2752,14 +2731,6 @@ impl CodeModel for CoupledMicrostripLine {
         }
     }
 
-    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        if cpmlin_tran_model(ctx)? == TRAN_FULL {
-            delay_boundary_breakpoints(ctx, cpmlin_delay(ctx)?)
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2836,6 +2807,52 @@ impl CodeModel for MicrostripOpenEnd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 1 ns line on a 10 us run has 10,000 delay multiples, past the 4096
+    /// the line once listed up front (it then listed only the first).
+    fn long_run_tline(time: Value) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.set_transient_run_context(Some(1.0e-9), Some(10.0e-6));
+        ctx.set_param("l", 1.0e-9 * 299_792_458.0);
+        ctx.set_param("z", 50.0);
+        ctx.set_param("a", 0.0);
+        ctx.time = time;
+        for port in ["V1sens", "V2sens", "in", "out"] {
+            ctx.set_input_analog(port, 0.0);
+        }
+        ctx
+    }
+
+    #[test]
+    fn a_line_asks_for_its_next_delay_multiple_however_long_the_run() {
+        let delay = tline_delay(&long_run_tline(0.0)).expect("delay");
+        for (time, expected) in [
+            (0.0, delay),
+            (8_000.3 * delay, 8_001.0 * delay),
+            // A step landed a hair early on a multiple asks for the next one.
+            (9_000.0 * delay - 1.0e-21, 9_001.0 * delay),
+            (9_999.5 * delay, 10_000.0 * delay),
+        ] {
+            let mut ctx = long_run_tline(time);
+            GenericTransmissionLine
+                .evaluate(&mut ctx)
+                .expect("the line evaluates");
+            assert_eq!(
+                ctx.take_requested_breakpoints(),
+                vec![expected],
+                "at {time:e}"
+            );
+        }
+        let mut ctx = long_run_tline(10_000.2 * delay);
+        GenericTransmissionLine
+            .evaluate(&mut ctx)
+            .expect("the line evaluates");
+        assert!(
+            ctx.take_requested_breakpoints().is_empty(),
+            "no multiple past the stop time is requested"
+        );
+    }
 
     fn microstrip_cache_context() -> CmContext {
         let mut ctx = CmContext::new();
