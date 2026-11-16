@@ -6,16 +6,13 @@
 use egui::Vec2;
 
 use crate::workbench::RSpiceApp;
+use rspice_app_simulate::workbench::surfaces::verify::raster::seed_monte_carlo;
 use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SimulationRunLifecycle,
-    SpecEntry, SpecPointScope,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_results::yield_analysis::{
-    DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
-};
 
 const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
 
@@ -103,56 +100,11 @@ fn verify_app(page: VerificationPage) -> RSpiceApp {
     app
 }
 
+/// The Verify fixtures' Monte Carlo run: forty trials of seed 0x1A2B against
+/// a 40 dB gain floor, judged into the verification sheet.
 fn verify_monte_carlo() -> RSpiceApp {
     let mut app = verify_app(VerificationPage::MonteCarlo);
-    app.state.model.workspace.content.specs.push(SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(40.0),
-        max: None,
-        unit: "dB".to_owned(),
-        scope: SpecPointScope::AllPoints,
-    });
-    let samples = (0..40)
-        .map(|index| match index {
-            7 => 39.2,
-            19 => 39.7,
-            31 => 38.9,
-            _ => 40.4 + f64::from(index % 9) * 0.35,
-        })
-        .collect::<Vec<f64>>();
-    let trail = samples
-        .iter()
-        .map(|value| *value >= 40.0)
-        .collect::<Vec<_>>();
-    let pass_count = trail.iter().filter(|passes| **passes).count();
-    let result = YieldResult {
-        spec: YieldSpec::lower("gain", 40.0, "dB"),
-        total_runs: samples.len(),
-        pass_count,
-        fail_count: samples.len() - pass_count,
-        yield_percent: pass_count as f64 / samples.len() as f64 * 100.0,
-        stats: DistributionStats::default(),
-        samples,
-        trail,
-    };
-    let mut run = SimulationRun::new(3);
-    run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
-        .expect("a finite elapsed time");
-    let provenance = YieldAnalysisProvenance {
-        source_run_id: run.run_id,
-        source_dataset_id: run.dataset_id,
-        seed: 0x1A2B,
-        runs_requested: 40,
-        runs_completed: 40,
-        sampling_mode: MonteCarloSamplingMode::PseudoRandom,
-    };
-    app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
-    app.state
-        .model
-        .simulation
-        .replace_yield_evidence(vec![result], Some(provenance));
+    seed_monte_carlo(&mut app.state.model);
     app
 }
 
@@ -375,6 +327,9 @@ fn assert_states(painted: &[String], present: &[&str], absent: &[&str]) {
     }
 }
 
+/// With no trial selected, the inspector states the campaign the view's
+/// statistics came from, and nothing the table, its summary or its detail
+/// already show.
 #[test]
 fn the_verify_inspector_states_the_monte_carlo_run_without_its_dataset_identity() {
     let painted = simulate_text(&mut verify_monte_carlo());
@@ -384,13 +339,19 @@ fn the_verify_inspector_states_the_monte_carlo_run_without_its_dataset_identity(
         &[
             "Monte Carlo",
             "40 / 40",
-            "95% CI 80.14–97.42%",
+            "0x1A2B",
+            "Pseudo-random",
             "12.4 s",
+        ],
+        &[
+            "Run definition",
+            "Wilson",
+            "Dataset",
+            "complete",
+            "CI",
             "Worst samples",
-            "observed 38.90 dB",
             "Specification yields",
         ],
-        &["Run definition", "Wilson", "Dataset", "complete"],
     );
 }
 
