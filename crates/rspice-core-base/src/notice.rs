@@ -20,9 +20,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::log_scope::{self, LogLine, LogScope, LogScopeGuard};
 
-/// The sweep points one notice lists by name. Past this many, it counts.
-const MAX_NAMED_POINTS: usize = 8;
-
 /// One advisory a run raised.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EngineNotice {
@@ -211,20 +208,22 @@ impl EngineNotice {
     }
 }
 
-/// One notice, as first raised, and every time the run raised it again.
+/// One notice, as its earliest point raised it, and every time the run raised
+/// it again.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RecordedNotice {
     pub notice: EngineNotice,
     /// How many times the run raised it.
     pub occurrences: usize,
-    /// The sweep points it was raised at, in the order first raised, where
-    /// the run names its points. At most a handful are named.
+    /// Every point it was raised at, where the run names its points: in the
+    /// run's own order of them where it numbers them (a Monte Carlo run's
+    /// samples), however its threads happened to finish, and otherwise in
+    /// the order first raised.
     pub points: Vec<String>,
-    /// Every distinct point it was raised at, named or not, as a 64-bit
-    /// digest of its label, in ascending order. A point past the named ones
-    /// is kept as nothing else, and a reader merging several analyses'
-    /// records counts their points by these, so a point that two of them
-    /// raise it at is counted once whether either names it or not.
+    /// Every distinct point it was raised at, as a 64-bit digest of its
+    /// label, in ascending order. A reader merging several analyses' records
+    /// counts their points by these, so a point that two of them raise it at
+    /// is counted once.
     pub point_identities: Vec<u64>,
     /// The line of the run's log that states it, as the host that keeps the
     /// log numbered that line ([`log_scope::logged`]): the warning its site
@@ -235,6 +234,13 @@ pub struct RecordedNotice {
     pub line: Option<u64>,
 }
 
+/// Where one raise stands in the run: the numbered point that raised it
+/// (none for a raise outside any, which the run makes before and after its
+/// points, on its own thread), then the order of raising. A numbered point
+/// runs on one thread, so the order among its own raises is its own; the
+/// order across points, which threads decide, never enters.
+type Place = (Option<u64>, u64);
+
 /// One notice as the collector keeps it while the run raises it.
 #[derive(Debug)]
 struct Entry {
@@ -242,24 +248,30 @@ struct Entry {
     /// Every point it was raised at, so a point that raises it twice, as a
     /// sample solved in two analyses does, is counted once.
     identities: HashSet<u64>,
+    /// Its earliest raise, whose notice `recorded` holds.
+    first: Place,
+    /// Each point it was raised at, where that point first raised it.
+    named: Vec<(Place, String)>,
 }
 
 impl Entry {
-    fn count_at(&mut self, point: Option<&str>) {
+    fn count_at(&mut self, point: Option<&str>, place: Place) {
         let recorded = &mut self.recorded;
         recorded.occurrences = recorded.occurrences.saturating_add(1);
         let Some(point) = point else {
             return;
         };
-        if self.identities.insert(crate::numerics::fnv1a(point))
-            && recorded.points.len() < MAX_NAMED_POINTS
-        {
-            recorded.points.push(point.to_owned());
+        if self.identities.insert(crate::numerics::fnv1a(point)) {
+            self.named.push((place, point.to_owned()));
         }
     }
 
     fn recorded(self) -> RecordedNotice {
         let mut recorded = self.recorded;
+        let mut named = self.named;
+        // Numbered points in their numbers' order, then the rest as raised.
+        named.sort_by_key(|((member, raised), _)| (member.is_none(), *member, *raised));
+        recorded.points = named.into_iter().map(|(_, point)| point).collect();
         recorded.point_identities = self.identities.into_iter().collect();
         recorded.point_identities.sort_unstable();
         recorded
@@ -269,11 +281,14 @@ impl Entry {
 /// The notices one run has raised so far.
 #[derive(Debug, Default)]
 struct Ledger {
-    /// In the order first raised.
+    /// In the order first raised; [`NoticeCollector::take`] states them in
+    /// the order of their earliest raise.
     entries: Vec<Entry>,
     /// Where each notice sits in `entries`, so raising it again costs a
     /// lookup, not a scan of every notice a large design has raised.
     index: HashMap<NoticeKey, usize>,
+    /// Raises recorded so far.
+    raised: u64,
 }
 
 /// Where one run's notices are recorded.
@@ -301,14 +316,16 @@ impl NoticeCollector {
         log_scope::enter(Some(scope.collecting(self.clone())))
     }
 
-    /// Everything recorded so far, in the order first raised, leaving the
-    /// collector empty.
+    /// Everything recorded so far, leaving the collector empty: what the run
+    /// raised outside its points first, as raised, then what its points
+    /// raised, in their order where the run numbers them (a Monte Carlo
+    /// run's samples), so a run that solves its points side by side states
+    /// the same notices, in the same order and with the same details, however
+    /// its threads happened to finish.
     pub fn take(&self) -> Vec<RecordedNotice> {
-        std::mem::take(&mut *self.lock())
-            .entries
-            .into_iter()
-            .map(Entry::recorded)
-            .collect()
+        let mut entries = std::mem::take(&mut *self.lock()).entries;
+        entries.sort_by_key(|entry| entry.first);
+        entries.into_iter().map(Entry::recorded).collect()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Ledger> {
@@ -317,14 +334,30 @@ impl NoticeCollector {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn record(&self, notice: EngineNotice, point: Option<&str>, line: Option<u64>) {
+    fn record(
+        &self,
+        notice: EngineNotice,
+        point: Option<&str>,
+        member: Option<u64>,
+        line: Option<u64>,
+    ) {
         let mut ledger = self.lock();
-        let Ledger { entries, index } = &mut *ledger;
+        let Ledger {
+            entries,
+            index,
+            raised,
+        } = &mut *ledger;
+        let place = (member, *raised);
+        *raised += 1;
         match index.entry(notice.key()) {
             hash_map::Entry::Occupied(at) => {
                 let entry = &mut entries[*at.get()];
-                entry.count_at(point);
+                entry.count_at(point, place);
                 entry.recorded.line = entry.recorded.line.or(line);
+                if place < entry.first {
+                    entry.first = place;
+                    entry.recorded.notice = notice;
+                }
             }
             hash_map::Entry::Vacant(slot) => {
                 slot.insert(entries.len());
@@ -337,8 +370,10 @@ impl NoticeCollector {
                         line,
                     },
                     identities: HashSet::new(),
+                    first: place,
+                    named: Vec::new(),
                 };
-                entry.count_at(point);
+                entry.count_at(point, place);
                 entries.push(entry);
             }
         }
@@ -429,7 +464,7 @@ fn collecting() -> bool {
 pub fn record(notice: EngineNotice, stated: LogLine) {
     let _ = log_scope::with_current(|scope| {
         if let Some(collector) = scope.notices() {
-            collector.record(notice, scope.point(), stated.line());
+            collector.record(notice, scope.point(), scope.member(), stated.line());
         }
     });
 }
@@ -530,7 +565,7 @@ mod tests {
         let recorded = collector.take();
         assert_eq!(recorded.len(), 2, "{recorded:#?}");
         assert_eq!(recorded[0].occurrences, 12);
-        assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
+        assert_eq!(recorded[0].points.len(), 12);
         assert_eq!(recorded[0].points[0], "sample 1");
         assert_eq!(recorded[0].point_identities.len(), 12);
         assert!(
@@ -553,8 +588,42 @@ mod tests {
         assert!(collector.take().is_empty(), "taking empties the collector");
     }
 
+    /// Points the run numbers state their notices in the run's order of them,
+    /// with the earliest point's details, whatever order they raised them
+    /// in: a Monte Carlo run's samples finish as their threads do.
+    #[test]
+    fn numbered_points_state_their_notices_in_their_own_order() {
+        let take = |order: &[u64]| {
+            let collector = NoticeCollector::new();
+            let _installed = collector.install();
+            for &member in order {
+                let _point = log_scope::enter_member(member, || format!("sample {}", member + 1));
+                // Each sample clamps its own element of the shared card, and
+                // the second alone clamps a second parameter.
+                let _binding = binding(&format!("M{member}"), Some("nch"));
+                clamp("pbs");
+                if member == 1 {
+                    clamp("pbd");
+                }
+            }
+            collector.take()
+        };
+        let in_order = take(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(in_order, take(&[7, 3, 9, 1, 0, 8, 2, 6, 5, 4]));
+        assert_eq!(in_order.len(), 2, "{in_order:#?}");
+        assert_eq!(
+            in_order[0].points,
+            (1..=10).map(|n| format!("sample {n}")).collect::<Vec<_>>()
+        );
+        let EngineNotice::ParameterReplaced(first) = &in_order[0].notice else {
+            panic!("a replacement")
+        };
+        assert_eq!(first.element.as_deref(), Some("M0"));
+        assert_eq!(in_order[1].points, ["sample 2"]);
+    }
+
     /// A point that raises a notice again — a sample solved in two analyses
-    /// binds its card twice — is one point, named or not.
+    /// binds its card twice — is one point.
     #[test]
     fn a_point_that_raises_a_notice_twice_is_counted_once() {
         let collector = NoticeCollector::new();
@@ -569,7 +638,7 @@ mod tests {
         let recorded = collector.take();
         assert_eq!(recorded.len(), 1, "{recorded:#?}");
         assert_eq!(recorded[0].occurrences, 24);
-        assert_eq!(recorded[0].points.len(), MAX_NAMED_POINTS);
+        assert_eq!(recorded[0].points.len(), 12);
         assert_eq!(recorded[0].point_identities.len(), 12);
     }
 

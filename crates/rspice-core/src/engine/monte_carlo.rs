@@ -635,7 +635,8 @@ impl Engine {
             let index = first_trial + offset;
             // Serial or on a worker, a sample's lines and notices say which
             // sample raised them.
-            let _sample = crate::log_scope::enter_point(|| format!("sample {}", index + 1));
+            let _sample =
+                crate::log_scope::enter_member(index as u64, || format!("sample {}", index + 1));
             if let Some(outcome) = journal
                 .as_ref()
                 .and_then(|journal| (journal.restore)(index))

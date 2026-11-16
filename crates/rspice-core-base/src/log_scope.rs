@@ -57,6 +57,9 @@ pub fn canonical_target(target: &str) -> Cow<'_, str> {
 pub struct LogScope {
     owner: Arc<dyn Any + Send + Sync>,
     point: Option<Arc<str>>,
+    /// The point's place among the run's points, counted from zero, where
+    /// the run numbers them: a Monte Carlo sample's index.
+    member: Option<u64>,
     /// Lines the run states once however often it reaches them, shared by
     /// every thread the run hands work to.
     said_once: Arc<Mutex<HashSet<String>>>,
@@ -74,6 +77,7 @@ impl LogScope {
         Self {
             owner,
             point: None,
+            member: None,
             said_once: Arc::default(),
             notices: None,
             backends: None,
@@ -91,12 +95,30 @@ impl LogScope {
         self.point.as_deref()
     }
 
+    /// The point's place among the run's points, where the run numbers
+    /// them, so a reader can put what the points said in their order rather
+    /// than in the order threads happened to say it.
+    pub fn member(&self) -> Option<u64> {
+        self.member
+    }
+
     /// The same run, at one of its points.
     #[must_use]
     pub fn at_point(self, point: impl Into<Arc<str>>) -> Self {
         Self {
             point: Some(point.into()),
+            member: None,
             ..self
+        }
+    }
+
+    /// The same run, at its point number `member` (from zero), labelled
+    /// `point`.
+    #[must_use]
+    pub fn at_member(self, member: u64, point: impl Into<Arc<str>>) -> Self {
+        Self {
+            member: Some(member),
+            ..self.at_point(point)
         }
     }
 }
@@ -231,6 +253,15 @@ impl Drop for LogScopeGuard {
 #[doc(hidden)]
 pub fn enter_point(point: impl FnOnce() -> String) -> Option<LogScopeGuard> {
     capture().map(|scope| enter(Some(scope.at_point(point()))))
+}
+
+/// Enter this thread's own scope again, at point number `member` (from zero)
+/// of its run, labelled `point`: [`enter_point`] for a run that numbers its
+/// points.
+#[must_use]
+#[doc(hidden)]
+pub fn enter_member(member: u64, point: impl FnOnce() -> String) -> Option<LogScopeGuard> {
+    capture().map(|scope| enter(Some(scope.at_member(member, point()))))
 }
 
 /// Whether this thread's run has yet to say `line`, which it then has.
