@@ -23,10 +23,12 @@ fn record_browser_history_warning(state: &mut AppState, text: String) {
 }
 
 pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
+    use rspice_app_state::workbench::workspace::Workspace;
     use rspice_app_workbench::workbench::browser::navigation::{
         current_location, install_popstate_listener, restart_history_session,
     };
     use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
+    use rspice_app_workbench::workbench::routing::surface_catalog::LinkedPage;
 
     match current_location() {
         Ok(location) => {
@@ -39,6 +41,12 @@ pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &
                     state,
                     format!("The page in the link was not opened: {error}"),
                 );
+            }
+            // The view a link names inside the workspace it opened.
+            if let Some(LinkedPage::Verify(page)) = location.page()
+                && state.workbench.workspace == Workspace::Verify
+            {
+                state.simulate.verification_page = page;
             }
         }
         Err(error) => record_browser_history_warning(

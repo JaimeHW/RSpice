@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use crate::time_compat::Instant;
 
 #[cfg(any(test, target_arch = "wasm32"))]
+use crate::workbench::routing::surface_catalog::LinkedPage;
+#[cfg(any(test, target_arch = "wasm32"))]
 use crate::workbench::routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -28,6 +30,8 @@ const SURFACE_KEY: &str = "surface";
 const OBJECT_KIND_KEY: &str = "object-kind";
 #[cfg(any(test, target_arch = "wasm32"))]
 const OBJECT_ID_KEY: &str = "object-id";
+#[cfg(any(test, target_arch = "wasm32"))]
+const PAGE_KEY: &str = "page";
 
 #[cfg(any(test, target_arch = "wasm32"))]
 const HISTORY_STATE_NAMESPACE: &str = "rspice.surface-navigation";
@@ -86,6 +90,9 @@ fn remove_listener_registration<T, E>(
 #[cfg(any(test, target_arch = "wasm32"))]
 pub struct LocationSearch {
     route: Option<SurfaceRoute>,
+    /// The page of the route's workspace the link opens on. Read once, where
+    /// the link is followed; a query written back for a route names none.
+    page: Option<LinkedPage>,
     unrelated_parameters: Vec<String>,
 }
 
@@ -105,6 +112,14 @@ impl LocationSearch {
         self.route
     }
 
+    /// The page of the route's workspace this query opens on, if it names
+    /// one.
+    #[must_use]
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub const fn page(&self) -> Option<LinkedPage> {
+        self.page
+    }
+
     /// Raw host-owned parameters in their original order.
     #[cfg(test)]
     pub fn unrelated_parameters(&self) -> impl ExactSizeIterator<Item = &str> {
@@ -117,6 +132,7 @@ impl LocationSearch {
     pub fn with_route(&self, route: SurfaceRoute) -> Self {
         Self {
             route: Some(route),
+            page: None,
             unrelated_parameters: self.unrelated_parameters.clone(),
         }
     }
@@ -127,6 +143,7 @@ impl LocationSearch {
     pub fn without_route(&self) -> Self {
         Self {
             route: None,
+            page: None,
             unrelated_parameters: self.unrelated_parameters.clone(),
         }
     }
@@ -171,6 +188,7 @@ impl FromStr for LocationSearch {
         if search.is_empty() {
             return Ok(Self {
                 route: None,
+                page: None,
                 unrelated_parameters: Vec::new(),
             });
         }
@@ -185,6 +203,7 @@ impl FromStr for LocationSearch {
         let mut surface = None;
         let mut object_kind = None;
         let mut object_id = None;
+        let mut page = None;
         let mut unrelated_parameters = Vec::new();
 
         for (index, parameter) in query.split('&').enumerate() {
@@ -227,6 +246,7 @@ impl FromStr for LocationSearch {
                 SURFACE_KEY => &mut surface,
                 OBJECT_KIND_KEY => &mut object_kind,
                 OBJECT_ID_KEY => &mut object_id,
+                PAGE_KEY => &mut page,
                 _ => {
                     return Err(BrowserNavigationError::InvalidHistoryState(
                         "reserved query-key classification was inconsistent".to_owned(),
@@ -269,8 +289,30 @@ impl FromStr for LocationSearch {
             }
         };
 
+        // A page belongs to the workspace the selector opens, so it follows
+        // that selector, on a route that names no object.
+        let page = match (page, route) {
+            (None, _) => None,
+            (Some(_), None) => return Err(BrowserNavigationError::OrphanedPage),
+            (Some(_), Some(route)) if route.object_ref().is_some() => {
+                return Err(BrowserNavigationError::PageOnObjectRoute);
+            }
+            (Some((page_index, name)), Some(route)) => {
+                if selector.is_some_and(|(selector_index, _, _)| page_index < selector_index) {
+                    return Err(BrowserNavigationError::NonCanonicalRouteOrder);
+                }
+                Some(LinkedPage::named(route.surface_id(), name).ok_or_else(|| {
+                    BrowserNavigationError::UnknownPage {
+                        surface: route.surface_id().deep_link(),
+                        page: name.to_owned(),
+                    }
+                })?)
+            }
+        };
+
         Ok(Self {
             route,
+            page,
             unrelated_parameters,
         })
     }
@@ -304,6 +346,7 @@ fn reserved_key(decoded_key: &str) -> Option<&'static str> {
         SURFACE_KEY => Some(SURFACE_KEY),
         OBJECT_KIND_KEY => Some(OBJECT_KIND_KEY),
         OBJECT_ID_KEY => Some(OBJECT_ID_KEY),
+        PAGE_KEY => Some(PAGE_KEY),
         _ => None,
     }
 }
@@ -392,6 +435,12 @@ pub enum BrowserNavigationError {
     PartialObjectReference,
     #[error("route parameters must retain selector, object-kind, object-id order")]
     NonCanonicalRouteOrder,
+    #[error("a `page` parameter requires a `view` selector")]
+    OrphanedPage,
+    #[error("an object route cannot also name a page")]
+    PageOnObjectRoute,
+    #[error("`{surface}` has no page `{page}`")]
+    UnknownPage { surface: &'static str, page: String },
     #[error(transparent)]
     SurfaceRoute(#[from] SurfaceRouteParseError),
     /// Raised only by the wasm32 history module below.
@@ -1224,6 +1273,55 @@ mod tests {
             assert_eq!(parsed.route(), None);
             assert_eq!(parsed.to_string(), search);
             assert_eq!(search_without_route(search).expect("route removal"), search);
+        }
+    }
+
+    /// A link may open Verify on any of its five views by name. The name is
+    /// where the link lands rather than part of the route, so the query
+    /// written back for the route names no page; a page the workspace does
+    /// not have, or one with no workspace before it, is refused.
+    #[test]
+    fn a_verify_link_opens_on_the_view_it_names() {
+        use crate::state::VerificationPage;
+        use crate::workbench::routing::surface_catalog::LinkedPage;
+
+        let verify = SurfaceRoute::surface(SurfaceId::Verify);
+        for (name, page) in [
+            ("specifications", VerificationPage::Specifications),
+            ("corners", VerificationPage::Corners),
+            ("monte-carlo", VerificationPage::MonteCarlo),
+            ("checks", VerificationPage::Checks),
+            ("reference", VerificationPage::Reference),
+        ] {
+            let parsed = LocationSearch::parse(&format!("?view=verify&page={name}&locale=en-US"))
+                .expect("a named view parses");
+            assert_eq!(parsed.route(), Some(verify));
+            assert_eq!(parsed.page(), Some(LinkedPage::Verify(page)));
+            assert_eq!(
+                parsed.with_route(verify).to_string(),
+                "?view=verify&locale=en-US"
+            );
+        }
+        assert_eq!(
+            LocationSearch::parse("?view=verify").expect("bare").page(),
+            None
+        );
+        for (search, refusal) in [
+            ("?view=verify&page=yield", "has no page `yield`"),
+            ("?view=results&page=corners", "has no page `corners`"),
+            ("?surface=jobs-manager&page=checks", "has no page `checks`"),
+            ("?page=corners", "requires a `view` selector"),
+            (
+                "?page=corners&view=verify",
+                "selector, object-kind, object-id order",
+            ),
+            (
+                "?view=verify&page=corners&page=checks",
+                "duplicate route parameter `page`",
+            ),
+        ] {
+            let error = LocationSearch::parse(search).expect_err(search);
+            assert!(error.to_string().contains(refusal), "{search}: {error}");
         }
     }
 

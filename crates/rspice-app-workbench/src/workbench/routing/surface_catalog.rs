@@ -12,6 +12,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::workspace::Workspace;
 
 /// Canonical composition family for a GUI surface.
@@ -276,6 +277,41 @@ define_surface_catalog! {
     MobileTaskHandoff => { id: "mobile-task-handoff", label: "Qualified-target handoff", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-task-handoff" },
     SurfaceContextMenu => { id: "surface-context-menu", label: "Selection context menu", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=surface-context-menu" },
     DockedTool => { id: "docked-tool", label: "Docked subordinate tool", archetype: Manager, tier: ReleaseTarget, status: Preview, deep_link: "?surface=docked-tool" },
+}
+
+/// A page of a workspace a link may open on, named after the workspace's
+/// own selector: `?view=verify&page=corners`. It says where a link lands,
+/// not which surface is open, so it is no part of a route's identity and the
+/// address the workbench writes back names none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkedPage {
+    Verify(VerificationPage),
+}
+
+impl LinkedPage {
+    /// The page of `surface` a link calls `name`.
+    #[must_use]
+    pub fn named(surface: SurfaceId, name: &str) -> Option<Self> {
+        match surface {
+            SurfaceId::Verify => VerificationPage::NAVIGATION
+                .into_iter()
+                .map(Self::Verify)
+                .find(|page| page.name() == name),
+            _ => None,
+        }
+    }
+
+    /// What a link calls this page.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Verify(VerificationPage::Specifications) => "specifications",
+            Self::Verify(VerificationPage::Corners) => "corners",
+            Self::Verify(VerificationPage::MonteCarlo) => "monte-carlo",
+            Self::Verify(VerificationPage::Checks) => "checks",
+            Self::Verify(VerificationPage::Reference) => "reference",
+        }
+    }
 }
 
 impl fmt::Display for SurfaceId {
