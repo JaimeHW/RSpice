@@ -26,6 +26,10 @@ pub(in crate::engine::transient) struct PublishedSource<'a> {
     pub(in crate::engine::transient) row: crate::abort_signal::TransientRow<'a>,
     /// Accepted samples the run has written, this one included.
     pub(in crate::engine::transient) points: usize,
+    /// The device values a result sink keeps in the row, by `(device, parameter)`, and the last
+    /// row's values of them; empty when the result holds the device traces.
+    pub(in crate::engine::transient) device_columns: &'a [(String, String)],
+    pub(in crate::engine::transient) device_row: &'a [Value],
 }
 
 impl PublishedRow {
@@ -38,6 +42,8 @@ impl PublishedRow {
             result,
             row,
             points: samples,
+            device_columns,
+            device_row,
         } = source;
         if samples == 0 {
             return Err("a published checkpoint row needs a sample".into());
@@ -45,18 +51,26 @@ impl PublishedRow {
         let row = Self {
             voltages: row.node_voltages().collect(),
             branch_currents: row.branch_currents().collect(),
-            device_values: result
-                .device_op_traces
-                .iter()
-                .filter(|trace| trace.values.len() == samples)
-                .map(|trace| {
-                    (
-                        trace.device_name.clone(),
-                        trace.parameter.clone(),
-                        trace.values[samples - 1],
-                    )
-                })
-                .collect(),
+            device_values: if device_columns.is_empty() {
+                result
+                    .device_op_traces
+                    .iter()
+                    .filter(|trace| trace.values.len() == samples)
+                    .map(|trace| {
+                        (
+                            trace.device_name.clone(),
+                            trace.parameter.clone(),
+                            trace.values[samples - 1],
+                        )
+                    })
+                    .collect()
+            } else {
+                device_columns
+                    .iter()
+                    .zip(device_row)
+                    .map(|((device, parameter), value)| (device.clone(), parameter.clone(), *value))
+                    .collect()
+            },
         };
         row.validate()?;
         Ok(row)
@@ -87,6 +101,18 @@ impl PublishedRow {
             rows.amend_first_current(index, value)?;
         }
         for (device, parameter, value) in &self.device_values {
+            let column =
+                rows.layout()
+                    .device_ops()
+                    .iter()
+                    .position(|(known_device, known_parameter)| {
+                        known_device.eq_ignore_ascii_case(device)
+                            && known_parameter.eq_ignore_ascii_case(parameter)
+                    });
+            if let Some(column) = column {
+                rows.amend_first_device_op(column, *value)?;
+                continue;
+            }
             if let Some(first) = result
                 .device_op_traces
                 .iter_mut()

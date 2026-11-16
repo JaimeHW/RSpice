@@ -13,9 +13,15 @@
 //! before. The run then ends at that accepted point, as it would at its stop time: the refusal is
 //! kept as the run's stop, every later row is dropped, and the time loop does not take another
 //! step.
+//!
+//! The sink is begun when the run starts integrating, not when its first row is gathered: until
+//! then the run can still name the event signals it will write (event nets, HDL variables,
+//! impulses), and row 0, which the run's set-up amends in place, waits in the buffer. Begun, the
+//! sink takes row 0 first.
 
 use crate::abort_signal::TransientRow;
 use crate::analysis::transient::{ObservedPoint, TransientResult};
+use crate::circuit::DeviceOpReport;
 use crate::result_sink::{
     ResultAxis, ResultSchema, ResultSignal, ResultSignalKind, ResultSink, RunMeta, SinkStop,
     VecSink,
@@ -36,6 +42,9 @@ pub(super) struct TransientRowLayout {
     step_size: bool,
     /// Then the value each per-point store trace (a memristor's resistance) holds, by name.
     stores: Vec<String>,
+    /// Then each device operating-point value a sink keeps, as `(device, parameter)` in the order
+    /// the run's first report named them.
+    device_ops: Vec<(String, String)>,
     /// Constant columns last: `(device, parameter, value)` of each instance parameter a sink
     /// keeps with the rows.
     constants: Vec<(String, String, Value)>,
@@ -64,6 +73,7 @@ impl TransientRowLayout {
             num_branches,
             step_size: false,
             stores: Vec::new(),
+            device_ops: Vec::new(),
             constants: Vec::new(),
         }
     }
@@ -87,6 +97,28 @@ impl TransientRowLayout {
         (!self.stores.is_empty()).then(|| {
             self.voltage_nodes.len() + self.current_branches.len() + usize::from(self.step_size)
         })
+    }
+
+    /// This layout with a column for each device operating-point value `device_ops` names, after
+    /// the store traces.
+    pub(super) fn with_device_ops(mut self, device_ops: Vec<(String, String)>) -> Self {
+        self.device_ops = device_ops;
+        self
+    }
+
+    /// The slot of the first device operating-point value, when the rows carry them.
+    pub(super) fn device_op_slots(&self) -> Option<usize> {
+        (!self.device_ops.is_empty()).then(|| {
+            self.voltage_nodes.len()
+                + self.current_branches.len()
+                + usize::from(self.step_size)
+                + self.stores.len()
+        })
+    }
+
+    /// `(device, parameter)` of each device operating-point column.
+    pub(super) fn device_ops(&self) -> &[(String, String)] {
+        &self.device_ops
     }
 
     /// This layout with `constants` as constant columns after the currents.
@@ -117,6 +149,7 @@ impl TransientRowLayout {
             + self.current_branches.len()
             + usize::from(self.step_size)
             + self.stores.len()
+            + self.device_ops.len()
             + self.constants.len()
     }
 
@@ -160,6 +193,12 @@ impl TransientRowLayout {
             signal.quantity = "store".to_owned();
             signals.push(signal);
         }
+        for (device, parameter) in &self.device_ops {
+            let mut signal = ResultSignal::new(parameter.clone(), "", ResultSignalKind::Real);
+            signal.quantity = "device_op".to_owned();
+            signal.path = device.clone();
+            signals.push(signal);
+        }
         for (device, parameter, _) in &self.constants {
             let mut signal = ResultSignal::new(parameter.clone(), "", ResultSignalKind::Real);
             signal.quantity = "instance_parameter".to_owned();
@@ -174,6 +213,76 @@ impl TransientRowLayout {
             signals,
         }
     }
+}
+
+/// Each `(device, parameter, value)` a device report and the observables beside it name, in the
+/// order the run records them: each device's own values, then its module's quantities, then the
+/// observables, which replace a reported value they name again.
+fn reported<'r>(
+    report: &'r DeviceOpReport,
+    observed: &'r [(String, String, Value)],
+) -> impl Iterator<Item = (&'r str, &'r str, Value)> {
+    report
+        .entries
+        .iter()
+        .flat_map(|entry| {
+            let module = entry.module.iter().flat_map(|module| {
+                module
+                    .quantities
+                    .iter()
+                    .map(|quantity| (entry.name.as_str(), quantity.name.as_str(), quantity.value))
+            });
+            entry
+                .params
+                .iter()
+                .map(|&(parameter, value)| (entry.name.as_str(), parameter, value))
+                .chain(module)
+        })
+        .chain(
+            observed
+                .iter()
+                .map(|(device, parameter, value)| (device.as_str(), parameter.as_str(), *value)),
+        )
+}
+
+/// The `(device, parameter)` columns of a run whose first device report is `report`: each one it
+/// names, once, in the order an in-memory run creates their traces.
+pub(super) fn device_op_columns(
+    report: &DeviceOpReport,
+    observed: &[(String, String, Value)],
+) -> Vec<(String, String)> {
+    let mut columns: Vec<(String, String)> = Vec::new();
+    for (device, parameter, _) in reported(report, observed) {
+        if !columns.iter().any(|(known_device, known_parameter)| {
+            known_device.eq_ignore_ascii_case(device)
+                && known_parameter.eq_ignore_ascii_case(parameter)
+        }) {
+            columns.push((device.to_owned(), parameter.to_owned()));
+        }
+    }
+    columns
+}
+
+/// Record a device report at row 0, overwriting what an earlier report there recorded: in the
+/// row's device columns when the sink keeps them, else in the result's device traces. Returns how
+/// many result values it added.
+pub(super) fn record_first_device_ops(
+    result: &mut TransientResult,
+    rows: &mut TransientRows<'_>,
+    report: DeviceOpReport,
+    observed: &[(String, String, Value)],
+) -> Result<usize, SimulationError> {
+    if rows.layout.device_op_slots().is_none() {
+        return Ok(result.record_device_op_sample(rows.points(), report, observed));
+    }
+    let mut values = Vec::new();
+    rows.map_device_ops(&report, observed, |index, value| {
+        values.push((index, value));
+    })?;
+    for (index, value) in values {
+        rows.amend_first_device_op(index, value)?;
+    }
+    Ok(0)
 }
 
 enum Target<'s> {
@@ -199,6 +308,10 @@ pub(super) struct TransientRows<'s> {
     filled: bool,
     /// The caller's sink refused a row for want of disk or memory: the run ends at that point.
     stop: Option<SinkStop>,
+    /// The schema the sink begins with when the run starts integrating; `None` once begun.
+    pending: Option<ResultSchema>,
+    /// The sink was begun and took row 0.
+    begun: bool,
 }
 
 impl<'s> TransientRows<'s> {
@@ -231,6 +344,8 @@ impl<'s> TransientRows<'s> {
             points: 0,
             filled: false,
             stop: None,
+            pending: None,
+            begun: false,
         }
     }
 
@@ -241,15 +356,77 @@ impl<'s> TransientRows<'s> {
         }
     }
 
-    /// Begin the sink with `schema`.
+    /// Lay out the sink's columns as `schema`; [`Self::start`] begins it.
     pub(super) fn begin(&mut self, schema: &ResultSchema) -> Result<(), SimulationError> {
+        if self.begun || self.pending.is_some() {
+            return Err(SimulationError::Circuit(
+                "a transient's result rows were laid out twice".to_owned(),
+            ));
+        }
+        self.pending = Some(schema.clone());
+        Ok(())
+    }
+
+    /// Name one more event signal the sink will take; returns its id. Only before the run starts.
+    pub(super) fn declare(&mut self, signal: ResultSignal) -> Result<u32, SimulationError> {
+        let Some(schema) = self.pending.as_mut() else {
+            return Err(SimulationError::Circuit(format!(
+                "event signal '{}' was named after the transient's result sink began",
+                signal.name
+            )));
+        };
+        let id = u32::try_from(schema.signals.len()).map_err(|_| {
+            SimulationError::Circuit("a transient names more signals than a store holds".to_owned())
+        })?;
+        schema.signals.push(signal);
+        Ok(id)
+    }
+
+    /// Begin the sink with every signal the run named and write row 0 to it, once. A sink that
+    /// refuses row 0 for want of disk or memory stops the run, as any row's refusal does.
+    pub(super) fn start(&mut self) -> Result<(), SimulationError> {
+        if self.begun {
+            return Ok(());
+        }
+        let schema = self.pending.take().ok_or_else(|| {
+            SimulationError::Circuit("a transient's result rows began without a layout".to_owned())
+        })?;
         let meta = RunMeta {
             analysis: "tran".to_owned(),
             ..RunMeta::default()
         };
         self.sink()
-            .begin(schema, &meta)
-            .map_err(SimulationError::ResultSink)
+            .begin(&schema, &meta)
+            .map_err(SimulationError::ResultSink)?;
+        self.begun = true;
+        if self.points == 0 {
+            return Ok(());
+        }
+        let (time, row) = (self.start, std::mem::take(&mut self.row));
+        let written = self.sink().row(time, &row);
+        self.row = row;
+        match written {
+            Ok(()) => Ok(()),
+            Err(stop) => self.refused(stop),
+        }
+    }
+
+    /// Hand event changes to the sink. The changes the run committed before its sink stopped it
+    /// are still offered, since they precede the refused row; a sink that refuses them too keeps
+    /// what it had.
+    pub(super) fn events(
+        &mut self,
+        changes: &[crate::result_sink::EventChange],
+    ) -> Result<(), SimulationError> {
+        if changes.is_empty() {
+            return Ok(());
+        }
+        self.start()?;
+        match self.sink().events(changes) {
+            Ok(()) => Ok(()),
+            Err(_) if self.stop.is_some() => Ok(()),
+            Err(stop) => self.refused(stop),
+        }
     }
 
     pub(super) fn layout(&self) -> &TransientRowLayout {
@@ -265,6 +442,18 @@ impl<'s> TransientRows<'s> {
     /// the run, the row is dropped.
     #[inline]
     pub(super) fn push(&mut self, time: Value) -> Result<(), SimulationError> {
+        if !self.begun {
+            // Row 0 waits for the sink to begin; any later row begins it.
+            if self.points != 0 {
+                self.start()?;
+            } else {
+                std::mem::swap(&mut self.row, &mut self.next);
+                self.start = time;
+                self.time = time;
+                self.points = 1;
+                return Ok(());
+            }
+        }
         let written = match &mut self.target {
             Target::Memory(sink) => sink.row(time, &self.next),
             Target::External(_) if self.stop.is_some() => return Ok(()),
@@ -336,10 +525,13 @@ impl<'s> TransientRows<'s> {
         &'r self,
         result: &'r TransientResult,
     ) -> super::checkpoint::PublishedSource<'r> {
+        let first = self.layout.device_op_slots().unwrap_or(self.row.len());
         super::checkpoint::PublishedSource {
             result,
             row: self.last_row(),
             points: self.points,
+            device_columns: &self.layout.device_ops,
+            device_row: self.row.get(first..).unwrap_or(&[]),
         }
     }
 
@@ -398,6 +590,81 @@ impl<'s> TransientRows<'s> {
         }
     }
 
+    /// Gather a device report into the device columns of the row being gathered; a column the
+    /// report does not name is NaN, as an in-memory trace is padded.
+    pub(super) fn gather_device_ops(
+        &mut self,
+        report: &DeviceOpReport,
+        observed: &[(String, String, Value)],
+    ) -> Result<(), SimulationError> {
+        let Some(first) = self.layout.device_op_slots() else {
+            return Ok(());
+        };
+        let count = self.layout.device_ops.len();
+        let mut next = std::mem::take(&mut self.next);
+        let slots = &mut next[first..first + count];
+        slots.fill(Value::NAN);
+        let mapped = self.map_device_ops(report, observed, |index, value| slots[index] = value);
+        self.next = next;
+        mapped
+    }
+
+    /// Call `put` with each reported value's device column. The report names its values in the
+    /// columns' order, so each is looked for where the last one was found first. A value no
+    /// column holds is refused: the sink's columns were fixed by the first report.
+    fn map_device_ops(
+        &self,
+        report: &DeviceOpReport,
+        observed: &[(String, String, Value)],
+        mut put: impl FnMut(usize, Value),
+    ) -> Result<(), SimulationError> {
+        let columns = &self.layout.device_ops;
+        let named = |index: usize, device: &str, parameter: &str| {
+            columns
+                .get(index)
+                .is_some_and(|(known_device, known_parameter)| {
+                    known_device.eq_ignore_ascii_case(device)
+                        && known_parameter.eq_ignore_ascii_case(parameter)
+                })
+        };
+        let mut cursor = 0;
+        for (device, parameter, value) in reported(report, observed) {
+            let index = if named(cursor, device, parameter) {
+                cursor
+            } else {
+                (0..columns.len())
+                    .find(|&index| named(index, device, parameter))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "device '{device}' reported operating-point value '{parameter}', \
+                             which its first report did not name; a transient written to a \
+                             result store keeps the values the first report names"
+                        ))
+                    })?
+            };
+            put(index, value);
+            cursor = index + 1;
+        }
+        Ok(())
+    }
+
+    /// Overwrite row 0's value of device operating-point column `index`.
+    pub(super) fn amend_first_device_op(
+        &mut self,
+        index: usize,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        match self.layout.device_op_slots() {
+            Some(first) if index < self.layout.device_ops.len() => {
+                self.amend_first(first + index, value)
+            }
+            _ => Err(SimulationError::Circuit(format!(
+                "device operating-point column {index} is outside this run's {} columns",
+                self.layout.device_ops.len()
+            ))),
+        }
+    }
+
     fn amend_first(&mut self, slot: usize, value: Value) -> Result<(), SimulationError> {
         if self.stop.is_some() {
             return Ok(());
@@ -409,6 +676,9 @@ impl<'s> TransientRows<'s> {
             )));
         }
         self.row[slot] = value;
+        if !self.begun {
+            return Ok(());
+        }
         let column = u32::try_from(slot).map_err(|_| {
             SimulationError::Circuit(format!("value slot {slot} does not fit a row index"))
         })?;

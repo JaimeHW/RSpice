@@ -139,6 +139,17 @@ impl HdlVariableCapture {
     }
 
     /// The buses over the vector variables' bits.
+    /// Each slot's trace name, and whether it records a real rather than a logic value.
+    pub(super) fn slot_kinds(&self) -> Vec<(&str, bool)> {
+        #[cfg(feature = "veriloga")]
+        let reals = self.variables.iter().flat_map(|(_, _, variable)| {
+            std::iter::repeat_n(variable.range.is_none() && variable.real, variable.slots())
+        });
+        #[cfg(not(feature = "veriloga"))]
+        let reals = std::iter::empty();
+        self.slots.iter().map(String::as_str).zip(reals).collect()
+    }
+
     pub(super) fn buses(&self) -> &[DigitalBusDeclaration] {
         &self.buses
     }

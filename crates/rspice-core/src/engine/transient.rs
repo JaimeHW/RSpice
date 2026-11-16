@@ -1021,6 +1021,7 @@ mod result_rows;
 use result_rows::{TransientRowLayout, TransientRows};
 mod impulses;
 mod left_limit;
+mod sink_events;
 // Exact source-root ownership is prepared separately from the ordinary
 // controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
@@ -3005,28 +3006,43 @@ impl Engine {
         if keeps_rows {
             added_values = added_values.saturating_add(layout.current_branches().len());
         }
+        let device_ops = if record_device_op_traces {
+            Some((
+                circuit
+                    .transient_device_op_report(
+                        solution,
+                        &diode_history.cqd_prev,
+                        &bjt_history.accepted_terminal_currents,
+                        Some(&bjt_history.accepted_external_bc_current),
+                        Some([
+                            &jfet_history.accepted_cqgs,
+                            &jfet_history.accepted_cqgd,
+                            &jfet_history.accepted_cqds,
+                        ]),
+                        Some(&mosfet_history.accepted_displacement_currents),
+                    )
+                    .map_err(SimulationError::Circuit)?,
+                Self::veriloga_terminal_meter_observables(circuit, solution)?,
+            ))
+        } else {
+            None
+        };
+        // A sink keeps the device values in the row; a run in memory, in
+        // the result's device traces.
+        let device_ops = match device_ops {
+            Some((report, observed)) if rows.layout().device_op_slots().is_some() => {
+                rows.gather_device_ops(&report, &observed)?;
+                None
+            }
+            other => other,
+        };
         rows.push(time)?;
-        if record_device_op_traces {
-            added_values = added_values.saturating_add(
-                result.record_device_op_sample(
-                    rows.points(),
-                    circuit
-                        .transient_device_op_report(
-                            solution,
-                            &diode_history.cqd_prev,
-                            &bjt_history.accepted_terminal_currents,
-                            Some(&bjt_history.accepted_external_bc_current),
-                            Some([
-                                &jfet_history.accepted_cqgs,
-                                &jfet_history.accepted_cqgd,
-                                &jfet_history.accepted_cqds,
-                            ]),
-                            Some(&mosfet_history.accepted_displacement_currents),
-                        )
-                        .map_err(SimulationError::Circuit)?,
-                    &Self::veriloga_terminal_meter_observables(circuit, solution)?,
-                ),
-            );
+        if let Some((report, observed)) = device_ops {
+            added_values = added_values.saturating_add(result.record_device_op_sample(
+                rows.points(),
+                report,
+                &observed,
+            ));
         }
         circuit.accept_generic_switch_transient_step();
         Ok(added_values)
@@ -5010,6 +5026,7 @@ impl Engine {
                 let schema = rows.layout().schema(&[], &[], &[]);
                 rows.begin(&schema)?;
                 rows.push(0.0)?;
+                rows.start()?;
                 result.time.clear();
             }
             let final_checkpoint = if final_checkpoint_retention.is_retained()
@@ -6294,6 +6311,17 @@ impl Engine {
             fft_results: Vec::new(),
         };
         let mut external_sink = result_sink.map(std::cell::RefCell::borrow_mut);
+        // The device report at row 0, recorded once the row is written.
+        let initial_device_ops = if record_device_op_traces {
+            Some((
+                circuit
+                    .initial_transient_device_op_report(&solution)
+                    .map_err(SimulationError::Circuit)?,
+                Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
+            ))
+        } else {
+            None
+        };
         let mut rows = {
             let layout = TransientRowLayout::new(
                 &capture_plan.voltages,
@@ -6303,19 +6331,38 @@ impl Engine {
             );
             match external_sink.as_deref_mut() {
                 // An instance parameter cannot move during the run: a sink
-                // keeps it as a constant column of every row.
-                Some(sink) => TransientRows::to_sink(
-                    layout
-                        .with_step_and_stores(
-                            result
-                                .store_traces
-                                .iter()
-                                .map(|trace| trace.name.clone())
-                                .collect(),
-                        )
-                        .with_constants(circuit.requested_static_instance_parameters(netlist)),
-                    sink,
-                ),
+                // keeps it as a constant column of every row. Each device
+                // value the first report names is a column too; the result
+                // keeps its trace's name, in the order a run in memory has.
+                Some(sink) => {
+                    let device_ops = initial_device_ops
+                        .as_ref()
+                        .map(|(report, observed)| result_rows::device_op_columns(report, observed))
+                        .unwrap_or_default();
+                    result.device_op_traces = device_ops
+                        .iter()
+                        .map(|(device, parameter)| {
+                            crate::analysis::transient::TransientDeviceOpTrace {
+                                device_name: device.clone(),
+                                parameter: parameter.clone(),
+                                values: Vec::new(),
+                            }
+                        })
+                        .collect();
+                    TransientRows::to_sink(
+                        layout
+                            .with_step_and_stores(
+                                result
+                                    .store_traces
+                                    .iter()
+                                    .map(|trace| trace.name.clone())
+                                    .collect(),
+                            )
+                            .with_device_ops(device_ops)
+                            .with_constants(circuit.requested_static_instance_parameters(netlist)),
+                        sink,
+                    )
+                }
                 None => TransientRows::in_memory(layout, trace_capacity),
             }
         };
@@ -6351,14 +6398,8 @@ impl Engine {
             rows.push(resume_time)?;
         }
         drop(branch_currents);
-        if record_device_op_traces {
-            result.record_device_op_sample(
-                rows.points(),
-                circuit
-                    .initial_transient_device_op_report(&solution)
-                    .map_err(SimulationError::Circuit)?,
-                &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
-            );
+        if let Some((report, observed)) = initial_device_ops {
+            result_rows::record_first_device_ops(&mut result, &mut rows, report, &observed)?;
         }
         let mut event_changes = Vec::new();
         let mut event_trace_points = Vec::new();
@@ -6381,6 +6422,22 @@ impl Engine {
         result
             .digital_buses
             .extend(hdl_variables.buses().iter().cloned());
+        // A sink takes the event traces as they go, each its own signal.
+        let mut sink_events = if rows.keeps_rows() {
+            None
+        } else {
+            Some(sink_events::SinkEvents::declare_nets(
+                &mut rows,
+                &result.node_names,
+                &result.event_only_nodes,
+                if record_xspice_event_traces {
+                    &capture_plan.event_nodes
+                } else {
+                    &[]
+                },
+                &hdl_variables.slot_kinds(),
+            )?)
+        };
         let mut digital_snapshot = Vec::new();
         let mut digital_event_codes = Vec::new();
         let mut real_snapshot = Vec::new();
@@ -6588,15 +6645,15 @@ impl Engine {
             // The initial report is created before capacitor histories are
             // initialized. Refresh its sample so solution-dependent C probes
             // expose the DC-evaluated capacitance at t=0.
-            retained_result_values = retained_result_values.saturating_add(
-                result.record_device_op_sample(
-                    rows.points(),
+            retained_result_values =
+                retained_result_values.saturating_add(result_rows::record_first_device_ops(
+                    &mut result,
+                    &mut rows,
                     circuit
                         .initial_transient_device_op_report(&solution)
                         .map_err(SimulationError::Circuit)?,
                     &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
-                ),
-            );
+                )?);
             self.ensure_transient_result_limits(retained_result_values)?;
         }
 
@@ -7050,6 +7107,9 @@ impl Engine {
                 abort,
             )?;
             retained_result_values = retained_result_values.saturating_add(added_values);
+            if let Some(events) = sink_events.as_mut() {
+                events.declare_impulses(&mut rows, &result)?;
+            }
             Some(plan)
         } else {
             None
@@ -7123,9 +7183,10 @@ impl Engine {
             // and before the accepted terminal-current history was installed.
             // Recording at the same sample index overwrites it in place with
             // restored diode/BJT caches and exact accepted BJT lead currents.
-            retained_result_values = retained_result_values.saturating_add(
-                result.record_device_op_sample(
-                    rows.points(),
+            retained_result_values =
+                retained_result_values.saturating_add(result_rows::record_first_device_ops(
+                    &mut result,
+                    &mut rows,
                     circuit
                         .transient_device_op_report(
                             &solution,
@@ -7141,8 +7202,7 @@ impl Engine {
                         )
                         .map_err(SimulationError::Circuit)?,
                     &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
-                ),
-            );
+                )?);
             self.ensure_transient_result_limits(retained_result_values)?;
         }
         // A checkpoint taken where the published row was not the restart
@@ -7982,6 +8042,12 @@ impl Engine {
                 }
             };
         }
+        // The run starts integrating: the sink begins with every signal the
+        // set-up named and takes row 0.
+        if let Some(events) = sink_events.as_mut() {
+            events.declare_recorded(&mut rows, &result)?;
+        }
+        rows.start()?;
         // A caller's sink out of disk or memory ends the run at the accepted point whose row it
         // refused, before another step or event is taken.
         while !rows.stopped() && !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
@@ -12438,6 +12504,9 @@ impl Engine {
                         retained_result_values,
                         abort,
                     )?;
+                    if let Some(events) = sink_events.as_mut() {
+                        events.gathered(&mut rows, &mut result, &mut retained_result_values)?;
+                    }
                     if let Some(capture) = state_capture
                         && capture.offer(
                             t,
@@ -13188,6 +13257,9 @@ impl Engine {
                 retained_result_values,
                 abort,
             )?;
+            if let Some(events) = sink_events.as_mut() {
+                events.gathered(&mut rows, &mut result, &mut retained_result_values)?;
+            }
             if let Some(capture) = state_capture
                 && capture.offer(
                     t,
@@ -13617,6 +13689,11 @@ impl Engine {
         }
 
         // The rows a run kept in memory become its time and waveform columns.
+        // Every change the traces still hold goes to the sink.
+        if let Some(events) = sink_events.as_mut() {
+            rows.start()?;
+            events.finish(&mut rows, &mut result)?;
+        }
         rows.fill_result(&mut result);
         log::info!("Transient complete: {} time points computed", rows.points());
         if let Some(runtime) = &transient_noise {

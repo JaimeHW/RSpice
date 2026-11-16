@@ -39,6 +39,8 @@ enum SlotTarget {
     StepSize,
     /// A store trace (a memristor's resistance): its index in the result's store traces.
     Store(usize),
+    /// A device operating-point value: its index in the result's device traces.
+    DeviceOp(usize),
 }
 
 impl SlotTarget {
@@ -50,6 +52,10 @@ impl SlotTarget {
             SlotTarget::StepSize => Some(&mut result.step_sizes),
             SlotTarget::Store(index) => result
                 .store_traces
+                .get_mut(index)
+                .map(|trace| &mut trace.values),
+            SlotTarget::DeviceOp(index) => result
+                .device_op_traces
                 .get_mut(index)
                 .map(|trace| &mut trace.values),
             SlotTarget::Parameter(_) => None,
@@ -147,7 +153,7 @@ pub(super) fn run(
             store.save_manifest(&reader)?;
             Ok(reader)
         });
-    let reader = match opened {
+    let mut reader = match opened {
         Ok(reader) => reader,
         Err(error) => {
             let failure = store_error(&store.dir, error);
@@ -162,6 +168,12 @@ pub(super) fn run(
             return Err(CliError::InternalError { message });
         }
     };
+    let mut shell = shell;
+    if let Err(error) = fill_events(&mut reader, &mut shell) {
+        let failure = store_error(&store.dir, error);
+        store.discard();
+        return Err(failure);
+    }
     Ok(StoredTransient {
         shell,
         rows: StoredRows {
@@ -181,6 +193,161 @@ pub(super) fn run(
     })
 }
 
+/// Read the run's event signals back into the traces the result names: its digital and real
+/// event traces and its impulse traces, each of which the run moved to the store as it went.
+fn fill_events(
+    reader: &mut SegmentReader<FileIo>,
+    shell: &mut TransientResult,
+) -> Result<(), StoreError> {
+    use rspice_core::analysis::transient::{DigitalTracePoint, RealTracePoint};
+    use rspice_core::xspice::DigitalValue;
+    use rspice_core::{
+        CurrentImpulseOwner, CurrentImpulsePoint, ImpulseDerivative, VoltageImpulsePoint,
+    };
+    use rspice_results_store::EventValue;
+    let events: Vec<(usize, String, String, String)> = reader
+        .schema()
+        .signals
+        .iter()
+        .enumerate()
+        .filter(|(_, signal)| signal.kind.slots() == 0)
+        .map(|(id, signal)| {
+            (
+                id,
+                signal.quantity.clone(),
+                signal.name.clone(),
+                signal.path.clone(),
+            )
+        })
+        .collect();
+    let malformed = |what: &str, name: &str| StoreError::Io {
+        kind: std::io::ErrorKind::InvalidData,
+        message: format!("the transient store's {what} signal '{name}' holds a change it cannot"),
+    };
+    for (id, quantity, name, path) in events {
+        let changes = reader.events(id, f64::NEG_INFINITY, f64::INFINITY)?;
+        let real = |value: &EventValue| match value {
+            EventValue::Real(value) => Some(*value),
+            _ => None,
+        };
+        let current = |owner: &CurrentImpulseOwner| match owner {
+            CurrentImpulseOwner::Branch { branch_name } => path.is_empty() && *branch_name == name,
+            CurrentImpulseOwner::DeviceLead {
+                device_name,
+                parameter,
+            } => *device_name == path && *parameter == name,
+        };
+        match quantity.as_str() {
+            "digital" => {
+                let Some(trace) = shell
+                    .digital_traces
+                    .iter_mut()
+                    .find(|t| t.node_name == name)
+                else {
+                    continue;
+                };
+                trace.points = changes
+                    .iter()
+                    .map(|change| {
+                        DigitalValue::from_store_strength(change.strength)
+                            .map(|value| DigitalTracePoint {
+                                time: change.time,
+                                value,
+                            })
+                            .ok_or_else(|| malformed("digital", &name))
+                    })
+                    .collect::<Result<_, _>>()?;
+            }
+            "real_event" => {
+                let Some(trace) = shell.real_traces.iter_mut().find(|t| t.node_name == name) else {
+                    continue;
+                };
+                trace.points = changes
+                    .iter()
+                    .map(|change| {
+                        real(&change.value)
+                            .map(|value| RealTracePoint {
+                                time: change.time,
+                                value,
+                            })
+                            .ok_or_else(|| malformed("real event", &name))
+                    })
+                    .collect::<Result<_, _>>()?;
+            }
+            "current_impulse" | "current_impulse_derivative" => {
+                let Some(trace) = shell
+                    .current_impulses
+                    .iter_mut()
+                    .flatten()
+                    .find(|trace| current(&trace.owner))
+                else {
+                    continue;
+                };
+                if quantity == "current_impulse" {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| {
+                            real(&change.value)
+                                .map(|charge_coulombs| CurrentImpulsePoint {
+                                    time: change.time,
+                                    charge_coulombs,
+                                })
+                                .ok_or_else(|| malformed("impulse", &name))
+                        })
+                        .collect::<Result<_, _>>()?;
+                } else {
+                    trace.derivatives =
+                        derivatives(&changes).ok_or_else(|| malformed("impulse", &name))?;
+                }
+            }
+            "voltage_impulse" | "voltage_impulse_derivative" => {
+                let Some(trace) = shell
+                    .voltage_impulses
+                    .iter_mut()
+                    .flatten()
+                    .find(|trace| trace.node_name == name)
+                else {
+                    continue;
+                };
+                if quantity == "voltage_impulse" {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| {
+                            real(&change.value)
+                                .map(|volt_seconds| VoltageImpulsePoint {
+                                    time: change.time,
+                                    volt_seconds,
+                                })
+                                .ok_or_else(|| malformed("impulse", &name))
+                        })
+                        .collect::<Result<_, _>>()?;
+                } else {
+                    trace.derivatives =
+                        derivatives(&changes).ok_or_else(|| malformed("impulse", &name))?;
+                }
+            }
+            _ => {}
+        }
+    }
+    /// An impulse derivative's order is its change's sequence.
+    fn derivatives(
+        changes: &[rspice_results_store::EventChange],
+    ) -> Option<Vec<ImpulseDerivative>> {
+        changes
+            .iter()
+            .map(|change| match change.value {
+                EventValue::Real(coefficient) => Some(ImpulseDerivative {
+                    time: change.time,
+                    order: change.sequence,
+                    coefficient,
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+    Ok(())
+}
+
 /// Each slot's place in the result: the store's voltages are the saved nodes in node order, then
 /// its currents the saved branches in branch order, so each name is the next one of its kind.
 fn slot_targets(
@@ -190,6 +357,10 @@ fn slot_targets(
     let (mut next_node, mut next_branch, mut parameters) = (0usize, 0usize, 0usize);
     let mut targets = Vec::with_capacity(reader.slots());
     for signal in &reader.schema().signals {
+        // An event signal takes no slot; its changes are read on their own.
+        if signal.kind.slots() == 0 {
+            continue;
+        }
         if signal.quantity == "instance_parameter" {
             targets.push(SlotTarget::Parameter(parameters));
             parameters += 1;
@@ -197,6 +368,23 @@ fn slot_targets(
         }
         if signal.quantity == "step_size" {
             targets.push(SlotTarget::StepSize);
+            continue;
+        }
+        if signal.quantity == "device_op" {
+            let index = shell
+                .device_op_traces
+                .iter()
+                .position(|trace| {
+                    trace.device_name == signal.path && trace.parameter == signal.name
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "the transient store's device value '{}' of '{}' is not a result device \
+                         trace",
+                        signal.name, signal.path
+                    )
+                })?;
+            targets.push(SlotTarget::DeviceOp(index));
             continue;
         }
         if signal.quantity == "store" {
@@ -492,6 +680,7 @@ fn probe_plan(
     let column = |target: SlotTarget| match target {
         SlotTarget::Voltage(node) => shell.voltages.get(node),
         SlotTarget::Current(branch) => shell.branch_currents.get(branch),
+        SlotTarget::DeviceOp(index) => shell.device_op_traces.get(index).map(|trace| &trace.values),
         // An output that reads these reads the run back.
         SlotTarget::Parameter(_) | SlotTarget::StepSize | SlotTarget::Store(_) => None,
     };
@@ -620,7 +809,7 @@ impl StoredRows {
                 if found.is_some()
                     || matches!(
                         self.targets[slot],
-                        SlotTarget::StepSize | SlotTarget::Store(_)
+                        SlotTarget::StepSize | SlotTarget::Store(_) | SlotTarget::DeviceOp(_)
                     )
                 {
                     continue;
@@ -655,6 +844,10 @@ impl StoredRows {
                 .store_traces
                 .get(index)
                 .map_or("store", |trace| trace.name.as_str()),
+            SlotTarget::DeviceOp(index) => shell
+                .device_op_traces
+                .get(index)
+                .map_or("device", |trace| trace.parameter.as_str()),
         };
         Err(super::shared::non_finite_error(
             "Transient",

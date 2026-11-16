@@ -1,13 +1,15 @@
 //! A transient run written through `StoreSink` reads back from its segment as exactly the columns
 //! the same run returns in memory: the time axis, every saved node voltage and branch current, NaN
-//! and signed zero included.
+//! and signed zero included, and the device values, event traces and impulses beside them.
 
 use rspice_core::NoAbort;
 use rspice_core::engine::{Engine, TransientResult, TransientStartupMode};
 use rspice_core::netlist::Netlist;
 use rspice_results_store::{MemoryIo, RunStatus, SegmentReader, SegmentState, StoreSink};
 
-/// An RC step, a rectifier, a capacitor `IC=` start, and an RC driven through XSPICE bridges.
+/// An RC step, a rectifier, a capacitor `IC=` start, an RC driven through XSPICE bridges, a clock
+/// through them with thousands of events, a memristor, a transistor whose collector current is saved, and a source stepped across a
+/// capacitor, whose current and a CCVS output carry impulses.
 const DECKS: &[(&str, &str, f64, f64, TransientStartupMode)] = &[
     (
         "rc",
@@ -46,6 +48,34 @@ const DECKS: &[(&str, &str, f64, f64, TransientStartupMode)] = &[
         5e-9,
         TransientStartupMode::OperatingPoint,
     ),
+    (
+        "clock",
+        "clock\nvin a 0 pulse(0 3.3 0 0.1n 0.1n 1n 2n)\na_adc [a] [d] adc\na_inv d dn inv\n\
+         a_dac [dn] [drv] dac\n\
+         .model adc adc_bridge (in_low=0.8 in_high=2.0 rise_delay=1p fall_delay=1p)\n\
+         .model inv d_inverter (rise_delay=50p fall_delay=50p)\n\
+         .model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)\n\
+         r1 drv out 1k\nc1 out 0 1p\n.end\n",
+        2e-6,
+        0.1e-9,
+        TransientStartupMode::OperatingPoint,
+    ),
+    (
+        "transistor",
+        "transistor\nvcc vcc 0 5\nvin in 0 sin(0.75 0.05 1meg)\nrb in b 1k\nq1 c b 0 qmod\n\
+         rc vcc c 1k\n.model qmod npn(bf=100 cje=1p cjc=1p)\n.save v(c) @q1[ic] @q1[gm]\n.end\n",
+        3e-6,
+        10e-9,
+        TransientStartupMode::OperatingPoint,
+    ),
+    (
+        "impulses",
+        "impulses\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\n\
+         R2 out 0 10\n.save v(out) i(v1) i(h1)\n.end\n",
+        3e-9,
+        5e-12,
+        TransientStartupMode::OperatingPoint,
+    ),
 ];
 
 fn bits(values: &[f64]) -> Vec<u64> {
@@ -70,11 +100,16 @@ fn saved_columns(result: &TransientResult) -> Vec<(&str, &[f64])> {
         .store_traces
         .iter()
         .map(|trace| (trace.name.as_str(), trace.values.as_slice()));
+    let devices = result
+        .device_op_traces
+        .iter()
+        .map(|trace| (trace.parameter.as_str(), trace.values.as_slice()));
     voltages
         .chain(currents)
         .map(|(name, column)| (name.as_str(), column.as_slice()))
         .chain(std::iter::once(("step", result.step_sizes.as_slice())))
         .chain(stores)
+        .chain(devices)
         .collect()
 }
 
@@ -114,9 +149,30 @@ fn a_transient_written_through_the_store_reads_back_as_the_in_memory_result() {
                     .all(|trace| trace.values.is_empty()),
             "{label}: the step sizes and store traces went to the sink"
         );
-        assert_eq!(
-            streamed.digital_traces, memory.digital_traces,
-            "{label}: event traces"
+        assert!(
+            streamed
+                .digital_traces
+                .iter()
+                .all(|trace| trace.points.is_empty())
+                && streamed
+                    .real_traces
+                    .iter()
+                    .all(|trace| trace.points.is_empty())
+                && streamed
+                    .device_op_traces
+                    .iter()
+                    .all(|t| t.values.is_empty())
+                && streamed
+                    .current_impulses
+                    .iter()
+                    .flatten()
+                    .all(|trace| trace.points.is_empty() && trace.derivatives.is_empty())
+                && streamed
+                    .voltage_impulses
+                    .iter()
+                    .flatten()
+                    .all(|trace| trace.points.is_empty() && trace.derivatives.is_empty()),
+            "{label}: the device values, event traces and impulses went to the sink"
         );
 
         let columns = saved_columns(&memory);
@@ -151,6 +207,177 @@ fn a_transient_written_through_the_store_reads_back_as_the_in_memory_result() {
                 "{label}: {name}"
             );
         }
+        // Each deck records what it is here for.
+        let recorded = match label {
+            "xspice bridges" => memory.digital_traces.iter().any(|t| t.points.len() > 1),
+            // More changes than the run gathers before it moves them to the sink, two values each.
+            "clock" => {
+                memory
+                    .digital_traces
+                    .iter()
+                    .map(|trace| trace.points.len())
+                    .sum::<usize>()
+                    > 4096 / 2
+            }
+            "transistor" => memory
+                .device_op_traces
+                .iter()
+                .any(|trace| trace.parameter.eq_ignore_ascii_case("gm")),
+            "impulses" => {
+                memory
+                    .current_impulses
+                    .iter()
+                    .flatten()
+                    .any(|trace| !trace.points.is_empty() && !trace.derivatives.is_empty())
+                    && memory
+                        .voltage_impulses
+                        .iter()
+                        .flatten()
+                        .any(|trace| trace.points.len() > 1)
+            }
+            _ => true,
+        };
+        assert!(recorded, "{label}: nothing to compare");
+        let mut events = streamed;
+        read_events(&mut events, &mut reader);
+        assert_eq!(
+            events.digital_traces, memory.digital_traces,
+            "{label}: digital"
+        );
+        assert_eq!(
+            events.real_traces, memory.real_traces,
+            "{label}: real events"
+        );
+        assert_eq!(
+            events.current_impulses, memory.current_impulses,
+            "{label}: current impulses"
+        );
+        assert_eq!(
+            events.voltage_impulses, memory.voltage_impulses,
+            "{label}: voltage impulses"
+        );
+        assert_eq!(
+            receipt.events,
+            reader
+                .schema()
+                .signals
+                .iter()
+                .enumerate()
+                .filter(|(_, signal)| signal.kind.slots() == 0)
+                .map(|(id, _)| reader.event_count(id).unwrap())
+                .sum::<u64>(),
+            "{label}: events"
+        );
+    }
+}
+
+/// The event signals of `reader` read back into `shell`'s traces, by name: digital and real
+/// event changes, and impulses, whose derivatives keep their order as their sequence.
+fn read_events(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) {
+    use rspice_core::VoltageImpulsePoint;
+    use rspice_core::analysis::transient::{DigitalTracePoint, RealTracePoint};
+    use rspice_core::xspice::DigitalValue;
+    use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, ImpulseDerivative};
+    use rspice_results_store::EventValue;
+    let signals = reader.schema().signals.clone();
+    for (id, signal) in signals.iter().enumerate() {
+        if signal.kind.slots() != 0 {
+            continue;
+        }
+        let changes = reader.events(id, f64::NEG_INFINITY, f64::INFINITY).unwrap();
+        let real = |value: &EventValue| match value {
+            EventValue::Real(value) => *value,
+            other => panic!("{}: {other:?}", signal.name),
+        };
+        let derivatives = || {
+            changes
+                .iter()
+                .map(|change| ImpulseDerivative {
+                    time: change.time,
+                    order: change.sequence,
+                    coefficient: real(&change.value),
+                })
+                .collect::<Vec<_>>()
+        };
+        match signal.quantity.as_str() {
+            "digital" => {
+                if let Some(trace) = shell
+                    .digital_traces
+                    .iter_mut()
+                    .find(|trace| trace.node_name == signal.name)
+                {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| DigitalTracePoint {
+                            time: change.time,
+                            value: DigitalValue::from_store_strength(change.strength).unwrap(),
+                        })
+                        .collect();
+                }
+            }
+            "real_event" => {
+                if let Some(trace) = shell
+                    .real_traces
+                    .iter_mut()
+                    .find(|trace| trace.node_name == signal.name)
+                {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| RealTracePoint {
+                            time: change.time,
+                            value: real(&change.value),
+                        })
+                        .collect();
+                }
+            }
+            "current_impulse" | "current_impulse_derivative" => {
+                let trace = shell
+                    .current_impulses
+                    .iter_mut()
+                    .flatten()
+                    .find(|trace| match &trace.owner {
+                        CurrentImpulseOwner::Branch { branch_name } => {
+                            signal.path.is_empty() && *branch_name == signal.name
+                        }
+                        CurrentImpulseOwner::DeviceLead {
+                            device_name,
+                            parameter,
+                        } => *device_name == signal.path && *parameter == signal.name,
+                    })
+                    .unwrap();
+                if signal.quantity == "current_impulse" {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| CurrentImpulsePoint {
+                            time: change.time,
+                            charge_coulombs: real(&change.value),
+                        })
+                        .collect();
+                } else {
+                    trace.derivatives = derivatives();
+                }
+            }
+            "voltage_impulse" | "voltage_impulse_derivative" => {
+                let trace = shell
+                    .voltage_impulses
+                    .iter_mut()
+                    .flatten()
+                    .find(|trace| trace.node_name == signal.name)
+                    .unwrap();
+                if signal.quantity == "voltage_impulse" {
+                    trace.points = changes
+                        .iter()
+                        .map(|change| VoltageImpulsePoint {
+                            time: change.time,
+                            volt_seconds: real(&change.value),
+                        })
+                        .collect();
+                } else {
+                    trace.derivatives = derivatives();
+                }
+            }
+            other => panic!("unexpected {other} event signal"),
+        }
     }
 }
 
@@ -161,7 +388,7 @@ fn read_back(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) 
     shell.time = reader.read_x(0, rows).unwrap();
     let (mut next_node, mut next_branch) = (0, 0);
     let signals = reader.schema().signals.clone();
-    for (slot, signal) in signals.iter().enumerate() {
+    for (slot, signal) in signals.iter().enumerate().take(reader.slots()) {
         let values = reader.read_slot(slot, 0, rows).unwrap();
         match signal.quantity.as_str() {
             "voltage" => {
@@ -184,6 +411,16 @@ fn read_back(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) 
                 shell.adopt_instance_parameter(&signal.path, &signal.name, values);
             }
             "step_size" => shell.step_sizes = values,
+            "device_op" => {
+                let trace = shell
+                    .device_op_traces
+                    .iter_mut()
+                    .find(|trace| {
+                        trace.device_name == signal.path && trace.parameter == signal.name
+                    })
+                    .unwrap();
+                trace.values = values;
+            }
             "store" => {
                 let trace = shell
                     .store_traces
@@ -269,6 +506,7 @@ fn a_deck_whose_outputs_read_whole_waveforms_completes_them_from_the_rows_read_b
 /// offered after it.
 struct FillsAt {
     kept: rspice_core::result_sink::VecSink,
+    schema: Option<rspice_core::result_sink::ResultSchema>,
     refuse: usize,
     refused_at: Option<f64>,
     offered_after: usize,
@@ -279,6 +517,7 @@ impl FillsAt {
     fn new(refuse: usize) -> Self {
         Self {
             kept: rspice_core::result_sink::VecSink::new(),
+            schema: None,
             refuse,
             refused_at: None,
             offered_after: 0,
@@ -293,6 +532,7 @@ impl rspice_core::result_sink::ResultSink for FillsAt {
         schema: &rspice_core::result_sink::ResultSchema,
         meta: &rspice_core::result_sink::RunMeta,
     ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.schema = Some(schema.clone());
         self.kept.begin(schema, meta)
     }
 
@@ -409,14 +649,37 @@ fn a_sink_out_of_disk_ends_the_run_at_the_refused_point_with_no_later_step_or_ev
             })
             .collect::<Vec<_>>()
     };
+    // The changes the run moved to the sink, read back into its traces by name.
+    let mut stopped = run.result;
+    let schema = sink.schema.clone().unwrap();
+    for trace in &mut stopped.digital_traces {
+        let id = schema
+            .signals
+            .iter()
+            .position(|signal| signal.quantity == "digital" && signal.name == trace.node_name)
+            .unwrap() as u32;
+        trace.points = sink
+            .kept
+            .event_changes()
+            .iter()
+            .filter(|change| change.signal == id)
+            .map(
+                |change| rspice_core::analysis::transient::DigitalTracePoint {
+                    time: change.time,
+                    value: rspice_core::xspice::DigitalValue::from_store_strength(change.strength)
+                        .unwrap(),
+                },
+            )
+            .collect();
+    }
     assert!(
-        run.result
+        stopped
             .digital_traces
             .iter()
             .flat_map(|trace| &trace.points)
             .all(|point| point.time <= stop)
     );
-    assert_eq!(until(&run.result), until(&memory));
+    assert_eq!(until(&stopped), until(&memory));
 
     // Refused at its first row, the run stops there too, typed, with nothing kept.
     let mut sink = FillsAt::new(0);

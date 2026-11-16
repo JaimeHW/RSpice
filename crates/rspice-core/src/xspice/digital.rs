@@ -195,6 +195,28 @@ pub struct DigitalValue {
     pub strength: DigitalStrength,
 }
 
+/// Every digital state, in declaration order: the order a results store numbers them.
+const DIGITAL_STATES: [DigitalState; 10] = [
+    DigitalState::Zero,
+    DigitalState::One,
+    DigitalState::Unknown,
+    DigitalState::ZeroR,
+    DigitalState::OneR,
+    DigitalState::UnknownR,
+    DigitalState::ZeroZ,
+    DigitalState::OneZ,
+    DigitalState::UnknownZ,
+    DigitalState::HighZ,
+];
+
+/// Every drive strength, in declaration order: the order a results store numbers them.
+const DIGITAL_STRENGTHS: [DigitalStrength; 4] = [
+    DigitalStrength::Undetermined,
+    DigitalStrength::HighZ,
+    DigitalStrength::Resistive,
+    DigitalStrength::Strong,
+];
+
 /// ngspice's XSPICE digital user-defined-node resolver table.
 ///
 /// Table indexes are strength-major: strong, resistive, high-Z, undetermined;
@@ -327,6 +349,41 @@ impl DigitalValue {
             DigitalStrength::Undetermined => 9,
         };
         level + offset
+    }
+
+    /// The strength byte a results store keeps for this value beside its logic level: the
+    /// state's place in [`DigitalState`] times four plus the strength's place in
+    /// [`DigitalStrength`], so the store gives back exactly the value written.
+    pub fn store_strength(&self) -> u8 {
+        let state = DIGITAL_STATES
+            .iter()
+            .position(|state| *state == self.state)
+            .unwrap_or(0) as u8;
+        let strength = DIGITAL_STRENGTHS
+            .iter()
+            .position(|strength| *strength == self.strength)
+            .unwrap_or(0) as u8;
+        state * 4 + strength
+    }
+
+    /// The logic level a results store keeps for this value: 0, 1, X, or Z for a node no driver
+    /// holds.
+    pub fn store_logic(&self) -> crate::result_sink::Logic {
+        use crate::result_sink::Logic;
+        match self.state {
+            DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => Logic::Zero,
+            DigitalState::One | DigitalState::OneR | DigitalState::OneZ => Logic::One,
+            DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => Logic::X,
+            DigitalState::HighZ => Logic::Z,
+        }
+    }
+
+    /// The value a results store's strength byte names, the inverse of [`Self::store_strength`].
+    pub fn from_store_strength(code: u8) -> Option<Self> {
+        Some(Self {
+            state: *DIGITAL_STATES.get(usize::from(code / 4))?,
+            strength: DIGITAL_STRENGTHS[usize::from(code % 4)],
+        })
     }
 
     /// Decode the value one XSPICE event code names.
