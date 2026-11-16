@@ -56,6 +56,55 @@ fn the_inspector_and_the_toolbar_name_each_view_by_its_label() {
     }
 }
 
+/// The workspace has one name. The rail, the document bar, the title, the
+/// phone's tab bar and the surface catalog all read the workspace's label at
+/// every width, and the navigator's header names what it lists, as every
+/// other workspace's does.
+#[test]
+fn every_surface_that_names_the_workspace_reads_verify() {
+    use crate::feature_tests::replay::Replay;
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::host::{DocumentHost, Host};
+    use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
+
+    assert_eq!(Workspace::Verify.label(), "Verify");
+    assert_eq!(SurfaceId::Verify.label(), "Verify");
+    for size in [
+        egui::vec2(1440.0, 900.0),
+        egui::vec2(820.0, 1180.0),
+        egui::vec2(390.0, 844.0),
+    ] {
+        let mut replay = Replay::new().sized(size);
+        replay.app.state.workbench.activate(Workspace::Verify);
+        let controls = replay.frames(Vec::new());
+        let old_name = controls
+            .iter()
+            .filter(|control| {
+                [&control.label, &control.value, &control.description]
+                    .iter()
+                    .any(|text| text.contains("Verification"))
+            })
+            .map(|control| (control.role, control.label.as_str()))
+            .collect::<Vec<_>>();
+        assert!(old_name.is_empty(), "{size:?}: {old_name:?}");
+        assert!(
+            controls.iter().any(|control| control.label == "Verify"),
+            "{size:?}: nothing names the open workspace"
+        );
+        let app = &replay.app;
+        assert_eq!(app.title_cell(Workspace::Verify), "Verify");
+        assert_eq!(app.navigator_section(Workspace::Verify).title, "Views");
+        assert_eq!(
+            app.state
+                .workspace_documents(Workspace::Verify)
+                .iter()
+                .map(|document| document.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Verify"]
+        );
+    }
+}
+
 /// A stored session reopens on the Verify view it was left on, stored and
 /// read back the way the application does it.
 #[test]

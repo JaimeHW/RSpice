@@ -255,7 +255,7 @@ define_surface_catalog! {
     Simulate => { id: "simulate", label: "Simulation setup", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=simulate" },
     Stimulus => { id: "stimulus", label: "Stimulus Library", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=stimulus" },
     Results => { id: "results", label: "Results", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=results" },
-    Verify => { id: "verify", label: "Verification", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=verify" },
+    Verify => { id: "verify", label: "Verify", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=verify" },
     Models => { id: "models", label: "Models and libraries", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=models" },
     Netlist => { id: "netlist", label: "Code and automation", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=netlist" },
     ReleaseCockpit => { id: "release-cockpit", label: "Release closure", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=release-cockpit" },

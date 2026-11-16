@@ -2,7 +2,7 @@
 //! document.
 
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::state::WorkspaceDocumentId;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
@@ -27,7 +27,7 @@ pub fn simulation_plan_documents() -> Vec<WorkspaceDocument> {
 pub fn verification_documents() -> Vec<WorkspaceDocument> {
     vec![WorkspaceDocument {
         id: WorkspaceDocumentId::Verification,
-        label: "Verification".to_owned(),
+        label: Workspace::Verify.label().to_owned(),
         icon: WorkbenchIcon::Verify,
         dirty: false,
     }]

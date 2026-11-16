@@ -558,7 +558,8 @@ impl Host for RSpiceApp {
             Workspace::Simulate => "Simulation setup",
             Workspace::Stimulus => "Library browser",
             Workspace::Results => "Data browser",
-            Workspace::Verify => "Verification flows",
+            // The views, then the plan's runs under their own header.
+            Workspace::Verify => "Views",
             Workspace::Models => "Library browser",
             Workspace::Netlist => {
                 use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
@@ -686,7 +687,7 @@ impl Host for RSpiceApp {
             Workspace::Simulate => "Simulation plan".to_owned(),
             Workspace::Stimulus => "Stimulus Library".to_owned(),
             Workspace::Results => "Results".to_owned(),
-            Workspace::Verify => "Verification".to_owned(),
+            Workspace::Verify => workspace.label().to_owned(),
             Workspace::Models => "Models & PDKs".to_owned(),
             Workspace::Netlist => code_title_cell(
                 &app.state.model,

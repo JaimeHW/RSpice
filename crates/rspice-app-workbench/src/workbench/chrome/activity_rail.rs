@@ -180,7 +180,7 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
         Workspace::Simulate => "Simulation Studio",
         Workspace::Stimulus => "Stimulus Library",
         Workspace::Results => "Results",
-        Workspace::Verify => "Verification",
+        Workspace::Verify => Workspace::Verify.label(),
         Workspace::Models => "Models and PDKs",
         // The workspace name the mockup registry gives it; the two pages
         // inside it stay Netlist and Automation.
@@ -234,7 +234,7 @@ mod tests {
             "Stimulus Library"
         );
         assert_eq!(activity_workspace_label(Workspace::Results), "Results");
-        assert_eq!(activity_workspace_label(Workspace::Verify), "Verification");
+        assert_eq!(activity_workspace_label(Workspace::Verify), "Verify");
         assert_eq!(
             activity_workspace_label(Workspace::Models),
             "Models and PDKs"
