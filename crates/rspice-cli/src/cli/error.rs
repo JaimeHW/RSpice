@@ -766,16 +766,27 @@ impl CliError {
 /// Preserve writer-domain failures while typing publication failures reported
 /// by the shared atomic artifact publisher.
 ///
-/// A writer failure is the caller's own error and passes through. Everything
-/// else happened to a result the run had already produced correctly, so it
-/// becomes the engine's `OutputCommitFailed` — exit 73, not the generic I/O
-/// 74 that used to hide it.
+/// A writer failure is the caller's own error and passes through, and a full
+/// disk while staging or flushing is the output error a full disk while
+/// writing is. Everything else happened to a result the run had already
+/// produced correctly, so it becomes the engine's `OutputCommitFailed` — exit
+/// 73, not the generic I/O 74 that used to hide it.
 pub(crate) fn map_atomic_output_error(
     path: &Path,
     error: AtomicArtifactError<CliError>,
 ) -> CliError {
     match error {
         AtomicArtifactError::Write(error) => error,
+        // Flushing the last bytes can fill the disk as writing them can; the destination is
+        // untouched either way, so it is the same full disk.
+        AtomicArtifactError::Prepare(source) | AtomicArtifactError::Flush { source, .. }
+            if matches!(
+                source.kind(),
+                std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+            ) =>
+        {
+            CliError::output_error(path, source)
+        }
         other => {
             let commit = rspice_core::OutputCommitError::from_atomic(path, &other);
             CliError::CoreSimulationError {

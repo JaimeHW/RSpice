@@ -287,3 +287,82 @@ fn a_disk_that_fills_before_the_first_row_is_the_same_typed_stop_with_nothing_ke
     assert!(!output.exists() && !dir.join("out.rsr").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_completed_run_whose_output_fills_the_disk_keeps_its_whole_store_and_exits_86() {
+    use crate::commands::publish::OUTPUT_QUOTA;
+    let dir = scratch("output");
+    let input = dir.join("deck.cir");
+    std::fs::write(
+        &input,
+        "rc\nv1 in 0 sin(0 1 4meg)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 20u\n.end\n",
+    )
+    .unwrap();
+    let output = dir.join("out.csv");
+    let summary = dir.join("summary.json");
+    // `--no-store` asks for the store to go once the output is written; it never is.
+    let cli = Cli::try_parse_from([
+        "rspice",
+        "run",
+        input.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--no-store",
+        "--summary",
+        summary.to_str().unwrap(),
+    ])
+    .unwrap();
+    let Commands::Run(args) = cli.command else {
+        panic!("expected the run command");
+    };
+    // Room for the summary, not for the table.
+    OUTPUT_QUOTA.with(|cell| cell.set(Some(64 * 1024)));
+    let ended = crate::commands::run(args, &Config::default(), false, true);
+    OUTPUT_QUOTA.with(|cell| cell.set(None));
+    let error = ended.expect_err("the run stops when its output fills the disk");
+    assert_eq!(error.exit_code(), ExitCode::StoppedStorageFull, "{error}");
+    assert_eq!(error.category(), FailureCategory::StorageFull);
+    // The table is published whole or not at all.
+    assert!(!output.exists());
+
+    // The store beside the output holds the whole completed run.
+    let store = dir.join("out.rsr");
+    let mut reader =
+        SegmentReader::open(FileIo::open(&store.join(StoreDir::segment_name(0))).unwrap()).unwrap();
+    assert!(matches!(
+        reader.state(),
+        SegmentState::Complete {
+            status: RunStatus::Completed,
+            ..
+        }
+    ));
+    let rows = reader.rows();
+    assert!(rows > 1000, "{rows} rows kept");
+    let last = reader.read_x(rows - 1, 1).unwrap()[0];
+    assert!((last - 20e-6).abs() < 1e-15, "the run ended at {last}");
+
+    let summary: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&summary).unwrap()).unwrap();
+    let run = &summary["runs"][0];
+    assert_eq!(run["passed"], false);
+    let message = run["error"].as_str().unwrap();
+    assert!(
+        message.starts_with("stopped: storage full")
+            && message.contains("writing its output filled the disk")
+            && message.contains(&format!("all {rows} points are kept")),
+        "{message}"
+    );
+    assert_eq!(run["error_details"]["category"], "storage_full");
+    let kept = summary["stores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["path"].as_str() == store.to_str())
+        .unwrap();
+    assert_eq!(kept["stopped"]["reason"], "output_disk_full");
+    assert_eq!(kept["stopped"]["rows_kept"], rows);
+    assert_eq!(kept["stopped"]["at_x"].as_f64(), Some(last));
+    let _ = std::fs::remove_dir_all(&dir);
+}

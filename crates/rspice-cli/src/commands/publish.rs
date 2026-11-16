@@ -39,6 +39,37 @@ thread_local! {
     static ACTIVE: RefCell<Option<Arc<RunTransactionState>>> = const { RefCell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The bytes an artifact this thread publishes may take before its volume is full, when a
+    /// test sets it.
+    pub(crate) static OUTPUT_QUOTA: std::cell::Cell<Option<u64>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// A writer on a volume with `left` bytes free: a write that does not fit fails as a full disk.
+#[cfg(test)]
+struct QuotaWriter<'w> {
+    writer: &'w mut dyn Write,
+    left: u64,
+}
+
+#[cfg(test)]
+impl Write for QuotaWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.len() as u64 > self.left {
+            return Err(std::io::ErrorKind::StorageFull.into());
+        }
+        let written = self.writer.write(buf)?;
+        self.left -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
+
 /// Shared state of one open publication transaction.
 #[derive(Debug)]
 pub struct RunTransactionState {
@@ -192,6 +223,11 @@ where
     E: std::error::Error + 'static,
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
+    #[cfg(test)]
+    let write = |writer: &mut dyn Write| match OUTPUT_QUOTA.with(std::cell::Cell::get) {
+        Some(left) => write(&mut QuotaWriter { writer, left }),
+        None => write(writer),
+    };
     match current() {
         None => write_atomic(path, write),
         Some(state) => {
