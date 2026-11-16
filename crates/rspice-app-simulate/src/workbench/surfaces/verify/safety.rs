@@ -94,13 +94,6 @@ pub fn soa_summary(rows: &[SoaRow]) -> Option<Summary> {
     })
 }
 
-/// What the SOA toolbar can do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SoaAction {
-    Run,
-    Edit,
-}
-
 pub fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
@@ -119,11 +112,9 @@ pub fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         }
         _ => None,
     });
-    let actions = [SoaAction::Run, SoaAction::Edit];
-    let toolbar_actions = [
-        ToolbarAction::new("Run SOA checks"),
-        ToolbarAction::new("Edit SOA checks"),
-    ];
+    // Verify reads runs; it starts none. The checks are edited where the
+    // plan is.
+    let toolbar_actions = [ToolbarAction::new("Edit SOA checks")];
     let summary = rows.as_deref().and_then(soa_summary);
     let output = PageToolbar {
         title: "Electrical SOA",
@@ -132,17 +123,9 @@ pub fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         actions: &toolbar_actions,
     }
     .show(ui);
-    match output.action.and_then(|index| actions.get(index)) {
-        Some(SoaAction::Run) => {
-            let result = request_analysis_run(cx, &[crate::simulation::plan::AnalysisKind::Soa]);
-            record_action(&mut cx.state.verification, result);
-        }
-        Some(SoaAction::Edit) => {
-            let result =
-                open_analysis_configuration(cx, crate::simulation::plan::AnalysisKind::Soa);
-            record_action(&mut cx.state.verification, result);
-        }
-        None => {}
+    if output.action == Some(0) {
+        let result = open_analysis_configuration(cx, crate::simulation::plan::AnalysisKind::Soa);
+        record_action(&mut cx.state.verification, result);
     }
     if let Some(index) = output.run {
         select_verification_run(&mut cx.model.simulation, index);

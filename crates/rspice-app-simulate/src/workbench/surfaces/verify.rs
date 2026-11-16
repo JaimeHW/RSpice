@@ -26,7 +26,7 @@ use crate::ui::widgets::{Button, Problem};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::ResultsPort;
-use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, run_host};
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use crate::workbench::slots::SimulateState;
 
 use super::super::state::VerificationSessionState;
@@ -430,60 +430,6 @@ pub fn latest_validated_analysis<'m>(
     let dataset_id = model.simulation.active_run()?.dataset_id;
     latest_analysis(model, analysis_type)
         .filter(|analysis| results.analysis_evidence_is_valid(model, dataset_id, analysis))
-}
-
-fn request_analysis_run(
-    cx: &mut Cx<'_, SimulateFeature>,
-    kinds: &[crate::simulation::plan::AnalysisKind],
-) -> Result<(), String> {
-    let mut selected = None;
-    let mut plan_changed = false;
-    let mut setup = cx.model.sim_setup.clone();
-    {
-        let plan = setup.stable_analysis_plan_mut()?;
-        for kind in kinds {
-            let existing = plan
-                .instances()
-                .iter()
-                .find(|instance| instance.kind() == *kind)
-                .map(|instance| (instance.id(), instance.enabled()));
-            let id = if let Some((id, enabled)) = existing {
-                if !enabled {
-                    plan.set_enabled(id, true)
-                        .map_err(|error| error.to_string())?;
-                    plan_changed = true;
-                }
-                id
-            } else {
-                plan_changed = true;
-                plan.insert(*kind).map_err(|error| error.to_string())?.0
-            };
-            selected = Some((*kind, id));
-        }
-    }
-    setup.refresh_legacy_analysis_projections();
-    if plan_changed {
-        cx.model.sim_setup = setup;
-        invalidate_plan_bound_preflight(cx);
-    }
-    if let Some((kind, id)) = selected {
-        cx.state.active_analysis = kind.singleton_index();
-        cx.state.active_analysis_instance = Some(id);
-    }
-    {
-        let (mut host, controller) = run_host(cx);
-        crate::workbench::preflight::start(&mut host, controller, true);
-    }
-    // A run that waits on the engine's check of its decks is queued when the
-    // check authorizes it.
-    if cx.model.simulation.execution.trigger_simulation || cx.runs.preflight.run_awaits_check() {
-        Ok(())
-    } else {
-        Err(
-            "Execution was not started; review the Simulation preflight report and use its prerequisite repair action."
-                .to_owned(),
-        )
-    }
 }
 
 fn open_analysis_configuration(

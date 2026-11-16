@@ -51,7 +51,6 @@ pub mod simulation {
 }
 
 pub mod workbench {
-    pub(crate) use rspice_app_runs::workbench::preflight;
     pub(crate) use rspice_app_services::workbench::workflows;
     pub(crate) use rspice_app_state::workbench::preferences;
     pub(crate) use rspice_app_workbench::workbench::{framework, layout, localization, routing};
