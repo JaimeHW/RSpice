@@ -868,6 +868,27 @@ fn value_column_width(ui: &Ui, head: &str) -> f32 {
     (measured + 24.0).max(VALUE_COLUMN_MIN_W)
 }
 
+/// The width a body cell needs for `words`, set as the table sets values.
+fn cell_text_width(ui: &Ui, words: &str) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let measured = ui
+        .painter()
+        .layout_no_wrap(words.to_owned(), font, t.color.text)
+        .size()
+        .x;
+    measured + 24.0
+}
+
+/// A right-aligned value column that shares the width the fixed columns
+/// leave equally with its siblings, so two specifications turned into
+/// columns stay as wide as each other instead of the last taking the rest.
+fn shared_value_column(head: &str, width: f32) -> Column {
+    let mut column = Column::name(head, width);
+    column.align = super::table::Align::Right;
+    column
+}
+
 /// Specifications down, points across.
 fn plain_table(
     ui: &mut Ui,
@@ -935,18 +956,34 @@ fn transposed_table(
     state: &mut super::table::TableState,
 ) -> Asked {
     let leading = transposed_leading(sheet);
+    let last_axis = sheet.axes.len().saturating_sub(1);
+    // The last axis's column carries the nominal mark, so it is as wide as
+    // the marked value.
+    let nominal_words = sheet
+        .points
+        .iter()
+        .find(|point| point.nominal)
+        .and_then(|point| {
+            let axis = sheet.axes.get(last_axis)?;
+            Some(marked(point, axis_value(point, axis)?))
+        });
     let mut columns = if sheet.axes.is_empty() {
         vec![Column::name("Point", 160.0)]
     } else {
         sheet
             .axes
             .iter()
-            .map(|axis| {
+            .enumerate()
+            .map(|(position, axis)| {
                 let head = axis_name(axis);
+                let marked_w = nominal_words
+                    .as_deref()
+                    .filter(|_| position == last_axis)
+                    .map_or(0.0, |words| cell_text_width(ui, words));
                 match axis {
-                    PointAxis::Process => Column::words(head, 96.0),
+                    PointAxis::Process => Column::words(head, marked_w.max(96.0)),
                     _ => {
-                        let width = value_column_width(ui, &head);
+                        let width = value_column_width(ui, &head).max(marked_w);
                         Column::number(head, width)
                     }
                 }
@@ -956,7 +993,7 @@ fn transposed_table(
     columns.push(Column::words("Status", 72.0));
     columns.extend(sheet.rows.iter().map(|row| {
         let limit = limit_text(row);
-        let column = Column::number(&row.name, value_column_width(ui, &row.name));
+        let column = shared_value_column(&row.name, value_column_width(ui, &row.name));
         if limit.is_empty() {
             column
         } else {
@@ -967,7 +1004,6 @@ fn transposed_table(
         .iter()
         .map(|point| RowKey::Number(*point as u64))
         .collect::<Vec<_>>();
-    let last_axis = sheet.axes.len().saturating_sub(1);
     let response = DataTable::new("verify.corners.transposed", &columns, points.len())
         .state(state)
         .keys(&keys)

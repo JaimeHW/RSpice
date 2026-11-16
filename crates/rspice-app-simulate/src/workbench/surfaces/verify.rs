@@ -42,7 +42,7 @@ use safety::*;
 use specifications::specifications;
 
 pub(crate) use corners::{FactSection, point_facts};
-pub(crate) use monte_carlo::trial_facts;
+pub(crate) use monte_carlo::{campaign_facts, trial_facts};
 
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let page = cx.state.verification_page;

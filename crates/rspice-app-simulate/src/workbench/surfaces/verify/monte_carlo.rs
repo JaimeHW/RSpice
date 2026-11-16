@@ -21,7 +21,7 @@ use rspice_results::specification::{
     MonteCarloSpecificationGate, SpecPointScope, SpecificationComparison, SpecificationDefinition,
 };
 use rspice_results::verification::{JointYield, Row, Sheet, Statistics, Trial, YieldCount};
-use rspice_results::yield_analysis::DistributionStats;
+use rspice_results::yield_analysis::{DistributionStats, monte_carlo_provenance};
 use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
@@ -564,6 +564,85 @@ pub(crate) fn trial_facts(model: &Model, session: &VerificationSessionState) -> 
     }]
 }
 
+/// The Monte Carlo campaigns the view's statistics came from, as the
+/// inspector states them when no trial is selected: samples completed of
+/// those requested, seed, sampling and `duration`. One section per analysis
+/// whose trials a specification counts, in the order they first appear, or
+/// every Monte Carlo analysis of the run while none is judged. Several are
+/// told apart by label, and by the point each ran at where labels repeat.
+pub(crate) fn campaign_facts(model: &Model, duration: Option<&str>) -> Vec<FactSection> {
+    let Some(run) = model.simulation.active_run() else {
+        return Vec::new();
+    };
+    let sheet = model.simulation.verification_sheet();
+    // Each judged analysis with the sheet point its trials ran at.
+    let mut judged: Vec<(usize, Option<usize>)> = Vec::new();
+    let trials = sheet
+        .into_iter()
+        .flat_map(|sheet| &sheet.rows)
+        .filter_map(|row| row.statistics.as_ref())
+        .flat_map(|statistics| &statistics.trials);
+    for trial in trials {
+        if !judged
+            .iter()
+            .any(|(analysis, _)| *analysis == trial.analysis)
+        {
+            judged.push((trial.analysis, trial.point));
+        }
+    }
+    let analyses = if judged.is_empty() {
+        (0..run.analyses.len()).map(|index| (index, None)).collect()
+    } else {
+        judged
+    };
+    let campaigns = analyses
+        .into_iter()
+        .filter_map(|(index, point)| {
+            let analysis = run.analyses.get(index)?;
+            let provenance = monte_carlo_provenance(run.run_id, run.dataset_id, analysis)?;
+            Some((analysis.label.as_str(), point, provenance))
+        })
+        .collect::<Vec<_>>();
+    let several = campaigns.len() > 1;
+    campaigns
+        .iter()
+        .map(|(label, point, provenance)| {
+            let repeated = campaigns
+                .iter()
+                .filter(|(other, _, _)| other == label)
+                .count()
+                > 1;
+            let at = point
+                .and_then(|point| sheet?.points.get(point))
+                .map(point_name)
+                .filter(|_| repeated);
+            let title = match (several, at) {
+                (false, _) => "Monte Carlo".to_owned(),
+                (true, Some(at)) => format!("{label} \u{00b7} {at}"),
+                (true, None) => (*label).to_owned(),
+            };
+            let mut rows = vec![
+                (
+                    "Samples".to_owned(),
+                    format!(
+                        "{} / {}",
+                        provenance.runs_completed, provenance.runs_requested
+                    ),
+                ),
+                ("Seed".to_owned(), format!("0x{:X}", provenance.seed)),
+                (
+                    "Sampling".to_owned(),
+                    provenance.sampling_mode.display_name().to_owned(),
+                ),
+            ];
+            if let Some(duration) = duration {
+                rows.push(("Duration".to_owned(), duration.to_owned()));
+            }
+            FactSection { title, rows }
+        })
+        .collect()
+}
+
 /// Whether the run Verify reads holds a Monte Carlo analysis, and whether its
 /// trials kept their own records.
 fn monte_carlo_in_run(model: &Model) -> Option<bool> {
@@ -674,17 +753,19 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     } else {
         body
     };
+    // At their least the columns fit the page beside both docks at 1440
+    // points; the name column takes whatever is left.
     let columns = [
-        Column::name("Specification", 160.0),
+        Column::name("Specification", 120.0),
         Column::words("Limit", 112.0)
             .tooltip("The plan's limit on this measurement. Click to enter one."),
         Column::number("Yield", 76.0),
-        Column::number("Mean", 96.0),
-        Column::number("Std dev", 96.0),
-        Column::number("Min", 96.0),
-        Column::number("Max", 96.0),
-        Column::number("Cpk", 64.0),
-        Column::number("Fails", 64.0),
+        Column::number("Mean", 88.0),
+        Column::number("Std dev", 88.0),
+        Column::number("Min", 88.0),
+        Column::number("Max", 88.0),
+        Column::number("Cpk", 56.0),
+        Column::number("Fails", 56.0),
     ];
     let keys = rows
         .iter()

@@ -293,6 +293,48 @@ fn a_point_select_narrows_the_table_and_the_trials() {
     );
 }
 
+/// With no trial selected, the inspector states each campaign the sheet's
+/// statistics came from; two analyses of one label are told apart by the
+/// point each ran at, and one campaign is simply the Monte Carlo run.
+#[test]
+fn the_campaigns_behind_the_statistics_are_named_by_their_points() {
+    let mut harness = SimulateTestHost::harness();
+    seed_monte_carlo_at_two_points(&mut harness.model);
+    let sheet_now = sheet(&harness);
+    let campaigns = campaign_facts(&harness.model, Some("12.4 s"));
+    let titles = campaigns
+        .iter()
+        .map(|campaign| campaign.title.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        titles,
+        [0, 1].map(|point| format!(
+            "Monte Carlo \u{00b7} {}",
+            point_name(&sheet_now.points[point])
+        ))
+    );
+    assert_ne!(titles[0], titles[1]);
+    assert_eq!(
+        campaigns[0].rows,
+        [
+            ("Samples", "40 / 40"),
+            ("Seed", "0x1A2B"),
+            ("Sampling", "Pseudo-random"),
+            ("Duration", "12.4 s"),
+        ]
+        .map(|(label, value)| (label.to_owned(), value.to_owned()))
+    );
+
+    let mut harness = SimulateTestHost::harness();
+    seed_monte_carlo(&mut harness.model);
+    let titles = campaign_facts(&harness.model, None)
+        .into_iter()
+        .map(|campaign| (campaign.title, campaign.rows.len()))
+        .collect::<Vec<_>>();
+    assert_eq!(titles, [("Monte Carlo".to_owned(), 3)]);
+    assert!(campaign_facts(&SimulateTestHost::harness().model, None).is_empty());
+}
+
 /// One run's trials at one point offer no point select.
 #[test]
 fn trials_at_one_point_offer_no_select() {
