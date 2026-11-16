@@ -89,11 +89,12 @@ pub use source_search::{
 pub use veriloga::{
     PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,
     close_veriloga_import_form, commit_veriloga_source_replacement,
-    compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_sources,
-    invalidate_veriloga_evidence, replace_selected_veriloga_file, request_veriloga_add_files,
-    request_veriloga_compile, request_veriloga_import_locate, request_veriloga_source_replacement,
-    selected_veriloga_editor_snapshot_in, selected_veriloga_source_in, viewed_veriloga_header,
-    writable_libraries, write_veriloga_build_profile,
+    import_dropped_veriloga_sources, invalidate_veriloga_evidence,
+    project_bundle_closure_for_provenance, replace_selected_veriloga_file,
+    request_veriloga_add_files, request_veriloga_compile, request_veriloga_import_locate,
+    request_veriloga_source_replacement, selected_veriloga_editor_snapshot_in,
+    selected_veriloga_source_in, viewed_veriloga_header, writable_libraries,
+    write_veriloga_build_profile,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};

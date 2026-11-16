@@ -77,6 +77,21 @@ endmodule
     );
 }
 
+/// The preprocessor alone names the files a compile reads and the includes
+/// that reach them, as the compile's own receipt does.
+#[test]
+fn the_source_closure_is_the_compiles_without_compiling() {
+    let bundle = bundle_with_unused("module unused; endmodule\n");
+    let compilation = VerilogACompiler::default()
+        .compile_virtual_runtime(&bundle, "selected", VirtualCompileLimits::default())
+        .expect("sealed bundle compiles");
+    let closure = VerilogACompiler::default()
+        .virtual_source_closure(&bundle, VirtualCompileLimits::default())
+        .expect("the bundle preprocesses");
+    assert_eq!(closure.dependency_closure, compilation.dependency_closure);
+    assert_eq!(closure.include_graph, compilation.include_graph);
+}
+
 #[test]
 fn compiles_nested_virtual_and_builtin_dependencies_with_exact_receipt() {
     let bundle = bundle_with_unused("module unused; endmodule\n");

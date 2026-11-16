@@ -256,9 +256,20 @@ fn includes_resolve_project_first_then_built_in() {
 #[test]
 fn includes_agree_with_the_compile() {
     let bundle = including_bundle();
-    let compilation =
-        super::super::veriloga::compile_project_bundle_virtual_for_provenance(&bundle, "gain")
-            .expect("the closure compiles");
+    let compilation = rspice_simulation::project_veriloga::compile_project_virtual_runtime(
+        &bundle,
+        "gain",
+        None,
+        Default::default(),
+    )
+    .expect("the closure compiles");
+    let closure = super::super::veriloga::project_bundle_closure_for_provenance(&bundle, "gain")
+        .expect("the closure is read");
+    assert_eq!(
+        closure.dependency_closure, compilation.dependency_closure,
+        "a generated netlist's provenance names what the compile read"
+    );
+    assert_eq!(closure.include_graph, compilation.include_graph);
     let mut compiled = Vec::new();
     for edge in &compilation.include_graph {
         if !compiled.contains(&edge.included_path) {

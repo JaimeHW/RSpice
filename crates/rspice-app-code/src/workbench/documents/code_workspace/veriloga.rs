@@ -6,9 +6,7 @@
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use rspice_veriloga::{
-    RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTargetReadiness, VirtualRuntimeCompilation,
-};
+use rspice_veriloga::{RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTargetReadiness};
 use sha2::Digest as _;
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -1015,17 +1013,16 @@ fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompile
     )
 }
 
-pub fn compile_project_bundle_virtual_for_provenance(
+/// The files a compile of `selected_module` of `bundle` reads and the
+/// includes that reach them, for a generated netlist's provenance. Read by
+/// the preprocessor alone, on the editor's thread, so no module is compiled
+/// and no constant function runs.
+pub fn project_bundle_closure_for_provenance(
     bundle: &ProjectSourceBundle,
     selected_module: &str,
-) -> Result<VirtualRuntimeCompilation, String> {
-    rspice_simulation::project_veriloga::compile_project_virtual_runtime(
-        bundle,
-        selected_module,
-        None,
-        Default::default(),
-    )
-    .map_err(|error| error.to_string())
+) -> Result<rspice_veriloga::VirtualSourceClosure, String> {
+    rspice_simulation::project_veriloga::project_bundle_source_closure(bundle, selected_module)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

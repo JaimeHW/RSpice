@@ -221,7 +221,7 @@ pub use connection_configuration::ConnectionConfiguration;
 pub use prepared_source::{
     MapConfig, PreparedRuntimeSource, PreparedSourceDependency, UnitFile, UnitLibraries,
 };
-pub use prepared_virtual_source::PreparedVirtualSource;
+pub use prepared_virtual_source::{PreparedVirtualSource, VirtualSourceClosure};
 pub use source_diagnostics::SourceCompileDiagnostic;
 
 /// Failure at the source-provider or compiler boundary.

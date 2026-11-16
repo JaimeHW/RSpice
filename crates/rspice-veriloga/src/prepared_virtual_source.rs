@@ -264,7 +264,55 @@ impl PreparedVirtualSource {
     }
 }
 
+/// The files a compile of a bundle's root reads and the includes that reach
+/// them; see [`VerilogACompiler::virtual_source_closure`].
+#[derive(Debug, Clone)]
+pub struct VirtualSourceClosure {
+    /// Every document the preprocessor read, in its traversal order, the
+    /// root first.
+    pub dependency_closure: Vec<VirtualSourceDependency>,
+    /// Every resolved include, in the compiler's traversal order.
+    pub include_graph: Vec<VirtualSourceInclude>,
+}
+
 impl VerilogACompiler {
+    /// The files a compile of `bundle`'s root reads and the includes that
+    /// reach them, as [`VirtualRuntimeCompilation::dependency_closure`] and
+    /// [`VirtualRuntimeCompilation::include_graph`] would hold them, read by
+    /// the preprocessor alone.
+    ///
+    /// Nothing is parsed or elaborated, so no constant function runs and the
+    /// cost is the preprocessor's: a caller that needs a source's provenance
+    /// and not its compile (a generated netlist naming the files it read) can
+    /// ask on the editor's thread.
+    pub fn virtual_source_closure(
+        &self,
+        bundle: &VirtualSourceBundle,
+        limits: VirtualCompileLimits,
+    ) -> Result<VirtualSourceClosure, VirtualRuntimeCompileFailure> {
+        let limits = virtual_source::validate_bundle_request(bundle, limits)
+            .map_err(CompileError::from)
+            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+        let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
+        let mut preprocessor = self.configured_in_memory_preprocessor();
+        preprocessor
+            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
+            .map_err(|error| {
+                VirtualRuntimeCompileFailure::from_preprocessor(
+                    error,
+                    preprocessor.dependency_documents(),
+                )
+            })?;
+        Ok(VirtualSourceClosure {
+            dependency_closure: virtual_source::dependencies_from_preprocessor(
+                preprocessor.take_dependency_documents(),
+            ),
+            include_graph: virtual_source::includes_from_preprocessor(
+                preprocessor.take_include_graph(),
+            ),
+        })
+    }
+
     pub fn prepare_virtual_runtime_source(
         &self,
         bundle: &VirtualSourceBundle,

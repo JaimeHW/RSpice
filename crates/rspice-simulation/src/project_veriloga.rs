@@ -122,6 +122,35 @@ fn successful_compile_outcome(
     Ok(Box::new(report))
 }
 
+/// The files a compile of `module_name` of `bundle` reads and the includes
+/// that reach them, as [`compile_project_virtual_runtime`]'s compilation
+/// names them, read through the build profile by the preprocessor alone: no
+/// module is parsed or elaborated, so this is cheap and cannot be held by a
+/// constant function.
+pub fn project_bundle_source_closure(
+    bundle: &rspice_design::project_sources::ProjectSourceBundle,
+    module_name: &str,
+) -> Result<rspice_veriloga::VirtualSourceClosure, PreparedRuntimeError> {
+    let resolved = build_profile::resolve_veriloga_build_profile(bundle)
+        .map_err(PreparedRuntimeError::SourceIdentity)?;
+    resolved
+        .profile
+        .validate_selected_module(module_name)
+        .map_err(PreparedRuntimeError::SourceIdentity)?;
+    let virtual_bundle =
+        build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
+            .map_err(PreparedRuntimeError::SourceBundle)?;
+    rspice_veriloga::VerilogACompiler::new(resolved.profile.compiler_options())
+        .virtual_source_closure(&virtual_bundle, project_virtual_compile_limits())
+        .map_err(|error| {
+            PreparedRuntimeError::Compile(format!(
+                "Could not read the Verilog-A files of module '{module_name}' from project \
+                 bundle {}: {error}",
+                bundle.id(),
+            ))
+        })
+}
+
 /// Compile `module_name` of `bundle`, offering the design `cells` as leaves
 /// and keeping the `delay_select` value of each min:typ:max expression.
 pub fn compile_project_virtual_runtime(

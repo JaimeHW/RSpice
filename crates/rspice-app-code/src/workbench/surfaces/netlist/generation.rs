@@ -312,17 +312,18 @@ pub(super) fn generated_project_source_dependencies(
             bundle.root().logical_path(),
         )
         .map_err(|error| error.to_string())?;
-        let compilation = crate::workbench::documents::code_workspace::compile_project_bundle_virtual_for_provenance(
-            bundle,
-            binding.selected_module(),
-        )
+        let closure =
+            crate::workbench::documents::code_workspace::project_bundle_closure_for_provenance(
+                bundle,
+                binding.selected_module(),
+            )
             .map_err(|failure| {
                 format!(
-                    "Could not compile the Verilog-A source used by {}: {failure}",
+                    "Could not read the Verilog-A files used by {}: {failure}",
                     execution.instance_path()
                 )
             })?;
-        let compiled_root = compilation
+        let read_root = closure
             .dependency_closure
             .first()
             .filter(|dependency| {
@@ -332,7 +333,7 @@ pub(super) fn generated_project_source_dependencies(
             })
             .ok_or_else(|| {
                 format!(
-                    "The compiled Verilog-A files for {} do not include the source's root file",
+                    "The Verilog-A files read for {} do not include the source's root file",
                     execution.instance_path()
                 )
             })?;
@@ -343,11 +344,11 @@ pub(super) fn generated_project_source_dependencies(
                 root_locator.clone(),
             )
             .map_err(|error| error.to_string())?
-            .resolve_utf8(compiled_root.source.as_bytes().to_vec())
+            .resolve_utf8(read_root.source.as_bytes().to_vec())
             .map_err(|error| error.to_string())?,
         );
-        for edge in &compilation.include_graph {
-            let parent = compilation
+        for edge in &closure.include_graph {
+            let parent = closure
                 .dependency_closure
                 .iter()
                 .find(|dependency| {
@@ -357,11 +358,11 @@ pub(super) fn generated_project_source_dependencies(
                 })
                 .ok_or_else(|| {
                     format!(
-                        "Verilog-A include parent '{}' is missing from the compiled files",
+                        "Verilog-A include parent '{}' is missing from the files read",
                         edge.including_path
                     )
                 })?;
-            let child = compilation
+            let child = closure
                 .dependency_closure
                 .iter()
                 .find(|dependency| {
@@ -371,7 +372,7 @@ pub(super) fn generated_project_source_dependencies(
                 })
                 .ok_or_else(|| {
                     format!(
-                        "Verilog-A include target '{}' is missing from the compiled files",
+                        "Verilog-A include target '{}' is missing from the files read",
                         edge.included_path
                     )
                 })?;
