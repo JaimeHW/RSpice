@@ -1181,6 +1181,7 @@ pub(super) fn commit_design_variable(
 ) -> Result<String, String> {
     let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
     let variable_name = variable.name.clone();
+    let step = cx.model.setup_snapshot(SetupParts::PLAN_DATA);
     let mut setup = cx.model.sim_setup.clone();
     let mut workspace = cx.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
@@ -1199,6 +1200,8 @@ pub(super) fn commit_design_variable(
         .map_err(|error| error.to_string())?;
     cx.model.sim_setup = setup;
     cx.model.workspace = workspace;
+    cx.model
+        .record_setup_change(cx.state.simulation_page.label(), step);
     crate::workbench::simulate::invalidate_preflight(cx);
     cx.model.record_plan_receipt(receipt.status_line());
     Ok(format!(
@@ -1274,6 +1277,7 @@ pub(super) fn commit_saved_output(
     validate_saved_output_draft(cx, draft)?;
     let output = saved_output_from_draft(cx, draft)?;
     let output_name = output.name.clone();
+    let step = cx.model.setup_snapshot(SetupParts::PLAN_DATA);
     let mut setup = cx.model.sim_setup.clone();
     let mut workspace = cx.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
@@ -1290,6 +1294,8 @@ pub(super) fn commit_saved_output(
         .map_err(|error| error.to_string())?;
     cx.model.sim_setup = setup;
     cx.model.workspace = workspace;
+    cx.model
+        .record_setup_change(cx.state.simulation_page.label(), step);
     crate::workbench::simulate::invalidate_preflight(cx);
     cx.model.record_plan_receipt(receipt.status_line());
     Ok(format!(
@@ -1323,6 +1329,7 @@ pub(super) fn commit_plan_change(
         crate::product::SimulationPlanId,
     ) -> Result<(), String>,
 ) -> bool {
+    let step = cx.model.setup_snapshot(SetupParts::PLAN_DATA);
     let mut workspace = cx.model.workspace.clone();
     let mut setup = cx.model.sim_setup.clone();
     let before = plan_capture_state(&cx.model.workspace, plan_id);
@@ -1343,6 +1350,10 @@ pub(super) fn commit_plan_change(
         Ok(receipt) => {
             cx.model.workspace = workspace;
             cx.model.sim_setup = setup;
+            // One step of the setup's history, named for the page that took
+            // it.
+            cx.model
+                .record_setup_change(cx.state.simulation_page.label(), step);
             crate::workbench::simulate::invalidate_preflight(cx);
             cx.model.record_plan_receipt(receipt.status_line());
             true

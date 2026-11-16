@@ -146,9 +146,8 @@ fn analysis_at(app: &RSpiceApp, position: usize) -> rspice_app_state::product::A
         .id()
 }
 
-/// Make `edit` on the Simulate page, then check it is one step of Undo:
-/// `read` gives back exactly what it read before after Undo, and what the
-/// edit left after Redo.
+/// Make `edit` on the Simulate page, then check it is one step of Undo, as
+/// [`undo_and_redo`] does.
 fn one_step<T: PartialEq + std::fmt::Debug>(
     app: &mut RSpiceApp,
     edit: &str,
@@ -158,6 +157,18 @@ fn one_step<T: PartialEq + std::fmt::Debug>(
     app.state.workbench.activate(Workspace::Simulate);
     let before = read(app);
     make(app);
+    undo_and_redo(app, edit, read, before);
+}
+
+/// Check the edit just made on the Simulate page is one step of Undo:
+/// `read` gives back exactly `before` after Undo, and what the edit left
+/// after Redo.
+fn undo_and_redo<T: PartialEq + std::fmt::Debug>(
+    app: &mut RSpiceApp,
+    edit: &str,
+    read: impl Fn(&RSpiceApp) -> T,
+    before: T,
+) {
     let after = read(app);
     assert_ne!(before, after, "the {edit} changes the setup");
     app.execute_command_key(ids::UNDO);
@@ -285,4 +296,36 @@ fn each_edit_of_the_analysis_list_is_one_step_put_back_exactly() {
         drawn,
         "the analysis added, renamed, moved, disabled and removed is gone again"
     );
+}
+
+// --------------------------------------------------------------- plan data
+
+/// The active plan's design variables, outputs, capture groups and
+/// specifications, in their stored form.
+fn plan_data(app: &RSpiceApp) -> String {
+    let model = &app.state.model;
+    let plan = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan")
+        .id();
+    serde_json::to_string(&model.workspace.content.plan_data(plan))
+        .expect("the plan's data serializes")
+}
+
+/// A design variable created on its page is one step: Undo takes the plan's
+/// data back exactly as it stood, and Redo creates the variable again.
+#[test]
+fn a_variable_created_on_its_page_is_one_step_put_back_exactly() {
+    use rspice_app_simulate::workbench::state::workflow_drafts::DesignVariableDraft;
+
+    let mut app = app_with_a_moded_device("").0;
+    app.state.simulate.simulation_page = SimulationPage::Variables;
+    one_step(&mut app, "new variable", plan_data, |app| {
+        press_in_the_dialog(
+            app,
+            SimulationWorkflowDialog::DesignVariable(DesignVariableDraft::default()),
+            "Create variable",
+        );
+    });
 }
