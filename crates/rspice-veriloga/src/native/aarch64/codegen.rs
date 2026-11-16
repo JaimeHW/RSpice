@@ -4408,13 +4408,24 @@ mod tests {
         assert_eq!(variables, [0.0, 3.0]);
         assert!(context.take_runtime_error().is_none());
 
+        // An endless loop runs until the run is stopped: its back edge polls
+        // the run's abort hook, and a raised hook ends the pass with the
+        // variables as they were.
         let unbounded = [NativeAssignment::Loop {
             condition: program(vec![NativeOp::Const(1.0)], 1),
             body: Vec::new(),
         }];
-        execute_assignment_pass(&unbounded, &context, &mut variables);
+        rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || {
+            execute_assignment_pass(&unbounded, &context, &mut variables);
+        });
         assert_eq!(variables, [0.0, 3.0]);
-        assert!(context.take_runtime_error().is_some());
+        let error = context
+            .take_native_runtime_error()
+            .expect("an endless loop stops on the abort hook");
+        assert!(matches!(
+            error.kind,
+            crate::native::NativeRuntimeErrorKind::Aborted
+        ));
     }
 
     #[cfg(target_arch = "aarch64")]
