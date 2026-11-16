@@ -591,12 +591,13 @@ mod tests {
                 spectra: Vec::new(),
                 checks,
                 hdl_output,
-                time: vec![0.0, 1.0e-9],
+                time: vec![0.0, 1.0e-9].into(),
                 waveforms,
                 measurements: Vec::new(),
                 periodic_state: None,
                 convergence: Default::default(),
                 events: Default::default(),
+                store: None,
             }),
         );
         (state, run_sequence)

@@ -1136,6 +1136,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 spectra,
                 hdl_output,
                 checks,
+                store: _,
             } => match periodic_state {
                 Some(operating_point) => {
                     if convergence.is_some() {
@@ -1148,7 +1149,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     let reporting_times = if time == operating_point.analysis().result.time {
                         Vec::new()
                     } else {
-                        time
+                        time.into_vec()
                     };
                     Ok(Self::Pss {
                         reporting_times,
@@ -1157,7 +1158,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     })
                 }
                 None => Ok(Self::Transient {
-                    time,
+                    time: time.into_vec(),
                     waveforms: worker_waveforms(waveforms),
                     measurements: worker_measurements(measurements),
                     convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
@@ -1541,7 +1542,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 testbench_errors,
                 checks,
             } => Self::Transient {
-                time,
+                time: time.into(),
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
                 periodic_state: None,
@@ -1550,6 +1551,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 spectra: worker_recorded_fft::recorded_spectra(spectra),
                 hdl_output: testbench_errors,
                 checks: checks.into(),
+                store: None,
             },
             WorkerSimulationResult::Fft {
                 spectrum,

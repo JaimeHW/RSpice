@@ -19,6 +19,31 @@ pub use checks::SimulationChecks;
 pub use rspice_results::fft::recorded::RecordedFftSpectrum;
 pub use rspice_results::waveform::SampledWaveform;
 
+/// The results store a transient wrote its rows to as it ran: one segment file that its time axis
+/// and waveforms read, deleted with the last of them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientStoreReceipt {
+    /// The segment file.
+    pub path: std::path::PathBuf,
+    /// The rows it holds.
+    pub rows: u64,
+    /// Its size in bytes.
+    pub bytes: u64,
+    /// The logical digest of its rows and events, which does not depend on how they were coded.
+    pub digest: Option<[u8; 32]>,
+    /// Why the run ended before its stop time, keeping the rows it had written.
+    pub stopped: Option<TransientStoreStop>,
+}
+
+/// A transient its results store stopped: the volume holding the store filled.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientStoreStop {
+    /// The time of the last row kept.
+    pub at: Option<f64>,
+    /// The bytes the volume had free when the run ended, when the host can say.
+    pub free: Option<u64>,
+}
+
 /// The waveform a stability run retains its Nyquist contour under.
 ///
 /// This is a contract between two modules that never meet: the run writes the
@@ -69,8 +94,9 @@ pub enum SimulationResult {
 
     /// Transient analysis results
     Transient {
-        /// Time vector
-        time: Vec<f64>,
+        /// Time vector, shared by every waveform: in memory, or a window of the run's results
+        /// store.
+        time: rspice_results::waveform::WaveformValues,
         /// Waveforms indexed by signal name
         waveforms: HashMap<String, SampledWaveform>,
         /// Evaluated `.MEAS TRAN` results.
@@ -112,6 +138,9 @@ pub enum SimulationResult {
         /// the assertions evaluated over its whole accepted trajectory. Empty
         /// for a PSS rebuild and the other analyses that reuse this shape.
         checks: SimulationChecks,
+        /// The results store the solve wrote its rows to, which its time axis and waveforms read;
+        /// `None` for a transient kept in memory.
+        store: Option<TransientStoreReceipt>,
     },
 
     /// AC analysis results

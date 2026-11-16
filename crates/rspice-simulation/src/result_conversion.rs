@@ -250,10 +250,11 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 // records are kept with the checks.
                 hdl_output: _,
                 checks,
+                store: _,
             } => {
                 let mut result =
                     AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
-                        .with_waveforms(self.build_time_waveforms_owned(time.into(), waveforms))
+                        .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
                         .with_measurements(measurements);
                 result.checks = checks.into_run_checks();
                 let event_payload = transient_events_payload(events);
@@ -948,7 +949,7 @@ mod convergence_conversion_tests {
                 spectra: Vec::new(),
                 hdl_output: Vec::new(),
                 checks: Default::default(),
-                time: time.clone(),
+                time: time.clone().into(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
                     crate::results::SampledWaveform::new_time_domain(
@@ -961,6 +962,7 @@ mod convergence_conversion_tests {
                 periodic_state: None,
                 convergence,
                 events: Default::default(),
+                store: None,
             };
             super::convert(result, AnalysisType::Transient, "Quality retention", || 0.0)
         };
@@ -1070,7 +1072,7 @@ mod waveform_unit_conversion_tests {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time: vec![0.0, 1.0],
+            time: vec![0.0, 1.0].into(),
             waveforms: HashMap::from([
                 (
                     "V(out)".to_owned(),
@@ -1089,6 +1091,7 @@ mod waveform_unit_conversion_tests {
             periodic_state: None,
             convergence: Default::default(),
             events: Default::default(),
+            store: None,
         };
 
         let result = super::convert(sim_result, AnalysisType::Transient, "TRAN", || 0.0);
@@ -1196,12 +1199,13 @@ mod waveform_unit_conversion_tests {
                 spectra: Vec::new(),
                 hdl_output: Vec::new(),
                 checks: Default::default(),
-                time: vec![0.0, 1.0],
+                time: vec![0.0, 1.0].into(),
                 waveforms: HashMap::from([("V(env)".to_owned(), waveform)]),
                 measurements: Vec::new(),
                 periodic_state: None,
                 convergence: Default::default(),
                 events: Default::default(),
+                store: None,
             },
             AnalysisType::Envelope,
             "Envelope",

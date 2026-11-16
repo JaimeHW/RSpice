@@ -207,7 +207,10 @@ impl TransientTrajectoryArtifact {
             }
         }
         let trajectory = TransientTrajectoryArtifact {
-            time: time.clone(),
+            time: time
+                .try_values()
+                .map_err(|failure| ExecutionArtifactError::InvalidPayload(failure.to_string()))?
+                .clone(),
             voltage_impulses: events.voltage_impulses.clone(),
             current_impulses: events.current_impulses.clone(),
             waveforms: artifact_waveforms,

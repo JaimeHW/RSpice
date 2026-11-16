@@ -757,12 +757,13 @@ pub(in crate::runner) mod tests {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time: produced.time,
+            time: produced.time.into(),
             waveforms: HashMap::new(),
             measurements: Vec::new(),
             periodic_state: Some(produced.operating_point),
             convergence: Default::default(),
             events: Default::default(),
+            store: None,
         };
         let producer = AnalysisInstanceId::new();
         let revision = ObjectRevision::INITIAL;

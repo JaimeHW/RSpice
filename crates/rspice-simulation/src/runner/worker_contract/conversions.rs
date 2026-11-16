@@ -1226,7 +1226,7 @@ pub(super) fn simulation_result_from_worker_pss(
     }
     SimulationResult::Transient {
         spectra: Vec::new(),
-        time,
+        time: time.into(),
         waveforms,
         measurements: measure_results(measurements),
         periodic_state: Some(std::sync::Arc::new(operating_point)),
@@ -1234,6 +1234,7 @@ pub(super) fn simulation_result_from_worker_pss(
         events: TransientEventHistory::default(),
         hdl_output: Vec::new(),
         checks: Default::default(),
+        store: None,
     }
 }
 

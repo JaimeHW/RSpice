@@ -746,7 +746,7 @@ fn project_pss_data(
 
     Ok(SimulationResult::Transient {
         spectra: Vec::new(),
-        time,
+        time: time.into(),
         waveforms,
         measurements: Vec::new(),
         periodic_state: Some(periodic_state),
@@ -758,6 +758,7 @@ fn project_pss_data(
         events: Default::default(),
         hdl_output: Vec::new(),
         checks: Default::default(),
+        store: None,
     })
 }
 
@@ -1039,7 +1040,7 @@ fn run_envelope(
 
     Ok(SimulationResult::Transient {
         spectra: Vec::new(),
-        time: data.time,
+        time: data.time.into(),
         waveforms,
         measurements: data.measurements,
         periodic_state: None,
@@ -1048,6 +1049,7 @@ fn run_envelope(
         // The service transient does not collect HDL output.
         hdl_output: Vec::new(),
         checks: Default::default(),
+        store: None,
     })
 }
 

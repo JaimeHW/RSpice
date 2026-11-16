@@ -326,6 +326,8 @@ fn convert_transient_result(
         filtered_time.push(start_time);
     }
     filtered_time.extend_from_slice(&tran_result.time[start_idx..start_idx + sample_count]);
+    // One axis for every waveform: each holds the same allocation, never a copy.
+    let filtered_time = rspice_results::waveform::WaveformValues::from(filtered_time);
     let mut waveforms = HashMap::new();
 
     for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
@@ -436,6 +438,7 @@ fn convert_transient_result(
         spectra,
         hdl_output: Vec::new(),
         checks: Default::default(),
+        store: None,
     })
 }
 

@@ -163,12 +163,13 @@ mod floquet_payload_conversion_tests {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time: vec![0.0, 1.0],
+            time: vec![0.0, 1.0].into(),
             waveforms: HashMap::from([("V(out)".to_owned(), display)]),
             measurements: Vec::new(),
             periodic_state: Some(Arc::new(pss_operating_point(multipliers))),
             convergence: Default::default(),
             events: Default::default(),
+            store: None,
         }
     }
 

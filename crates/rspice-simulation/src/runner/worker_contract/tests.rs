@@ -1015,7 +1015,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
             SampledWaveform::new_time_domain("V(out)", time, values),
@@ -1024,6 +1024,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         periodic_state: None,
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         snapshot_digest,
@@ -1832,7 +1833,7 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: vec![0.0, 1e-9],
+        time: vec![0.0, 1e-9].into(),
         waveforms: HashMap::new(),
         measurements: Vec::new(),
         periodic_state: None,
@@ -1867,6 +1868,7 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
                 }],
             }],
         },
+        store: None,
     };
     let wire = WorkerSimulationResult::try_from(source.clone()).expect("transient converts");
     let SimulationResult::Transient { events, .. } = SimulationResult::from(wire) else {
@@ -1986,7 +1988,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: vec![0.0, 1.0],
+        time: vec![0.0, 1.0].into(),
         waveforms: HashMap::from([(
             "V(out)".to_string(),
             SampledWaveform::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
@@ -1995,6 +1997,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         periodic_state: None,
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     };
 
     let transfer_response = WorkerResponse::from_result_for_transfer(87, Ok(result));

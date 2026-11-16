@@ -159,7 +159,7 @@ fn transient_convergence_survives_worker_round_trip() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: vec![0.0, 1e-9],
+        time: vec![0.0, 1e-9].into(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
             SampledWaveform::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
@@ -168,6 +168,7 @@ fn transient_convergence_survives_worker_round_trip() {
         periodic_state: None,
         convergence: Some(std::sync::Arc::new(convergence)),
         events: Default::default(),
+        store: None,
     };
     let response = WorkerResponse {
         id: 42,
@@ -223,12 +224,13 @@ fn a_testbench_error_crosses_the_worker_and_its_other_output_does_not() {
         spectra: Vec::new(),
         hdl_output: vec![record(HdlSeverity::Info, "checking out\n"), error.clone()],
         checks: Default::default(),
-        time: vec![0.0, 2e-9],
+        time: vec![0.0, 2e-9].into(),
         waveforms: HashMap::new(),
         measurements: Vec::new(),
         periodic_state: None,
         convergence: None,
         events: Default::default(),
+        store: None,
     };
 
     let restored = crate::runner::worker_contract::round_trip_response_for_test(result);
@@ -340,12 +342,13 @@ fn checks_cross_the_worker_field_for_field() {
         spectra: Vec::new(),
         hdl_output: expected.hdl.clone(),
         checks: expected.clone(),
-        time: vec![0.0, 2e-6],
+        time: vec![0.0, 2e-6].into(),
         waveforms: HashMap::new(),
         measurements: Vec::new(),
         periodic_state: None,
         convergence: None,
         events: Default::default(),
+        store: None,
     });
     assert_eq!(restored.checks(), Some(&expected));
 }
@@ -378,12 +381,13 @@ fn a_non_finite_assertion_value_is_refused_at_the_worker_boundary() {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: crate::results::SimulationChecks::new(&[], vec![report]),
-            time: vec![0.0, 1e-9],
+            time: vec![0.0, 1e-9].into(),
             waveforms: HashMap::new(),
             measurements: Vec::new(),
             periodic_state: None,
             convergence: None,
             events: Default::default(),
+            store: None,
         }),
     );
     let error = WorkerResponseTransport::from_response(response).unwrap_err();
@@ -418,7 +422,7 @@ fn worker_result_round_trip() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: vec![0.0, 1e-9],
+        time: vec![0.0, 1e-9].into(),
         waveforms: HashMap::from([(
             "V(out)".to_string(),
             SampledWaveform::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
@@ -430,6 +434,7 @@ fn worker_result_round_trip() {
         periodic_state: None,
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     };
     let transient = round_trip_result(transient);
     match transient {
@@ -895,12 +900,13 @@ fn convergence_source_evidence_survives_derived_worker_transports() {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time: vec![0.6, 1.0],
+            time: vec![0.6, 1.0].into(),
             waveforms: HashMap::new(),
             measurements: Vec::new(),
             periodic_state: None,
             events: Default::default(),
             convergence: Some(quality.clone()),
+            store: None,
         },
         SimulationResult::Ac {
             frequencies: vec![1.0],
@@ -951,12 +957,13 @@ fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: vec![0.0, 1.0],
+        time: vec![0.0, 1.0].into(),
         waveforms: HashMap::new(),
         measurements: Vec::new(),
         periodic_state: None,
         events: Default::default(),
         convergence: Some(std::sync::Arc::new(quality)),
+        store: None,
     };
     let transport = WorkerResponseTransport::from_response(
         WorkerResponse::from_result_for_transfer(8, Ok(result)),
@@ -1107,7 +1114,7 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
 
     // The transient that computed it carries it out.
     let carried = SimulationResult::Transient {
-        time: vec![0.0, 1e-9, 2e-9],
+        time: vec![0.0, 1e-9, 2e-9].into(),
         waveforms: HashMap::new(),
         measurements: Vec::new(),
         periodic_state: None,
@@ -1116,6 +1123,7 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
         spectra: vec![std::sync::Arc::clone(&recorded)],
         hdl_output: Vec::new(),
         checks: Default::default(),
+        store: None,
     };
     let SimulationResult::Transient {
         spectra: restored, ..
@@ -1358,12 +1366,13 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time,
+            time: time.into(),
             waveforms,
             measurements: Vec::new(),
             periodic_state: Some(reported.operating_point.clone()),
             convergence: None,
             events: Default::default(),
+            store: None,
         };
         let restored = crate::runner::worker_contract::round_trip_response_for_test(display);
         let SimulationResult::Transient {

@@ -18,7 +18,7 @@ fn transient() -> SimulationResult {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([
             (
                 "V(out)".to_owned(),
@@ -33,6 +33,7 @@ fn transient() -> SimulationResult {
         periodic_state: None,
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     }
 }
 
@@ -189,7 +190,7 @@ fn periodic_result() -> SimulationResult {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
             SampledWaveform::new_time_domain("V(out)", time, values),
@@ -198,6 +199,7 @@ fn periodic_result() -> SimulationResult {
         periodic_state: Some(Arc::new(operating_point)),
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     }
 }
 
@@ -241,12 +243,13 @@ fn authenticated_periodic_result() -> SimulationResult {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: result.time.clone(),
+        time: result.time.clone().into(),
         waveforms,
         measurements: Vec::new(),
         periodic_state: Some(Arc::new(operating_point)),
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     }
 }
 
@@ -867,7 +870,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
             SampledWaveform::new_time_domain("V(out)", time, values),
@@ -876,6 +879,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         periodic_state: None,
         convergence: Default::default(),
         events: Default::default(),
+        store: None,
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         snapshot,

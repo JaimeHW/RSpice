@@ -678,12 +678,13 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
             spectra: Vec::new(),
             hdl_output: Vec::new(),
             checks: Default::default(),
-            time,
+            time: time.into(),
             waveforms,
             measurements: Vec::new(),
             periodic_state: None,
             convergence: Default::default(),
             events: Default::default(),
+            store: None,
         }),
     );
 

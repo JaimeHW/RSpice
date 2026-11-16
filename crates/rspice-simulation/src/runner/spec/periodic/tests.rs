@@ -174,7 +174,7 @@ fn an_authored_fourier_run_reports_every_output() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([
             (
                 "out".to_owned(),
@@ -189,6 +189,7 @@ fn an_authored_fourier_run_reports_every_output() {
         periodic_state: None,
         convergence: None,
         events: Default::default(),
+        store: None,
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         ContentDigest::from_bytes([3; 32]),
@@ -303,7 +304,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([(
             "out".to_owned(),
             SampledWaveform::new_time_domain("out", time, values),
@@ -312,6 +313,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
         periodic_state: None,
         convergence: Some(quality.clone()),
         events: Default::default(),
+        store: None,
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         ContentDigest::from_bytes([1; 32]),
@@ -385,7 +387,7 @@ fn a_fourier_window_is_read_by_the_rule_of_the_deck_s_dialect() {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
         checks: Default::default(),
-        time: time.clone(),
+        time: time.clone().into(),
         waveforms: HashMap::from([(
             "out".to_owned(),
             SampledWaveform::new_time_domain("out", time.clone(), clipped.clone()),
@@ -394,6 +396,7 @@ fn a_fourier_window_is_read_by_the_rule_of_the_deck_s_dialect() {
         periodic_state: None,
         convergence: None,
         events: Default::default(),
+        store: None,
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         ContentDigest::from_bytes([3; 32]),
@@ -484,7 +487,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
         })
         .collect();
     let transient = SimulationResult::Transient {
-        time,
+        time: time.into(),
         waveforms,
         spectra: Vec::new(),
         hdl_output: Vec::new(),
@@ -493,6 +496,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
         periodic_state: None,
         convergence: None,
         events: Default::default(),
+        store: None,
     };
     let trajectory = TransientTrajectoryArtifact::from_result(&transient, &names, false)
         .unwrap()

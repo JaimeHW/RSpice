@@ -885,7 +885,7 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             ..
         } => {
             observation.kind = "tran".into();
-            observation.axis = time.clone();
+            observation.axis = time.to_vec();
             waveforms_into(&mut observation, waveforms);
             record_measures(measurements, &mut observation);
             for history in &events.digital {
