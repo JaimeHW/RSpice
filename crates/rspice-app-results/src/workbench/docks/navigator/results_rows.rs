@@ -3,7 +3,7 @@
 
 use egui::{Response, ScrollArea, Ui};
 
-use crate::state::bus_notations;
+use crate::state::{BusNotations, bus_notations};
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1144,10 +1144,14 @@ pub(super) fn show_virtualized_result_signals(
                             let in_tree = runs[run].analyses[analysis].tree.is_some();
                             let analysis = &runs[run].analyses[analysis];
                             let artifact = &analysis.artifacts[artifact];
+                            let full_name = drawn_artifact_name(artifact, &notations);
                             let label = if in_tree && depth > 0 {
-                                split_hierarchy(artifact_hierarchical_name(artifact)).leaf
+                                split_hierarchy(&notations.display(artifact_hierarchical_name(
+                                    artifact,
+                                )))
+                                .leaf
                             } else {
-                                artifact.name.clone()
+                                full_name.clone()
                             };
                             let selection_key =
                                 ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
@@ -1157,7 +1161,7 @@ pub(super) fn show_virtualized_result_signals(
                                 result_signal_row_id(&selection_key),
                                 RowLabel {
                                     name: &label,
-                                    full_name: &artifact.name,
+                                    full_name: &full_name,
                                     kind: artifact_signal_kind(artifact)
                                         .unwrap_or(SignalKind::Other(artifact.kind.glyph())),
                                     indent: depth,
@@ -1232,6 +1236,23 @@ pub(super) fn show_virtualized_result_signals(
 /// The hierarchical name an artifact row is placed in the tree by and
 /// answers a pattern with: an event net's `D(net)` or `E(net)`, a bus's
 /// `name[msb:lsb]`, and any other artifact its own name.
+/// An event net's row name with its net spelled as the drawing spells it
+/// (`Digital net csn` for the engine's `CSN`); any other row keeps its name.
+pub(super) fn drawn_artifact_name(artifact: &ResultArtifact, notations: &BusNotations) -> String {
+    let column = artifact.identity.canonical_name();
+    let Some(net) = column
+        .strip_prefix(EVENT_NET_ROW_PREFIX)
+        .and_then(|column| column.get(2..))
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return artifact.name.clone();
+    };
+    match artifact.name.strip_suffix(net) {
+        Some(noun) => format!("{noun}{}", notations.display(net)),
+        None => artifact.name.clone(),
+    }
+}
+
 pub(super) fn artifact_hierarchical_name(artifact: &ResultArtifact) -> &str {
     let canonical = artifact.identity.canonical_name();
     canonical

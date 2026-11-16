@@ -279,6 +279,38 @@ fn a_net_on_the_lanes_is_a_ticked_row() {
     );
 }
 
+/// The engine folds every node name to upper case; an event net's row reads
+/// as the drawing spells the net.
+#[test]
+fn an_event_net_row_reads_as_drawn() {
+    let mut host = ResultsTestHost::default();
+    host.model
+        .schematic
+        .add_net_label(crate::state::Point::new(0, 0), "Clk".to_owned());
+    host.model
+        .simulation
+        .start_run()
+        .add_analysis(test_fixtures::events_analysis());
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        find(&nodes, "Digital net Clk").is_some()
+            || nodes
+                .iter()
+                .any(|node| node.label.starts_with("Select Digital net Clk")),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.label.contains("Digital net clk")),
+        "{:?}",
+        labels(&nodes)
+    );
+}
+
 /// A run that records no source revision to compare with the design, as a
 /// netlist the reader ran or a file they imported does, heads its dataset
 /// row with its name and count alone. "Unresolved" stated a relationship the
