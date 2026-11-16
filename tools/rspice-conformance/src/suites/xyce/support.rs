@@ -2587,6 +2587,7 @@ impl XyceTestRunner {
             hdl_path_delays,
             hdl_timing_checks,
             hdl_libmap,
+            max_event_passes,
             scale: _,
         } = options;
         spice_dialect.is_none()
@@ -2702,6 +2703,7 @@ impl XyceTestRunner {
             && hdl_path_delays.is_none()
             && hdl_timing_checks.is_none()
             && hdl_libmap.is_none()
+            && max_event_passes.is_none()
     }
 
     pub(super) fn analytic_rc_options_match(
