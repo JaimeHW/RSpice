@@ -2,12 +2,13 @@
 //!
 //! Two net/value grids side by side, as Virtuoso ADE's Convergence Aids
 //! forms give them: a row names a net of the plan's simulation root as the
-//! design names it, picked from the design's nets (the one selected on the
-//! schematic first) or typed, and its volts: a number, or an expression of
+//! design names it, or a net inside an instance by its address, `/X1/mid`,
+//! picked from the design's nets (the one selected on the schematic first,
+//! an instance's by looking inside it) or typed, and its volts: a number, or an expression of
 //! the plan's design variables, so a corner or a sweep that moves one moves
 //! where the run starts. A net the design does not have, ground, a net that
-//! holds no voltage, a net already set or a variable the plan does not
-//! define is refused in place: the cell keeps what was typed, ringed, with
+//! holds no voltage, an instance's port, a net already set or a variable the
+//! plan does not define is refused in place: the cell keeps what was typed, ringed, with
 //! the reason on its hover. The rows are the plan's options, written into the deck as `.IC`
 //! and `.NODESET` cards, so an edit is one step of the setup's Undo.
 
@@ -19,10 +20,11 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{IconButton, editable_select_mono, name_control, text_field};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
-use rspice_design::connectivity::summary::DesignNet;
-use rspice_simulation::netlist_preparation::startup_nets::{startup_net, startup_value};
+use rspice_simulation::netlist_preparation::startup_nets::{settable, startup_net, startup_value};
+use rspice_simulation::output_contract::selection::OccurrenceNets;
 use rspice_simulation_contract::design_variable::DesignVariable;
 use rspice_simulation_contract::options::{NodeVoltage, StartupKind};
+use rspice_vocabulary::hierarchy_path::InstancePath;
 
 use super::super::page_kit::{Tone, card, cell_ui, ledger_head_explained, ledger_row_cells};
 use super::{commit_draft, released};
@@ -33,7 +35,7 @@ const COLUMNS: [f32; 3] = [0.56, 0.32, 0.12];
 /// The two grids side by side, each as tall as the longer, so neither card
 /// ends short of the other.
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    let nets = cx.model.simulation_root_nets();
+    let occurrences = cx.model.simulation_occurrence_nets();
     let selected = cx
         .model
         .schematic
@@ -42,38 +44,109 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .net_highlight
         .selected_net_name
         .clone();
-    let choices = match &nets {
-        Ok(nets) => net_choices(nets, selected.as_deref()),
-        Err(_) => Vec::new(),
-    };
+    let occurrences = occurrences.as_deref();
+    let root = occurrences
+        .map(|occurrences| scope_choices(occurrences, 0, selected.as_deref()))
+        .unwrap_or_default();
     let draft = &cx.model.sim_setup.session.options_draft;
     let rows = draft.initial_conditions.len().max(draft.nodesets.len()) + 1;
-    let nets = nets.as_ref().map(|nets| nets.as_slice());
     super::super::page_kit::card_row(
         ui,
         cx,
-        |ui, cx| grid(ui, cx, StartupKind::InitialCondition, nets, &choices, rows),
-        |ui, cx| grid(ui, cx, StartupKind::NodeSet, nets, &choices, rows),
+        |ui, cx| {
+            grid(
+                ui,
+                cx,
+                StartupKind::InitialCondition,
+                occurrences,
+                &root,
+                rows,
+            )
+        },
+        |ui, cx| grid(ui, cx, StartupKind::NodeSet, occurrences, &root, rows),
     );
 }
 
-/// The nets a row can name, as the design names them: the net selected on
-/// the schematic first, then every other net that holds a voltage.
-fn net_choices(nets: &[DesignNet], selected: Option<&str>) -> Vec<String> {
-    let mut choices = nets
-        .iter()
-        .filter(|net| startup_net(&net.name, nets).is_ok())
-        .map(|net| net.name.clone())
-        .collect::<Vec<_>>();
-    if let Some(selected) = selected
-        && let Some(index) = choices
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case(selected))
-    {
-        let name = choices.remove(index);
-        choices.insert(0, name);
+/// One entry of a net cell's list: a net to set, by the address a row
+/// stores, or an instance to look inside, by its address and a slash.
+#[derive(Clone)]
+enum Choice {
+    Net(String),
+    Inside(String),
+}
+
+impl Choice {
+    fn shown(&self) -> String {
+        match self {
+            Self::Net(address) => address.clone(),
+            Self::Inside(scope) => format!("{scope} \u{203a}"),
+        }
     }
+}
+
+/// What a net cell lists at the occurrence `scope` indexes: its nets a row
+/// can name, the net selected on the schematic first at the root, then the
+/// instances directly inside it, each to look inside.
+fn scope_choices(
+    occurrences: &[OccurrenceNets],
+    scope: usize,
+    selected: Option<&str>,
+) -> Vec<Choice> {
+    let Some(at) = occurrences.get(scope) else {
+        return Vec::new();
+    };
+    let path = at.occurrence();
+    let inside = !path.is_root();
+    let mut choices = at
+        .nets()
+        .iter()
+        .filter(|net| settable(net, inside))
+        .map(|net| {
+            Choice::Net(if inside {
+                format!("{path}/{}", net.name)
+            } else {
+                net.name.clone()
+            })
+        })
+        .collect::<Vec<_>>();
+    if let Some(selected) = selected.filter(|_| !inside)
+        && let Some(index) = choices.iter().position(
+            |choice| matches!(choice, Choice::Net(name) if name.eq_ignore_ascii_case(selected)),
+        )
+    {
+        let choice = choices.remove(index);
+        choices.insert(0, choice);
+    }
+    choices.extend(
+        occurrences
+            .iter()
+            .map(OccurrenceNets::occurrence)
+            .filter(|child| {
+                child
+                    .parent()
+                    .is_some_and(|parent| parent.same_engine_scope(path))
+            })
+            .map(|child| Choice::Inside(format!("{child}/"))),
+    );
     choices
+}
+
+/// The occurrence a cell's text is inside, when it names one: `/X1/` or
+/// `/X1/mid` is inside `/X1`, as the deck's `X1.mid` is.
+fn scope_of(text: &str, occurrences: &[OccurrenceNets]) -> Option<usize> {
+    let text = text.trim();
+    let scope = if text.starts_with('/') {
+        text[..text.rfind('/')?].to_owned()
+    } else {
+        text[..text.rfind('.')?].to_owned()
+    };
+    if scope.is_empty() {
+        return Some(0);
+    }
+    let scope = InstancePath::parse(&scope).ok()?;
+    occurrences
+        .iter()
+        .position(|occurrence| occurrence.occurrence().same_engine_scope(&scope))
 }
 
 /// What one grid's row is called: the run's own word for it, then its
@@ -116,8 +189,9 @@ fn rows_of_mut(
     }
 }
 
-const NET_HOVER: &str = "A net of the simulation root as the design names it: pick one, the net \
-                         selected on the schematic first, or type its name.";
+const NET_HOVER: &str = "A net of the simulation root as the design names it, or inside an \
+                         instance by its address, /X1/mid: pick one, the net selected on the \
+                         schematic first, or type its name.";
 
 fn volts_hover(kind: StartupKind) -> &'static str {
     match kind {
@@ -143,8 +217,8 @@ fn grid(
     ui: &mut Ui,
     cx: &mut Cx<'_, SimulateFeature>,
     kind: StartupKind,
-    nets: Result<&[DesignNet], &String>,
-    choices: &[String],
+    occurrences: Result<&[OccurrenceNets], &String>,
+    root: &[Choice],
     rows: usize,
 ) {
     let mut edit = None;
@@ -168,7 +242,15 @@ fn grid(
             let net_rect = cells[0].shrink2(pad);
             let mut cell = cell_ui(ui, net_rect);
             let shown = row.map_or_else(String::new, |row| row.net.clone());
-            if let Some(text) = net_cell(&mut cell, &name, &shown, choices, net_rect.width()) {
+            let occurrences = occurrences.ok();
+            if let Some(text) = net_cell(
+                &mut cell,
+                &name,
+                &shown,
+                occurrences,
+                root,
+                net_rect.width(),
+            ) {
                 edit = Some(Edit::Net(place, text));
             }
             let volts_rect = cells[1].shrink2(pad);
@@ -191,7 +273,7 @@ fn grid(
         }
     });
     if let Some(edit) = edit {
-        apply(ui, cx, kind, nets, edit);
+        apply(ui, cx, kind, occurrences, edit);
     }
 }
 
@@ -200,7 +282,7 @@ fn apply(
     ui: &mut Ui,
     cx: &mut Cx<'_, SimulateFeature>,
     kind: StartupKind,
-    nets: Result<&[DesignNet], &String>,
+    occurrences: Result<&[OccurrenceNets], &String>,
     edit: Edit,
 ) {
     let variables = match edit {
@@ -215,7 +297,7 @@ fn apply(
         }
         Edit::Net(place, text) => {
             let name = row_name(kind, place);
-            match drawn_net(kind, draft, place, &text, nets) {
+            match drawn_net(kind, draft, place, &text, occurrences) {
                 Ok(net) => match place {
                     Some(index) => {
                         rows_of_mut(kind, draft)[index].net = net;
@@ -275,18 +357,18 @@ fn drawn_net(
     draft: &crate::simulation::plan::OptionsDialogState,
     place: Option<usize>,
     text: &str,
-    nets: Result<&[DesignNet], &String>,
+    occurrences: Result<&[OccurrenceNets], &String>,
 ) -> Result<String, String> {
-    let nets = nets.map_err(Clone::clone)?;
-    let net = startup_net(text, nets)?;
+    let occurrences = occurrences.map_err(Clone::clone)?;
+    let net = startup_net(text, occurrences)?;
     let taken = rows_of(kind, draft)
         .iter()
         .enumerate()
-        .any(|(index, row)| Some(index) != place && row.net.eq_ignore_ascii_case(&net.name));
+        .any(|(index, row)| Some(index) != place && row.net.eq_ignore_ascii_case(&net));
     if taken {
-        return Err(format!("{} is already set", net.name));
+        return Err(format!("{net} is already set"));
     }
-    Ok(net.name.clone())
+    Ok(net)
 }
 
 /// The design variables a value can name: the plan's own.
@@ -404,23 +486,50 @@ fn settle(ui: &Ui, id: egui::Id, response: &egui::Response, text: &str) -> Optio
     Some(text.to_owned())
 }
 
+/// The net cell: its list is the root's nets and instances, or, while its
+/// text is inside an instance, that instance's. Picking an instance looks
+/// inside it: the cell takes its address and lists what it holds.
 fn net_cell(
     ui: &mut Ui,
     name: &str,
     shown: &str,
-    choices: &[String],
+    occurrences: Option<&[OccurrenceNets]>,
+    root: &[Choice],
     width: f32,
 ) -> Option<String> {
     let id = cell_id(name, Column::Net);
     let (mut text, refused) = cell_text(ui, name, Column::Net, shown);
     let label = format!("{name} net");
-    let output = editable_select_mono(ui, &label, &label, &mut text, "net", choices, width);
-    if let Some(choice) = output.picked.and_then(|index| choices.get(index)) {
-        ui.data_mut(|data| {
-            data.remove::<String>(id);
-            data.remove::<Refused>(id.with("refused"));
-        });
-        return Some(choice.clone());
+    let scoped = occurrences.and_then(|occurrences| {
+        scope_of(&text, occurrences)
+            .filter(|&scope| scope != 0)
+            .map(|scope| scope_choices(occurrences, scope, None))
+    });
+    let choices = scoped.as_deref().unwrap_or(root);
+    let shown_choices = choices.iter().map(Choice::shown).collect::<Vec<_>>();
+    let output = editable_select_mono(ui, &label, &label, &mut text, "net", &shown_choices, width);
+    match output.picked.and_then(|index| choices.get(index)) {
+        Some(Choice::Net(address)) => {
+            ui.data_mut(|data| {
+                data.remove::<String>(id);
+                data.remove::<Refused>(id.with("refused"));
+            });
+            return Some(address.clone());
+        }
+        Some(Choice::Inside(scope)) => {
+            ui.data_mut(|data| {
+                data.insert_temp(id, scope.clone());
+                data.remove::<Refused>(id.with("refused"));
+            });
+            let field = ui.make_persistent_id(("rspice.editable_select", label.as_str()));
+            ui.memory_mut(|memory| memory.request_focus(field));
+            egui::Popup::open_id(
+                ui.ctx(),
+                ui.make_persistent_id(("rspice.select", label.as_str())),
+            );
+            return None;
+        }
+        None => {}
     }
     let field = ring(ui, output.field, refused.as_ref());
     settle(ui, id, &field, &text).filter(|typed| typed.trim() != shown)

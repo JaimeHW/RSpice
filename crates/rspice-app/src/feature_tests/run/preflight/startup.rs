@@ -376,6 +376,160 @@ fn an_initial_condition_written_as_a_design_variable_moves_with_its_sweep() {
     }
 }
 
+/// The RC with R1 and C1 made into a block through Create hierarchy: the
+/// root keeps VIN on `net1` and places the block as X1, inside which `out`
+/// is the block's own net and `R1_p` its port.
+fn rc_in_a_block() -> RSpiceApp {
+    use rspice_app_design::workbench::app::dialogs::hierarchy::create::{
+        commit_create_hierarchy, open_create_hierarchy_dialog,
+    };
+    let mut app = rc();
+    let block = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| component.name == "R1" || component.name == "C1")
+        .map(|component| component.id)
+        .collect::<Vec<_>>();
+    for id in block {
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    open_create_hierarchy_dialog(
+        &mut app.state.design.create_hierarchy,
+        &app.state.model,
+        &mut app.state.workbench,
+    );
+    commit_create_hierarchy(
+        &mut app.state.design.create_hierarchy,
+        &mut app.state.design.symbol,
+        &mut app.state.model,
+        &app.state.workbench,
+    )
+    .expect("the block is created");
+    app
+}
+
+/// What the open list of a combo box offers.
+fn listed(page: &Page) -> Vec<&str> {
+    page.controls
+        .iter()
+        .filter(|control| control.role == egui::accesskit::Role::ListBoxOption)
+        .map(|control| control.label.as_str())
+        .collect()
+}
+
+/// Pick `option` from the list of the combo box `label`, opening it first
+/// unless it is open, as a hand does.
+fn pick(page: &mut Page, label: &str, option: &str) {
+    if !listed(page).contains(&option) {
+        page.click(&format!("{label} choices"));
+    }
+    let at = page
+        .controls
+        .iter()
+        .find(|control| {
+            control.role == egui::accesskit::Role::ListBoxOption && control.label == option
+        })
+        .unwrap_or_else(|| panic!("the list offers {option}: {:?}", listed(page)))
+        .rect
+        .center();
+    page.click_at(at);
+}
+
+/// A net inside an instance is set as a net of the root is: picked by
+/// looking inside the instance, or typed by its address or as the deck
+/// spells it. The row stores the drawn address, the deck names the node the
+/// engine solves, and the transient starts there: V(/X1/out) at 0.25 V,
+/// charging toward the 1 V drive as `1 - 0.75·exp(-t/RC)`. A port of the
+/// instance, an instance or a net the design does not have, and ground
+/// inside it are refused in place.
+#[test]
+fn a_net_inside_an_instance_is_picked_by_looking_inside_it_and_starts_the_run_there() {
+    let mut page = Page::open_on(rc_in_a_block(), SimulationPage::Solver);
+    pick(&mut page, "New initial condition net", "/X1/ \u{203a}");
+    assert_eq!(
+        page.control("New initial condition net").value.as_deref(),
+        Some("/X1/")
+    );
+    assert_eq!(
+        listed(&page),
+        ["/X1/out"],
+        "looking inside X1 lists its own net, and not the port the root's net1 reaches it by"
+    );
+    pick(&mut page, "New initial condition net", "/X1/out");
+    page.retype("New initial condition volts", "250m");
+    assert_eq!(
+        page.app.state.model.sim_setup.options.initial_conditions,
+        [NodeVoltage {
+            net: "/X1/out".to_owned(),
+            value: "250m".to_owned()
+        }]
+    );
+    let deck = rspice_app_runs::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
+        &page.app.state.model,
+    )
+    .expect("the deck");
+    assert!(
+        deck.lines().any(|line| line == ".IC V(x1.out)=0.25"),
+        "{deck}"
+    );
+
+    page.retype("New node set net", "x1.OUT");
+    page.retype("New node set volts", "0.3");
+    assert_eq!(
+        page.app.state.model.sim_setup.options.nodesets,
+        [NodeVoltage {
+            net: "/X1/out".to_owned(),
+            value: "0.3".to_owned()
+        }],
+        "the deck's spelling names the same net, stored by its address"
+    );
+    page.click("Remove node set 1");
+    for (typed, reason) in [
+        (
+            "X1.R1_p",
+            "R1_p is a port of /X1: name the net it connects to",
+        ),
+        ("/X9/out", "the design has no instance /X9"),
+        ("/X1/nosuch", "/X1 has no net nosuch"),
+        (
+            "/X1/0",
+            "/X1/0: 0 is ground, the reference every voltage is measured from",
+        ),
+    ] {
+        page.retype("New node set net", typed);
+        assert_eq!(description(&page, "New node set net"), reason);
+    }
+    assert!(page.app.state.model.sim_setup.options.nodesets.is_empty());
+
+    let (times, volts) = ran(&mut page.app, "/X1/out");
+    let tau = 1e3 * 159e-9;
+    let worst = times
+        .iter()
+        .zip(&volts)
+        .map(|(t, v)| (v - (1.0 - 0.75 * (-t / tau).exp())).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        volts[0] == 0.25,
+        "the transient starts at the .IC: {}",
+        volts[0]
+    );
+    assert!(
+        worst < 1e-5,
+        "V(/X1/out) against 1 - 0.75 exp(-t/RC): worst {worst:e} V over {} rows",
+        times.len()
+    );
+}
+
 /// A net the design does not have, ground, or a net already set is refused
 /// where it was typed: the cell keeps the text, its reason on hover, and the
 /// plan is unchanged. A removed row is one step of Undo too.

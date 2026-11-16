@@ -42,6 +42,20 @@ pub struct OccurrenceNets {
     nets: Arc<Vec<DesignNet>>,
 }
 
+impl OccurrenceNets {
+    /// The occurrence, as drawn: the root, or `/X1/X2`.
+    #[must_use]
+    pub const fn occurrence(&self) -> &InstancePath {
+        &self.occurrence
+    }
+
+    /// The nets its master owns, as the master names them.
+    #[must_use]
+    pub fn nets(&self) -> &[DesignNet] {
+        &self.nets
+    }
+}
+
 /// Every occurrence the configured design emits, paired with its master's nets.
 ///
 /// The design root comes first and carries the caller's own summary, because

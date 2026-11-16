@@ -275,13 +275,13 @@ where
             &hierarchy,
         ),
     );
-    crate::netlist_preparation::startup_nets::check_startup_nets(
-        &inputs.analysis.sim_setup.options,
-        &design_nets,
-        &plan_payload.design_variables,
-    )?;
     let occurrences =
         projection_occurrence_nets(inputs.libraries, &execution_projection, design_nets);
+    crate::netlist_preparation::startup_nets::check_startup_nets(
+        &inputs.analysis.sim_setup.options,
+        &occurrences,
+        &plan_payload.design_variables,
+    )?;
     let (mut effective_saved_outputs, used_automatic_outputs, capture_membership) =
         effective_plan_capture(
             inputs.analysis.sim_setup.save_policy.output_selection_mode,

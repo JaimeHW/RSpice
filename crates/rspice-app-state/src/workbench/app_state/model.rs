@@ -216,12 +216,13 @@ impl Model {
         Some(crate::state::SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis))
     }
 
-    /// The nets of the plan's simulation root, as the design names them: the
-    /// nets an initial condition or nodeset can name. Retained by the
-    /// design projection, so asking each frame costs a lookup.
-    pub fn simulation_root_nets(
+    /// The nets of the plan's simulation root and of every instance below
+    /// it, root first, as the design names them: the nets an initial
+    /// condition or nodeset can name. Each master's nets are retained by the
+    /// design projection, so asking each frame costs a lookup per instance.
+    pub fn simulation_occurrence_nets(
         &self,
-    ) -> Result<std::sync::Arc<Vec<rspice_design::connectivity::summary::DesignNet>>, String> {
+    ) -> Result<Vec<rspice_simulation::output_contract::selection::OccurrenceNets>, String> {
         let projection = self
             .workspace
             .configuration_execution_projection(
@@ -230,11 +231,19 @@ impl Model {
                 &self.schematic,
             )
             .map_err(|error| error.to_string())?;
-        Ok(rspice_design::connectivity::summary::projection_nets(
-            self.library_manager.catalog(),
+        let catalog = self.library_manager.catalog();
+        let root = rspice_design::connectivity::summary::projection_nets(
+            catalog,
             &projection,
             &projection.root().key(),
-        ))
+        );
+        Ok(
+            rspice_simulation::output_contract::selection::projection_occurrence_nets(
+                catalog,
+                &projection,
+                root,
+            ),
+        )
     }
 
     /// The folders searched for includes after every project's own paths.

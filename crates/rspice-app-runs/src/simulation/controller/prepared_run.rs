@@ -680,11 +680,18 @@ impl SimulationController {
         })?;
         let options = &model.sim_setup.options;
         if !options.initial_conditions.is_empty() || !options.nodesets.is_empty() {
-            rspice_simulation::netlist_preparation::startup_nets::check_startup_nets(
-                options,
-                &rspice_design::connectivity::summary::design_nets_with_hierarchy(
+            let root_nets = std::sync::Arc::new(
+                rspice_design::connectivity::summary::design_nets_with_hierarchy(
                     root_schematic,
                     &hierarchy,
+                ),
+            );
+            rspice_simulation::netlist_preparation::startup_nets::check_startup_nets(
+                options,
+                &projection_occurrence_nets(
+                    model.library_manager.catalog(),
+                    &projection,
+                    root_nets,
                 ),
                 &payload.design_variables,
             )?;

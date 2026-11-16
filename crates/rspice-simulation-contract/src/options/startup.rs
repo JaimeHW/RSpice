@@ -9,8 +9,8 @@
 //! InitCond or NodeSet on the net; here they are the plan's own, written
 //! into the deck as one card per net.
 
-/// One net's voltage: the net as the design names it, an instance path
-/// such as `X1.mid` for a net inside one, and its value as written: volts
+/// One net's voltage: the net as the design names it, the drawn address
+/// such as `/X1/mid` for a net inside an instance, and its value as written: volts
 /// in SPICE notation, or an expression of the plan's design variables, which
 /// a corner or a sweep then moves with them.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,20 @@ pub struct NodeVoltage {
 }
 
 impl NodeVoltage {
+    /// The net as the deck names it: a net of the root as drawn, a net
+    /// inside an instance by the flattened name the engine solves, `/amp/mid`
+    /// as `xamp.mid`.
+    #[must_use]
+    pub fn deck_net(&self) -> String {
+        if self.net.starts_with('/')
+            && let Ok(name) = rspice_vocabulary::hierarchy_path::ProbeTarget::parse(&self.net)
+                .and_then(|target| target.engine_name())
+        {
+            return name;
+        }
+        self.net.clone()
+    }
+
     /// The value as a number, when it is one rather than an expression.
     #[must_use]
     pub fn volts(&self) -> Option<f64> {
@@ -72,7 +86,7 @@ impl StartupKind {
 #[must_use]
 pub fn startup_cards(kind: StartupKind, rows: &[NodeVoltage]) -> Vec<String> {
     rows.iter()
-        .map(|row| format!("{} V({})={}", kind.card(), row.net, row.deck_value()))
+        .map(|row| format!("{} V({})={}", kind.card(), row.deck_net(), row.deck_value()))
         .collect()
 }
 
@@ -165,9 +179,9 @@ mod tests {
         assert_eq!(
             startup_cards(
                 StartupKind::InitialCondition,
-                &[row("out", "250m"), row("X1.mid", "vdd/2")]
+                &[row("out", "250m"), row("/amp/mid", "vdd/2")]
             ),
-            [".IC V(out)=0.25", ".IC V(X1.mid)={vdd/2}"]
+            [".IC V(out)=0.25", ".IC V(xamp.mid)={vdd/2}"]
         );
         assert_eq!(
             startup_cards(StartupKind::NodeSet, &[row("Q", "3.3"), row("QB", "0")]),
