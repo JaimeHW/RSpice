@@ -326,6 +326,18 @@ pub(super) fn derive_regression_checks(
             let Ok(occurrence) = u32::try_from(occurrence) else {
                 continue;
             };
+            // The unit the producer stated the value in, the current run's
+            // first; a measurement that states none is shown bare.
+            let unit = [current_measurement, baseline_measurement]
+                .into_iter()
+                .find_map(|measurement| {
+                    measurement
+                        .units
+                        .as_ref()
+                        .and_then(|units| units.value.symbol())
+                })
+                .unwrap_or_default()
+                .to_owned();
             checks.push(RegressionCheck {
                 target: crate::state::RegressionTargetSelector {
                     source_domain: baseline_provenance.source_domain(),
@@ -343,6 +355,7 @@ pub(super) fn derive_regression_checks(
                 ),
                 baseline: baseline_value,
                 current: current_value,
+                unit,
             });
         }
     }

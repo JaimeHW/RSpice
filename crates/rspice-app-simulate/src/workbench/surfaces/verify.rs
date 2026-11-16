@@ -214,10 +214,10 @@ fn format_scalar(value: f64) -> String {
     format_value(value, "")
 }
 
-/// A difference in engineering notation, signed either way.
-fn signed_scalar(value: f64) -> String {
+/// A difference in engineering notation with its unit, signed either way.
+fn signed_value(value: f64, unit: &str) -> String {
     let sign = if value >= 0.0 { "+" } else { "" };
-    format!("{sign}{}", format_scalar(value))
+    format!("{sign}{}", format_value(value, unit))
 }
 
 fn latest_analysis(
@@ -281,6 +281,9 @@ struct RegressionCheck {
     source_identity: String,
     baseline: f64,
     current: f64,
+    /// The unit the producer states the measured value in; empty when it
+    /// states none.
+    unit: String,
 }
 
 #[derive(Debug, Clone)]

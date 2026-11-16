@@ -118,6 +118,9 @@ struct ReferenceRow {
     target: Option<RegressionTargetSelector>,
     name: String,
     values: Values,
+    /// The unit the compared values are in, as their producer states it;
+    /// empty when it states none.
+    unit: String,
     rule: Option<RegressionToleranceRule>,
     verdict: Option<RegressionVerdict>,
 }
@@ -266,6 +269,7 @@ impl ReferenceComparison {
                     reference: check.baseline,
                     current: check.current,
                 },
+                unit: check.unit.clone(),
                 rule: rule_of(&check.target),
                 verdict: Some(verdict.clone()),
             });
@@ -285,6 +289,12 @@ impl ReferenceComparison {
                     reference: pair.baseline.y.len(),
                     current: pair.current.y.len(),
                 },
+                unit: pair
+                    .current
+                    .unit
+                    .clone()
+                    .or_else(|| pair.baseline.unit.clone())
+                    .unwrap_or_default(),
                 rule: rule_of(&pair.target),
                 verdict: Some(verdict.clone()),
             });
@@ -300,6 +310,7 @@ impl ReferenceComparison {
                         .as_ref()
                         .is_some_and(|target| orphans.contains(target)),
                 },
+                unit: String::new(),
                 rule: gap.target.as_ref().and_then(rule_of),
                 verdict: None,
             });
@@ -667,7 +678,9 @@ fn reference_columns() -> [Column; 7] {
 }
 
 fn row_cells(row: &ReferenceRow) -> Vec<Cell> {
-    let number = |value: f64| Cell::number(format_scalar(value)).sort_by(SortKey::Number(value));
+    let unit = row.unit.as_str();
+    let number =
+        |value: f64| Cell::number(format_value(value, unit)).sort_by(SortKey::Number(value));
     let tolerance = row
         .rule
         .as_ref()
@@ -681,7 +694,7 @@ fn row_cells(row: &ReferenceRow) -> Vec<Cell> {
             (
                 number(*reference),
                 number(*current),
-                Cell::number(signed_scalar(delta)).sort_by(SortKey::Number(delta)),
+                Cell::number(signed_value(delta, unit)).sort_by(SortKey::Number(delta)),
                 percent.map_or_else(Cell::absent, |percent| {
                     Cell::number(format!("{percent:+.2} %")).sort_by(SortKey::Number(percent))
                 }),
@@ -695,7 +708,7 @@ fn row_cells(row: &ReferenceRow) -> Vec<Cell> {
                 .as_ref()
                 .and_then(worst_delta)
                 .map_or_else(Cell::absent, |delta| {
-                    Cell::number(format!("max {}", format_scalar(delta)))
+                    Cell::number(format!("max {}", format_value(delta, unit)))
                         .sort_by(SortKey::Number(delta))
                 }),
             Cell::absent(),
@@ -765,24 +778,25 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
         .rows
         .get(session.reference_table.selected_row()?)?;
     let mut rows = Vec::new();
+    let unit = row.unit.as_str();
     let of_run = |value: String, run: u64| format!("{value} \u{00b7} Run {run}");
     match &row.values {
         Values::Measurement { reference, current } => {
             rows.push((
                 "Reference",
-                of_run(format_scalar(*reference), compared.reference_run),
+                of_run(format_value(*reference, unit), compared.reference_run),
             ));
             rows.push((
                 "Current",
-                of_run(format_scalar(*current), compared.current_run),
+                of_run(format_value(*current, unit), compared.current_run),
             ));
             let delta = current - reference;
             let change = if *reference == 0.0 {
-                signed_scalar(delta)
+                signed_value(delta, unit)
             } else {
                 format!(
                     "{} ({:+.2} %)",
-                    signed_scalar(delta),
+                    signed_value(delta, unit),
                     delta / reference.abs() * 100.0
                 )
             };
@@ -798,7 +812,7 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
                 of_run(format!("{current} points"), compared.current_run),
             ));
             if let Some(delta) = row.verdict.as_ref().and_then(worst_delta) {
-                rows.push(("Largest change", format_scalar(delta)));
+                rows.push(("Largest change", format_value(delta, unit)));
             }
         }
         Values::Gap { detail, orphan } => {
@@ -834,7 +848,7 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
             RegressionVerdict::Pass { allowed_delta, .. }
             | RegressionVerdict::Fail { allowed_delta, .. },
         ) => {
-            rows.push(("Allowed change", format_scalar(*allowed_delta)));
+            rows.push(("Allowed change", format_value(*allowed_delta, unit)));
         }
         Some(RegressionVerdict::NotEvaluated(detail)) => {
             rows.push(("Not evaluated", detail.clone()));

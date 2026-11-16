@@ -724,6 +724,7 @@ fn empty_regression_matrix_exports_one_blocked_case_and_xml_controls_fail_closed
         source_identity: source.to_string(),
         baseline: 1.0,
         current: 1.0,
+        unit: String::new(),
     }];
     let cases = regression_export_cases(
         &checks,

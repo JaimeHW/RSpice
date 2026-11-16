@@ -81,13 +81,23 @@ fn the_reference_view_compares_every_shared_check() {
         texts,
         [
             "bw".to_owned(),
-            format_scalar(18.2e6),
-            format_scalar(17.1e6),
-            signed_scalar(17.1e6 - 18.2e6),
+            "18.20 MHz".to_owned(),
+            "17.10 MHz".to_owned(),
+            "-1.100 MHz".to_owned(),
             "-6.04 %".to_owned(),
             "rel 2 %".to_owned(),
             "Fail".to_owned(),
         ]
+    );
+    // Each value carries the unit its producer states, and one it states none
+    // for is bare.
+    let text = |name: &str, column: usize| row_cells(row(&harness, name))[column].text.clone();
+    assert_eq!(text("tsettle", 1), "1.620 \u{00b5}s");
+    assert_eq!(text("overshoot", 1), "12.60");
+    assert!(
+        text("V(out)", 3).starts_with("max ") && text("V(out)", 3).ends_with('V'),
+        "a waveform's change is in its trace's unit: {}",
+        text("V(out)", 3)
     );
     let compared = comparison(&harness).compared.as_ref().expect("a pair");
     assert_eq!((compared.changed, compared.outside), (5, 1));
@@ -408,16 +418,11 @@ fn the_selected_row_states_its_rule_and_allowance() {
     let facts = selected_reference(&harness.state.verification).expect("a row is selected");
     assert_eq!((facts.title.as_str(), facts.result), ("bw", "Fail"));
     for (label, value) in [
-        (
-            "Reference",
-            format!("{} \u{00b7} Run 3", format_scalar(18.2e6)),
-        ),
-        (
-            "Current",
-            format!("{} \u{00b7} Run 4", format_scalar(17.1e6)),
-        ),
-        ("Tolerance", "rel 2 %".to_owned()),
-        ("Allowed change", format_scalar(0.02 * 18.2e6)),
+        ("Reference", "18.20 MHz \u{00b7} Run 3"),
+        ("Current", "17.10 MHz \u{00b7} Run 4"),
+        ("Change", "-1.100 MHz (-6.04 %)"),
+        ("Tolerance", "rel 2 %"),
+        ("Allowed change", "364.0 kHz"),
     ] {
         assert!(
             facts

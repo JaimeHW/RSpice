@@ -906,8 +906,24 @@ fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
 }
 
 /// A transient step: three microseconds of the output at 12.5 ns, and its
-/// measurements.
-fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
+/// measurements, each in the unit its producer states (none for a ratio).
+fn step_analysis(
+    damping: f64,
+    natural_rad_s: f64,
+    measurements: &[(&str, f64, &str)],
+) -> AnalysisResult {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let measured = |(name, value, unit): &(&str, f64, &str)| {
+        let mut measurement = rspice_core::MeasureResult::success(name, *value);
+        if !unit.is_empty() {
+            measurement.units = Some(MeasurementUnits {
+                value: MeasurementUnit::Known((*unit).to_owned()),
+                raw_value: MeasurementUnit::Known((*unit).to_owned()),
+                axis: MeasurementUnit::Known("s".to_owned()),
+            });
+        }
+        measurement
+    };
     let time = (0..=240)
         .map(|index| f64::from(index) * 12.5e-9)
         .collect::<Vec<_>>();
@@ -921,12 +937,7 @@ fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)])
             )
             .with_unit("V"),
         ])
-        .with_measurements(
-            measurements
-                .iter()
-                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
-                .collect(),
-        )
+        .with_measurements(measurements.iter().map(measured).collect())
 }
 
 /// The Reference fixture's seeding: Run 4 of the plan's transient read
@@ -958,10 +969,10 @@ pub fn seed_reference(model: &mut Model) {
                 damping,
                 natural,
                 &[
-                    ("gain", values[0]),
-                    ("bw", values[1]),
-                    ("tsettle", values[2]),
-                    ("overshoot", values[3]),
+                    ("gain", values[0], "dB"),
+                    ("bw", values[1], "Hz"),
+                    ("tsettle", values[2], "s"),
+                    ("overshoot", values[3], ""),
                 ],
             ),
         );
