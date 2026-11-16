@@ -526,6 +526,46 @@ pub(super) fn bind_supply_ports(
 // Where the rules come from, and the pass that runs over the planner's answers
 // ---------------------------------------------------------------------------
 
+/// One of the deck's `.CONNECTRULES` blocks as the engine compiled it.
+#[derive(Debug)]
+struct DeckBlockSource {
+    /// The name it is registered under: its card's location.
+    path: std::path::PathBuf,
+    /// The `.CONNECTRULES` card.
+    origin: crate::netlist::NetlistSourceLocation,
+    /// Each statement's bytes in the compiled source, and its deck line.
+    statements: Vec<(
+        std::ops::Range<usize>,
+        crate::netlist::NetlistSourceLocation,
+    )>,
+}
+
+impl DeckBlockSource {
+    /// The deck line a byte of the compiled source was written on: its
+    /// statement's, or the card's for the block's own lines.
+    fn origin_of(&self, offset: Option<usize>) -> crate::netlist::NetlistSourceLocation {
+        offset
+            .and_then(|offset| {
+                self.statements
+                    .iter()
+                    .find(|(range, _)| range.contains(&offset))
+            })
+            .map_or_else(|| self.origin.clone(), |(_, origin)| origin.clone())
+    }
+}
+
+/// The byte a compile error points at in the source it was given.
+fn compile_error_offset(error: &rspice_veriloga::CompileError) -> Option<usize> {
+    use rspice_veriloga::CompileError;
+    match error {
+        CompileError::Lexer(error) => Some(error.span.start as usize),
+        CompileError::Parser(error) => Some(error.span.start as usize),
+        CompileError::Semantic(error) => Some(error.span.start as usize),
+        CompileError::CodeGen(error) => error.span.map(|span| span.start as usize),
+        _ => None,
+    }
+}
+
 /// A design's active connect specification. Compiled devices supply the exact
 /// preprocessed closure retained in their artifact, including virtual sources.
 /// Standalone libraries use the same preparation path. Repeated modules from
@@ -534,6 +574,9 @@ pub(super) fn bind_supply_ports(
 #[derive(Debug, Default)]
 pub(super) struct DesignConnectRules {
     declared_in: Option<std::path::PathBuf>,
+    /// The deck's own `.CONNECTRULES` blocks, registered under their card's
+    /// location, with where each statement is written.
+    deck_blocks: Vec<DeckBlockSource>,
     requested: Option<String>,
     requested_source: Option<(String, std::path::PathBuf)>,
     registered_sources: std::collections::HashSet<String>,
@@ -648,7 +691,94 @@ impl DesignConnectRules {
                 paths.into_iter().next().expect("one source"),
             ));
         }
+        selected.register_deck_blocks(netlist)?;
         Ok(selected)
+    }
+
+    /// Register the deck's `.CONNECTRULES` blocks through the connect compiler
+    /// that reads every other block. A block can name only the shipped
+    /// modules, since it is compiled alone; every statement's parameter names
+    /// are checked now, whether or not a boundary selects the statement, and a
+    /// refusal points at the deck line the statement is written on.
+    fn register_deck_blocks(&mut self, netlist: &crate::Netlist) -> Result<(), SimulationError> {
+        for block in &netlist.connect_rules {
+            let (source, ranges) = block.source();
+            let written = DeckBlockSource {
+                path: std::path::PathBuf::from(block.origin.to_string()),
+                origin: block.origin.clone(),
+                statements: ranges
+                    .into_iter()
+                    .zip(
+                        block
+                            .statements
+                            .iter()
+                            .map(|statement| statement.origin.clone()),
+                    )
+                    .collect(),
+            };
+            let refusal = |offset: Option<usize>, detail: String| -> SimulationError {
+                connect_refusal(format!(".CONNECTRULES {}: {detail}", block.name))
+                    .at(written.origin_of(offset))
+                    .into()
+            };
+            if block
+                .name
+                .get(..SHIPPED_RULE_SET_PREFIX.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(SHIPPED_RULE_SET_PREFIX))
+            {
+                return Err(refusal(
+                    None,
+                    format!(
+                        "the name is one RSpice reserves for its shipped rule sets \
+                         ({SHIPPED_RULE_SET_PREFIX}*); rename the block"
+                    ),
+                ));
+            }
+            let specification = rspice_veriloga::VerilogACompiler::default()
+                .connect_specification_from_preprocessed(&source)
+                .map_err(|error| refusal(compile_error_offset(&error), error.to_string()))?;
+            let table = specification
+                .rules
+                .select_block(&block.name)
+                .map_err(|error| {
+                    refusal(
+                        error.span().map(|span| span.start as usize),
+                        error.to_string(),
+                    )
+                })?;
+            for rule in table.insertions() {
+                let at = Some(rule.span.start as usize);
+                let parameters: Vec<(String, f64)> = rule
+                    .numeric_parameters()
+                    .map_err(|error| refusal(at, error.to_string()))?
+                    .into_iter()
+                    .map(|(name, value)| (name.to_string(), value))
+                    .collect();
+                let signature = specification
+                    .builtin_delegations
+                    .get(rule.connect_module.as_str())
+                    .copied()
+                    .unwrap_or(BuiltinSignature::Full);
+                if let Some(Err(message)) =
+                    parameters::check_statement_names(&rule.connect_module, signature, &parameters)
+                {
+                    return Err(refusal(at, message));
+                }
+            }
+            let path = written.path.clone();
+            self.deck_blocks.push(written);
+            self.register(&path, specification)?;
+        }
+        Ok(())
+    }
+
+    /// Where byte `offset` of a registered source is written, `file:line`,
+    /// when the source is one of the deck's `.CONNECTRULES` blocks.
+    fn deck_location(&self, path: &std::path::Path, offset: usize) -> Option<String> {
+        self.deck_blocks
+            .iter()
+            .find(|block| block.path == path)
+            .map(|block| block.origin_of(Some(offset)).to_string())
     }
 
     fn source_is_selected(&self, path: &std::path::Path) -> bool {
@@ -790,6 +920,9 @@ impl DesignConnectRules {
             .available
             .iter()
             .map(|(name, path, span, source)| {
+                if let Some(location) = self.deck_location(path, span.start as usize) {
+                    return format!("'{name}' at {location}");
+                }
                 match source
                     .as_deref()
                     .and_then(|source| original_coordinates(path, source))
@@ -911,6 +1044,9 @@ impl DesignConnectRules {
             .entry(rule.span.start as usize)
             .or_insert_with(|| {
                 let path = self.declared_in.as_deref()?;
+                if let Some(location) = self.deck_location(path, rule.span.start as usize) {
+                    return Some(location);
+                }
                 let (file, line, _) = original_coordinates(path, self.source.as_deref()?)?
                     .locate(rule.span.start as usize)?;
                 Some(format!("{file}:{line}"))

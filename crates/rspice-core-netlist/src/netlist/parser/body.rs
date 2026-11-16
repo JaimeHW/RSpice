@@ -25,6 +25,10 @@ pub(super) fn parse(
     // the line immediately before. A directive is consumed whole and leaves no
     // card open, so a `+` line here continues nothing.
     let mut veriloga_directive_line: Option<usize> = None;
+    // The `.CONNECTRULES` card being read. Its lines are Verilog-AMS text, so
+    // they are taken before SPICE comment stripping reaches them; `None`
+    // inside the card means a card a false `.IF` branch switched off.
+    let mut connect_rules: Option<Option<crate::netlist::connect_rules::ConnectRulesCard>> = None;
     let mut shell_continuation = false;
     state.forward_parameters = super::forward_params::ForwardParameters::new(
         std::sync::Arc::clone(&scans.forward_parameter_names),
@@ -73,6 +77,23 @@ pub(super) fn parse(
 
         if xyce_syntax && xyce_physical_line_is_comment(line) {
             continue;
+        }
+
+        if connect_rules.is_some() {
+            let raw = line.trim_start();
+            if let Some(text) = raw.strip_prefix('+') {
+                if let Some(Some(card)) = connect_rules.as_mut() {
+                    card.continue_with(text, origin.clone())
+                        .map_err(|message| ParseError::Syntax {
+                            line: line_num,
+                            message,
+                        })?;
+                }
+                continue;
+            }
+            if !raw.is_empty() && !raw.starts_with('*') {
+                close_connect_rules(connect_rules.take(), state)?;
+            }
         }
 
         // Strip inline comments (common SPICE syntax), then trim.
@@ -226,6 +247,32 @@ pub(super) fn parse(
             .into());
         }
 
+        if head.eq_ignore_ascii_case(".connectrules") {
+            if state.conditionals_suppress() {
+                connect_rules = Some(None);
+                continue;
+            }
+            if let Some(frame) = state.subckt_stack.last() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".CONNECTRULES is a deck-level card; it cannot be written inside \
+                         subcircuit '{}'",
+                        frame.qualified_name
+                    ),
+                }
+                .into());
+            }
+            let card =
+                crate::netlist::connect_rules::ConnectRulesCard::open(line, line_num, origin)
+                    .map_err(|message| ParseError::Syntax {
+                        line: line_num,
+                        message,
+                    })?;
+            connect_rules = Some(Some(card));
+            continue;
+        }
+
         // Handle a Verilog-A source directive directly, in any of its
         // spellings, before continuation handling.
         if is_veriloga_source_command(head) {
@@ -294,6 +341,8 @@ pub(super) fn parse(
         )?;
     }
 
+    close_connect_rules(connect_rules.take(), state)?;
+
     if let Some(table) = data_table {
         return Err(ParseError::Syntax {
             line: table.opened_at_line,
@@ -348,4 +397,34 @@ pub(super) fn parse(
     super::forward_params::read_postponed_elements(state, abort)?;
 
     Ok(root_eof)
+}
+
+/// Close a `.CONNECTRULES` card: a block is named once in a deck.
+fn close_connect_rules(
+    card: Option<Option<crate::netlist::connect_rules::ConnectRulesCard>>,
+    state: &mut ParseState,
+) -> Result<(), ParseWithAbortError> {
+    let Some(Some(card)) = card else {
+        return Ok(());
+    };
+    let line = card.line();
+    let block = card
+        .finish()
+        .map_err(|message| ParseError::Syntax { line, message })?;
+    if let Some(first) = state
+        .connect_rules
+        .iter()
+        .find(|existing| existing.name == block.name)
+    {
+        return Err(ParseError::Syntax {
+            line,
+            message: format!(
+                ".CONNECTRULES {} is already written at {}; a block is named once",
+                block.name, first.origin
+            ),
+        }
+        .into());
+    }
+    state.connect_rules.push(block);
+    Ok(())
 }

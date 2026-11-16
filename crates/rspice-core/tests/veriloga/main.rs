@@ -35,6 +35,8 @@ mod connect_module_insertion;
 mod connect_rule_parameters;
 #[cfg(feature = "veriloga")]
 mod d_process_coupled;
+#[cfg(feature = "veriloga")]
+mod deck_connect_rules;
 mod device_engine_roundtrip;
 mod diode_native;
 #[cfg(feature = "veriloga")]

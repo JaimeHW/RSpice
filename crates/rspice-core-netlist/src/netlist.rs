@@ -18,6 +18,8 @@ pub use assertion::{
     AssertAnalysis, AssertCheck, AssertLevel, AssertSample, AssertStatement, AssertTarget,
 };
 mod ast;
+pub(crate) mod connect_rules;
+pub use connect_rules::{DeckConnectRules, DeckConnectStatement};
 mod control_source;
 pub use control_source::ControlScriptSource;
 mod data_table;
@@ -1247,6 +1249,8 @@ pub struct Netlist {
     pub options: SimulationOptions,
     /// Verilog-A model includes from .VERILOGA statements
     pub veriloga_includes: Vec<VerilogAInclude>,
+    /// `connectrules` blocks written in the deck with `.CONNECTRULES`.
+    pub connect_rules: Vec<DeckConnectRules>,
     /// SPEF parasitic files from `.spef_include` (or `.include *.spef`),
     /// back-annotated onto the parsed deck by the path-aware parse entry
     /// points (`netlist::spef`).
@@ -4023,6 +4027,7 @@ impl Default for Netlist {
             output_requests: Vec::new(),
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
+            connect_rules: Vec::new(),
             spef_includes: Vec::new(),
             diagnostics: Vec::new(),
             control_dispositions: Vec::new(),

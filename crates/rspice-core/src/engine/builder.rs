@@ -6987,7 +6987,9 @@ impl Engine {
             crate::xspice::verilog::compiler_delay_select(self.config.hdl.delay_select),
         )?;
         #[cfg(not(feature = "veriloga"))]
-        if netlist.options.connect_rules.is_some() || netlist.options.connect_rules_source.is_some()
+        if netlist.options.connect_rules.is_some()
+            || netlist.options.connect_rules_source.is_some()
+            || !netlist.connect_rules.is_empty()
         {
             return Err(SimulationError::Netlist(
                 "Selecting Verilog-AMS connectrules requires the veriloga feature".to_owned(),

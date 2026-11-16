@@ -1405,7 +1405,7 @@ fn apply_root_preprocessing(
         }
         if matches!(
             head.to_ascii_uppercase().as_str(),
-            ".SUBCKT" | ".INCLUDE" | ".INC" | ".INCL" | ".LIB" | ".ENDL"
+            ".SUBCKT" | ".INCLUDE" | ".INC" | ".INCL" | ".LIB" | ".ENDL" | ".CONNECTRULES"
         ) {
             return LogicalLinePolicy::ProtectedDirective;
         }

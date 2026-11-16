@@ -771,6 +771,7 @@ fn clone_netlist_with_abort(
     let spectre_mismatch_override = source.spectre_mismatch_override.clone();
     let options = source.options.clone();
     let veriloga_includes = clone_slice(&source.veriloga_includes, abort)?;
+    let connect_rules = clone_slice(&source.connect_rules, abort)?;
     let spef_includes = clone_slice(&source.spef_includes, abort)?;
     let diagnostics = clone_slice(&source.diagnostics, abort)?;
     let control_dispositions = clone_slice(&source.control_dispositions, abort)?;
@@ -803,6 +804,7 @@ fn clone_netlist_with_abort(
         output_requests,
         options,
         veriloga_includes,
+        connect_rules,
         spef_includes,
         diagnostics,
         control_dispositions,

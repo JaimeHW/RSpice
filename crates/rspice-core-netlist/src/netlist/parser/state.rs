@@ -131,6 +131,7 @@ pub(super) struct ParseState {
     pub(super) startup_directives: Vec<StartupDirectiveRecord>,
     pub(super) global_nodes: HashSet<String>,
     pub(super) veriloga_includes: Vec<VerilogAInclude>,
+    pub(super) connect_rules: Vec<crate::netlist::DeckConnectRules>,
     pub(super) spef_includes: Vec<String>,
     pub(super) measurements: Vec<MeasureStatement>,
     pub(super) assertions: Vec<crate::netlist::AssertStatement>,
@@ -210,6 +211,7 @@ impl ParseState {
             startup_directives: Vec::new(),
             global_nodes: HashSet::new(),
             veriloga_includes: Vec::new(),
+            connect_rules: Vec::new(),
             spef_includes: Vec::new(),
             measurements: Vec::new(),
             assertions: Vec::new(),
@@ -316,6 +318,7 @@ impl ParseState {
             output_requests: self.output_requests,
             options,
             veriloga_includes: self.veriloga_includes,
+            connect_rules: self.connect_rules,
             spef_includes: self.spef_includes,
             diagnostics: self.diagnostics,
             // The control-region walk runs ahead of this builder and attaches

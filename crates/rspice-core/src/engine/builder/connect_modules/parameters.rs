@@ -135,6 +135,28 @@ fn accepted(kind: Kind, signature: BuiltinSignature) -> (&'static [&'static str]
     }
 }
 
+/// Refuse a parameter the shipped module `module` does not take, or one
+/// given twice, before any boundary selects its statement. A deck's own
+/// `.CONNECTRULES` statements are checked this way whether or not a boundary
+/// uses them, so a misspelt knob is never left unheard. `None` for a module
+/// the library does not ship.
+pub(in crate::engine::builder) fn check_statement_names(
+    module: &str,
+    signature: BuiltinSignature,
+    statement: &[(String, f64)],
+) -> Option<Result<(), String>> {
+    let kind = match module {
+        "a2d" => Kind::Adc,
+        "d2a" => Kind::Dac,
+        "bidir" => Kind::Bidi,
+        "r2e" => Kind::RealToV,
+        "e2r" => Kind::VToReal,
+        "rbidir" => Kind::RealBidi,
+        _ => return None,
+    };
+    Some(read_statement(kind, signature, module, statement).map(|_| ()))
+}
+
 /// The parameters given by a connect statement, aliases resolved.
 #[derive(Default)]
 struct Given(Vec<(&'static str, f64)>);
