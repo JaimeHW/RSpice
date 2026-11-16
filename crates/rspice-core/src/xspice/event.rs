@@ -1193,6 +1193,19 @@ mod tests {
         );
     }
 
+    /// A settle's pass bound is the settle's alone: the kernel's limits,
+    /// which bound one drain's delta cycles and which a checkpoint records
+    /// and its restore compares, stay as configured.
+    #[test]
+    fn a_settle_bound_leaves_the_kernels_limits_as_configured() {
+        let mut scheduler = XspiceEventScheduler::new();
+        let configured = scheduler.inner.limits();
+        scheduler
+            .note_settle_pass(1.0e-9, true, 2)
+            .expect("one pass is within the bound");
+        assert_eq!(scheduler.inner.limits(), configured);
+    }
+
     /// Every settle of one instant counts its own passes: a Newton iteration
     /// that settles the instant again starts from none.
     #[test]

@@ -2032,7 +2032,7 @@ impl EventScheduler {
             self.check_sequence_state()?;
             let Some(event) = self.queues.pop_active() else {
                 if self.queues.promote() {
-                    self.count_delta_cycle(bound)?;
+                    self.count_delta_cycle(bound, self.limits.max_delta_cycles_per_tick)?;
                     continue;
                 }
                 // The current instant has gone quiet in every region, so the
@@ -2086,7 +2086,7 @@ impl EventScheduler {
     pub fn note_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
         self.check_sequence_state()?;
         self.open_due_slot(bound);
-        self.count_delta_cycle(bound)
+        self.count_delta_cycle(bound, self.limits.max_delta_cycles_per_tick)
     }
 
     /// Count one pass of a code-model settle at `bound`, refusing the settle
@@ -2099,6 +2099,10 @@ impl EventScheduler {
     /// counted again from the end of the settle's first pass, so a refusal
     /// names what went round in it rather than what earlier settles of the
     /// same instant fired.
+    ///
+    /// `passes` bounds the settle alone. The kernel's own limits, which bound
+    /// the delta cycles of one drain and which a checkpoint records, stay as
+    /// they were configured.
     pub(crate) fn note_settle_pass(
         &mut self,
         bound: Instant,
@@ -2112,8 +2116,7 @@ impl EventScheduler {
             self.slot_events_executed = 0;
             self.queues.clear_activations();
         }
-        self.limits.max_delta_cycles_per_tick = passes;
-        self.count_delta_cycle(bound)
+        self.count_delta_cycle(bound, passes)
     }
 
     /// Record that the open slot resumed work deferred by a zero delay
@@ -2194,19 +2197,23 @@ impl EventScheduler {
     }
 
     /// Count one delta cycle of the open slot against its ceiling.
-    fn count_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
+    fn count_delta_cycle(&mut self, bound: Instant, limit: u32) -> Result<(), SchedulerError> {
         self.slot_delta_cycles = self
             .slot_delta_cycles
             .checked_add(1)
             .ok_or_else(|| self.accounting_failure())?;
         self.poll_abort(u64::from(self.slot_delta_cycles))?;
-        if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
-            return Err(self.oscillation(
+        if self.slot_delta_cycles > limit {
+            let mut error = self.oscillation(
                 bound,
                 OscillationCause::DeltaCycleLimit,
                 self.slot_delta_cycles,
                 self.slot_events_executed,
-            ));
+            );
+            if let SchedulerError::Oscillation(diagnostic) = &mut error {
+                diagnostic.delta_cycle_limit = limit;
+            }
+            return Err(error);
         }
         Ok(())
     }

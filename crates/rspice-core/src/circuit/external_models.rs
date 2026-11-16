@@ -163,6 +163,10 @@ pub(crate) struct XspiceActiveWave {
     /// takes is not this network's to bound: the passes are counted again
     /// from here (see `max_event_passes`).
     inputs_from_hdl: bool,
+    /// The latest instant an event of this wave was drained at. A pass
+    /// that drains a later one starts a settle of that instant (see
+    /// `max_event_passes`).
+    settle_instant: Value,
 }
 
 impl XspiceActiveWave {
@@ -398,6 +402,7 @@ fn apply_xspice_events_at_or_before(
     touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
 ) -> crate::xspice::CmResult<bool> {
+    let mut drained_at = Value::NEG_INFINITY;
     apply_xspice_events_with_resolver(
         event_values,
         event_queue,
@@ -405,6 +410,7 @@ fn apply_xspice_events_at_or_before(
         touched_real_nodes,
         time,
         &mut LocalDigitalResolver,
+        &mut drained_at,
     )
 }
 
@@ -461,6 +467,7 @@ impl XspiceDigitalResolver for LocalDigitalResolver {
 // Resolve each physical publication separately. A coarse analog interval may
 // contain several queued instants; folding all of them into one driver bank
 // would erase intermediate waveform values before they can be recorded.
+// `drained_at` is raised to the latest instant an event was drained at.
 fn apply_xspice_events_with_resolver(
     event_values: &mut crate::xspice::SharedXspiceEventValues,
     event_queue: &mut crate::xspice::SharedXspiceEventQueue,
@@ -468,12 +475,14 @@ fn apply_xspice_events_with_resolver(
     touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
     resolver: &mut impl XspiceDigitalResolver,
+    drained_at: &mut Value,
 ) -> crate::xspice::CmResult<bool> {
     let Some(first) = event_queue.next_event_time().filter(|next| *next <= time) else {
         touched_digital_nodes.clear();
         touched_real_nodes.clear();
         return Ok(false);
     };
+    *drained_at = drained_at.max(first);
     let mut changed = apply_xspice_event_slot(
         event_values,
         event_queue,
@@ -486,6 +495,7 @@ fn apply_xspice_events_with_resolver(
     let mut digital = Vec::new();
     let mut real = Vec::new();
     while let Some(next) = event_queue.next_event_time().filter(|next| *next <= time) {
+        *drained_at = drained_at.max(next);
         let outcome = apply_xspice_event_slot(
             event_values,
             event_queue,
@@ -1569,6 +1579,7 @@ impl CircuitData {
             analog_feedback: false,
             restored_by_caller: false,
             inputs_from_hdl: false,
+            settle_instant: Value::NEG_INFINITY,
         })
     }
 
@@ -1792,6 +1803,9 @@ impl CircuitData {
         let pending = &mut self.xspice_dispatch_pending;
         let next_pending = &mut self.xspice_dispatch_next_pending;
         next_pending.fill(false);
+        // The latest instant this pass drains an event at; see
+        // `XspiceActiveWave::settle_instant`.
+        let mut drained_at = Value::NEG_INFINITY;
         let mut changed = match apply_xspice_events_with_resolver(
             event_values,
             event_queue,
@@ -1799,6 +1813,7 @@ impl CircuitData {
             touched_real_nodes,
             drain_through,
             resolver,
+            &mut drained_at,
         ) {
             Ok(changed) => changed,
             Err(error) => {
@@ -1982,6 +1997,7 @@ impl CircuitData {
                 touched_real_nodes,
                 drain_through,
                 resolver,
+                &mut drained_at,
             ) {
                 Ok(changed) => changed,
                 Err(error) => {
@@ -2042,6 +2058,7 @@ impl CircuitData {
                 touched_real_nodes,
                 drain_through,
                 resolver,
+                &mut drained_at,
             );
             mark_drained_fanout_dirty(
                 dispatch,
@@ -2071,12 +2088,19 @@ impl CircuitData {
         // `true`, which it can only do past its emptiness check, so the
         // scheduler is already unshared and this mutable view copies
         // nothing.
-        // The slot is the one the drains opened, at the same bound.
-        if let Err(error) =
-            event_queue
-                .make_mut()
-                .note_settle_pass(drain_through, opens_settle, max_event_passes)
-        {
+        // The slot is the one the drains opened, at the same bound. A pass
+        // that drained events of a later instant than the settle's carries
+        // that instant's work, which ngspice settles in an EVTiter call of
+        // its own (spicelib/analysis/dctran.c:613-623 dequeues and iterates
+        // each event time up to the next analog point in turn): the passes
+        // are counted again from it.
+        let moved_on = drained_at > wave.settle_instant;
+        wave.settle_instant = wave.settle_instant.max(drained_at);
+        if let Err(error) = event_queue.make_mut().note_settle_pass(
+            drain_through,
+            opens_settle || moved_on,
+            max_event_passes,
+        ) {
             let message = xspice_event_settling_message(time, &error);
             if self.xspice_evaluation_error.is_none() {
                 self.xspice_evaluation_error = Some(message.clone());
