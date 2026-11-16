@@ -451,6 +451,16 @@ struct Tally {
     /// A failed assignment pass or prelude cannot supply numerical inputs.
     /// These fail the model row before any entry reads partly written storage.
     preparation_errors: usize,
+    /// Points where only the shipped plan's assignment pass failed. It
+    /// publishes every observable variable eagerly, operating-point outputs
+    /// included, and the CFG plan computes only what it reads, so a failure
+    /// there leaves the census no reference at the point and says nothing
+    /// about the plan production runs. The point is skipped and counted.
+    reference_refused: usize,
+    /// Prelude walks the walker refused, an analog task among them. The
+    /// slots after the refusal were never published, so neither the slots
+    /// nor the entries reading them have a reference at that point.
+    preludes_skipped: usize,
     /// Entries the CFG route's liveness found structurally absent, where the
     /// shipped plan still carries a program. Checked against zero rather than
     /// against a rounding bound — see [`check_structural_zero`].
@@ -887,6 +897,13 @@ fn plan_reference(
                 "cfg-mir model={module} prelude_refused route={route} detail={}",
                 refusal.name()
             );
+            // Every slot from the refused operation on still holds zero, and
+            // an entry of this route is a load of one. Comparing either with
+            // the machine code would report the walk's gap as the backend's.
+            tally.preludes_skipped += 1;
+            tally.walker_refusals.extend(narrow.refusals());
+            tally.walker_refusals.extend(wide.refusals());
+            return HashMap::new();
         }
         // The same fidelity question the entries are asked, at the one place a
         // block program's *intermediate* values are readable: the walk's slots
@@ -1175,25 +1192,37 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         let mut cfg_variables = vec![0.0_f64; model.num_variables + 64];
         context.clear_runtime_error();
         mir_native.run_assignments(&context, variables.as_mut_ptr());
-        if let Some(error) = context.take_runtime_error() {
-            tally.preparation_errors += 1;
-            return Some(format!(
-                "{module}: point={index} native assignments failed: {error}"
-            ));
-        }
+        let reference_error = context.take_runtime_error();
         cfg_native.run_assignments(&context, cfg_variables.as_mut_ptr());
-        if let Some(error) = context.take_runtime_error() {
-            tally.preparation_errors += 1;
-            return Some(format!(
-                "{module}: point={index} CFG assignments failed: {error}"
-            ));
-        }
-        cfg_native.run_prelude(&context, cfg_variables.as_ptr());
-        if let Some(error) = context.take_runtime_error() {
-            tally.preparation_errors += 1;
-            return Some(format!(
-                "{module}: point={index} CFG prelude failed: {error}"
-            ));
+        let cfg_error = context
+            .take_runtime_error()
+            .map(|error| format!("CFG assignments failed: {error}"))
+            .or_else(|| {
+                cfg_native.run_prelude(&context, cfg_variables.as_ptr());
+                context
+                    .take_runtime_error()
+                    .map(|error| format!("CFG prelude failed: {error}"))
+            });
+        match (reference_error, cfg_error) {
+            (Some(error), Some(cfg)) => {
+                tally.preparation_errors += 1;
+                return Some(format!(
+                    "{module}: point={index} native assignments failed: {error}; {cfg}"
+                ));
+            }
+            (None, Some(error)) => {
+                tally.preparation_errors += 1;
+                return Some(format!("{module}: point={index} {error}"));
+            }
+            (Some(error), None) => {
+                tally.reference_refused += 1;
+                println!(
+                    "cfg-mir model={module} point={index} reference_refused \
+                     stage=assignments detail={error}"
+                );
+                continue;
+            }
+            (None, None) => {}
         }
 
         // Read every entry on both plans first, then compare. Two passes
@@ -1550,7 +1579,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     );
     println!(
         "cfg-mir models={} built={} refused={} codegen_failed={} entries={} comparisons={} exact={} \
-         runtime_errors={} preparation_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
+         runtime_errors={} preparation_errors={} reference_refused={} preludes_skipped={} \
+         structural_zeros={} over_bound={} nonzero_structural_zeros={} \
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={} referenced={} reference_missing={} \
@@ -1565,6 +1595,8 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.exact,
         tally.runtime_errors,
         tally.preparation_errors,
+        tally.reference_refused,
+        tally.preludes_skipped,
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
@@ -1665,6 +1697,60 @@ module cfg_initial_step_temperature(p, n);
   end
 endmodule
 "#;
+
+fn census_source(name: &str, source: &str) -> (Option<String>, Tally) {
+    let runtime = crate::VerilogACompiler::default()
+        .compile_runtime(source, None)
+        .unwrap();
+    let shipped = CensusModel {
+        name: name.into(),
+        path: format!("{name}.va").into(),
+        model: runtime.model,
+        canonical_ir: runtime.canonical_ir,
+        compile_seconds: 0.0,
+        from_cache: false,
+    };
+    let mut tally = Tally::default();
+    let refusal = census_model(&shipped, &mut tally);
+    (refusal, tally)
+}
+
+/// An operating-point output only the shipped plan evaluates is the shipped
+/// plan's failure, not the model's: the CFG plan never runs it, so each point
+/// has no reference and is skipped, counted apart from a preparation failure.
+#[test]
+fn a_reference_refusal_skips_the_point_and_is_not_a_preparation_failure() {
+    let (refusal, tally) = census_source(
+        "reference",
+        "module reference(p,n); inout p,n; electrical p,n; real gm;
+        analog begin gm=ddx(log(-abs(V(p,n))-1.0),V(p,n)); I(p,n)<+2.0*V(p,n); end endmodule",
+    );
+    assert!(refusal.is_none(), "{refusal:?}");
+    assert_eq!(tally.preparation_errors, 0);
+    assert_eq!(tally.reference_refused, CENSUS_POINTS.len());
+    assert_eq!(tally.comparisons, 0, "a refused point compares nothing");
+}
+
+/// A prelude the walker refuses part way, at an analog task, publishes zero
+/// in every slot after the refusal. Those slots and the entries reading them
+/// are skipped rather than compared with the machine code.
+#[test]
+fn a_prelude_the_walker_refuses_is_skipped_not_read_as_zero() {
+    let (refusal, tally) = census_source(
+        "tasks",
+        "module tasks(p,n); inout p,n; electrical p,n; real g;
+        analog begin g=exp(V(p,n)); if (g>1.5) $strobe(\"g=%g\", g);
+        I(p,n)<+g*V(p,n); end endmodule",
+    );
+    assert!(refusal.is_none(), "{refusal:?}");
+    assert!(
+        tally.preludes_skipped > 0,
+        "the fixture's prelude holds a task"
+    );
+    assert_eq!(tally.prelude_slot_disagreements, 0);
+    assert_eq!(tally.walker_disagreements, 0);
+    assert!(tally.comparisons > 0);
+}
 
 #[test]
 fn failed_preparation_cannot_produce_a_numerical_comparison() {
