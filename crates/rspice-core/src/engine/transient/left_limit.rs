@@ -40,7 +40,6 @@ pub(super) struct LeftLimitStep<'a> {
     pub snapshots: AcceptedReactiveSnapshots<'a>,
     pub breakpoints: &'a BreakpointManager,
     pub tstop: Value,
-    pub dynamic_breakpoints_added: usize,
     pub pending_dynamic_breakpoints: &'a [Value],
 }
 
@@ -62,8 +61,6 @@ impl Engine {
         let mut bsim4 = step.histories.bsim4.clone();
         let mut ekv26 = step.histories.ekv26.clone();
         let mut breakpoints = step.breakpoints.empty_like();
-        let mut dynamic_breakpoints_added = step.dynamic_breakpoints_added;
-        let mut warned_dynamic_breakpoint_cap = false;
         let mut pending_dynamic_breakpoints = step.pending_dynamic_breakpoints.to_vec();
         self.accept_transient_models(
             abort,
@@ -105,8 +102,6 @@ impl Engine {
                     current_abstol: self.current_abstol(),
                 },
                 sink: DynamicBreakpointSink {
-                    dynamic_breakpoints_added: &mut dynamic_breakpoints_added,
-                    warned_dynamic_breakpoint_cap: &mut warned_dynamic_breakpoint_cap,
                     pending_dynamic_breakpoints: &mut pending_dynamic_breakpoints,
                 },
             }),

@@ -143,7 +143,7 @@ fn checkpoint_operation_result<T>(
 }
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 65;
+const FORMAT_VERSION: u32 = 66;
 
 /// Canonical text header. One owner, so the writer, the parser, and the
 /// format-version gate below cannot drift apart.
@@ -231,7 +231,6 @@ pub(super) struct CheckpointIntegrationState<'a> {
     pub integration_max_step: Option<Value>,
     pub integration_continuation: Option<ProposedIntegrationContinuation>,
     pub pending_tline_arrivals: &'a [Value],
-    pub dynamic_tline_breakpoints_added: usize,
     pub edge_completions: &'a EdgeCompletionSchedule,
     pub requested_breakpoints: &'a [Value],
     pub requested_landings: &'a [Value],
@@ -515,10 +514,6 @@ pub struct TransientCheckpoint {
     /// breakpoints: they arise from accepted wave changes and cannot always be
     /// reconstructed from the compacted delay history after a restart.
     pending_tline_arrivals: Vec<Value>,
-    /// Total unique dynamic line arrivals admitted during the trajectory.
-    /// Preserving this counter keeps the resource cap identical across a
-    /// restart seam rather than granting each segment a fresh allowance.
-    dynamic_tline_breakpoints_added: usize,
     /// Completions of zero-duration edges still ahead of `time`, and the edge
     /// being crossed (see `edge.rs`).
     edge_completions: EdgeCompletionSchedule,
@@ -5415,16 +5410,6 @@ impl TransientCheckpoint {
             }
             previous_arrival = Some(arrival);
         }
-        if self.dynamic_tline_breakpoints_added < self.pending_tline_arrivals.len()
-            || self.dynamic_tline_breakpoints_added > super::MAX_DYNAMIC_TLINE_BREAKPOINTS
-        {
-            return Err(format!(
-                "checkpoint dynamic transmission-line breakpoint count {} is inconsistent with {} pending arrivals or exceeds the trajectory cap {}",
-                self.dynamic_tline_breakpoints_added,
-                self.pending_tline_arrivals.len(),
-                super::MAX_DYNAMIC_TLINE_BREAKPOINTS
-            ));
-        }
         if self.netlist_identity.len() != 64
             || !self
                 .netlist_identity
@@ -6098,7 +6083,6 @@ impl TransientCheckpoint {
                 integration_max_step: None,
                 integration_continuation: None,
                 pending_tline_arrivals: &[],
-                dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
                 requested_landings: &[],
@@ -6144,7 +6128,6 @@ impl TransientCheckpoint {
             integration_max_step,
             integration_continuation,
             pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
             requested_landings,
@@ -6285,7 +6268,6 @@ impl TransientCheckpoint {
             accepted_integration_runtime,
             accepted_solver_state,
             pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
             edge_completions: edge::capture(edge_completions, time),
             requested_breakpoints: requested::capture(requested_breakpoints, time),
             requested_landings: requested::capture(requested_landings, time),
@@ -6357,7 +6339,6 @@ impl TransientCheckpoint {
             integration_max_step,
             integration_continuation,
             pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
             requested_landings,
@@ -6392,7 +6373,6 @@ impl TransientCheckpoint {
                 integration_max_step,
                 integration_continuation,
                 pending_tline_arrivals,
-                dynamic_tline_breakpoints_added,
                 edge_completions,
                 requested_breakpoints,
                 requested_landings,
@@ -7112,10 +7092,6 @@ impl TransientCheckpoint {
         &self.pending_tline_arrivals
     }
 
-    pub(crate) fn dynamic_tline_breakpoints_added(&self) -> usize {
-        self.dynamic_tline_breakpoints_added
-    }
-
     /// Completions of zero-duration edges still ahead of the checkpoint, and
     /// the edge being crossed, which a resumed run reinstates in its
     /// breakpoint schedule before it takes a step.
@@ -7558,10 +7534,6 @@ impl TransientCheckpoint {
             out.push_str(&arrival.to_string());
         }
         out.push('\n');
-        out.push_str(&format!(
-            "dynamic_tline_breakpoints_added {}\n",
-            self.dynamic_tline_breakpoints_added
-        ));
 
         let section =
             |out: &mut String, name: &str, rows: &[&[Value]]| -> Result<(), SimulationError> {
@@ -8455,12 +8427,6 @@ impl TransientCheckpoint {
                 .map_err(|_| {
                     format!("malformed pending transmission-line arrivals line: '{line}'")
                 })?;
-            if count > super::MAX_DYNAMIC_TLINE_BREAKPOINTS {
-                return Err(format!(
-                    "pending transmission-line arrivals count {count} exceeds checkpoint limit {}",
-                    super::MAX_DYNAMIC_TLINE_BREAKPOINTS
-                ));
-            }
             let mut arrivals =
                 allocate_checkpoint_capacity(count, "pending transmission-line arrivals", budget)?;
             for index in 0..count {
@@ -8479,20 +8445,6 @@ impl TransientCheckpoint {
                 ));
             }
             arrivals
-        };
-        let dynamic_tline_breakpoints_added = {
-            let line = lines.next().ok_or_else(|| {
-                "missing dynamic transmission-line breakpoint count line".to_string()
-            })?;
-            let field = line
-                .strip_prefix("dynamic_tline_breakpoints_added ")
-                .map(str::trim)
-                .ok_or_else(|| {
-                    format!("malformed dynamic transmission-line breakpoint count line: '{line}'")
-                })?;
-            field.parse::<usize>().map_err(|_| {
-                format!("malformed dynamic transmission-line breakpoint count line: '{line}'")
-            })?
         };
 
         let mut solution_cols = read_value_section(lines, "solution", 1, budget)?;
@@ -8636,7 +8588,6 @@ impl TransientCheckpoint {
             accepted_integration_runtime,
             accepted_solver_state,
             pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
             edge_completions,
             requested_breakpoints,
             requested_landings,
@@ -10797,7 +10748,6 @@ mod tests {
                 },
             )),
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
-            dynamic_tline_breakpoints_added: 3,
             edge_completions: EdgeCompletionSchedule::default(),
             requested_breakpoints: Vec::new(),
             requested_landings: Vec::new(),
@@ -12939,7 +12889,6 @@ mod tests {
                 integration_max_step: None,
                 integration_continuation: None,
                 pending_tline_arrivals: &[],
-                dynamic_tline_breakpoints_added: 0,
                 edge_completions: &EdgeCompletionSchedule::default(),
                 requested_breakpoints: &[],
                 requested_landings: &[],

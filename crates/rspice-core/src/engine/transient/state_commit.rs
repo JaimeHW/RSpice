@@ -969,8 +969,6 @@ impl Engine {
         prepared: PreparedReactiveHistory<'_>,
     ) {
         let DynamicBreakpointSink {
-            dynamic_breakpoints_added,
-            warned_dynamic_breakpoint_cap,
             pending_dynamic_breakpoints,
         } = sink;
         let ReactiveBreakpointScheduling {
@@ -1138,8 +1136,6 @@ impl Engine {
                         arrival,
                         tstop,
                         DynamicBreakpointSink {
-                            dynamic_breakpoints_added,
-                            warned_dynamic_breakpoint_cap,
                             pending_dynamic_breakpoints,
                         },
                     );
@@ -1160,8 +1156,6 @@ impl Engine {
                         arrival,
                         tstop,
                         DynamicBreakpointSink {
-                            dynamic_breakpoints_added,
-                            warned_dynamic_breakpoint_cap,
                             pending_dynamic_breakpoints,
                         },
                     );
@@ -1182,8 +1176,6 @@ impl Engine {
                         abstol: voltage_abstol,
                     },
                     DynamicBreakpointSink {
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
                         pending_dynamic_breakpoints,
                     },
                 );
@@ -1201,8 +1193,6 @@ impl Engine {
                         abstol: voltage_abstol,
                     },
                     DynamicBreakpointSink {
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
                         pending_dynamic_breakpoints,
                     },
                 );
@@ -1285,8 +1275,6 @@ impl Engine {
                         abstol: voltage_abstol,
                     },
                     DynamicBreakpointSink {
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
                         pending_dynamic_breakpoints,
                     },
                 );
@@ -1304,8 +1292,6 @@ impl Engine {
                         abstol: voltage_abstol,
                     },
                     DynamicBreakpointSink {
-                        dynamic_breakpoints_added,
-                        warned_dynamic_breakpoint_cap,
                         pending_dynamic_breakpoints,
                     },
                 );
@@ -1922,8 +1908,6 @@ mod tests {
                 current_abstol: 1e-12,
             },
             DynamicBreakpointSink {
-                dynamic_breakpoints_added: &mut 0,
-                warned_dynamic_breakpoint_cap: &mut false,
                 pending_dynamic_breakpoints: &mut Vec::new(),
             },
         )

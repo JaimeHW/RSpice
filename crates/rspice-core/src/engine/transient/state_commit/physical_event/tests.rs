@@ -156,8 +156,6 @@ fn accept(
                 current_abstol: 1e-13,
             },
             sink: DynamicBreakpointSink {
-                dynamic_breakpoints_added: &mut 0,
-                warned_dynamic_breakpoint_cap: &mut false,
                 pending_dynamic_breakpoints: &mut Vec::new(),
             },
         }),

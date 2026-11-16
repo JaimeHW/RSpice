@@ -72,8 +72,6 @@ pub(super) const SOURCE_ACTIVE_DELTA: Value = 1e-2;
 pub(super) const HFET_SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
 /// Local ngspice `NIiter()` raises any smaller iteration limit to 100.
 pub(super) const NGSPICE_NIITER_MIN_ITERATIONS: usize = 100;
-/// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
-pub(super) const MAX_DYNAMIC_TLINE_BREAKPOINTS: usize = 200_000;
 pub(super) const BJT_VBIC_TRUNCATION_BRANCH_COUNT: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
 pub(super) const BJT_VCX_STATE_INDEX: usize = 0;
 pub(super) const BJT_VCI_STATE_INDEX: usize = 1;

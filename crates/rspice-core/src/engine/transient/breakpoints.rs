@@ -78,8 +78,6 @@ pub(super) struct TlineWaveChange {
 /// Where dynamically scheduled breakpoints accumulate, with the cap bookkeeping
 /// that goes with them.
 pub(super) struct DynamicBreakpointSink<'a> {
-    pub dynamic_breakpoints_added: &'a mut usize,
-    pub warned_dynamic_breakpoint_cap: &'a mut bool,
     pub pending_dynamic_breakpoints: &'a mut Vec<Value>,
 }
 
@@ -1567,8 +1565,6 @@ impl Engine {
         sink: DynamicBreakpointSink<'_>,
     ) {
         let DynamicBreakpointSink {
-            dynamic_breakpoints_added,
-            warned_dynamic_breakpoint_cap,
             pending_dynamic_breakpoints,
         } = sink;
         let TlineWaveChange {
@@ -1594,31 +1590,8 @@ impl Engine {
             return;
         }
 
-        if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS {
-            if !*warned_dynamic_breakpoint_cap {
-                log::warn!(
-                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
-                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
-                    tstop
-                );
-                *warned_dynamic_breakpoint_cap = true;
-            }
-            return;
-        }
-
         if breakpoints.add(arrival) {
-            *dynamic_breakpoints_added += 1;
             pending_dynamic_breakpoints.push(arrival);
-            if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
-                && !*warned_dynamic_breakpoint_cap
-            {
-                log::warn!(
-                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
-                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
-                    tstop
-                );
-                *warned_dynamic_breakpoint_cap = true;
-            }
         }
     }
 
@@ -1630,39 +1603,14 @@ impl Engine {
         sink: DynamicBreakpointSink<'_>,
     ) {
         let DynamicBreakpointSink {
-            dynamic_breakpoints_added,
-            warned_dynamic_breakpoint_cap,
             pending_dynamic_breakpoints,
         } = sink;
         if !(arrival.is_finite() && arrival >= 0.0 && arrival <= tstop) {
             return;
         }
 
-        if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS {
-            if !*warned_dynamic_breakpoint_cap {
-                log::warn!(
-                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
-                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
-                    tstop
-                );
-                *warned_dynamic_breakpoint_cap = true;
-            }
-            return;
-        }
-
         if breakpoints.add(arrival) {
-            *dynamic_breakpoints_added += 1;
             pending_dynamic_breakpoints.push(arrival);
-            if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
-                && !*warned_dynamic_breakpoint_cap
-            {
-                log::warn!(
-                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
-                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
-                    tstop
-                );
-                *warned_dynamic_breakpoint_cap = true;
-            }
         }
     }
 }
@@ -2391,5 +2339,26 @@ mod tests {
             breakpoints.times(),
             &[1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9, 6.0e-9, 7.0e-9],
         );
+    }
+
+    #[test]
+    fn a_line_schedules_every_wave_change_arrival_however_many() {
+        // Past the 200,000 arrivals a run once stopped scheduling at.
+        let count = 250_000;
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-18);
+        let mut pending = Vec::new();
+        for index in 0..count {
+            Engine::schedule_dynamic_tline_breakpoint(
+                &mut breakpoints,
+                (index + 1) as Value * 1.0e-12,
+                1.0,
+                DynamicBreakpointSink {
+                    pending_dynamic_breakpoints: &mut pending,
+                },
+            );
+        }
+        assert_eq!(pending.len(), count);
+        assert_eq!(breakpoints.scheduled_len(), count);
+        assert_eq!(pending.last(), Some(&(count as Value * 1.0e-12)));
     }
 }

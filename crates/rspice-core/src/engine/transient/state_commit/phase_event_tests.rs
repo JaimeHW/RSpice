@@ -160,8 +160,6 @@ fn commit(
             current_abstol: 1e-12,
         },
         DynamicBreakpointSink {
-            dynamic_breakpoints_added: &mut 0,
-            warned_dynamic_breakpoint_cap: &mut false,
             pending_dynamic_breakpoints: &mut Vec::new(),
         },
     )

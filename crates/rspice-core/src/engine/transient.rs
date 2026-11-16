@@ -1335,7 +1335,6 @@ struct ScheduledCheckpointIntegration<'a> {
     integration_continuation: Option<ProposedIntegrationContinuation>,
     integration_stop_time: Value,
     pending_tline_arrivals: &'a [Value],
-    dynamic_tline_breakpoints_added: usize,
     /// Asked for its edge completions only when a checkpoint is due.
     breakpoints: &'a BreakpointManager,
     /// The run of floor landings in progress, which a resumed run continues.
@@ -4435,7 +4434,6 @@ impl Engine {
             integration_continuation,
             integration_stop_time,
             pending_tline_arrivals,
-            dynamic_tline_breakpoints_added,
             breakpoints,
             floor_grid,
         } = integration;
@@ -4566,7 +4564,6 @@ impl Engine {
                 integration_max_step: Some(integration_max_step),
                 integration_continuation,
                 pending_tline_arrivals,
-                dynamic_tline_breakpoints_added,
                 edge_completions: &breakpoints.edge_completion_schedule(accepted_time),
                 requested_breakpoints: &breakpoints.model_request_schedule(accepted_time),
                 requested_landings: &breakpoints.model_landing_schedule(accepted_time),
@@ -4976,7 +4973,6 @@ impl Engine {
                         integration_max_step: Some(max_step),
                         integration_continuation: None,
                         pending_tline_arrivals: &[],
-                        dynamic_tline_breakpoints_added: 0,
                         edge_completions:
                             &crate::numerics::integration::EdgeCompletionSchedule::default(),
                         requested_breakpoints: &[],
@@ -5803,10 +5799,6 @@ impl Engine {
             FloorLandingGrid::default,
             TransientCheckpoint::floor_landing_grid,
         );
-        let mut dynamic_tline_breakpoints_added = resume
-            .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
-            .unwrap_or(0);
-        let mut warned_dynamic_tline_breakpoint_cap = false;
         let transient_lte_reltol = self.transient_lte_reltol();
         let transient_lte_abstol = self.transient_lte_abstol();
         // The explicit RBI current is an algebraic conditioning variable;
@@ -7399,7 +7391,6 @@ impl Engine {
                 }),
                 integration_stop_time: tstop,
                 pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
-                dynamic_tline_breakpoints_added,
                 breakpoints: &breakpoints,
                 floor_grid: veriloga_floor_grid,
             },
@@ -12047,7 +12038,6 @@ impl Engine {
                                 },
                                 breakpoints: &breakpoints,
                                 tstop,
-                                dynamic_breakpoints_added: dynamic_tline_breakpoints_added,
                                 pending_dynamic_breakpoints: &pending_dynamic_tline_breakpoints,
                             },
                             abort,
@@ -12136,9 +12126,6 @@ impl Engine {
                                 current_abstol: self.current_abstol(),
                             },
                             sink: DynamicBreakpointSink {
-                                dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
-                                warned_dynamic_breakpoint_cap:
-                                    &mut warned_dynamic_tline_breakpoint_cap,
                                 pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
                             },
                         }),
@@ -12482,7 +12469,6 @@ impl Engine {
                             }),
                             integration_stop_time: tstop,
                             pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
-                            dynamic_tline_breakpoints_added,
                             breakpoints: &breakpoints,
                             floor_grid: veriloga_floor_grid,
                         },
@@ -12801,7 +12787,6 @@ impl Engine {
                             },
                             breakpoints: &breakpoints,
                             tstop,
-                            dynamic_breakpoints_added: dynamic_tline_breakpoints_added,
                             pending_dynamic_breakpoints: &pending_dynamic_tline_breakpoints,
                         },
                         abort,
@@ -12892,8 +12877,6 @@ impl Engine {
                         current_abstol: self.current_abstol(),
                     },
                     sink: DynamicBreakpointSink {
-                        dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
-                        warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
                         pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
                     },
                 }),
@@ -13486,7 +13469,6 @@ impl Engine {
                     }),
                     integration_stop_time: tstop,
                     pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
-                    dynamic_tline_breakpoints_added,
                     breakpoints: &breakpoints,
                     floor_grid: veriloga_floor_grid,
                 },
@@ -13778,7 +13760,6 @@ impl Engine {
                         integration_max_step: Some(max_step),
                         integration_continuation: None,
                         pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
-                        dynamic_tline_breakpoints_added,
                         edge_completions: &breakpoints.edge_completion_schedule(t),
                         requested_breakpoints: &breakpoints.model_request_schedule(t),
                         requested_landings: &breakpoints.model_landing_schedule(t),
