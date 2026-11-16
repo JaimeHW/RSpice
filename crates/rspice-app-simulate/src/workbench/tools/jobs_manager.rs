@@ -610,7 +610,13 @@ fn render_content(
     let narrow = ui.available_width() <= 1_020.0;
     if narrow {
         render_queue_and_graph(ui, snapshot, &mut requests);
-        render_inspector(ui, snapshot, requests.open, requested_open_deck);
+        render_inspector(
+            ui,
+            snapshot,
+            requests.open,
+            requests.verify,
+            requested_open_deck,
+        );
     } else {
         let width = ui.available_width();
         let left_width = ((width - 1.0) * 0.695).max(560.0);
@@ -630,7 +636,15 @@ fn render_content(
                 ui.allocate_ui_with_layout(
                     vec2((width - left_width - 1.0).max(280.0), 0.0),
                     Layout::top_down(Align::Min),
-                    |ui| render_inspector(ui, snapshot, requests.open, requested_open_deck),
+                    |ui| {
+                        render_inspector(
+                            ui,
+                            snapshot,
+                            requests.open,
+                            requests.verify,
+                            requested_open_deck,
+                        );
+                    },
                 );
             })
             .response;
@@ -772,6 +786,7 @@ fn render_inspector(
     ui: &mut Ui,
     snapshot: &JobsSnapshot,
     requested_open: &mut Option<RunId>,
+    requested_verify: &mut Option<(RunId, VerificationPage)>,
     requested_open_deck: &mut Option<u64>,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -828,8 +843,9 @@ fn render_inspector(
                         row.tone.problem(),
                     );
                     // The manifest states what the run produced; these are the
-                    // two controls that go and look at it — the dataset it
-                    // retained, and the source its engine was actually handed.
+                    // controls that go and look at it — the dataset it
+                    // retained, what Verify judged of it, and the source its
+                    // engine was actually handed.
                     let openable = row.analysis_count > 0;
                     let open = crate::ui::widgets::Button::new("Open in Results")
                         .enabled(openable)
@@ -845,6 +861,17 @@ fn render_inspector(
                         open.on_hover_text(
                             "This run retained no analysis result, so there is no dataset to open.",
                         );
+                    }
+                    // Beside Results, as the row's context menu has it: the
+                    // run's specifications are judged in Verify, not here.
+                    if crate::ui::widgets::Button::new("Open in Verify")
+                        .show(ui)
+                        .on_hover_text(
+                            "Make this the active run and open its specifications in Verify",
+                        )
+                        .clicked()
+                    {
+                        *requested_verify = Some((row.run_id, VerificationPage::Specifications));
                     }
                     // Through the same owner the Netlist run strip's own
                     // control uses, so the document a reader reaches from here
@@ -2077,7 +2104,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            render_inspector(ui, &snapshot, &mut None, &mut None);
+            render_inspector(ui, &snapshot, &mut None, &mut None, &mut None);
         });
         let text = output
             .platform_output
@@ -2103,6 +2130,42 @@ mod tests {
         ] {
             assert!(!text.contains(constant), "{constant} came back:\n{text}");
         }
+    }
+
+    /// The selected run's manifest opens it in Verify beside Results, on its
+    /// specifications, as the row's context menu does.
+    #[test]
+    fn the_manifest_opens_the_selected_run_in_verify() {
+        use crate::workbench::surfaces::verify::raster::{page_input, page_pass};
+
+        let mut state = SimulateTestHost::default();
+        let run_id = state.model.simulation.start_run().run_id;
+        let snapshot = JobsSnapshot::capture(&state.model, Some(run_id), JobsPlanScope::AllPlans);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut verify = None;
+        let (output, _) = page_pass(&ctx, page_input(Vec::new()), |ui| {
+            render_inspector(ui, &snapshot, &mut None, &mut verify, &mut None);
+        });
+        let bounds = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label().as_deref() == Some("Open in Verify"))
+            .and_then(|(_, node)| node.bounds())
+            .expect("the manifest offers Open in Verify");
+        let at = pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        assert_eq!(verify, None);
+        let _ = page_pass(&ctx, page_input(click(at)), |ui| {
+            render_inspector(ui, &snapshot, &mut None, &mut verify, &mut None);
+        });
+        assert_eq!(verify, Some((run_id, VerificationPage::Specifications)));
     }
 
     /// The dialog, its route and the error a failed close reports all call
