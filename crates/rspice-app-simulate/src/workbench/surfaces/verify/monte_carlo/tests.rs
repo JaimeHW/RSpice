@@ -228,6 +228,53 @@ fn the_detail_fills_the_page_as_one_frame() {
     );
 }
 
+/// On a phone the detail stacks: the histogram over the failing trials, each
+/// the page's full width under its own head band, the list as tall as its
+/// rows and the plot taking the rest down to the page's foot.
+#[test]
+fn on_a_phone_the_histogram_sits_over_the_failing_trials() {
+    let ctx = context();
+    let mut harness = monte_carlo_app();
+    select_row(&mut harness, 0);
+    let phone = egui::vec2(390.0, 844.0);
+    let mut geometry = PageGeometry::default();
+    for _ in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, phone)),
+            ..Default::default()
+        };
+        geometry = page_pass(&ctx, input, |ui| harness.draw(ui)).1;
+    }
+    let split = geometry.one("split").expect("the detail is split off");
+    let band = geometry.one("detail.band").expect("the plot's head band");
+    let plot = geometry.one("detail.plot").expect("the histogram");
+    let list = geometry.one("detail.list").expect("the list");
+    assert_eq!(split.x_range(), egui::Rangef::new(0.0, phone.x));
+    assert_eq!(band.top(), split.bottom());
+    assert_eq!(band.height(), TABLE_HEAD_H);
+    for part in [band, plot, list] {
+        assert_eq!(part.x_range(), split.x_range(), "{part:?} is full width");
+    }
+    assert_eq!(plot.top(), band.bottom(), "the plot is under its band");
+    assert_eq!(
+        list.top(),
+        plot.bottom() + 1.0,
+        "the list is under the plot"
+    );
+    assert_eq!(list.bottom(), phone.y, "the list runs to the foot");
+    assert_eq!(
+        list.height(),
+        TABLE_HEAD_H + 3.0 * TABLE_ROW_H,
+        "the list is as tall as its three failing trials"
+    );
+    assert!(plot.height() > list.height(), "the plot takes the rest");
+    assert_eq!(geometry.one("histogram"), Some(plot));
+    let heads = geometry.all("table.head");
+    assert_eq!(heads.len(), 2);
+    assert_eq!(heads[1].top(), list.top(), "the list's heads are its band");
+    assert_eq!(heads[1].x_range(), list.x_range());
+}
+
 /// Nothing selected, the view selects the first row whose yield does not
 /// hold, else the first, so the row's wash says whose detail shows.
 #[test]

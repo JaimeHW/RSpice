@@ -4,10 +4,10 @@
 //! statistics, as the ADE Assembler yield view and the ADS yield summary put
 //! them: the yield with its confidence interval, the distribution's mean,
 //! sigma and extremes, its capability, and how many trials failed. Under the
-//! table, the selected row's histogram beside the trials that failed it, one
-//! frame filling the page to the dock; a trial opens in Results as the one
-//! member of its family. Nothing selected, the view selects the first row
-//! whose yield does not hold, else the first.
+//! table, the selected row's histogram beside the trials that failed it (over
+//! them on a phone), one frame filling the page to the dock; a trial opens in
+//! Results as the one member of its family. Nothing selected, the view
+//! selects the first row whose yield does not hold, else the first.
 //!
 //! Every number is the verification sheet's. A trial passes or fails by the
 //! sheet's word, a yield is the acceptance gate's own count, and a row's
@@ -864,13 +864,58 @@ struct Detail<'a> {
     trials: usize,
 }
 
-/// The selected row's detail, filling the page under the table: one frame
-/// of two halves, the histogram beside the trials that failed it. One head
-/// band runs across both at the table head's height, fill and type, the
-/// plot's title on the left and the list's column heads on the right, and
-/// both halves run to the frame's foot on the page's ground. Returns the
-/// failing trial the reader double-clicked, by its place in the row's
-/// statistics.
+/// Where the detail's parts sit in the frame under the table.
+struct DetailLayout {
+    /// The plot's head band, its title in it.
+    band: egui::Rect,
+    plot: egui::Rect,
+    /// The failing-trial list, its column heads at its top.
+    list: egui::Rect,
+}
+
+impl DetailLayout {
+    /// Two halves side by side: one head band across both, the plot's title
+    /// on the left and the list's column heads on the right, both halves
+    /// running to the frame's foot.
+    fn beside(frame: egui::Rect) -> Self {
+        let split = frame.right() - TRIALS_W.min(frame.width() * 0.5);
+        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), TABLE_HEAD_H));
+        Self {
+            band,
+            plot: egui::Rect::from_min_max(
+                egui::pos2(frame.left(), band.bottom()),
+                egui::pos2(split - 1.0, frame.bottom()),
+            ),
+            list: egui::Rect::from_min_max(egui::pos2(split, frame.top()), frame.max),
+        }
+    }
+
+    /// The histogram over the list, each the frame's full width under its own
+    /// head band: a phone has no width for two halves. The list takes the
+    /// height of its rows up to half the frame; the plot takes the rest.
+    fn stacked(frame: egui::Rect, failing: usize) -> Self {
+        let rows = TABLE_HEAD_H + TABLE_ROW_H * failing.max(1) as f32;
+        let list_h = rows.min((frame.height() * 0.5).floor());
+        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), TABLE_HEAD_H));
+        let list =
+            egui::Rect::from_min_max(egui::pos2(frame.left(), frame.bottom() - list_h), frame.max);
+        Self {
+            band,
+            plot: egui::Rect::from_min_max(
+                egui::pos2(frame.left(), band.bottom()),
+                egui::pos2(frame.right(), list.top() - 1.0),
+            ),
+            list,
+        }
+    }
+}
+
+/// The selected row's detail, filling the page under the table: the
+/// histogram and the trials that failed it, beside each other or, on a
+/// phone, one over the other. Each states its head in a band at the table
+/// head's height, fill and type, and the detail runs to the frame's foot on
+/// the page's ground. Returns the failing trial the reader double-clicked,
+/// by its place in the row's statistics.
 fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let Detail {
@@ -880,17 +925,21 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
         failing,
         trials,
     } = detail;
+    let stacked = phone_width(ui.ctx());
     let width = ui.available_width();
-    let height = ui.available_height().max(TABLE_HEAD_H + TABLE_ROW_H + 1.0);
+    let least = if stacked {
+        2.0 * (TABLE_HEAD_H + TABLE_ROW_H) + 2.0
+    } else {
+        TABLE_HEAD_H + TABLE_ROW_H + 1.0
+    };
+    let height = ui.available_height().max(least);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let frame = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + 1.0), rect.max);
-    let split = frame.right() - TRIALS_W.min(width * 0.5);
-    let band = egui::Rect::from_min_size(frame.min, egui::vec2(width, TABLE_HEAD_H));
-    let plot = egui::Rect::from_min_max(
-        egui::pos2(frame.left(), band.bottom()),
-        egui::pos2(split - 1.0, frame.bottom()),
-    );
-    let list = egui::Rect::from_min_max(egui::pos2(split, frame.top()), frame.max);
+    let DetailLayout { band, plot, list } = if stacked {
+        DetailLayout::stacked(frame, failing.len())
+    } else {
+        DetailLayout::beside(frame)
+    };
     #[cfg(any(test, feature = "test-support"))]
     {
         super::raster::probe(
@@ -908,10 +957,14 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
     painter.hline(rect.x_range(), rect.top() + 0.5, rule);
     painter.rect_filled(band, 0.0, t.color.bg_panel_2);
     painter.hline(band.x_range(), band.bottom() - 0.5, rule);
-    painter.vline(split - 0.5, frame.y_range(), rule);
+    if stacked {
+        painter.hline(list.x_range(), list.top() - 0.5, rule);
+    } else {
+        painter.vline(list.left() - 0.5, frame.y_range(), rule);
+    }
     let title = plot_title(ui, row, trials, failing.len());
     ui.painter()
-        .with_clip_rect(band.with_max_x(split - 1.0))
+        .with_clip_rect(band.with_max_x(plot.right()))
         .galley(
             egui::pos2(
                 band.left() + TABLE_EDGE_INSET,
