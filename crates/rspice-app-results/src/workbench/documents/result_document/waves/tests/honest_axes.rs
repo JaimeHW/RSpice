@@ -404,6 +404,7 @@ fn an_overlay_row_names_the_run_it_came_from() {
         },
         presentation.readout(),
         quantity_policy,
+        &rspice_results_ui::waves::as_returned,
     );
 
     assert_eq!(rows.len(), 2, "the active run and its overlay");

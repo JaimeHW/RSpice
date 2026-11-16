@@ -45,6 +45,11 @@ fn with_readout<R>(
         )
     });
     let strips = on_screen_strips(state.results_reads());
+    // Design notation changes labels only; the rows' keys stay the result's.
+    // It is read the first time a row is named, so a frame that names none
+    // does not walk the drawings.
+    let notations = std::cell::OnceCell::new();
+    let (workspace, schematic) = (&state.model.workspace, &state.model.schematic);
     render(
         &mut state.results.session,
         ReadoutInput {
@@ -52,6 +57,11 @@ fn with_readout<R>(
             on_screen_strips: &strips,
             presentation: presentation.readout(),
             quantity_policy,
+            display_name: &|name| {
+                notations
+                    .get_or_init(|| bus_notations(workspace, schematic))
+                    .display(name)
+            },
         },
     )
 }

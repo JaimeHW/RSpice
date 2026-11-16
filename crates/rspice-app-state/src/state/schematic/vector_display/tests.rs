@@ -243,3 +243,70 @@ fn an_empty_design_leaves_every_name_alone() {
     assert_eq!(notations.display("DATA#3"), "DATA#3");
     assert_eq!(notations.display("V(out)"), "V(out)");
 }
+
+/// A sheet that places `parts`, each a kind and the name it is drawn under,
+/// and labels the nets `labels`.
+fn placed_sheet(parts: &[(crate::state::ComponentType, &str)], labels: &[&str]) -> SchematicState {
+    let mut sheet = labelled_sheet(labels);
+    for (index, (kind, name)) in parts.iter().enumerate() {
+        let at = Point::new(400, 40 * i32::try_from(index).expect("a test position"));
+        let id = sheet.add_component(*kind, at);
+        sheet
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the placed part")
+            .name = (*name).to_owned();
+    }
+    sheet
+}
+
+/// The engine folds element and instance names to upper case as it folds
+/// nets: a device reads under the name its card is written under, as drawn,
+/// in a current or a power, and every instance a name is scoped through
+/// reads as drawn.
+#[test]
+fn an_element_reads_as_drawn() {
+    use crate::state::ComponentType;
+    let sheet = placed_sheet(
+        &[
+            (ComponentType::Capacitor, "Cout"),
+            (ComponentType::Resistor, "load"),
+            (ComponentType::CellInstance, "xtb"),
+        ],
+        &["ok"],
+    );
+    let notations = BusNotations::of_sheets(std::iter::once(sheet.document()));
+
+    assert_eq!(notations.display("I(COUT)"), "I(Cout)");
+    assert_eq!(notations.display("P(COUT)"), "P(Cout)");
+    // A resistor drawn `load` is written, and answered, as `Rload`.
+    assert_eq!(notations.display("I(RLOAD)"), "I(Rload)");
+    assert_eq!(notations.display("XTB.OK"), "xtb.ok");
+    assert_eq!(notations.display("D(XTB.OK)"), "D(xtb.ok)");
+    // A node no drawing names keeps its spelling inside a drawn instance.
+    assert_eq!(notations.display("XTB.OK__EVENT_0"), "xtb.OK__EVENT_0");
+    assert_eq!(notations.display_element("XTB"), "xtb");
+    assert_eq!(notations.display_element("XTB.COUT"), "xtb.Cout");
+    // A net is not an element, and an element no drawing places is the
+    // engine's.
+    assert_eq!(notations.display("COUT"), "COUT");
+    for untouched in ["I(C9)", "XQ.OK__EVENT_0", "V(B0)-V(XTB)"] {
+        assert_eq!(notations.display(untouched), untouched);
+    }
+}
+
+/// Two drawings that write one element two ways leave it as the engine
+/// spells it, as a net spelled two ways does.
+#[test]
+fn an_element_written_two_ways_keeps_its_engine_name() {
+    use crate::state::ComponentType;
+    let notations = BusNotations::of_sheets([
+        placed_sheet(&[(ComponentType::Capacitor, "Cout")], &[]).document(),
+        placed_sheet(&[(ComponentType::Capacitor, "cout")], &[]).document(),
+    ]);
+
+    assert_eq!(notations.display("I(COUT)"), "I(COUT)");
+    assert_eq!(notations.display_element("COUT"), "COUT");
+}

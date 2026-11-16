@@ -45,6 +45,7 @@ fn rows_of(state: &mut ResultsTestHost, a: Option<f64>, b: Option<f64>) -> Vec<R
         CursorPair { a, b },
         presentation.readout(),
         quantity_policy,
+        &rspice_results_ui::waves::as_returned,
     )
 }
 

@@ -142,6 +142,7 @@ fn render() -> Render {
             significant_digits: 4,
             violations: &violations,
             source_probes: true,
+            display_name: &|name| std::borrow::Cow::Borrowed(name),
         };
         show_marker_strip(
             ui,

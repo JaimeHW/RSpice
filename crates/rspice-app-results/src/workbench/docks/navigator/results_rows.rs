@@ -1037,7 +1037,7 @@ pub(super) fn show_virtualized_result_signals(
                             expanded,
                         } => {
                             let row = &list.instances[instance];
-                            instance_row(ui, state, runs, row, depth, expanded);
+                            instance_row(ui, state, runs, row, depth, expanded, &notations);
                         }
                         ResultSignalVirtualRow::Signal {
                             run,
@@ -1054,7 +1054,7 @@ pub(super) fn show_virtualized_result_signals(
                             let label = if in_tree {
                                 split_hierarchy(&shown).leaf
                             } else {
-                                shown.into_owned()
+                                shown.to_string()
                             };
                             let color = plotted_signal_color(
                                 last_strip_models(state),
@@ -1074,7 +1074,8 @@ pub(super) fn show_virtualized_result_signals(
                                 )),
                                 RowLabel {
                                     name: &label,
-                                    full_name: &signal.name,
+                                    // Spoken and explained as it is shown.
+                                    full_name: &shown,
                                     kind: signal.kind,
                                     indent: depth,
                                 },
@@ -1233,9 +1234,6 @@ pub(super) fn show_virtualized_result_signals(
     }
 }
 
-/// The hierarchical name an artifact row is placed in the tree by and
-/// answers a pattern with: an event net's `D(net)` or `E(net)`, a bus's
-/// `name[msb:lsb]`, and any other artifact its own name.
 /// An event net's row name with its net spelled as the drawing spells it
 /// (`Digital net csn` for the engine's `CSN`); any other row keeps its name.
 pub(super) fn drawn_artifact_name(artifact: &ResultArtifact, notations: &BusNotations) -> String {
@@ -1253,6 +1251,9 @@ pub(super) fn drawn_artifact_name(artifact: &ResultArtifact, notations: &BusNota
     }
 }
 
+/// The hierarchical name an artifact row is placed in the tree by and
+/// answers a pattern with: an event net's `D(net)` or `E(net)`, a bus's
+/// `name[msb:lsb]`, and any other artifact its own name.
 pub(super) fn artifact_hierarchical_name(artifact: &ResultArtifact) -> &str {
     let canonical = artifact.identity.canonical_name();
     canonical
@@ -1312,6 +1313,7 @@ fn instance_row(
     row: &InstanceRow<'_>,
     depth: usize,
     expanded: bool,
+    notations: &BusNotations,
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -1336,7 +1338,7 @@ fn instance_row(
             ui.is_enabled(),
             format!(
                 "{}, instance, {}, {}",
-                node.path,
+                notations.display_element(&node.path),
                 counted(node.count, "quantity", "quantities"),
                 if expanded { "expanded" } else { "collapsed" }
             ),
@@ -1379,9 +1381,11 @@ fn instance_row(
         );
         let name_left = caret_left + KIND_GLYPH_WIDTH;
         let font = theme::mono(tokens::FS_0, FontWeight::Medium);
+        // The engine names an instance in upper case; the tree names it as
+        // the drawing places it.
         let name = super::super::super::design_system::elide_text(
             ui,
-            &node.name,
+            &notations.display_element(&node.name),
             &font,
             rect.right() - 8.0 - count_width - 8.0 - name_left,
         );
@@ -1410,7 +1414,7 @@ fn instance_row(
     }
     let response = response.on_hover_text(format!(
         "{} · {}",
-        node.path,
+        notations.display_element(&node.path),
         counted(node.count, "quantity", "quantities")
     ));
     response.context_menu(|ui| {

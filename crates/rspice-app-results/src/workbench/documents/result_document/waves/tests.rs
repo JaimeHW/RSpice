@@ -335,11 +335,16 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
         a: Some(0.0),
         b: Some(1.0),
     };
-    let slopes: Vec<String> =
-        readout_rows(&models[0], cursors, presentation.readout(), quantity_policy)
-            .into_iter()
-            .map(|row| row.slope)
-            .collect();
+    let slopes: Vec<String> = readout_rows(
+        &models[0],
+        cursors,
+        presentation.readout(),
+        quantity_policy,
+        &rspice_results_ui::waves::as_returned,
+    )
+    .into_iter()
+    .map(|row| row.slope)
+    .collect();
 
     // The SLOPE column had its own copy of the unit mapping, keyed on the
     // strip, so the current on a mixed sheet reported volts per second. A
@@ -551,11 +556,16 @@ fn each_cursor_trace_reports_its_own_linear_slope() {
         a: Some(0.0),
         b: Some(1.0),
     };
-    let slopes: Vec<String> =
-        readout_rows(&models[0], cursors, presentation.readout(), quantity_policy)
-            .into_iter()
-            .map(|row| row.slope)
-            .collect();
+    let slopes: Vec<String> = readout_rows(
+        &models[0],
+        cursors,
+        presentation.readout(),
+        quantity_policy,
+        &rspice_results_ui::waves::as_returned,
+    )
+    .into_iter()
+    .map(|row| row.slope)
+    .collect();
 
     assert_eq!(slopes.len(), 1);
     assert!(

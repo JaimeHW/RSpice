@@ -39,6 +39,8 @@ pub(super) fn show_lanes(
             .displayed_significant_digits()
             .get(),
     );
+    // Design notation changes labels only; retained lane names stay the keys.
+    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
     let session = &mut state.results.session;
     let mut layout = session
         .event_lanes
@@ -77,6 +79,7 @@ pub(super) fn show_lanes(
             // The retained events do not yet carry where an HDL net was
             // declared or what drives it, so those probes have nowhere to go.
             source_probes: false,
+            display_name: &|name| notations.display(name),
         },
     );
     if let Some(width) = response.resize_name {

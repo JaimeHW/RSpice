@@ -3,8 +3,8 @@
 use super::cursor_values::{slope_text, x_delta, x_reciprocal};
 use super::pane::SwatchStyle;
 use super::{
-    NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind, cursor_interpolation,
-    trace_key,
+    DisplayName, NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind,
+    cursor_interpolation, trace_key,
 };
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
@@ -54,7 +54,8 @@ pub fn branch_tag(shape: &SweepShape, run: usize) -> String {
 ///
 /// The A and B column heads say which cursor the arrow keys and the jumps
 /// move, in that cursor's colour; a click on the other head hands them to
-/// it, and is returned for the host to apply.
+/// it, and is returned for the host to apply. `rows` are the table's rows,
+/// [`readout_rows`] then the strip's lane rows.
 pub fn cursor_readout_table(
     ui: &mut Ui,
     model: &StripModel,
@@ -62,7 +63,7 @@ pub fn cursor_readout_table(
     stepping: CursorId,
     presentation: ReadoutPolicy,
     quantity_policy: QuantityPresentationPolicy,
-    lane_rows: Vec<ReadoutRow>,
+    rows: Vec<ReadoutRow>,
 ) -> Option<CursorId> {
     let rect = ui.available_rect_before_wrap();
     let t = Tokens::get(ui.ctx());
@@ -167,10 +168,7 @@ pub fn cursor_readout_table(
         None,
     );
 
-    // Per-trace values at A and B, their difference, and their own slope;
-    // then what each event lane reads at A and B.
-    let mut rows = readout_rows(model, cursors, presentation, quantity_policy);
-    rows.extend(lane_rows);
+    // Each row as the host listed it: the traces', then the event lanes'.
     for (index, row) in rows.iter().enumerate() {
         draw_row(
             index + 2,
@@ -280,6 +278,7 @@ pub fn measurement_panel(
     window: Option<(f64, f64)>,
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
+    display_name: DisplayName<'_>,
 ) {
     let title = if window.is_some() {
         "Measurements · A–B"
@@ -297,6 +296,7 @@ pub fn measurement_panel(
         window,
         significant_digits,
         quantity_policy,
+        display_name,
     );
 }
 /// The traces the readout lists, in row order.
@@ -341,9 +341,19 @@ pub fn readout_rows(
     cursors: CursorPair,
     presentation: ReadoutPolicy,
     quantity_policy: QuantityPresentationPolicy,
+    display_name: DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
     readout_traces(model)
-        .flat_map(|trace| trace_readout_rows(model, trace, cursors, presentation, quantity_policy))
+        .flat_map(|trace| {
+            trace_readout_rows(
+                model,
+                trace,
+                cursors,
+                presentation,
+                quantity_policy,
+                display_name,
+            )
+        })
         .collect()
 }
 
@@ -378,13 +388,14 @@ fn trace_readout_rows(
     cursors: CursorPair,
     presentation: ReadoutPolicy,
     quantity_policy: QuantityPresentationPolicy,
+    display_name: DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let shape = trace.shape.as_ref();
     let branches = shape.branch_count();
     let qualifiers = |branch: Option<usize>| -> String {
-        let mut name = trace.name.clone();
+        let mut name = display_name(&trace.name).into_owned();
         if let Some(branch) = branch {
             name.push(' ');
             name.push_str(&branch_tag(shape, branch));
@@ -556,6 +567,7 @@ pub fn measurement_values(
     window: Option<(f64, f64)>,
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
+    display_name: DisplayName<'_>,
 ) -> Vec<(String, String)> {
     let mut rows = Vec::new();
     for trace in readout_traces(model) {
@@ -567,7 +579,7 @@ pub fn measurement_values(
             vec![None]
         };
         for branch in branches {
-            let mut name = trace.name.clone();
+            let mut name = display_name(&trace.name).into_owned();
             if let Some(branch) = branch {
                 name.push(' ');
                 name.push_str(&branch_tag(&trace.shape, branch));
@@ -609,8 +621,16 @@ fn measurement_rows(
     window: Option<(f64, f64)>,
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
+    display_name: DisplayName<'_>,
 ) {
-    let rows = measurement_values(derived, model, window, significant_digits, quantity_policy);
+    let rows = measurement_values(
+        derived,
+        model,
+        window,
+        significant_digits,
+        quantity_policy,
+        display_name,
+    );
     let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     rspice_ui_kit::widgets::measurement_table(ui, &refs);
 }

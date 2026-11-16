@@ -766,6 +766,49 @@ fn the_inspector_states_every_quantity_to_nine_digits_with_the_deck_name() {
     assert_eq!(detail.action, OpAction::Refused(DEVICE_NOT_ON_SCHEMATIC));
 }
 
+/// A device is titled as the drawing places it, its instance path and all;
+/// the Identity row keeps the deck's name.
+#[test]
+fn a_device_is_titled_as_drawn_and_identified_by_its_deck_name() {
+    struct Drawn;
+    impl SchematicMapping for Drawn {
+        fn display_node<'a>(&self, name: &'a str) -> Cow<'a, str> {
+            Cow::Borrowed(name)
+        }
+        fn display_element<'a>(&self, name: &'a str) -> Cow<'a, str> {
+            Cow::Owned(name.replace("X1", "xAmp").replace("M1", "Mn"))
+        }
+        fn node_available(&self, _: &str) -> bool {
+            false
+        }
+        fn device_target(&self, _: &str) -> Option<u64> {
+            None
+        }
+    }
+    let report = DeviceOpReport {
+        entries: vec![device(
+            "X1.M1",
+            "MOSFET",
+            Some("saturation"),
+            vec![("id", 1e-3)],
+        )],
+    };
+    let selection = OpSelection {
+        kind: OpRowKind::Device,
+        index: 0,
+        name: "X1.M1".to_owned(),
+    };
+    let detail = selection_detail(&selection, None, Some(&report), &Drawn).expect("the row exists");
+    assert_eq!(detail.title, "xAmp.Mn");
+    assert!(
+        detail
+            .rows
+            .contains(&("Identity".to_owned(), "X1.M1".to_owned())),
+        "{:?}",
+        detail.rows
+    );
+}
+
 #[test]
 fn a_section_scrolls_in_whole_columns_only_as_far_as_it_overflows() {
     let name_w = 200.0;

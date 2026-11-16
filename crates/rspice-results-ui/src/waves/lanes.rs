@@ -425,6 +425,7 @@ pub fn lane_readout_rows(
     user: &[Option<Arc<BusLane>>],
     cursors: CursorPair,
     significant_digits: usize,
+    display_name: super::DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
     let Some(lanes) = model.event_lanes.as_deref() else {
         return Vec::new();
@@ -440,7 +441,7 @@ pub fn lane_readout_rows(
         .map(|(spec, row)| {
             let lane = row.event_lane();
             ReadoutRow {
-                name: spec.label().to_owned(),
+                name: display_name(spec.label()).into_owned(),
                 swatch: spec.color(),
                 swatch_style: None,
                 a: read(lane, cursors.a),
@@ -468,7 +469,7 @@ pub fn lane_readout_rows(
         };
         let (a, b) = (value(cursors.a), value(cursors.b));
         out.push(ReadoutRow {
-            name: lane.source_waveform_name.clone(),
+            name: display_name(&lane.source_waveform_name).into_owned(),
             swatch: lane.color,
             swatch_style: None,
             a: format(a),

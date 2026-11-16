@@ -90,6 +90,11 @@ pub enum OpAction {
 /// Read-only schematic queries for visible rows; the host applies returned actions.
 pub trait SchematicMapping {
     fn display_node<'a>(&self, name: &'a str) -> Cow<'a, str>;
+    /// A device or instance name, or an instance path, as the drawing
+    /// places it; the result's spelling where the host has no drawing.
+    fn display_element<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        Cow::Borrowed(name)
+    }
     fn node_available(&self, name: &str) -> bool;
     fn device_target(&self, name: &str) -> Option<u64>;
 }
@@ -1366,10 +1371,11 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         kind: OpRowKind,
     ) -> Option<String> {
         let (parent, leaf) = name_parts(row.name());
+        let parent = self.source.mapping.display_element(&parent);
         let leaf = if kind == OpRowKind::Node {
             self.source.mapping.display_node(&leaf)
         } else {
-            Cow::Borrowed(leaf.as_str())
+            self.source.mapping.display_element(&leaf)
         };
         let (shown_parent, shown_leaf) = elide_name(&parent, &leaf, self.grid.max_name_chars());
         let font = theme::mono(tokens::FS_1, FontWeight::Regular);
@@ -1765,10 +1771,11 @@ pub fn selection_detail(
 ) -> Option<OpDetail> {
     let row = RowSource::of(selection.kind, selection.index, dc, devices)?;
     let (parent, leaf) = name_parts(row.name());
+    let parent = mapping.display_element(&parent).into_owned();
     let leaf = if selection.kind == OpRowKind::Node {
         mapping.display_node(&leaf).into_owned()
     } else {
-        leaf
+        mapping.display_element(&leaf).into_owned()
     };
     let mut rows = Vec::new();
     match row {

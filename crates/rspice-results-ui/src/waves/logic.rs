@@ -30,6 +30,8 @@ pub use real::real_step_trace;
 pub use rspice_results::events::projection::BusRadix;
 pub use rspice_results::visualization_document::BusValueName;
 
+use std::borrow::Cow;
+
 use egui::{Color32, Rect, Sense, Ui, pos2, vec2};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -136,6 +138,10 @@ pub struct LaneStackInput<'a> {
     /// Whether the host can open a lane's HDL declaration and drivers. When
     /// it cannot, those probes are not offered at all.
     pub source_probes: bool,
+    /// A lane's net as the reader is shown it: the drawing's spelling of the
+    /// name the result keys it by. The key itself is what every request
+    /// carries.
+    pub display_name: super::DisplayName<'a>,
 }
 
 /// What the reader asked of the lane stack this frame.
@@ -373,7 +379,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         return output;
     }
     let columns = GutterColumns::of(rect, input);
-    let mut elided: Vec<(Rect, &str)> = Vec::new();
+    let mut elided: Vec<(Rect, Cow<'_, str>)> = Vec::new();
     let lane_clip = Rect::from_x_y_ranges(map.left..=map.right, rect.y_range());
     let lane_painter = ui.painter().with_clip_rect(lane_clip);
     let readout = |lane: EventLane<'_>| {
@@ -405,17 +411,18 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         match row {
             LaneRow::Logic { lane, color } => {
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, row_rect.y_range());
+                let shown = (input.display_name)(lane.name());
                 elided.extend(
                     paint_gutter(
                         ui,
                         row_rect,
                         row_rect.left() + GUTTER_PAD,
                         columns,
-                        lane.name(),
+                        &shown,
                         readout(EventLane::Logic(lane)).as_deref(),
                         &tokens,
                     )
-                    .map(|cell| (cell, lane.name())),
+                    .map(|cell| (cell, shown.clone())),
                 );
                 paint_logic_lane(
                     &lane_painter,
@@ -443,6 +450,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                         tokens.color.canvas_text_dim,
                     );
                 }
+                let shown = (input.display_name)(lane.name());
                 elided.extend(
                     paint_gutter(
                         ui,
@@ -456,11 +464,11 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                                 CHEVRON_WIDTH
                             },
                         columns,
-                        lane.name(),
+                        &shown,
                         readout(EventLane::Bus(lane, *radix, names)).as_deref(),
                         &tokens,
                     )
-                    .map(|cell| (cell, lane.name())),
+                    .map(|cell| (cell, shown.clone())),
                 );
                 let style = LaneStyle::new(&tokens, *color);
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, main.y_range());
@@ -479,17 +487,18 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                             rect.x_range(),
                             member_top..=member_top + LOGIC_ROW_HEIGHT,
                         );
+                        let shown = (input.display_name)(member.name());
                         elided.extend(
                             paint_gutter(
                                 ui,
                                 member_rect,
                                 member_rect.left() + GUTTER_PAD + MEMBER_INDENT,
                                 columns,
-                                member.name(),
+                                &shown,
                                 readout(EventLane::Logic(member)).as_deref(),
                                 &tokens,
                             )
-                            .map(|cell| (cell, member.name())),
+                            .map(|cell| (cell, shown.clone())),
                         );
                         let member_lane =
                             Rect::from_x_y_ranges(map.left..=map.right, member_rect.y_range());
@@ -522,7 +531,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     if let Some(pointer) = response.hover_pos()
         && let Some((_, name)) = elided.iter().find(|(cell, _)| cell.contains(pointer))
     {
-        response.clone().on_hover_text_at_pointer(*name);
+        response.clone().on_hover_text_at_pointer(name.as_ref());
     }
     let pointer_row = response
         .interact_pointer_pos()

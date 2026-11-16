@@ -476,10 +476,59 @@ fn lane_frame(
                 significant_digits: 4,
                 violations: &[],
                 source_probes: true,
+                display_name: &|name| Cow::Borrowed(name),
             },
         ));
     });
     response.expect("the lanes were shown")
+}
+
+/// A lane names its net as the host shows it — the drawing's spelling of the
+/// result's name — in its gutter, while what it asks of the host still
+/// carries the result's own name.
+#[test]
+fn a_lane_names_its_net_as_the_host_shows_it() {
+    let lanes = fixture_lanes();
+    let rows = [LaneRow::Logic {
+        lane: lanes.logic("q").unwrap(),
+        color: Color32::WHITE,
+    }];
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 60.0))),
+        ..Default::default()
+    };
+    let output = ctx.run_ui(input, |ui| {
+        show_lanes(
+            ui,
+            &LaneStackInput {
+                rows: &rows,
+                x_range: (0.0, 100.0 * NS),
+                left_margin: 64.0,
+                name_width: 40.0,
+                right_margin: 14.0,
+                selected: &[],
+                cursor: None,
+                cursor_b: None,
+                significant_digits: 4,
+                violations: &[],
+                source_probes: true,
+                display_name: &|name| Cow::Owned(name.to_ascii_uppercase()),
+            },
+        );
+    });
+    let painted: Vec<String> = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(painted.iter().any(|text| text == "Q"), "{painted:?}");
+    assert!(!painted.iter().any(|text| text == "q"), "{painted:?}");
+    assert_eq!(lane_signal(&rows[0], None).as_deref(), Some("D(q)"));
 }
 
 #[test]

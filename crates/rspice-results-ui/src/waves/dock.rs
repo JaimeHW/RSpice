@@ -26,6 +26,8 @@ pub struct ReadoutInput<'a> {
     pub on_screen_strips: &'a [AnalysisPresentationKey],
     pub presentation: ReadoutPolicy,
     pub quantity_policy: QuantityPresentationPolicy,
+    /// How the host shows each row's name.
+    pub display_name: super::DisplayName<'a>,
 }
 
 /// Source-bound marker requests. The host applies removal before opening an edit.
@@ -67,8 +69,15 @@ pub fn readout_row_count(state: &mut ResultViewerState, source: ReadoutInput<'_>
         .iter()
         .find(|model| model.analysis_index == index)
         .map_or(0, |model| {
-            readout_rows(model, cursors, presentation, quantity_policy).len()
-                + strip_lane_rows(state, model, cursors, presentation).len()
+            readout_rows(
+                model,
+                cursors,
+                presentation,
+                quantity_policy,
+                source.display_name,
+            )
+            .len()
+                + strip_lane_rows(state, model, cursors, presentation, source.display_name).len()
         })
 }
 
@@ -79,11 +88,12 @@ fn strip_lane_rows(
     model: &StripModel,
     cursors: CursorPair,
     presentation: ReadoutPolicy,
+    display_name: super::DisplayName<'_>,
 ) -> Vec<super::readout::ReadoutRow> {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let specs = super::lanes::lane_specs(model, state.event_lanes.get(&model.analysis_key));
     let user = super::lanes::user_bus_lanes(&mut state.derived, model, &specs);
-    super::lanes::lane_readout_rows(model, &specs, &user, cursors, digits)
+    super::lanes::lane_readout_rows(model, &specs, &user, cursors, digits, display_name)
 }
 
 /// Height of one marker row.
@@ -417,7 +427,22 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut ResultViewerState, source: Read
         return;
     };
     let cursors = state.cursors;
-    let lane_rows = strip_lane_rows(state, model, cursors, presentation);
+    // Per-trace values at A and B, their difference, and their own slope;
+    // then what each event lane reads at A and B.
+    let mut rows = readout_rows(
+        model,
+        cursors,
+        presentation,
+        quantity_policy,
+        source.display_name,
+    );
+    rows.extend(strip_lane_rows(
+        state,
+        model,
+        cursors,
+        presentation,
+        source.display_name,
+    ));
     if let Some(stepping) = super::readout::cursor_readout_table(
         ui,
         model,
@@ -425,7 +450,7 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut ResultViewerState, source: Read
         state.stepping_cursor,
         presentation,
         quantity_policy,
-        lane_rows,
+        rows,
     ) {
         state.stepping_cursor = stepping;
     }
@@ -864,6 +889,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutIn
             window,
             significant_digits,
             quantity_policy,
+            source.display_name,
         );
     }
 }

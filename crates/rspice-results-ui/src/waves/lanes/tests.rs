@@ -288,6 +288,7 @@ fn a_real_lane_steps_in_the_pane_of_its_unit() {
             b: Some(39.0 * NS),
         },
         4,
+        &crate::waves::as_returned,
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "E(w)");
@@ -320,6 +321,7 @@ fn the_cursor_table_reads_logic_and_bus_lanes_at_both_cursors() {
             b: Some(30.0 * NS),
         },
         4,
+        &crate::waves::as_returned,
     );
     let cells: Vec<(&str, &str, &str)> = rows
         .iter()
@@ -356,6 +358,7 @@ fn the_cursor_reads_a_bus_in_octal_and_ascii() {
                 b: Some(30.0 * NS),
             },
             4,
+            &crate::waves::as_returned,
         );
         assert_eq!(
             (rows[1].a.as_str(), rows[1].b.as_str()),
@@ -402,6 +405,7 @@ fn a_named_bus_word_reads_as_its_name() {
             b: Some(30.0 * NS),
         },
         4,
+        &crate::waves::as_returned,
     );
     assert_eq!((rows[1].a.as_str(), rows[1].b.as_str()), ("LOAD", "0x2"));
     // Naming nothing removes the bus's entry.

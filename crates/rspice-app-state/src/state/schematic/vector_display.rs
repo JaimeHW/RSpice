@@ -19,7 +19,11 @@
 //! The engine folds every node name to upper case, so a net drawn `b0` comes
 //! back `B0`. A reader looks for the name on the drawing, so each net name
 //! and bus name a drawing writes is shown as written; the case is the only
-//! thing that changes.
+//! thing that changes. Instance and device names fold the same way, so a
+//! capacitor drawn `Cout` is answered as `COUT`; each element a drawing
+//! places reads under the name it is written under, as drawn, in a current
+//! (`I(Cout)`), a power, and every instance scope a name is flattened through
+//! (`xtb.ok`).
 //!
 //! The substitution is display-only. Nothing here is written back into a
 //! waveform name, a saved output, a persisted label or an export: the engine
@@ -47,6 +51,9 @@ pub struct BusNotations {
     by_bus: HashMap<String, Option<BusNotation>>,
     /// Keyed by the engine's spelling: the name folded to upper case.
     drawn: HashMap<String, Option<String>>,
+    /// The elements and instances the drawings place, by the name each card
+    /// is written under, keyed by the engine's spelling as `drawn` is.
+    elements: HashMap<String, Option<String>>,
 }
 
 /// The notations the project's own drawings declare, live editor buffer
@@ -76,7 +83,14 @@ impl BusNotations {
     ) -> Self {
         let mut by_bus = HashMap::new();
         let mut drawn = HashMap::new();
+        let mut elements = HashMap::new();
         for sheet in sheets {
+            // A part with no device prefix (a port, a ground) writes no card.
+            for component in &sheet.components {
+                if !component.kind.spice_prefix().is_empty() {
+                    spell(&mut elements, &component.engine_element_name());
+                }
+            }
             let buses = sheet.buses.iter().filter_map(|bus| bus.declaration.clone());
             let ports = sheet.interface_ports();
             for port in ports.iter().filter(|port| port.vector().is_none()) {
@@ -102,7 +116,11 @@ impl BusNotations {
                 }
             }
         }
-        Self { by_bus, drawn }
+        Self {
+            by_bus,
+            drawn,
+            elements,
+        }
     }
 
     /// One result vector name, spelled as the design that produced it declared
@@ -113,10 +131,27 @@ impl BusNotations {
     /// the surfaces that show a result name show whichever of those the engine
     /// returned. Anything else — an expression over two signals, a name no
     /// declaration claims, a scalar — is returned untouched. A net the design
-    /// draws reads as drawn; inside a current or a power, whose operand names
-    /// a device rather than a net, only a bit is re-spelled.
+    /// draws reads as drawn, and so does each instance it is scoped through;
+    /// inside a current or a power, whose operand names a device rather than
+    /// a net, the device reads as drawn.
     pub fn display<'a>(&self, name: &'a str) -> Cow<'a, str> {
         self.display_operand(name, true)
+    }
+
+    /// An element or instance name read off a result (`XTB`, `XLDO.M1`), each
+    /// segment spelled as the drawing that places it writes it; a segment no
+    /// drawing places is left as the engine spelled it.
+    pub fn display_element<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        let name = name.trim();
+        let (scope, leaf) = match name.rsplit_once('.') {
+            Some((scope, leaf)) => (&name[..=scope.len()], leaf),
+            None => ("", name),
+        };
+        let drawn = self.element(leaf);
+        match (self.scope(scope), drawn) {
+            (Cow::Borrowed(_), None) => Cow::Borrowed(name),
+            (scope, drawn) => Cow::Owned(format!("{scope}{}", drawn.unwrap_or(leaf))),
+        }
     }
 
     fn display_operand<'a>(&self, name: &'a str, net: bool) -> Cow<'a, str> {
@@ -138,10 +173,44 @@ impl BusNotations {
         if let Some(bit) = self.bit(name) {
             return Cow::Owned(bit);
         }
-        if net && let Some(shown) = self.drawn_net(name) {
+        if !net {
+            return self.display_element(name);
+        }
+        if let Some(shown) = self.drawn_net(name) {
             return Cow::Owned(shown);
         }
-        Cow::Borrowed(name)
+        // A net no drawing names keeps its own spelling; the instances it is
+        // scoped through still read as drawn.
+        match name.rsplit_once('.') {
+            Some((scope, leaf)) => match self.scope(&name[..=scope.len()]) {
+                Cow::Borrowed(_) => Cow::Borrowed(name),
+                Cow::Owned(scope) => Cow::Owned(format!("{scope}{leaf}")),
+            },
+            None => Cow::Borrowed(name),
+        }
+    }
+
+    /// An instance scope (`XLDO.XAMP.`, its trailing dot included) with each
+    /// segment a drawing places spelled as drawn.
+    fn scope<'a>(&self, scope: &'a str) -> Cow<'a, str> {
+        if self.elements.is_empty()
+            || !scope
+                .split('.')
+                .any(|segment| self.element(segment).is_some())
+        {
+            return Cow::Borrowed(scope);
+        }
+        let segments: Vec<&str> = scope
+            .split('.')
+            .map(|segment| self.element(segment).unwrap_or(segment))
+            .collect();
+        Cow::Owned(segments.join("."))
+    }
+
+    /// How the drawings write the element the engine names `name`, when that
+    /// differs from the engine's spelling.
+    fn element(&self, name: &str) -> Option<&str> {
+        lookup(&self.elements, name)?.filter(|drawn| *drawn != name)
     }
 
     /// `name` with the net its last segments name spelled as drawn, its
@@ -155,8 +224,9 @@ impl BusNotations {
         loop {
             if let Some(spelling) = self.spelling(candidate) {
                 let drawn = spelling?;
-                let scope = &name[..name.len() - candidate.len()];
-                return (drawn != candidate).then(|| format!("{scope}{drawn}"));
+                let scope = self.scope(&name[..name.len() - candidate.len()]);
+                return (drawn != candidate || matches!(scope, Cow::Owned(_)))
+                    .then(|| format!("{scope}{drawn}"));
             }
             candidate = candidate.split_once('.')?.1;
         }
@@ -164,20 +234,7 @@ impl BusNotations {
 
     /// How the drawings spell `name`: `Some(None)` when two of them disagree.
     fn spelling(&self, name: &str) -> Option<Option<&str>> {
-        let mut buffer = [0_u8; 64];
-        let key = match buffer.get_mut(..name.len()) {
-            Some(key) => {
-                key.copy_from_slice(name.as_bytes());
-                key.make_ascii_uppercase();
-                std::str::from_utf8(key).ok()
-            }
-            None => None,
-        };
-        let entry = match key {
-            Some(key) => self.drawn.get(key),
-            None => self.drawn.get(&name.to_ascii_uppercase()),
-        }?;
-        Some(entry.as_deref())
+        lookup(&self.drawn, name)
     }
 
     /// `name` rendered as the bit it is, or `None` when no bus declares it.
@@ -194,12 +251,14 @@ impl BusNotations {
             notation => display_bit_name(name, notation)?,
         };
         let bus = &base[scope..];
+        let drawn_scope = self.scope(&rendered[..scope]);
         match self.spelling(bus) {
-            Some(Some(drawn)) if drawn != bus => Some(format!(
-                "{}{drawn}{}",
-                &rendered[..scope],
-                &rendered[base.len()..]
-            )),
+            Some(Some(drawn)) if drawn != bus => {
+                Some(format!("{drawn_scope}{drawn}{}", &rendered[base.len()..]))
+            }
+            _ if matches!(drawn_scope, Cow::Owned(_)) => {
+                Some(format!("{drawn_scope}{}", &rendered[scope..]))
+            }
             _ => Some(rendered),
         }
     }
@@ -225,9 +284,34 @@ impl BusNotations {
 /// and its parts, and a device's power.
 const DEVICE_ACCESSORS: [&str; 7] = ["i", "im", "ip", "ir", "ii", "idb", "p"];
 
-/// Record that a drawing spells a net or bus `name`, keyed by the engine's
-/// spelling of it. A vector-shaped label (`data[3]`) names a bit the bus's
-/// notation answers for, so only whole names are recorded.
+/// How the drawings spell `name` in `spellings`: `Some(None)` when two of them
+/// disagree, `None` when none spells it.
+fn lookup<'m>(
+    spellings: &'m HashMap<String, Option<String>>,
+    name: &str,
+) -> Option<Option<&'m str>> {
+    if spellings.is_empty() {
+        return None;
+    }
+    let mut buffer = [0_u8; 64];
+    let key = match buffer.get_mut(..name.len()) {
+        Some(key) => {
+            key.copy_from_slice(name.as_bytes());
+            key.make_ascii_uppercase();
+            std::str::from_utf8(key).ok()
+        }
+        None => None,
+    };
+    let entry = match key {
+        Some(key) => spellings.get(key),
+        None => spellings.get(&name.to_ascii_uppercase()),
+    }?;
+    Some(entry.as_deref())
+}
+
+/// Record that a drawing spells a net, bus or element `name`, keyed by the
+/// engine's spelling of it. A vector-shaped label (`data[3]`) names a bit the
+/// bus's notation answers for, so only whole names are recorded.
 fn spell(drawn: &mut HashMap<String, Option<String>>, name: &str) {
     if name.is_empty() || name.contains(['[', '<', '{', '#', '(']) {
         return;

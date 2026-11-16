@@ -40,6 +40,17 @@ pub use units::{
     fmt_in_unit, fmt_in_unit_readout, unit_carries_its_decade,
 };
 
+/// How the host shows a result's name: the design's spelling of the name the
+/// result keys it by (`I(Cout)` for the engine's `I(COUT)`). Only what a
+/// surface paints passes through it; every key, request and copy keeps the
+/// result's own name.
+pub type DisplayName<'a> = &'a dyn for<'n> Fn(&'n str) -> std::borrow::Cow<'n, str>;
+
+/// The name as the result spells it, for a host with no design behind it.
+pub fn as_returned(name: &str) -> std::borrow::Cow<'_, str> {
+    std::borrow::Cow::Borrowed(name)
+}
+
 /// How a trace's Y values are interpreted.
 ///
 /// The discriminants are saved: a marker's trace key stores `kind as u8`, so

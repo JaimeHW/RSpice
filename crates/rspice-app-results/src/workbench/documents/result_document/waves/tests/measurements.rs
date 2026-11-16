@@ -41,6 +41,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
         Some((0.25, 0.75)),
         8,
         state.model.preferences.quantity_presentation_policy(),
+        &rspice_results_ui::waves::as_returned,
     );
     for ((label, actual), (suffix, expected)) in
         rows.iter()
@@ -122,6 +123,7 @@ fn measurement_readout_identifies_each_sweep_branch() {
         Some((0.25, 0.75)),
         8,
         state.model.preferences.quantity_presentation_policy(),
+        &rspice_results_ui::waves::as_returned,
     );
     assert_eq!(rows.len(), 6);
     assert!(rows[0].0.ends_with("fwd min"));
@@ -158,6 +160,7 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
         None,
         8,
         state.model.preferences.quantity_presentation_policy(),
+        &rspice_results_ui::waves::as_returned,
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, "V(out)");
@@ -184,6 +187,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
             },
             presentation.readout(),
             state.model.preferences.quantity_presentation_policy(),
+            &rspice_results_ui::waves::as_returned,
         );
         // 0.1 V over 0.5 ps, with its SI prefix and no padding zeros.
         assert_eq!(rows[0].slope, "200 GV/s");
@@ -196,6 +200,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
         },
         presentation.readout(),
         state.model.preferences.quantity_presentation_policy(),
+        &rspice_results_ui::waves::as_returned,
     );
     assert_eq!(coincident[0].slope, READOUT_ABSENT);
 }
@@ -235,6 +240,7 @@ fn interval_measurements_and_copied_values_cover_every_visible_trace() {
         Some((0.25, 0.75)),
         8,
         policy,
+        &rspice_results_ui::waves::as_returned,
     );
     for n in 1..=8 {
         for stat in ["min", "max", "rms"] {
@@ -257,4 +263,48 @@ fn interval_measurements_and_copied_values_cover_every_visible_trace() {
             "V(n{n}) not copied: {copied}"
         );
     }
+}
+
+/// The Measurements rows name each trace as the drawing spells its net, as
+/// the legend does: the engine's `V(OUT)` for a net drawn `Out` reads
+/// `V(Out) min`.
+#[test]
+fn a_measurement_row_names_its_trace_as_drawn() {
+    let mut state = ResultsTestHost::default();
+    state
+        .model
+        .schematic
+        .add_net_label(crate::state::Point::new(0, 0), "Out".to_owned());
+    state.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(OUT)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+        ]),
+    );
+    state.model.simulation.complete_run();
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let mut painted = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                readout::right_panel(ui, &mut state.results_parts());
+            });
+        });
+        painted = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+    }
+    assert!(
+        painted.iter().any(|text| text == "V(Out) min"),
+        "{painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text.contains("OUT")),
+        "{painted:?}"
+    );
 }

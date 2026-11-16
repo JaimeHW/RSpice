@@ -299,6 +299,13 @@ impl viewer::SchematicMapping for OpMapping<'_> {
             .as_ref()
             .map_or(Cow::Borrowed(name), |notations| notations.display(name))
     }
+    fn display_element<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        self.notations
+            .as_ref()
+            .map_or(Cow::Borrowed(name), |notations| {
+                notations.display_element(name)
+            })
+    }
     fn node_available(&self, name: &str) -> bool {
         node_target_available(self.state, name)
     }

@@ -413,3 +413,50 @@ fn internal_nodes_wait_behind_the_kind_lists_switch() {
         labels(&nodes)
     );
 }
+
+/// The engine names instances and devices in upper case; the tree's
+/// instance row and a current's row read as the drawing places them.
+#[test]
+fn an_instance_and_a_device_read_as_drawn() {
+    use crate::state::{ComponentType, Point};
+    let mut host = ResultsTestHost::default();
+    for (kind, name, x) in [
+        (ComponentType::CellInstance, "xTb", 0),
+        (ComponentType::Capacitor, "Cout", 200),
+    ] {
+        let id = host.model.schematic.add_component(kind, Point::new(x, 0));
+        host.model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the placed part")
+            .name = name.to_owned();
+    }
+    let trace = |name: &str| RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![trace("V(XTB.OK)"), trace("I(COUT)")]),
+    );
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        find(&nodes, "xTb, instance, 1 quantity, collapsed").is_some(),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        nodes.iter().any(|node| node.label.contains("I(Cout)")),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.label.contains("XTB") || node.label.contains("COUT")),
+        "{:?}",
+        labels(&nodes)
+    );
+}
