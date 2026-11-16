@@ -962,11 +962,13 @@ fn detail_pane(
         .and_then(|cell| failing.get(cell.row).copied())
 }
 
-/// One line of faint words at the top of a detail region.
+/// One line of faint words at the top of a detail region, read out as a
+/// label.
 fn quiet_line(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, TABLE_ROW_H), egui::Sense::hover());
+    let (rect, line) = ui.allocate_exact_size(egui::vec2(width, TABLE_ROW_H), egui::Sense::hover());
+    line.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     ui.painter().text(
         egui::pos2(rect.left() + TABLE_EDGE_INSET, rect.center().y),
         egui::Align2::LEFT_CENTER,
