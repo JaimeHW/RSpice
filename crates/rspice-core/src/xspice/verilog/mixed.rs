@@ -175,6 +175,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::VectorBounds;
+use rspice_veriloga::canonical_ir::digital_eval::DigitalEvalError;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::device::{
@@ -914,7 +915,11 @@ impl From<DigitalRunError> for MixedSignalError {
         match error {
             // A Stop or time limit that reached a settling time step is the
             // run's abort, not a failure of the design.
-            DigitalRunError::Scheduler(SchedulerError::Aborted) => Self::Aborted,
+            DigitalRunError::Scheduler(SchedulerError::Aborted)
+            | DigitalRunError::Evaluation {
+                error: DigitalEvalError::Aborted,
+                ..
+            } => Self::Aborted,
             error => Self::Digital(error),
         }
     }

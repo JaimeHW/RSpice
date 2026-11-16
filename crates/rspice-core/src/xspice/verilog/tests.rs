@@ -888,7 +888,7 @@ fn a_finite_run_of_zero_delays_is_not_refused() {
 
 /// `forever n = n + 1;` never suspends. The interpreter refuses it once it
 /// stands where no path reaches a timing control, naming the process by its
-/// line, rather than after 64 million blocks (21 s).
+/// line, rather than running until the run is stopped.
 #[test]
 fn a_loop_with_no_timing_control_is_refused_by_its_line() {
     let error = start_runaway(
@@ -939,6 +939,49 @@ fn a_long_loop_that_ends_is_not_refused() {
          for (i = 0; i < 400000; i = i + 1) n = n + 1;\n  end\nendmodule\n",
     )
     .expect("a loop that ends is legal however long it runs");
+}
+
+/// `while (x != 3) x = x + 2;` over an 8-bit `x` that starts even has a way
+/// out it never takes, so the graph cannot call it endless and no count may.
+/// It runs inside one activation until the run is stopped, and ends as the
+/// run's abort.
+#[test]
+fn a_process_that_never_suspends_ends_at_the_runs_stop() {
+    let polls = std::sync::atomic::AtomicU32::new(0);
+    let stop = || polls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
+    let error = rspice_veriloga_runtime::loop_abort::with_hook(&stop, || {
+        run_digital_testbench(
+            &[(
+                "tb.v".into(),
+                "module tb;
+  reg [7:0] x;
+  initial begin
+    x = 0;
+    while (x != 3) x = x + 2;
+  end
+endmodule
+"
+                .into(),
+            )],
+            &HdlTestbenchOptions::default(),
+        )
+    })
+    .expect_err("the loop never ends");
+    assert!(
+        matches!(
+            &error,
+            DigitalRunError::Evaluation {
+                error: DigitalEvalError::Aborted,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(polls.load(std::sync::atomic::Ordering::Relaxed), 4);
+    assert!(
+        matches!(MixedSignalError::from(error), MixedSignalError::Aborted),
+        "inside a circuit it is the run's abort"
+    );
 }
 
 // ===========================================================================

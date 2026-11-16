@@ -320,7 +320,14 @@ fn multidimensional_arrays_execute_exact_coordinates_and_capture_updates() {
                     let mut store = Store::new(&plan);
                     store.bits[6] = FourStateValue::from_integer(96, i128::from(lower) + row);
                     store.bits[7] = FourStateValue::from_integer(96, -2 + column);
-                    start_in(&plan, &plan.processes[0], &mut store, &mut scratch, 1000).unwrap();
+                    start_in(
+                        &plan,
+                        &plan.processes[0],
+                        &mut store,
+                        &mut scratch,
+                        Some(1000),
+                    )
+                    .unwrap();
                     let selected = (row * 3 + column) as usize;
                     assert_eq!(store.writes, [id(selected as u32), id(8), id(6)]);
                     let update = store.deferred.pop().unwrap();
@@ -358,7 +365,14 @@ fn multidimensional_arrays_execute_exact_coordinates_and_capture_updates() {
     let mut store = Store::new(&plan);
     store.reals[4] = -1.5;
     store.reals[5] = 4.5;
-    start_in(&plan, &plan.processes[0], &mut store, &mut scratch, 1000).unwrap();
+    start_in(
+        &plan,
+        &plan.processes[0],
+        &mut store,
+        &mut scratch,
+        Some(1000),
+    )
+    .unwrap();
     assert_eq!(store.deferred[0].target.signal, id(1));
 }
 

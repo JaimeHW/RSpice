@@ -92,11 +92,11 @@ use rspice_veriloga::canonical_ir::digital::{
     DigitalSignal,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DEFAULT_PROCESS_STEP_LIMIT, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment,
-    DigitalEvalError, DigitalEvalScratch, DigitalFunctionOutcome, DigitalProcessOutcome,
-    DigitalRealDrive, DigitalResumeState, DigitalScalar, DigitalTaskOutcome, DigitalWaitRequest,
-    any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
-    resume_in as resume_process, run_observer, start_in as start_process,
+    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError, DigitalEvalScratch,
+    DigitalFunctionOutcome, DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState,
+    DigitalScalar, DigitalTaskOutcome, DigitalWaitRequest, any_real_term_is_satisfied,
+    any_term_is_satisfied, apply_deferred as apply_deferred_update, resume_in as resume_process,
+    run_observer, start_in as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_progress::{DigitalProgress, blocks_without_progress};
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
@@ -1706,19 +1706,22 @@ impl DigitalHost {
     /// next. A thread that reaches `disable` goes on once the kernel has
     /// carried it out, without yielding (IEEE 1364-2005 section 10.3).
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
-        let mut rounds = 0;
+        let mut rounds: u64 = 0;
         loop {
             self.run_activation(index, tick)?;
             let Some(target) = self.disabling.take() else {
                 return Ok(());
             };
-            // Each round is at least one step, so a thread that disables
-            // without end meets the limit a loop without end does.
+            // A thread that disables without end is ended as a loop without
+            // end is: by the run's Stop or time limit.
             rounds += 1;
-            if rounds > DEFAULT_PROCESS_STEP_LIMIT {
+            if rounds.is_multiple_of(u64::from(
+                rspice_veriloga_runtime::loop_abort::POLL_INTERVAL,
+            )) && rspice_veriloga_runtime::loop_abort::aborted()
+            {
                 return Err(evaluation_error(
                     self.describe(index),
-                    DigitalEvalError::StepLimitExceeded(DEFAULT_PROCESS_STEP_LIMIT),
+                    DigitalEvalError::Aborted,
                 ));
             }
             if !self.disable(index, target, tick)? {
@@ -1758,14 +1761,14 @@ impl DigitalHost {
                 state,
                 &mut environment,
                 &mut self.scratch,
-                DEFAULT_PROCESS_STEP_LIMIT,
+                None,
             ),
             None => start_process(
                 &self.plan,
                 process,
                 &mut environment,
                 &mut self.scratch,
-                DEFAULT_PROCESS_STEP_LIMIT,
+                None,
             ),
         };
         let outcome = outcome.map_err(|error| evaluation_error(self.describe(index), error))?;

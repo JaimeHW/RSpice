@@ -953,6 +953,8 @@ pub enum DigitalEvalError {
     UnknownBitsToReal(ValueId),
     /// The process ran this many blocks without suspending or returning.
     StepLimitExceeded(usize),
+    /// The run was stopped while the process ran without suspending.
+    Aborted,
     /// The process stands where no path through its graph reaches a timing
     /// control, a return, or anything that could end the run: it loops in
     /// zero time forever (see [`super::digital_progress`]).
@@ -1121,6 +1123,7 @@ impl std::fmt::Display for DigitalEvalError {
                 f,
                 "the process entered {limit} blocks without suspending or returning"
             ),
+            Self::Aborted => f.write_str("the run was stopped while the process was running"),
             Self::LoopNeverWaits => f.write_str(
                 "it is in a loop with no timing control and no way out on any path, so it \
                  runs forever without letting simulation time advance",
@@ -1141,23 +1144,23 @@ impl std::fmt::Display for DigitalEvalError {
 
 impl std::error::Error for DigitalEvalError {}
 
-/// How many blocks one run of a process may enter.
+/// Blocks one activation runs between two polls of the run's abort hook
+/// ([`rspice_veriloga_runtime::loop_abort`]).
 ///
-/// Finite so that a `while` loop with a condition the body never falsifies, or
-/// an `always` process whose back edge carries no `Wait`, reports instead of
-/// hanging the simulator. IEEE 1364-2005 section 9.9.2 calls the latter a hang;
-/// a refusal naming the process is more use than one.
-///
-/// A hang detector, so it must not stop a legal program: the most any ivtest
-/// needs is under 6 million blocks (`pow_reg_signed`, one `initial` looping
-/// over every 16-bit base without suspending), and this is over ten times
-/// that. A loop that never suspends reaches it in under ten seconds.
-pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 64_000_000;
+/// IEEE 1364-2005 section 9.9.2 calls a loop that never lets time advance a
+/// hang, but a long loop that ends is a legal program, and no count tells the
+/// two apart: the most any ivtest needs is under 6 million blocks
+/// (`pow_reg_signed`, one `initial` looping over every 16-bit base without
+/// suspending). So a process runs as long as it runs. A loop with no way out
+/// is refused as soon as the graph shows it
+/// ([`DigitalEvalError::LoopNeverWaits`]); any other is ended by the run's
+/// Stop or time limit, polled at this interval.
+const ABORT_POLL_INTERVAL: usize = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL as usize;
 
 /// Blocks one activation runs between asking whether the thread can still
 /// suspend at all ([`DigitalEvalError::LoopNeverWaits`]). A loop with no way
 /// out is reported within this many blocks of entering it, a small fraction of
-/// a second, instead of at [`DEFAULT_PROCESS_STEP_LIMIT`].
+/// a second, instead of running until the run is stopped.
 const PROGRESS_CHECK_INTERVAL: usize = 1 << 18;
 
 /// The deepest a thread's task and function calls may nest (design P2 §4.1).
@@ -1694,7 +1697,13 @@ pub fn start<E: DigitalEnvironment + ?Sized>(
     process: &CfgDigitalProcess,
     environment: &mut E,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
-    start_with_limit(plan, process, environment, DEFAULT_PROCESS_STEP_LIMIT)
+    start_in(
+        plan,
+        process,
+        environment,
+        &mut DigitalEvalScratch::new(),
+        None,
+    )
 }
 
 /// Run a process from its entry block, bounding how far it may go.
@@ -1709,11 +1718,12 @@ pub fn start_with_limit<E: DigitalEnvironment + ?Sized>(
         process,
         environment,
         &mut DigitalEvalScratch::new(),
-        step_limit,
+        Some(step_limit),
     )
 }
 
-/// Run a process from its entry block against a caller-owned working set.
+/// Run a process from its entry block against a caller-owned working set,
+/// entering at most `step_limit` blocks when one is given.
 ///
 /// Validate decoded or edited plans with [`CanonicalDigitalPlan::validate`]
 /// before execution and keep them immutable. `process` must be borrowed from
@@ -1723,7 +1733,7 @@ pub fn start_in<E: DigitalEnvironment + ?Sized>(
     process: &CfgDigitalProcess,
     environment: &mut E,
     scratch: &mut DigitalEvalScratch,
-    step_limit: usize,
+    step_limit: Option<usize>,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
     validate_process_membership(plan, process)?;
     let entry = process.function.entry;
@@ -1743,12 +1753,13 @@ pub fn resume<E: DigitalEnvironment + ?Sized>(
     state: &DigitalResumeState,
     environment: &mut E,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
-    resume_with_limit(
+    resume_in(
         plan,
         process,
-        state,
+        state.clone(),
         environment,
-        DEFAULT_PROCESS_STEP_LIMIT,
+        &mut DigitalEvalScratch::new(),
+        None,
     )
 }
 
@@ -1770,7 +1781,7 @@ pub fn resume_with_limit<E: DigitalEnvironment + ?Sized>(
         state.clone(),
         environment,
         &mut DigitalEvalScratch::new(),
-        step_limit,
+        Some(step_limit),
     )
 }
 
@@ -1788,7 +1799,7 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     state: DigitalResumeState,
     environment: &mut E,
     scratch: &mut DigitalEvalScratch,
-    step_limit: usize,
+    step_limit: Option<usize>,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
     if state.process != process.id {
         return Err(DigitalEvalError::ResumeProcessMismatch {
@@ -1868,7 +1879,7 @@ pub fn run_observer<E: DigitalEnvironment + ?Sized>(
     }
     scratch.arguments.clear();
     match Interpreter::with_function(plan, process, function, environment, scratch)
-        .run(function.entry, function.blocks.len())?
+        .run(function.entry, Some(function.blocks.len()))?
     {
         DigitalProcessOutcome::Finished => Ok(()),
         DigitalProcessOutcome::Suspended(_)
@@ -1911,7 +1922,7 @@ pub fn evaluate_override<E: DigitalEnvironment + ?Sized>(
     }
     scratch.arguments.clear();
     match Interpreter::with_function(plan, process, function, environment, scratch)
-        .run(function.entry, DEFAULT_PROCESS_STEP_LIMIT)?
+        .run(function.entry, None)?
     {
         DigitalProcessOutcome::Finished => scratch
             .table
@@ -1992,12 +2003,9 @@ pub(crate) fn evaluate_constant_expression(
         origin: None,
     };
     // The functions a constant function call reaches (IEEE 1364-2005 section
-    // 10.4.5); their loops bound the run as a process's do.
-    let step_limit = if routines.is_empty() {
-        process.function.blocks.len()
-    } else {
-        DEFAULT_PROCESS_STEP_LIMIT
-    };
+    // 10.4.5); their loops run as a process's do. Without them the expression
+    // is straight-line code and enters each block at most once.
+    let step_limit = routines.is_empty().then_some(process.function.blocks.len());
     let plan = CanonicalDigitalPlan {
         routines,
         ..Default::default()
@@ -2512,7 +2520,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             &mut scratch,
         );
         let entry = nested.enter_routine(id, inputs)?;
-        match nested.run(entry, DEFAULT_PROCESS_STEP_LIMIT)? {
+        match nested.run(entry, None)? {
             DigitalProcessOutcome::Finished => nested.load(id, result),
             _ => Err(DigitalEvalError::InvalidRoutineCall {
                 routine: id,
@@ -2571,7 +2579,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn run(
         &mut self,
         entry: BlockId,
-        step_limit: usize,
+        step_limit: Option<usize>,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
         // The entry arguments are already in the edge buffer: empty for a
         // start, and the resumed state's own list for a resumption.
@@ -2583,12 +2591,20 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         &mut self,
         entry: BlockId,
         mut first_instruction: usize,
-        step_limit: usize,
+        step_limit: Option<usize>,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
         let mut block = entry;
         let mut steps = 0;
-        'blocks: while steps < step_limit {
+        'blocks: loop {
+            if let Some(limit) = step_limit
+                && steps >= limit
+            {
+                return Err(DigitalEvalError::StepLimitExceeded(limit));
+            }
             steps += 1;
+            if steps % ABORT_POLL_INTERVAL == 0 && rspice_veriloga_runtime::loop_abort::aborted() {
+                return Err(DigitalEvalError::Aborted);
+            }
             // Re-read per block: a call or a return switches the running
             // function.
             let function = self.function();
@@ -2738,7 +2754,6 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 }
             }
         }
-        Err(DigitalEvalError::StepLimitExceeded(step_limit))
     }
 
     /// Evaluate one edge's arguments into the reused buffer and bind them.
@@ -3168,7 +3183,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 );
                 // Validation restricts expression functions to acyclic, pure
                 // control flow. Even malformed input cannot run indefinitely.
-                let outcome = interpreter.run(function.entry, function.blocks.len());
+                let outcome = interpreter.run(function.entry, Some(function.blocks.len()));
                 let value = outcome.and_then(|outcome| match outcome {
                     DigitalProcessOutcome::Finished => storage
                         .table
@@ -4127,28 +4142,15 @@ mod tests {
         let mut environment = NoEnvironment;
         let mut scratch = DigitalEvalScratch::new();
 
-        let outcome = start_in(
-            &plan,
-            process,
-            &mut environment,
-            &mut scratch,
-            DEFAULT_PROCESS_STEP_LIMIT,
-        )
-        .expect("the process suspends at its first wait");
+        let outcome = start_in(&plan, process, &mut environment, &mut scratch, None)
+            .expect("the process suspends at its first wait");
         let DigitalProcessOutcome::Suspended(suspension) = outcome else {
             panic!("an event wait suspends");
         };
 
         let (_, state) = suspension.into_parts();
-        let error = resume_in(
-            &plan,
-            process,
-            state,
-            &mut environment,
-            &mut scratch,
-            DEFAULT_PROCESS_STEP_LIMIT,
-        )
-        .expect_err("the resumed block may not read what the suspended one computed");
+        let error = resume_in(&plan, process, state, &mut environment, &mut scratch, None)
+            .expect_err("the resumed block may not read what the suspended one computed");
         assert_eq!(
             error,
             DigitalEvalError::UndefinedValue(ValueId::from(1usize))
