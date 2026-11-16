@@ -707,7 +707,6 @@ pub mod ids {
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
-        TUNING = "tuning";
         UNDO = "undo";
         UPDATE_INSTANCE_INTERFACE = "update-instance-interface";
         VERIFY_WORKSPACE = "verify";

@@ -6,7 +6,6 @@ use egui::Ui;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
 use crate::workbench::app_state::Model;
-use crate::workbench::state::VerificationSessionState;
 
 use super::super::super::design_system::{property_row, section_header};
 use super::verification_footer::flow_row;
@@ -20,11 +19,10 @@ pub fn verification_navigator_requires_scroll(available_height: f32) -> bool {
     available_height < flow_height + HISTORY_COVERAGE_HEIGHT
 }
 
-/// What the Verify workspace's navigator reads: the model, the verification
-/// session, the flow in front and the navigator's filter.
+/// What the Verify workspace's navigator reads: the model, the flow in front
+/// and the navigator's filter.
 pub(in crate::workbench) struct VerifyNavigator<'a> {
     pub(in crate::workbench) model: &'a Model,
-    pub(in crate::workbench) verification: &'a VerificationSessionState,
     pub(in crate::workbench) page: VerificationPage,
     pub(in crate::workbench) filter: &'a str,
 }
@@ -43,7 +41,7 @@ pub(in crate::workbench) fn verify(
         egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
     );
     for page in VerificationPage::NAVIGATION {
-        let flow = verification_flow_presentation(navigator.model, navigator.verification, page);
+        let flow = verification_flow_presentation(navigator.model, page);
         let label = &flow.label;
         let detail = &flow.detail;
         let status = &flow.status;
@@ -97,7 +95,6 @@ pub(super) const fn verification_flow_label(page: VerificationPage) -> &'static 
     match page {
         VerificationPage::Yield => "PVT & Monte Carlo",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Tuning => "Tuning",
         VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Electrical SOA",
         VerificationPage::Regression => "Regression",
@@ -109,7 +106,6 @@ const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "M",
         VerificationPage::Corners => "C",
-        VerificationPage::Tuning => "T",
         VerificationPage::Optimization => "O",
         VerificationPage::DeviceSafety => "S",
         VerificationPage::Regression => "R",
@@ -118,7 +114,6 @@ const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
 
 pub(super) fn verification_flow_presentation(
     model: &Model,
-    verification: &VerificationSessionState,
     page: VerificationPage,
 ) -> VerificationFlowPresentation {
     let active_run = model.simulation.active_run();
@@ -190,35 +185,6 @@ pub(super) fn verification_flow_presentation(
                 problem: result
                     .is_some_and(|analysis| !analysis.success)
                     .then_some(Problem::Warning),
-                glyph: verification_flow_glyph(page),
-            }
-        }
-        VerificationPage::Tuning => {
-            let variable_count = model
-                .sim_setup
-                .stable_analysis_plan()
-                .ok()
-                .and_then(|plan| model.workspace.content.plan_data(plan.id()))
-                .map_or(0, |payload| payload.design_variables.len());
-            let dirty_count = verification
-                .tuning_variables
-                .iter()
-                .filter(|draft| draft.is_dirty())
-                .count();
-            VerificationFlowPresentation {
-                label: verification_flow_label(page).to_owned(),
-                detail: match variable_count {
-                    0 => "No variables".to_owned(),
-                    1 => "1 variable".to_owned(),
-                    count => format!("{count} variables"),
-                },
-                // Nothing uncommitted is the normal state, and says nothing.
-                status: if dirty_count == 0 {
-                    String::new()
-                } else {
-                    format!("{dirty_count} uncommitted")
-                },
-                problem: None,
                 glyph: verification_flow_glyph(page),
             }
         }

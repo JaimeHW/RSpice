@@ -1,7 +1,7 @@
 //! Netlist document engine.
 //!
-//! This module owns editor diagnostics, syntax highlighting, completion,
-//! parameter tuning, and run-to-run diff state. It has no application-chrome
+//! This module owns editor diagnostics, syntax highlighting, completion and
+//! run-to-run diff state. It has no application-chrome
 //! chrome; the canonical Netlist workspace composes it as a document surface.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]

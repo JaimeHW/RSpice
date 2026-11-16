@@ -110,8 +110,7 @@ impl Feature for DesignFeature {
     /// the dispatcher answers them, its guards included (Cancel, its other
     /// command button, is offered while an operation is live). The
     /// navigator's row menu and the inspector's netlist card offer Show in
-    /// netlist, and the inspector's tuning rows ask whether Tuning can run,
-    /// as the dispatcher answers them.
+    /// netlist as the dispatcher answers it.
     const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] = &[
         DesignCommand::RotateSelection.key(),
         DesignCommand::MirrorSelectionHorizontal.key(),
@@ -119,7 +118,6 @@ impl Feature for DesignFeature {
         ids::REDO,
         ids::ZOOM_FIT,
         ids::SHOW_IN_NETLIST,
-        ids::TUNING,
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

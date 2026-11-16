@@ -406,15 +406,7 @@ impl Host for RSpiceApp {
                     }
                     Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),
                     Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),
-                    // Tuning the deck, asked of the Netlist inspector, is
-                    // answered once it has drawn.
-                    Workspace::Netlist => {
-                        features::show_inspector_reading::<CodeFeature>(app, ui, |app| {
-                            app.state.code.code_workspace.page
-                                == rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-                        });
-                        app.after_contribution();
-                    }
+                    Workspace::Netlist => features::show_inspector::<CodeFeature>(app, ui),
                 }
             }
             // The section that inspects a workspace's document itself: the
@@ -1362,22 +1354,17 @@ mod tests {
     }
 
     /// Each key framework code names by an id for a simulate command is the
-    /// key that command declares, the tuning sandbox's too, which the
-    /// registry leaves out.
+    /// key that command declares.
     #[test]
     fn each_simulate_id_names_its_command() {
         use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
-        use rspice_app_state::state::{SimulationPage, VerificationPage};
+        use rspice_app_state::state::SimulationPage;
         for (id, command) in [
             (ids::RUN_SIMULATION, SimulateCommand::Run),
             (ids::STOP_SIMULATION, SimulateCommand::Stop),
             (
                 ids::SIMULATION_ANALYSES,
                 SimulateCommand::Page(SimulationPage::Analyses),
-            ),
-            (
-                ids::TUNING,
-                SimulateCommand::Verify(VerificationPage::Tuning),
             ),
         ] {
             assert_eq!(id, command.key(), "{command:?}");

@@ -1,7 +1,7 @@
 //! What the Simulate and Verify workspaces keep for the session and for
-//! themselves alone: the verification review's working state, the parameter
-//! tuner's candidate drafts, the run-set budgets being typed, the
-//! specification evidence filter and the Jobs manager's view.
+//! themselves alone: the verification review's working state, the run-set
+//! budgets being typed, the specification evidence filter and the Jobs
+//! manager's view.
 //!
 //! None of it is evidence or project configuration. Of what is here, the
 //! session keeps only the regression baseline and the corner comparison;
@@ -160,32 +160,6 @@ pub struct VerificationSessionState {
     pub regression_selected_target: Option<crate::state::RegressionTargetSelector>,
     #[serde(skip)]
     pub regression_tolerance_drafts: Vec<RegressionToleranceDraft>,
-    /// Stable plan/revision that owns `tuning_variables`. All three fields are
-    /// transient so an interrupted sandbox can never restore as project data.
-    #[serde(skip)]
-    pub tuning_plan_id: Option<crate::product::SimulationPlanId>,
-    #[serde(skip)]
-    pub tuning_plan_revision: Option<crate::product::ObjectRevision>,
-    #[serde(skip)]
-    pub tuning_variables: Vec<TuningVariableDraft>,
-    /// Optional instance Value-row proposal that opened this sandbox.
-    #[serde(skip)]
-    pub tuning_instance_binding: Option<TuningInstanceBindingDraft>,
-    /// Selected variable card and one-shot editor focus request. Both are
-    /// transient presentation state and never confer commit authority.
-    #[serde(skip)]
-    pub tuning_selected_variable: Option<crate::product::DesignVariableId>,
-    #[serde(skip)]
-    pub tuning_focus_variable: Option<crate::product::DesignVariableId>,
-    /// Immutable retained run selected when the sandbox was opened. This is
-    /// presentation state only; the run and dataset remain owned by
-    /// `SimulationState` and are never copied into the tuner.
-    #[serde(skip)]
-    pub tuning_baseline_run: Option<crate::product::RunId>,
-    /// Review gate opened by the mockup-specified tuning commit action. The
-    /// dialog is transient and never restores across an application session.
-    #[serde(skip)]
-    pub tuning_review_open: bool,
     /// Why the last Verify action the reader took could not be carried out,
     /// stated under the toolbar until the next action. An action that worked
     /// leaves nothing here: its result is the page itself.
@@ -221,47 +195,4 @@ pub struct JobsManagerState {
     pub selected_run_id: Option<crate::product::RunId>,
     pub scroll_offset: f32,
     pub plan_scope: JobsPlanScope,
-}
-
-/// Runtime-only candidate value owned by the non-destructive parameter tuner.
-/// The persisted `DesignVariable` remains authoritative until the user commits
-/// the complete candidate set as one simulation-plan revision.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TuningVariableDraft {
-    pub variable_id: crate::product::DesignVariableId,
-    pub baseline_expression: String,
-    pub candidate_expression: String,
-    pub validation_error: Option<String>,
-    /// A proposed variable does not exist in the authoritative plan yet.
-    /// Its candidate expression is still initialized from the selected
-    /// instance literal, so this bit participates in dirty detection.
-    pub proposed: bool,
-}
-
-impl TuningVariableDraft {
-    pub fn is_dirty(&self) -> bool {
-        self.proposed || self.candidate_expression.trim() != self.baseline_expression.trim()
-    }
-}
-
-/// Runtime-only bridge between a selected schematic instance and the tuning
-/// sandbox.  The proposed variable and binding are deliberately kept outside
-/// both authoritative stores until the review dialog commits them together.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TuningInstanceBindingDraft {
-    pub component_id: u64,
-    pub component_name: String,
-    pub source_view: crate::state::CellViewRef,
-    pub source_topology_version: u64,
-    pub source_value: String,
-    pub binding_expression: String,
-    pub variable: crate::state::DesignVariable,
-    pub creates_variable: bool,
-}
-
-impl TuningInstanceBindingDraft {
-    #[must_use]
-    pub fn requires_schematic_edit(&self) -> bool {
-        self.source_value.trim() != self.binding_expression
-    }
 }

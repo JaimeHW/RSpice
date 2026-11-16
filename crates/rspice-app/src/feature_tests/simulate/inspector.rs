@@ -160,10 +160,6 @@ fn verify_yield_empty() -> RSpiceApp {
     verify_app(VerificationPage::Yield)
 }
 
-fn verify_tuning() -> RSpiceApp {
-    verify_app(VerificationPage::Tuning)
-}
-
 fn inspector_context() -> egui::Context {
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
@@ -440,22 +436,4 @@ fn the_verify_inspector_restates_nothing_the_other_pages_show() {
             ],
         );
     }
-}
-
-#[test]
-fn the_tuning_inspector_states_only_uncommitted_and_invalid_values() {
-    let painted = simulate_text(&mut verify_tuning());
-
-    assert_states(
-        &painted,
-        &["Tuning"],
-        &[
-            "Parameter tuning",
-            "committed baseline",
-            "Design variables",
-            "Provisional changes",
-            "Validation",
-            "Commit contract",
-        ],
-    );
 }

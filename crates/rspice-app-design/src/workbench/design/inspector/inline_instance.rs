@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::requests::StageComponentTuning;
 use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
@@ -397,22 +396,6 @@ pub(super) fn edit_description(field: &InlineEditField) -> String {
     }
 }
 
-pub fn component_tuning_action_block_reason(
-    cx: &Cx<'_, DesignFeature>,
-    component: &Component,
-) -> Option<String> {
-    match cx.foreign_availability(ids::TUNING) {
-        CommandAvailability::Available => cx
-            .peers
-            .simulate()
-            .component_tuning_block_reason(cx.model, component),
-        CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
-        CommandAvailability::Hidden => {
-            Some("parameter tuning is unavailable in this context".to_owned())
-        }
-    }
-}
-
 /// One editable instance row.
 ///
 /// The row applies each keystroke to the design so the canvas, connectivity,
@@ -483,47 +466,19 @@ pub fn edit_row_with_hint(
             })
     }) && ui.input(|input| input.key_pressed(egui::Key::Escape));
 
-    let (response, tuning_response) = ui
+    let response = ui
         .push_id((component.id, &field), |ui| {
-            if matches!(field, InlineEditField::Value) {
-                let tuning_block_reason = rejection.as_ref().map_or_else(
-                    || component_tuning_action_block_reason(cx, component),
-                    |reason| {
-                        Some(format!(
-                            "resolve the Value validation error before tuning: {reason}"
-                        ))
-                    },
-                );
-                let (edit, action) = property_row_input_action(
+            if captioned {
+                property_row_input_captioned(
                     ui,
                     label,
                     &mut buffer,
+                    hint,
                     rejection.is_some(),
-                    crate::workbench::design_system::PropertyRowAction {
-                        icon: WorkbenchIcon::Sliders,
-                        label: &format!("Scrub-tune {} in the parameter sandbox", component.name),
-                        enabled: tuning_block_reason.is_none(),
-                        disabled_reason: tuning_block_reason.as_deref(),
-                    },
-                );
-                (edit, Some(action))
-            } else if captioned {
-                (
-                    property_row_input_captioned(
-                        ui,
-                        label,
-                        &mut buffer,
-                        hint,
-                        rejection.is_some(),
-                        caption,
-                    ),
-                    None,
+                    caption,
                 )
             } else {
-                (
-                    property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some()),
-                    None,
-                )
+                property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some())
             }
         })
         .inner;
@@ -561,20 +516,6 @@ pub fn edit_row_with_hint(
     {
         restore_edit_focus(ui.ctx(), cx);
     }
-    if tuning_response.is_some_and(|response| response.clicked()) {
-        if commit_inline_component_edit(cx.model, cx.wb).is_err() {
-            restore_edit_focus(ui.ctx(), cx);
-            return cx
-                .wb
-                .inline_edit
-                .error_for(component.id, &field)
-                .map(str::to_owned);
-        }
-        cx.wb.outbox.push(StageComponentTuning {
-            component_id: component.id,
-        });
-    }
-
     let rejection = cx
         .wb
         .inline_edit

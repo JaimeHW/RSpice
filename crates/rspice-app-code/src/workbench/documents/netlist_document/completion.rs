@@ -81,11 +81,7 @@ const DOT_COMMANDS: &[(&str, &str, &str)] = &[
         "tran|ac|dc <name> <type> <signal> …",
         "Post-run measurement (drives the specs matrix).",
     ),
-    (
-        ".param",
-        "<name>=<value> …",
-        "Deck parameter — appears in the tuner.",
-    ),
+    (".param", "<name>=<value> …", "Deck parameter."),
     (
         ".model",
         "<name> <type> (<param>=<value> …)",

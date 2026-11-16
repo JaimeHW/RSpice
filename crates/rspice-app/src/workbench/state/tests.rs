@@ -4,7 +4,6 @@
 //! the live layout owner rather than a copy. That every layout round-trips
 //! through the saved session unchanged is tested with the session wire.
 
-use rspice_app_simulate::workbench::state::simulate_session::VerificationSessionState;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::preferences::WorkspacePreset;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -401,30 +400,17 @@ fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
 }
 
 #[test]
-fn verification_routes_are_the_exact_canonical_six() {
+fn verification_routes_are_the_exact_canonical_five() {
     assert_eq!(
         VerificationPage::NAVIGATION,
         [
             VerificationPage::Yield,
             VerificationPage::Corners,
-            VerificationPage::Tuning,
             VerificationPage::Optimization,
             VerificationPage::DeviceSafety,
             VerificationPage::Regression,
         ]
     );
-}
-
-#[test]
-fn removed_tuning_sandbox_fields_migrate_without_restoring_fake_state() {
-    let restored: VerificationSessionState = serde_json::from_value(serde_json::json!({
-        "tuning_baseline": {"rgain_ohm": 499.0, "cfilt_nf": 22.0, "vref_v": 2.5},
-        "tuning_values": {"rgain_ohm": 620.0, "cfilt_nf": 31.0, "vref_v": 2.8},
-        "regression_baseline_run": null
-    }))
-    .expect("legacy tuning fields are ignored during migration");
-
-    assert_eq!(restored, VerificationSessionState::default());
 }
 
 #[test]

@@ -137,22 +137,9 @@ impl Default for SimulateState {
 }
 
 /// What another feature reads of simulate: the specification the
-/// verification matrix has selected, and whether the parameter tuner would
-/// stage an instance's Value.
+/// verification matrix has selected.
 impl SimulatePort for SimulateState {
     fn selected_specification(&self) -> Option<&str> {
         self.selected_specification.as_deref()
-    }
-
-    fn component_tuning_block_reason(
-        &self,
-        model: &crate::workbench::app_state::Model,
-        component: &crate::state::Component,
-    ) -> Option<String> {
-        crate::workbench::app::actions::tuning_staging::component_tuning_block_reason(
-            model,
-            &self.verification,
-            component,
-        )
     }
 }

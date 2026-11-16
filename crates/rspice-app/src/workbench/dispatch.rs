@@ -55,7 +55,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, StageComponentTuning, VoidVerilogAEvidence,
+    ShowWaveforms, VoidVerilogAEvidence,
 };
 
 /// Who carries out a command once the prologue has let it through.
@@ -408,18 +408,6 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, OpenStimulusDefinition(definition)| {
                 DesignFeature::show_stimulus_definition(&mut features::cx(app), &definition);
-            },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, StageComponentTuning { component_id }| {
-                if rspice_app_simulate::workbench::simulate::SimulateFeature::stage_component_tuning(
-                    &mut features::cx(app),
-                    component_id,
-                ) {
-                    app.execute_command_key(ids::TUNING);
-                }
             },
         );
         requests::drain(

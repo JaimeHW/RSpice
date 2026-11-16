@@ -20,7 +20,6 @@ use crate::state::{
 };
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::app_state::Model;
-use crate::workbench::state::VerificationSessionState;
 use rspice_app_state::workbench::workspace::restore_model_library_manager;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
@@ -79,15 +78,14 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
 }
 
 #[test]
-fn verification_navigation_exposes_the_operational_tuning_route() {
-    assert_eq!(VerificationPage::NAVIGATION.len(), 6);
+fn verification_navigation_lists_every_view() {
+    assert_eq!(VerificationPage::NAVIGATION.len(), 5);
     let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
     assert_eq!(
         labels,
         [
             "PVT & Monte Carlo",
             "Process corners",
-            "Tuning",
             "Optimization",
             "Electrical SOA",
             "Regression",
@@ -202,7 +200,6 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
 
     let flow = super::super::verify::verification_flow_presentation(
         &model,
-        &VerificationSessionState::default(),
         VerificationPage::DeviceSafety,
     );
     assert_eq!(flow.status, "9.1% margin");
@@ -210,8 +207,8 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
 
 #[test]
 fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-    assert!(verification_navigator_requires_scroll(503.0));
-    assert!(!verification_navigator_requires_scroll(504.0));
+    assert!(verification_navigator_requires_scroll(440.0));
+    assert!(!verification_navigator_requires_scroll(441.0));
     assert!(verification_navigator_requires_scroll(390.0));
     assert!(!verification_navigator_requires_scroll(560.0));
     assert!(!verification_navigator_requires_scroll(700.0));

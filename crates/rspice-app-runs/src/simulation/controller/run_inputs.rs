@@ -21,9 +21,9 @@
 //! file-backed source is routed to. [`RunInputIdentity`] names the session
 //! part, in the cheapest exact form each input has, and only what the run's
 //! kind reads; the host part is read again from what the preparation recorded
-//! about it. Automation and tuning prepare in their own frame from the live
-//! session, and retain the identity of the state they prepared from, so their
-//! runs are held to the same check.
+//! about it. Automation prepares in its own frame from the live session, and
+//! retains the identity of the state it prepared from, so its runs are held
+//! to the same check.
 //!
 //! Automation also publishes evidence from the run it dispatched, and only
 //! while the session still holds what that run was prepared from. It used to

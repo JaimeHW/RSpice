@@ -11,24 +11,28 @@ use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
-fn tuning_command_opens_the_transactional_sandbox() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = Workspace::Project;
-    app.state.simulate.verification_page = VerificationPage::Yield;
-    let command = SimulateCommand::Verify(VerificationPage::Tuning).key();
+fn each_verify_command_opens_the_verify_workspace_on_its_view() {
+    for page in VerificationPage::NAVIGATION {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Project;
+        let other = VerificationPage::NAVIGATION
+            .into_iter()
+            .find(|other| *other != page)
+            .expect("more than one view");
+        app.state.simulate.verification_page = other;
+        let command = SimulateCommand::Verify(page).key();
 
-    assert!(app.command_key_enabled(command));
-    assert_eq!(
-        app.command_availability(command),
-        CommandAvailability::Available
-    );
-    app.execute_command_key(command);
+        assert!(app.command_key_enabled(command), "{page:?}");
+        assert_eq!(
+            app.command_availability(command),
+            CommandAvailability::Available,
+            "{page:?}"
+        );
+        app.execute_command_key(command);
 
-    assert_eq!(app.state.workbench.workspace, Workspace::Verify);
-    assert_eq!(
-        app.state.simulate.verification_page,
-        VerificationPage::Tuning
-    );
+        assert_eq!(app.state.workbench.workspace, Workspace::Verify, "{page:?}");
+        assert_eq!(app.state.simulate.verification_page, page);
+    }
 }
 
 #[test]

@@ -466,19 +466,6 @@ pub(super) fn show_inspector<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::
 }
 
 /// [`show_inspector`], in a context holding the dispatcher's answers for the
-/// commands `F` reads when `reads(app)` says the section reads them, as
-/// [`cx_with_foreign_answers`] takes them.
-pub(super) fn show_inspector_reading<F: Registered>(
-    app: &mut RSpiceApp,
-    ui: &mut egui::Ui,
-    reads: impl FnOnce(&RSpiceApp) -> bool,
-) {
-    if let Some(inspector) = F::registry().inspector_section() {
-        (inspector.show)(&mut cx_with_foreign_answers::<F>(app, reads), ui);
-    }
-}
-
-/// [`show_inspector`], in a context holding the dispatcher's answers for the
 /// commands `F` reads when `reads(app)` says the section reads them, and
 /// both modal facts, as [`surface_cx`] takes them.
 pub(super) fn show_inspector_modal<F: Registered>(

@@ -142,7 +142,6 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
         "simulate.regression_baseline_picker",
         DocsTopic::Verification,
     ),
-    ("simulate.tuning_review", DocsTopic::Verification),
     ("models.pdk_settings", DocsTopic::ModelsAndPdks),
     ("models.model_browser", DocsTopic::ModelsAndPdks),
     ("models.model_correlation", DocsTopic::ModelsAndPdks),

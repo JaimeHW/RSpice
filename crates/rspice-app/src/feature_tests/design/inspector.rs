@@ -10,7 +10,7 @@ use rspice_app_design::workbench::design::inspector::component::{
     terminals_section,
 };
 use rspice_app_design::workbench::design::inspector::inline_instance::{
-    begin_edit, component_tuning_action_block_reason, field_value, net_panel, update_edit,
+    begin_edit, field_value, net_panel, update_edit,
 };
 use rspice_app_design::workbench::design::inspector::model_evidence::component_model_evidence;
 use rspice_app_design::workbench::design::inspector::tests::{
@@ -22,7 +22,6 @@ use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::framework::feature::SimulatePort as _;
 use rspice_app_workbench::workbench::state::console_views::{InlineEditField, InlineEditSession};
 use std::collections::HashMap;
 
@@ -372,32 +371,6 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
     assert!(
         !app.state.model.schematic.can_undo(),
         "one inline session must create exactly one undo entry"
-    );
-}
-
-#[test]
-fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
-        .schematic
-        .add_component(ComponentType::Inductor, Point::origin());
-    app.state.model.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
-    let component = app.state.model.schematic.document().components[0].clone();
-
-    let reason = component_tuning_action_block_reason(&app.design_cx(), &component)
-        .expect("an unsupported typed quantity cannot expose an enabled Tune action");
-
-    assert_eq!(
-        reason,
-        "Inductor values do not have a truthful typed design-variable mapping"
-    );
-    assert_eq!(
-        app.state
-            .simulate
-            .component_tuning_block_reason(&app.state.model, &component)
-            .expect("staging preflight must reject the same unsupported quantity"),
-        reason
     );
 }
 

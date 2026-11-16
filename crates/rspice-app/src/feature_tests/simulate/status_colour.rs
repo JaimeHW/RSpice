@@ -233,7 +233,6 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
             "surfaces/verify/table/head.rs",
             "surfaces/verify/table/state.rs",
             "surfaces/verify/toolbar.rs",
-            "surfaces/verify/tuning.rs",
             "surfaces/verify/yield_page.rs",
         ],
         &["status_dot"],

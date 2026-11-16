@@ -1700,7 +1700,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
     (
         "rspice-app-simulate",
         &[
-            ("lib.rs", "actions"),
             ("lib.rs", "app"),
             ("lib.rs", "app_state"),
             ("lib.rs", "chrome"),
@@ -1722,7 +1721,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "surfaces"),
             ("lib.rs", "toolbar"),
             ("lib.rs", "tools"),
-            ("lib.rs", "tuning_staging"),
             ("lib.rs", "verification_footer"),
             ("lib.rs", "verify"),
             ("lib.rs", "workbench"),
@@ -1762,7 +1760,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/surfaces/verify.rs", "safety"),
             ("workbench/surfaces/verify.rs", "table"),
             ("workbench/surfaces/verify.rs", "toolbar"),
-            ("workbench/surfaces/verify.rs", "tuning"),
         ],
     ),
     (
@@ -2235,7 +2232,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::section_head",
     "rspice-app-simulate/src/workbench/surfaces/simulate/plan_manager/kit.rs::table",
     "rspice-app-simulate/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
-    "rspice-app-simulate/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",

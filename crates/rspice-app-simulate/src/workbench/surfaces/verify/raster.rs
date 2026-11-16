@@ -19,14 +19,12 @@ use crate::state::{
     SpecEntry, SpecPointScope,
 };
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::Workspace;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
-use super::tuning::sync_tuning_session;
 use super::verification_yield_results;
 
 pub const PAGE_WIDTH: f32 = 1100.0;
@@ -630,88 +628,6 @@ pub fn seed_optimization(model: &mut Model) {
                 converged: true,
             }),
     );
-}
-
-pub fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
-    let plan_id = model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let variable = crate::state::DesignVariable::new(
-        "RGAIN",
-        "499 ohm",
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
-        "Closed-loop gain-setting resistor",
-        Some(crate::state::DesignVariableRange {
-            minimum: "350 ohm".to_owned(),
-            maximum: "750 ohm".to_owned(),
-        }),
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("valid tuning variable");
-    let id = variable.id;
-    model
-        .workspace
-        .content
-        .add_design_variable(plan_id, variable)
-        .expect("variable enters active plan payload");
-    id
-}
-
-pub fn stage_literal_tuning_binding(
-    cx: &mut Cx<'_, SimulateFeature>,
-    component_id: u64,
-    variable_name: &str,
-) -> crate::product::DesignVariableId {
-    sync_tuning_session(cx);
-    let component = cx
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .cloned()
-        .expect("component exists");
-    let source_view = cx.model.workspace.content.active_schematic_reference();
-    let typed_expression = format!("{} ohm", component.value.trim());
-    let variable = crate::state::DesignVariable::new(
-        variable_name,
-        &typed_expression,
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
-        format!("Value of {}", component.name),
-        None,
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("test literal is a valid resistance");
-    let variable_id = variable.id;
-    cx.state
-        .verification
-        .tuning_variables
-        .push(crate::workbench::state::TuningVariableDraft {
-            variable_id,
-            baseline_expression: typed_expression.clone(),
-            candidate_expression: typed_expression,
-            validation_error: None,
-            proposed: true,
-        });
-    cx.state.verification.tuning_instance_binding =
-        Some(crate::workbench::state::TuningInstanceBindingDraft {
-            component_id,
-            component_name: component.name,
-            source_view,
-            source_topology_version: cx.model.schematic.topology_version(),
-            source_value: component.value,
-            binding_expression: format!("{{{variable_name}}}"),
-            variable,
-            creates_variable: true,
-        });
-    variable_id
 }
 
 pub fn fixture_yield_results(model: &Model) -> Vec<rspice_results::yield_analysis::YieldResult> {

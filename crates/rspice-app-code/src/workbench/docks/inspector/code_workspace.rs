@@ -19,8 +19,8 @@ use super::super::super::design_system::{WorkbenchIcon, property_row, property_r
 
 /// What the Netlist workspace's inspector reads: the model, the netlist
 /// editor's and the Code & Automation page's state, the runs that sealed a
-/// deck, the workspace in front, whether a project is open, the message
-/// catalogue and whether tuning the deck's parameters would run.
+/// deck, the workspace in front, whether a project is open and the message
+/// catalogue.
 #[derive(Clone, Copy)]
 pub(crate) struct CodeInspector<'a> {
     pub(crate) model: &'a Model,
@@ -30,17 +30,13 @@ pub(crate) struct CodeInspector<'a> {
     pub(crate) workspace: Workspace,
     pub(crate) project_open: bool,
     pub(crate) messages: MessageCatalog,
-    pub(crate) tuning_available: bool,
 }
 
-/// Draw the inspector of the page in front, and say whether the reader asked
-/// to tune the deck's parameters.
-pub(in crate::workbench) fn code_workspace_inspector(
-    ui: &mut Ui,
-    reads: &CodeInspector<'_>,
-) -> bool {
+/// Draw the inspector of the page in front.
+pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeInspector<'_>) {
     if reads.code_workspace.page == CodeWorkspacePage::Netlist {
-        return netlist(ui, reads);
+        netlist(ui, reads);
+        return;
     }
 
     let messages = reads.messages;
@@ -57,7 +53,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
             ui,
             &messages.text(MessageId::CodeInspectorContextUnavailable),
         );
-        return false;
+        return;
     };
     let ownership = messages.text(match context.ownership {
         CodeDocumentOwnership::GeneratedReadOnly => MessageId::CodeInspectorGeneratedReadOnly,
@@ -75,10 +71,9 @@ pub(in crate::workbench) fn code_workspace_inspector(
         &messages.text(MessageId::CodeInspectorOwnership),
         &ownership,
     );
-    false
 }
 
-fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) -> bool {
+fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
     };
@@ -156,24 +151,6 @@ fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) -> bool {
         );
     }
 
-    // The sandbox itself, rather than a paragraph recommending it.
-    let mut tune = false;
-    if reads.tuning_available {
-        section_header(
-            ui,
-            &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
-            None,
-        );
-        if crate::ui::widgets::Button::new(
-            &messages.text(crate::workbench::MessageId::NetlistTuneParameters),
-        )
-        .show(ui)
-        .clicked()
-        {
-            tune = true;
-        }
-    }
-
     if active_dependency_in(reads.model, reads.netlist).is_some() {
         dependency_provenance(ui, reads);
     } else {
@@ -183,7 +160,6 @@ fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) -> bool {
             _ => generated_provenance(ui, reads.model),
         }
     }
-    tune
 }
 
 fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) {

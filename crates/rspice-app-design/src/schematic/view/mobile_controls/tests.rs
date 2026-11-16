@@ -6,7 +6,7 @@ use super::*;
 
 /// Every button's command the strip asks the dispatcher about is one the
 /// design feature declares it reads, in the strip's order and ahead of Show
-/// in netlist and Tuning, which the navigator and the inspector read;
+/// in netlist, which the navigator and the inspector read;
 /// Cancel's is offered while an operation is live, and the two latches run
 /// no command.
 #[test]
@@ -24,10 +24,7 @@ fn the_strip_asks_only_the_answers_the_design_feature_reads() {
     assert_eq!(&foreign[..asked.len()], &asked);
     assert_eq!(
         &foreign[asked.len()..],
-        &[
-            crate::workbench::framework::command_registry::ids::SHOW_IN_NETLIST,
-            crate::workbench::framework::command_registry::ids::TUNING,
-        ]
+        &[crate::workbench::framework::command_registry::ids::SHOW_IN_NETLIST]
     );
     assert!(!foreign.contains(&ids::CANCEL));
 }

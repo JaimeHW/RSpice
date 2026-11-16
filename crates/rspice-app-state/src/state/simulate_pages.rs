@@ -10,17 +10,15 @@ pub enum VerificationPage {
     #[default]
     Yield,
     Corners,
-    Tuning,
     Optimization,
     DeviceSafety,
     Regression,
 }
 
 impl VerificationPage {
-    pub const NAVIGATION: [Self; 6] = [
+    pub const NAVIGATION: [Self; 5] = [
         Self::Yield,
         Self::Corners,
-        Self::Tuning,
         Self::Optimization,
         Self::DeviceSafety,
         Self::Regression,
@@ -30,7 +28,6 @@ impl VerificationPage {
         match self {
             Self::Yield => "PVT & Monte Carlo verification",
             Self::Corners => "Process-corner verification",
-            Self::Tuning => "Live design-space exploration",
             Self::Optimization => "Optimization candidate",
             Self::DeviceSafety => "Safe-operating-area verification",
             Self::Regression => "Golden regression comparison",

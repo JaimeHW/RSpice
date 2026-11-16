@@ -2,8 +2,7 @@
 //! that drive a frame or the shell, or that read what another part of the
 //! application carries out for a simulate command (the notice centre
 //! draining what a plan command announced), or that read the whole
-//! application's state (a project snapshot, a session round trip) or reach
-//! an action the application ranks above the feature (tuning staging).
+//! application's state (a project snapshot, a session round trip).
 
 mod accessibility;
 mod capture_groups;
@@ -41,7 +40,6 @@ mod statement;
 mod status_colour;
 mod studio;
 mod transient_checkpoint_exchange;
-mod tuning_staging;
 mod value_size;
 mod variable_import;
 mod verify;

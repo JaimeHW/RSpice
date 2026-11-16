@@ -15,29 +15,23 @@ mod regression_panel;
 pub mod safety;
 pub mod table;
 pub mod toolbar;
-pub mod tuning;
 mod yield_page;
 
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
 
-use crate::simulation::RunHost as _;
 use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem};
-use crate::workbench::app::actions::tuning_staging;
-use crate::workbench::app_state::run_preflight::simulation_run_block_reason;
-use crate::workbench::app_state::{Model, SlotFacts};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, run_host};
 use crate::workbench::slots::SimulateState;
-use rspice_app_runs::workbench::slots::runs::request_run_set;
 
 use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
-use tuning::{sync_tuning_session, tuning, tuning_review_dialog};
 
 use corners::*;
 use optimization::*;
@@ -48,9 +42,6 @@ use yield_page::*;
 
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let page = cx.state.verification_page;
-    if page == VerificationPage::Tuning {
-        sync_tuning_session(cx);
-    }
     // A refused action is stated under the toolbar of the page it was taken
     // on; another page has no business repeating it.
     let shown_page = egui::Id::new("workbench.verify.shown_page");
@@ -73,12 +64,10 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             VerificationPage::Corners => corners(ui, cx),
             VerificationPage::Optimization => optimization(ui, cx),
             VerificationPage::DeviceSafety => device_safety(ui, cx),
-            VerificationPage::Tuning => tuning(ui, cx),
             VerificationPage::Regression => regression(ui, cx),
         }
     });
     regression_baseline_picker(&ctx, cx);
-    tuning_review_dialog(&ctx, cx);
 }
 
 /// The runs a page could read: the run it reads now, and every other run that
@@ -359,52 +348,6 @@ fn joint_sample_summary(
     })
 }
 
-/// The worst measurement of a limit's name in a run, against that limit.
-///
-/// Verify used to take the first name-matching measurement it found in the
-/// first attributed analysis. The studio's requirements page takes the worst of
-/// every attributed measurement of that name, including the ones a result
-/// family's own members retained, because a limit answered by one arbitrary
-/// point of a sweep is not a verdict on the sweep. Two surfaces disagreeing
-/// about which number answers one limit is not a display difference — one of
-/// them is telling an engineer a specification passed while a retained point
-/// failed it — so this reduces the same candidate set by the same rule.
-fn worst_measurement_in_run(run: &crate::state::SimulationRun, spec: &SpecEntry) -> Option<f64> {
-    run.analyses
-        .iter()
-        .filter(|analysis| verified_analysis(analysis))
-        .filter(|analysis| {
-            analysis
-                .provenance()
-                .is_some_and(|provenance| spec.scope.admits(provenance.pvt_point()))
-        })
-        .flat_map(|analysis| {
-            let analysis_level = analysis
-                .measurements
-                .iter()
-                .filter(|measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
-                .filter(|measurement| measurement.passed && measurement.error.is_none())
-                .map(|measurement| measurement.value_in_unit(&spec.unit));
-            let member_level = analysis
-                .family_metadata
-                .iter()
-                .flat_map(|metadata| metadata.member_measurements())
-                .filter_map(|member| member.evidence_for(&spec.measurement))
-                .filter(|evidence| evidence.is_measured())
-                .map(|evidence| evidence.value_in_unit(&spec.unit));
-            analysis_level.chain(member_level)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?
-        .into_iter()
-        .flatten()
-        .filter(|value| value.is_finite())
-        // `total_cmp` on a set already filtered finite, so a tie cannot panic.
-        .min_by(|left, right| {
-            verification_margin(spec, *left).total_cmp(&verification_margin(spec, *right))
-        })
-}
-
 /// How much room a value has before it breaks the limit. Negative once broken,
 /// and more negative the worse the break, so the minimum is the worst point.
 fn verification_margin(spec: &SpecEntry, value: f64) -> f64 {
@@ -584,11 +527,6 @@ pub(super) fn invalidate_plan_bound_preflight(cx: &mut Cx<'_, SimulateFeature>) 
     invalidate_preflight(cx);
 }
 
-/// What model operations read of the slots, as the run view reads them.
-fn slot_facts(cx: &mut Cx<'_, SimulateFeature>) -> SlotFacts {
-    run_host(cx).0.slot_facts()
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct RegressionCheck {
     target: crate::state::RegressionTargetSelector,
@@ -609,36 +547,6 @@ struct RegressionCoverageIssue {
     target: Option<crate::state::RegressionTargetSelector>,
     label: String,
     detail: String,
-}
-
-impl SimulateFeature {
-    /// Stage placed instance `component_id`'s Value in the parameter tuner.
-    /// Returns whether it staged; a refusal is stated on the Tuning page and
-    /// on the status bar.
-    pub fn stage_component_tuning(cx: &mut Cx<'_, Self>, component_id: u64) -> bool {
-        let Err(error) = tuning_staging::stage_component_tuning(
-            cx.model,
-            &mut cx.state.verification,
-            component_id,
-        ) else {
-            return true;
-        };
-        let name = cx
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)
-            .map_or_else(
-                || "the instance".to_owned(),
-                |component| component.name.clone(),
-            );
-        let problem = format!("Could not tune {name}: {error}");
-        cx.state.verification.action_problem = Some(problem.clone());
-        cx.wb.prompt(problem);
-        false
-    }
 }
 
 #[cfg(any(test, feature = "test-support"))]

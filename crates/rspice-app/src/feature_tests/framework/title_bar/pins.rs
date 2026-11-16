@@ -486,7 +486,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
         &[
             "Monte Carlo yield | yield |  | on",
             "Process corners | corners |  | on",
-            "Parameter tuning | tuning |  | on",
             "Optimization | optimization |  | on",
             "Safe operating area | device-safety |  | on",
             "Specification matrix… | specifications |  | on",

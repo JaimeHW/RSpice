@@ -37,7 +37,6 @@ use rspice_app_state::results;
 use rspice_app_workbench::ui;
 
 pub mod simulation {
-    pub(crate) use rspice_app_runs::simulation::RunHost;
     pub(crate) use rspice_app_runs::simulation::controller;
     pub use rspice_app_runs::simulation::status;
     pub(crate) use rspice_app_state::simulation::placed_sources;
@@ -64,9 +63,6 @@ pub mod workbench {
     pub(crate) use routing::surface_route::SurfaceRoute;
 
     pub mod app {
-        pub mod actions {
-            pub mod tuning_staging;
-        }
         pub mod dialogs {
             pub mod plan_removal;
         }
@@ -83,7 +79,7 @@ pub mod workbench {
         pub(crate) use rspice_app_workbench::workbench::app_state::session;
         pub(crate) use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 
-        pub(crate) use model::{Model, SlotFacts};
+        pub(crate) use model::Model;
         pub(crate) use session::shortcuts::runtime_command_platform;
         pub(crate) use sim_setup::plan_catalog::{
             SimulationPlanCloneOptions, SimulationPlanLineage, SimulationPlanName,

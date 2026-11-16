@@ -525,14 +525,6 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
-        "8.3",
-        &[
-            "|app, StageComponentTuning { component_id }|",
-            "rspice_app_simulate::workbench::simulate::SimulateFeature::stage_component_tuning(",
-            "app.execute_command_key(ids::TUNING);",
-        ],
-    ),
-    (
         "9",
         &[
             "|app, ShowWaveforms { visibility, selected, }|",
@@ -888,10 +880,8 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
 /// navigator draws in the feature's context on the Netlist workspace and on a
 /// Verilog-A view the Design workspace shows, and on both has what it raised
 /// answered once it has drawn, before the next point draws. The inspector
-/// draws in the feature's context on the same two: a Verilog-A view's raises
-/// nothing, so it answers nothing where it draws; the Netlist inspector,
-/// holding the dispatcher's answers while the deck's page is in front, has
-/// the command it raised answered once it has drawn.
+/// draws in the feature's context on the same two and raises nothing, so it
+/// answers nothing where it draws.
 const CODE_CONTRIBUTIONS: &[Step] = &[
     (
         "netlist page",
@@ -936,13 +926,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
          {\
          features::show_inspector::<CodeFeature>(app, ui);\
          }",
-            "Workspace::Netlist => {\
-         features::show_inspector_reading::<CodeFeature>(app, ui, |app| {\
-         app.state.code.code_workspace.page\
-         == rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist\
-         });\
-         app.after_contribution();\
-         }",
+            "Workspace::Netlist => features::show_inspector::<CodeFeature>(app, ui),",
         ],
     ),
 ];
@@ -1604,8 +1588,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        34,
-        "`after_contribution` answers exactly the thirty-four requests it lists"
+        33,
+        "`after_contribution` answers exactly the thirty-three requests it lists"
     );
 }
 

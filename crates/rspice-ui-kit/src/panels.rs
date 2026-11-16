@@ -1564,10 +1564,9 @@ pub struct PropertyRowAction<'a> {
     pub disabled_reason: Option<&'a str>,
 }
 
-/// Editable property row with one compact trailing action, used by instance
-/// values that can open a non-destructive engineering workflow such as the
-/// parameter-tuning sandbox. The action owns fixed width so focusing or
-/// editing the text field never shifts adjacent rows.
+/// Editable property row with one compact trailing action. The action owns
+/// fixed width so focusing or editing the text field never shifts adjacent
+/// rows.
 pub fn property_row_input_action(
     ui: &mut Ui,
     label: &str,

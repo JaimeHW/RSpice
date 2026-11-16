@@ -703,11 +703,6 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
         modality: Modality::Application,
         is_open: |state| state.simulate.verification.regression_baseline_picker_open,
     },
-    ModalSpec {
-        key: DialogKey("simulate.tuning_review"),
-        modality: Modality::Application,
-        is_open: |state| state.simulate.verification.tuning_review_open,
-    },
     // The Netlist document's own dialogs hold the gate only while its
     // workspace shows them.
     ModalSpec {

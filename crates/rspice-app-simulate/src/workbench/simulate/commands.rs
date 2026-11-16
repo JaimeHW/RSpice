@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 22] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -113,15 +113,12 @@ impl SimulateCommand {
         Self::Page(SimulationPage::Save),
         Self::Verify(VerificationPage::Yield),
         Self::Verify(VerificationPage::Corners),
-        Self::Verify(VerificationPage::Tuning),
         Self::Verify(VerificationPage::Optimization),
         Self::Verify(VerificationPage::DeviceSafety),
         Self::Verify(VerificationPage::Regression),
     ];
 
-    /// The commands that run but are not listed: none. Parameter tuning,
-    /// which once opened only from the instance it tunes, is listed in
-    /// Verify and the palette like the other pages.
+    /// The commands that run but are not listed: none.
     pub const UNLISTED: [Self; 0] = [];
 
     /// The key a shortcut profile names this command by.
@@ -148,7 +145,6 @@ impl SimulateCommand {
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
             Self::Verify(VerificationPage::Yield) => CommandKey::new("yield"),
             Self::Verify(VerificationPage::Corners) => CommandKey::new("corners"),
-            Self::Verify(VerificationPage::Tuning) => ids::TUNING,
             Self::Verify(VerificationPage::Optimization) => CommandKey::new("optimization"),
             Self::Verify(VerificationPage::DeviceSafety) => CommandKey::new("device-safety"),
             Self::Verify(VerificationPage::Regression) => CommandKey::new("regression"),
@@ -282,7 +278,6 @@ const fn verification_page_label(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "Monte Carlo yield",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Tuning => "Parameter tuning",
         VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Safe operating area",
         VerificationPage::Regression => "Regression",

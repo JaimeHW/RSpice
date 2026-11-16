@@ -1,175 +1,20 @@
-//! The Verify surface over the whole application: a tuning commit whose run the
-//! run controller refuses after an edit, the slot facts' read-only recheck, and
-//! the device-safety pane and rows, which read the Results workspace's memoized
-//! evidence verdict.
+//! The Verify surface over the whole application: the device-safety pane and
+//! rows, which read the Results workspace's memoized evidence verdict, and the
+//! seeded pages' table grammar.
 
 use super::verify_fixtures::soa_app;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::verify::latest_validated_analysis;
-use rspice_app_simulate::workbench::surfaces::verify::raster::add_tuning_variable;
 use rspice_app_simulate::workbench::surfaces::verify::raster::sealed_run;
-use rspice_app_simulate::workbench::surfaces::verify::raster::stage_literal_tuning_binding;
 use rspice_app_simulate::workbench::surfaces::verify::safety::device_safety;
 use rspice_app_simulate::workbench::surfaces::verify::safety::soa_rows;
 use rspice_app_simulate::workbench::surfaces::verify::safety::soa_summary;
 use rspice_app_simulate::workbench::surfaces::verify::table::Verdict;
 use rspice_app_simulate::workbench::surfaces::verify::toolbar::Summary;
 use rspice_app_simulate::workbench::surfaces::verify::toolbar::TOOLBAR_H;
-use rspice_app_simulate::workbench::surfaces::verify::tuning;
-use rspice_app_simulate::workbench::surfaces::verify::tuning::sync_tuning_session;
-use rspice_app_simulate::workbench::surfaces::verify::tuning::{
-    tuning_commit_block_reason, tuning_is_dirty,
-};
 use rspice_app_state::product::AnalysisInstanceId;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace};
-
-/// A tuning commit prepares the run it requires in its own frame and queues
-/// it. An edit to the design before the frame that dispatches it refuses the
-/// run there, as it refuses a run a Run press prepared: nothing is prepared
-/// again, and nothing runs.
-#[test]
-fn an_edit_after_a_tuning_commit_refuses_its_run() {
-    use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    app.state.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut app.state.model.schematic,
-    );
-    add_tuning_variable(&mut app.state.model);
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
-    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
-        .expect("valid candidate commits and dispatches");
-    assert!(app.state.model.simulation.execution.trigger_simulation);
-    thread_preparations::take();
-
-    app.state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .components
-        .iter_mut()
-        .find(|component| component.name == "R2")
-        .expect("the divider draws R2")
-        .value = "22k".to_owned();
-    app.simulation_controller
-        .update(&mut app.state, &*app.export_workflow_io);
-
-    assert!(
-        thread_preparations::take().is_empty(),
-        "the dispatch frame prepares nothing"
-    );
-    assert!(!app.state.model.simulation.execution.has_active_execution());
-    assert!(app.state.model.simulation.retained.runs.is_empty());
-    assert_eq!(
-        app.state.model.simulation.execution.status,
-        "The design changed after it was checked; run again"
-    );
-}
-
-#[test]
-fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut app.state.model.schematic,
-    );
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.kind == rspice_app_state::state::ComponentType::Resistor)
-        .map(|component| component.id)
-        .expect("voltage divider resistor");
-    let component_index = app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .position(|component| component.id == component_id)
-        .unwrap();
-    app.state.model.schematic.document_mut_for_test().components[component_index].name =
-        "RLOCKED".to_owned();
-    app.state.model.schematic.document_mut_for_test().components[component_index].value =
-        "10k".to_owned();
-    app.state.model.schematic.bump_topology_version();
-    stage_literal_tuning_binding(
-        &mut crate::workbench::features::cx(&mut app),
-        component_id,
-        "RLOCKED_VALUE",
-    );
-
-    let workspace_before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    let plan_revision_before = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    let topology_before = app.state.model.schematic.topology_version();
-    let value_before = app.state.model.schematic.document().components[component_index]
-        .value
-        .clone();
-    let can_undo_before = app.state.model.schematic.can_undo();
-
-    app.state.model.safe_mode.activate(
-        rspice_app_state::state::write_policy::LocalSafeModeOptions {
-            open_project_read_only: true,
-            ..Default::default()
-        },
-        String::new(),
-    );
-    assert!(app.state.model.schematic_edit_read_only());
-
-    let reason = tuning_commit_block_reason(
-        &app.state.model,
-        &app.state.simulate,
-        app.state.slot_facts(),
-    );
-    assert_eq!(
-        reason,
-        "The staged instance Value binding cannot be committed because the active schematic is read-only."
-    );
-    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
-        .expect_err("authority revoked after staging must prevent every authoritative write");
-
-    assert_eq!(error, reason);
-    assert_eq!(
-        serde_json::to_vec(&app.state.model.workspace).unwrap(),
-        workspace_before
-    );
-    assert_eq!(
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .revision(),
-        plan_revision_before
-    );
-    assert_eq!(
-        app.state.model.schematic.topology_version(),
-        topology_before
-    );
-    assert_eq!(
-        app.state.model.schematic.document().components[component_index].value,
-        value_before
-    );
-    assert_eq!(app.state.model.schematic.can_undo(), can_undo_before);
-    assert!(tuning_is_dirty(&app.state.simulate));
-    assert!(!app.state.model.simulation.execution.trigger_simulation);
-}
 
 /// Retained samples in the fixture SOA stress histories. Large enough that a
 /// per-frame revalidation is real work, small enough to build in a test.

@@ -4,11 +4,7 @@
 //! XML control characters are refused rather than escaped away, and a receipt
 //! whose tolerance digest does not match its contract is rejected.
 
-use super::raster::{
-    add_tuning_variable, limit, sealed_run, seed_corner, seed_optimization, set_limits,
-    stage_literal_tuning_binding,
-};
-use super::tuning::{revert_tuning_session, tuning_is_dirty};
+use super::raster::{sealed_run, seed_corner, seed_optimization};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
@@ -162,347 +158,6 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
 }
 
 #[test]
-fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
-    let mut harness = SimulateTestHost::harness();
-    let variable_id = add_tuning_variable(&mut harness.model);
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    sync_tuning_session(&mut harness.cx());
-
-    assert_eq!(harness.state.verification.tuning_variables.len(), 1);
-    let draft = &mut harness.state.verification.tuning_variables[0];
-    assert_eq!(draft.variable_id, variable_id);
-    draft.candidate_expression = "620 ohm".to_owned();
-    assert!(tuning_is_dirty(&harness.state));
-
-    revert_tuning_session(&mut harness.cx());
-
-    assert!(!tuning_is_dirty(&harness.state));
-    assert_eq!(
-        harness
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables[0]
-            .expression,
-        "499 ohm"
-    );
-}
-
-#[test]
-fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
-    let mut harness = SimulateTestHost::harness();
-    harness.model.provision_test_project_technology_contract();
-    harness.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut harness.model.schematic,
-    );
-    let variable_id = add_tuning_variable(&mut harness.model);
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let source_plan_revision = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    sync_tuning_session(&mut harness.cx());
-    harness.state.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
-
-    tuning::commit_tuning_and_run(&mut harness.cx())
-        .expect("valid candidate commits and dispatches");
-
-    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
-    assert_eq!(plan.revision(), source_plan_revision.next().unwrap());
-    let variable = harness
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .unwrap()
-        .design_variables
-        .iter()
-        .find(|variable| variable.id == variable_id)
-        .unwrap();
-    assert_eq!(variable.expression, "620 ohm");
-    assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
-    assert!(harness.model.simulation.execution.trigger_simulation);
-    assert!(!tuning_is_dirty(&harness.state));
-}
-
-#[test]
-fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
-    let mut harness = SimulateTestHost::harness();
-    let component_id = harness.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::origin(),
-    );
-    harness.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let workspace_before = serde_json::to_vec(&harness.model.workspace).unwrap();
-    let value_before = harness.model.schematic.document().components[0]
-        .value
-        .clone();
-    stage_literal_tuning_binding(&mut harness.cx(), component_id, "R1_VALUE");
-
-    assert!(tuning_is_dirty(&harness.state));
-    revert_tuning_session(&mut harness.cx());
-
-    assert!(!tuning_is_dirty(&harness.state));
-    assert!(harness.state.verification.tuning_instance_binding.is_none());
-    assert!(
-        harness
-            .state
-            .verification
-            .tuning_variables
-            .iter()
-            .all(|draft| !draft.proposed)
-    );
-    assert_eq!(
-        harness.model.schematic.document().components[0].value,
-        value_before
-    );
-    assert_eq!(
-        serde_json::to_vec(&harness.model.workspace).unwrap(),
-        workspace_before
-    );
-    assert!(
-        harness
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables
-            .is_empty()
-    );
-}
-
-#[test]
-fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
-    let mut harness = SimulateTestHost::harness();
-    harness.model.provision_test_project_technology_contract();
-    harness.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut harness.model.schematic,
-    );
-    let component_id = harness
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.kind == crate::state::ComponentType::Resistor)
-        .map(|component| component.id)
-        .expect("voltage divider resistor");
-    let component_index = harness
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .position(|component| component.id == component_id)
-        .unwrap();
-    harness.model.schematic.document_mut_for_test().components[component_index].name =
-        "RLOAD".to_owned();
-    harness.model.schematic.document_mut_for_test().components[component_index].value =
-        "10k".to_owned();
-    harness.model.schematic.bump_topology_version();
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let source_plan_revision = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    let variable_id = stage_literal_tuning_binding(&mut harness.cx(), component_id, "RLOAD_VALUE");
-
-    tuning::commit_tuning_and_run(&mut harness.cx())
-        .expect("the exact prepared candidate commits and dispatches");
-
-    let variable = harness
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .unwrap()
-        .design_variables
-        .iter()
-        .find(|variable| variable.id == variable_id)
-        .expect("proposed variable became authoritative");
-    assert_eq!(variable.name, "RLOAD_VALUE");
-    assert_eq!(variable.expression, "10k ohm");
-    assert_eq!(
-        harness
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)
-            .unwrap()
-            .value,
-        "{RLOAD_VALUE}"
-    );
-    assert_eq!(
-        harness
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .revision(),
-        source_plan_revision.next().unwrap()
-    );
-    assert!(harness.model.schematic.can_undo());
-    assert_eq!(
-        harness.model.schematic.undo_description(),
-        Some("bind RLOAD to RLOAD_VALUE")
-    );
-    assert!(harness.model.simulation.execution.trigger_simulation);
-    assert!(harness.state.verification.tuning_instance_binding.is_none());
-}
-
-#[test]
-fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
-    let mut harness = SimulateTestHost::harness();
-    harness.model.provision_test_project_technology_contract();
-    let component_id = harness.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::origin(),
-    );
-    harness.model.schematic.document_mut_for_test().components[0].name = "RFAIL".to_owned();
-    harness.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let source_plan_revision = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    let source_topology = harness.model.schematic.topology_version();
-    let source_can_undo = harness.model.schematic.can_undo();
-    let workspace_before = serde_json::to_vec(&harness.model.workspace).unwrap();
-    retain_preflight_report(&mut harness);
-    stage_literal_tuning_binding(&mut harness.cx(), component_id, "RFAIL_VALUE");
-
-    let error = tuning::commit_tuning_and_run(&mut harness.cx())
-        .expect_err("missing ground and open pins fail exact run preparation");
-
-    assert!(error.contains("the run could not be prepared"), "{error}");
-    assert_eq!(
-        harness
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .revision(),
-        source_plan_revision
-    );
-    assert_eq!(harness.model.schematic.topology_version(), source_topology);
-    assert_eq!(
-        harness.model.schematic.document().components[0].value,
-        "10k"
-    );
-    assert_eq!(harness.model.schematic.can_undo(), source_can_undo);
-    assert_eq!(
-        serde_json::to_vec(&harness.model.workspace).unwrap(),
-        workspace_before
-    );
-    assert!(
-        harness
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables
-            .is_empty()
-    );
-    assert!(harness.runs.preflight.report.is_some());
-    assert!(tuning_is_dirty(&harness.state));
-    assert!(!harness.model.simulation.execution.trigger_simulation);
-}
-
-#[test]
-fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
-    let mut harness = SimulateTestHost::harness();
-    add_tuning_variable(&mut harness.model);
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let before = serde_json::to_vec(&harness.model.workspace).unwrap();
-    sync_tuning_session(&mut harness.cx());
-    let draft = &mut harness.state.verification.tuning_variables[0];
-    draft.candidate_expression = "2 kohm".to_owned();
-    let mut candidate = harness
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .unwrap()
-        .design_variables[0]
-        .clone();
-    candidate.expression.clone_from(&draft.candidate_expression);
-    draft.validation_error = candidate.validate().err();
-
-    assert!(tuning::commit_tuning_and_run(&mut harness.cx()).is_err());
-    assert_eq!(
-        serde_json::to_vec(&harness.model.workspace).unwrap(),
-        before
-    );
-    assert!(!harness.model.simulation.execution.trigger_simulation);
-}
-
-#[test]
-fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
-    let mut harness = SimulateTestHost::harness();
-    add_tuning_variable(&mut harness.model);
-    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let source_plan_revision = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    harness.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-        harness.model.workspace.content.project.revision().get(),
-    ));
-    sync_tuning_session(&mut harness.cx());
-    harness.state.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
-
-    let error = tuning::commit_tuning_and_run(&mut harness.cx())
-        .expect_err("an empty schematic must block the required run");
-
-    assert!(error.contains("required run is blocked"));
-    assert_eq!(
-        harness
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .revision(),
-        source_plan_revision
-    );
-    assert_eq!(
-        harness
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables[0]
-            .expression,
-        "499 ohm"
-    );
-    assert!(
-        harness.runs.preflight.report.is_some(),
-        "a blocked tuning run rolls back without dropping retained preflight evidence",
-    );
-    assert!(tuning_is_dirty(&harness.state));
-    assert!(!harness.model.simulation.execution.trigger_simulation);
-}
-
-#[test]
 fn soa_cross_probe_selects_the_exact_schematic_device() {
     let mut harness = SimulateTestHost::harness();
     harness
@@ -631,45 +286,6 @@ fn verification_requires_an_explicit_active_run_selection() {
 
     assert_eq!(verification_run_index(&harness.model), None);
     assert!(verification_run(&harness.model).is_none());
-}
-
-#[test]
-fn measurement_evidence_requires_success_finite_value_and_provenance() {
-    let mut run = SimulationRun::new(1);
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Ac, "legacy")
-            .with_measurements(vec![rspice_core::MeasureResult::success("legacy", 1.0)]),
-    );
-    run.add_analysis(attributed(
-        AnalysisResult::failed(2, AnalysisType::Ac, "failed", "solver failed")
-            .with_measurements(vec![rspice_core::MeasureResult::success("failed", 2.0)]),
-    ));
-    run.add_analysis(attributed(
-        AnalysisResult::new(3, AnalysisType::Ac, "measure failed").with_measurements(vec![
-            rspice_core::MeasureResult::failed("measure_failed", "crossing not found"),
-        ]),
-    ));
-    run.add_analysis(attributed(
-        AnalysisResult::new(4, AnalysisType::Ac, "valid")
-            .with_measurements(vec![rspice_core::MeasureResult::success("valid", 4.0)]),
-    ));
-
-    let tracked = |name: &str| SpecEntry {
-        measurement: name.to_owned(),
-        expression: String::new(),
-        min: None,
-        max: None,
-        unit: String::new(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    };
-
-    assert_eq!(worst_measurement_in_run(&run, &tracked("legacy")), None);
-    assert_eq!(worst_measurement_in_run(&run, &tracked("failed")), None);
-    assert_eq!(
-        worst_measurement_in_run(&run, &tracked("measure_failed")),
-        None
-    );
-    assert_eq!(worst_measurement_in_run(&run, &tracked("valid")), Some(4.0));
 }
 
 #[test]
@@ -1379,16 +995,12 @@ fn tolerance_digest_is_order_independent_and_receipts_fail_on_contract_mismatch(
     assert!(serialized.get("regression_comparison").is_none());
 }
 
-/// A limit answered on both surfaces must be answered with the same number.
-///
-/// Verify's cockpit and the studio's requirements page read the same limits
-/// against the same selected dataset. Verify used to take the first
-/// name-matching measurement it found; the studio takes the worst of every
-/// attributed measurement of that name. On a dataset holding several — a corner
-/// set, or a family whose members measured — that is not a display difference:
-/// one surface reports a specification passing while a retained point fails it.
+/// A limit is answered by the worst of every attributed measurement of its
+/// name, not the first one found. On a dataset holding several — a corner set,
+/// or a family whose members measured — the first would report a
+/// specification passing while a retained point fails it.
 #[test]
-fn verify_and_the_studio_report_the_same_worst_value_for_one_limit() {
+fn the_worst_retained_point_answers_a_limit() {
     use crate::state::{
         AnalysisResultFamilyMetadata, FamilyMeasurementEvidence, FamilyMemberId,
         FamilyMemberMeasurements,
@@ -1434,18 +1046,10 @@ fn verify_and_the_studio_report_the_same_worst_value_for_one_limit() {
         ),
     ));
 
-    let verify_value = worst_measurement_in_run(&run, &spec);
-    let studio_value =
-        crate::workbench::surfaces::simulate::measurement_in_output_dataset_for_test(&run, &spec);
-
     assert_eq!(
-        verify_value,
+        crate::workbench::surfaces::simulate::measurement_in_output_dataset_for_test(&run, &spec),
         Some(7.25),
-        "Verify must report the worst retained point, not the first"
-    );
-    assert_eq!(
-        verify_value, studio_value,
-        "Verify and the studio must not disagree about which number answers a limit"
+        "the worst retained point answers the limit, not the first"
     );
 }
 
@@ -1682,40 +1286,6 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
     }
 }
 
-/// Tuning is its toolbar, the variable editors beside the response they
-/// produce, and under both the limits judged against the baseline and the
-/// candidate run.
-#[test]
-fn the_tuning_page_is_two_panes_over_the_limits_table() {
-    use super::raster::{PAGE_WIDTH, page_geometry};
-
-    let geometry = page_geometry(tuning_app(), VerificationPage::Tuning);
-    let toolbar = geometry.one("toolbar").expect("toolbar");
-    assert_eq!(toolbar.height(), super::toolbar::TOOLBAR_H);
-    assert!(
-        geometry.one("toolbar.summary").is_some(),
-        "the toolbar names the candidate and the baseline"
-    );
-    let variables = geometry.one("tuning.variables").expect("variables pane");
-    let response = geometry.one("tuning.response").expect("response pane");
-    assert_eq!(variables.left(), 0.0);
-    assert_eq!(variables.top(), toolbar.bottom());
-    assert_eq!(response.top(), variables.top());
-    assert_eq!(response.bottom(), variables.bottom());
-    assert_eq!(response.left(), variables.right() + 1.0);
-    assert_eq!(response.right(), PAGE_WIDTH);
-    let head = geometry.one("table.head").expect("limits table");
-    assert_eq!(head.top(), variables.bottom() + 1.0, "one hairline between");
-    let rows = geometry.all("table.row");
-    assert_eq!(rows.len(), 2, "one row per limit");
-    assert!(rows.iter().all(|row| row.height() == 24.0));
-    assert_eq!(rows[0].top(), head.bottom());
-    for (column, edges) in geometry.right_edges() {
-        assert_eq!(edges.len(), 1, "{column}: numbers end on one edge");
-    }
-    assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
-}
-
 /// Regression is one table of every compared target, and the selected
 /// target's detail in a pane directly under it.
 #[test]
@@ -1796,71 +1366,6 @@ fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)])
                 .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
                 .collect(),
         )
-}
-
-/// A plan with one tuned resistor and two limits, and two runs of it: Run 3,
-/// the baseline the tuning session opened on, whose overshoot fails, and
-/// Run 4, the committed candidate, whose settling time is near its limit.
-fn tuning_app() -> FeatureHarness<SimulateFeature> {
-    use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableScope, DesignVariableSweepEligibility,
-    };
-
-    let mut harness = SimulateTestHost::harness();
-    let plan_id = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let variable = DesignVariable::new(
-        "RGAIN",
-        "499 ohm",
-        DesignVariableQuantity::Resistance,
-        DesignVariableScope::Project,
-        "Closed-loop gain-setting resistor",
-        Some(DesignVariableRange {
-            minimum: "350 ohm".to_owned(),
-            maximum: "750 ohm".to_owned(),
-        }),
-        DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .expect("valid tuning variable");
-    harness
-        .model
-        .workspace
-        .content
-        .add_design_variable(plan_id, variable)
-        .expect("the variable enters the active plan");
-    set_limits(
-        &mut harness.model,
-        vec![
-            limit("tsettle", None, Some(2.0e-6), "s"),
-            limit("overshoot", None, Some(10.0), "%"),
-        ],
-    );
-    let source = AnalysisInstanceId::new();
-    let baseline = sealed_run(
-        3,
-        plan_id,
-        source,
-        TRANSIENT_TASK_TAG,
-        step_analysis(0.55, 4.49e6, &[("tsettle", 1.62e-6), ("overshoot", 12.6)]),
-    );
-    let candidate = sealed_run(
-        4,
-        plan_id,
-        source,
-        TRANSIENT_TASK_TAG,
-        step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
-    );
-    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
-    harness.model.simulation.view.active_run_idx = Some(0);
-    super::tuning::sync_tuning_session(&mut harness.cx());
-    harness.model.simulation.view.active_run_idx = Some(1);
-    harness
 }
 
 /// Run 4 of the active plan against its baseline, Run 3: four measurements and

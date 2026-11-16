@@ -701,9 +701,9 @@ impl SimulationController {
     /// before this method. Preflight itself prepares off the UI thread; see
     /// [`Self::start_preflight`].
     ///
-    /// Automation and tuning prepare their runs here. The identity of the
-    /// state the run is prepared from is retained with it, and the frame that
-    /// dispatches it checks that identity, as it checks a Run press's.
+    /// The identity of the state the run is prepared from is retained with
+    /// it, and the frame that dispatches it checks that identity, as it checks
+    /// a Run press's.
     /// Automation prepares through [`Self::prepare_run_set_for_evidence`].
     pub fn prepare_run_set_for_preflight(
         &mut self,
@@ -1065,7 +1065,7 @@ impl SimulationController {
     }
 
     /// Validate and consume an explicitly retained preflight snapshot. Run,
-    /// collaborative approval, Automation, and tuning all prepare through an
+    /// collaborative approval and Automation all prepare through an
     /// owning workflow before they request dispatch; the controller never
     /// manufactures hidden authorization at this final boundary.
     ///

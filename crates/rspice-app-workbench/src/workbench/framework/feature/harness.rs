@@ -164,18 +164,9 @@ impl HardcopyPort for NullPorts {
     }
 }
 
-/// A fresh session has selected no specification, and holds no tuning
-/// binding that would stand against staging another.
+/// A fresh session has selected no specification.
 impl SimulatePort for NullPorts {
     fn selected_specification(&self) -> Option<&str> {
-        None
-    }
-
-    fn component_tuning_block_reason(
-        &self,
-        _model: &crate::workbench::app_state::Model,
-        _component: &crate::state::Component,
-    ) -> Option<String> {
         None
     }
 }

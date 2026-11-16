@@ -39,11 +39,10 @@ use crate::workbench::app::actions::workspace::{
 use crate::workbench::app_state::Model;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::design_system::{
-    Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row, property_row_captioned,
-    property_row_combo, property_row_flagged, property_row_input_action,
-    property_row_input_captioned, property_row_input_with_hint, property_row_problem,
+    Problem, PropertyRowCaption, problem_line, property_row, property_row_captioned,
+    property_row_combo, property_row_flagged, property_row_input_captioned,
+    property_row_input_with_hint, property_row_problem,
 };
-use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::{Drain, Request, RevealModel};
 use crate::workbench::slots::DesignState;

@@ -78,9 +78,6 @@ const APPLICATION_GATE: &[GateRow] = &[
             state.simulate.verification.regression_baseline_picker_open = true;
         },
     ),
-    ("workbench.verification.tuning_review_open", |state| {
-        state.simulate.verification.tuning_review_open = true;
-    }),
     ("route ProjectLauncher", |state| {
         navigate(state, SurfaceId::ProjectLauncher);
     }),
@@ -194,9 +191,6 @@ fn application_modals_own_global_input_exclusively() {
     state.simulate.verification.regression_baseline_picker_open = true;
     assert!(state.application_modal_open());
     state.simulate.verification.regression_baseline_picker_open = false;
-    state.simulate.verification.tuning_review_open = true;
-    assert!(state.application_modal_open());
-    state.simulate.verification.tuning_review_open = false;
     state
         .workbench
         .navigate(

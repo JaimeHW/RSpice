@@ -84,11 +84,10 @@ impl Feature for CodeFeature {
     type State = CodeState;
     type Session = WorkbenchSession;
     type Handles = crate::workbench::documents::code_workspace::CodeHandles;
-    /// The Netlist inspector offers the tuning sandbox while the dispatcher
-    /// would open it, and the deck page's toolbar offers Run or Stop while
-    /// the dispatcher would run or stop, stating Stop's refusal in its words.
+    /// The deck page's toolbar offers Run or Stop while the dispatcher would
+    /// run or stop, stating Stop's refusal in its words.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] =
-        &[ids::TUNING, ids::RUN_SIMULATION, ids::STOP_SIMULATION];
+        &[ids::RUN_SIMULATION, ids::STOP_SIMULATION];
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[

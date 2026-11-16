@@ -1,9 +1,9 @@
 //! The scale a Verify comparison plot is read against.
 //!
-//! The tuning response and the regression waveform are the same picture — a
-//! baseline curve and a candidate over it — so they carry the same axes: a
-//! gutter of value ticks on the left, a band of sweep ticks underneath, the
-//! 1-2-5 ladder and the engineering labels the histogram's axis already uses.
+//! The regression waveform is a baseline curve and a candidate over it, drawn
+//! on measured axes: a gutter of value ticks on the left, a band of sweep
+//! ticks underneath, the 1-2-5 ladder and the engineering labels the
+//! histogram's axis already uses.
 //! A curve drawn without them is a shape; with them it is a measurement.
 
 use egui::{Rect, Stroke, Ui, pos2};

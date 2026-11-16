@@ -1225,13 +1225,11 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
     );
 }
 
-/// Every Verify row is a command the palette finds too: Parameter tuning
-/// was unlisted, reachable only from the instance it tunes.
+/// Every Verify row is a command the palette finds too.
 #[test]
 fn every_verify_row_is_in_the_palette() {
     let registry = command_registry();
     let rows = listed_commands(application_menu_entries(ApplicationMenu::Verify));
-    assert!(rows.contains(&SimulateCommand::Verify(VerificationPage::Tuning).key()));
     for key in rows {
         assert!(
             registry
@@ -1240,6 +1238,31 @@ fn every_verify_row_is_in_the_palette() {
             "{key:?} is not in the palette"
         );
         assert!(registry.order().contains(&key), "{key:?} is not ordered");
+    }
+}
+
+/// Parameter tuning left the product with every way into it: no command the
+/// registry declares, and so no palette entry, and no row of any menu, names
+/// it by its label or by its id.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn nothing_offers_parameter_tuning() {
+    fn names_tuning(text: &str) -> bool {
+        text.split(|character: char| !character.is_ascii_alphanumeric())
+            .map(str::to_ascii_lowercase)
+            .any(|word| matches!(word.as_str(), "tune" | "tuned" | "tuner" | "tuning"))
+    }
+    let registry = command_registry();
+    assert!(registry.ordered().count() > 0);
+    for spec in registry.ordered() {
+        assert!(!names_tuning(spec.label), "{}", spec.label);
+        assert!(!names_tuning(spec.key.as_str()), "{}", spec.key.as_str());
+    }
+    let app = RSpiceApp::test_instance();
+    for menu in ALL_MENUS {
+        for row in pins::menu_pin(application_menu_entries(menu), &app) {
+            assert!(!names_tuning(&row), "{menu:?}: {row}");
+        }
     }
 }
 

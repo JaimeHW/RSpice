@@ -1,5 +1,5 @@
 //! The Verify workspace's inspector: the Monte Carlo run and its worst
-//! samples, a failed corner run, and the tuning session's open values.
+//! samples, and a failed corner run.
 
 use egui::{Pos2, Rect, Ui, Vec2};
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
@@ -8,23 +8,21 @@ use rspice_ui_kit::panels::{Problem, panel_inset, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
-use crate::workbench::state::VerificationSessionState;
 
 use super::super::super::design_system::property_row;
 use super::compact_readout;
 use crate::state::VerificationPage;
 
-/// The Verify inspector states only what its page does not: the Monte Carlo
-/// run's definition and worst samples, a corner run that failed, and the
-/// tuning session's uncommitted or invalid values. The other pages already
-/// show everything there is to say about them.
-/// What the Verify workspace's inspector reads: the model, the flow in front
-/// and the verification session.
+/// What the Verify workspace's inspector reads: the model and the view in
+/// front.
 pub(in crate::workbench) struct VerifyInspector<'a> {
     pub(in crate::workbench) model: &'a Model,
     pub(in crate::workbench) page: VerificationPage,
-    pub(in crate::workbench) verification: &'a VerificationSessionState,
 }
+
+/// The Verify inspector states only what its view does not: the Monte Carlo
+/// run's definition and worst samples, and a corner run that failed. The
+/// other views already show everything there is to say about them.
 
 pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>) {
     match inspector.page {
@@ -42,33 +40,6 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>)
                     |error| format!("The corner run failed: {error}"),
                 );
                 crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
-            }
-        }
-        VerificationPage::Tuning => {
-            let session = inspector.verification;
-            let dirty_count = session
-                .tuning_variables
-                .iter()
-                .filter(|draft| draft.is_dirty())
-                .count();
-            let invalid_count = session
-                .tuning_variables
-                .iter()
-                .filter(|draft| draft.validation_error.is_some())
-                .count();
-            let uncommitted = format!("{dirty_count} uncommitted");
-            section_header(
-                ui,
-                "Tuning",
-                (dirty_count > 0).then_some(uncommitted.as_str()),
-            );
-            if invalid_count > 0 {
-                super::super::super::design_system::property_row_problem(
-                    ui,
-                    "Validation",
-                    &format!("{invalid_count} invalid"),
-                    Some(Problem::Failure),
-                );
             }
         }
         VerificationPage::Optimization

@@ -158,8 +158,6 @@ define_messages! {
     NetlistErrors => "Errors",
     NetlistAdvisories => "Advisories",
     NetlistMoreInProblems => "{count} more in Problems",
-    NetlistParameterExploration => "Parameter exploration",
-    NetlistTuneParameters => "Tune parameters…",
     NetlistIncludeProvenance => "Include",
     NetlistDisplayName => "Name",
     NetlistLogicalIdentity => "Include",

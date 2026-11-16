@@ -26,7 +26,6 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
             ui,
             &VerifyNavigator {
                 model: cx.model,
-                verification: &cx.state.verification,
                 page: cx.state.verification_page,
                 filter: cx.wb.navigator_filter(),
             },
@@ -63,7 +62,6 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
             &VerifyInspector {
                 model: cx.model,
                 page: cx.state.verification_page,
-                verification: &cx.state.verification,
             },
         );
         return;
