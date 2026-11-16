@@ -156,6 +156,16 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
         pushed
     }
 
+    fn annotate(&mut self, key: &str, bytes: &[u8]) -> Result<(), SinkStop> {
+        let Some(writer) = self.writer.as_mut() else {
+            return Err(SinkStop::Io(
+                "the results segment was annotated without being begun".to_owned(),
+            ));
+        };
+        writer.annotate(key, bytes.to_vec());
+        Ok(())
+    }
+
     fn end(&mut self, status: sink::RunStatus) -> Result<SinkReceipt, SinkStop> {
         let Some(writer) = self.writer.take() else {
             return Err(SinkStop::Io(

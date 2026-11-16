@@ -40,6 +40,8 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# A mixed-signal run, whose HDL designs only a Verilog-A build runs, stored and reopened.
+rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga"] }
 ron = { version = "0.12.2", features = ["integer128"] }
 
 [build-dependencies]

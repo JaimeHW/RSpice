@@ -165,6 +165,8 @@ struct EndRecord {
     digest: Digest,
     /// Per event signal: (signal id, changes).
     event_totals: Vec<(u32, u64)>,
+    /// What the run said of itself, by key.
+    annotations: Vec<(String, Vec<u8>)>,
 }
 
 /// Reads one segment.
@@ -179,6 +181,8 @@ pub struct SegmentReader<I: SegmentIo> {
     event_signals: Vec<(u32, EventKind)>,
     catalogue: Catalogue,
     state: SegmentState,
+    /// What the run said of itself in `END`; none for a segment recovered without it.
+    annotations: Vec<(String, Vec<u8>)>,
     planes: Vec<u8>,
     block: Vec<u8>,
 }
@@ -223,6 +227,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             event_signals: Vec::new(),
             catalogue: Catalogue::default(),
             state: SegmentState::Recovered,
+            annotations: Vec::new(),
             planes: Vec::new(),
             block: Vec::new(),
         };
@@ -280,6 +285,14 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     pub fn run_meta(&self) -> &RunMeta {
         &self.meta
+    }
+
+    /// The bytes the run kept under `key` in `END`, if it ended with any.
+    pub fn annotation(&self, key: &str) -> Option<&[u8]> {
+        self.annotations
+            .iter()
+            .find(|(kept, _)| kept == key)
+            .map(|(_, bytes)| bytes.as_slice())
     }
 
     pub fn state(&self) -> &SegmentState {
@@ -397,6 +410,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             status: end.status,
             digest: end.digest,
         };
+        self.annotations = end.annotations;
         Ok(())
     }
 
@@ -421,6 +435,13 @@ impl<I: SegmentIo> SegmentReader<I> {
             cursor.u32()?;
             event_totals.push((signal, cursor.u64()?));
         }
+        let count = cursor.count(8)?;
+        let mut annotations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let key = cursor.string()?;
+            let len = cursor.u32()? as usize;
+            annotations.push((key, cursor.take(len)?.to_vec()));
+        }
         let record = EndRecord {
             status,
             rows,
@@ -428,6 +449,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             last_index,
             digest: Digest(digest),
             event_totals,
+            annotations,
         };
         Ok((record, cursor.pos()))
     }
@@ -581,10 +603,13 @@ impl<I: SegmentIo> SegmentReader<I> {
         let end = self.scan(&mut catalogue, at);
         self.catalogue = catalogue;
         self.state = match end {
-            Some(end) => SegmentState::Complete {
-                status: end.status,
-                digest: end.digest,
-            },
+            Some(end) => {
+                self.annotations = end.annotations;
+                SegmentState::Complete {
+                    status: end.status,
+                    digest: end.digest,
+                }
+            }
             None => SegmentState::Recovered,
         };
     }

@@ -11,6 +11,7 @@ mod hdl_variables;
 mod integral_trace;
 mod lead_power;
 mod post_results;
+mod shell_codec;
 mod sink_route;
 use super::result::canonical_event_name;
 use super::{
@@ -20,6 +21,7 @@ use super::{
 use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
 use crate::analysis::transient::EventOnlyNetKind;
 use integral_trace::TransientIntegralTrace;
+pub use shell_codec::{TRANSIENT_SHELL_ANNOTATION, decode_transient_shell, encode_transient_shell};
 pub use sink_route::SinkTransient;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.

@@ -113,6 +113,12 @@ impl<I: RunIo> RunWriter<I> {
         self.inner.sync()
     }
 
+    /// Keep `bytes` under `key` in `END`, for a reader to describe the run by; a later
+    /// annotation under the same key replaces the earlier.
+    pub fn annotate(&mut self, key: impl Into<String>, bytes: Vec<u8>) {
+        self.inner.annotate(key.into(), bytes);
+    }
+
     /// Write the last chunk and `END` with `status`; returns the receipt and the segment's I/O.
     pub fn finish(self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
         self.inner.finish(status)
@@ -134,11 +140,14 @@ mod threaded {
     /// Wall clock between durability flushes while a run goes.
     pub(super) const SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
+    /// What a run said of itself, by key, for `END`.
+    type Annotations = Vec<(String, Vec<u8>)>;
+
     enum Message {
         Events(Vec<EventChange>),
         Chunk(Batch),
         Sync(Batch),
-        Finish(Batch, RunStatus),
+        Finish(Batch, RunStatus, Annotations),
     }
 
     /// How the writer thread ended.
@@ -165,8 +174,11 @@ mod threaded {
     impl<I: SegmentIo> Thread<I> {
         fn run(mut self) -> Outcome<I> {
             let error = match self.serve() {
-                Ok((batch, status)) => match self.encoder.write_batch(&batch) {
+                Ok((batch, status, annotations)) => match self.encoder.write_batch(&batch) {
                     Ok(()) => {
+                        for (key, bytes) in annotations {
+                            self.encoder.annotate(key, bytes);
+                        }
                         return match self.encoder.finish(&status) {
                             Ok((receipt, io)) => Outcome::Closed(receipt, io),
                             Err(error) => Outcome::Failed(error),
@@ -191,7 +203,7 @@ mod threaded {
         }
 
         /// Apply messages in order until the last chunk arrives with the run's status.
-        fn serve(&mut self) -> Result<(Batch, RunStatus), StoreError> {
+        fn serve(&mut self) -> Result<(Batch, RunStatus, Annotations), StoreError> {
             let mut last_sync = Instant::now();
             loop {
                 let message = if self.sync_due.load(Ordering::Relaxed) {
@@ -215,7 +227,9 @@ mod threaded {
                         self.sync_due.store(false, Ordering::Relaxed);
                         last_sync = Instant::now();
                     }
-                    Ok(Message::Finish(batch, status)) => return Ok((batch, status)),
+                    Ok(Message::Finish(batch, status, annotations)) => {
+                        return Ok((batch, status, annotations));
+                    }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return Err(StoreError::WriterStopped),
                 }
@@ -242,6 +256,8 @@ mod threaded {
         closed: Option<(StoreReceipt, I)>,
         /// The error that stopped the writer thread, which `finish` reports again.
         failure: Option<StoreError>,
+        /// What the run said of itself, handed to the writer thread with the last chunk.
+        annotations: Annotations,
     }
 
     impl<I: SegmentIo + Send + 'static> Threaded<I> {
@@ -305,6 +321,7 @@ mod threaded {
                 stopped: false,
                 closed: None,
                 failure: None,
+                annotations: Vec::new(),
             })
         }
 
@@ -461,6 +478,15 @@ mod threaded {
         /// Write the last chunk and `END` with `status`. After a full disk stopped the writer
         /// thread, it closed the segment over the chunks it held: that is the receipt for a run
         /// ended as stopped, and a run ended as completed is told the disk was full.
+        /// Keep `bytes` under `key` for `END`, replacing an earlier annotation under the same
+        /// key.
+        pub(super) fn annotate(&mut self, key: String, bytes: Vec<u8>) {
+            match self.annotations.iter_mut().find(|(kept, _)| *kept == key) {
+                Some((_, kept)) => *kept = bytes,
+                None => self.annotations.push((key, bytes)),
+            }
+        }
+
         pub(super) fn finish(mut self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
             let stopped = matches!(status, RunStatus::Stopped(_));
             let sent = if self.stopped {
@@ -468,7 +494,8 @@ mod threaded {
             } else {
                 self.hand_off_events().and_then(|()| {
                     let last = std::mem::replace(&mut self.open, Batch::new(0, 0));
-                    self.send(Message::Finish(last, status))
+                    let annotations = std::mem::take(&mut self.annotations);
+                    self.send(Message::Finish(last, status, annotations))
                 })
             };
             if let Err(error) = sent {

@@ -10,6 +10,7 @@
 use rspice_core::analysis::transient::{
     DigitalTrace, RealTrace, TransientDeviceOpTrace, TransientResult, TransientStoreTrace,
 };
+use rspice_core::engine::{TRANSIENT_SHELL_ANNOTATION, decode_transient_shell};
 use rspice_core::solver::InstanceUnknown;
 use rspice_core::{CurrentImpulseOwner, CurrentImpulseTrace, VoltageImpulseTrace};
 use rspice_results_store::{Schema, SegmentIo, SegmentReader, StoreError};
@@ -28,11 +29,17 @@ pub struct StoredTransientRun<I: SegmentIo> {
 }
 
 impl<I: SegmentIo> StoredTransientRun<I> {
-    /// Open the transient a segment holds, with no engine and no netlist: the segment names
-    /// every signal as the run named it.
+    /// Open the transient a segment holds, with no engine and no netlist. A run that ended
+    /// kept its result's shell with its rows, and the result is the one it returned, trace for
+    /// trace; a segment closed without it (a crash, a full disk) is named from its schema alone
+    /// ([`transient_shell`]).
     pub fn open(io: I) -> Result<Self, StoreError> {
         let mut reader = SegmentReader::open(io)?;
-        let mut shell = transient_shell(reader.schema()).map_err(StoreError::Schema)?;
+        let mut shell = match reader.annotation(TRANSIENT_SHELL_ANNOTATION) {
+            Some(bytes) => decode_transient_shell(bytes),
+            None => transient_shell(reader.schema()),
+        }
+        .map_err(StoreError::Schema)?;
         let targets = slot_targets(&reader, &shell).map_err(StoreError::Schema)?;
         fill_events(&mut reader, &mut shell)?;
         let parameters = instance_parameters(&reader);

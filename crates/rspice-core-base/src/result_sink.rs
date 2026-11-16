@@ -229,6 +229,13 @@ pub trait ResultSink {
 
     /// The run ended with `status`: close what was written and say what was kept.
     fn end(&mut self, status: RunStatus) -> Result<SinkReceipt, SinkStop>;
+
+    /// Keep `bytes` under `key` with the run, for a reader to describe it by: what the run knows
+    /// of itself once its last row is written. A later annotation under the same key replaces
+    /// the earlier. A sink that keeps nothing beside its rows ignores it.
+    fn annotate(&mut self, _key: &str, _bytes: &[u8]) -> Result<(), SinkStop> {
+        Ok(())
+    }
 }
 
 /// A borrowed sink is a sink: a run can write through a sink its caller keeps.
@@ -252,6 +259,10 @@ impl<S: ResultSink + ?Sized> ResultSink for &mut S {
 
     fn end(&mut self, status: RunStatus) -> Result<SinkReceipt, SinkStop> {
         (**self).end(status)
+    }
+
+    fn annotate(&mut self, key: &str, bytes: &[u8]) -> Result<(), SinkStop> {
+        (**self).annotate(key, bytes)
     }
 }
 

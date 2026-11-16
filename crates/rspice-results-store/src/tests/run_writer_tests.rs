@@ -322,3 +322,34 @@ fn an_abandoned_writer_leaves_the_chunks_it_handed_over() {
     assert_eq!(reader.state(), &SegmentState::Recovered);
     assert_eq!(reader.rows(), 192);
 }
+
+#[test]
+fn what_a_run_says_of_itself_is_kept_in_end_and_read_back_by_key() {
+    let mut signal = crate::Signal::new("out", "V", crate::SignalKind::Real);
+    signal.quantity = "voltage".to_owned();
+    let schema = crate::Schema {
+        x: Default::default(),
+        signals: vec![signal],
+    };
+    let mut threaded =
+        RunWriter::create(MemoryIo::new(), &schema, &crate::RunMeta::default()).unwrap();
+    let mut inline =
+        crate::SegmentWriter::create(MemoryIo::new(), &schema, &crate::RunMeta::default()).unwrap();
+    for row in 0..10_000 {
+        threaded.push_row(f64::from(row), &[0.5]).unwrap();
+        inline.push_row(f64::from(row), &[0.5]).unwrap();
+    }
+    threaded.annotate("shell", vec![1, 2, 3]);
+    threaded.annotate("precision", vec![9]);
+    threaded.annotate("shell", vec![4, 5]);
+    inline.annotate("shell", vec![1, 2, 3]);
+    inline.annotate("precision", vec![9]);
+    inline.annotate("shell", vec![4, 5]);
+    let (_, threaded) = threaded.finish(RunStatus::Completed).unwrap();
+    let (_, inline) = inline.finish(RunStatus::Completed).unwrap();
+    assert_eq!(threaded.bytes(), inline.bytes());
+    let reader = SegmentReader::open(threaded).unwrap();
+    assert_eq!(reader.annotation("shell"), Some(&[4u8, 5][..]));
+    assert_eq!(reader.annotation("precision"), Some(&[9u8][..]));
+    assert_eq!(reader.annotation("sources"), None);
+}

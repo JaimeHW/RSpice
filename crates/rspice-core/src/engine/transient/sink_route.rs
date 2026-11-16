@@ -287,6 +287,15 @@ impl Engine {
                     Some(SinkStop::MemoryFull { .. }) => RunStatus::Stopped(StopReason::MemoryFull),
                     Some(_) => RunStatus::Stopped(StopReason::DiskFull),
                 };
+                // The shell goes with the rows, so a reader with neither the engine nor the
+                // netlist rebuilds the result this run returns.
+                if begun {
+                    sink.annotate(
+                        super::TRANSIENT_SHELL_ANNOTATION,
+                        &super::encode_transient_shell(&result),
+                    )
+                    .map_err(SimulationError::ResultSink)?;
+                }
                 let receipt = sink.end(status).map_err(SimulationError::ResultSink)?;
                 Ok((
                     SinkTransient {

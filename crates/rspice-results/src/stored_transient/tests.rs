@@ -74,6 +74,9 @@ fn a_stored_transient_opened_from_its_segment_alone_is_the_run_it_returned_in_me
             let index = memory.node_names.iter().position(|n| n == name).unwrap();
             assert_eq!(*unknown, memory.instance_unknowns[index], "{label}: {name}");
         }
+        // The run kept its shell: every node it named, saved or not, and its event nets.
+        assert_eq!(opened.node_names, memory.node_names, "{label}");
+        assert_eq!(opened.event_only_nodes, memory.event_only_nodes, "{label}");
         let debug = |value: &dyn std::fmt::Debug| format!("{value:?}");
         assert_eq!(
             debug(&opened.digital_traces),
@@ -131,4 +134,85 @@ fn a_verilog_a_instance_unknown_is_named_as_the_run_marked_it() {
     unknown.signals.push(node("q", "C", "charge"));
     let refused = transient_shell(&unknown).unwrap_err();
     assert!(refused.contains("a 'charge' signal 'q'"), "{refused}");
+}
+
+/// A run stored to its segment and opened from the bytes alone, against the same run in memory.
+fn stored_and_live(deck: &str, tstop: f64, max_step: f64) -> (TransientResult, TransientResult) {
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::default();
+    let startup = TransientStartupMode::OperatingPoint;
+    let memory = engine
+        .run_tran_with_startup_mode_and_abort(&netlist, tstop, max_step, startup, &NoAbort)
+        .unwrap();
+    let mut sink = StoreSink::new(MemoryIo::new());
+    engine
+        .run_tran_into_sink_with_startup_mode_and_abort(
+            &netlist, tstop, max_step, startup, &NoAbort, &mut sink,
+        )
+        .unwrap();
+    let io = MemoryIo::from_bytes(sink.into_io().unwrap().into_bytes());
+    let mut run = StoredTransientRun::open(io).unwrap();
+    run.read_all().unwrap();
+    (run.shell, memory)
+}
+
+#[test]
+fn a_reopened_mixed_run_dumps_the_live_runs_vcd_byte_for_byte() {
+    let dir = std::env::temp_dir().join(format!("rspice-stored-vcd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let vector = dir.join("vector.va");
+    std::fs::write(
+        &vector,
+        "`include \"disciplines.vams\"\nmodule vector_mixed(p, n, count);\n\
+         inout p, n; electrical p, n;\noutput [1:0] count; reg [1:0] count;\n\
+         initial count = 2'b00;\nalways #5 count = count + 2'b01;\n\
+         analog I(p, n) <+ V(p, n) / 1000.0;\nendmodule\n",
+    )
+    .unwrap();
+    let reader = dir.join("rx.v");
+    std::fs::write(
+        &reader,
+        "`timescale 1ns/1ps\nmodule rx(in, o);\ninput in; output o; reg o;\n\
+         initial o = 0;\nalways @(in) o = in;\nendmodule\n",
+    )
+    .unwrap();
+    let deck = format!(
+        "* a bus and an HDL-observed net, stored\n\
+         x1 p 0 count#1 count#0 vector_mixed\nrp p 0 1meg\n\
+         v1 in 0 pwl(0 0 10n 0 17n 2.9 20n 2.9 27n 0)\nx2 in o rx\nr1 o 0 1k\n\
+         .va \"{}\" vector_mixed\n.hdl \"{}\" module=rx\n.end\n",
+        vector.display(),
+        reader.display()
+    );
+    let (opened, memory) = stored_and_live(&deck, 40e-9, 1e-9);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!memory.digital_buses.is_empty(), "the deck declares a bus");
+    assert!(
+        memory
+            .digital_traces
+            .iter()
+            .any(|trace| trace.hdl_time_precision.is_some()),
+        "an HDL design observes a net"
+    );
+    let vcd = |result: &TransientResult| {
+        let document = rspice_core::execution::event_vcd_document(
+            "tran",
+            &result.digital_traces,
+            &result.real_traces,
+            &result.digital_buses,
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        rspice_core::io::write_vcd(&mut bytes, &document).unwrap();
+        bytes
+    };
+    let (reopened, live) = (vcd(&opened), vcd(&memory));
+    assert!(
+        reopened == live,
+        "the reopened dump differs:\n{}\n---\n{}",
+        String::from_utf8_lossy(&reopened),
+        String::from_utf8_lossy(&live)
+    );
+    assert_eq!(opened.hdl_sources, memory.hdl_sources);
+    assert_eq!(opened.digital_buses, memory.digital_buses);
 }

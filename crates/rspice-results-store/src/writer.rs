@@ -305,6 +305,8 @@ pub(crate) struct Encoder<I: SegmentIo> {
     chunks_since_index: usize,
     index_first_row: u64,
     last_index: Option<u64>,
+    /// What the run said of itself, kept in `END`: each key once, in the order first given.
+    annotations: Vec<(String, Vec<u8>)>,
     /// Every `INDEX` frame written: its offset and entry count. `END` copies their entries.
     index_frames: Vec<(u64, u32)>,
     pyramid: Pyramid,
@@ -373,6 +375,7 @@ impl<I: SegmentIo> Encoder<I> {
             chunks_since_index: 0,
             index_first_row: 0,
             last_index: None,
+            annotations: Vec::new(),
             index_frames: Vec::new(),
             pyramid: Pyramid::new(layout.analog.len()),
             events: layout
@@ -724,6 +727,14 @@ impl<I: SegmentIo> Encoder<I> {
         self.write_pointers(0)
     }
 
+    /// Keep `bytes` under `key` for `END`, replacing an earlier annotation under the same key.
+    pub(crate) fn annotate(&mut self, key: String, bytes: Vec<u8>) {
+        match self.annotations.iter_mut().find(|(kept, _)| *kept == key) {
+            Some((_, kept)) => *kept = bytes,
+            None => self.annotations.push((key, bytes)),
+        }
+    }
+
     /// Write the last frames and `END`; returns the receipt and the segment's I/O.
     pub(crate) fn finish(mut self, status: &RunStatus) -> Result<(StoreReceipt, I), StoreError> {
         for position in 0..self.events.len() {
@@ -753,6 +764,16 @@ impl<I: SegmentIo> Encoder<I> {
             self.frame.put_u32(buffer.signal);
             self.frame.put_u32(0);
             self.frame.put_u64(buffer.written);
+        }
+        self.frame.put_u32(self.annotations.len() as u32);
+        for (key, bytes) in &self.annotations {
+            self.frame.put_u32(key.len() as u32);
+            self.frame.put(key.as_bytes());
+            self.frame.put_u32(
+                u32::try_from(bytes.len())
+                    .map_err(|_| StoreError::Schema(format!("annotation '{key}' over 4 GiB")))?,
+            );
+            self.frame.put(bytes);
         }
         // Every index's entries, read back from the index frames, so a reader opens a complete
         // segment from END alone instead of reading every index frame.
@@ -948,6 +969,11 @@ impl<I: SegmentIo> SegmentWriter<I> {
         }
         let result = self.encoder.write_provisional(&self.open);
         self.guard(result)
+    }
+
+    /// Keep `bytes` under `key` in `END`, replacing an earlier annotation under the same key.
+    pub fn annotate(&mut self, key: impl Into<String>, bytes: Vec<u8>) {
+        self.encoder.annotate(key.into(), bytes);
     }
 
     /// Write the last chunk and `END` with `status`; returns the receipt and the segment's I/O.
