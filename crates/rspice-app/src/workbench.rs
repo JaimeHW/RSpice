@@ -1,33 +1,35 @@
-//! Contract-driven, responsive RSpice application workbench.
+//! The RSpice application shell: the frame loop, the application state that
+//! holds every feature's slot, and the one dispatcher between them.
 //!
-//! This is the sole owner of application chrome and top-level task layout.
-//! Document engines such as the schematic canvas and precision result viewers
-//! render inside its central surface but do not own navigation or chrome.
+//! Each feature lives in its own crate (`rspice-app-design`,
+//! `rspice-app-results`, `rspice-app-code` and the rest) with its surface,
+//! navigator, inspector, dialogs and commands, and the containers they draw
+//! into (chrome, docks, routing, the command registry) live in
+//! `rspice-app-workbench`. What stays here is what only the whole
+//! application can do:
 //!
-//! # What the shell is made of
-//!
-//! The declarations below are one sorted list. They were previously three
-//! blocks accreted by the `common` merge and the `panels` fold, with a thread
-//! helper wedged between the first two and 470 lines of frame rendering after
-//! the last — so the module root was the least useful place to look for the
-//! shell's shape. Rendering now lives in [`frame`], platform branching in
-//! [`platform`].
-//!
-//! Five kinds of view container appear here, and the distinction is load
-//! bearing:
-//!
-//! - `chrome` — the frame around everything: title bar, activity rail,
-//!   document bar, toolbar, status bar. Always present, never a document.
-//! - `docks` — context panels that flank the central surface (navigator,
-//!   inspector, console, drawers). Dismissible; they never own a document.
-//! - `surfaces` — the canonical task owners that fill the central area. One
-//!   is active at a time, and it is what the current route names.
-//! - `tools` — application-modal tools that float above the active surface
-//!   (project launcher, jobs list, calculator, notification centre). They
-//!   own neither a route nor a document: they open over whatever is beneath,
-//!   do one job, and close.
-//! - `app/dialogs` — modal dialogs. They block the surface beneath until
-//!   dismissed, which is what separates them from a `tools` float.
+//! - `app` — the eframe application, [`RSpiceApp`], and its frame loop, with
+//!   the dialogs and actions that still reach the whole session.
+//! - `app_state` — [`AppState`], everything a session owns.
+//! - `slots` — the state each feature owns, one slot per feature, and the
+//!   shell's own.
+//! - `features` — the features the shell registers, and the context each one
+//!   is lent from the application state.
+//! - `dispatch` — the one dispatcher every command goes through, and the
+//!   answers to what a feature's call raised, taken straight after it.
+//! - `commands` — the shell's own commands, their vocabulary, and the edit
+//!   target the routed edit commands follow.
+//! - `shell_host` — which owner draws at each contribution point.
+//! - `frame` — one frame: chrome, docks and the central surface.
+//! - `menu_bar` — the behaviour behind the application menus.
+//! - `session` and `workflows` — the transactions over the whole project,
+//!   and the multi-step operations a command runs.
+//! - `diagnostic_routes` — following a finding to the object it is about.
+//! - `chrome` — the status bar's platform segment.
+//! - `logging` and `system_contrast` — the native logger's defaults, and the
+//!   contrast theme Windows runs.
+//! - `state` and `examples` — the workbench session's layout tests, and the
+//!   hierarchy fixture and example-circuit tests the suites build from.
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/app_conventions.rs`, not by this file.
