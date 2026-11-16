@@ -273,14 +273,19 @@ fn select_rules(cx: &mut Cx<'_, SimulateFeature>, choice: Option<String>) {
 }
 
 /// What the CONNECTRULES list offers: the design default, the run's own
-/// block, every shipped set, the blocks the design declares, and the current
-/// value when it is none of those.
+/// block, the blocks the design declares, every shipped set, and the current
+/// value when it is none of those. The design's own blocks come before
+/// RSpice's sets: they are the ones a design that declares them is run with,
+/// and after fifteen shipped sets they would sit below the list's fold.
 fn rule_choices(current: &str, run_block: &str, declared: &[DeclaredConnectRules]) -> Vec<String> {
     let mut choices = vec![DESIGN_DEFAULT_RULES.to_owned(), run_block.to_owned()];
-    choices.extend(connect_rules::shipped_set_names().iter().cloned());
-    for block in declared {
-        if !choices.contains(&block.name) {
-            choices.push(block.name.clone());
+    for name in declared
+        .iter()
+        .map(|block| &block.name)
+        .chain(connect_rules::shipped_set_names())
+    {
+        if !choices.contains(name) {
+            choices.push(name.clone());
         }
     }
     let current = current.trim();
@@ -724,17 +729,33 @@ fn edit_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{DESIGN_DEFAULT_RULES, rule_choices};
+    use super::{DESIGN_DEFAULT_RULES, DeclaredConnectRules, DeclaredIn, rule_choices};
 
-    /// The list opens on the design default and the run's block, offers
-    /// every shipped set once, and keeps a name the design declares.
+    /// The list opens on the design default and the run's block, then the
+    /// blocks the design declares ahead of every shipped set, each once, and
+    /// keeps a typed name nothing declares.
     #[test]
-    fn the_list_offers_the_run_block_the_shipped_sets_and_a_declared_name() {
+    fn the_list_offers_the_run_block_the_declared_blocks_then_the_shipped_sets() {
         let listed = rule_choices("", "run_rules", &[]);
         assert_eq!(listed[..2], [DESIGN_DEFAULT_RULES, "run_rules"]);
         assert_eq!(listed.len(), 2 + 15, "{listed:?}");
         assert_eq!(rule_choices("rspice_1v8_slow", "run_rules", &[]), listed);
-        let declared = rule_choices(" gate_rules ", "run_rules", &[]);
-        assert_eq!(declared.last().map(String::as_str), Some("gate_rules"));
+        let typed = rule_choices(" gate_rules ", "run_rules", &[]);
+        assert_eq!(typed.last().map(String::as_str), Some("gate_rules"));
+
+        let block = |name: &str| DeclaredConnectRules {
+            name: name.to_owned(),
+            origin: DeclaredIn::Library("rules".to_owned()),
+            logical_path: "rules.vams".to_owned(),
+            line: 1,
+            statements: Vec::new(),
+        };
+        let declared = rule_choices("", "run_rules", &[block("Low"), block("High")]);
+        assert_eq!(
+            declared[..4],
+            [DESIGN_DEFAULT_RULES, "run_rules", "Low", "High"],
+            "the design's own blocks lead the list"
+        );
+        assert_eq!(declared.len(), 4 + 15, "{declared:?}");
     }
 }
