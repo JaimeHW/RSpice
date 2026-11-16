@@ -267,18 +267,20 @@ fn collect_design_nets(
             .as_ref()
             .map_or(&[][..], |binding| binding.terminal_order.as_slice());
         for (index, (pin, position)) in pins.into_iter().enumerate() {
-            let pin_endpoints = carriers
-                .get(&pin.to_ascii_lowercase())
-                .or_else(|| {
-                    order
-                        .get(index)
-                        .and_then(|port| carriers.get(&port.to_ascii_lowercase()))
-                })
+            let key = [Some(pin.as_str()), order.get(index).map(String::as_str)]
+                .into_iter()
+                .flatten()
+                .map(str::to_ascii_lowercase)
+                .find(|key| carriers.contains_key(key));
+            let pin_endpoints = key
+                .as_ref()
+                .and_then(|key| carriers.get(key))
                 .copied()
                 .unwrap_or_else(|| one_conductor(PortCarrier::Electrical, false));
             let on_bus = vector_terminals.contains(&position);
             if conductor && on_bus {
-                vector_pins.insert(position, pin_endpoints);
+                let bits = key.map_or_else(Vec::new, |key| pin_bit_carriers(carriers, &key));
+                vector_pins.insert(position, (pin_endpoints, bits));
             }
             if let Some(net) = net_at(position) {
                 if conductor && !on_bus {
@@ -292,20 +294,29 @@ fn collect_design_nets(
             }
         }
     }
-    // A vector pin puts one conductor on every bit of the bus it meets.
+    // A vector pin puts one conductor on every bit of the bus it meets; a
+    // placed schematic's vector pin puts on each bit what meets on that bit
+    // inside, bit for bit in declared order, as the deck wires them.
     let net_ids: HashMap<String, usize> = extracted_nets
         .iter()
         .map(|net| (net.spice_name().to_ascii_lowercase(), net.id))
         .collect();
     for vector in &vector_nets.nets {
         for point in &vector.terminals {
-            let Some(&pin_endpoints) = vector_pins.get(point) else {
+            let Some((pin_endpoints, bits)) = vector_pins.get(point) else {
                 continue;
             };
-            for member in vector.declaration.members() {
+            let members = vector.declaration.members();
+            let per_bit = bits.len() == members.len();
+            for (position, member) in members.iter().enumerate() {
                 let name = deck_bit_name(&vector.declaration.name, member.index);
+                let carried = if per_bit {
+                    bits[position]
+                } else {
+                    *pin_endpoints
+                };
                 if let Some(id) = net_ids.get(&name.to_ascii_lowercase()) {
-                    join(endpoints.entry(*id).or_default(), pin_endpoints);
+                    join(endpoints.entry(*id).or_default(), carried);
                 }
             }
         }
@@ -495,20 +506,47 @@ fn schematic_pin_carriers(
     visiting.push(key);
     let nets = collect_design_nets(inner, Some(source), visiting);
     visiting.pop();
-    inner
-        .interface_ports()
-        .iter()
-        .map(|port| {
-            let met = nets
-                .iter()
-                .find(|(net, _)| net.name.eq_ignore_ascii_case(&port.name))
-                .map(|(_, met)| NetEndpoints {
-                    ground: false,
-                    ..*met
-                })
-                .unwrap_or_default();
-            (port.name.to_ascii_lowercase(), met)
-        })
+    let met_on = |name: &str| {
+        nets.iter()
+            .find(|(net, _)| net.name.eq_ignore_ascii_case(name))
+            .map(|(_, met)| NetEndpoints {
+                ground: false,
+                ..*met
+            })
+            .unwrap_or_default()
+    };
+    let mut carriers = PinCarriers::new();
+    for port in inner.interface_ports() {
+        let pin = port.name.to_ascii_lowercase();
+        let Some(declaration) = crate::schematic::bus::declared_vector(&port.name) else {
+            carriers.insert(pin, met_on(&port.name));
+            continue;
+        };
+        // A vector port's bits are its declaration's deck bits inside; the
+        // pin as a whole carries all of them, for a pin left open.
+        let mut whole = NetEndpoints::default();
+        for (position, member) in declaration.members().iter().enumerate() {
+            let met = met_on(&deck_bit_name(&declaration.name, member.index));
+            join(&mut whole, met);
+            carriers.insert(bit_key(&pin, position), met);
+        }
+        carriers.insert(pin, whole);
+    }
+    carriers
+}
+
+/// The key a vector pin's bit at `position` (most significant first) is
+/// carried under. `#` is in no authored name, so it meets no pin of its own.
+fn bit_key(pin: &str, position: usize) -> String {
+    format!("{pin}#{position}")
+}
+
+/// What each bit of the vector pin `pin` carries, most significant first,
+/// when its master says bit by bit; empty when every bit carries the pin's
+/// one carrier, as a module's vector port does.
+fn pin_bit_carriers(carriers: &PinCarriers, pin: &str) -> Vec<NetEndpoints> {
+    (0..)
+        .map_while(|position| carriers.get(&bit_key(pin, position)).copied())
         .collect()
 }
 

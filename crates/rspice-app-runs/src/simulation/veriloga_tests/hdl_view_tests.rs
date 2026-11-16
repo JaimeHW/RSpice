@@ -782,3 +782,236 @@ fn a_net_reads_its_kind_before_a_run() {
         "{added:?}"
     );
 }
+
+/// Make what `state` has drawn the schematic of the cell `cell` of
+/// `LIBRARY`, and start a fresh drawing for the sheet that places it. Hands
+/// back the master's reference and its drawing.
+fn take_master(
+    state: &mut RunTestHost,
+    cell: &str,
+) -> (
+    CellViewRef,
+    rspice_design::schematic::document::SchematicDocument,
+) {
+    let reference = CellViewRef::new(LIBRARY, cell, "schematic");
+    let mut library_cell = Cell::new(cell);
+    library_cell.add_view(View::new("schematic", ViewType::Schematic));
+    state
+        .model
+        .library_manager
+        .get_library_mut(LIBRARY)
+        .expect("the library")
+        .add_cell(library_cell);
+    let master = std::mem::take(&mut state.model.schematic);
+    let drawing = master.document().clone();
+    state
+        .model
+        .workspace
+        .insert_schematic_editor(reference.key(), master);
+    (reference, drawing)
+}
+
+/// Place the schematic master `reference`, whose interface is `ports`, as
+/// `name` at `origin`; hand back each pin's name and where it landed.
+fn place_master(
+    state: &mut RunTestHost,
+    reference: &CellViewRef,
+    ports: &[&str],
+    name: &str,
+    origin: Point,
+) -> Vec<(String, Point)> {
+    let mut binding =
+        LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
+    binding.bind_interface(
+        &ports
+            .iter()
+            .map(|port| rspice_design_model::port::PortSpec {
+                name: (*port).to_owned(),
+                direction: rspice_design_model::port::PortDirection::In,
+            })
+            .collect::<Vec<_>>(),
+    );
+    let id = state
+        .model
+        .schematic
+        .add_library_cell_component(origin, binding);
+    let component = state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the instance");
+    component.name = name.to_owned();
+    let order = component
+        .library_cell
+        .as_ref()
+        .expect("a cell instance")
+        .terminal_order
+        .clone();
+    order
+        .into_iter()
+        .zip(component.terminal_positions())
+        .map(|(pin, (_, at))| (pin, at))
+        .collect()
+}
+
+/// A bus `declaration` drawn from `from` to `to`, out from each end's body
+/// and joined halfway.
+fn draw_bus(
+    state: &mut RunTestHost,
+    id: u64,
+    declaration: &str,
+    (from, from_body): (Point, Point),
+    (to, to_body): (Point, Point),
+) {
+    let (from_out, to_out) = (outward(from, from_body, 40), outward(to, to_body, 40));
+    let middle = (from.y + to.y) / 2;
+    let mut route = vec![
+        from,
+        from_out,
+        Point::new(from_out.x, middle),
+        Point::new(to_out.x, middle),
+        to_out,
+        to,
+    ];
+    route.dedup();
+    state.model.schematic.document_mut_for_test().buses.push(
+        rspice_design::schematic::bus::Bus::new(
+            id,
+            route,
+            Some(
+                rspice_design_model::bus::BusDeclaration::parse(declaration)
+                    .expect("a declaration"),
+            ),
+        )
+        .expect("the bus"),
+    );
+}
+
+/// An interface port's net reads what it joins through the instance pin
+/// above it, and a placed schematic's vector pin reads each bit's kind
+/// inside: `wrap` passes its port `en` to `level`'s logic input, and `blink`
+/// drives `en` from the top, so `en` is one logic net of two module ports, as
+/// the flattened deck runs it, not a lone port the engine converts. `wrapv`
+/// passes its bus port `mode[1:0]` to `moded`, so `count`'s bus to it is a
+/// logic net per bit at the top, and inside, each bit of `mode` is too.
+#[test]
+fn a_port_net_reads_the_kind_it_joins_through_the_instance_above() {
+    let mut state = RunTestHost::default();
+    let blink = add_source_cell(&mut state, "blink", ViewType::Verilog, "blink.v", BLINK);
+    let level = add_source_cell(
+        &mut state,
+        "level",
+        ViewType::VerilogAms,
+        "level.vams",
+        LEVEL,
+    );
+    let count = add_source_cell(&mut state, "count", ViewType::Verilog, "count.v", COUNT);
+    let moded = add_source_cell(
+        &mut state,
+        "moded",
+        ViewType::VerilogAms,
+        "moded.vams",
+        MODED,
+    );
+
+    // wrap: the port en on level's d.
+    place(
+        &mut state,
+        &level,
+        "XL",
+        Point::new(300, 300),
+        &[("d", "en"), ("out", "out")],
+    );
+    device(
+        &mut state,
+        ComponentType::Port,
+        "P1",
+        "en",
+        Point::new(0, 300),
+        &["en"],
+    );
+    let (wrap, _) = take_master(&mut state, "wrap");
+
+    // wrapv: the bus port mode[1:0] on moded's bus pin.
+    let moded_at = Point::new(300, 300);
+    let pins = place(
+        &mut state,
+        &moded,
+        "XM",
+        moded_at,
+        &[("p", "p"), ("n", "0")],
+    );
+    let [(_, moded_pin)] = pins.as_slice() else {
+        panic!("one bus pin: {pins:?}");
+    };
+    let port_at = Point::new(0, 0);
+    let id = state
+        .model
+        .schematic
+        .add_component(ComponentType::Port, port_at);
+    let port = state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the port");
+    port.name = "P1".to_owned();
+    port.value = "mode[1:0]".to_owned();
+    let port_pin = rspice_design::schematic::component_edit::legacy_terminal_points(port)[0];
+    draw_bus(
+        &mut state,
+        1_000,
+        "mode[1:0]",
+        (port_pin, port_at),
+        (*moded_pin, moded_at),
+    );
+    let (wrapv, _) = take_master(&mut state, "wrapv");
+
+    // The top: blink drives wrap's en on d; count drives wrapv over mode[1:0].
+    place(&mut state, &blink, "XB", Point::new(300, 0), &[("q", "d")]);
+    let wrap_at = Point::new(300, 300);
+    let pins = place_master(&mut state, &wrap, &["en"], "XW", wrap_at);
+    label_terminals(
+        &mut state,
+        pins.iter().map(|(_, at)| *at).collect(),
+        wrap_at,
+        &["d"],
+    );
+    let count_at = Point::new(900, 0);
+    let pins = place(&mut state, &count, "XC", count_at, &[]);
+    let [(_, count_pin)] = pins.as_slice() else {
+        panic!("one bus pin: {pins:?}");
+    };
+    let wrapv_at = Point::new(900, 300);
+    let pins = place_master(&mut state, &wrapv, &["mode[1:0]"], "XV", wrapv_at);
+    let [(_, wrapv_pin)] = pins.as_slice() else {
+        panic!("one bus pin: {pins:?}");
+    };
+    draw_bus(
+        &mut state,
+        2_000,
+        "mode[1:0]",
+        (*count_pin, count_at),
+        (*wrapv_pin, wrapv_at),
+    );
+    state.sync_active_schematic_to_workspace();
+
+    let kind = |kinds: &[(String, String)], name: &str| {
+        kinds
+            .iter()
+            .find(|(net, _)| net == name)
+            .map(|(_, kind)| kind.clone())
+            .unwrap_or_else(|| panic!("no net {name} in {kinds:?}"))
+    };
+    let kinds = net_kinds(&state);
+    assert_eq!(kind(&kinds, "d"), "logic", "{kinds:?}");
+    // Each bit of count's bus meets moded's bit inside wrapv: logic, not a
+    // module port alone on a node.
+    assert_eq!(kind(&kinds, "mode#1"), "logic", "{kinds:?}");
+    assert_eq!(kind(&kinds, "mode#0"), "logic", "{kinds:?}");
+}
