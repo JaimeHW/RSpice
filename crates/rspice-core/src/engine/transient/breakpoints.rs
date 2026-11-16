@@ -1528,41 +1528,20 @@ impl Engine {
         delays
     }
 
+    /// Repeat every breakpoint scheduled so far, the sources' corners, at
+    /// each multiple of each transmission line's delay up to `tstop`: the
+    /// times an edge launched at a corner reaches a line's ports.
+    ///
+    /// The schedule produces these as the run reaches them
+    /// ([`BreakpointManager::schedule_delayed_copies`]) rather than listing
+    /// them, since a long run of a clocked deck has a corner count times a
+    /// multiple count of them.
     pub(super) fn collect_transient_tline_breakpoints(
         circuit: &crate::circuit::CircuitData,
-        source_breakpoints: &[Value],
         tstop: Value,
         breakpoints: &mut BreakpointManager,
     ) {
-        if source_breakpoints.is_empty() {
-            return;
-        }
-
-        let delays = Self::transmission_line_delays(circuit);
-        if delays.is_empty() {
-            return;
-        }
-
-        let mut generated = 0_usize;
-        'origins: for &origin in source_breakpoints {
-            for &delay in &delays {
-                let mut arrival = origin + delay;
-                while arrival.is_finite() && arrival <= tstop {
-                    if breakpoints.add(arrival) {
-                        generated += 1;
-                        if generated >= MAX_PROPAGATED_TLINE_BREAKPOINTS {
-                            log::warn!(
-                                "Capped propagated transmission-line breakpoints at {} entries (tstop={:.3e}s)",
-                                MAX_PROPAGATED_TLINE_BREAKPOINTS,
-                                tstop
-                            );
-                            break 'origins;
-                        }
-                    }
-                    arrival += delay;
-                }
-            }
-        }
+        breakpoints.schedule_delayed_copies(&Self::transmission_line_delays(circuit), tstop);
     }
 
     #[inline]
@@ -2405,11 +2384,12 @@ mod tests {
         circuit.tlines.push(ltra_line);
 
         let mut breakpoints = BreakpointManager::new();
-        Engine::collect_transient_tline_breakpoints(&circuit, &[1.0e-9], 7.0e-9, &mut breakpoints);
+        breakpoints.add(1.0e-9);
+        Engine::collect_transient_tline_breakpoints(&circuit, 7.0e-9, &mut breakpoints);
 
         assert_delays_close(
             breakpoints.times(),
-            &[2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9, 6.0e-9, 7.0e-9],
+            &[1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9, 6.0e-9, 7.0e-9],
         );
     }
 }
