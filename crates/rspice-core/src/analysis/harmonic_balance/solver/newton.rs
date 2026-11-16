@@ -970,12 +970,19 @@ fn exact_hb_certificate(
 }
 
 /// Streamed entries up to which an exact realified Jacobian above the Krylov
-/// threshold is factored directly (at most 24 MiB of triplets). Harmonic
-/// balance couples every harmonic of a nonlinear device's terminals, so the
-/// nonzeros come in dense blocks that a supernodal sparse LU factors in a
-/// fraction of the work a restarted GMRES spends on them; past the budget the
-/// matrix-free route keeps memory proportional to the stamps.
+/// threshold is factored directly once restarted GMRES stagnates on it (at
+/// most 24 MiB of triplets). Harmonic balance couples every harmonic of a
+/// nonlinear device's terminals, so the nonzeros come in dense blocks: GMRES
+/// solves a well-preconditioned system in a few products for less than their
+/// factorization costs, but once it stagnates a sparse LU factors them in a
+/// fraction of the work the restarts spend; past the budget the matrix-free
+/// route keeps memory proportional to the stamps.
 const EXACT_DIRECT_ENTRY_LIMIT: usize = 1 << 20;
+
+/// Restart cycles one exact HB GMRES call may run. A correction that needs
+/// more than one call's restarts has stagnated, and the following corrections
+/// are factored directly.
+const EXACT_GMRES_RESTARTS: usize = 6;
 
 /// The sparse matrix of the last direct exact Newton correction. A later
 /// correction whose entries all fall on its pattern refills its values, so it
@@ -2364,6 +2371,25 @@ impl HbSolver {
         Ok(())
     }
 
+    /// Keep the factorization that certified this correction for the next
+    /// one.
+    fn keep_exact_direct_matrix(
+        &mut self,
+        matrix: Option<ExactDirectMatrix>,
+        size: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), HbError> {
+        self.exact_direct_matrix = matrix;
+        self.exact_direct_preferred = true;
+        if abort.is_aborted() {
+            return Err(HbError::Aborted);
+        }
+        if self.config.verbose {
+            log::debug!("HB exact {size}x{size} sparse direct solve: componentwise certified");
+        }
+        Ok(())
+    }
+
     /// Solve the Newton step with the EXACT Jacobian in real-split form.
     ///
     /// The one-sided residual depends on both `c_m` and `c_m*` (perturbing a
@@ -2472,15 +2498,18 @@ impl HbSolver {
             }
         }
 
-        // Large exact systems are factored from the streamed operator entries
-        // while those fit the direct budget, and otherwise take the
-        // branch-aware matrix-free route; an explicit Krylov request goes
-        // straight to it. A candidate is accepted only after the matrix
-        // package independently certifies its componentwise backward error
-        // from the streamed operator entries. Numerical failure may recover
-        // through dense elimination only below the automatic Krylov
-        // threshold; structural, non-finite, allocation, and large-system
-        // failures are fail-closed.
+        // Large exact systems take the branch-aware matrix-free route until
+        // its restarted GMRES stagnates: a correction that needs more than
+        // one call's restarts, or that GMRES cannot certify. From there a
+        // sparse factorization of the streamed operator entries, while those
+        // fit the direct budget, solves each correction it certifies, and
+        // GMRES returns once it does not. An explicit Krylov request keeps
+        // the matrix-free route throughout. A candidate is accepted only
+        // after the matrix package independently certifies its componentwise
+        // backward error from the streamed operator entries. Numerical
+        // failure may recover through dense elimination only below the
+        // automatic Krylov threshold; structural, non-finite, allocation, and
+        // large-system failures are fail-closed.
         let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
         if try_krylov && entity_count > 0 {
             let extended = self.num_harmonics.checked_mul(2).ok_or_else(|| {
@@ -2501,8 +2530,10 @@ impl HbSolver {
             unfold_collocation_spectra(&mut g_spectra, self.fft.size(), extended);
             unfold_collocation_spectra(&mut c_spectra, self.fft.size(), extended);
             // Held outside the solver while the operator borrows it; a
-            // certified direct correction puts it back.
+            // certified direct correction puts both back, and a stagnated
+            // GMRES correction sets the preference again.
             let mut direct_matrix = self.exact_direct_matrix.take();
+            let direct_preferred = std::mem::take(&mut self.exact_direct_preferred);
             let operator = ExactHbOperator {
                 non_electrical_nodes: &self.non_electrical_nodes,
                 num_nodes: n,
@@ -2526,7 +2557,9 @@ impl HbSolver {
                 .iter()
                 .map(|&value| Complex64::new(value, 0.0))
                 .collect::<Vec<_>>();
-            if !self.config.use_krylov
+            let direct_allowed = !self.config.use_krylov;
+            let direct_tried = direct_allowed && direct_preferred;
+            if direct_tried
                 && let Some(solution) = exact_hb_direct_correction(
                     &mut direct_matrix,
                     &operator,
@@ -2534,15 +2567,7 @@ impl HbSolver {
                     &rhs_complex,
                 )
             {
-                self.exact_direct_matrix = direct_matrix;
-                if abort.is_aborted() {
-                    return Err(HbError::Aborted);
-                }
-                if self.config.verbose {
-                    log::debug!(
-                        "HB exact {size}x{size} sparse direct solve: componentwise certified"
-                    );
-                }
+                self.keep_exact_direct_matrix(direct_matrix, size, abort)?;
                 return Ok(exact_step(&solution));
             }
             if abort.is_aborted() {
@@ -2559,7 +2584,7 @@ impl HbSolver {
                 &preconditioner,
                 &rhs_complex,
                 restart,
-                6,
+                EXACT_GMRES_RESTARTS,
                 &|| abort.is_aborted(),
             )
             .map_err(|_| HbError::Aborted)?;
@@ -2688,7 +2713,7 @@ impl HbSolver {
                         &scaled_preconditioner,
                         &scaled_rhs,
                         restart,
-                        6,
+                        EXACT_GMRES_RESTARTS,
                         &|| abort.is_aborted(),
                     )
                     .map_err(|_| HbError::Aborted)?;
@@ -2757,6 +2782,19 @@ impl HbSolver {
                     }
                 }
             }
+            if qualification.is_err()
+                && direct_allowed
+                && !direct_tried
+                && let Some(solution) = exact_hb_direct_correction(
+                    &mut direct_matrix,
+                    &operator,
+                    &homogeneous,
+                    &rhs_complex,
+                )
+            {
+                self.keep_exact_direct_matrix(direct_matrix, size, abort)?;
+                return Ok(exact_step(&solution));
+            }
             match qualification {
                 Ok(()) => {
                     if self.config.verbose {
@@ -2767,6 +2805,8 @@ impl HbSolver {
                             outcome.relative_residual
                         );
                     }
+                    self.exact_direct_preferred = direct_allowed
+                        && outcome.iterations > restart.saturating_mul(EXACT_GMRES_RESTARTS);
                     return Ok(exact_step(&outcome.solution));
                 }
                 Err(error) if exact_krylov_dense_recovery_allowed(size, &error) => {

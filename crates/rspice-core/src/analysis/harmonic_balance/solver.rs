@@ -1103,6 +1103,11 @@ pub struct HbSolver {
     /// The last direct exact Newton matrix, refilled while its pattern holds.
     exact_direct_matrix: Option<newton::ExactDirectMatrix>,
 
+    /// Whether the next exact Newton correction is factored directly before
+    /// GMRES is tried: set once GMRES stagnates, cleared once a
+    /// factorization fails to certify.
+    exact_direct_preferred: bool,
+
     /// Node names
     node_names: Vec<String>,
 
