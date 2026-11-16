@@ -11,6 +11,7 @@ use crate::simulation::controller::test_execution::{
     run_generated_batch_within, run_manual_batch_at_within,
 };
 use crate::simulation::controller::test_host::RunTestHost;
+use crate::simulation::plan::connect_rules::ConnectRuleColumn;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
     Cell, CellViewRef, ComponentType, Library, Point, ProjectSourceBundle, ProjectSourceLanguage,
@@ -23,6 +24,7 @@ use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::run::SimulationRunLifecycle;
 
 mod c04;
+mod c06;
 mod c12;
 
 /// A corpus file, by its path under `tests/mixed-corpus`.
@@ -190,11 +192,22 @@ impl Drawing {
         })
         .unwrap_or_else(|| panic!("the browser offers {}", reference.display_path()));
         assert!(candidate.ready, "{name}: {}", candidate.unavailable_reason);
+        self.place(candidate.binding, name, "", row, nets);
+    }
+
+    /// Place `binding` as `name` with `params`, in row `row` below the
+    /// devices, each pin wired out to the net `nets` gives it.
+    fn place(
+        &mut self,
+        binding: crate::state::LibraryCellInstance,
+        name: &str,
+        params: &str,
+        row: i32,
+        nets: &[(&str, &str)],
+    ) {
         let origin = Point::new(row * 1200, -1600);
         let model = &mut self.state.model;
-        let id = model
-            .schematic
-            .add_library_cell_component(origin, candidate.binding);
+        let id = model.schematic.add_library_cell_component(origin, binding);
         let component = model
             .schematic
             .document_mut_for_test()
@@ -203,6 +216,7 @@ impl Drawing {
             .find(|component| component.id == id)
             .expect("the instance");
         component.name = name.to_owned();
+        component.params = params.to_owned();
         let component = component.clone();
         let order = &component
             .library_cell
@@ -332,6 +346,55 @@ impl Drawing {
         candidate
             .commit_active_plan_configuration_change(format!("Attached model library {library}"))
             .expect("the plan takes the binding");
+        model.sim_setup = candidate;
+    }
+
+    /// A model card made in the Models workspace as a project model of the
+    /// library `library`, attached to the plan.
+    fn project_model(&mut self, library: &str, name: &str, kind: &str, parameters: &[(&str, f64)]) {
+        let definition = rspice_model_library::ProjectModelDefinition {
+            name: name.to_owned(),
+            spice_type: kind.to_owned(),
+            description: String::new(),
+            numeric_parameters: parameters
+                .iter()
+                .map(|(parameter, value)| ((*parameter).to_owned(), *value))
+                .collect(),
+            string_parameters: Default::default(),
+        };
+        let model = &mut self.state.model;
+        model
+            .model_library_manager
+            .create_project_model(library, &definition)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        self.attach_model_library(library);
+    }
+
+    /// Type `cells` into the run's own connect rules on the Connect rules
+    /// page: select run_rules, which starts from the shipped default set, and
+    /// commit each cell of its grid as the page does.
+    fn run_connect_rules(&mut self, cells: &[(&str, ConnectRuleColumn, &str)]) {
+        use crate::simulation::plan::OptionsDialogState;
+        use crate::simulation::plan::connect_rules;
+        use rspice_simulation_contract::options::RunConnectRules;
+        let model = &mut self.state.model;
+        let draft = &mut model.sim_setup.session.options_draft;
+        draft.connect_rules = RunConnectRules::DEFAULT_NAME.to_owned();
+        let block = draft
+            .connect_rule_block
+            .get_or_insert_with(|| connect_rules::started_from(connect_rules::DEFAULT_BASE));
+        for (module, column, text) in cells {
+            connect_rules::set_cell(block, module, *column, text)
+                .unwrap_or_else(|error| panic!("{module} {column:?} = {text}: {error}"));
+        }
+        let options = draft.to_options().expect("the draft reads");
+        options.validate().expect("the options validate");
+        let mut candidate = model.sim_setup.clone();
+        candidate.commit_options(&options);
+        candidate.session.options_draft = OptionsDialogState::from_options(&options);
+        candidate
+            .commit_active_plan_configuration_change("Updated simulation solver options.")
+            .expect("the plan takes the options");
         model.sim_setup = candidate;
     }
 
