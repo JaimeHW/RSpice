@@ -5,6 +5,7 @@
 
 use egui::Color32;
 
+use super::super::histogram::HistogramModel;
 use super::super::raster::{
     PageGeometry, VerifyStage, page_input, page_pass, refresh_verification, seed_monte_carlo,
     seed_monte_carlo_at_two_points, seed_monte_carlo_over_different_trials,
@@ -136,17 +137,14 @@ fn each_row_states_the_sheets_statistics() {
     );
 }
 
-/// A selected row's histogram sits under the table beside its failing
-/// trials.
+/// The selected row's detail fills the page under the table as one frame:
+/// one head band across both halves at the table head's height, the
+/// histogram half and the list half sharing their top and their foot, which
+/// is the view's.
 #[test]
-fn the_selected_rows_histogram_sits_beside_its_failing_trials() {
+fn the_detail_fills_the_page_as_one_frame() {
     let ctx = context();
     let mut harness = monte_carlo_app();
-    let (_, geometry) = settled(&ctx, &mut harness);
-    let head = geometry.one("table.head").expect("head");
-    let toolbar = geometry.one("toolbar").expect("toolbar");
-    assert_eq!(head.top(), toolbar.bottom());
-
     select_row(&mut harness, 0);
     let (output, geometry) = settled(&ctx, &mut harness);
     let rows = geometry.all("table.row");
@@ -155,22 +153,35 @@ fn the_selected_rows_histogram_sits_beside_its_failing_trials() {
         4,
         "the specification and its three failing trials"
     );
-    let split = geometry.one("split").expect("the detail is split off");
-    assert_eq!(split.top(), rows[0].bottom());
-    let histogram = geometry.one("histogram").expect("the histogram");
-    assert_eq!(histogram.top(), split.bottom());
-    assert!(
-        (220.0..=340.0).contains(&histogram.height()),
-        "{histogram:?}"
-    );
+    let toolbar = geometry.one("toolbar").expect("toolbar");
     let heads = geometry.all("table.head");
     assert_eq!(heads.len(), 2);
-    assert!(
-        heads[1].left() >= histogram.right(),
-        "the list is beside it"
-    );
-    assert_eq!(heads[1].top(), histogram.top());
+    assert_eq!(heads[0].top(), toolbar.bottom());
+    let split = geometry.one("split").expect("the detail is split off");
+    assert_eq!(split.top(), rows[0].bottom(), "the table takes its rows");
+
+    let band = geometry.one("detail.band").expect("one head band");
+    let plot = geometry.one("detail.plot").expect("the histogram half");
+    let list = geometry.one("detail.list").expect("the list half");
+    assert_eq!(band.top(), split.bottom());
+    assert_eq!(band.height(), TABLE_HEAD_H);
+    assert_eq!((band.left(), band.right()), (plot.left(), list.right()));
+    assert_eq!(plot.top(), band.bottom(), "the plot is under the band");
+    assert_eq!(list.top(), band.top(), "the list's heads are in the band");
+    assert_eq!(plot.bottom(), super::super::raster::PAGE_HEIGHT);
+    assert_eq!(list.bottom(), plot.bottom(), "both halves run to the foot");
+    assert!(list.left() >= plot.right());
+    assert_eq!(geometry.one("histogram"), Some(plot));
+
+    assert_eq!(heads[1].y_range(), band.y_range(), "one band across both");
+    assert_eq!(heads[1].x_range(), list.x_range());
     let words = painted(&output);
+    assert!(
+        words
+            .iter()
+            .any(|(words, _)| words == "gain \u{00b7} 40 trials \u{00b7} 3 fail"),
+        "the plot's title states the output, its trials and its failures"
+    );
     for seed in ["0x1A32", "0x1A3E", "0x1A4A"] {
         assert!(words.iter().any(|(words, _)| words == seed), "{seed}");
     }
@@ -205,6 +216,8 @@ fn the_selected_rows_histogram_sits_beside_its_failing_trials() {
     );
 }
 
+/// Nothing selected, the view selects the first row whose yield does not
+/// hold, else the first, so the row's wash says whose detail shows.
 #[test]
 fn nothing_selected_selects_the_first_failing_row_else_the_first() {
     let ctx = context();
@@ -595,7 +608,7 @@ fn the_histogram_counts_the_sheets_failing_trials() {
     let harness = monte_carlo_app();
     let statistics = sheet(&harness).rows[0].statistics.as_ref().expect("trials");
     let shown = population(statistics, None).expect("every trial");
-    let model = histogram_model(&shown.samples(), &[40.0]).expect("forty samples bin");
+    let model = histogram_model(&shown.samples(), &[FLOOR_40]).expect("forty samples bin");
     assert_eq!(model.counts.iter().sum::<usize>(), 40);
     assert_eq!(model.failing.iter().sum::<usize>(), 3);
     assert!(
@@ -603,58 +616,175 @@ fn the_histogram_counts_the_sheets_failing_trials() {
         "the limit is an edge: {:?}",
         model.edges
     );
-    assert_eq!(model.limits, [40.0]);
+    assert_eq!(model.limits, [FLOOR_40]);
     assert!(model.axis.0 <= model.mean - 3.0 * model.std_dev);
     assert!(model.axis.1 >= model.mean + 3.0 * model.std_dev);
     assert!((8..=48).contains(&model.counts.len()));
-    assert!(model.ticks.windows(2).all(|pair| pair[1] > pair[0]));
+    assert_eq!(model.count_top(), 12.0, "ten at the peak, and headroom");
 
     // A trial the sheet failed above the line is counted as failing.
-    let guarded = histogram_model(&[(40.5, false), (41.0, true), (41.5, true)], &[40.0])
+    let guarded = histogram_model(&[(40.5, false), (41.0, true), (41.5, true)], &[FLOOR_40])
         .expect("three samples bin");
     assert_eq!(guarded.failing.iter().sum::<usize>(), 1);
-    assert!(histogram_model(&[(f64::NAN, true)], &[1.0]).is_none());
+    assert!(histogram_model(&[(f64::NAN, true)], &[FLOOR_40]).is_none());
 }
 
-/// Bars are neutral and their failing part a muted error tone; nothing in
-/// the histogram is painted in the accent.
+const FLOOR_40: Bound = Bound {
+    value: 40.0,
+    side: Side::Floor,
+};
+
+/// A range's two bounds each fail on their own side, and each is tagged
+/// with its own comparison.
 #[test]
-fn histogram_bars_are_neutral_and_failing_parts_muted_error() {
+fn a_ranges_bounds_fail_outward() {
+    let bounds = bounds_of(&SpecificationComparison::Range {
+        minimum: 1.62,
+        maximum: 1.98,
+    });
+    assert_eq!(
+        bounds
+            .iter()
+            .map(|bound| (bound.side, bound.tag("V")))
+            .collect::<Vec<_>>(),
+        [
+            (Side::Floor, "\u{2265} 1.62 V".to_owned()),
+            (Side::Ceiling, "\u{2264} 1.98 V".to_owned()),
+        ]
+    );
+}
+
+/// The forty-trial gain histogram as the view paints it.
+fn gain_histogram(ctx: &egui::Context) -> (HistogramModel, egui::FullOutput) {
     let harness = monte_carlo_app();
     let statistics = sheet(&harness).rows[0].statistics.as_ref().expect("trials");
     let model = histogram_model(
         &population(statistics, None).expect("every trial").samples(),
-        &[40.0],
+        &[FLOOR_40],
     )
     .expect("forty samples bin");
-    let ctx = context();
-    let mut fills = Vec::new();
+    let mut output = None;
     for _ in 0..2 {
-        let output = ctx.run_ui(
+        output = Some(ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(900.0, 320.0),
+                    egui::vec2(900.0, 420.0),
                 )),
                 ..Default::default()
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    super::super::histogram::paint_histogram(ui, "gain", "dB", &model, 300.0);
+                    super::super::histogram::paint_histogram(ui, "gain", "dB", &model);
                 });
             },
-        );
-        fills = output
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Rect(rect) => Some(rect.fill),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        ));
     }
+    (model, output.expect("two frames ran"))
+}
+
+/// Every shape a frame painted, flattened.
+fn shapes(output: &egui::FullOutput) -> Vec<egui::Shape> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            shape => out.push(shape.clone()),
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The limit and the mean cannot be mistaken for each other: the limit is a
+/// solid rule in the failing ink, tagged with its comparison at the top; the
+/// mean a dot with a dashed drop line, tagged with its value. The ticks carry
+/// no unit, which the axis states once, and the count axis is named.
+#[test]
+fn the_limit_and_the_mean_are_drawn_apart() {
+    let ctx = context();
+    let (model, output) = gain_histogram(&ctx);
     let t = Tokens::get(&ctx);
-    assert!(!fills.contains(&t.color.accent));
-    assert!(fills.contains(&t.color.err.gamma_multiply(0.45)));
-    assert!(fills.contains(&t.color.text_dim.gamma_multiply(0.38)));
+    let spec = super::super::histogram::histogram_spec("dB", &model, ("gain histogram", ""), &t);
+    let limit = spec
+        .markers
+        .iter()
+        .find(|marker| marker.x == 40.0)
+        .expect("the limit is tagged");
+    assert_eq!(limit.shape, crate::ui::plot::MarkerShape::LimitLine);
+    assert_eq!(limit.color, t.color.err);
+    assert_eq!(limit.label, "\u{2265} 40 dB");
+    let mean = spec
+        .markers
+        .iter()
+        .find(|marker| marker.x == model.mean)
+        .expect("the mean is tagged");
+    assert_eq!(mean.shape, crate::ui::plot::MarkerShape::Point);
+    assert!(mean.drop_line);
+    assert_eq!(mean.color, t.color.accent);
+    assert_eq!(
+        mean.label,
+        format!("\u{00b5} {}", format_value(model.mean, "dB"))
+    );
+    assert_eq!(
+        spec.markers
+            .iter()
+            .filter(|marker| marker.label.ends_with('\u{03c3}'))
+            .count(),
+        2,
+        "mean \u{00b1} 3 standard deviations"
+    );
+    assert_eq!(spec.x.unit, "dB");
+    assert!(spec.x.ticks.iter().all(|(_, label)| !label.contains("dB")));
+    assert_eq!(spec.y.unit, "trials");
+
+    // The limit's rule is the one solid rule two points wide.
+    let rules = shapes(&output)
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::LineSegment { points, stroke }
+                if points[0].x == points[1].x && stroke.width >= 2.0 =>
+            {
+                Some(stroke.color)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rules, [t.color.err]);
+}
+
+/// Bars wear the Results histogram's tones, the accent wash in an accent
+/// outline, and the failing part of a bar the same wash and outline in the
+/// failing ink; the canvas theme is worn again once the plot has drawn.
+#[test]
+fn bars_wear_the_results_tones_and_failing_parts_the_failing_ink() {
+    let ctx = context();
+    let canvas = Tokens::get(&ctx).color;
+    let (_, output) = gain_histogram(&ctx);
+    let t = Tokens::get(&ctx);
+    assert_eq!(t.color, canvas, "the page's inks are put back");
+    let bars = shapes(&output)
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
+                Some((rect.fill, rect.stroke.color))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(bars.contains(&(t.color.accent_dim, t.color.accent)));
+    let failing = t
+        .color
+        .err
+        .gamma_multiply(f32::from(t.color.accent_dim.a()) / 255.0);
+    assert!(bars.contains(&(failing, t.color.err)));
+    assert!(
+        bars.iter()
+            .all(|bar| *bar == (t.color.accent_dim, t.color.accent)
+                || *bar == (failing, t.color.err)
+                || bar.0 == t.color.bg_elevated),
+        "{bars:?}"
+    );
 }

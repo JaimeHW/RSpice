@@ -4,10 +4,10 @@
 //! statistics, as the ADE Assembler yield view and the ADS yield summary put
 //! them: the yield with its confidence interval, the distribution's mean,
 //! sigma and extremes, its capability, and how many trials failed. Under the
-//! table, the selected row's histogram beside the trials that failed it; a
-//! trial opens in Results as the one member of its family. Nothing
-//! selected, the view selects the first row whose yield does not hold, else
-//! the first.
+//! table, the selected row's histogram beside the trials that failed it, one
+//! frame filling the page to the dock; a trial opens in Results as the one
+//! member of its family. Nothing selected, the view selects the first row
+//! whose yield does not hold, else the first.
 //!
 //! Every number is the verification sheet's. A trial passes or fails by the
 //! sheet's word, a yield is the acceptance gate's own count, and a row's
@@ -24,7 +24,7 @@ use rspice_results::yield_analysis::{DistributionStats, monte_carlo_provenance};
 
 use super::super::super::state::YieldLimitDraft;
 use super::corners::{Evidence, FactSection, limit_text, open_in_results, point_name};
-use super::histogram::{histogram_model, paint_histogram};
+use super::histogram::{Bound, Side, histogram_model, paint_histogram};
 use super::table::{
     Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
     TABLE_HEAD_H, TABLE_ROW_H, TableState, Verdict,
@@ -33,9 +33,9 @@ use super::toolbar::{PageToolbar, RunChoice, Summary, empty_line};
 use super::*;
 use crate::workbench::framework::command_registry::ids;
 
-/// Least and greatest height of the detail pane under the table.
-const DETAIL_MIN_H: f32 = 220.0;
-const DETAIL_MAX_H: f32 = 340.0;
+/// The share of the body the table may take before its rows scroll; the
+/// detail fills everything under it.
+const TABLE_SHARE: f32 = 0.4;
 /// Width of the failing-trial list beside the histogram.
 const TRIALS_W: f32 = 300.0;
 
@@ -626,14 +626,9 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             .monte_carlo_table
             .select(first, Some(RowKey::Number(rows[first] as u64)));
     }
-    let selected = selected_row(sheet, session);
-    let body = ui.available_height();
-    let detail_h = selected.map_or(0.0, |_| (body * 0.45).clamp(DETAIL_MIN_H, DETAIL_MAX_H));
-    let table_h = if selected.is_some() {
-        (body - detail_h - 1.0).max(TABLE_HEAD_H + TABLE_ROW_H)
-    } else {
-        body
-    };
+    // The table takes the height of its rows, scrolling past its share of
+    // the body; the detail fills everything under it.
+    let table_h = (ui.available_height() * TABLE_SHARE).max(TABLE_HEAD_H + TABLE_ROW_H);
     // At their least the columns fit the page beside both docks at 1440
     // points; the name column takes whatever is left.
     let columns = [
@@ -767,21 +762,24 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             row,
             histogram_model(&shown.samples(), &limits),
             shown.failing(),
+            shown.trials.len(),
         ))
     });
     cx.state.verification.yield_limit_draft = draft;
-    let opened = detail.and_then(|(row, histogram, failing)| {
+    let opened = detail.and_then(|(row, histogram, failing, trials)| {
         let sheet = cx.model.simulation.verification_sheet()?;
         let row = &sheet.rows[row];
         let statistics = row.statistics.as_ref()?;
         let open = detail_pane(
             ui,
-            row,
-            statistics,
-            histogram.as_ref(),
-            &failing,
+            Detail {
+                row,
+                statistics,
+                histogram: histogram.as_ref(),
+                failing: &failing,
+                trials,
+            },
             &mut cx.state.verification.monte_carlo_trials_table,
-            detail_h,
         )?;
         let run = cx.model.simulation.active_run()?;
         trial_evidence(run, &statistics.trials[open])
@@ -832,66 +830,105 @@ fn first_shown(
         .unwrap_or(0)
 }
 
-/// The bounds a limit draws on the histogram.
-fn bounds_of(comparison: &SpecificationComparison) -> Vec<f64> {
+/// The bounds a limit draws on the histogram, each with the side that fails.
+fn bounds_of(comparison: &SpecificationComparison) -> Vec<Bound> {
+    let floor = |value| Bound {
+        value,
+        side: Side::Floor,
+    };
+    let ceiling = |value| Bound {
+        value,
+        side: Side::Ceiling,
+    };
     match *comparison {
         SpecificationComparison::Tracked => Vec::new(),
-        SpecificationComparison::Minimum { limit } | SpecificationComparison::Maximum { limit } => {
-            vec![limit]
+        SpecificationComparison::Minimum { limit } => vec![floor(limit)],
+        SpecificationComparison::Maximum { limit } => vec![ceiling(limit)],
+        SpecificationComparison::Range { minimum, maximum } => {
+            vec![floor(minimum), ceiling(maximum)]
         }
-        SpecificationComparison::Range { minimum, maximum } => vec![minimum, maximum],
         SpecificationComparison::EqualWithin { target, tolerance } => {
-            vec![target - tolerance, target + tolerance]
+            vec![floor(target - tolerance), ceiling(target + tolerance)]
         }
     }
 }
 
-/// The selected row's detail under the table: its histogram beside the
-/// trials that failed it. Returns the failing trial the reader
-/// double-clicked, by its place in the row's statistics.
-fn detail_pane(
-    ui: &mut Ui,
-    row: &Row,
-    statistics: &Statistics,
-    histogram: Option<&super::histogram::HistogramModel>,
-    failing: &[usize],
-    state: &mut TableState,
-    height: f32,
-) -> Option<usize> {
+/// What the detail frame states of the selected row.
+struct Detail<'a> {
+    row: &'a Row,
+    statistics: &'a Statistics,
+    histogram: Option<&'a super::histogram::HistogramModel>,
+    /// The failing trials, by their place in the row's statistics.
+    failing: &'a [usize],
+    /// How many trials the row states at the shown point.
+    trials: usize,
+}
+
+/// The selected row's detail, filling the page under the table: one frame
+/// of two halves, the histogram beside the trials that failed it. One head
+/// band runs across both at the table head's height, fill and type, the
+/// plot's title on the left and the list's column heads on the right, and
+/// both halves run to the frame's foot on the page's ground. Returns the
+/// failing trial the reader double-clicked, by its place in the row's
+/// statistics.
+fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
-    let top = ui.cursor().top();
-    let left = ui.max_rect().left();
+    let Detail {
+        row,
+        statistics,
+        histogram,
+        failing,
+        trials,
+    } = detail;
     let width = ui.available_width();
-    ui.painter().hline(
-        left..=left + width,
-        top + 0.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    ui.add_space(1.0);
-    #[cfg(any(test, feature = "test-support"))]
-    super::raster::probe(
-        ui,
-        "split",
-        egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, 1.0)),
-    );
+    let height = ui.available_height().max(TABLE_HEAD_H + TABLE_ROW_H + 1.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    let list_w = TRIALS_W.min(width * 0.5);
-    let split = rect.right() - list_w;
-    let plot = egui::Rect::from_min_max(rect.min, egui::pos2(split - 1.0, rect.bottom()));
-    let list = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
-    ui.painter().vline(
-        split - 0.5,
-        rect.y_range(),
-        egui::Stroke::new(1.0, t.color.border),
+    let frame = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + 1.0), rect.max);
+    let split = frame.right() - TRIALS_W.min(width * 0.5);
+    let band = egui::Rect::from_min_size(frame.min, egui::vec2(width, TABLE_HEAD_H));
+    let plot = egui::Rect::from_min_max(
+        egui::pos2(frame.left(), band.bottom()),
+        egui::pos2(split - 1.0, frame.bottom()),
     );
+    let list = egui::Rect::from_min_max(egui::pos2(split, frame.top()), frame.max);
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        super::raster::probe(
+            ui,
+            "split",
+            egui::Rect::from_min_size(rect.min, egui::vec2(width, 1.0)),
+        );
+        super::raster::probe(ui, "detail.band", band);
+        super::raster::probe(ui, "detail.plot", plot);
+        super::raster::probe(ui, "detail.list", list);
+    }
+
+    let painter = ui.painter();
+    let rule = egui::Stroke::new(1.0, t.color.border);
+    painter.hline(rect.x_range(), rect.top() + 0.5, rule);
+    painter.rect_filled(band, 0.0, t.color.bg_panel_2);
+    painter.hline(band.x_range(), band.bottom() - 0.5, rule);
+    painter.vline(split - 0.5, frame.y_range(), rule);
+    let title = plot_title(ui, row, trials, failing.len());
+    ui.painter()
+        .with_clip_rect(band.with_max_x(split - 1.0))
+        .galley(
+            egui::pos2(
+                band.left() + TABLE_EDGE_INSET,
+                band.center().y - title.size().y * 0.5,
+            ),
+            title,
+            t.color.text_dim,
+        );
 
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(plot)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    plot_ui.set_clip_rect(plot);
     match histogram {
-        Some(model) => paint_histogram(&mut plot_ui, &row.name, &row.unit, model, plot.height()),
+        Some(model) => paint_histogram(&mut plot_ui, &row.name, &row.unit, model),
         None => quiet_line(
             &mut plot_ui,
             &format!("This run kept no values of {}.", row.name),
@@ -904,10 +941,6 @@ fn detail_pane(
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     list_ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-    if failing.is_empty() {
-        quiet_line(&mut list_ui, &format!("No trial fails {}.", row.name));
-        return None;
-    }
     let columns = [
         Column::number("Trial", 72.0),
         Column::number("Seed", 112.0),
@@ -939,9 +972,40 @@ fn detail_pane(
                 }),
             ]
         });
+    if failing.is_empty() {
+        quiet_line(&mut list_ui, &format!("No trial fails {}.", row.name));
+    }
     response
         .double_clicked
         .and_then(|cell| failing.get(cell.row).copied())
+}
+
+/// The plot's title in the head band: the output, how many trials it states
+/// and how many of them fail, that count in the failing ink when any do.
+fn plot_title(ui: &Ui, row: &Row, trials: usize, failing: usize) -> std::sync::Arc<egui::Galley> {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let mut job = egui::text::LayoutJob::default();
+    let mut add = |text: &str, color: egui::Color32| {
+        job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
+    };
+    add(&row.name, t.color.text);
+    add(
+        &format!(
+            " \u{00b7} {trials} {} \u{00b7} ",
+            if trials == 1 { "trial" } else { "trials" }
+        ),
+        t.color.text_dim,
+    );
+    add(
+        &format!("{failing} fail"),
+        if failing > 0 {
+            t.color.err
+        } else {
+            t.color.text_dim
+        },
+    );
+    ui.painter().layout_job(job)
 }
 
 /// One line of faint words at the top of a detail region, read out as a
