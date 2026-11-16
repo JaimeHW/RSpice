@@ -59,7 +59,6 @@ fn cx<'a>(
             Some(&*state.cloud),
             None,
             Some(&mut *state.results),
-            Some(&*state.simulate),
             Some(&*state.code),
             Some(&*state.models),
         ),

@@ -35,7 +35,6 @@ fn frozen_from(app: &mut RSpiceApp) -> FrozenRun {
             Some(&*state.cloud),
             Some(&*state.hardcopy),
             Some(&mut *state.results),
-            None,
             Some(&*state.code),
             Some(&*state.models),
         ),

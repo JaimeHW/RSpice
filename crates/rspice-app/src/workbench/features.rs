@@ -196,17 +196,6 @@ macro_rules! models_peer {
     };
 }
 
-/// The simulate peer a context over `state` holds for the feature whose slot
-/// is `slot`: none for simulate itself, whose slot it is.
-macro_rules! simulate_peer {
-    (simulate, $state:ident) => {
-        None
-    };
-    ($slot:ident, $state:ident) => {
-        Some(&*$state.simulate)
-    };
-}
-
 /// The design peer a context over `state` holds for the feature whose slot
 /// is `slot`: none for design itself, whose slot it is.
 macro_rules! design_peer {
@@ -297,7 +286,6 @@ macro_rules! features {
                                 cloud_peer!($slot, state),
                                 hardcopy_peer!($slot, state),
                                 results_peer!($slot, state),
-                                simulate_peer!($slot, state),
                                 code_peer!($slot, state),
                                 models_peer!($slot, state),
                             )

@@ -300,12 +300,6 @@ impl Default for PublicationDraft {
     }
 }
 
-/// What simulate shows that another feature reads.
-pub trait SimulatePort {
-    /// The specification the reader selected in the plan, if any.
-    fn selected_specification(&self) -> Option<&str>;
-}
-
 /// What the models feature shows that another part reads: whether its
 /// authoring holds unsaved work, the model it has selected, and each model's
 /// release gate.
@@ -339,9 +333,6 @@ pub struct Peers<'a> {
     /// state, never itself as a peer. Lent mutably, as design is, for the
     /// run tier's reports alone.
     results: Option<&'a mut dyn ResultsPeer>,
-    /// `None` in simulate's own context, as `results` is in the results
-    /// feature's.
-    simulate: Option<&'a dyn SimulatePort>,
     /// `None` in code's own context, as `results` is in the results
     /// feature's.
     code: Option<&'a dyn CodePort>,
@@ -360,7 +351,6 @@ impl<'a> Peers<'a> {
         cloud: Option<&'a dyn CloudPort>,
         hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a mut dyn ResultsPeer>,
-        simulate: Option<&'a dyn SimulatePort>,
         code: Option<&'a dyn CodePort>,
         models: Option<&'a dyn ModelsPort>,
     ) -> Self {
@@ -369,7 +359,6 @@ impl<'a> Peers<'a> {
             cloud,
             hardcopy,
             results,
-            simulate,
             code,
             models,
             cloud_session: None,
@@ -430,14 +419,6 @@ impl<'a> Peers<'a> {
         self.results
             .as_deref_mut()
             .expect("the results feature reads its own state, never itself as a peer")
-    }
-
-    /// What simulate shows. Simulate's own context holds no such peer,
-    /// because the feature reads its own state; its code asking for one is
-    /// a fault in that code.
-    pub fn simulate(&self) -> &'a dyn SimulatePort {
-        self.simulate
-            .expect("simulate reads its own state, never itself as a peer")
     }
 
     /// What code shows. Code's own context holds no such peer, because the

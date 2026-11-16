@@ -2,8 +2,6 @@
 //! the Simulation and Verification Studios' session: their pages,
 //! selections, drafts and filters, and the Jobs manager's review context.
 
-use crate::workbench::framework::feature::SimulatePort;
-
 /// What the simulate feature keeps between frames.
 #[derive(Debug, Clone)]
 pub struct SimulateState {
@@ -126,13 +124,5 @@ impl Default for SimulateState {
             saved_output_filter: String::new(),
             jobs_manager: Default::default(),
         }
-    }
-}
-
-/// What another feature reads of simulate: the specification the
-/// verification matrix has selected.
-impl SimulatePort for SimulateState {
-    fn selected_specification(&self) -> Option<&str> {
-        self.selected_specification.as_deref()
     }
 }

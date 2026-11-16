@@ -47,7 +47,7 @@ use rspice_app_services::workbench::workflows::export_workflow::{
 use super::{
     CanvasGesturePort, CloudPort, CloudSessionPort, CodePort, Cx, DesignPort, Feature,
     FeatureCommand, FeatureRegistry, HardcopyPort, LiveCursor, LowerHandles, ModelsPort, Peers,
-    PublicationDraft, Reads, SimulatePort,
+    PublicationDraft, Reads,
 };
 use crate::workbench::framework::ports::{
     CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPeer, ResultsPort, RunEventPort,
@@ -161,13 +161,6 @@ impl HardcopyPort for NullPorts {
 
     fn publication_timestamp_utc(&self) -> String {
         "1970-01-01T00:00:00Z".to_owned()
-    }
-}
-
-/// A fresh session has selected no specification.
-impl SimulatePort for NullPorts {
-    fn selected_specification(&self) -> Option<&str> {
-        None
     }
 }
 
@@ -464,7 +457,6 @@ where
                 Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&mut self.results_peer),
-                Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&NullPorts),
             )

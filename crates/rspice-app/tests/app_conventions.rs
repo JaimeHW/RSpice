@@ -14,6 +14,7 @@
 //! - Every production dialog states its purpose.
 //! - A row painted with words reaches the accessibility tree, or is listed as
 //!   debt in [`UNPUBLISHED_PAINTED_ROWS`].
+//! - Every peer a feature's context lends is read by a feature.
 //! - A module is public only where [`PUBLIC_MODULES`] lists it: nowhere in the
 //!   shell, and exactly the listed ones in each crate below it.
 //!
@@ -2538,4 +2539,65 @@ fn a_painted_row_reaches_the_accessibility_tree() {
         ));
     }
     assert!(failures.is_empty(), "{failures}");
+}
+
+/// Every peer a feature's context lends is read by a feature.
+///
+/// `Peers` lends each feature a port onto the others. A port no feature
+/// reads is plumbing for nothing: its owner still implements it, every
+/// context still builds it, and the next reader takes it for a contract. The
+/// accessors are read from `Peers`' own `impl` block, so a new port is held
+/// to this without an edit here; tests and fixtures do not count as readers.
+#[test]
+fn every_peer_a_feature_context_lends_is_read() {
+    let framework = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rspice-app-workbench/src/workbench/framework/feature.rs");
+    let source = fs::read_to_string(&framework)
+        .unwrap_or_else(|error| panic!("read {}: {error}", framework.display()))
+        .replace("\r\n", "\n");
+    let block = source
+        .split_once("impl<'a> Peers<'a> {")
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .map(|(block, _)| block)
+        .expect("the accessors of `Peers`");
+    let accessors: Vec<&str> = block
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("pub fn "))
+        .filter_map(|rest| rest.split_once('(').map(|(name, _)| name))
+        .filter(|name| !matches!(*name, "new" | "with_cloud_session"))
+        .collect();
+    assert!(
+        accessors.len() >= 5,
+        "found too few accessors of `Peers` to hold anything: {accessors:?}"
+    );
+    let readers: Vec<String> = app_sources()
+        .iter()
+        .filter(|source| {
+            !source.shown.contains("feature_tests")
+                && !source.shown.contains("/tests/")
+                && !source.shown.ends_with("tests.rs")
+                && !source.shown.ends_with("harness.rs")
+        })
+        .map(|source| {
+            let code = fs::read_to_string(&source.file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.shown));
+            without_test_items(&strip_line_comments(&code))
+                .split_whitespace()
+                .collect()
+        })
+        .collect();
+    let unread: Vec<&str> = accessors
+        .into_iter()
+        .filter(|name| {
+            let lent = [format!("peers.{name}()"), format!("peers().{name}()")];
+            !readers
+                .iter()
+                .any(|code| lent.iter().any(|call| code.contains(call.as_str())))
+        })
+        .collect();
+    assert!(
+        unread.is_empty(),
+        "no feature reads these peers, so each is plumbing for nothing; delete the port: \
+         {unread:?}"
+    );
 }
