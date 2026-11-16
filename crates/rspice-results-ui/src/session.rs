@@ -1222,11 +1222,6 @@ impl ResultViewerState {
         self.recent_signals.iter().position(|recent| recent == key)
     }
 
-    pub fn is_checked_result_artifact(&self, key: &ResultArtifactPresentationKey) -> bool {
-        self.checked_result_quantities
-            .contains(&ResultBrowserSelectionKey::Artifact(key.clone()))
-    }
-
     pub fn clear_checked_signals(&mut self) {
         self.checked_result_quantities.clear();
         self.browser_range_anchor = None;

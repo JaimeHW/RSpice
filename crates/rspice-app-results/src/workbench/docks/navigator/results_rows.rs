@@ -1165,8 +1165,10 @@ pub(super) fn show_virtualized_result_signals(
                                 &artifact.meta,
                                 artifact.value.as_deref(),
                                 selected,
-                                state.results
-                                    .session.is_checked_result_artifact(&artifact.identity),
+                                // The tick is the one the count above reads: an
+                                // event net's or a bus's row is ticked while its
+                                // lane is plotted, however it got there.
+                                ticked.contains(&selection_key),
                             );
                             if responses.selection.drag_started()
                                 && is_plottable_artifact(artifact.identity.canonical_name())

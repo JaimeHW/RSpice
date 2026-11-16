@@ -41,6 +41,8 @@ pub(super) struct Browser {
 pub(super) struct Node {
     pub(super) label: String,
     pub(super) rect: egui::Rect,
+    /// A tick box's state; `false` for anything that is not one.
+    pub(super) ticked: bool,
 }
 
 impl Browser {
@@ -83,6 +85,7 @@ impl Browser {
                         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                         egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
                     ),
+                    ticked: node.toggled() == Some(egui::accesskit::Toggled::True),
                 })
             })
             .collect()
@@ -264,6 +267,16 @@ fn a_net_on_the_lanes_is_a_ticked_row() {
     let nodes = browser.frame(Vec::new());
     // The band counts it, so a set saves it and a drag carries it.
     assert!(find(&nodes, "1 ticked").is_some(), "{:?}", labels(&nodes));
+    // And the row's own box says so: one answer for the count and the row.
+    let row = nodes
+        .iter()
+        .find(|node| node.label.starts_with("Select") && node.label.contains("clk"))
+        .unwrap_or_else(|| panic!("no tick box for clk: {:?}", labels(&nodes)));
+    assert!(
+        row.ticked,
+        "{} reads unticked while its lane is plotted",
+        row.label
+    );
 }
 
 /// A run that records no source revision to compare with the design, as a

@@ -91,6 +91,7 @@ impl Workspace {
                         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                         egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
                     ),
+                    ticked: node.toggled() == Some(egui::accesskit::Toggled::True),
                 })
             })
             .collect()
