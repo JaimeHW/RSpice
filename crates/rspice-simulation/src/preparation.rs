@@ -231,11 +231,21 @@ pub fn check_generated_design(
         ));
     }
     if drc.has_errors() {
+        // Each finding is named, as the design check words it: a run refused
+        // with only a count sends the engineer to the checks to learn why,
+        // and a headless run has no checks panel to go to.
         let summary = drc.summary();
+        let findings = drc
+            .errors()
+            .iter()
+            .map(|violation| violation.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
         return Err(PreparationError::new(
             PreparationStage::DesignChecks,
             format!(
-                "Fix schematic source-check errors before simulation ({} critical, {} error{})",
+                "Fix schematic source-check errors before simulation ({} critical, {} error{}): \
+                 {findings}",
                 summary.critical,
                 summary.errors,
                 if summary.errors == 1 { "" } else { "s" }
