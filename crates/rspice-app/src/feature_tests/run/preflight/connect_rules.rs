@@ -11,6 +11,7 @@ use super::engine::{
 };
 use super::setup_page::{Page, stored_options};
 use super::*;
+use rspice_app_state::state::AnalysisResultPayload;
 use rspice_app_state::state::SimulationPage;
 
 impl Page {
@@ -85,10 +86,11 @@ fn checked_rows(app: &mut RSpiceApp) -> Vec<[String; 4]> {
 
 // ------------------------------------------------------------- edit to run
 
-/// When the device's conductance switches: the first instant the drive's
+/// Run the ramp and say when it switched: the converter's own edge, the
+/// event time its digital output rises at, and the first row whose drive
 /// current over the ramp's 3.3 V/µs reads the 1 mS the device takes with
 /// `mode` high, rather than the 2 mS it takes low.
-fn edge_time(app: &mut RSpiceApp) -> f64 {
+fn edge_times(app: &mut RSpiceApp) -> (f64, f64) {
     app.invalidate_simulation_preflight();
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
@@ -127,7 +129,8 @@ fn edge_time(app: &mut RSpiceApp) -> f64 {
                     .collect::<Vec<_>>()
             )
         });
-    amps.x
+    let row = amps
+        .x
         .iter()
         .zip(amps.y.iter())
         .find(|(t, i)| {
@@ -135,14 +138,37 @@ fn edge_time(app: &mut RSpiceApp) -> f64 {
             volts > 0.05 && i.abs() / volts < 1.5e-3
         })
         .map(|(t, _)| *t)
-        .expect("the device switches during the ramp")
+        .expect("the device switches during the ramp");
+    let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
+        &run.analyses[0].result_payload
+    else {
+        panic!("the run keeps its event histories");
+    };
+    // The converter's output is the run's one digital node; a code below 12
+    // whose level is one is a 1 at any strength.
+    let rose = digital_traces
+        .iter()
+        .flat_map(|trace| &trace.points)
+        .filter(|point| point.value_code < 12 && point.value_code % 3 == 1)
+        .map(|point| point.time_s)
+        .min_by(f64::total_cmp)
+        .unwrap_or_else(|| {
+            panic!(
+                "the converter's output rises: {:?}",
+                digital_traces
+                    .iter()
+                    .map(|trace| trace.node_name.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    (rose, row)
 }
 
 /// A threshold typed into the run's own block is the one the deck writes and
 /// the run converts at. A new block starts from the built-in rules, a
 /// comparator at half its 3.3 V supply with no X timeout, so on a 3.3 V/µs
 /// ramp the converter's edge is 500 ns in. A 2 V Vth high typed into the grid
-/// holds the output low through the band to 2 V, 606 ns in. Clearing the cell
+/// holds the output low through the band to 2 V, 606.06 ns in. Clearing the cell
 /// takes the half-supply edge back, in the deck and in the run.
 #[test]
 fn a_threshold_typed_in_the_run_block_moves_the_converter_edge() {
@@ -153,12 +179,12 @@ fn a_threshold_typed_in_the_run_block_moves_the_converter_edge() {
         deck_half.starts_with(".CONNECTRULES run_rules") && !deck_half.contains("vthi"),
         "{deck_half}"
     );
-    let at_half = edge_time(&mut page.app);
+    let at_half = edge_times(&mut page.app);
 
     page.retype("a2d Vth high", "2");
     let deck_2 = rules_card(&deck(&page.app)).expect("the card");
     assert!(deck_2.contains("connect a2d #(.vthi(2.0))"), "{deck_2}");
-    let at_2 = edge_time(&mut page.app);
+    let at_2 = edge_times(&mut page.app);
 
     page.retype("a2d Vth high", "");
     let cleared = rules_card(&deck(&page.app)).expect("the card");
@@ -166,15 +192,23 @@ fn a_threshold_typed_in_the_run_block_moves_the_converter_edge() {
         cleared, deck_half,
         "clearing the cell takes the set's value back"
     );
-    let again = edge_time(&mut page.app);
+    let again = edge_times(&mut page.app);
 
+    // The converter dates its edge at the located crossing, to the femtosecond.
+    // The device's conductance changes at the first analog solution after
+    // that event, so on the run's 1 ns rows it reads on the first row after
+    // the crossing: never before it, and never a row late.
     let ramp = 3.3 / 1e-6;
     let step = 1e-9;
-    for (measured, threshold) in [(at_half, 1.65), (at_2, 2.0), (again, 1.65)] {
-        let expected = threshold / ramp;
+    for ((rose, row), threshold) in [(at_half, 1.65), (at_2, 2.0), (again, 1.65)] {
+        let crossing = threshold / ramp;
         assert!(
-            (measured - expected).abs() <= 2.0 * step,
-            "edge at {measured:e} s, closed form {expected:e} s"
+            (rose - crossing).abs() <= 1e-15,
+            "the converter rose at {rose:e} s, the ramp crosses at {crossing:e} s"
+        );
+        assert!(
+            row > crossing && row - crossing <= step * (1.0 + 1e-6),
+            "the device switched on the row at {row:e} s, the ramp crosses at {crossing:e} s"
         );
     }
 }
