@@ -847,9 +847,20 @@ fn render_inspector(
                     // retained, what Verify judged of it, and the source its
                     // engine was actually handed.
                     let openable = row.analysis_count > 0;
-                    let open = crate::ui::widgets::Button::new("Open in Results")
-                        .enabled(openable)
-                        .show(ui);
+                    let deck_held = row.executed_deck_points > 0;
+                    let results =
+                        crate::ui::widgets::Button::new("Open in Results").enabled(openable);
+                    let verify = crate::ui::widgets::Button::new("Open in Verify");
+                    let deck = crate::ui::widgets::Button::new(
+                        crate::workbench::localization::OPEN_TASK_DECK,
+                    )
+                    .enabled(deck_held);
+                    // One stack, one width: the widest of the three.
+                    let width = [&results, &verify, &deck]
+                        .into_iter()
+                        .map(|button| button.measured_width(ui))
+                        .fold(0.0, f32::max);
+                    let open = results.min_width(width).show(ui);
                     if openable {
                         if open
                             .on_hover_text("Activate this run's retained dataset in Results")
@@ -864,7 +875,8 @@ fn render_inspector(
                     }
                     // Beside Results, as the row's context menu has it: the
                     // run's specifications are judged in Verify, not here.
-                    if crate::ui::widgets::Button::new("Open in Verify")
+                    if verify
+                        .min_width(width)
                         .show(ui)
                         .on_hover_text(
                             "Make this the active run and open its specifications in Verify",
@@ -876,12 +888,7 @@ fn render_inspector(
                     // Through the same owner the Netlist run strip's own
                     // control uses, so the document a reader reaches from here
                     // is byte-identical to the one they reach from there.
-                    let deck_held = row.executed_deck_points > 0;
-                    let deck = crate::ui::widgets::Button::new(
-                        crate::workbench::localization::OPEN_TASK_DECK,
-                    )
-                    .enabled(deck_held)
-                    .show(ui);
+                    let deck = deck.min_width(width).show(ui);
                     if deck_held {
                         if deck
                             .on_hover_text(format!(
@@ -2133,7 +2140,8 @@ mod tests {
     }
 
     /// The selected run's manifest opens it in Verify beside Results, on its
-    /// specifications, as the row's context menu does.
+    /// specifications, as the row's context menu does; the stack of controls
+    /// shares one width.
     #[test]
     fn the_manifest_opens_the_selected_run_in_verify() {
         use crate::workbench::surfaces::verify::raster::{page_input, page_pass};
@@ -2148,15 +2156,29 @@ mod tests {
         let (output, _) = page_pass(&ctx, page_input(Vec::new()), |ui| {
             render_inspector(ui, &snapshot, &mut None, &mut verify, &mut None);
         });
-        let bounds = output
+        let nodes = output
             .platform_output
             .accesskit_update
             .expect("accessibility tree")
-            .nodes
-            .iter()
-            .find(|(_, node)| node.label().as_deref() == Some("Open in Verify"))
-            .and_then(|(_, node)| node.bounds())
-            .expect("the manifest offers Open in Verify");
+            .nodes;
+        let bounds_of = |label: &str| {
+            nodes
+                .iter()
+                .find(|(_, node)| node.label().as_deref() == Some(label))
+                .and_then(|(_, node)| node.bounds())
+                .unwrap_or_else(|| panic!("the manifest offers {label}"))
+        };
+        let bounds = bounds_of("Open in Verify");
+        for sibling in [
+            "Open in Results",
+            crate::workbench::localization::OPEN_TASK_DECK,
+        ] {
+            assert_eq!(
+                bounds_of(sibling).width(),
+                bounds.width(),
+                "{sibling} is as wide as Open in Verify"
+            );
+        }
         let at = pos2(
             ((bounds.x0 + bounds.x1) / 2.0) as f32,
             ((bounds.y0 + bounds.y1) / 2.0) as f32,
