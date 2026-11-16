@@ -100,7 +100,8 @@ fn a_run_leaves_its_store_beside_its_output_and_the_summary_names_it() {
 
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&summary).unwrap()).unwrap();
-    assert_eq!(json["schema_version"], 5);
+    // The summary has listed its stores since schema 5.
+    assert!(json["schema_version"].as_u64().unwrap() >= 5, "{json}");
     let stores = json["stores"].as_array().unwrap();
     assert_eq!(stores.len(), 1, "{json}");
     assert_eq!(stores[0]["path"], store.display().to_string());
