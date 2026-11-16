@@ -13,7 +13,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use rspice_core::engine::{SinkTransient, TransientResult, TransientStartupMode};
+use rspice_core::engine::{
+    SinkTransient, TransientCheckpoint, TransientEnd, TransientResult, TransientStartupMode,
+};
 use rspice_core::netlist::OutputDirectiveKind;
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_results_store::{
@@ -85,6 +87,29 @@ pub(super) struct StoredRows {
 /// A store directory, under a private name while its run is open.
 struct RunStore {
     dir: PathBuf,
+    /// The store beside the output that a resumed run appended to where it was: it is never
+    /// moved, and never deleted, since it held the earlier segments' rows before the run began.
+    in_place: bool,
+}
+
+/// One segment of a checkpointed transient.
+#[derive(Clone, Copy)]
+pub(super) enum Segment<'c> {
+    /// The run to its stop, ending with its checkpoint there.
+    Whole,
+    /// The deck's run over its own window, to `tstop` with `max_step`, interrupted at the stop
+    /// the command line gave it.
+    Interrupted { tstop: f64, max_step: f64 },
+    /// The run continued from a checkpoint.
+    Resumed(&'c TransientCheckpoint),
+}
+
+/// A store open for a run: its directory, its segment file and the sink writing it.
+struct OpenStore {
+    store: RunStore,
+    segment: PathBuf,
+    sink: StoreSink<WatchedIo>,
+    free: FreeSpace,
 }
 
 /// Run the transient into a new store.
@@ -103,42 +128,129 @@ pub(super) fn run(
     startup_mode: TransientStartupMode,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<StoredTransient, CliError> {
-    let store = RunStore::create(ctx.output.as_deref())?;
-    let segment = store.dir.join(StoreDir::segment_name(0));
-    let io = match FileIo::create(&segment) {
-        Ok(io) => io,
-        Err(error) => {
-            store.discard();
-            return Err(CliError::output_error(&segment, error));
-        }
-    };
-    let free = free_space(&store.dir);
-    let mut sink = WatchedSink {
-        inner: StoreSink::new(WatchedIo {
-            io,
-            free: free.clone(),
-            full: false,
-        }),
-        free,
-        rows_needed: tstop / max_step,
-        rows_likely: tstop / max_step.min(tstep),
-        refused: None,
-    };
-    let run = ctx.engine.run_tran_into_sink_with_startup_mode_and_abort(
-        ctx.netlist,
-        tstop,
-        max_step,
+    run_into_store(ctx, (tstop, tstep, max_step), None, startup_mode, abort)
+        .map(|(stored, _)| stored)
+}
+
+/// Run one segment of a checkpointed transient into a store, as [`run`] does, and return the
+/// checkpoint it ends with.
+///
+/// A resumed segment appends to the store beside its output when that store holds the run its
+/// checkpoint continues, which is the one whose last row is the checkpoint's: the segment's
+/// outputs then cover the whole run from its start, and its store is the uninterrupted run's. With
+/// `--no-store`, or beside no such store, it writes a store of its own from the checkpoint on.
+pub(super) fn run_segment(
+    ctx: &RunContext<'_>,
+    segment: Segment<'_>,
+    (tstop, tstep, max_step): (f64, f64, f64),
+    startup_mode: TransientStartupMode,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(StoredTransient, TransientEnd), CliError> {
+    let (stored, end) = run_into_store(
+        ctx,
+        (tstop, tstep, max_step),
+        Some(segment),
         startup_mode,
         abort,
-        &mut sink,
-    );
-    let SinkTransient {
-        result: shell,
-        receipt,
-        stopped,
-    } = match run {
+    )?;
+    let end = end.ok_or_else(|| CliError::InternalError {
+        message: "a checkpointed transient ended without its checkpoint".to_owned(),
+    })?;
+    Ok((stored, end))
+}
+
+fn run_into_store(
+    ctx: &RunContext<'_>,
+    (tstop, tstep, max_step): (f64, f64, f64),
+    segment: Option<Segment<'_>>,
+    startup_mode: TransientStartupMode,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(StoredTransient, Option<TransientEnd>), CliError> {
+    let (start, step_cap) = match segment {
+        Some(Segment::Resumed(checkpoint)) => (checkpoint.time, max_step),
+        Some(Segment::Interrupted { max_step, .. }) => (0.0, max_step),
+        Some(Segment::Whole) | None => (0.0, max_step),
+    };
+    let appended = match segment {
+        Some(Segment::Resumed(checkpoint)) if !ctx.args.no_store => {
+            reopen_beside_output(ctx, checkpoint.time)
+        }
+        _ => None,
+    };
+    let OpenStore {
+        store,
+        segment: segment_path,
+        sink: inner,
+        free,
+    } = match appended {
+        Some(open) => open,
+        None => create_store(ctx)?,
+    };
+    let mut sink = WatchedSink {
+        inner,
+        free,
+        rows_needed: (tstop - start) / step_cap,
+        rows_likely: (tstop - start) / step_cap.min(tstep),
+        refused: None,
+    };
+    let (netlist, sink_ref) = (ctx.netlist, &mut sink);
+    let run = match segment {
+        None => ctx
+            .engine
+            .run_tran_into_sink_with_startup_mode_and_abort(
+                netlist,
+                tstop,
+                max_step,
+                startup_mode,
+                abort,
+                sink_ref,
+            )
+            .map(|run| (run, None)),
+        Some(Segment::Whole) => ctx
+            .engine
+            .run_tran_checkpointed_into_sink_with_startup_mode_and_abort(
+                netlist,
+                (tstop, max_step),
+                startup_mode,
+                abort,
+                sink_ref,
+            )
+            .map(|(run, end)| (run, Some(end))),
+        Some(Segment::Interrupted {
+            tstop: deck_stop,
+            max_step: deck_max_step,
+        }) => ctx
+            .engine
+            .run_tran_checkpointed_at_into_sink_with_startup_mode_and_abort(
+                netlist,
+                (deck_stop, deck_max_step),
+                tstop,
+                startup_mode,
+                abort,
+                sink_ref,
+            )
+            .map(|(run, end)| (run, Some(end))),
+        Some(Segment::Resumed(checkpoint)) => ctx
+            .engine
+            .run_tran_resume_into_sink_with_abort(
+                netlist,
+                checkpoint,
+                (tstop, max_step),
+                abort,
+                sink_ref,
+            )
+            .map(|(run, end)| (run, Some(end))),
+    };
+    let (
+        SinkTransient {
+            result: shell,
+            receipt,
+            stopped,
+        },
+        end,
+    ) = match run {
         Ok(done) => done,
-        Err(source) => return Err(stopped_run(ctx, store, &segment, sink, source)),
+        Err(source) => return Err(stopped_run(ctx, store, &segment_path, sink, source)),
     };
     let opened = sink
         .inner
@@ -176,7 +288,7 @@ pub(super) fn run(
         store.discard();
         return Err(failure);
     }
-    Ok(StoredTransient {
+    let stored = StoredTransient {
         shell,
         rows: StoredRows {
             parameters: reader
@@ -192,7 +304,101 @@ pub(super) fn run(
             receipt,
             stopped,
         },
+    };
+    Ok((stored, end))
+}
+
+/// A new store for a run, under a private name beside its output.
+fn create_store(ctx: &RunContext<'_>) -> Result<OpenStore, CliError> {
+    let store = RunStore::create(ctx.output.as_deref())?;
+    let segment = store.dir.join(StoreDir::segment_name(0));
+    let io = match FileIo::create(&segment) {
+        Ok(io) => io,
+        Err(error) => {
+            store.discard();
+            return Err(CliError::output_error(&segment, error));
+        }
+    };
+    let free = free_space(&store.dir);
+    Ok(OpenStore {
+        store,
+        segment,
+        sink: StoreSink::new(WatchedIo {
+            io,
+            free: free.clone(),
+            full: false,
+        }),
+        free,
     })
+}
+
+/// The store beside a resumed run's output, reopened to take the run's rows after `through`, the
+/// checkpoint's time, when it holds the run the checkpoint continues: one whose last row is at
+/// `through`. Any other store there is left for the run's own store to replace, with a note.
+fn reopen_beside_output(ctx: &RunContext<'_>, through: f64) -> Option<OpenStore> {
+    let output = ctx.next_output_path("tran")?;
+    let dir = store_path_beside(&output);
+    let segment = dir.join(StoreDir::segment_name(0));
+    if !dir.join(StoreDir::MANIFEST).is_file() || !segment.is_file() {
+        return None;
+    }
+    let note = |why: &dyn std::fmt::Display| {
+        crate::observability::diagnostic(
+            "results_store_not_resumed",
+            None,
+            format_args!(
+                "Note: the resumed transient writes a new results store in place of {}, which \
+                 {why}",
+                dir.display()
+            ),
+        );
+    };
+    let last = FileIo::open(&segment)
+        .map_err(StoreError::from)
+        .and_then(SegmentReader::open)
+        .and_then(|mut reader| match reader.rows().checked_sub(1) {
+            Some(last) => reader.read_x(last, 1).map(|x| x.first().copied()),
+            None => Ok(None),
+        });
+    match last {
+        Ok(Some(x)) if x.to_bits() == through.to_bits() => {}
+        Ok(_) => {
+            note(&"does not end at the checkpoint's time");
+            return None;
+        }
+        Err(error) => {
+            note(&format_args!("cannot be read: {error}"));
+            return None;
+        }
+    }
+    let free = free_space(&dir);
+    let reopened = FileIo::open_writable(&segment)
+        .map_err(StoreError::from)
+        .and_then(|io| {
+            StoreSink::appending(
+                WatchedIo {
+                    io,
+                    free: free.clone(),
+                    full: false,
+                },
+                through,
+            )
+        });
+    match reopened {
+        Ok(sink) => Some(OpenStore {
+            store: RunStore {
+                dir,
+                in_place: true,
+            },
+            segment,
+            sink,
+            free,
+        }),
+        Err(error) => {
+            note(&format_args!("cannot be reopened: {error}"));
+            None
+        }
+    }
 }
 
 /// Read the run's event signals back into the traces the result names: its digital and real
@@ -1066,7 +1272,10 @@ impl RunStore {
         };
         let store = StoreDir::new(&dir);
         store.create().map_err(|error| store_error(&dir, error))?;
-        Ok(Self { dir })
+        Ok(Self {
+            dir,
+            in_place: false,
+        })
     }
 
     fn save_manifest(&self, reader: &SegmentReader<FileIo>) -> Result<(), StoreError> {
@@ -1087,6 +1296,10 @@ impl RunStore {
     }
 
     fn publish(self, output: Option<&Path>, keep: bool) -> Result<Option<PathBuf>, CliError> {
+        if self.in_place {
+            // The store a resumed run appended to is already beside its output.
+            return Ok(keep.then_some(self.dir));
+        }
         let Some(output) = output.filter(|_| keep) else {
             self.discard();
             return Ok(None);
@@ -1099,8 +1312,12 @@ impl RunStore {
     }
 
     fn discard(self) {
-        // A store that cannot be removed is left under its private name; the run's own outcome
-        // is what the caller reports.
+        // A store a resumed run appended to held the earlier segments' rows before the run began,
+        // so it stays, closed over whatever the run wrote. A store that cannot be removed is left
+        // under its private name; the run's own outcome is what the caller reports.
+        if self.in_place {
+            return;
+        }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
@@ -1177,12 +1394,22 @@ fn stopped_run(
 ) -> CliError {
     use rspice_core::result_sink::SinkStop;
     let WatchedSink {
-        inner,
+        mut inner,
         free,
         rows_needed,
         refused,
         ..
     } = sink;
+    if store.in_place {
+        // A resumed run that failed before it began leaves the store it reopened closed over the
+        // rows it held; one that began was closed with how it stopped, and refuses a second end.
+        let _ = rspice_core::result_sink::ResultSink::end(
+            &mut inner,
+            rspice_core::result_sink::RunStatus::Stopped(
+                rspice_core::result_sink::StopReason::Failed(source.to_string()),
+            ),
+        );
+    }
     // The segment closes before its store is read, moved or deleted: Windows refuses to rename
     // or delete a directory with a file open in it.
     drop(inner);

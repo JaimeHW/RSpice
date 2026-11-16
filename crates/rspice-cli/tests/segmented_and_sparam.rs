@@ -797,6 +797,97 @@ fn a_checkpoint_inside_the_decks_window_resumes_onto_the_uninterrupted_steps() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A run checkpointed inside its window and resumed into the same output appends to the results
+/// store beside it, so the resumed output, its measures and its store are the uninterrupted run's.
+/// A store that does not end at the checkpoint is replaced by the resumed run's own, with a note.
+#[test]
+fn a_resume_into_the_same_output_appends_to_its_store_and_publishes_the_whole_run() {
+    let dir = test_dir("ckpt_store_append");
+    let deck = dir.join("rc.sp");
+    std::fs::write(
+        &deck,
+        "* RC through two close corners\n\
+         V1 in 0 PWL(0 0 10u 1 10.02u 0.5 20u 0)\n\
+         R1 in out 1k\n\
+         C1 out 0 1n\n\
+         .tran 10n 20u 0 100n\n\
+         .meas tran peak MAX V(out)\n\
+         .meas tran half WHEN V(out)=0.5 CROSS=1\n\
+         .meas tran mean AVG V(out)\n\
+         .meas tran area INTEG V(out)\n\
+         .end\n",
+    )
+    .expect("write deck");
+    let summary = dir.join("summary.json");
+    let run = |args: &[&str]| -> (serde_json::Value, String) {
+        let mut all = vec![
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ];
+        all.extend_from_slice(args);
+        let output = run_rspice(&all);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "{args:?}: {stderr}");
+        (common::read_json(&summary), stderr)
+    };
+    let (whole, out, state) = (
+        dir.join("whole.raw"),
+        dir.join("out.raw"),
+        dir.join("state.ckpt"),
+    );
+    let (uninterrupted, _) = run(&["-o", whole.to_str().unwrap()]);
+    run(&[
+        "--tran-stop",
+        "10u",
+        "--checkpoint",
+        state.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    let (resumed, _) = run(&[
+        "--resume",
+        state.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        std::fs::read(&whole).unwrap(),
+        "the resumed rawfile is the uninterrupted run's"
+    );
+    assert_eq!(
+        resumed["runs"][0]["measurements"],
+        uninterrupted["runs"][0]["measurements"]
+    );
+    let store = |summary: &serde_json::Value| {
+        let store = &summary["stores"][0];
+        (store["rows"].clone(), store["digest"].clone())
+    };
+    assert_eq!(store(&resumed), store(&uninterrupted));
+    assert_eq!(store(&resumed).0, 221, "221 accepted points");
+    assert_eq!(
+        resumed["stores"][0]["path"].as_str(),
+        dir.join("out.rsr").to_str()
+    );
+
+    // Resumed again, the store ends past the checkpoint: the run writes a store of its own.
+    let (again, stderr) = run(&[
+        "--resume",
+        state.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert!(
+        stderr.contains("does not end at the checkpoint's time"),
+        "{stderr}"
+    );
+    assert!(store(&again).0.as_u64().unwrap() < 221);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn compression_uses_static_solver_ceiling_across_widened_checkpoint_resume() {
     let dir = test_dir("compression_interval_ceiling");

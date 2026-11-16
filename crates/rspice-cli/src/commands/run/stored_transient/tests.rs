@@ -404,3 +404,81 @@ fn a_transient_read_back_whole_is_bounded_by_its_store_not_the_result_value_cap(
     assert!(lines > 1000, "{lines} lines");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A resumed run appends to the store beside its output; when its storage fills, that store keeps
+/// the earlier segment's rows and the resumed rows that fit, closed as stopped.
+#[test]
+fn a_resume_whose_storage_fills_keeps_the_store_it_appended_to() {
+    let dir = scratch("resume");
+    let input = dir.join("deck.cir");
+    std::fs::write(
+        &input,
+        "rc\nv1 in 0 sin(0 1 4meg)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 200u\n.end\n",
+    )
+    .unwrap();
+    let (output, state) = (dir.join("out.csv"), dir.join("state.ckpt"));
+    let args = |extra: &[&str]| {
+        let cli = Cli::try_parse_from(
+            [
+                "rspice",
+                "--quiet",
+                "run",
+                input.to_str().unwrap(),
+                "-o",
+                output.to_str().unwrap(),
+                "-f",
+                "csv",
+            ]
+            .into_iter()
+            .chain(extra.iter().copied()),
+        )
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected the run command");
+        };
+        args
+    };
+    crate::commands::run(
+        args(&[
+            "--tran-stop",
+            "20u",
+            "--checkpoint",
+            state.to_str().unwrap(),
+        ]),
+        &Config::default(),
+        false,
+        true,
+    )
+    .expect("the first segment runs");
+    let segment = dir.join("out.rsr").join(StoreDir::segment_name(0));
+    let (first_rows, first_bytes) = {
+        let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
+        let rows = reader.rows();
+        assert_eq!(reader.read_x(rows - 1, 1).unwrap()[0], 20e-6);
+        (rows, std::fs::metadata(&segment).unwrap().len())
+    };
+
+    QUOTA.with(|cell| cell.set(Some(first_bytes + CLOSING_RESERVE + 256 * 1024)));
+    let ended = crate::commands::run(
+        args(&["--resume", state.to_str().unwrap()]),
+        &Config::default(),
+        false,
+        true,
+    );
+    QUOTA.with(|cell| cell.set(None));
+    let error = ended.expect_err("the resumed run stops when its storage fills");
+    assert_eq!(error.exit_code(), ExitCode::StoppedStorageFull, "{error}");
+
+    let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
+    assert!(matches!(
+        reader.state(),
+        SegmentState::Complete {
+            status: RunStatus::Stopped(StopReason::DiskFull),
+            ..
+        }
+    ));
+    let rows = reader.rows();
+    assert!(rows > first_rows, "{rows} rows kept after {first_rows}");
+    assert_eq!(reader.read_x(first_rows - 1, 1).unwrap()[0], 20e-6);
+    let _ = std::fs::remove_dir_all(&dir);
+}

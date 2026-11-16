@@ -866,171 +866,44 @@ pub(super) fn run_transient(
             Ok(accepted)
         }
     } else if checkpointing {
-        // Segmented integration: restore the saved state (when resuming),
-        // run to this segment's stop time, and persist the new state (when
-        // checkpointing). The core validates the netlist fingerprint, so a
-        // checkpoint can never silently continue a different circuit.
-        enum SegmentResult {
-            Full(Box<rspice_core::engine::TransientResult>),
-            Compressed(Box<rspice_core::engine::TransientResultCompressed>),
-        }
-
+        // Segmented integration: restore the saved state (when resuming), run this segment into
+        // a results store, and persist the new state (when checkpointing). The core validates
+        // the netlist fingerprint, so a checkpoint can never silently continue a different
+        // circuit.
         let progress_abort = crate::abort::ProgressAbort::new(&pb);
-        let run = if let Some(ref resume_path) = resume_path {
-            super::restart::protect_input(resume_path, checkpoint_path.as_deref())?;
-            let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
-            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
+        let resumed = match resume_path.as_deref() {
+            Some(resume_path) => Some(load_resume_checkpoint(
+                ctx,
                 resume_path,
-                checkpoint_limit,
-                checkpoint_limit,
+                checkpoint_path.as_deref(),
+                startup_mode,
                 &progress_abort,
-            )
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some(format!(
-                    "Transient checkpoint load ({})",
-                    resume_path.display()
-                )),
-            })?;
-            if checkpoint.startup_mode() != startup_mode {
-                return Err(CliError::SimulationError {
-                    message: format!(
-                        "checkpoint startup mode {:?} does not match the selected .TRAN startup mode {:?}",
-                        checkpoint.startup_mode(),
-                        startup_mode
-                    ),
-                    analysis: Some("Transient".to_string()),
-                });
-            }
-            if ctx.compress {
-                ctx.engine
-                    .run_tran_resume_compressed_with_abort(
-                        ctx.netlist,
-                        &checkpoint,
-                        tstop,
-                        internal_max_step,
-                        compression_config(),
-                        &progress_abort,
-                    )
-                    .map(|(result, checkpoint)| {
-                        (SegmentResult::Compressed(Box::new(result)), checkpoint)
-                    })
-            } else {
-                ctx.engine
-                    .run_tran_resume_with_abort(
-                        ctx.netlist,
-                        &checkpoint,
-                        tstop,
-                        internal_max_step,
-                        &progress_abort,
-                    )
-                    .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
-            }
-        } else if interrupted {
+            )?),
+            None => None,
+        };
+        let segment = match &resumed {
+            Some(checkpoint) => super::stored_transient::Segment::Resumed(checkpoint),
             // A stop before the deck's own interrupts the deck's run there, as a checkpoint
             // taken mid-run does: the run keeps the deck's window, so a resume to the deck's
             // stop takes every step the run takes with a breakpoint at the interruption.
-            let run = ctx
-                .engine
-                .run_tran_checkpointed_at_with_startup_mode_and_abort(
-                    ctx.netlist,
-                    (deck_stop, internal_max_step),
-                    tstop,
-                    startup_mode,
-                    &progress_abort,
-                );
-            match run {
-                Ok((result, end)) if ctx.compress => ctx
-                    .engine
-                    .compress_transient_result_with_abort(
-                        ctx.netlist,
-                        &result,
-                        &compression_config(),
-                        &progress_abort,
-                    )
-                    .map(|compressed| (SegmentResult::Compressed(Box::new(compressed)), end)),
-                Ok((result, end)) => Ok((SegmentResult::Full(Box::new(result)), end)),
-                Err(error) => Err(error),
-            }
-        } else if ctx.compress {
-            ctx.engine
-                .run_tran_checkpointed_compressed_with_startup_mode_and_abort(
-                    ctx.netlist,
-                    tstop,
-                    internal_max_step,
-                    startup_mode,
-                    compression_config(),
-                    &progress_abort,
-                )
-                .map(|(result, checkpoint)| {
-                    (SegmentResult::Compressed(Box::new(result)), checkpoint)
-                })
-        } else {
-            ctx.engine
-                .run_tran_checkpointed_with_startup_mode_and_abort(
-                    ctx.netlist,
-                    tstop,
-                    internal_max_step,
-                    startup_mode,
-                    &progress_abort,
-                )
-                .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
+            None if interrupted => super::stored_transient::Segment::Interrupted {
+                tstop: deck_stop,
+                max_step: internal_max_step,
+            },
+            None => super::stored_transient::Segment::Whole,
         };
+        let stored = super::stored_transient::run_segment(
+            ctx,
+            segment,
+            (tstop, tstep, internal_max_step),
+            startup_mode,
+            &progress_abort,
+        );
         pb.finish_and_clear();
-        match run {
-            Ok((segment, end)) => {
-                let result = match segment {
-                    SegmentResult::Full(result) => *result,
-                    SegmentResult::Compressed(compressed) => {
-                        if !ctx.quiet {
-                            crate::console::line(format_args!(
-                                "  Compressed segment: {} of {} accepted points ({:.1}x)",
-                                compressed.time.len(),
-                                compressed.input_points,
-                                compressed.compression_ratio
-                            ))?;
-                            crate::console::line(format_args!(
-                                "  {}",
-                                describe_compression_error(&compressed.compression_report)
-                            ))?;
-                        }
-                        compression_report = Some(compressed.compression_report.clone());
-                        post_results = Some(compressed.post_results.clone());
-                        expand_compressed(*compressed, "checkpoint segment")?
-                    }
-                };
-                match (&end, checkpoint_path.as_deref()) {
-                    (rspice_core::engine::TransientEnd::Checkpoint(checkpoint), Some(path)) => {
-                        super::restart::publish_checkpoint(
-                            ctx,
-                            checkpoint,
-                            path,
-                            rspice_core::engine::TransientCheckpointEncoding::Unpacked,
-                            &progress_abort,
-                        )?;
-                        if !ctx.quiet {
-                            crate::console::line(format_args!(
-                                "  Checkpoint saved (t={:.6e}s): {}",
-                                checkpoint.time,
-                                path.display()
-                            ))?;
-                        }
-                    }
-                    // A finished run has nothing left to resume.
-                    (rspice_core::engine::TransientEnd::Finished(finish), Some(path)) => {
-                        if !ctx.quiet {
-                            crate::console::line(format_args!(
-                                "  No checkpoint saved to {}: {finish}, which completes the run",
-                                path.display()
-                            ))?;
-                        }
-                    }
-                    (_, None) => {}
-                }
-                Ok(result)
-            }
-            Err(e) => Err(e),
-        }
+        let (stored, end) = stored?;
+        publish_segment_end(ctx, &end, checkpoint_path.as_deref(), &progress_abort)?;
+        let compression = ctx.compress.then(compression_config);
+        return finish_stored_transient(ctx, stored, (tstart, tstop), store, compression.as_ref());
     } else if ctx.compress {
         // Compression decides what the published waveform keeps, not where the rows live while
         // the run goes: they go to the store like any other run's, and the compressed output is
@@ -1129,6 +1002,80 @@ pub(super) enum TransientStore {
 /// the store, and its post-processing products are the ones evaluated on that whole trajectory.
 /// A run its storage stopped publishes what it kept uncompressed, since the stop is what it
 /// reports.
+/// Load the checkpoint `--resume` names, refusing one whose startup mode is not the deck's.
+fn load_resume_checkpoint(
+    ctx: &RunContext<'_>,
+    resume_path: &std::path::Path,
+    checkpoint_path: Option<&std::path::Path>,
+    startup_mode: rspice_core::engine::TransientStartupMode,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<rspice_core::engine::TransientCheckpoint, CliError> {
+    super::restart::protect_input(resume_path, checkpoint_path)?;
+    let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
+    let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
+        resume_path,
+        checkpoint_limit,
+        checkpoint_limit,
+        abort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some(format!(
+            "Transient checkpoint load ({})",
+            resume_path.display()
+        )),
+    })?;
+    if checkpoint.startup_mode() != startup_mode {
+        return Err(CliError::SimulationError {
+            message: format!(
+                "checkpoint startup mode {:?} does not match the selected .TRAN startup mode {:?}",
+                checkpoint.startup_mode(),
+                startup_mode
+            ),
+            analysis: Some("Transient".to_string()),
+        });
+    }
+    Ok(checkpoint)
+}
+
+/// Write the checkpoint a segment ended with to `--checkpoint`'s file, or say why there is none.
+fn publish_segment_end(
+    ctx: &RunContext<'_>,
+    end: &rspice_core::engine::TransientEnd,
+    checkpoint_path: Option<&std::path::Path>,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(), CliError> {
+    match (end, checkpoint_path) {
+        (rspice_core::engine::TransientEnd::Checkpoint(checkpoint), Some(path)) => {
+            super::restart::publish_checkpoint(
+                ctx,
+                checkpoint,
+                path,
+                rspice_core::engine::TransientCheckpointEncoding::Unpacked,
+                abort,
+            )?;
+            if !ctx.quiet {
+                crate::console::line(format_args!(
+                    "  Checkpoint saved (t={:.6e}s): {}",
+                    checkpoint.time,
+                    path.display()
+                ))?;
+            }
+        }
+        // A finished run has nothing left to resume.
+        (rspice_core::engine::TransientEnd::Finished(finish), Some(path)) => {
+            if !ctx.quiet {
+                crate::console::line(format_args!(
+                    "  No checkpoint saved to {}: {finish}, which completes the run",
+                    path.display()
+                ))?;
+            }
+        }
+        (_, None) => {}
+    }
+    Ok(())
+}
+
 fn finish_stored_transient(
     ctx: &RunContext<'_>,
     mut stored: super::stored_transient::StoredTransient,

@@ -511,6 +511,22 @@ impl<'a> RunContext<'a> {
         })
     }
 
+    /// The path the next [`RunContext::resolve_output`] under `tag` resolves to, without taking
+    /// the identity it publishes under.
+    pub(super) fn next_output_path(&self, tag: &str) -> Option<PathBuf> {
+        let path = self.output.clone()?;
+        if let Some(state) = self.transient_state.borrow().as_ref() {
+            return Some(self.namespaced_artifact_path(path, &state.dataset()));
+        }
+        let planned = self
+            .planned_output_ids
+            .borrow()
+            .get(tag)
+            .and_then(|queue| queue.front().map(|id| id.tag()));
+        let qualified_tag = planned.unwrap_or_else(|| tag.to_string());
+        Some(self.namespaced_artifact_path(path, &qualified_tag))
+    }
+
     /// The canonical identity the next artifact under `tag` publishes with,
     /// and the namespace component its path takes.
     ///
