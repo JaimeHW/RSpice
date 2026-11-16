@@ -359,9 +359,16 @@ fn default_transient(
     else {
         return Err(command_error(line, "transient runner received another analysis kind").into());
     };
-    let maximum_step =
-        crate::analysis::transient::resolve_transient_maximum_step(*step, *stop, *start, *max_step)
-            .map_err(|error| command_error(line, error.to_string()))?;
+    // The dialect's ceiling, as the deck's own run, a run a `stop` interrupts and the command
+    // line take it: the same card runs the same steps whichever of them runs it.
+    let maximum_step = crate::analysis::transient::resolve_dialect_transient_maximum_step(
+        engine.config().spice_dialect,
+        *step,
+        *stop,
+        *start,
+        *max_step,
+    )
+    .map_err(|error| command_error(line, error.to_string()))?;
     engine
         .run_tran_with_startup_mode_and_abort(
             netlist,

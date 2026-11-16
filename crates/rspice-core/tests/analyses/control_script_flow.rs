@@ -209,7 +209,8 @@ fn resume_with_no_interrupted_run_runs_the_deck() {
 /// does (dctran.c's `resume:` label keeps the step, the order and the
 /// integrator history): the stop lands on a source corner the run steps to
 /// anyway, so stopping there and resuming takes every step the run takes
-/// without a stop, to the bit.
+/// without a stop, to the bit. Both take the dialect's maximum step for the
+/// card, which gives no TMAX.
 #[test]
 fn a_stopped_and_resumed_transient_takes_the_steps_of_the_uninterrupted_run() {
     let deck = |control: &str| {
@@ -237,10 +238,8 @@ fn a_stopped_and_resumed_transient_takes_the_steps_of_the_uninterrupted_run() {
         };
         (bits(&result.time), bits(&result.voltages[node]))
     };
-    let whole = transient(&deck("tran 10u 2ms 0 10u uic\n"));
-    let resumed = transient(&deck(
-        "stop when time = 0.5ms\ntran 10u 2ms 0 10u uic\nresume\n",
-    ));
-    assert_eq!(resumed.0.len(), 211, "accepted points");
+    let whole = transient(&deck("tran 10u 2ms uic\n"));
+    let resumed = transient(&deck("stop when time = 0.5ms\ntran 10u 2ms uic\nresume\n"));
+    assert_eq!(resumed.0.len(), 1033, "accepted points");
     assert_eq!(resumed, whole);
 }
