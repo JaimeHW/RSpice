@@ -1,5 +1,7 @@
 //! Immutable evaluation of the specifications sealed into a prepared run.
 
+use std::borrow::Borrow;
+
 use rspice_vocabulary::product::{AnalysisInstanceId, SpecificationId};
 
 use crate::analysis_result::AnalysisResult;
@@ -152,15 +154,19 @@ impl SpecificationVerdict {
     }
 }
 
-struct Candidate {
-    value: Option<f64>,
-    measurement_passed: bool,
-    signed_margin: Option<f64>,
+/// One retained value that answers a requirement, as the judge reads it.
+pub(crate) struct Candidate {
+    pub(crate) value: Option<f64>,
+    pub(crate) measurement_passed: bool,
+    pub(crate) signed_margin: Option<f64>,
     source_instance_id: AnalysisInstanceId,
-    is_monte_carlo: bool,
+    pub(crate) is_monte_carlo: bool,
     /// Which family member produced this candidate, for evidence that came
     /// from one. Analysis-level measurements carry `None`.
-    member: Option<FamilyMemberId>,
+    pub(crate) member: Option<FamilyMemberId>,
+    /// The position, in the evidence set the judge was handed, of the
+    /// analysis this candidate came from.
+    pub(crate) analysis: usize,
 }
 
 impl PreparedSpecification {
@@ -241,17 +247,28 @@ fn evaluate_specification<'a, W: AsRef<RetainedWaveform> + 'a>(
     specification: &PreparedSpecification,
     analyses: impl IntoIterator<Item = &'a AnalysisResult<W>>,
 ) -> SpecificationVerdict {
+    let mut candidates = candidates_for(specification, analyses);
+    verdict_over(specification, &mut candidates)
+}
+
+/// The verdict one requirement's candidates answer to.
+///
+/// Sorts the candidates worst first, as [`status_of`] does, so a caller that
+/// placed them itself reads the worst one where the verdict found it.
+pub(crate) fn verdict_over<C: Borrow<Candidate>>(
+    specification: &PreparedSpecification,
+    candidates: &mut [C],
+) -> SpecificationVerdict {
     let spec = specification.entry();
     let definition = specification.definition();
     let specification_id = definition.map(|definition| definition.id);
     let requirement_key = definition.map(|definition| definition.requirement_key.clone());
-    let mut candidates = candidates_for(specification, analyses);
     let evidence_count = u64::try_from(candidates.len()).unwrap_or(u64::MAX);
     let passing_evidence_count = definition.map_or(0, |_| {
         u64::try_from(
             candidates
                 .iter()
-                .filter(|candidate| candidate_is_passing(candidate))
+                .filter(|candidate| candidate_is_passing((*candidate).borrow()))
                 .count(),
         )
         .unwrap_or(u64::MAX)
@@ -271,8 +288,8 @@ fn evaluate_specification<'a, W: AsRef<RetainedWaveform> + 'a>(
         };
     }
 
-    let status = status_of(&mut candidates);
-    let worst = &candidates[0];
+    let status = status_of(candidates);
+    let worst: &Candidate = candidates[0].borrow();
     SpecificationVerdict {
         specification_id,
         requirement_key,
@@ -287,21 +304,26 @@ fn evaluate_specification<'a, W: AsRef<RetainedWaveform> + 'a>(
     }
 }
 
-fn candidates_for<'a, W: AsRef<RetainedWaveform> + 'a>(
+/// Every retained value that answers one requirement, in retained order: each
+/// admitted analysis's own measurement, then its family members' values.
+pub(crate) fn candidates_for<'a, W: AsRef<RetainedWaveform> + 'a>(
     specification: &PreparedSpecification,
     analyses: impl IntoIterator<Item = &'a AnalysisResult<W>>,
 ) -> Vec<Candidate> {
     let spec = specification.entry();
     analyses
         .into_iter()
-        .filter_map(|analysis| {
+        .enumerate()
+        .filter_map(|(position, analysis)| {
             let provenance = analysis.provenance()?;
             let source_instance_id = provenance.authored_source_instance_id();
-            specification
-                .admits_analysis(analysis)
-                .then_some((analysis, source_instance_id))
+            specification.admits_analysis(analysis).then_some((
+                position,
+                analysis,
+                source_instance_id,
+            ))
         })
-        .flat_map(|(analysis, source_instance_id)| {
+        .flat_map(|(position, analysis, source_instance_id)| {
             let is_monte_carlo = analysis.analysis_type == AnalysisType::MonteCarlo;
             let make = move |value: Option<f64>,
                              unit: Option<&rspice_core::analysis::MeasurementUnit>,
@@ -323,6 +345,7 @@ fn candidates_for<'a, W: AsRef<RetainedWaveform> + 'a>(
                     source_instance_id,
                     is_monte_carlo,
                     member,
+                    analysis: position,
                 }
             };
 
@@ -363,7 +386,9 @@ fn candidates_for<'a, W: AsRef<RetainedWaveform> + 'a>(
         .collect()
 }
 
-fn candidate_is_passing(candidate: &Candidate) -> bool {
+/// Whether one candidate holds: it was measured, and inside the guarded
+/// limit when it has one.
+pub(crate) fn candidate_is_passing(candidate: &Candidate) -> bool {
     candidate.measurement_passed && candidate.signed_margin.is_none_or(|margin| margin >= 0.0)
 }
 
@@ -375,19 +400,49 @@ fn candidate_is_passing(candidate: &Candidate) -> bool {
 /// non-Monte-Carlo candidates, once the yield gate has answered for the trials
 /// — and a second copy of this ordering is how the gate would come to disagree
 /// with the verdict it was handed.
-fn status_of(candidates: &mut [Candidate]) -> SpecificationVerdictStatus {
+pub(crate) fn status_of<C: Borrow<Candidate>>(candidates: &mut [C]) -> SpecificationVerdictStatus {
     candidates.sort_by(|left, right| {
+        let (left, right) = (left.borrow(), right.borrow());
         left.measurement_passed
             .cmp(&right.measurement_passed)
             .then_with(|| compare_margin(left.signed_margin, right.signed_margin))
     });
-    match candidates.first() {
+    match candidates
+        .first()
+        .map(|worst| -> &Candidate { worst.borrow() })
+    {
         None => SpecificationVerdictStatus::MissingEvidence,
         Some(worst) if !worst.measurement_passed => SpecificationVerdictStatus::MeasurementFailure,
         Some(worst) if worst.signed_margin.is_none_or(|margin| margin >= 0.0) => {
             SpecificationVerdictStatus::Pass
         }
         Some(_) => SpecificationVerdictStatus::BoundFailure,
+    }
+}
+
+/// The Monte Carlo trials among one requirement's candidates, as the yield
+/// gate counts them: every trial, and the ones that hold.
+///
+/// One count for the gate and for every surface that states a yield, so a
+/// yield shown beside a limit is the population the sign-off divides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TrialCount {
+    pub(crate) passing: usize,
+    pub(crate) total: usize,
+}
+
+pub(crate) fn trial_count<C: Borrow<Candidate>>(candidates: &[C]) -> TrialCount {
+    let trials = || {
+        candidates
+            .iter()
+            .map(|candidate| -> &Candidate { candidate.borrow() })
+            .filter(|candidate| candidate.is_monte_carlo)
+    };
+    TrialCount {
+        passing: trials()
+            .filter(|candidate| candidate_is_passing(candidate))
+            .count(),
+        total: trials().count(),
     }
 }
 
@@ -401,64 +456,64 @@ pub fn acceptance_is_blocked<'a, W: AsRef<RetainedWaveform> + 'a>(
         .iter()
         .zip(verdicts)
         .any(|(specification, verdict)| {
-            let definition = specification.definition();
-            if definition.is_some_and(|definition| {
-                definition.waiver.is_some() || definition.role != SpecificationRole::Blocking
-            }) {
-                return false;
-            }
-
-            let status_blocks = |status| match status {
-                SpecificationVerdictStatus::Pass => false,
-                SpecificationVerdictStatus::MissingEvidence => {
-                    policy.missing_measurement == MissingMeasurementPolicy::FailClosed
-                }
-                SpecificationVerdictStatus::BoundFailure
-                | SpecificationVerdictStatus::MeasurementFailure => {
-                    !(policy.nominal_failure == NominalFailurePolicy::RecordDisposition
-                        && matches!(specification.entry().scope, SpecPointScope::Nominal))
-                }
-            };
-
-            if matches!(
-                policy.monte_carlo,
-                MonteCarloSpecificationGate::YieldAtLeast { .. }
-            ) && definition.is_some()
-            {
-                let mut candidates = candidates_for(specification, analyses.clone());
-                let trials = candidates
-                    .iter()
-                    .filter(|candidate| candidate.is_monte_carlo)
-                    .count();
-                if trials > 0 {
-                    let passing = candidates
-                        .iter()
-                        .filter(|candidate| {
-                            candidate.is_monte_carlo && candidate_is_passing(candidate)
-                        })
-                        .count();
-                    // Through the gate's own predicate, so the row the registry
-                    // draws and the sign-off this decides cannot disagree about
-                    // the same population.
-                    let yield_blocks = !policy.monte_carlo.clears(
-                        u64::try_from(passing).unwrap_or(u64::MAX),
-                        u64::try_from(trials).unwrap_or(u64::MAX),
-                    );
-                    // The yield gate answers for the trials, and only for
-                    // them. A specification is routinely governed by corner
-                    // and parametric evidence as well, and a passing yield
-                    // says nothing about that — so this is the OR of the two,
-                    // never the first one that had an answer. Returning here
-                    // read a failed corner as "not blocked".
-                    candidates.retain(|candidate| !candidate.is_monte_carlo);
-                    let other_blocks =
-                        !candidates.is_empty() && status_blocks(status_of(&mut candidates));
-                    return yield_blocks || other_blocks;
-                }
-            }
-
-            status_blocks(verdict.status)
+            blocks_acceptance(specification, policy, verdict, analyses.clone())
         })
+}
+
+/// Whether one requirement's verdict keeps the run from being accepted.
+pub(crate) fn blocks_acceptance<'a, W: AsRef<RetainedWaveform> + 'a>(
+    specification: &PreparedSpecification,
+    policy: &SpecificationPolicy,
+    verdict: &SpecificationVerdict,
+    analyses: impl IntoIterator<Item = &'a AnalysisResult<W>>,
+) -> bool {
+    let definition = specification.definition();
+    if definition.is_some_and(|definition| {
+        definition.waiver.is_some() || definition.role != SpecificationRole::Blocking
+    }) {
+        return false;
+    }
+
+    let status_blocks = |status| match status {
+        SpecificationVerdictStatus::Pass => false,
+        SpecificationVerdictStatus::MissingEvidence => {
+            policy.missing_measurement == MissingMeasurementPolicy::FailClosed
+        }
+        SpecificationVerdictStatus::BoundFailure
+        | SpecificationVerdictStatus::MeasurementFailure => {
+            !(policy.nominal_failure == NominalFailurePolicy::RecordDisposition
+                && matches!(specification.entry().scope, SpecPointScope::Nominal))
+        }
+    };
+
+    if matches!(
+        policy.monte_carlo,
+        MonteCarloSpecificationGate::YieldAtLeast { .. }
+    ) && definition.is_some()
+    {
+        let mut candidates = candidates_for(specification, analyses);
+        let count = trial_count(&candidates);
+        if count.total > 0 {
+            // Through the gate's own predicate, so the row the registry
+            // draws and the sign-off this decides cannot disagree about
+            // the same population.
+            let yield_blocks = !policy.monte_carlo.clears(
+                u64::try_from(count.passing).unwrap_or(u64::MAX),
+                u64::try_from(count.total).unwrap_or(u64::MAX),
+            );
+            // The yield gate answers for the trials, and only for
+            // them. A specification is routinely governed by corner
+            // and parametric evidence as well, and a passing yield
+            // says nothing about that — so this is the OR of the two,
+            // never the first one that had an answer. Returning here
+            // read a failed corner as "not blocked".
+            candidates.retain(|candidate| !candidate.is_monte_carlo);
+            let other_blocks = !candidates.is_empty() && status_blocks(status_of(&mut candidates));
+            return yield_blocks || other_blocks;
+        }
+    }
+
+    status_blocks(verdict.status)
 }
 
 fn signed_margin(minimum: Option<f64>, maximum: Option<f64>, value: f64) -> Option<f64> {

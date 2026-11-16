@@ -95,6 +95,8 @@ pub mod transfer_function;
 #[cfg(feature = "engine-evidence")]
 pub mod transient_checkpoint;
 pub mod validation;
+#[cfg(feature = "engine-evidence")]
+pub mod verification;
 pub mod viewer_catalog;
 pub mod visualization_document;
 pub mod visualization_raster;

@@ -46,7 +46,7 @@ pub struct AnalysisResultPvtPoint {
 }
 
 /// The kind of run-set axis a swept value was set by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisResultSweptAxis {
     /// A design variable, written into the point's deck as a `.param` card.
@@ -61,7 +61,7 @@ pub enum AnalysisResultSweptAxis {
 /// Text, not a number, because the run set's value is what the deck was given
 /// and may be an expression; a number parsed back from it would name a value
 /// nobody wrote.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisResultSweptValue {
     pub axis: AnalysisResultSweptAxis,
