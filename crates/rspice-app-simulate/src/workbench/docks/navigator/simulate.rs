@@ -217,6 +217,7 @@ const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
         SimulationPage::Specifications => WorkbenchIcon::Target,
         SimulationPage::RunSet => WorkbenchIcon::Grid,
         SimulationPage::Models => WorkbenchIcon::Models,
+        SimulationPage::ConnectRules => WorkbenchIcon::Compare,
         SimulationPage::Solver => WorkbenchIcon::Settings,
         SimulationPage::Save => WorkbenchIcon::Save,
     }
@@ -257,6 +258,15 @@ pub(super) fn simulate_nav_meta(
         SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
         SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
         SimulationPage::Models => count(model.sim_setup.model_bindings.len()),
+        // The rule set the run selects, as CONNECTRULES names it; nothing
+        // while the design's own default converts.
+        SimulationPage::ConnectRules => model
+            .sim_setup
+            .options
+            .connect_rules
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
         // The active numerical policy, not a count — the tree's job is to say
         // what each route currently holds, and for the solver that is which
         // preset the effective options match.

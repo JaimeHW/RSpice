@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod checkpoint_exchange;
 pub mod lifecycle;
 mod output_evidence;
+mod page_connect_rules;
 mod page_excitations;
 pub mod page_kit;
 pub mod page_models;

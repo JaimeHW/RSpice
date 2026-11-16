@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -108,6 +108,7 @@ impl SimulateCommand {
         Self::Page(SimulationPage::Specifications),
         Self::Page(SimulationPage::RunSet),
         Self::Page(SimulationPage::Models),
+        Self::Page(SimulationPage::ConnectRules),
         Self::Page(SimulationPage::Solver),
         Self::Page(SimulationPage::Save),
         Self::Verify(VerificationPage::Yield),
@@ -142,6 +143,7 @@ impl SimulateCommand {
             }
             Self::Page(SimulationPage::RunSet) => CommandKey::new("simulation-run-set"),
             Self::Page(SimulationPage::Models) => CommandKey::new("simulation-models"),
+            Self::Page(SimulationPage::ConnectRules) => CommandKey::new("simulation-connect-rules"),
             Self::Page(SimulationPage::Solver) => CommandKey::new("simulation-solver"),
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
             Self::Verify(VerificationPage::Yield) => CommandKey::new("yield"),
@@ -269,6 +271,7 @@ const fn simulation_page_label(page: SimulationPage) -> &'static str {
         SimulationPage::Specifications => "Requirements & specifications",
         SimulationPage::RunSet => "PVT, sweeps & variation",
         SimulationPage::Models => "Models & sections",
+        SimulationPage::ConnectRules => "Connect rules",
         SimulationPage::Solver => "Simulator options",
         SimulationPage::Save => "Save, streaming & retention policy",
     }

@@ -646,6 +646,7 @@ const SETUP_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Page(SimulationPage::Specifications)).access('R'),
     simulate(SimulateCommand::Page(SimulationPage::RunSet)).access('V'),
     simulate(SimulateCommand::Page(SimulationPage::Models)).access('M'),
+    simulate(SimulateCommand::Page(SimulationPage::ConnectRules)).access('N'),
     simulate(SimulateCommand::Page(SimulationPage::Solver)).access('S'),
     simulate(SimulateCommand::Page(SimulationPage::Save)).access('P'),
     Separator,

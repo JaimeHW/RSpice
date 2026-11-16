@@ -13,7 +13,7 @@ pub struct StudioBaseline {
     pub fingerprint: &'static str,
 }
 
-pub const STUDIO_BASELINES: [StudioBaseline; 9] = [
+pub const STUDIO_BASELINES: [StudioBaseline; 10] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
@@ -50,9 +50,14 @@ pub const STUDIO_BASELINES: [StudioBaseline; 9] = [
         fingerprint: "a12633e9281a251972c64ef6e998319fca1660e03b21158419c3a0da9f34496c",
     },
     StudioBaseline {
+        name: "studio-connect-rules",
+        page: SimulationPage::ConnectRules,
+        fingerprint: "d0768dfcb656207f67c5919fff6a61c30b819b7b11ba9ed181911a58ffc0ba66",
+    },
+    StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "0965c98875e854f630c5698a9abb7570c6e3a253d4e27a0394111fc79fbce4c8",
+        fingerprint: "e228fd07b73d47c60aee93efa4c4bc5262af52b40ad9f4808fc493ef38c69c2f",
     },
     StudioBaseline {
         name: "studio-save",

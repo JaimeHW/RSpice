@@ -29,6 +29,7 @@ fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_ident
         (SimulationPage::Specifications, "simulation-specifications"),
         (SimulationPage::RunSet, "simulation-run-set"),
         (SimulationPage::Models, "simulation-models"),
+        (SimulationPage::ConnectRules, "simulation-connect-rules"),
         (SimulationPage::Solver, "simulation-solver"),
         (SimulationPage::Save, "simulation-save-policy"),
     ];

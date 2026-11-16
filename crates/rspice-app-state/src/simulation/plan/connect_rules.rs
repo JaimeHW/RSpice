@@ -85,15 +85,17 @@ impl ConnectRuleColumn {
     }
 }
 
-/// What a shipped module converts, as the grid states it.
+/// What a shipped module converts, as the grid and the converter report
+/// state it: between the analog side (`A`) and a logic (`D`) or real (`R`)
+/// port.
 pub fn conversion(module: &str) -> &'static str {
     match module {
-        "a2d" => "electrical \u{2192} logic",
-        "d2a" => "logic \u{2192} electrical",
-        "bidir" => "electrical \u{2194} logic",
-        "r2e" => "real \u{2192} electrical",
-        "e2r" => "electrical \u{2192} real",
-        "rbidir" => "electrical \u{2194} real",
+        "a2d" => "A\u{2192}D",
+        "d2a" => "D\u{2192}A",
+        "bidir" => "A\u{2194}D",
+        "r2e" => "R\u{2192}A",
+        "e2r" => "A\u{2192}R",
+        "rbidir" => "A\u{2194}R",
         _ => "",
     }
 }
@@ -127,12 +129,16 @@ pub fn shipped_statements(set: &str) -> Option<Vec<RunConnectStatement>> {
         .map(|(_, statements)| statements.clone())
 }
 
-/// Every shipped rule set's name, in the order a list offers them.
-pub fn shipped_set_names() -> Vec<String> {
-    rspice_veriloga::connect::library::shipped_rule_sets()
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect()
+/// Every shipped rule set's name, in the order a list offers them. Listed
+/// once per process: a page offers them every frame.
+pub fn shipped_set_names() -> &'static [String] {
+    static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        rspice_veriloga::connect::library::shipped_rule_sets()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    })
 }
 
 /// The statements of block `name` in Verilog-AMS `source`, each with the
@@ -260,7 +266,7 @@ pub fn cell(statement: &RunConnectStatement, column: ConnectRuleColumn) -> Optio
     if column == ConnectRuleColumn::Supply {
         return statement.supply.as_ref().map(|supply| CellText {
             text: match supply {
-                RunConnectSupply::Volts(volts) => format!("{} V", format_si_value(*volts)),
+                RunConnectSupply::Volts(volts) => with_unit(*volts, "V"),
                 RunConnectSupply::Net(net) => net.clone(),
             },
             from_base: statement.supply_from_base,
@@ -285,9 +291,22 @@ fn value_text(name: &str, value: f64) -> String {
         // A percentage rounded to nine places, so 0.7 reads as 70% rather
         // than as the binary product's last digits.
         "fthi" | "ftlo" => format!("{}%", format_si_value((value * 100.0 * 1e9).round() / 1e9)),
-        "vthi" | "vtlo" => format!("{} V", format_si_value(value)),
-        "rhi" | "rlo" | "rout" => format!("{} \u{3a9}", format_si_value(value)),
-        _ => format!("{}s", format_si_value(value)),
+        "vthi" | "vtlo" => with_unit(value, "V"),
+        "rhi" | "rlo" | "rout" => with_unit(value, "\u{3a9}"),
+        _ => with_unit(value, "s"),
+    }
+}
+
+/// `value` as the number, a space, then its SI prefix and `unit`: `1.2 V`,
+/// `100 ps`, `40 \u{3a9}`.
+fn with_unit(value: f64, unit: &str) -> String {
+    let text = format_si_value(value);
+    match text
+        .find(|c: char| c.is_ascii_alphabetic())
+        .filter(|at| !text[*at..].starts_with('e'))
+    {
+        Some(at) => format!("{} {}{unit}", &text[..at], &text[at..]),
+        None => format!("{text} {unit}"),
     }
 }
 
@@ -403,8 +422,11 @@ fn set_parameter(statement: &mut RunConnectStatement, name: &str, value: f64) {
     });
 }
 
+/// A number with an optional SI suffix, read with or without a space
+/// before the suffix, as a cell shows it (`100 p`).
 fn parse_number(text: &str) -> Result<f64, String> {
-    parse_si_value(text).map_err(|_| format!("'{text}' is not a number"))
+    let joined: String = text.split_whitespace().collect();
+    parse_si_value(&joined).map_err(|_| format!("'{text}' is not a number"))
 }
 
 fn parse_volts(text: &str) -> Result<f64, String> {
@@ -505,7 +527,7 @@ mod tests {
                 ConnectRuleColumn::Rise
             )
             .map(|cell| cell.text),
-            Some("100ps".to_owned())
+            Some("100 ps".to_owned())
         );
     }
 
@@ -578,7 +600,7 @@ mod tests {
         );
         assert_eq!(
             cell(d2a, ConnectRuleColumn::Rise).map(|cell| cell.text),
-            Some("1ns".to_owned())
+            Some("1 ns".to_owned())
         );
         assert!(selects(&moved, "r2e"));
         assert!(moved.problems().is_empty(), "{:?}", moved.problems());

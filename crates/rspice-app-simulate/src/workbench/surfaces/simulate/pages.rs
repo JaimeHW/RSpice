@@ -61,6 +61,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, page: Simulati
         SimulationPage::Specifications => super::page_specs::show(ui, cx),
         SimulationPage::RunSet => super::page_runset::show(ui, cx),
         SimulationPage::Models => super::page_models::show(ui, cx),
+        SimulationPage::ConnectRules => super::page_connect_rules::show(ui, cx),
         SimulationPage::Solver => super::page_solver::show(ui, cx),
         SimulationPage::Save => super::page_save::show(ui, cx),
     });
@@ -395,6 +396,7 @@ fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
         | SimulationPage::Specifications
         | SimulationPage::RunSet
         | SimulationPage::Models
+        | SimulationPage::ConnectRules
         | SimulationPage::Solver
         | SimulationPage::Save => None,
     }
