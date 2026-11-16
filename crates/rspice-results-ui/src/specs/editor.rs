@@ -29,7 +29,7 @@ pub enum ComparisonDraftKind {
 }
 
 impl ComparisonDraftKind {
-    const ALL: [Self; 5] = [
+    pub const ALL: [Self; 5] = [
         Self::Tracked,
         Self::Minimum,
         Self::Maximum,
@@ -37,7 +37,7 @@ impl ComparisonDraftKind {
         Self::EqualWithin,
     ];
 
-    const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Tracked => "Track only",
             Self::Minimum => "At least",
@@ -226,6 +226,63 @@ impl SpecDraft {
     }
 }
 
+/// The authoring aids of one draft: the measurement-card builder, while the
+/// draft defines its own measurement, and the reference-result picker.
+/// Returns whether either changed the draft — a card built into its
+/// expression, or a reference chosen or cleared — so a host that commits each
+/// change knows to.
+pub fn measurement_authoring(
+    ui: &mut Ui,
+    draft: &mut SpecDraft,
+    start_reference: &mut impl FnMut(
+        &egui::Context,
+        Option<&MeasurementReferenceSource>,
+    ) -> Result<Box<dyn ReferenceExchange>, String>,
+) -> bool {
+    let mut changed = false;
+    if draft.define_measurement {
+        ui.push_id("measurement-builder", |ui| {
+            if draft.measurement_builder.is_none() && ui.button("Build measurement card…").clicked()
+            {
+                let mut builder =
+                    measurement_builder::MeasurementBuilder::for_card(&draft.expression);
+                if let Some(reference) = &draft.measurement_reference {
+                    builder.set_reference_path(&reference.logical_path);
+                }
+                draft.measurement_builder = Some(builder);
+            }
+            let mut close = false;
+            if let Some(builder) = &mut draft.measurement_builder {
+                ui.group(|ui| {
+                    if let Some(card) = builder.show(ui, &draft.measurement) {
+                        draft.expression = card;
+                        changed = true;
+                        close = true;
+                    }
+                    close |= ui.button("Close builder").clicked();
+                });
+            }
+            if close {
+                draft.measurement_builder = None;
+            }
+        });
+    }
+    ui.push_id("measurement-reference", |ui| {
+        if draft
+            .reference_import
+            .show(ui, &mut draft.measurement_reference, start_reference)
+        {
+            changed = true;
+            if let (Some(builder), Some(reference)) =
+                (&mut draft.measurement_builder, &draft.measurement_reference)
+            {
+                builder.set_reference_path(&reference.logical_path);
+            }
+        }
+    });
+    changed
+}
+
 /// Edit local drafts using the host's current producer/scope choices and file picker.
 pub fn show(
     ui: &mut Ui,
@@ -317,32 +374,7 @@ pub fn show(
                         "Reference an existing result; expression text is descriptive."
                     });
                 });
-                if draft.define_measurement {
-                    ui.push_id(("measurement-builder", idx), |ui| {
-                        if draft.measurement_builder.is_none() && ui.button("Build measurement card…").clicked() {
-                            let mut builder = measurement_builder::MeasurementBuilder::for_card(&draft.expression);
-                            if let Some(reference) = &draft.measurement_reference { builder.set_reference_path(&reference.logical_path); }
-                            draft.measurement_builder = Some(builder);
-                        }
-                        let mut close = false;
-                        if let Some(builder) = &mut draft.measurement_builder {
-                            ui.group(|ui| {
-                                if let Some(card) = builder.show(ui, &draft.measurement) {
-                                    draft.expression = card;
-                                    close = true;
-                                }
-                                close |= ui.button("Close builder").clicked();
-                            });
-                        }
-                        if close { draft.measurement_builder = None; }
-                    });
-                }
-                ui.push_id(("measurement-reference", idx), |ui| {
-                    if draft.reference_import.show(ui, &mut draft.measurement_reference, &mut start_reference)
-                        && let (Some(builder), Some(reference)) = (&mut draft.measurement_builder, &draft.measurement_reference) {
-                            builder.set_reference_path(&reference.logical_path);
-                        }
-                });
+                let _ = ui.push_id(idx, |ui| measurement_authoring(ui, draft, &mut start_reference));
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
                     rspice_ui_kit::widgets::Combo::from_id_salt(("spec-comparison", idx))
