@@ -602,39 +602,32 @@ pub(super) fn active_regression_baseline(
         .or(simulate.verification.regression_baseline_run)
 }
 
-pub(super) fn commit_regression_baseline(
-    cx: &mut Cx<'_, SimulateFeature>,
+/// Whether the active plan can take `run_id` as its regression baseline
+/// against the active run, and that plan when it can: the run is retained,
+/// it and the active run are complete runs of the plan, they are two runs,
+/// and they share a measurement or a waveform to compare. The baseline
+/// picker offers exactly the runs this accepts; a commit refuses the rest
+/// with its reason.
+pub(super) fn regression_baseline_eligibility(
+    model: &Model,
     run_id: crate::product::RunId,
-) -> Result<(), String> {
-    let plan_id = cx
-        .model
+) -> Result<crate::product::SimulationPlanId, String> {
+    let plan_id = model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
         .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
-    if !cx
-        .model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .any(|run| run.run_id == run_id)
-    {
-        return Err(format!("retained run {run_id} no longer exists"));
-    }
-    let selected = cx
-        .model
+    let selected = model
         .simulation
         .retained
         .runs
         .iter()
         .find(|run| run.run_id == run_id)
-        .expect("existence checked above");
+        .ok_or_else(|| format!("retained run {run_id} no longer exists"))?;
     validate_regression_run_for_plan(selected, plan_id)
         .map_err(|error| format!("retained run {run_id} is not an eligible baseline: {error}"))?;
-    let candidate = cx
-        .model
+    let candidate = model
         .simulation
         .active_run()
         .ok_or_else(|| "no active candidate dataset is selected".to_owned())?;
@@ -651,6 +644,14 @@ pub(super) fn commit_regression_baseline(
                 .to_owned(),
         );
     }
+    Ok(plan_id)
+}
+
+pub(super) fn commit_regression_baseline(
+    cx: &mut Cx<'_, SimulateFeature>,
+    run_id: crate::product::RunId,
+) -> Result<(), String> {
+    let plan_id = regression_baseline_eligibility(cx.model, run_id)?;
 
     let mut workspace = cx.model.workspace.clone();
     let mut setup = cx.model.sim_setup.clone();

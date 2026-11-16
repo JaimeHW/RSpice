@@ -161,31 +161,27 @@ fn verification_specs(model: &Model) -> Vec<SpecEntry> {
     )
 }
 
+/// The runs the baseline picker offers, newest first: exactly the runs a
+/// commit takes as the active plan's baseline against the active run.
+fn regression_baseline_candidates(model: &Model) -> Vec<(crate::product::RunId, u64, String)> {
+    let mut candidates = model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|run| regression_baseline_eligibility(model, run.run_id).is_ok())
+        .map(|run| (run.run_id, run.id, run.label.clone()))
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+    candidates
+}
+
 fn regression_baseline_picker(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if !cx.state.verification.regression_baseline_picker_open {
         return;
     }
 
-    let active_run = cx.model.simulation.active_run();
-    let active_run_id = active_run.map(|run| run.run_id);
-    let mut candidates = cx
-        .model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .filter(|run| {
-            Some(run.run_id) != active_run_id
-                && validate_regression_run(run).is_ok()
-                && active_run.is_some_and(|candidate| {
-                    validate_regression_run(candidate).is_ok()
-                        && (!derive_regression_checks(run, candidate).is_empty()
-                            || !regression_waveform_pairs(run, candidate).is_empty())
-                })
-        })
-        .map(|run| (run.run_id, run.id, run.label.clone()))
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.1.cmp(&left.1));
+    let candidates = regression_baseline_candidates(cx.model);
 
     let mut selected = cx.state.verification.regression_baseline_picker_selection;
     if selected.is_none_or(|selected| !candidates.iter().any(|row| row.0 == selected)) {

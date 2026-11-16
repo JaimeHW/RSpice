@@ -103,6 +103,60 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     );
 }
 
+/// The baseline picker offers exactly the runs a commit accepts. A complete
+/// run of another plan is sound data but no baseline for this one, so it is
+/// not offered; nor is a run sharing nothing with the active run, nor the
+/// active run itself.
+#[test]
+fn the_baseline_picker_offers_only_the_runs_a_commit_accepts() {
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let source_id = AnalysisInstanceId::new();
+    let measured = |label: &str| {
+        AnalysisResult::new(1, AnalysisType::Ac, label)
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)])
+    };
+    let candidate = sealed_run(4, plan_id, source_id, 2, measured("candidate"));
+    let baseline = sealed_run(3, plan_id, source_id, 2, measured("baseline"));
+    let other_plan = sealed_run(
+        2,
+        crate::product::SimulationPlanId::new(),
+        source_id,
+        2,
+        measured("another plan"),
+    );
+    let unshared = sealed_run(
+        1,
+        plan_id,
+        source_id,
+        2,
+        AnalysisResult::new(1, AnalysisType::Ac, "nothing shared"),
+    );
+    let runs = [&candidate, &baseline, &other_plan, &unshared].map(|run| run.run_id);
+    harness.model.simulation.retained.runs = vec![candidate, baseline, other_plan, unshared].into();
+    assert!(harness.model.simulation.select_run(0));
+
+    let offered = super::regression_baseline_candidates(&harness.model)
+        .into_iter()
+        .map(|(run_id, ..)| run_id)
+        .collect::<Vec<_>>();
+    assert_eq!(offered, [runs[1]]);
+    // A refused commit changes nothing, so every run the picker leaves out is
+    // tried first, then the one it offers.
+    for run_id in runs.iter().filter(|run_id| !offered.contains(run_id)) {
+        assert!(
+            commit_regression_baseline(&mut harness.cx(), *run_id).is_err(),
+            "a run the picker leaves out commits: {run_id}"
+        );
+    }
+    commit_regression_baseline(&mut harness.cx(), offered[0]).expect("the offered run commits");
+}
+
 fn retain_preflight_report(harness: &mut FeatureHarness<SimulateFeature>) {
     let (plan_id, plan_revision) = harness
         .model
