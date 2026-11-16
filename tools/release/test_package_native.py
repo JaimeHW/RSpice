@@ -1,6 +1,8 @@
 import hashlib
 import json
 import os
+import plistlib
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -135,6 +137,71 @@ class NativeReleasePackageTests(unittest.TestCase):
                     )
                 )
             )
+
+    def test_macos_tar_carries_the_application_bundle_and_its_launcher(self) -> None:
+        target = "aarch64-apple-darwin"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, checksum = self.package(root, target)
+            self.assert_checksum(archive, checksum)
+            prefix = f"rspice-{workspace_version()}-{target}"
+            contents = f"{prefix}/RSpice.app/Contents"
+            with tarfile.open(archive, "r:gz") as package:
+                ui_executable = package.getmember(f"{contents}/MacOS/rspice-app")
+                launcher = package.getmember(f"{prefix}/rspice-app")
+                info = plistlib.load(package.extractfile(f"{contents}/Info.plist"))
+                icon = package.extractfile(f"{contents}/Resources/RSpice.icns").read()
+                manifest = json.load(package.extractfile(f"{prefix}/RELEASE-MANIFEST.json"))
+                package.extractall(root / "installed", filter="data")
+            self.assertEqual(ui_executable.mode, 0o755)
+            self.assertEqual(launcher.mode, 0o755)
+            self.assertEqual(info["CFBundleIdentifier"], "app.rspice.RSpice")
+            self.assertEqual(info["CFBundleExecutable"], "rspice-app")
+            self.assertEqual(info["CFBundlePackageType"], "APPL")
+            self.assertEqual(info["CFBundleShortVersionString"], workspace_version())
+            self.assertEqual(info["CFBundleVersion"], workspace_version())
+            self.assertEqual(info["CFBundleIconFile"], "RSpice.icns")
+            self.assertTrue(info["NSHighResolutionCapable"])
+
+            self.assertEqual(icon[:4], b"icns")
+            self.assertEqual(int.from_bytes(icon[4:8], "big"), len(icon))
+            slots, offset = [], 8
+            while offset < len(icon):
+                slot = icon[offset : offset + 4]
+                length = int.from_bytes(icon[offset + 4 : offset + 8], "big")
+                self.assertTrue(icon[offset + 8 :].startswith(b"\x89PNG\r\n\x1a\n"))
+                slots.append(slot)
+                offset += length
+            self.assertEqual(offset, len(icon))
+            self.assertEqual(
+                slots,
+                [b"icp4", b"icp5", b"ic11", b"icp6", b"ic12", b"ic07", b"ic08", b"ic13"],
+            )
+
+            payload_paths = [entry["path"] for entry in manifest["files"]]
+            for required in [
+                "RSpice.app/Contents/Info.plist",
+                "RSpice.app/Contents/MacOS/rspice-app",
+                "RSpice.app/Contents/Resources/RSpice.icns",
+                "rspice-app",
+                "models/spice/SHIPPING.toml",
+                "runtimes/python/runtime-manifest.json",
+            ]:
+                self.assertIn(required, payload_paths)
+
+            if os.name != "nt":
+                installed = root / "installed" / prefix
+                bundled = installed / "RSpice.app" / "Contents" / "MacOS" / "rspice-app"
+                bundled.write_text('#!/bin/sh\nprintf "%s|" "$@"\n', encoding="ascii")
+                bundled.chmod(0o755)
+                opened = subprocess.run(
+                    [str(installed / "rspice-app"), "a", "b c"],
+                    cwd=root,
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                )
+                self.assertEqual(opened.stdout, "a|b c|")
 
     def test_windows_zip_contains_canonical_executable_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

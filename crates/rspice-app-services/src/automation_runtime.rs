@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, TryRecvError},
     thread,
 };
@@ -398,10 +398,29 @@ impl NativeAutomationRuntime {
 fn installed_runtime_root() -> Result<PathBuf, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not resolve the RSpice executable: {error}"))?;
-    let directory = executable
-        .parent()
+    let directory = installation_directory(&executable)
         .ok_or_else(|| "the RSpice executable has no installation directory".to_owned())?;
     Ok(directory.join(RUNTIME_RELATIVE_PATH))
+}
+
+/// The folder RSpice was installed into. On macOS the application runs from
+/// `RSpice.app/Contents/MacOS`, and the installation is the folder holding the bundle,
+/// beside the command-line binary, `models` and `runtimes`.
+fn installation_directory(executable: &Path) -> Option<&Path> {
+    let directory = executable.parent()?;
+    let contents = directory.parent().filter(|_| directory.ends_with("MacOS"));
+    let bundle = contents
+        .filter(|contents| contents.ends_with("Contents"))
+        .and_then(Path::parent)
+        .filter(|bundle| {
+            bundle
+                .extension()
+                .is_some_and(|extension| extension == "app")
+        });
+    match bundle {
+        Some(bundle) => bundle.parent(),
+        None => Some(directory),
+    }
 }
 
 fn runtime_requirement() -> Result<RuntimeRequirement, String> {
@@ -470,5 +489,23 @@ mod tests {
         assert_eq!(requirement.architecture, build.arch);
         assert!(requirement.python.matches(&Version::new(3, 14, 0)));
         assert!(requirement.rspice_api.matches(&Version::new(1, 0, 0)));
+    }
+
+    #[test]
+    fn a_bundled_application_finds_its_runtime_beside_the_bundle() {
+        let installed = Path::new("/opt/rspice-1.0.0");
+        assert_eq!(
+            installation_directory(&installed.join("RSpice.app/Contents/MacOS/rspice-app")),
+            Some(installed)
+        );
+        assert_eq!(
+            installation_directory(&installed.join("rspice-app")),
+            Some(installed)
+        );
+        let unbundled = installed.join("Contents/MacOS");
+        assert_eq!(
+            installation_directory(&unbundled.join("rspice-app")),
+            Some(unbundled.as_path())
+        );
     }
 }

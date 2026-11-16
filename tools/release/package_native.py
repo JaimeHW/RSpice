@@ -9,8 +9,10 @@ import hashlib
 import io
 import json
 import os
+import plistlib
 import re
 import stat
+import struct
 import tarfile
 import tempfile
 import tomllib
@@ -25,6 +27,22 @@ SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 TARGET = re.compile(r"^[A-Za-z0-9_.-]+$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 ZIP_EPOCH_FLOOR = 315_532_800  # 1980-01-01, the earliest ZIP timestamp.
+# macOS gives notifications, the Dock and Finder to an application bundle, not to a
+# bare executable, so the macOS archives carry the UI binary inside RSpice.app.
+APPLE_BUNDLE = "RSpice.app"
+APPLE_BUNDLE_IDENTIFIER = "app.rspice.RSpice"
+APPLE_ICON = "RSpice.icns"
+BRAND_ICON = Path("assets") / "brand" / "rspice.ico"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# The icns slots that take a PNG of each edge length the brand icon carries
+# (Apple's icns types: icp4-icp6 and ic07/ic08 at 1x, ic11-ic13 at 2x).
+ICNS_SLOTS = {
+    16: (b"icp4",),
+    32: (b"icp5", b"ic11"),
+    64: (b"icp6", b"ic12"),
+    128: (b"ic07",),
+    256: (b"ic08", b"ic13"),
+}
 
 
 class PackageError(ValueError):
@@ -258,14 +276,91 @@ def file_payload(path: str, source: Path, mode: int) -> Payload:
     return Payload(path, source.read_bytes(), mode)
 
 
+def brand_icon_frames(ico: bytes) -> dict[int, bytes]:
+    """The square PNG frames of a Windows icon, by edge length."""
+    if len(ico) < 6 or struct.unpack_from("<HH", ico) != (0, 1):
+        raise PackageError(f"{BRAND_ICON.as_posix()} is not an icon file")
+    (count,) = struct.unpack_from("<H", ico, 4)
+    frames = {}
+    for index in range(count):
+        entry = 6 + 16 * index
+        if entry + 16 > len(ico):
+            raise PackageError(f"{BRAND_ICON.as_posix()} lists more frames than it holds")
+        size, offset = struct.unpack_from("<II", ico, entry + 8)
+        frame = ico[offset : offset + size]
+        if len(frame) != size or len(frame) < 24 or not frame.startswith(PNG_SIGNATURE):
+            raise PackageError(f"{BRAND_ICON.as_posix()} frame {index} is not a PNG")
+        width, height = struct.unpack_from(">II", frame, 16)
+        if width != height:
+            raise PackageError(
+                f"{BRAND_ICON.as_posix()} frame {index} is {width}x{height}, not square"
+            )
+        frames[width] = frame
+    return frames
+
+
+def apple_icon(ico: bytes) -> bytes:
+    """An icns file carrying the brand icon's PNG frames in Apple's slots."""
+    frames = brand_icon_frames(ico)
+    missing = sorted(set(ICNS_SLOTS) - set(frames))
+    if missing:
+        raise PackageError(
+            f"{BRAND_ICON.as_posix()} has no {', '.join(map(str, missing))} px frame"
+        )
+    elements = b"".join(
+        slot + struct.pack(">I", 8 + len(frames[edge])) + frames[edge]
+        for edge, slots in sorted(ICNS_SLOTS.items())
+        for slot in slots
+    )
+    return b"icns" + struct.pack(">I", 8 + len(elements)) + elements
+
+
+def apple_info_plist(version: str) -> bytes:
+    return plistlib.dumps(
+        {
+            "CFBundleDevelopmentRegion": "en",
+            "CFBundleDisplayName": "RSpice",
+            "CFBundleExecutable": "rspice-app",
+            "CFBundleIconFile": APPLE_ICON,
+            "CFBundleIdentifier": APPLE_BUNDLE_IDENTIFIER,
+            "CFBundleInfoDictionaryVersion": "6.0",
+            "CFBundleName": "RSpice",
+            "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": version,
+            "NSHighResolutionCapable": True,
+        },
+        fmt=plistlib.FMT_XML,
+        sort_keys=True,
+    )
+
+
+def apple_bundle_payloads(ui_binary: Path, version: str) -> list[Payload]:
+    """RSpice.app around the UI binary, and the top-level `rspice-app` that opens it.
+
+    The bundle sits beside `models/` and `runtimes/`, so the installation stays one
+    folder: the application finds both above `RSpice.app/Contents/MacOS`.
+    """
+    contents = f"{APPLE_BUNDLE}/Contents"
+    launcher = (
+        "#!/bin/sh\n"
+        f'exec "$(dirname "$0")/{contents}/MacOS/rspice-app" "$@"\n'
+    )
+    icon = file_payload(f"{contents}/Resources/{APPLE_ICON}", ROOT / BRAND_ICON, 0o644)
+    return [
+        file_payload(f"{contents}/MacOS/rspice-app", ui_binary, 0o755),
+        Payload(f"{contents}/Info.plist", apple_info_plist(version), 0o644),
+        Payload(icon.path, apple_icon(icon.content), icon.mode),
+        Payload("rspice-app", launcher.encode("ascii"), 0o755),
+    ]
+
+
 def release_payloads(
-    binary: Path, ui_binary: Path, runtime_root: Path, target: str
+    binary: Path, ui_binary: Path, runtime_root: Path, target: str, version: str
 ) -> list[Payload]:
     executable = "rspice.exe" if "windows" in target else "rspice"
-    ui_executable = "rspice-app.exe" if "windows" in target else "rspice-app"
     sources = [
         (executable, binary, 0o755),
-        (ui_executable, ui_binary, 0o755),
         ("LICENSE", ROOT / "LICENSE", 0o644),
         ("NOTICE", ROOT / "NOTICE", 0o644),
         ("README.md", ROOT / "README.md", 0o644),
@@ -273,6 +368,11 @@ def release_payloads(
         ("Cargo.lock", ROOT / "Cargo.lock", 0o644),
     ]
     payloads = [file_payload(name, source, mode) for name, source, mode in sources]
+    if "apple-darwin" in target:
+        payloads.extend(apple_bundle_payloads(ui_binary, version))
+    else:
+        ui_executable = "rspice-app.exe" if "windows" in target else "rspice-app"
+        payloads.append(file_payload(ui_executable, ui_binary, 0o755))
     payloads.extend(model_tree_payloads())
     payloads.extend(runtime_tree_payloads(runtime_root))
     payloads.sort(key=lambda payload: payload.path)
@@ -389,7 +489,7 @@ def package_release(
         source_date_epoch,
     )
     prefix = f"rspice-{version}-{target}"
-    payloads = release_payloads(binary, ui_binary, runtime_root, target)
+    payloads = release_payloads(binary, ui_binary, runtime_root, target, version)
     payloads.append(
         Payload(
             "RELEASE-MANIFEST.json",
