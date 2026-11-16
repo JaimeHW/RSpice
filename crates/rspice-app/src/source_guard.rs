@@ -1751,7 +1751,7 @@ mod tests {
     /// under the caret; a document is read at its editor's own size.
     const OWN_SIZE_EDITORS: [(&str, &str); 8] = [
         (
-            "rspice-app-simulate/src/workbench/surfaces/verify/table.rs",
+            "rspice-app-simulate/src/workbench/surfaces/verify/table/body.rs",
             "edit_cell",
         ),
         (
