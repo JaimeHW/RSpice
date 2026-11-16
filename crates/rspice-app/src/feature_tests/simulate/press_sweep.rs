@@ -528,11 +528,12 @@ fn announced(node: &Node) -> String {
 /// is egui's own widget identity, so the plan toolbar drawn on all ten setup
 /// routes is one control and not ten. The zeroes are honest — ten of the eleven
 /// analysis-catalogue fixtures open the same window the eleventh already
-/// contributed, and the Outputs registry's own actions are all disabled over
-/// an empty registry, so its enabled controls are the toolbar's.
+/// contributed, the Outputs registry's own actions are all disabled over an
+/// empty registry, so its enabled controls are the toolbar's, and the
+/// specifications page has none: its acceptance settings are Verify's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 49),
-    ("Analyses/Ac", 6),
+    ("Analyses/Ac", 7),
     ("Analyses/DcSweep", 13),
     ("Analyses/Noise", 11),
     ("Analyses/Stb", 8),
@@ -542,13 +543,13 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
-    ("Specifications", 3),
+    ("Specifications", 0),
     ("RunSet", 31),
     ("Models", 1),
     ("ConnectRules", 2),
-    ("Solver", 33),
+    ("Solver", 34),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 37),
+    ("analysis catalogue · Analyses", 38),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -621,8 +622,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// controls of its own, and a catalogue fixture that opens the window the
 /// first one contributed (355).
 ///
-/// The specifications page's acceptance settings moved to Verify's
-/// inspector, which edits them beside the specifications they judge (354).
+/// The specifications page's four acceptance settings moved to Verify's
+/// inspector, which edits them beside the specifications they judge, and
+/// the AC form, the solver page and the analysis catalogue each publish one
+/// more control than was recorded (354).
 const PRESSED_FLOOR: usize = 354;
 
 /// Controls that are wired to nothing.
