@@ -4,9 +4,13 @@
 //! `connectrules` block selects (LRM 2.4 section 7.7). The page states which
 //! block the run selects (`.OPTIONS CONNECTRULES`), and then that block's
 //! statements in one grid: the run's own block is edited there cell by cell,
-//! while a shipped set and a block the design declares are shown as written,
-//! a declared one opening its source. The run's block is stored with the
-//! plan's options and written into the deck as a `.CONNECTRULES` card.
+//! while a shipped set and a block the design or a bound model library
+//! declares are shown as written, a project's one opening its source. The
+//! run's block is stored with the plan's options and written into the deck
+//! as a `.CONNECTRULES` card.
+//!
+//! The page carries no prose: what a control or a column means is its hover,
+//! and a table with no rows says why in one line.
 //!
 //! Below them, the converters the checked run's decks insert, one row each
 //! as the engine reports them (Virtuoso AMS's elaboration report of inserted
@@ -15,12 +19,12 @@
 use egui::{RichText, TextEdit, Ui, vec2};
 
 use crate::simulation::plan::connect_rules::{
-    self, ConnectRuleColumn, DEFAULT_BASE, DeclaredConnectRules,
+    self, ConnectRuleColumn, DEFAULT_BASE, DeclaredConnectRules, DeclaredIn,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, mono_input, name_control, select, select_mono_with_response, text_field,
+    Button, editable_select_mono, name_control, select_with_response, text_field,
 };
 use crate::workbench::app_state::run_preflight::CheckedConverter;
 use crate::workbench::framework::feature::Cx;
@@ -31,30 +35,49 @@ use rspice_simulation_contract::options::{
 };
 
 use super::page_kit::{
-    CARD_PAD_X, RowPress, Tone, card, card_body, card_head_row, card_note, cell_ui, field_pair,
-    ledger_group, ledger_head, ledger_row, ledger_row_cells, switch_cell,
+    CARD_PAD_X, RowPress, Tone, card, card_body, card_empty, card_head_row, cell_ui, field_pair,
+    ledger_group, ledger_head_explained, ledger_row, ledger_row_cells, switch_cell,
 };
 use super::page_solver::{commit_draft, released};
 
-/// The CONNECTRULES list's entry for an empty value.
+/// The CONNECTRULES list's entry for an empty value, and the hint the empty
+/// field shows.
 const DESIGN_DEFAULT_RULES: &str = "(design default)";
+
+/// The CONNECTRULES field's hover.
+const RULES_HOVER: &str = "The connectrules block that converts at every analog/digital \
+                           boundary. The design default takes the design's only block; \
+                           run_rules is this run's own block; an rspice_ set is RSpice's; any \
+                           other name is a block the design or a bound library declares.";
 
 /// The grid's columns: the module, what it converts, then
 /// [`ConnectRuleColumn::ALL`].
 const GRID: [f32; 9] = [0.11, 0.08, 0.12, 0.11, 0.11, 0.11, 0.11, 0.125, 0.125];
 
 /// The converter table's columns: [`CheckedConverter::cells`].
-const REPORT: [f32; 8] = [0.10, 0.10, 0.08, 0.09, 0.18, 0.11, 0.11, 0.23];
+const REPORT: [f32; 7] = [0.11, 0.13, 0.08, 0.10, 0.13, 0.10, 0.35];
 
-const REPORT_LABELS: [&str; 8] = [
+const REPORT_LABELS: [&str; 7] = [
     "Net",
     "Port",
     "Converts",
     "Module",
-    "Instance",
     "Rule",
     "Supply",
     "Set by statement",
+];
+
+const REPORT_HOVERS: [&str; 7] = [
+    "The deck net an analog node and a discrete port share. Select a row to show it on the \
+     schematic.",
+    "The instance and port whose discrete side meets the net.",
+    "A\u{2192}D reads the net into a logic input, D\u{2192}A drives it from a logic output, \
+     A\u{2194}D both ways; R is a real-valued port.",
+    "The connect module inserted on the net.",
+    "The connectrules block, or the rule set, that chose the module.",
+    "The supply the converter converts against.",
+    "The parameters the connect statement sets. Hover a row for every value and where it came \
+     from.",
 ];
 
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
@@ -71,26 +94,27 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 fn converters_card(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let preflight = &cx.runs.preflight;
     let sets = &preflight.converters;
-    let checked = preflight
-        .report
-        .as_ref()
-        .map(|report| report.project_revision);
+    let checked = preflight.report.is_some();
     let count: usize = sets.iter().map(|set| set.converters.len()).sum();
-    let status = checked.map(|revision| {
-        format!(
-            "{count} converter{} \u{b7} revision {revision}",
-            if count == 1 { "" } else { "s" }
-        )
-    });
+    let status = checked.then(|| format!("{count} converter{}", if count == 1 { "" } else { "s" }));
     let mut route = None;
     card(
         ui,
         "Inserted converters",
         status.as_deref().map(|status| (status, Tone::Neutral)),
         |ui| {
-            if count > 0 {
-                ledger_head(ui, &REPORT, &REPORT_LABELS);
+            if count == 0 {
+                let _ = card_empty(
+                    ui,
+                    if checked {
+                        "The checked decks insert no converters."
+                    } else {
+                        "Check the run to list inserted converters."
+                    },
+                );
+                return;
             }
+            ledger_head_explained(ui, &REPORT, &REPORT_LABELS, &REPORT_HOVERS);
             let several = sets.len() > 1;
             for set in sets {
                 if several {
@@ -109,24 +133,6 @@ fn converters_card(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                     }
                 }
             }
-            card_note(
-                ui,
-                match (checked, count) {
-                    (None, _) => {
-                        "Check the run to list the converters the engine inserts where an \
-                         analog node meets a digital port."
-                    }
-                    (Some(_), 0) => {
-                        "The checked decks insert no converter: no analog node meets a digital \
-                         port."
-                    }
-                    (Some(_), _) => {
-                        "As the engine inserts them when it builds the checked decks; rspice \
-                         check --converters prints the same rows for the deck. Select a row to \
-                         show its net on the schematic."
-                    }
-                },
-            );
         },
     );
     if let Some(route) = route {
@@ -147,21 +153,30 @@ fn converter_detail(ui: &mut Ui, converter: &CheckedConverter) {
     }
 }
 
-/// The design's own blocks, read from its sources once per source revision.
+/// The blocks the design and the plan's bound model libraries declare, read
+/// once per source revision and binding.
 fn declared_blocks(
     ui: &Ui,
     cx: &Cx<'_, SimulateFeature>,
 ) -> std::sync::Arc<Vec<DeclaredConnectRules>> {
     let sources = &cx.model.workspace.content.project_sources;
+    let bindings = &cx.model.sim_setup.model_bindings;
     let id = sources
         .iter_bundles()
         .fold(egui::Id::new("connect-rules-declared"), |id, bundle| {
             id.with((bundle.id(), bundle.revision().get()))
         });
+    let id = bindings.iter().fold(id, |id, binding| {
+        id.with((&binding.library_name, binding.source_digest))
+    });
     if let Some(blocks) = ui.data(|data| data.get_temp(id)) {
         return blocks;
     }
-    let blocks = std::sync::Arc::new(connect_rules::declared_blocks(sources));
+    let blocks = std::sync::Arc::new(connect_rules::declared_blocks(
+        sources,
+        &cx.model.model_library_manager,
+        bindings,
+    ));
     ui.data_mut(|data| data.insert_temp(id, std::sync::Arc::clone(&blocks)));
     blocks
 }
@@ -194,67 +209,43 @@ fn selection_card(
                 &run_block,
                 declared,
             );
-            let mut typed = None;
-            let mut picked = None;
+            let mut output = None;
             field_pair(
                 ui,
                 (
                     SimulationOptions::CONNECT_RULES_LABEL,
                     &mut |ui: &mut Ui, width: f32| {
-                        // The name stays typed text, so a block the design
+                        // Typed as well as picked, so a block the design
                         // declares in a source that does not compile alone is
                         // entered as written.
-                        let gap = 6.0;
-                        let text_width = ((width - gap) * 0.5).max(1.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = gap;
-                            let rules = &mut cx.model.sim_setup.session.options_draft.connect_rules;
-                            typed = Some(mono_input(
-                                ui,
-                                SimulationOptions::CONNECT_RULES_LABEL,
-                                rules,
-                                text_width,
-                            ));
-                            let shown = if rules.trim().is_empty() {
-                                DESIGN_DEFAULT_RULES
-                            } else {
-                                rules.trim()
-                            };
-                            picked = select_mono_with_response(
-                                ui,
-                                "simulation.connect_rules.selection",
-                                "Connect rule set",
-                                shown,
-                                &choices,
-                                (width - gap - text_width).max(1.0),
-                            )
-                            .picked;
-                        });
+                        output = Some(editable_select_mono(
+                            ui,
+                            "simulation.connect_rules.selection",
+                            SimulationOptions::CONNECT_RULES_LABEL,
+                            &mut cx.model.sim_setup.session.options_draft.connect_rules,
+                            DESIGN_DEFAULT_RULES,
+                            &choices,
+                            width,
+                        ));
                     },
                 ),
                 None,
             );
-            if let Some(response) = typed
-                && released(&response)
-            {
-                select_rules(cx, None);
-            }
-            if let Some(choice) = picked.and_then(|index| choices.get(index)) {
+            let Some(output) = output else {
+                return;
+            };
+            let field = output.field.on_hover_text(RULES_HOVER);
+            if let Some(choice) = output.picked.and_then(|index| choices.get(index)) {
                 let choice = if choice == DESIGN_DEFAULT_RULES {
                     String::new()
                 } else {
                     choice.clone()
                 };
                 select_rules(cx, Some(choice));
+            } else if released(&field) {
+                select_rules(cx, None);
             }
         });
-        card_note(
-            ui,
-            "CONNECTRULES names the connectrules block that converts at every analog/digital \
-             boundary: the design default takes the design's only block, run_rules is this run's \
-             own block, an rspice_ set is RSpice's, and any other name is a block the design \
-             declares.",
-        );
     });
 }
 
@@ -338,13 +329,10 @@ fn statements_card(
         Selected::Run(block) => format!("{} \u{b7} this run's block", block.name),
         Selected::Shipped(name, _) => format!("{name} \u{b7} shipped rule set"),
         Selected::Declared(blocks) if blocks.len() == 1 => {
-            format!(
-                "{} \u{b7} {}:{}",
-                blocks[0].name, blocks[0].logical_path, blocks[0].line
-            )
+            format!("{} \u{b7} {}", blocks[0].name, declared_place(blocks[0]))
         }
-        Selected::Declared(_) => "Blocks the design declares".to_owned(),
-        Selected::Unknown(name) => format!("{name} \u{b7} not declared in the project's sources"),
+        Selected::Declared(_) => "Declared blocks".to_owned(),
+        Selected::Unknown(name) => format!("{name} \u{b7} not declared in the design's sources"),
     };
     let mut rebase = None;
     let mut copy = false;
@@ -355,18 +343,25 @@ fn statements_card(
                 Selected::Run(block) => {
                     let sets = connect_rules::shipped_set_names();
                     let base = block.base.as_deref().unwrap_or(DEFAULT_BASE);
-                    rebase = select(
+                    let output = select_with_response(
                         ui,
                         "simulation.connect_rules.base",
                         "Start from",
                         &format!("from {base}"),
                         sets,
                         170.0,
-                    )
-                    .and_then(|index| sets.get(index).cloned());
+                    );
+                    let _ = output.response.on_hover_text(
+                        "The set the block starts from. A cell left empty takes the set's value, \
+                         shown faint; clearing a typed value takes it back.",
+                    );
+                    rebase = output.picked.and_then(|index| sets.get(index).cloned());
                 }
                 Selected::Shipped(..) => {
-                    copy = Button::new("Edit as this run's block").show(ui).clicked();
+                    copy = Button::new("Edit as this run's block")
+                        .show(ui)
+                        .on_hover_text("Copy these values into a block this run owns.")
+                        .clicked();
                 }
                 _ => {}
             });
@@ -381,7 +376,7 @@ fn statements_card(
                 Selected::Unknown(_) => false,
             };
             if rows {
-                ledger_head(ui, &GRID, &grid_labels());
+                ledger_head_explained(ui, &GRID, &grid_labels(), &grid_hovers());
             }
             match &selection {
                 Selected::Run(block) => run_rows(ui, cx, block),
@@ -393,7 +388,9 @@ fn statements_card(
                 Selected::Declared(blocks) => declared_rows(ui, cx, blocks),
                 Selected::Unknown(_) => {}
             }
-            card_note(ui, statements_note(&selection));
+            if !rows {
+                empty_statements(ui, &selection);
+            }
         },
     );
     if let Some(base) = rebase {
@@ -415,31 +412,23 @@ fn statements_card(
     }
 }
 
-fn statements_note(selection: &Selected<'_>) -> &'static str {
-    match selection {
-        Selected::Run(_) => {
-            "Faint values come from the set the block starts from; a value typed here replaces \
-             one, and clearing it takes the set's back. A supply is volts, a net the converter \
-             tracks while it runs (vdd), or deck for the deck's own. A threshold is volts, or a \
-             share of the supply written with % that follows a tracked supply."
-        }
-        Selected::Shipped(..) => {
-            "RSpice's own values. Edit as this run's block copies them into a block this run \
-             owns, where they can be changed."
-        }
-        Selected::Declared(blocks) if blocks.is_empty() => {
-            "No Verilog-AMS source in the project declares a connectrules block, so an HDL \
-             port converts with the rspice_builtin set and an XSPICE port with ngspice's \
-             bridges. Select run_rules or a shipped set to state the rules here."
-        }
-        Selected::Declared(_) => {
-            "Declared in the design's Verilog-AMS sources and edited there: select a row to open \
-             its statement."
-        }
-        Selected::Unknown(_) => {
-            "No source this page can read declares this block; the engine looks for it in every \
-             source the run compiles, and names the blocks it finds if there is none."
-        }
+/// Why the grid has no rows, in one line, with the rest on hover.
+fn empty_statements(ui: &mut Ui, selection: &Selected<'_>) {
+    let (line, hover) = match selection {
+        Selected::Unknown(_) => (
+            "The engine looks for it in every source the run compiles.",
+            "If none declares it, the run is refused, naming the blocks it found.",
+        ),
+        Selected::Shipped(..) => ("The set states no converter.", ""),
+        _ => (
+            "Neither the design nor a bound library declares a connectrules block.",
+            "An HDL port then converts with the rspice_builtin set and an XSPICE port with \
+             ngspice's bridges. Select run_rules or a shipped set to state the rules here.",
+        ),
+    };
+    let response = card_empty(ui, line);
+    if !hover.is_empty() {
+        let _ = response.on_hover_text(hover);
     }
 }
 
@@ -447,6 +436,27 @@ fn grid_labels() -> Vec<&'static str> {
     let mut labels = vec!["Module", "Converts"];
     labels.extend(ConnectRuleColumn::ALL.iter().map(|column| column.label()));
     labels
+}
+
+/// What each grid column takes, on its header's hover.
+fn grid_hovers() -> Vec<&'static str> {
+    let mut hovers = vec![
+        "The connect module the statement selects.",
+        "What it converts: A is the analog side, D a logic port, R a real one.",
+    ];
+    hovers.extend(ConnectRuleColumn::ALL.iter().map(|column| match column {
+        ConnectRuleColumn::Supply => {
+            "Volts; a net the converter tracks while it runs (vdd); or deck for the deck's own."
+        }
+        ConnectRuleColumn::ThresholdHigh | ConnectRuleColumn::ThresholdLow => {
+            "Volts, or a share of the supply written with %, which follows a tracked supply."
+        }
+        ConnectRuleColumn::DriveHigh | ConnectRuleColumn::DriveLow => {
+            "The output resistance driving the level, in ohms."
+        }
+        ConnectRuleColumn::Rise | ConnectRuleColumn::Fall => "The output's transition time.",
+    }));
+    hovers
 }
 
 /// The cells of one statement, as text.
@@ -488,24 +498,42 @@ fn read_only_row(ui: &mut Ui, statement: &RunConnectStatement, press: RowPress) 
     ledger_row(ui, &GRID, &toned, false, press)
 }
 
+/// Where a declared block is written, as its caption and the statement
+/// grid's title name it: `file:line`, after the library's name for a bound
+/// one.
+fn declared_place(block: &DeclaredConnectRules) -> String {
+    match &block.origin {
+        DeclaredIn::Project(_) => format!("{}:{}", block.logical_path, block.line),
+        DeclaredIn::Library(library) => {
+            format!("{library} \u{203a} {}:{}", block.logical_path, block.line)
+        }
+    }
+}
+
+/// The declared blocks' statements: a project's own opening its statement in
+/// the source editor, a bound library's read here only.
 fn declared_rows(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, blocks: &[&DeclaredConnectRules]) {
     let several = blocks.len() > 1;
     for block in blocks {
         if several {
             ledger_group(
                 ui,
-                &format!(
-                    "{} \u{b7} {}:{}",
-                    block.name, block.logical_path, block.line
-                ),
+                &format!("{} \u{b7} {}", block.name, declared_place(block)),
             );
         }
         for (statement, line) in &block.statements {
-            if read_only_row(ui, statement, RowPress::Taken).clicked() {
+            let DeclaredIn::Project(bundle) = block.origin else {
+                let _ = read_only_row(ui, statement, RowPress::Ignored);
+                continue;
+            };
+            if read_only_row(ui, statement, RowPress::Taken)
+                .on_hover_text(format!("Open {}:{line}", block.logical_path))
+                .clicked()
+            {
                 cx.model
                     .diagnostics
                     .request_route(DiagnosticRoute::CodeDocument {
-                        bundle: block.bundle,
+                        bundle,
                         logical_path: block.logical_path.as_str().into(),
                         line: Some(*line),
                         column: None,
@@ -566,19 +594,44 @@ fn run_rows(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, block: &RunConnectRul
     let Some(block) = draft.connect_rule_block.as_mut() else {
         return;
     };
-    let applied = match edit {
+    let applied = match &edit {
         Edit::Select(on) => {
-            connect_rules::set_selected(block, &module, on);
+            connect_rules::set_selected(block, &module, *on);
             Ok(())
         }
-        Edit::Cell(column, text) => connect_rules::set_cell(block, &module, column, &text),
+        Edit::Cell(column, text) => connect_rules::set_cell(block, &module, *column, text),
     };
-    match applied {
-        Ok(()) => commit_draft(cx),
-        Err(error) => {
-            record_plan_refusal(cx, format!("Connect rules were not changed \u{b7} {error}"))
+    match (applied, edit) {
+        (Ok(()), _) => commit_draft(cx),
+        (Err(error), edit) => {
+            // Refused in place: the cell keeps what was typed, ringed, with
+            // the reason on its hover, until it is typed again.
+            if let Edit::Cell(column, text) = edit {
+                ui.data_mut(|data| {
+                    data.insert_temp(
+                        cell_id(&module, column).with("refused"),
+                        RefusedCell {
+                            text,
+                            reason: error.clone(),
+                        },
+                    );
+                });
+            }
+            record_plan_refusal(cx, format!("Connect rules were not changed \u{b7} {error}"));
         }
     }
+}
+
+/// A cell's typed text the block refused, and why.
+#[derive(Clone)]
+struct RefusedCell {
+    text: String,
+    reason: String,
+}
+
+/// Where a cell keeps what is being typed into it, and what it refused.
+fn cell_id(module: &str, column: ConnectRuleColumn) -> egui::Id {
+    egui::Id::new(("connect-rule-cell", module, column.label()))
 }
 
 /// A cell's words in the grid's mono face: the row's own ink, or faint for
@@ -607,16 +660,20 @@ fn edit_cell(
     column: ConnectRuleColumn,
     width: f32,
 ) -> Option<String> {
-    let id = ui.make_persistent_id(("connect-rule-cell", &statement.module, column.label()));
+    let id = cell_id(&statement.module, column);
     let shown = connect_rules::cell(statement, column);
     let (own, hint) = match &shown {
         Some(cell) if !cell.from_base => (cell.text.clone(), String::new()),
         Some(cell) => (String::new(), cell.text.clone()),
         None => (String::new(), default_text(column).to_owned()),
     };
-    let mut text = ui.data(|data| data.get_temp::<String>(id)).unwrap_or(own);
+    let refused = ui.data(|data| data.get_temp::<RefusedCell>(id.with("refused")));
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(id))
+        .or_else(|| refused.as_ref().map(|refused| refused.text.clone()))
+        .unwrap_or(own);
     let hint = cell_text(ui, &hint, true).font(theme::field_mono());
-    let response = text_field(
+    let mut response = text_field(
         ui,
         TextEdit::singleline(&mut text)
             .id(id.with("field"))
@@ -630,11 +687,27 @@ fn edit_cell(
         &response,
         &format!("{} {}", statement.module, column.label()),
     );
+    if let Some(refused) = &refused {
+        let t = Tokens::get(ui.ctx());
+        ui.painter().rect_stroke(
+            response.rect,
+            t.radius,
+            egui::Stroke::new(1.0, t.color.err),
+            egui::StrokeKind::Inside,
+        );
+        let reason = refused.reason.clone();
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_description(reason));
+        response = response.on_hover_text(&refused.reason);
+    }
     if response.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, text.clone()));
     }
     if released(&response) {
-        ui.data_mut(|data| data.remove::<String>(id));
+        ui.data_mut(|data| {
+            data.remove::<String>(id);
+            data.remove::<RefusedCell>(id.with("refused"));
+        });
         return Some(text);
     }
     None

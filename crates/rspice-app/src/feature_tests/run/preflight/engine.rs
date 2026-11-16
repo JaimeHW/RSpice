@@ -512,8 +512,15 @@ fn a_checked_run_lists_the_converters_its_decks_insert_on_their_drawn_nets() {
     let [converter] = sets[0].converters.as_slice() else {
         panic!("one boundary, one converter: {sets:#?}");
     };
-    let [net, port, converts, module, _, rule, supply, set] = &converter.cells;
+    let [net, port, converts, module, rule, supply, set] = &converter.cells;
     assert!(net.eq_ignore_ascii_case("drv"), "{converter:#?}");
+    assert!(
+        !converter
+            .cells
+            .iter()
+            .any(|cell| cell.contains("__rspice_auto")),
+        "the row names the module and port, not the engine's instance: {converter:#?}"
+    );
     assert!(
         port.to_ascii_lowercase().ends_with(".mode"),
         "{converter:#?}"

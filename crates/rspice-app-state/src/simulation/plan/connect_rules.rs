@@ -7,8 +7,9 @@
 //! and a value typed here replaces one and is marked as the run's. The Connect
 //! rules page edits it one cell at a time through [`set_cell`].
 //!
-//! A design's own `connectrules` blocks live in its Verilog-AMS sources and
-//! are read here only to be shown; the source is where they are edited.
+//! A design's own `connectrules` blocks live in its Verilog-AMS sources, or
+//! in a model library bound to the plan, and are read here only to be
+//! shown; the source is where they are edited.
 
 use rspice_simulation_contract::options::{
     RunConnectParameter, RunConnectRules, RunConnectStatement, RunConnectSupply, format_si_value,
@@ -352,7 +353,9 @@ pub fn set_cell(
             (None, false)
         } else if let Ok(volts) = parse_volts(text) {
             if !(volts.is_finite() && volts > 0.0) {
-                return Err(format!("a supply is a positive level, not {text}"));
+                return Err(format!(
+                    "a supply is a level above zero in volts, not '{text}'"
+                ));
             }
             (Some(RunConnectSupply::Volts(volts)), false)
         } else if is_net_name(text) {
@@ -381,19 +384,37 @@ pub fn set_cell(
         }
         return Ok(());
     }
+    let label = column.label();
+    let refused = || match column {
+        ConnectRuleColumn::ThresholdHigh | ConnectRuleColumn::ThresholdLow => format!(
+            "{label} is a level in volts (1.2 V) or a share of the supply (70%), not '{text}'"
+        ),
+        ConnectRuleColumn::DriveHigh | ConnectRuleColumn::DriveLow => {
+            format!("{label} is a resistance above zero in ohms (50 \u{3a9}), not '{text}'")
+        }
+        _ => format!("{label} is a time of zero or more in seconds (100 ps), not '{text}'"),
+    };
     let (name, value) = match names {
         [volts, fraction] => match text.strip_suffix('%') {
-            Some(percent) => (*fraction, parse_number(percent.trim())? / 100.0),
-            None => (*volts, parse_volts(text)?),
+            Some(percent) => (
+                *fraction,
+                parse_number(percent.trim()).map_err(|_| refused())? / 100.0,
+            ),
+            None => (*volts, parse_volts(text).map_err(|_| refused())?),
         },
         [name] => (
             *name,
-            parse_number(text.trim_end_matches(['s', '\u{3a9}']).trim())?,
+            parse_number(text.trim_end_matches(['s', '\u{3a9}']).trim()).map_err(|_| refused())?,
         ),
         _ => unreachable!("a column states one or two parameters"),
     };
-    if !value.is_finite() {
-        return Err(format!("{name} must be finite, not {text}"));
+    let in_range = match column {
+        ConnectRuleColumn::DriveHigh | ConnectRuleColumn::DriveLow => value > 0.0,
+        ConnectRuleColumn::Rise | ConnectRuleColumn::Fall => value >= 0.0,
+        _ => true,
+    };
+    if !value.is_finite() || !in_range {
+        return Err(refused());
     }
     statement
         .parameters
@@ -446,12 +467,23 @@ fn is_net_name(text: &str) -> bool {
         && characters.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
-/// A `connectrules` block one of the design's Verilog-AMS sources declares.
+/// Where a declared `connectrules` block is written.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeclaredIn {
+    /// One of the project's own sources, opened in its editor.
+    Project(crate::state::ProjectSourceId),
+    /// A model library bound to the plan, named as the plan binds it.
+    Library(String),
+}
+
+/// A `connectrules` block the design's Verilog-AMS sources, or a model
+/// library bound to the plan, declares.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclaredConnectRules {
     pub name: String,
-    /// The source bundle and file it is written in.
-    pub bundle: crate::state::ProjectSourceId,
+    pub origin: DeclaredIn,
+    /// The file it is written in: a project source's logical path, or a
+    /// library member's file name.
     pub logical_path: String,
     /// The `connectrules` line, 1-based.
     pub line: usize,
@@ -460,43 +492,79 @@ pub struct DeclaredConnectRules {
 }
 
 /// Every `connectrules` block the project's Verilog-AMS sources declare, in
-/// source order. A source that does not compile on its own (one that
-/// includes another, say) states its blocks to the engine only; its own
-/// editor reports why.
-pub fn declared_blocks(sources: &crate::state::ProjectSourceRegistry) -> Vec<DeclaredConnectRules> {
+/// source order, then every one the model libraries bound to the plan
+/// declare, in binding order: the engine reads both when it builds the
+/// run's decks. A source that does not compile on its own (one that includes
+/// another, say) states its blocks to the engine only; its own editor
+/// reports why.
+pub fn declared_blocks(
+    sources: &crate::state::ProjectSourceRegistry,
+    libraries: &crate::state::ModelLibraryManager,
+    bindings: &[rspice_model_library::SimulationPlanModelBinding],
+) -> Vec<DeclaredConnectRules> {
     let mut blocks = Vec::new();
     for bundle in sources.iter_bundles() {
         for file in bundle.files() {
-            let content = file.content();
-            if !content.contains("connectrules") {
-                continue;
-            }
-            let Ok(specification) = rspice_veriloga::VerilogACompiler::default()
-                .connect_specification_from_preprocessed(content)
-            else {
+            blocks_in(
+                file.content(),
+                &DeclaredIn::Project(bundle.id()),
+                file.logical_path(),
+                &mut blocks,
+            );
+        }
+    }
+    for binding in bindings {
+        let Some(library) = libraries.get_library(&binding.library_name) else {
+            continue;
+        };
+        let origin = DeclaredIn::Library(binding.library_name.clone());
+        for member in &library.source_contents {
+            let Ok(content) = std::str::from_utf8(&member.bytes) else {
                 continue;
             };
-            let line_of = |offset: usize| {
-                content
-                    .get(..offset)
-                    .map_or(1, |head| head.matches('\n').count() + 1)
-            };
-            for block in specification.rules.blocks() {
-                blocks.push(DeclaredConnectRules {
-                    name: block.name.to_string(),
-                    bundle: bundle.id(),
-                    logical_path: file.logical_path().to_owned(),
-                    line: line_of(block.span.start as usize),
-                    statements: statements_of(content, &block.name)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|(statement, offset)| (statement, line_of(offset)))
-                        .collect(),
-                });
-            }
+            let file = member.path.file_name().map_or_else(
+                || member.path.to_string_lossy(),
+                |name| name.to_string_lossy(),
+            );
+            blocks_in(content, &origin, &file, &mut blocks);
         }
     }
     blocks
+}
+
+/// Push the blocks `content` declares.
+fn blocks_in(
+    content: &str,
+    origin: &DeclaredIn,
+    logical_path: &str,
+    blocks: &mut Vec<DeclaredConnectRules>,
+) {
+    if !content.contains("connectrules") {
+        return;
+    }
+    let Ok(specification) = rspice_veriloga::VerilogACompiler::default()
+        .connect_specification_from_preprocessed(content)
+    else {
+        return;
+    };
+    let line_of = |offset: usize| {
+        content
+            .get(..offset)
+            .map_or(1, |head| head.matches('\n').count() + 1)
+    };
+    for block in specification.rules.blocks() {
+        blocks.push(DeclaredConnectRules {
+            name: block.name.to_string(),
+            origin: origin.clone(),
+            logical_path: logical_path.to_owned(),
+            line: line_of(block.span.start as usize),
+            statements: statements_of(content, &block.name)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(statement, offset)| (statement, line_of(offset)))
+                .collect(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -604,5 +672,55 @@ mod tests {
         );
         assert!(selects(&moved, "r2e"));
         assert!(moved.problems().is_empty(), "{:?}", moved.problems());
+    }
+
+    /// A block a model library bound to the plan declares is listed, named
+    /// by its library and file, since the engine reads it beside the
+    /// design's own; an unbound library states nothing to the run.
+    #[test]
+    fn a_block_a_bound_library_declares_is_listed_with_its_library() {
+        let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+            .iter()
+            .map(|(_, source)| *source)
+            .collect::<String>();
+        rules.push_str("\nconnectrules Low;\n  connect a2d #(.vsup(1.0));\nendconnectrules\n");
+        let mut libraries = crate::state::ModelLibraryManager::new();
+        let library = libraries
+            .load_library_bundle(
+                "connections.lib",
+                vec![
+                    (
+                        "root.lib".to_owned(),
+                        b".va \"rules.vams\" CONNECTIONS\n".to_vec(),
+                    ),
+                    ("rules.vams".to_owned(), rules.clone().into_bytes()),
+                ],
+                None,
+            )
+            .expect("the rules import");
+        let binding = libraries
+            .simulation_plan_binding(&library)
+            .expect("the rules bind to the plan");
+        let sources = crate::state::ProjectSourceRegistry::default();
+        assert!(declared_blocks(&sources, &libraries, &[]).is_empty());
+        let blocks = declared_blocks(&sources, &libraries, &[binding]);
+        let [block] = blocks.as_slice() else {
+            panic!("one block: {blocks:?}");
+        };
+        assert_eq!(block.name, "Low");
+        assert_eq!(block.origin, DeclaredIn::Library(library));
+        assert_eq!(block.logical_path, "rules.vams");
+        let line = rules
+            .lines()
+            .position(|line| line.starts_with("connectrules Low"))
+            .expect("the block's line")
+            + 1;
+        assert_eq!(block.line, line);
+        let modules: Vec<&str> = block
+            .statements
+            .iter()
+            .map(|(statement, _)| statement.module.as_str())
+            .collect();
+        assert_eq!(modules, ["a2d"]);
     }
 }

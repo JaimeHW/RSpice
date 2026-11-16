@@ -215,7 +215,7 @@ pub struct CheckedConverters {
 pub struct CheckedConverter {
     /// `ConverterInsertion::report_row`, verbatim: the same cells
     /// `rspice check --converters` prints.
-    pub cells: [String; 8],
+    pub cells: [String; 7],
     /// Where the connect statement that chose it is written, `file:line`.
     pub location: Option<String>,
     /// Its supply and every parameter, each with where its value came from.

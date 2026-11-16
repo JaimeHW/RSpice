@@ -871,8 +871,8 @@ fn output_json(result: &ValidationResult, converters: bool) -> Result<(), CliErr
 
 /// One dense row per converter, as [`ConverterInsertion::report_row`] states
 /// it: the boundary node, the port that meets it, what it converts, the
-/// module and its instance, the rule that chose it, the supply, and the
-/// parameters the connect statement set.
+/// module, the rule that chose it, the supply, and the parameters the
+/// connect statement set. `--json` carries each one's instance as well.
 ///
 /// [`ConverterInsertion::report_row`]: rspice_core::circuit::ConverterInsertion::report_row
 fn output_converters(
@@ -888,7 +888,6 @@ fn output_converters(
             "PORT",
             "DIR",
             "MODULE",
-            "INSTANCE",
             "RULE",
             "SUPPLY",
             "PARAMETERS",
@@ -902,7 +901,7 @@ fn output_converters(
         }
         rows.push(row);
     }
-    let mut widths = [0usize; 8];
+    let mut widths = [0usize; 7];
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());

@@ -146,6 +146,117 @@ pub fn select_mono_with_response(
     .0
 }
 
+/// What an [`editable_select_mono`] did this frame.
+pub struct EditableSelectOutput {
+    /// The option picked from the list; writing it is the caller's.
+    pub picked: Option<usize>,
+    /// The value well's response: typed text is applied when it is
+    /// released, as from any field.
+    pub field: egui::Response,
+}
+
+/// A combo box whose value is typed or picked: the mono value well, with a
+/// select's chevron at its trailing edge opening the list of `options`.
+///
+/// A select offers only what its list holds; this takes a name as typed,
+/// for a value the list cannot know of ahead of time, and lists the ones it
+/// can. `hint` stands faint in the well while `value` is empty. The list
+/// opens from the chevron, or from the down arrow while the well has focus.
+pub fn editable_select_mono(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    value: &mut String,
+    hint: &str,
+    options: &[String],
+    width: f32,
+) -> EditableSelectOutput {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let value_font = theme::field_mono();
+    let field = ui.add_sized(
+        vec2(width, t.metrics.ctl_h),
+        egui::TextEdit::singleline(value)
+            .id(ui.make_persistent_id(("rspice.editable_select", id_salt)))
+            .font(value_font.clone())
+            .hint_text(
+                egui::RichText::new(hint)
+                    .font(value_font.clone())
+                    .color(c.text_faint),
+            )
+            .vertical_align(egui::Align::Center)
+            .margin(egui::Margin {
+                left: VALUE_INSET as i8,
+                right: CHEVRON_ROOM as i8,
+                top: 4,
+                bottom: 4,
+            }),
+    );
+    super::name_control(ui, &field, accessible_label);
+    let rect = field.rect;
+    let popup_id = ui.make_persistent_id(("rspice.select", id_salt));
+    // Over the well's trailing edge, laid after it so the chevron, not the
+    // text, takes a press there.
+    let chevron = ui.interact(
+        egui::Rect::from_min_max(
+            egui::pos2((rect.right() - CHEVRON_ROOM).max(rect.left()), rect.top()),
+            rect.max,
+        ),
+        popup_id.with("chevron"),
+        Sense::click(),
+    );
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    chevron.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Button,
+            ui.is_enabled(),
+            format!("{accessible_label} choices"),
+        )
+    });
+    ui.ctx()
+        .accesskit_node_builder(chevron.id, |node| node.set_expanded(open));
+    paint_select_chevron(
+        ui.painter(),
+        egui::pos2(rect.right() - 11.0, rect.center().y),
+        if chevron.hovered() {
+            c.text
+        } else {
+            c.text_dim
+        },
+    );
+    if chevron.clicked() {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+    } else if !open
+        && field.has_focus()
+        && ui.input(|input| input.key_pressed(egui::Key::ArrowDown))
+    {
+        egui::Popup::open_id(ui.ctx(), popup_id);
+    }
+    let current = value.trim().to_owned();
+    let mut picked = None;
+    egui::Popup::from_response(&field)
+        .id(popup_id)
+        .open_memory(None)
+        .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
+        .align(egui::RectAlign::BOTTOM_START)
+        .width(rect.width())
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.set_min_width(rect.width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            picked = option_list(
+                ui,
+                id_salt,
+                accessible_label,
+                &current,
+                options,
+                &[],
+                &value_font,
+            );
+        });
+    EditableSelectOutput { picked, field }
+}
+
 /// One switch at the foot of a select's list, under a rule: a setting that
 /// widens every choice above it rather than being one more of them, such as a
 /// signal browser showing its internal nodes whatever kind it lists.
@@ -290,91 +401,17 @@ fn select_with_font(
             ui.set_min_width(ui.available_width());
             ui.set_min_width(width.max(rect.width()));
             ui.spacing_mut().item_spacing.y = 0.0;
-            // A long list scrolls inside the drop-down rather than running
-            // the drop-down off the screen; a short one is laid out as is.
-            let option_rows = t.metrics.ctl_h.max(24.0) * SELECT_VISIBLE_OPTIONS as f32;
-            let listbox = egui::ScrollArea::vertical()
-                .id_salt(("rspice.select.options", id_salt))
-                .max_height(option_rows)
-                .show(ui, |ui| {
-                    ui.scope(|ui| {
-                        for (index, option) in options.iter().enumerate() {
-                            let is_current = option == selected;
-                            let unavailable = disabled.iter().find_map(|(candidate, reason)| {
-                                (*candidate == index).then_some(*reason)
-                            });
-                            // The owning surface may raise `ctl_h` for a coarse pointer;
-                            // option rows must honor the same target rather than falling
-                            // back to a mouse-only 24 px hit area.
-                            let option_height = t.metrics.ctl_h.max(24.0);
-                            let (row, row_response) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), option_height),
-                                if unavailable.is_some() {
-                                    Sense::hover()
-                                } else {
-                                    Sense::click()
-                                },
-                            );
-                            let shown = super::middle_elided(
-                                ui,
-                                option,
-                                &value_font,
-                                c.text,
-                                (row.width() - 2.0 * VALUE_INSET).max(1.0),
-                            );
-                            let row_response = if let Some(reason) = unavailable {
-                                row_response.on_hover_text(reason)
-                            } else if shown != *option {
-                                row_response.on_hover_text(option)
-                            } else {
-                                row_response
-                            };
-                            row_response.widget_info(|| {
-                                WidgetInfo::selected(
-                                    WidgetType::SelectableLabel,
-                                    ui.is_enabled() && unavailable.is_none(),
-                                    is_current,
-                                    option,
-                                )
-                            });
-                            ui.ctx().accesskit_node_builder(row_response.id, |node| {
-                                node.set_role(egui::accesskit::Role::ListBoxOption);
-                                node.set_selected(is_current);
-                            });
-                            let painter = ui.painter();
-                            if row_response.hovered() {
-                                painter.rect_filled(row, t.radius, c.bg_hover);
-                            }
-                            painter.text(
-                                egui::pos2(row.left() + VALUE_INSET, row.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                shown,
-                                value_font.clone(),
-                                if unavailable.is_some() {
-                                    c.text_faint
-                                } else if is_current {
-                                    c.accent
-                                } else {
-                                    c.text
-                                },
-                            );
-                            theme::paint_focus_ring(ui, &row_response, row);
-                            if unavailable.is_none()
-                                && row_response
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .clicked()
-                            {
-                                picked = Some(index);
-                            }
-                        }
-                    })
-                })
-                .inner;
-            ui.ctx()
-                .accesskit_node_builder(listbox.response.id, |node| {
-                    node.set_role(egui::accesskit::Role::ListBox);
-                    node.set_label(accessible_label);
-                });
+            if let Some(index) = option_list(
+                ui,
+                id_salt,
+                accessible_label,
+                selected,
+                options,
+                disabled,
+                &value_font,
+            ) {
+                picked = Some(index);
+            }
             if let Some(switch) = switch {
                 // Under a rule and outside the scrolling choices, so it is at
                 // the list's foot however long the list is.
@@ -406,6 +443,110 @@ fn select_with_font(
         egui::Popup::close_id(ui.ctx(), popup_id);
     }
     (SelectOutput { picked, response }, switched)
+}
+
+/// The list a select opens: one row per option, the current one in the
+/// accent and an unavailable one faint with its reason on hover, scrolling
+/// once it holds more than [`SELECT_VISIBLE_OPTIONS`]. Returns the option
+/// clicked this frame.
+fn option_list(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    disabled: &[(usize, &'static str)],
+    value_font: &egui::FontId,
+) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let mut picked = None;
+    // A long list scrolls inside the drop-down rather than running
+    // the drop-down off the screen; a short one is laid out as is.
+    let option_rows = t.metrics.ctl_h.max(24.0) * SELECT_VISIBLE_OPTIONS as f32;
+    let listbox = egui::ScrollArea::vertical()
+        .id_salt(("rspice.select.options", id_salt))
+        .max_height(option_rows)
+        .show(ui, |ui| {
+            ui.scope(|ui| {
+                for (index, option) in options.iter().enumerate() {
+                    let is_current = option == selected;
+                    let unavailable = disabled
+                        .iter()
+                        .find_map(|(candidate, reason)| (*candidate == index).then_some(*reason));
+                    // The owning surface may raise `ctl_h` for a coarse pointer;
+                    // option rows must honor the same target rather than falling
+                    // back to a mouse-only 24 px hit area.
+                    let option_height = t.metrics.ctl_h.max(24.0);
+                    let (row, row_response) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), option_height),
+                        if unavailable.is_some() {
+                            Sense::hover()
+                        } else {
+                            Sense::click()
+                        },
+                    );
+                    let shown = super::middle_elided(
+                        ui,
+                        option,
+                        value_font,
+                        c.text,
+                        (row.width() - 2.0 * VALUE_INSET).max(1.0),
+                    );
+                    let row_response = if let Some(reason) = unavailable {
+                        row_response.on_hover_text(reason)
+                    } else if shown != *option {
+                        row_response.on_hover_text(option)
+                    } else {
+                        row_response
+                    };
+                    row_response.widget_info(|| {
+                        WidgetInfo::selected(
+                            WidgetType::SelectableLabel,
+                            ui.is_enabled() && unavailable.is_none(),
+                            is_current,
+                            option,
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(row_response.id, |node| {
+                        node.set_role(egui::accesskit::Role::ListBoxOption);
+                        node.set_selected(is_current);
+                    });
+                    let painter = ui.painter();
+                    if row_response.hovered() {
+                        painter.rect_filled(row, t.radius, c.bg_hover);
+                    }
+                    painter.text(
+                        egui::pos2(row.left() + VALUE_INSET, row.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        shown,
+                        value_font.clone(),
+                        if unavailable.is_some() {
+                            c.text_faint
+                        } else if is_current {
+                            c.accent
+                        } else {
+                            c.text
+                        },
+                    );
+                    theme::paint_focus_ring(ui, &row_response, row);
+                    if unavailable.is_none()
+                        && row_response
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                    {
+                        picked = Some(index);
+                    }
+                }
+            })
+        })
+        .inner;
+    ui.ctx()
+        .accesskit_node_builder(listbox.response.id, |node| {
+            node.set_role(egui::accesskit::Role::ListBox);
+            node.set_label(accessible_label);
+        });
+    picked
 }
 
 fn keyboard_selection(

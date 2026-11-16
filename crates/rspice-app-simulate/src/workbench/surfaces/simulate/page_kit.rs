@@ -412,6 +412,18 @@ pub(super) fn card_row<T>(
 
 /// A ledger head row: the column labels as written, over the table's own fill.
 pub(super) fn ledger_head(ui: &mut Ui, fractions: &[f32], labels: &[&str]) {
+    ledger_head_explained(ui, fractions, labels, &[]);
+}
+
+/// [`ledger_head`] whose columns state their rule on hover: `hovers[i]` over
+/// column `i`, nothing where it is empty or missing. What a column's values
+/// mean is said where the reader looks for it, not in prose under the table.
+pub(super) fn ledger_head_explained(
+    ui: &mut Ui,
+    fractions: &[f32],
+    labels: &[&str],
+    hovers: &[&str],
+) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), TABLE_HEAD_H), Sense::hover());
@@ -421,7 +433,11 @@ pub(super) fn ledger_head(ui: &mut Ui, fractions: &[f32], labels: &[&str]) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    for (cell, label) in column_rects(rect, fractions).into_iter().zip(labels) {
+    for (index, (cell, label)) in column_rects(rect, fractions)
+        .into_iter()
+        .zip(labels)
+        .enumerate()
+    {
         paint_text(
             ui,
             cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)),
@@ -429,6 +445,15 @@ pub(super) fn ledger_head(ui: &mut Ui, fractions: &[f32], labels: &[&str]) {
             theme::sans(tokens::FS_0, FontWeight::Medium),
             t.color.text_faint,
         );
+        if let Some(hover) = hovers.get(index).filter(|hover| !hover.is_empty()) {
+            let _ = ui
+                .interact(
+                    cell,
+                    ui.auto_id_with(("ledger-head", index)),
+                    Sense::hover(),
+                )
+                .on_hover_text(*hover);
+        }
     }
 }
 
@@ -597,6 +622,16 @@ pub(super) fn column_rects(rect: Rect, fractions: &[f32]) -> Vec<Rect> {
 
 /// A card's closing prose. Explains a rule the controls above cannot state.
 pub(super) fn card_note(ui: &mut Ui, text: &str) {
+    let _ = card_prose(ui, text, true);
+}
+
+/// A table's empty state: one line where its rows would be, saying why there
+/// are none. Returns its response, so the line can carry the rest on hover.
+pub(super) fn card_empty(ui: &mut Ui, text: &str) -> egui::Response {
+    card_prose(ui, text, false)
+}
+
+fn card_prose(ui: &mut Ui, text: &str, wrap: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .inner_margin(egui::Margin {
@@ -606,15 +641,14 @@ pub(super) fn card_note(ui: &mut Ui, text: &str) {
             bottom: 9,
         })
         .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                )
-                .wrap(),
+            let label = egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
             );
-        });
+            ui.add(if wrap { label.wrap() } else { label.truncate() })
+        })
+        .inner
 }
 
 /// The body region of a card: horizontal padding and a comfortable rhythm for

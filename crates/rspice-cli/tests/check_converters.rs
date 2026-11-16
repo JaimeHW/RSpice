@@ -35,6 +35,9 @@ fn each_converter_is_one_row_with_its_port_module_and_supply() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Converters: 2"), "{stdout}");
+    // Named by net, module and port, as an elaboration report names an
+    // inserted connect instance; the build's own name is in --json.
+    assert!(!stdout.contains("__rspice_auto"), "{stdout}");
     let row = |node: &str| {
         stdout
             .lines()
@@ -47,15 +50,7 @@ fn each_converter_is_one_row_with_its_port_module_and_supply() {
             .to_ascii_lowercase()
     };
     let header = row("NODE");
-    for column in [
-        "port",
-        "dir",
-        "module",
-        "instance",
-        "rule",
-        "supply",
-        "parameters",
-    ] {
+    for column in ["port", "dir", "module", "rule", "supply", "parameters"] {
         assert!(header.contains(column), "{header}");
     }
     let input = row("din");

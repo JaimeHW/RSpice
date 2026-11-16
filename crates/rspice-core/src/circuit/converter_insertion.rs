@@ -263,16 +263,21 @@ impl ConverterInsertion {
     /// 2. the discrete port that meets it, or `-`;
     /// 3. what it converts: `A→D`, `D→A` or `A↔D` between an analog node
     ///    and a logic port, `A→R`, `R→A` or `A↔R` with a real one;
-    /// 4. the module that converts, and 5. its instance;
-    /// 6. what chose it: the `connectrules` block whose statement selected
+    /// 4. the module that converts;
+    /// 5. what chose it: the `connectrules` block whose statement selected
     ///    it, the rule set an HDL port no statement reaches converts with,
     ///    `auto-bridge` or the template;
-    /// 7. the supply it converts against, or `-`;
-    /// 8. the parameters its connect statement set, or `-`.
+    /// 6. the supply it converts against, or `-`;
+    /// 7. the parameters its connect statement set, or `-`.
     ///
+    /// The row names the converter as an elaboration report names an
+    /// inserted connect instance, by the net, the module and the port it
+    /// serves, rather than by [`Self::instance`]: that name is the build's
+    /// own (it starts `__rspice_auto_` so no deck can write it, and output
+    /// and diagnostics key on the prefix to speak of the author's nets).
     /// `rspice check --converters` prints these rows, and the app's
     /// converter table shows the same cells.
-    pub fn report_row(&self) -> [String; 8] {
+    pub fn report_row(&self) -> [String; 7] {
         let set = self
             .parameters
             .iter()
@@ -284,7 +289,6 @@ impl ConverterInsertion {
             self.port.clone().unwrap_or_else(|| "-".into()),
             self.converts().to_owned(),
             self.module.clone(),
-            self.instance.clone(),
             match &self.rules {
                 ConverterSource::ConnectRule { block, .. } => block.clone(),
                 ConverterSource::RuleSet(name) => format!("{name}, no connect rule"),
