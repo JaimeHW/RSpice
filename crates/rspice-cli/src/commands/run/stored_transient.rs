@@ -763,6 +763,7 @@ impl StoredTransient {
                     | OutputFormat::RawAscii
                     | OutputFormat::Csv
                     | OutputFormat::Tsv
+                    | OutputFormat::Hdf5
                     | OutputFormat::Vcd
             );
         let prints = netlist.output_requests.iter().any(|request| {
@@ -1379,6 +1380,14 @@ pub(super) struct RowCursor<'r> {
     non_finite: bool,
 }
 
+/// Why [`RowCursor::write_column`] stopped.
+pub(super) enum ColumnStop {
+    /// The value at this output row is not finite.
+    NonFinite(usize),
+    /// A read or the write failed.
+    Failed(CliError),
+}
+
 impl RowCursor<'_> {
     /// Variable `variable` (0 is time, then each output signal) of output row `row`.
     pub(super) fn value(&mut self, row: usize, variable: usize) -> f64 {
@@ -1426,6 +1435,34 @@ impl RowCursor<'_> {
             self.non_finite = true;
         }
         value
+    }
+
+    /// Write variable `variable` (as [`Self::value`] numbers it) of output rows `0..rows` to
+    /// `out` as the little-endian bytes of its values, a chunk's worth at a time.
+    pub(super) fn write_column(
+        &mut self,
+        variable: usize,
+        rows: usize,
+        out: &mut dyn std::io::Write,
+        path: &Path,
+    ) -> Result<(), ColumnStop> {
+        let mut bytes = Vec::with_capacity(1 << 16);
+        for row in 0..rows {
+            let value = self.value(row, variable);
+            if !value.is_finite() {
+                return Err(match self.error.take() {
+                    Some(error) => ColumnStop::Failed(store_error(self.dir, error)),
+                    None => ColumnStop::NonFinite(row),
+                });
+            }
+            bytes.extend_from_slice(&value.to_le_bytes());
+            if bytes.len() >= 1 << 16 || row + 1 == rows {
+                out.write_all(&bytes)
+                    .map_err(|error| ColumnStop::Failed(CliError::output_error(path, error)))?;
+                bytes.clear();
+            }
+        }
+        Ok(())
     }
 
     fn load(&mut self, row: u64) -> usize {

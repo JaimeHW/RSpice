@@ -108,6 +108,16 @@ pub enum Hdf5Error {
     /// The serialized bytes could not be handed to the writer.
     #[error("could not write the HDF5 document: {0}")]
     Write(#[source] std::io::Error),
+    /// A streamed dataset's values did not arrive as the document declares them: the writer
+    /// was given no source, the source wrote another count, or the encoder lays the file out
+    /// otherwise than the streamed writer does.
+    #[error("the HDF5 dataset '{dataset}' could not be streamed: {reason}")]
+    Streamed {
+        /// The dataset's name, or the file's part the layout disagrees on.
+        dataset: String,
+        /// Why.
+        reason: &'static str,
+    },
     /// A column does not stand on the section's coordinate. Padding or
     /// truncating it would publish numbers the run never produced.
     #[error(
@@ -164,6 +174,9 @@ pub enum Hdf5Values {
     Real(Vec<f64>),
     /// An `i64` array.
     Integer(Vec<i64>),
+    /// This many `f64` values, which [`write_hdf5_streamed`]'s source writes while the file is
+    /// written instead of the document holding them.
+    Streamed(usize),
 }
 
 /// One group of a document: its attributes and its datasets, each in the order
@@ -204,6 +217,17 @@ impl Hdf5Group {
     pub fn set_integer_dataset(&mut self, name: &str, values: &[i64]) {
         self.datasets
             .push((name.to_owned(), Hdf5Values::Integer(values.to_vec())));
+    }
+}
+
+impl Hdf5Values {
+    /// How many values the dataset holds.
+    fn len(&self) -> usize {
+        match self {
+            Self::Real(values) => values.len(),
+            Self::Integer(values) => values.len(),
+            Self::Streamed(count) => *count,
+        }
     }
 }
 
@@ -457,6 +481,21 @@ impl Hdf5Table {
 /// and [`Hdf5Error::Write`] when the writer does.
 pub fn write_hdf5(writer: impl Write, document: &Hdf5Document) -> Result<(), Hdf5Error> {
     let mut writer = writer;
+    let bytes = encode(document, |name, _| {
+        Err(Hdf5Error::Streamed {
+            dataset: name.to_owned(),
+            reason: "the document holds no values for it",
+        })
+    })?;
+    writer.write_all(&bytes).map_err(Hdf5Error::Write)
+}
+
+/// The encoder's bytes for `document`, with the values `streamed` gives in place of each
+/// [`Hdf5Values::Streamed`] dataset.
+fn encode(
+    document: &Hdf5Document,
+    mut streamed: impl FnMut(&str, usize) -> Result<Vec<f64>, Hdf5Error>,
+) -> Result<Vec<u8>, Hdf5Error> {
     let mut builder = FileBuilder::new();
     for (name, value) in &document.attributes {
         builder.set_attr(name, attribute(value));
@@ -474,12 +513,216 @@ pub fn write_hdf5(writer: impl Write, document: &Hdf5Document) -> Result<(), Hdf
                 Hdf5Values::Integer(values) => {
                     built.create_dataset(name).with_i64_data(values);
                 }
+                Hdf5Values::Streamed(count) => {
+                    built
+                        .create_dataset(name)
+                        .with_f64_data(&streamed(name, *count)?);
+                }
             }
         }
         builder.add_group(built.finish());
     }
-    let bytes = builder.finish().map_err(Hdf5Error::Backend)?;
-    writer.write_all(&bytes).map_err(Hdf5Error::Write)
+    builder.finish().map_err(Hdf5Error::Backend)
+}
+
+/// Why [`write_hdf5_streamed`] stopped.
+#[derive(Debug, Error)]
+pub enum Hdf5StreamError<E> {
+    /// The document or the writer refused.
+    #[error(transparent)]
+    Document(#[from] Hdf5Error),
+    /// The source of a streamed dataset failed.
+    #[error("{0}")]
+    Source(E),
+}
+
+/// [`write_hdf5`] of a document whose [`Hdf5Values::Streamed`] datasets `source` writes, the
+/// `index`th of them (counting in document order) as the little-endian bytes of its `f64`
+/// values, while the file is written: memory holds the file's metadata and what `source` holds,
+/// never a dataset. The bytes are the ones [`write_hdf5`] writes for the same values.
+///
+/// Every dataset is stored contiguously after all of the file's metadata, at an address its
+/// length alone fixes, so the metadata is the encoder's own for the same document with one
+/// value in each streamed dataset, with each dataset's header restated for its real length.
+/// The encoder's layout is checked against that reading before a byte is written.
+///
+/// # Errors
+///
+/// [`Hdf5StreamError::Source`] when `source` fails, and [`Hdf5Error::Streamed`] when it writes
+/// another count of bytes than its dataset declares or the encoder lays the file out otherwise.
+pub fn write_hdf5_streamed<E>(
+    writer: impl Write,
+    document: &Hdf5Document,
+    mut source: impl FnMut(usize, &mut dyn Write) -> Result<(), E>,
+) -> Result<(), Hdf5StreamError<E>> {
+    let mut writer = writer;
+    let skeleton = encode(document, |_, _| Ok(vec![0.0]))?;
+    // Each dataset in the order the encoder lays them out: its type, its length in the file
+    // and in the skeleton.
+    let datasets = document
+        .groups
+        .iter()
+        .flat_map(|group| &group.datasets)
+        .map(|(name, values)| {
+            let real = !matches!(values, Hdf5Values::Integer(_));
+            let skeleton = if matches!(values, Hdf5Values::Streamed(_)) {
+                1
+            } else {
+                values.len()
+            };
+            (name.as_str(), real, values.len() as u64, skeleton as u64)
+        })
+        .collect::<Vec<_>>();
+    let headers = |lengths: &mut dyn Iterator<Item = (bool, u64)>, data: u64| {
+        let mut address = data;
+        lengths
+            .map(|(real, length)| {
+                let header = dataset_header(real, length, address);
+                address += length * 8;
+                header
+            })
+            .collect::<Vec<_>>()
+    };
+    let layout_differs = |part: &str| Hdf5Error::Streamed {
+        dataset: part.to_owned(),
+        reason: "the HDF5 encoder lays the file out otherwise than this writer streams it",
+    };
+    let header_bytes = headers(&mut datasets.iter().map(|d| (d.1, 0)), 0)
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
+    let skeleton_data = datasets.iter().map(|d| d.3 as usize * 8).sum::<usize>();
+    let metadata = skeleton
+        .len()
+        .checked_sub(header_bytes + skeleton_data)
+        .filter(|&metadata| metadata >= SUPERBLOCK_BYTES)
+        .ok_or_else(|| layout_differs("file"))?;
+    let data = (metadata + header_bytes) as u64;
+    let expected = headers(&mut datasets.iter().map(|d| (d.1, d.3)), data).concat();
+    if skeleton[metadata..metadata + header_bytes] != expected[..]
+        || skeleton[..SUPERBLOCK_BYTES] != superblock(skeleton.len() as u64)[..]
+    {
+        return Err(layout_differs("dataset headers").into());
+    }
+    let end = data + datasets.iter().map(|d| d.2 * 8).sum::<u64>();
+    let write = |writer: &mut dyn Write, bytes: &[u8]| -> Result<(), Hdf5StreamError<E>> {
+        writer
+            .write_all(bytes)
+            .map_err(|error| Hdf5Error::Write(error).into())
+    };
+    write(&mut writer, &superblock(end))?;
+    write(&mut writer, &skeleton[SUPERBLOCK_BYTES..metadata])?;
+    for header in headers(&mut datasets.iter().map(|d| (d.1, d.2)), data) {
+        write(&mut writer, &header)?;
+    }
+    drop(skeleton);
+    let mut streamed = 0;
+    let mut bytes = Vec::new();
+    for (name, values) in document.groups.iter().flat_map(|group| &group.datasets) {
+        match values {
+            Hdf5Values::Real(values) => {
+                for chunk in values.chunks(8192) {
+                    bytes.clear();
+                    bytes.extend(chunk.iter().flat_map(|value| value.to_le_bytes()));
+                    write(&mut writer, &bytes)?;
+                }
+            }
+            Hdf5Values::Integer(values) => {
+                for chunk in values.chunks(8192) {
+                    bytes.clear();
+                    bytes.extend(chunk.iter().flat_map(|value| value.to_le_bytes()));
+                    write(&mut writer, &bytes)?;
+                }
+            }
+            Hdf5Values::Streamed(count) => {
+                let mut counted = Counted {
+                    inner: &mut writer,
+                    bytes: 0,
+                };
+                source(streamed, &mut counted).map_err(Hdf5StreamError::Source)?;
+                if counted.bytes != *count as u64 * 8 {
+                    return Err(Hdf5Error::Streamed {
+                        dataset: name.clone(),
+                        reason: "its source wrote another count of values than it declares",
+                    }
+                    .into());
+                }
+                streamed += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The bytes of a v3 superblock before the root group, as the encoder writes them.
+const SUPERBLOCK_BYTES: usize = 48;
+
+/// The encoder's superblock for a file of `end` bytes whose root group follows it.
+fn superblock(end: u64) -> Vec<u8> {
+    rustyhdf5_format::superblock::Superblock {
+        version: 3,
+        offset_size: 8,
+        length_size: 8,
+        base_address: 0,
+        eof_address: end,
+        root_group_address: SUPERBLOCK_BYTES as u64,
+        group_leaf_node_k: None,
+        group_internal_node_k: None,
+        indexed_storage_internal_node_k: None,
+        free_space_address: None,
+        driver_info_address: None,
+        consistency_flags: 0,
+        superblock_extension_address: Some(u64::MAX),
+        checksum: None,
+    }
+    .serialize()
+}
+
+/// The encoder's object header of a contiguous one-dimensional dataset of `length` values
+/// (`f64` when `real`, else `i64`) stored at `address`, with no attributes.
+fn dataset_header(real: bool, length: u64, address: u64) -> Vec<u8> {
+    use rustyhdf5_format::dataspace::{Dataspace, DataspaceType};
+    use rustyhdf5_format::message_type::MessageType;
+    use rustyhdf5_format::object_header_writer::ObjectHeaderWriter;
+    use rustyhdf5_format::type_builders::{make_f64_type, make_i64_type};
+    let datatype = if real {
+        make_f64_type()
+    } else {
+        make_i64_type()
+    };
+    let dataspace = Dataspace {
+        space_type: DataspaceType::Simple,
+        rank: 1,
+        dimensions: vec![length],
+        max_dimensions: None,
+    };
+    let mut layout = vec![4, 1];
+    layout.extend_from_slice(&address.to_le_bytes());
+    layout.extend_from_slice(&(length * 8).to_le_bytes());
+    let mut header = ObjectHeaderWriter::new();
+    header.add_message_with_flags(MessageType::Datatype, datatype.serialize(), 0x01);
+    header.add_message(MessageType::Dataspace, dataspace.serialize(8));
+    header.add_message_with_flags(MessageType::FillValue, vec![3, 0x0a], 0x01);
+    header.add_message(MessageType::DataLayout, layout);
+    header.serialize()
+}
+
+/// A writer that counts the bytes it passes on.
+struct Counted<'w> {
+    inner: &'w mut dyn Write,
+    bytes: u64,
+}
+
+impl Write for Counted<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 fn attribute(value: &Hdf5Attribute) -> AttrValue {
@@ -655,6 +898,85 @@ mod tests {
         write_hdf5(&mut second, &document).expect("serializes");
         assert_eq!(first, second);
         assert_eq!(&first[..8], b"\x89HDF\r\n\x1a\n", "the HDF5 signature");
+    }
+
+    #[test]
+    fn a_streamed_document_is_the_whole_document_byte_for_byte() {
+        // Wide enough that the group's attributes go dense, with columns of a length that
+        // takes more than one buffer, an integer dataset and an empty section beside them.
+        let rows = 20_000;
+        let column = |seed: f64| {
+            (0..rows)
+                .map(|row| (row as f64 * 1.0e-3 + seed).sin() * seed)
+                .collect::<Vec<_>>()
+        };
+        let columns = (0..12)
+            .map(|index| Hdf5Column::Real {
+                name: format!("V(n{index})"),
+                quantity: "voltage".to_owned(),
+                unit: (index % 2 == 0).then(|| "V".to_owned()),
+                values: column(index as f64 + 0.5),
+            })
+            .collect::<Vec<_>>();
+        let time = (0..rows).map(|row| row as f64 * 1.0e-9).collect::<Vec<_>>();
+        let mut whole = Hdf5Document::new("streamed");
+        whole.set_attr("analysis_id", Hdf5Attribute::Text("tran".to_owned()));
+        whole
+            .add_table(&Hdf5Table {
+                group: "tran".to_owned(),
+                section_type: "transient".to_owned(),
+                coordinate: Hdf5Coordinate::Independent {
+                    name: "time".to_owned(),
+                    values: time.clone(),
+                },
+                columns: columns.clone(),
+            })
+            .expect("a shared axis");
+        let mut measures = Hdf5Group::new("measurements");
+        measures.set_attr("count", Hdf5Attribute::Integer(2));
+        measures.set_integer_dataset("flags", &[1, 0]);
+        measures.set_real_dataset("values", &[]);
+        whole.groups.push(measures);
+        whole.add_table(&spectral()).expect("a shared axis");
+        let mut expected = Vec::new();
+        write_hdf5(&mut expected, &whole).expect("serializes");
+
+        let mut streamed = whole.clone();
+        let mut sources = Vec::new();
+        for (_, values) in &mut streamed.groups[0].datasets {
+            let Hdf5Values::Real(held) = std::mem::replace(values, Hdf5Values::Streamed(rows))
+            else {
+                unreachable!("the section's datasets are real");
+            };
+            sources.push(held);
+        }
+        assert_eq!(sources.len(), 13);
+        let mut actual = Vec::new();
+        write_hdf5_streamed(&mut actual, &streamed, |index, out| {
+            for chunk in sources[index].chunks(1_000) {
+                let bytes = chunk
+                    .iter()
+                    .flat_map(|value| value.to_le_bytes())
+                    .collect::<Vec<_>>();
+                out.write_all(&bytes)?;
+            }
+            Ok::<(), std::io::Error>(())
+        })
+        .expect("streams");
+        assert!(actual == expected, "the streamed file differs");
+
+        // A source that writes another count is refused rather than published.
+        let short =
+            write_hdf5_streamed(&mut Vec::new(), &streamed, |_, out| out.write_all(&[0; 8]));
+        assert!(matches!(
+            short,
+            Err(Hdf5StreamError::Document(Hdf5Error::Streamed { .. }))
+        ));
+        // And the whole-document writer refuses a dataset it holds no values for.
+        assert!(matches!(
+            write_hdf5(&mut Vec::new(), &streamed),
+            Err(Hdf5Error::Streamed { .. })
+        ));
     }
 
     #[test]

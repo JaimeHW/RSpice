@@ -13,19 +13,24 @@ c1 out 0 100p
 .end
 ";
 
-/// The same circuit with a measurement of an expression, which is a waveform of its own, so the
-/// run is read back from its store into memory before its outputs are written.
+/// The same circuit with a measurement of an expression that reads another statement's running
+/// result, which no chunk of rows gives alone, so the run is read back from its store into
+/// memory before its outputs are written.
 const RC_MEASURED: &str = "rc step
 v1 in 0 pulse(0 1 10n 1n 1n 200n 400n)
 r1 in out 1k
 c1 out 0 100p
 .tran 5n 2u
-.meas tran vmax max par('2*v(out)')
+.meas tran vavg avg v(out)
+.meas tran vmax max par('2*v(out)+0*vavg')
 .end
 ";
 
-/// Measurements that read the run's own columns, which are measured in one pass over its store.
+/// Measurements that read the run's own columns, an expression of them or a voltage between two
+/// nodes, which are measured in passes over its store.
 const RC_MEASURES: &str = ".meas tran vavg avg v(out)
+.meas tran gap max par('v(in)-v(out)') from=50n
+.meas tran across rms v(in,out)
 .meas tran vmax max v(out) from=100n
 .meas tran rise trig v(out) val=0.1 rise=1 targ v(out) val=0.8 rise=1
 .meas tran vat find v(out) at=333n
@@ -51,7 +56,7 @@ fn a_streamed_output_is_byte_identical_to_the_same_run_read_back_into_memory() {
     let measured_deck = dir.join("rc_measured.cir");
     std::fs::write(&streamed_deck, RC).unwrap();
     std::fs::write(&measured_deck, RC_MEASURED).unwrap();
-    for format in ["raw", "ascii", "csv", "tsv"] {
+    for format in ["raw", "ascii", "csv", "tsv", "hdf5"] {
         let streamed = dir.join(format!("streamed-{format}.out"));
         let read_back = dir.join(format!("read-back-{format}.out"));
         for (deck, output) in [(&streamed_deck, &streamed), (&measured_deck, &read_back)] {
@@ -82,10 +87,11 @@ fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
     let read_back = dir.join("read_back.cir");
     let body = RC.trim_end_matches(".end\n");
     std::fs::write(&streamed, format!("{body}{RC_MEASURES}.end\n")).unwrap();
-    // An expression's measurement reads the run in memory, and the others with it.
+    // A measurement of another one's running result reads the run in memory, and the others
+    // with it.
     std::fs::write(
         &read_back,
-        format!("{body}{RC_MEASURES}.meas tran twice max par('2*v(out)')\n.end\n"),
+        format!("{body}{RC_MEASURES}.meas tran twice max par('2*v(out)+0*vavg')\n.end\n"),
     )
     .unwrap();
     let measured = |deck: &std::path::Path, file: &str| {
@@ -103,7 +109,7 @@ fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
     };
     let streamed = measured(&streamed, "streamed.json");
     let read_back = measured(&read_back, "read_back.json");
-    assert_eq!(streamed.len(), 8);
+    assert_eq!(streamed.len(), 10);
     for measurement in &streamed {
         let twin = read_back
             .iter()

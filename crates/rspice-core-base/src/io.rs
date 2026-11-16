@@ -41,7 +41,7 @@ pub fn decimal_underflowed(spelling: &str, value: f64) -> bool {
 
 pub use hdf5::{
     HDF5_SCHEMA_VERSION, HDF5_SIMULATOR, Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document,
-    Hdf5Error, Hdf5Group, Hdf5Table, Hdf5Values, write_hdf5,
+    Hdf5Error, Hdf5Group, Hdf5StreamError, Hdf5Table, Hdf5Values, write_hdf5, write_hdf5_streamed,
 };
 pub use ltspice_raw::{
     RawFile, RawFileHeader, RawParseError, RawWaveform, RawWaveformData, parse_raw_file,

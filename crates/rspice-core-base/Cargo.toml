@@ -102,6 +102,9 @@ libm = "0.2"
 # here: `io::hdf5` builds a document in memory and hands the bytes to a writer,
 # so nothing on the wasm path reaches for a file or a mapping.
 rustyhdf5 = { version = "1.93", default-features = false }
+# The encoder's own object-header, superblock and type writers, which the streamed HDF5 writer
+# lays a dataset's header out with so that its file is the encoder's byte for byte.
+rustyhdf5-format = { version = "1.93", default-features = false }
 rspice-matrix.workspace = true
 rspice-veriloga-runtime.workspace = true
 serde.workspace = true

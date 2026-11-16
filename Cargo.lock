@@ -5821,6 +5821,7 @@ dependencies = [
  "rspice-matrix",
  "rspice-veriloga-runtime",
  "rustyhdf5",
+ "rustyhdf5-format",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -1603,6 +1603,53 @@ fn finish_transient_products(
                         cursor.finish(&output_path)?;
                         write_raw_event_plots(writer, &output_path, ctx.format, events, buses)
                     }
+                    (
+                        TransientOutputDocument::Hdf5(data),
+                        Some((first, points)),
+                        Some(plan),
+                        Some(stored),
+                    ) => {
+                        let points =
+                            usize::try_from(points).map_err(|_| CliError::InternalError {
+                                message: "a transient output has more rows than this host \
+                                          can address"
+                                    .to_owned(),
+                            })?;
+                        // Each dataset is one column of the store, written as it is read, in
+                        // the order the document refuses a non-finite sample in.
+                        let names = std::iter::once("time")
+                            .chain(signals.iter().map(|signal| signal.display_name.as_str()))
+                            .collect::<Vec<_>>();
+                        let mut cursor = stored.rows.cursor(plan, first);
+                        crate::hdf5::write_streamed_transient_to_writer(
+                            writer,
+                            data,
+                            points,
+                            |variable, out| {
+                                cursor
+                                    .write_column(variable, points, out, &output_path)
+                                    .map_err(|stop| match stop {
+                                        super::stored_transient::ColumnStop::NonFinite(row) => {
+                                            map_hdf5_output_error(
+                                                &output_path,
+                                                crate::hdf5::Hdf5Error::InvalidSchema(format!(
+                                                    "non-finite value in '{}' at sample {row}",
+                                                    names[variable]
+                                                )),
+                                            )
+                                        }
+                                        super::stored_transient::ColumnStop::Failed(error) => error,
+                                    })
+                            },
+                        )
+                        .map_err(|failure| match failure {
+                            crate::hdf5::Hdf5StreamFailure::Hdf5(error) => {
+                                map_hdf5_output_error(&output_path, error)
+                            }
+                            crate::hdf5::Hdf5StreamFailure::Source(error) => error,
+                        })?;
+                        cursor.finish(&output_path)
+                    }
                     _ => document.write_to(
                         writer,
                         &output_path,
