@@ -502,3 +502,43 @@ fn the_interval_after_a_line_event_is_read_through_samples_after_it() {
         assert_eq!(read(&line, 3.75), after(3.5));
     }
 }
+
+#[test]
+fn an_event_arrives_at_the_other_port_only_where_it_changed_a_launched_wave() {
+    let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 1.0);
+    line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+    let event = |time, outgoing, outgoing_wave_slopes| TransmissionLineHistoryEvent {
+        time,
+        incoming: [1.0, 0.0, -1.0, 0.0],
+        outgoing,
+        incoming_wave_slopes: [2.0, -2.0],
+        outgoing_wave_slopes,
+    };
+    let unchanged = [1.0, 0.0, -1.0, 0.0];
+    // Both waves continue through 0.25; the backward wave turns at 0.5.
+    line.accept_history_event(event(0.25, unchanged, [2.0, -2.0]))
+        .unwrap();
+    line.accept_history_event(event(0.5, unchanged, [2.0, 3.0]))
+        .unwrap();
+    assert_eq!(
+        line.next_history_event_arrival_after(0.0).unwrap(),
+        Some(1.5)
+    );
+    // Under the deck's tolerance a corner counts once a step one delay long
+    // would cut its kink by more than reltol |w| + vntol; a jump counts too.
+    line.set_arrival_tolerances(1e-3, 1e-6);
+    line.accept_history_event(event(0.75, unchanged, [2.004, -2.0]))
+        .unwrap();
+    line.accept_history_event(event(1.0, [1.5, 0.0, -1.0, 0.0], [2.0, -2.0]))
+        .unwrap();
+    assert_eq!(
+        line.next_history_event_arrival_after(1.5).unwrap(),
+        Some(2.0)
+    );
+    line.accept_history_event(event(1.25, unchanged, [2.005, -2.0]))
+        .unwrap();
+    assert_eq!(
+        line.next_history_event_arrival_after(2.0).unwrap(),
+        Some(2.25)
+    );
+}

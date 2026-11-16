@@ -11085,6 +11085,16 @@ impl Engine {
                         if let Some(tau) = loss_time_constant {
                             tline.set_loss_time_constant(tau);
                         }
+                        if tline.supports_sided_history_events() {
+                            tline.set_arrival_tolerances(
+                                self.voltage_reltol(),
+                                self.voltage_abstol(),
+                            );
+                            // No step longer than the delay, as Xyce's TRA
+                            // (N_DEV_TRA.C:1972): the far end then reads
+                            // accepted history, never a value held past it.
+                            circuit.tighten_transient_max_step_hint(tline.delay());
+                        }
                         circuit.tlines.push(tline);
                     };
 

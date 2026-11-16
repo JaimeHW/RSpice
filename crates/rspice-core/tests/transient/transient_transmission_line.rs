@@ -531,8 +531,11 @@ fn prescribed_capacitor_load_preserves_the_analytic_line_arrival() {
 /// apart under a Xyce floor of 5.6e-23 s. Landing on the first left the second
 /// unreachable ("physical source/delay event ... cannot be reached"); the two
 /// land together on the later clock, and the matched line's waves stay exact.
+/// Xyce's BUG 662 deck: a pulse train through a line matched at both ends.
+/// What reaches the far end is absorbed there, so nothing travels back to
+/// land with a pulse corner, and each corner lands on its own clock.
 #[test]
-fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
+fn a_line_matched_at_both_ends_sends_nothing_back_to_a_pulse_corner() {
     use rspice_core::engine::{ConvergenceConfig, TransientStartupMode};
     use rspice_core::numerics::integration::IntegrationMethod;
     let deck = Netlist::parse(
@@ -567,8 +570,8 @@ fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
         .unwrap();
     assert_eq!(result.time.last().copied(), Some(100.0e-9));
     let corner: f64 = 25.0e-9 + 0.1e-9;
-    assert!(result.time.contains(&corner.next_up()));
-    assert!(!result.time.contains(&corner));
+    assert!(result.time.contains(&corner));
+    assert!(!result.time.contains(&corner.next_up()));
 
     // The source sees 50 ohms on each side, so the near end is half the pulse
     // and the far end is the near end ten nanoseconds earlier.
@@ -700,10 +703,10 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
 
 #[test]
 fn a_short_line_reaches_each_arrival_when_the_steps_are_as_long_as_its_delay() {
-    // Nothing but the line's own arrivals limits the steps here, so each
-    // one ends a delay after the last. The 3 ns arrival rounds up a unit in
-    // the last place, past `3 ns - TD`, and was refused as reaching beyond
-    // accepted history.
+    // Nothing but the line limits the steps here: its arrivals while the
+    // sine's starting corner still reflects, then its delay. The 3 ns
+    // arrival rounds up a unit in the last place, past `3 ns - TD`, and was
+    // refused as reaching beyond accepted history.
     let deck = Netlist::parse(
         "short line\nV1 in 0 SIN(0 1 1meg)\nR1 in a 30\nT1 a 0 b 0 Z0=75 TD=1n\nR2 b 0 300\n.end\n",
     )
@@ -743,11 +746,20 @@ fn a_short_line_reaches_each_arrival_when_the_steps_are_as_long_as_its_delay() {
                 (1.0 + load_reflection) * forward(time - td),
             ),
         ] {
+            // Within VNTOL: the history is read over steps one delay long,
+            // linearly between two events, |w''| TD^2/8 <= 3.5e-7 V here.
             assert!(
-                (voltage - expected).abs() < 1e-12,
+                (voltage - expected).abs() < 1e-6,
                 "v({node}) at {time:e}: {voltage:e} vs {expected:e}"
             );
         }
     }
+    assert!(result.time.contains(&3.0000000000000004e-9));
+    assert!(
+        result
+            .time
+            .windows(2)
+            .all(|step| step[1] - step[0] <= td * (1.0 + 4.0 * f64::EPSILON))
+    );
     assert_eq!(result.time.last(), Some(&10e-9));
 }

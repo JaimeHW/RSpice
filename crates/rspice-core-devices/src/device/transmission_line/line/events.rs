@@ -318,7 +318,8 @@ impl TransmissionLine {
         !self.state_history.is_empty() && time <= arrival(self.current_time, self.td)
     }
 
-    /// Next exactly owned delayed event, including a slope-only corner.
+    /// Next arrival of an owned event that changed a launched wave, including
+    /// a slope-only corner ([`Self::event_launches`]).
     #[doc(hidden)]
     pub fn next_history_event_arrival_after(&self, time: Value) -> Result<Option<Value>, String> {
         if !time.is_finite() {
@@ -329,9 +330,50 @@ impl TransmissionLine {
             .partition_point(|event| arrival(event.incoming.time, self.td) <= time);
         Ok(self
             .history_events
-            .get(index)
+            .range(index..)
+            .find(|event| self.event_launches(event))
             .map(|event| arrival(event.incoming.time, self.td))
             .filter(|clock| clock.is_finite()))
+    }
+
+    /// Whether an event changed either launched wave enough to arrive at the
+    /// other port as an event of its own ([`Self::arrival_matters`]).
+    ///
+    /// Every event commits on every line, so without this each arrival is
+    /// an event that arrives again one delay later, forever: a pulse corner
+    /// on a mismatched line came back every round trip after its reflections
+    /// had shrunk below any tolerance. ngspice and Xyce launch an arrival
+    /// only where a wave turns (traacct.c:84-117, N_DEV_TRA.C:1393-1404);
+    /// this keeps every corner either of them would, and the smaller ones
+    /// the transient tolerance can see.
+    fn event_launches(&self, event: &HistoryEvent) -> bool {
+        let clock = event.incoming.time;
+        let index = self
+            .state_history
+            .partition_point(|sample| sample.time < clock);
+        let Some(outgoing) = self
+            .state_history
+            .get(index)
+            .filter(|sample| sample.time == clock)
+        else {
+            return true;
+        };
+        [true, false].into_iter().any(|forward| {
+            let wave = |sample: &TlineStateSample| {
+                if forward {
+                    sample.v1 + self.z0 * sample.i1
+                } else {
+                    sample.v2 + self.z0 * sample.i2
+                }
+            };
+            let (before, after) = (wave(&event.incoming), wave(outgoing));
+            self.arrival_matters(
+                before.abs().max(after.abs()),
+                after - before,
+                event.slope(forward, TransmissionLineTimeSide::Outgoing)
+                    - event.slope(forward, TransmissionLineTimeSide::Incoming),
+            )
+        })
     }
 
     /// Native delayed launched wave on one side of its physical arrival.

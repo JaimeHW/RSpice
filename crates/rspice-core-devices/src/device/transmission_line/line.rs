@@ -237,6 +237,10 @@ pub struct TransmissionLine {
     ltra_interpolation_mode: DelayedInterpolationMode,
     /// Interpolation policy for an ordinary lossless transmission line.
     lossless_interpolation_mode: DelayedInterpolationMode,
+    /// The transient tolerance an event's change to a launched wave must
+    /// exceed for its arrival to be an event ([`Self::set_arrival_tolerances`]).
+    arrival_reltol: Value,
+    arrival_vntol: Value,
     /// Relative derivative tolerance for ngspice-style LTRA breakpoints.
     ltra_breakpoint_reltol: Value,
     /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
@@ -783,6 +787,8 @@ impl TransmissionLine {
             distributed_rlc_cache: Cell::new(None),
             ltra_interpolation_mode: DelayedInterpolationMode::Quadratic,
             lossless_interpolation_mode: DelayedInterpolationMode::Quadratic,
+            arrival_reltol: 0.0,
+            arrival_vntol: 0.0,
             ltra_breakpoint_reltol: 1.0,
             ltra_breakpoint_abstol: 1.0,
             ltra_history_compaction: false,
@@ -1323,6 +1329,16 @@ impl TransmissionLine {
     /// each launched traveling wave to linear interpolation when consecutive
     /// derivatives indicate a discontinuity. This prevents quadratic ringing
     /// immediately after a propagated source edge.
+    /// The deck's transient tolerances, which decide whether an event changed
+    /// a launched wave enough for its arrival to be an event of its own
+    /// ([`Self::next_history_event_arrival_after`]). Without them any change
+    /// counts.
+    #[doc(hidden)]
+    pub fn set_arrival_tolerances(&mut self, reltol: Value, vntol: Value) {
+        self.arrival_reltol = reltol;
+        self.arrival_vntol = vntol;
+    }
+
     #[doc(hidden)]
     pub fn set_xyce_tra_interpolation(&mut self) {
         self.lossless_interpolation_mode = DelayedInterpolationMode::XyceTra;
@@ -2104,7 +2120,9 @@ impl TransmissionLine {
     /// step by step does not. ngspice's TRA applies the same test with a
     /// relative factor of 1 (traacct.c:84-117), which no ramp starting from a
     /// flat wave passes, so it lets the far end of a line step over the corners
-    /// it receives.
+    /// it receives. The corner must also be one the deck's tolerance can see
+    /// at the other port ([`Self::arrival_matters`]): a reflection that has
+    /// shrunk below it does not count.
     pub fn launched_corner_arrival(&self) -> Option<Value> {
         let arrival = |history: &DelayBuffer| {
             let corner = history.last_corner()?;
@@ -2112,9 +2130,23 @@ impl TransmissionLine {
             let turns =
                 (slope_out - slope_in).abs() >= 0.99 * slope_out.abs().max(slope_in.abs()) + 1.0;
             let arrival = corner.time + self.td;
-            (turns && arrival > corner.newest).then_some(arrival)
+            (turns
+                && self.arrival_matters(corner.value.abs(), 0.0, slope_out - slope_in)
+                && arrival > corner.newest)
+                .then_some(arrival)
         };
         arrival(&self.history_forward).or_else(|| arrival(&self.history_backward))
+    }
+
+    /// Whether a launched wave of magnitude `scale` that changes by `jump`
+    /// in value and `turn` in slope at a clock changes enough for the other
+    /// port to land on its arrival: a step as long as the delay, the longest
+    /// a lossless line allows, would cut its kink by `|turn| TD/4`, and that
+    /// or the jump exceeds the deck's `reltol |w| + vntol`
+    /// ([`Self::set_arrival_tolerances`]).
+    pub(super) fn arrival_matters(&self, scale: Value, jump: Value, turn: Value) -> bool {
+        let tolerance = self.arrival_reltol * scale + self.arrival_vntol;
+        !(jump.abs() <= tolerance && 0.25 * turn.abs() * self.td <= tolerance)
     }
 
     /// Reset for new simulation

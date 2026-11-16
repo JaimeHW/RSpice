@@ -12,6 +12,7 @@ struct Sample {
 #[derive(Debug, Clone, Copy)]
 pub(in crate::device::transmission_line) struct Corner {
     pub(in crate::device::transmission_line) time: Value,
+    pub(in crate::device::transmission_line) value: Value,
     pub(in crate::device::transmission_line) slope_in: Value,
     pub(in crate::device::transmission_line) slope_out: Value,
     /// The time of the sample after it, the newest.
@@ -219,8 +220,9 @@ impl DelayBuffer {
         h00 * p0.value + h10 * dt * p0.slope + h01 * p1.value + h11 * dt * p1.slope
     }
 
-    /// The newest sample but one, as a possible corner: its time, the slope
-    /// of the wave into it, the slope out of it, and the newest sample's time.
+    /// The newest sample but one, as a possible corner: its time and value,
+    /// the slope of the wave into it, the slope out of it, and the newest
+    /// sample's time.
     ///
     /// `None` until two samples are held, or once a step longer than the
     /// retained window has aged the earlier one out; a corner that old has
@@ -231,6 +233,7 @@ impl DelayBuffer {
         let corner = newest_first.next()?;
         Some(Corner {
             time: corner.time,
+            value: corner.value,
             slope_in: corner.slope,
             slope_out: out.slope,
             newest: out.time,
