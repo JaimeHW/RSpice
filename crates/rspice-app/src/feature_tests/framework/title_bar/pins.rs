@@ -419,6 +419,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Requirements & specifications | simulation-specifications |  | on",
             "  PVT, sweeps & variation | simulation-run-set |  | on",
             "  Models & sections | simulation-models |  | on",
+            "  Connect rules | simulation-connect-rules |  | on",
             "  Simulator options | simulation-solver |  | on",
             "  Save, streaming & retention policy | simulation-save-policy |  | on",
             "  ---",

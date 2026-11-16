@@ -653,6 +653,8 @@ fn a_transistor_letters_its_value_away_from_its_gate() {
 /// An operating-point badge reads like an annotation: four significant
 /// digits, the SI prefix joined to its unit and micro spelled `µ` (D1
 /// section 8), so `912.4 mV`, not the property-editor spelling `912.430m V`.
+/// An unlabelled net's badge names it as the drawing does: the ports are
+/// drawn `IN` and `OUT`, whatever case the result spells them in.
 #[test]
 fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
     let mut state = hierarchy_sheet();
@@ -674,8 +676,8 @@ fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
         "600 mV",
         "651.2 mV",
         "I(X2) = 21.4 \u{00b5}A",
-        "in 900 mV",
-        "out 912.4 mV",
+        "IN 900 mV",
+        "OUT 912.4 mV",
     ]
     .map(str::to_owned)
     .into_iter()
