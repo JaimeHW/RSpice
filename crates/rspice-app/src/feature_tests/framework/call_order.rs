@@ -922,7 +922,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
              features::show_navigator::<CodeFeature>(app, ui);\
              app.after_contribution();\
              }",
-            "== Some(ViewType::VerilogA) =>\
+            ".active_view_is_hdl_source() =>\
              {\
              features::show_navigator::<CodeFeature>(app, ui);\
              app.after_contribution();\
@@ -932,7 +932,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace inspector",
         &[
-            "== Some(rspice_app_state::state::ViewType::VerilogA) =>\
+            ".active_view_is_hdl_source() =>\
          {\
          features::show_inspector::<CodeFeature>(app, ui);\
          }",
