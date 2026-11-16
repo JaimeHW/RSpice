@@ -39,6 +39,8 @@ use super::page_kit::{
     ledger_group, ledger_head_explained, ledger_row, ledger_row_cells, switch_cell,
 };
 use super::page_solver::{commit_draft, released};
+use super::pages::preflight_currency;
+use crate::workbench::app_state::run_preflight::PreflightCurrency;
 
 /// The CONNECTRULES list's entry for an empty value, and the hint the empty
 /// field shows.
@@ -92,24 +94,31 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// The converters the checked run's decks insert, one row each as the engine
 /// reports them; selecting one shows the net it converts.
 fn converters_card(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    let preflight = &cx.runs.preflight;
-    let sets = &preflight.converters;
-    let checked = preflight.report.is_some();
+    let sets = &cx.runs.preflight.converters;
+    // Rows stand only while the check they came from describes the design and
+    // the plan as they are now: an edit of either since leaves none listed.
+    let currency = preflight_currency(cx.model, cx.runs);
+    let current = !matches!(
+        currency,
+        PreflightCurrency::Absent | PreflightCurrency::Expired
+    );
     let count: usize = sets.iter().map(|set| set.converters.len()).sum();
-    let status = checked.then(|| format!("{count} converter{}", if count == 1 { "" } else { "s" }));
+    let status = current.then(|| format!("{count} converter{}", if count == 1 { "" } else { "s" }));
     let mut route = None;
     card(
         ui,
         "Inserted converters",
         status.as_deref().map(|status| (status, Tone::Neutral)),
         |ui| {
-            if count == 0 {
+            if count == 0 || !current {
                 let _ = card_empty(
                     ui,
-                    if checked {
-                        "The checked decks insert no converters."
-                    } else {
-                        "Check the run to list inserted converters."
+                    match currency {
+                        PreflightCurrency::Absent => "Check the run to list inserted converters.",
+                        PreflightCurrency::Expired => {
+                            "The design or the plan changed after the check; check the run again."
+                        }
+                        _ => "The checked decks insert no converters.",
                     },
                 );
                 return;
