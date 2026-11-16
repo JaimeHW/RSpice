@@ -124,13 +124,11 @@ pub struct ResourceConfig {
     pub max_batch_runs: usize,
 }
 
-/// The values one batch result may hold. A run here writes its results and
-/// exits, so it holds one result set rather than the workbench's many. A
-/// waveform is held as 8-byte samples and copied once more on its way to the
-/// output file: an annotated ISCAS-85 c880 transient with every vector saved
-/// (32.7M values) peaks at 940 MB, 24 bytes a value, so 100M values bound a
-/// run near 2.4 GB. That admits the gate-level transients ngspice writes with
-/// `-r`, which the engine's 25M default refused from c880 up.
+/// The values one batch result held in memory may hold. A run here writes its
+/// results and exits, so it holds one result set rather than the workbench's
+/// many; at about 24 bytes a value, 100M values bound one near 2.4 GB. A
+/// transient is not held to it: its rows stream to its results store, which
+/// the free disk bounds.
 const BATCH_MAX_RESULT_VALUES: usize = 100_000_000;
 
 impl Default for ResourceConfig {

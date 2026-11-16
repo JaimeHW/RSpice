@@ -216,6 +216,14 @@ impl ArtifactCoordinate {
 }
 
 impl<'a> RunContext<'a> {
+    /// The limits a transient's outputs are read under. Its rows are in its results store, so
+    /// only the disk bounds how many it keeps: the result-value cap is not among them.
+    pub(super) fn transient_limits(&self) -> rspice_core::ResourceLimits {
+        let mut limits = self.engine.config().resource_limits;
+        limits.max_result_values = usize::MAX;
+        limits
+    }
+
     pub(super) fn qualify_control_outputs(&mut self) {
         // The next command may launch another analysis; every script result
         // therefore receives its stable identity even before that is known.

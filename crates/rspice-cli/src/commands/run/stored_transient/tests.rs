@@ -366,3 +366,41 @@ fn a_completed_run_whose_output_fills_the_disk_keeps_its_whole_store_and_exits_8
     assert_eq!(kept["stopped"]["at_x"].as_f64(), Some(last));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_transient_read_back_whole_is_bounded_by_its_store_not_the_result_value_cap() {
+    let dir = scratch("cap");
+    let input = dir.join("deck.cir");
+    // A measure reads the run back whole, projected and measured in memory.
+    std::fs::write(
+        &input,
+        "rc\nv1 in 0 sin(0 1 4meg)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 20u\n\
+         .meas tran vmax max v(out)\n.end\n",
+    )
+    .unwrap();
+    let output = dir.join("out.csv");
+    let cli = Cli::try_parse_from([
+        "rspice",
+        "run",
+        input.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+        "-f",
+        "csv",
+    ])
+    .unwrap();
+    let Commands::Run(args) = cli.command else {
+        panic!("expected the run command");
+    };
+    let mut config = Config::default();
+    config.resources.max_result_values = 1000;
+    crate::commands::run(args, &config, false, true)
+        .expect("a transient's rows are bounded by its store's disk");
+    let lines = std::fs::read_to_string(&output)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .count();
+    assert!(lines > 1000, "{lines} lines");
+    let _ = std::fs::remove_dir_all(&dir);
+}

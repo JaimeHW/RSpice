@@ -1328,7 +1328,7 @@ fn finish_transient_products(
         None => rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
             ctx.netlist,
             result,
-            &ctx.engine.config().resource_limits,
+            &ctx.transient_limits(),
             &crate::abort::ProcessAbort,
         )
         .map_err(|source| CliError::CoreSimulationError {
@@ -1359,7 +1359,7 @@ fn finish_transient_products(
         None => transient_export_signals(
             ctx.netlist,
             result,
-            ctx.engine.config().resource_limits,
+            ctx.transient_limits(),
             &crate::abort::ProcessAbort,
         )
         .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?,
@@ -1381,7 +1381,7 @@ fn finish_transient_products(
                 ctx.netlist.options.output_interval_schedule.as_ref(),
                 output_start,
                 tstop,
-                ctx.engine.config().resource_limits.max_result_values,
+                ctx.transient_limits().max_result_values,
             )
             .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))
     };

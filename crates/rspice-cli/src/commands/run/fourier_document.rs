@@ -99,7 +99,7 @@ pub(super) fn run_fourier(
                 ctx.netlist,
                 &retained.result,
                 four_index,
-                ctx.engine.config().resource_limits,
+                ctx.transient_limits(),
                 &crate::abort::ProcessAbort,
             )
             .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;

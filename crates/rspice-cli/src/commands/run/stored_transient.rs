@@ -705,7 +705,7 @@ fn probe_plan(
     let Ok(mut signals) = crate::commands::run_signals::transient_export_signals(
         ctx.netlist,
         shell,
-        ctx.engine.config().resource_limits,
+        ctx.transient_limits(),
         &crate::abort::ProcessAbort,
     ) else {
         // The run read back whole reports the same failure the in-memory run would.
