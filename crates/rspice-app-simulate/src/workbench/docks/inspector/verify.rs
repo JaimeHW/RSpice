@@ -23,7 +23,6 @@ pub(in crate::workbench) struct VerifyInspector<'a> {
 /// The Verify inspector states only what its view does not: the Monte Carlo
 /// run's definition and worst samples, and a corner run that failed. The
 /// other views already show everything there is to say about them.
-
 pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>) {
     match inspector.page {
         VerificationPage::MonteCarlo => yield_details(ui, inspector.model),
