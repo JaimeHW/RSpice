@@ -223,7 +223,6 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
             "surfaces/verify.rs",
             "surfaces/verify/corners.rs",
             "surfaces/verify/histogram.rs",
-            "surfaces/verify/optimization.rs",
             "surfaces/verify/regression_contract.rs",
             "surfaces/verify/regression_panel.rs",
             "surfaces/verify/safety.rs",

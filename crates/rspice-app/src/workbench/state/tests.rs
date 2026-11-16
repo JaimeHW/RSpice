@@ -400,13 +400,12 @@ fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
 }
 
 #[test]
-fn verification_routes_are_the_exact_canonical_five() {
+fn verification_routes_are_the_exact_canonical_four() {
     assert_eq!(
         VerificationPage::NAVIGATION,
         [
             VerificationPage::Yield,
             VerificationPage::Corners,
-            VerificationPage::Optimization,
             VerificationPage::DeviceSafety,
             VerificationPage::Regression,
         ]

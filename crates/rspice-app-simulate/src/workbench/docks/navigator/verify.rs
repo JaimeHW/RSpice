@@ -95,7 +95,6 @@ pub(super) const fn verification_flow_label(page: VerificationPage) -> &'static 
     match page {
         VerificationPage::Yield => "PVT & Monte Carlo",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Electrical SOA",
         VerificationPage::Regression => "Regression",
     }
@@ -106,7 +105,6 @@ const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "M",
         VerificationPage::Corners => "C",
-        VerificationPage::Optimization => "O",
         VerificationPage::DeviceSafety => "S",
         VerificationPage::Regression => "R",
     }
@@ -185,21 +183,6 @@ pub(super) fn verification_flow_presentation(
                 problem: result
                     .is_some_and(|analysis| !analysis.success)
                     .then_some(Problem::Warning),
-                glyph: verification_flow_glyph(page),
-            }
-        }
-        VerificationPage::Optimization => {
-            let result = active_run
-                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Optimization));
-            VerificationFlowPresentation {
-                label: verification_flow_label(page).to_owned(),
-                detail: String::new(),
-                status: if result.is_some() {
-                    "done".to_owned()
-                } else {
-                    "not run".to_owned()
-                },
-                problem: None,
                 glyph: verification_flow_glyph(page),
             }
         }

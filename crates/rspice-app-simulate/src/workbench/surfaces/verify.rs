@@ -9,7 +9,6 @@
 mod axes;
 mod corners;
 mod histogram;
-mod optimization;
 mod regression_contract;
 mod regression_panel;
 pub mod safety;
@@ -34,7 +33,6 @@ use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
 
 use corners::*;
-use optimization::*;
 use regression_contract::*;
 use regression_panel::*;
 use safety::*;
@@ -62,7 +60,6 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         match page {
             VerificationPage::Yield => yield_page(ui, cx),
             VerificationPage::Corners => corners(ui, cx),
-            VerificationPage::Optimization => optimization(ui, cx),
             VerificationPage::DeviceSafety => device_safety(ui, cx),
             VerificationPage::Regression => regression(ui, cx),
         }

@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 21] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -113,7 +113,6 @@ impl SimulateCommand {
         Self::Page(SimulationPage::Save),
         Self::Verify(VerificationPage::Yield),
         Self::Verify(VerificationPage::Corners),
-        Self::Verify(VerificationPage::Optimization),
         Self::Verify(VerificationPage::DeviceSafety),
         Self::Verify(VerificationPage::Regression),
     ];
@@ -145,7 +144,6 @@ impl SimulateCommand {
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
             Self::Verify(VerificationPage::Yield) => CommandKey::new("yield"),
             Self::Verify(VerificationPage::Corners) => CommandKey::new("corners"),
-            Self::Verify(VerificationPage::Optimization) => CommandKey::new("optimization"),
             Self::Verify(VerificationPage::DeviceSafety) => CommandKey::new("device-safety"),
             Self::Verify(VerificationPage::Regression) => CommandKey::new("regression"),
         }
@@ -278,7 +276,6 @@ const fn verification_page_label(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "Monte Carlo yield",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Safe operating area",
         VerificationPage::Regression => "Regression",
     }

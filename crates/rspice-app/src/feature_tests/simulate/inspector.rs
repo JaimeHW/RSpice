@@ -415,7 +415,6 @@ fn the_verify_inspector_says_once_that_no_monte_carlo_ran() {
 fn the_verify_inspector_restates_nothing_the_other_pages_show() {
     for page in [
         VerificationPage::Corners,
-        VerificationPage::Optimization,
         VerificationPage::DeviceSafety,
         VerificationPage::Regression,
     ] {

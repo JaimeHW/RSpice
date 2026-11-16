@@ -242,14 +242,13 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
 /// every right-aligned column ending on one edge and nothing past the insets.
 #[test]
 fn seeded_verify_pages_follow_the_table_grammar() {
-    use super::verify_fixtures::{corner_app, monte_carlo_app, optimization_app, soa_app};
+    use super::verify_fixtures::{corner_app, monte_carlo_app, soa_app};
     use rspice_app_simulate::workbench::surfaces::verify::raster::{PAGE_WIDTH, page_geometry};
 
     for (page, app) in [
         (VerificationPage::Yield, monte_carlo_app()),
         (VerificationPage::Corners, corner_app()),
         (VerificationPage::DeviceSafety, soa_app()),
-        (VerificationPage::Optimization, optimization_app()),
     ] {
         let geometry = page_geometry(app, page);
         let toolbar = geometry.one("toolbar").expect("toolbar");

@@ -729,7 +729,6 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
 const VERIFY_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Verify(VerificationPage::Yield)).access('M'),
     simulate(SimulateCommand::Verify(VerificationPage::Corners)).access('C'),
-    simulate(SimulateCommand::Verify(VerificationPage::Optimization)).access('O'),
     simulate(SimulateCommand::Verify(VerificationPage::DeviceSafety)).access('A'),
     results(ResultsCommand::EditSpecifications).access('S'),
     simulate(SimulateCommand::Verify(VerificationPage::Regression)).access('R'),

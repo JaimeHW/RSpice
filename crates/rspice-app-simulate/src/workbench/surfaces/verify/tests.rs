@@ -4,7 +4,7 @@
 //! XML control characters are refused rather than escaped away, and a receipt
 //! whose tolerance digest does not match its contract is rejected.
 
-use super::raster::{sealed_run, seed_corner, seed_optimization};
+use super::raster::{sealed_run, seed_corner};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
@@ -1135,7 +1135,7 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The page grammar: corners, SOA, optimization
+// The page grammar: corners and SOA
 // ---------------------------------------------------------------------------
 
 use super::table::Verdict;
@@ -1248,27 +1248,6 @@ fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
     );
     assert_eq!(matrix.nominal, None);
     assert_eq!(matrix.corner_indices().len(), 7);
-}
-
-#[test]
-fn optimization_iterations_put_the_cost_first_and_name_the_best() {
-    let harness = optimization_app();
-    let result =
-        latest_analysis(&harness.model, AnalysisType::Optimization).expect("optimization run");
-    let table = IterationTable::from_result(result).expect("iterations");
-    assert_eq!(
-        table
-            .traces
-            .iter()
-            .map(|(head, _)| head.as_str())
-            .collect::<Vec<_>>(),
-        ["Cost", "IBIAS", "W1"]
-    );
-    assert_eq!(table.best, Some(23));
-    assert_eq!(
-        table.summary().text,
-        "converged · best cost 20.04 m at iteration 23 · 24 iterations"
-    );
 }
 
 /// A page with nothing to show is its toolbar and one line saying what
@@ -1455,12 +1434,5 @@ fn regression_app() -> FeatureHarness<SimulateFeature> {
 fn corner_app() -> FeatureHarness<SimulateFeature> {
     let mut harness = SimulateTestHost::harness();
     seed_corner(&mut harness.model);
-    harness
-}
-
-/// Twenty-four optimizer iterations over two variables, converged.
-fn optimization_app() -> FeatureHarness<SimulateFeature> {
-    let mut harness = SimulateTestHost::harness();
-    seed_optimization(&mut harness.model);
     harness
 }

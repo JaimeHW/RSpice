@@ -79,14 +79,13 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
 
 #[test]
 fn verification_navigation_lists_every_view() {
-    assert_eq!(VerificationPage::NAVIGATION.len(), 5);
+    assert_eq!(VerificationPage::NAVIGATION.len(), 4);
     let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
     assert_eq!(
         labels,
         [
             "PVT & Monte Carlo",
             "Process corners",
-            "Optimization",
             "Electrical SOA",
             "Regression",
         ]
@@ -207,9 +206,9 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
 
 #[test]
 fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-    assert!(verification_navigator_requires_scroll(440.0));
-    assert!(!verification_navigator_requires_scroll(441.0));
-    assert!(verification_navigator_requires_scroll(390.0));
+    assert!(verification_navigator_requires_scroll(377.0));
+    assert!(!verification_navigator_requires_scroll(378.0));
+    assert!(verification_navigator_requires_scroll(330.0));
     assert!(!verification_navigator_requires_scroll(560.0));
     assert!(!verification_navigator_requires_scroll(700.0));
 }

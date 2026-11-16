@@ -42,9 +42,7 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>)
                 crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
             }
         }
-        VerificationPage::Optimization
-        | VerificationPage::DeviceSafety
-        | VerificationPage::Regression => {}
+        VerificationPage::DeviceSafety | VerificationPage::Regression => {}
     }
 }
 

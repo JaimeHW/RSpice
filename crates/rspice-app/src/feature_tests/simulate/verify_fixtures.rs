@@ -5,7 +5,7 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::verify::raster::{
-    VerifyStage, seed_corner, seed_monte_carlo, seed_optimization, seed_soa,
+    VerifyStage, seed_corner, seed_monte_carlo, seed_soa,
 };
 use rspice_app_simulate::workbench::surfaces::verify::show;
 use rspice_app_state::state::VerificationPage;
@@ -30,13 +30,6 @@ pub(super) fn soa_app() -> RSpiceApp {
 pub(super) fn corner_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     seed_corner(&mut app.state.model);
-    app
-}
-
-/// Twenty-four optimizer iterations over two variables, converged.
-pub(super) fn optimization_app() -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    seed_optimization(&mut app.state.model);
     app
 }
 
