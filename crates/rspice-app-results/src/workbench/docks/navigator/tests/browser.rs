@@ -460,3 +460,43 @@ fn an_instance_and_a_device_read_as_drawn() {
         labels(&nodes)
     );
 }
+
+/// The engine names a measurement in upper case; its row reads as the plan
+/// that authors it spells it.
+#[test]
+fn a_measurement_reads_as_its_plan_spells_it() {
+    use rspice_results::specification::{SpecEntry, SpecPointScope, SpecificationDefinition};
+    let mut host = ResultsTestHost::default();
+    host.model
+        .workspace
+        .content
+        .replace_active_specification_definitions(
+            crate::product::SimulationPlanId::new(),
+            vec![SpecificationDefinition::new_from_projection(&SpecEntry {
+                measurement: "okt".to_owned(),
+                expression: ".MEAS TRAN okt WHEN D(ok)=0.5 RISE=1".to_owned(),
+                min: None,
+                max: None,
+                unit: String::new(),
+                scope: SpecPointScope::AllPoints,
+            })],
+        );
+    let trace = RetainedTrace::new("V(OUT)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![trace]);
+    analysis.measurements = vec![rspice_core::MeasureResult::success("OKT", 1.6e-3)];
+    host.model.simulation.start_run().add_analysis(analysis);
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(
+        nodes.iter().any(|node| node.label.contains(".MEAS okt")),
+        "{:?}",
+        labels(&nodes)
+    );
+    assert!(
+        !nodes.iter().any(|node| node.label.contains("OKT")),
+        "{:?}",
+        labels(&nodes)
+    );
+}

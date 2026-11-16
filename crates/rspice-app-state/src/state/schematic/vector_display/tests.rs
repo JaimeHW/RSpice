@@ -310,3 +310,40 @@ fn an_element_written_two_ways_keeps_its_engine_name() {
     assert_eq!(notations.display("I(COUT)"), "I(COUT)");
     assert_eq!(notations.display_element("COUT"), "COUT");
 }
+
+/// The engine folds a measurement's name as it folds a net's, so a plan's
+/// `okt` comes back `OKT`; it reads as the plan spells it. A name no plan
+/// authors, and one two plans spell two ways, keeps the engine's spelling,
+/// and a net of the same name is not a measurement.
+#[test]
+fn a_measurement_reads_as_its_plan_spells_it() {
+    use rspice_results::specification::{SpecEntry, SpecPointScope, SpecificationDefinition};
+    let entry = |name: &str| SpecEntry {
+        measurement: name.to_owned(),
+        expression: format!(".MEAS TRAN {name} WHEN D(ok)=0.5 RISE=1"),
+        min: None,
+        max: None,
+        unit: String::new(),
+        scope: SpecPointScope::AllPoints,
+    };
+    let mut workspace = crate::state::ProjectWorkspace::default();
+    let first = crate::product::SimulationPlanId::new();
+    let second = crate::product::SimulationPlanId::new();
+    workspace.content.replace_active_specification_definitions(
+        first,
+        vec![
+            SpecificationDefinition::new_from_projection(&entry("okt")),
+            SpecificationDefinition::new_from_projection(&entry("Rise")),
+        ],
+    );
+    workspace.content.replace_active_specification_definitions(
+        second,
+        vec![SpecificationDefinition::new_from_projection(&entry("RISE"))],
+    );
+    let notations = bus_notations(&workspace, &SchematicState::default());
+
+    assert_eq!(notations.display_measurement("OKT"), "okt");
+    assert_eq!(notations.display_measurement("RISE"), "RISE");
+    assert_eq!(notations.display_measurement("TPD"), "TPD");
+    assert_eq!(notations.display("OKT"), "OKT");
+}

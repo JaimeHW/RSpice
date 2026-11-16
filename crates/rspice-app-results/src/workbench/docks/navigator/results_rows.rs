@@ -574,7 +574,7 @@ pub fn retained_result_artifacts(
     }
     for measurement in &analysis.measurements {
         push(
-            &format!("measurement/{}", measurement.name),
+            &format!("{MEASUREMENT_ROW_PREFIX}{}", measurement.name),
             format!(".MEAS {}", measurement.name),
             ResultArtifactKind::Scalar,
             1,
@@ -1146,7 +1146,11 @@ pub(super) fn show_virtualized_result_signals(
                             let analysis = &runs[run].analyses[analysis];
                             let artifact = &analysis.artifacts[artifact];
                             let full_name = drawn_artifact_name(artifact, &notations);
-                            let label = if in_tree && depth > 0 {
+                            let measurement = artifact
+                                .identity
+                                .canonical_name()
+                                .starts_with(MEASUREMENT_ROW_PREFIX);
+                            let label = if in_tree && depth > 0 && !measurement {
                                 split_hierarchy(&notations.display(artifact_hierarchical_name(
                                     artifact,
                                 )))
@@ -1234,10 +1238,21 @@ pub(super) fn show_virtualized_result_signals(
     }
 }
 
+/// The identity prefix of a measurement's row, its name after it.
+const MEASUREMENT_ROW_PREFIX: &str = "measurement/";
+
 /// An event net's row name with its net spelled as the drawing spells it
-/// (`Digital net csn` for the engine's `CSN`); any other row keeps its name.
+/// (`Digital net csn` for the engine's `CSN`), and a measurement's as its
+/// plan spells it (`.MEAS okt` for the engine's `OKT`); any other row keeps
+/// its name.
 pub(super) fn drawn_artifact_name(artifact: &ResultArtifact, notations: &BusNotations) -> String {
     let column = artifact.identity.canonical_name();
+    if let Some(name) = column.strip_prefix(MEASUREMENT_ROW_PREFIX) {
+        return match artifact.name.strip_suffix(name) {
+            Some(directive) => format!("{directive}{}", notations.display_measurement(name)),
+            None => artifact.name.clone(),
+        };
+    }
     let Some(net) = column
         .strip_prefix(EVENT_NET_ROW_PREFIX)
         .and_then(|column| column.get(2..))

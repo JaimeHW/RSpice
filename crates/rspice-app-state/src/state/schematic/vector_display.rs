@@ -23,7 +23,8 @@
 //! capacitor drawn `Cout` is answered as `COUT`; each element a drawing
 //! places reads under the name it is written under, as drawn, in a current
 //! (`I(Cout)`), a power, and every instance scope a name is flattened through
-//! (`xtb.ok`).
+//! (`xtb.ok`). A measurement's name folds too, so one a plan authors `okt`
+//! is answered as `OKT`; it reads as the plan spells it.
 //!
 //! The substitution is display-only. Nothing here is written back into a
 //! waveform name, a saved output, a persisted label or an export: the engine
@@ -54,6 +55,9 @@ pub struct BusNotations {
     /// The elements and instances the drawings place, by the name each card
     /// is written under, keyed by the engine's spelling as `drawn` is.
     elements: HashMap<String, Option<String>>,
+    /// The measurements the project's plans author, keyed by the engine's
+    /// spelling as `drawn` is.
+    measurements: HashMap<String, Option<String>>,
 }
 
 /// The notations the project's own drawings declare, live editor buffer
@@ -66,14 +70,26 @@ pub struct BusNotations {
 /// a bus declared only inside a master the project does not own keeps its deck
 /// spelling, which is what an unclaimed bit does anyway.
 pub fn bus_notations(workspace: &ProjectWorkspace, active: &SchematicState) -> BusNotations {
-    BusNotations::of_sheets(
+    let mut notations = BusNotations::of_sheets(
         workspace
             .content
             .schematic_buffers
             .values()
             .map(|schematic| schematic.document())
             .chain(std::iter::once(active.document())),
-    )
+    );
+    for record in &workspace.content.simulation_plan_payloads {
+        let payload = &record.payload;
+        let defined = payload
+            .specification_definitions
+            .iter()
+            .map(|definition| definition.measurement.as_str());
+        let listed = payload.specs.iter().map(|spec| spec.measurement.as_str());
+        for name in defined.chain(listed) {
+            spell(&mut notations.measurements, name.trim());
+        }
+    }
+    notations
 }
 
 impl BusNotations {
@@ -120,6 +136,17 @@ impl BusNotations {
             by_bus,
             drawn,
             elements,
+            measurements: HashMap::new(),
+        }
+    }
+
+    /// A measurement's name, spelled as the plan that authors it writes it.
+    /// One no plan authors, or two plans spell two ways, is left as the
+    /// engine named it.
+    pub fn display_measurement<'a>(&self, name: &'a str) -> Cow<'a, str> {
+        match lookup(&self.measurements, name).flatten() {
+            Some(authored) if authored != name => Cow::Owned(authored.to_owned()),
+            _ => Cow::Borrowed(name),
         }
     }
 

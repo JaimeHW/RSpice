@@ -754,15 +754,24 @@ pub fn active_measurement_rows(
     let Some(run) = app.model().simulation.active_run() else {
         return Vec::new();
     };
+    // Each measurement reads as its plan spells it; the engine folds it.
+    let notations = crate::state::bus_notations(&app.model().workspace, &app.model().schematic);
     let mut rows: Vec<MeasurementTableRow> = run
         .analyses
         .iter()
         .flat_map(|analysis| {
+            let notations = &notations;
             analysis.measurements.iter().map(move |measurement| {
                 let spec = specifications
                     .iter()
                     .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement.name));
-                measurement_table_row(measurement, &analysis.label, spec)
+                let mut row = measurement_table_row(measurement, &analysis.label, spec);
+                if let std::borrow::Cow::Owned(authored) =
+                    notations.display_measurement(&measurement.name)
+                {
+                    row.name = authored;
+                }
+                row
             })
         })
         .collect();
