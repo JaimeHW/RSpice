@@ -144,6 +144,22 @@ impl ResultsState {
             preferences.toggle(crate::workbench::TogglePreference::WaveMinorGrid);
     }
 
+    /// Open the operating point's viewer on `device`, as the schematic's hop
+    /// to a device's operating point asks.
+    pub fn show_operating_point(&mut self, device: String) {
+        let session = &mut self.results.session;
+        session.op_filter = device;
+        session.viewer = crate::workbench::ResultViewer::Op;
+    }
+
+    /// Select `trace`, the trace a probe on the schematic picked.
+    pub fn select_probed_trace(
+        &mut self,
+        trace: rspice_results_ui::selection::SelectedResultTrace,
+    ) {
+        self.results.session.selected_trace = Some(trace);
+    }
+
     /// The results feature's part of replacing the design the session
     /// executes against: nothing seen, viewed or routed to under the previous
     /// design survives it.

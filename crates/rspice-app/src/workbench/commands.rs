@@ -282,7 +282,9 @@ pub(in crate::workbench) use edit_target::source_editor_redirect;
 mod design_requests;
 #[cfg(test)]
 pub(crate) use design_requests::answer_surface_requests;
-pub(in crate::workbench) use design_requests::{answer_surface_request, select_probed_trace};
+pub(in crate::workbench) use design_requests::{
+    answer_surface_request, open_connectivity_source_map, select_probed_trace,
+};
 
 #[cfg(test)]
 pub(crate) mod tests;

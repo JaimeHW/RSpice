@@ -388,6 +388,22 @@ impl DesignState {
         self.schematic_snap.grid_size = model.schematic.session.editor.snap_engine.grid_size;
     }
 
+    /// Open Create symbol over `model`, from the model `selected_model` names
+    /// in the Models workspace when the library holds it.
+    pub fn open_create_model_bound_symbol(
+        &mut self,
+        model: &crate::workbench::app_state::Model,
+        wb: &mut WorkbenchSession,
+        selected_model: Option<&str>,
+    ) {
+        crate::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(
+            &mut self.create_model_bound_symbol,
+            model,
+            wb,
+            selected_model,
+        );
+    }
+
     /// The style a cycle sets next, in the upgraded toolbar's exact
     /// presentation order.
     pub fn next_grid_style(&self) -> GridStyle {

@@ -21,8 +21,8 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
-    carry_out_code_hand_off, file_action, run_project_file_action, select_probed_trace,
-    source_editor_redirect,
+    carry_out_code_hand_off, file_action, open_connectivity_source_map, run_project_file_action,
+    select_probed_trace, source_editor_redirect,
 };
 use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -637,6 +637,31 @@ fn answer_code_request(app: &mut RSpiceApp, request: CodeRequest) {
 }
 
 impl RSpiceApp {
+    /// Carry out what a design dialog handed over, as the dialog once did in
+    /// place: in design's context, except reopening the component editor,
+    /// which the shell's property form opens, and the source map, which
+    /// opens the code feature's netlist page.
+    pub(crate) fn answer_design_request(&mut self, request: DesignRequest) {
+        match request {
+            DesignRequest::Descend(choice) => {
+                DesignFeature::descend(&mut features::cx(self), choice);
+            }
+            DesignRequest::ReopenPropertyEditor(component_id) => {
+                self.state.open_property_editor(component_id);
+            }
+            DesignRequest::RevealConnectivity(target) => {
+                DesignFeature::reveal_connectivity(&mut features::cx(self), target);
+            }
+            DesignRequest::OpenSourceMap => open_connectivity_source_map(&mut self.state),
+            DesignRequest::ApplyConnectivityRepairs => {
+                DesignFeature::apply_connectivity_repairs(&mut features::cx(self));
+            }
+            DesignRequest::CreateHierarchy => {
+                DesignFeature::create_hierarchy(&mut features::cx(self));
+            }
+        }
+    }
+
     /// Have the code feature take the netlist page's own history step
     /// `direction`, in its context.
     pub(in crate::workbench) fn take_netlist_history_step(

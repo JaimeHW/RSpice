@@ -51,7 +51,8 @@ use crate::workbench::app::actions::workspace::{
 };
 use crate::workbench::app::actions::{activate_symbol_tool, edit_selected_symbol_items, stimulus};
 use crate::workbench::app::dialogs::connectivity_manager::{
-    ConnectivityManager, open_connectivity_manager,
+    ConnectivityManager, RevealTarget, apply_selected_connectivity_repairs,
+    open_connectivity_manager, reveal_connectivity_target,
 };
 use crate::workbench::app::dialogs::design_review_comments::{
     ReviewComments, open_design_review_comments,
@@ -61,9 +62,9 @@ use crate::workbench::app::dialogs::engineering_table::{
 };
 use crate::workbench::app::dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 use crate::workbench::app::dialogs::hierarchy::create::{
-    CreateHierarchy, open_create_hierarchy_dialog,
+    CreateHierarchy, commit_create_hierarchy, open_create_hierarchy_dialog,
 };
-use crate::workbench::app::dialogs::hierarchy::descend;
+use crate::workbench::app::dialogs::hierarchy::descend::{self, DescendHierarchy};
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
 use crate::workbench::app::dialogs::placement::bus_tap::open_bus_tap;
 use crate::workbench::app::dialogs::placement::pin_port::open_create_pins;
@@ -1469,8 +1470,7 @@ impl DesignFeature {
         let design = &mut *cx.state;
         match request {
             OpenSymbolAuthoring::ModelBound => {
-                create_model_bound_symbol::open_create_model_bound_symbol_dialog(
-                    &mut design.create_model_bound_symbol,
+                design.open_create_model_bound_symbol(
                     cx.model,
                     cx.wb,
                     cx.peers.models().selected_model(),
@@ -1538,6 +1538,54 @@ impl DesignFeature {
             }
         }
         None
+    }
+}
+
+/// What the feature's own dialogs hand over, carried out in its context
+/// straight after the dialog's step draws, as each dialog once did in place.
+impl DesignFeature {
+    /// Close Descend into hierarchy and descend as its checked `choice`
+    /// says.
+    pub fn descend(cx: &mut Cx<'_, Self>, choice: DescendHierarchy) {
+        cx.state.descend_hierarchy.close();
+        descend::answer_descend_hierarchy(navigation(cx), choice);
+    }
+
+    /// Close the connectivity manager and show `target`, the object a row of
+    /// it names.
+    pub fn reveal_connectivity(cx: &mut Cx<'_, Self>, target: RevealTarget) {
+        cx.state.connectivity_manager.close();
+        reveal_connectivity_target(navigation(cx), target);
+    }
+
+    /// Apply the repairs the connectivity manager has selected, or hold on
+    /// the manager why they cannot apply.
+    pub fn apply_connectivity_repairs(cx: &mut Cx<'_, Self>) {
+        let review_markers = cx.state.schematic_visibility.review_markers;
+        if let Err(error) = apply_selected_connectivity_repairs(
+            &mut cx.state.connectivity_manager,
+            cx.model,
+            cx.wb,
+            cx.runs,
+            cx.handles.run_controller,
+            review_markers,
+        ) {
+            cx.state.connectivity_manager.error = Some(error);
+        }
+    }
+
+    /// Create the hierarchy Create hierarchy describes, or hold on the
+    /// dialog why it cannot.
+    pub fn create_hierarchy(cx: &mut Cx<'_, Self>) {
+        let design = &mut *cx.state;
+        if let Err(error) = commit_create_hierarchy(
+            &mut design.create_hierarchy,
+            &mut design.symbol,
+            cx.model,
+            cx.wb,
+        ) {
+            design.create_hierarchy.validation_error = Some(error);
+        }
     }
 }
 

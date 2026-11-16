@@ -2,22 +2,15 @@
 //! feature's workspace: the results workspace, the code feature's form and
 //! netlist, the models feature's selection and the project's copy-cell
 //! dialog. The surface raises each request where it once wrote in place,
-//! and the shell answers it once the surface has drawn, in the same frame.
+//! and the shell answers it once the surface has drawn, in the same frame,
+//! writing each workspace through its owner.
 //!
-//! Here too, what the design feature's dialogs hand the shell to carry out
-//! over the whole session.
+//! Here too, the source map a design dialog asks for, which opens the code
+//! feature's netlist page.
 
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use rspice_app_design::workbench::app::dialogs::connectivity_manager::{
-    apply_selected_connectivity_repairs, reveal_connectivity_target,
-};
-use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog;
-use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
-use rspice_app_design::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
-use rspice_app_design::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
-use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::open_specification_editor;
 
 /// Carry out what the design surface asked of another feature's workspace,
@@ -28,9 +21,7 @@ pub(in crate::workbench) fn answer_surface_request(
 ) {
     match request {
         DesignSurfaceRequest::ShowOperatingPoint { device } => {
-            let session = &mut state.results.results.session;
-            session.op_filter = device;
-            session.viewer = ResultViewer::Op;
+            state.results.show_operating_point(device);
         }
         DesignSurfaceRequest::OpenSpecificationEditor => {
             open_specification_editor(&mut state.results_parts());
@@ -39,8 +30,7 @@ pub(in crate::workbench) fn answer_surface_request(
             open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
         }
         DesignSurfaceRequest::CreateSymbolFromPorts => {
-            open_create_model_bound_symbol_dialog(
-                &mut state.design.create_model_bound_symbol,
+            state.design.open_create_model_bound_symbol(
                 &state.model,
                 &mut state.workbench,
                 state.models.selected_model.as_deref(),
@@ -61,7 +51,7 @@ pub(in crate::workbench) fn answer_surface_request(
 /// Select the trace a probe selected.
 pub(in crate::workbench) fn select_probed_trace(state: &mut AppState, probed: SelectProbedTrace) {
     let SelectProbedTrace(trace) = probed;
-    state.results.results.session.selected_trace = Some(trace);
+    state.results.select_probed_trace(trace);
 }
 
 /// Answer what the design surface raised, as the shell does once the
@@ -81,60 +71,9 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
     );
 }
 
-impl RSpiceApp {
-    /// Carry out what a design dialog handed over, as the dialog once did in
-    /// place.
-    ///
-    /// The shell answers these for now, because what they do still reaches
-    /// the whole session: the source map the code feature's netlist, and
-    /// applying repairs the simulation controller. Design carries each out
-    /// itself once it sits on its own parts.
-    pub(crate) fn answer_design_request(&mut self, request: DesignRequest) {
-        match request {
-            DesignRequest::Descend(choice) => {
-                self.state.design.descend_hierarchy.close();
-                answer_descend_hierarchy(self.state.navigation(), choice);
-            }
-            DesignRequest::ReopenPropertyEditor(component_id) => {
-                self.state.open_property_editor(component_id);
-            }
-            DesignRequest::RevealConnectivity(target) => {
-                self.state.design.connectivity_manager.close();
-                reveal_connectivity_target(self.state.navigation(), target);
-            }
-            DesignRequest::OpenSourceMap => open_connectivity_source_map(&mut self.state),
-            DesignRequest::ApplyConnectivityRepairs => {
-                let state = &mut self.state;
-                let review_markers = state.design.schematic_visibility.review_markers;
-                if let Err(error) = apply_selected_connectivity_repairs(
-                    &mut state.design.connectivity_manager,
-                    &mut state.model,
-                    &mut state.workbench,
-                    &mut state.runs,
-                    &mut self.simulation_controller,
-                    review_markers,
-                ) {
-                    state.design.connectivity_manager.error = Some(error);
-                }
-            }
-            DesignRequest::CreateHierarchy => {
-                let state = &mut self.state;
-                if let Err(error) = commit_create_hierarchy(
-                    &mut state.design.create_hierarchy,
-                    &mut state.design.symbol,
-                    &mut state.model,
-                    &state.workbench,
-                ) {
-                    self.state.design.create_hierarchy.validation_error = Some(error);
-                }
-            }
-        }
-    }
-}
-
 /// Open the generated netlist on its source map, at the first line it maps,
 /// with the manager closed.
-fn open_connectivity_source_map(state: &mut AppState) {
+pub(in crate::workbench) fn open_connectivity_source_map(state: &mut AppState) {
     state.design.connectivity_manager.close();
     state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     state.workbench.navigator_visible = true;
