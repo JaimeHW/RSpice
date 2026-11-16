@@ -218,6 +218,14 @@ enum Kind {
         on: Value,
         off: Value,
     },
+    /// Xyce's `FOUR`: the distortion of the window's last period, which the axis pass finds.
+    Fourier {
+        signal: Operand,
+        at: Value,
+        num_freq: usize,
+        grid_size: usize,
+        window: MeasureWindow,
+    },
 }
 
 impl Kind {
@@ -232,7 +240,8 @@ impl Kind {
             Kind::Window { signal, .. }
             | Kind::Extrema { signal, .. }
             | Kind::At { signal, .. }
-            | Kind::OnOff { signal, .. } => vec![signal],
+            | Kind::OnOff { signal, .. }
+            | Kind::Fourier { signal, .. } => vec![signal],
             Kind::When {
                 reads, left, right, ..
             } => {
@@ -526,6 +535,22 @@ pub(super) fn plan(
             on: *on,
             off: *off,
         },
+        MeasureType::Fourier {
+            signal,
+            at,
+            num_freq,
+            grid_size,
+            from,
+            to,
+            td,
+            minval,
+        } => Kind::Fourier {
+            signal: column(signal)?,
+            at: *at,
+            num_freq: *num_freq,
+            grid_size: *grid_size,
+            window: window(*from, *to, *td, *minval),
+        },
         _ => return None,
     };
     Some(Spec {
@@ -551,6 +576,17 @@ struct AxisFacts {
     non_finite: bool,
     /// Each `TD` a window opens at, with the first sample at or after it.
     delays: Vec<(Value, Option<Value>)>,
+    /// Each `FOUR` window, with the last sample it accepts.
+    fourier_ends: Vec<(MeasureWindow, Option<Value>)>,
+}
+
+/// Whether two windows are the same, bit for bit.
+fn same_window(left: MeasureWindow, right: MeasureWindow) -> bool {
+    let bits = |value: Option<Value>| value.map(Value::to_bits);
+    bits(left.from) == bits(right.from)
+        && bits(left.to) == bits(right.to)
+        && bits(left.td) == bits(right.td)
+        && left.minval.to_bits() == right.minval.to_bits()
 }
 
 impl AxisFacts {
@@ -583,6 +619,19 @@ impl AxisFacts {
                 *start = Some(x);
             }
         }
+        for (window, end) in &mut self.fourier_ends {
+            if xyce_window_accepts(x, window.from, window.to, window.td, window.minval) {
+                *end = Some(x);
+            }
+        }
+    }
+
+    /// The last sample a `FOUR` window accepts, which its last period ends at.
+    fn fourier_end(&self, window: MeasureWindow) -> Option<Value> {
+        self.fourier_ends
+            .iter()
+            .find(|(known, _)| same_window(*known, window))
+            .and_then(|(_, end)| *end)
     }
 
     /// [`delayed_window_start`] over the whole axis.
@@ -669,7 +718,7 @@ impl TranMeasureStream {
     ///   which a chunk alone does not give;
     /// - an event operand beside a sampled one, whose sampled values are read at the events;
     /// - FRAC_MAX, whose level moves with the running maximum while Xyce replays its history;
-    /// - an equation, an error function or a FOUR statement (forms with no pass of their own);
+    /// - an equation or an error function (forms with no pass of their own);
     /// - a run with impulses, whose integrals add them.
     pub fn plan(
         netlist: &Netlist,
@@ -792,6 +841,16 @@ impl TranMeasureStream {
                 delays.push((td, None));
             }
         }
+        let mut fourier_ends: Vec<(MeasureWindow, Option<Value>)> = Vec::new();
+        for spec in planned.iter().flatten() {
+            if let Kind::Fourier { window, .. } = spec.kind
+                && !fourier_ends
+                    .iter()
+                    .any(|(known, _)| same_window(*known, window))
+            {
+                fourier_ends.push((window, None));
+            }
+        }
         Ok(Some(Self {
             specs: planned,
             earlier,
@@ -813,6 +872,7 @@ impl TranMeasureStream {
                 maximum: 0.0,
                 non_finite: false,
                 delays,
+                fourier_ends,
             },
             slots: None,
         }))
@@ -1022,6 +1082,7 @@ enum Measure {
     Delay(Box<DelayState>),
     LegacyDelay(Box<LegacyDelayState>),
     OnOff(OnOffState),
+    Fourier(FourierState),
 }
 
 struct WindowState {
@@ -1148,6 +1209,21 @@ struct OnOffState {
     on: Value,
     off: Value,
     accumulator: OnOffAccumulator,
+}
+
+/// A `FOUR` statement's window samples from the last one at or before its last period's start,
+/// all the distortion reads of them.
+struct FourierState {
+    signal: Operand,
+    at: Value,
+    num_freq: usize,
+    grid_size: usize,
+    window: MeasureWindow,
+    /// The last period's start; `None` when it is the window's first sample, whose samples are
+    /// all kept.
+    period_start: Option<Value>,
+    time: Vec<Value>,
+    values: Vec<Value>,
 }
 
 impl Measure {
@@ -1387,6 +1463,38 @@ impl Measure {
                 off,
                 accumulator: OnOffAccumulator::default(),
             }),
+            Kind::Fourier {
+                signal,
+                at,
+                num_freq,
+                grid_size,
+                window,
+            } => {
+                // As [`super::fourier::xyce_total_harmonic_distortion`] finds the period that
+                // ends at the window's last sample.
+                let period_start = axis
+                    .fourier_end(window)
+                    .filter(|_| at > 0.0)
+                    .map(|end| (at * end - 1.0) / at);
+                match period_start {
+                    Some(start) if start.abs() < Value::EPSILON || start > 0.0 => {
+                        Self::Fourier(FourierState {
+                            signal,
+                            at,
+                            num_freq,
+                            grid_size,
+                            window,
+                            period_start: (start.abs() >= Value::EPSILON).then_some(start),
+                            time: Vec::new(),
+                            values: Vec::new(),
+                        })
+                    }
+                    _ => Self::Done(MeasureResult::failed(
+                        name,
+                        "the window holds less than one period of AT",
+                    )),
+                }
+            }
         }
     }
 
@@ -1415,6 +1523,23 @@ impl Measure {
                     state
                         .accumulator
                         .push(x, value, state.on, state.off, minval);
+                }
+            }
+            Self::Fourier(state) => {
+                let MeasureWindow {
+                    from,
+                    to,
+                    td,
+                    minval,
+                } = state.window;
+                if xyce_window_accepts(x, from, to, td, minval) {
+                    // A sample at or before the period's start is the last such one so far.
+                    if state.period_start.is_some_and(|start| x <= start) {
+                        state.time.clear();
+                        state.values.clear();
+                    }
+                    state.time.push(x);
+                    state.values.push(state.signal.value(x, row));
                 }
             }
         }
@@ -1459,6 +1584,16 @@ impl Measure {
             {
                 Some(value) => MeasureResult::success(name, value),
                 None => MeasureResult::failed(name, "Empty range"),
+            },
+            Self::Fourier(state) => match super::fourier::xyce_total_harmonic_distortion(
+                &state.time,
+                &state.values,
+                state.at,
+                state.num_freq,
+                state.grid_size,
+            ) {
+                Some(thd) => MeasureResult::success(name, thd),
+                None => MeasureResult::failed(name, "the window holds less than one period of AT"),
             },
         })
     }

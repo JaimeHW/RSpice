@@ -41,7 +41,7 @@ pub use stream::TranMeasureStream;
 /// magnitude below which a crossing is treated as noise rather than an event.
 /// Xyce resolves an event against all four together, so a helper handed three
 /// of them would be searching a window nobody described.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MeasureWindow {
     pub(crate) from: Option<Value>,
     pub(crate) to: Option<Value>,

@@ -224,6 +224,10 @@ const STATEMENTS: &str = "\
 .meas tran t3 TRIG V(in) VAL=0.5 RISE=1 TD=0.3 TARG V(out) VAL=0.2 CROSS=2
 .meas tran t4 TRIG V(in) VAL=0.5 RISE=40 TARG V(out) VAL=0.2 RISE=1
 .meas tran t5 TRIG AT=0.2 TARG AT=0.9
+.meas tran q1 FOUR V(out) AT=1.3
+.meas tran q2 FOUR V(in) AT=7 NUMFREQ=5 GRIDSIZE=64 FROM=0.2 TO=0.8
+.meas tran q3 FOUR V(out) AT=0.4
+.meas tran q4 FOUR I(V1) AT=3 TD=0.5
 .meas tran pm PARAM='a1*2+m1'
 .meas tran fw FIND V(in) AT=w1
 .meas tran dw DERIV V(out) AT=t5
