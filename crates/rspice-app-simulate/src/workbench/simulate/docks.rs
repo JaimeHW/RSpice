@@ -32,6 +32,7 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
         );
         if let Some(page) = opened {
             cx.state.verification_page = page;
+            cx.wb.close_drawer();
         }
         return;
     }
@@ -76,5 +77,79 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
     );
     if open_results {
         cx.execute(ids::RESULTS_WORKSPACE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::show_navigator;
+    use crate::state::VerificationPage;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
+    use crate::workbench::state::Workspace;
+    use crate::workbench::state::workbench_session::Drawer;
+
+    /// Picking a view in the compact navigator drawer closes the drawer, as
+    /// picking a Simulate page does, so the view is not left under it.
+    #[test]
+    fn picking_a_verify_view_closes_the_navigator_drawer() {
+        let mut harness = SimulateTestHost::harness();
+        harness.wb.activate(Workspace::Verify);
+        harness.wb.drawer = Some(Drawer::Navigator);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let input = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 640.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let row = ctx
+            .run_ui(input(Vec::new()), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show_navigator(&mut harness.cx(), ui));
+            })
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .into_iter()
+            .find(|(_, node)| {
+                node.label()
+                    .is_some_and(|label| label.starts_with(VerificationPage::MonteCarlo.label()))
+            })
+            .and_then(|(_, node)| node.bounds())
+            .expect("the Monte Carlo row");
+        let at = egui::pos2(
+            ((row.x0 + row.x1) / 2.0) as f32,
+            ((row.y0 + row.y1) / 2.0) as f32,
+        );
+        let _ = ctx.run_ui(
+            input(vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]),
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show_navigator(&mut harness.cx(), ui));
+            },
+        );
+
+        assert_eq!(
+            harness.state.verification_page,
+            VerificationPage::MonteCarlo
+        );
+        assert_eq!(harness.wb.drawer, None);
     }
 }
