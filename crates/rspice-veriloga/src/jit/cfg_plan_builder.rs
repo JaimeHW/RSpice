@@ -2221,6 +2221,76 @@ endmodule
         }
     }
 
+    /// A `ddt` under a parameter guard whose operand is merged by an `if`,
+    /// `else if` chain or `case` takes the CFG plan, each merge carried as the
+    /// select the shipped route computes, and its record advances once.
+    #[test]
+    fn a_guarded_ddt_reads_a_two_arm_merge_as_a_select() {
+        use crate::jit::expr::NativeOp;
+        use crate::jit::plan_program::PlanProgram;
+
+        let admitted = [
+            (
+                "if (enabled) begin if (V(p,n) > 0.0) q = V(p,n)*V(p,n); else q = 3.0*V(p,n); \
+              I(p,n) <+ ddt(q); end",
+                1,
+            ),
+            (
+                "if (enabled) begin if (mode == 1) q = V(p,n); else if (mode == 2) q = 2.0*V(p,n); \
+              else q = exp(V(p,n)); I(p,n) <+ ddt(q); end",
+                2,
+            ),
+            (
+                "if (enabled) begin if (mode == 1) q = V(p,n); I(p,n) <+ ddt(q); end",
+                1,
+            ),
+            (
+                "if (enabled) begin case (mode) 1: q = V(p,n); 2: q = 2.0*V(p,n); default: q = 3.0; \
+              endcase I(p,n) <+ ddt(q); end",
+                2,
+            ),
+            (
+                "if (enabled) begin if (mode == 1 && V(p,n) > 0.0) q = V(p,n); else q = 2.0*V(p,n); \
+              I(p,n) <+ ddt(q); end",
+                1,
+            ),
+        ];
+        for (statement, selects) in admitted {
+            let source = format!(
+                "module merged(p,n); inout p,n; electrical p,n; real q;
+                 parameter integer enabled=1, mode=2;
+                 analog begin q = 0.5*V(p,n); {statement} end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            let (plan, refusal) =
+                build_default_model_plan_reported(&report.model, &report.canonical_ir).unwrap();
+            assert!(refusal.is_none(), "{statement}: {refusal:?}");
+            plan.validate_shape(&report.model).unwrap();
+            let PlanProgram::Blocks(program) = &plan.prelude.as_ref().unwrap().program else {
+                panic!("guarded operators require a CFG prelude");
+            };
+            let instructions = program.ssa().instructions();
+            assert_eq!(
+                instructions
+                    .iter()
+                    .filter(|instruction| matches!(instruction.op(), NativeOp::DdtState(_)))
+                    .count(),
+                1,
+                "{statement}: the record advances once"
+            );
+            assert!(
+                instructions
+                    .iter()
+                    .filter(|instruction| instruction.op() == NativeOp::IfElse)
+                    .count()
+                    >= selects,
+                "{statement}: each merge the hoisted operand reads is a select"
+            );
+        }
+    }
+
     #[test]
     fn nested_mathematical_derivatives_take_the_cfg_plan() {
         for expression in [

@@ -373,7 +373,7 @@ impl Lowerer<'_> {
         // One hoist decision per site and one record advance per operator,
         // whichever publication this is: the hoist is a property of the
         // function, and the prelude lowers the function once.
-        let hoisted = self.hoisted_state_operators(&layout)?;
+        let hoist = self.hoisted_state_operators(&layout)?;
         let mut publications = self.publication_slots(outputs)?;
         let mut exit_publications = Vec::new();
         if matches!(outputs, CfgOutputs::Published { variables, .. } if !variables.is_empty()) {
@@ -431,11 +431,25 @@ impl Lowerer<'_> {
             // A speculated cone value may appear in more than one operator's
             // cone, and a speculated value may also be one this block already
             // computes; either way it is emitted once.
-            for value in &hoisted[usize::from(*block)] {
+            for value in &hoist.at[usize::from(*block)] {
                 if lowered[usize::from(*value)].is_some() {
                     continue;
                 }
-                let emitted = self.emit(&mut builder, &lowered, *value)?;
+                let emitted = match hoist.merges[usize::from(*value)] {
+                    // The select the two-arm merge computes; the parameter
+                    // itself is bound where its join begins, later in the
+                    // layout, and holds the same value there.
+                    Some([condition, then_value, else_value]) => builder.push(
+                        NativeOp::IfElse,
+                        &[
+                            self.read(&lowered, condition)?,
+                            self.read(&lowered, then_value)?,
+                            self.read(&lowered, else_value)?,
+                        ],
+                        self.value_type(*value)?,
+                    )?,
+                    None => self.emit(&mut builder, &lowered, *value)?,
+                };
                 lowered[usize::from(*value)] = Some(emitted);
                 self.publish(&mut builder, &publications, *value, emitted)?;
             }
@@ -552,9 +566,10 @@ impl Lowerer<'_> {
     /// is evaluated on the path the source did not take. See
     /// [`Self::speculation_cone`] for exactly how far that reaches and what it
     /// refuses.
-    fn hoisted_state_operators(&self, layout: &Layout) -> JitResult<Vec<Vec<CfgValueId>>> {
+    fn hoisted_state_operators(&self, layout: &Layout) -> JitResult<Hoist> {
         let mut definition = self.definition_blocks();
         let mut hoisted: Vec<Vec<CfgValueId>> = vec![Vec::new(); self.function.blocks.len()];
+        let mut merges = vec![None; self.function.values.len()];
         for block in &layout.order {
             let index = usize::from(*block);
             if dominates(&layout.idom, index, layout.exit) {
@@ -581,8 +596,13 @@ impl Lowerer<'_> {
                         kind_name(&value.kind)
                     )));
                 }
-                let cone =
-                    self.speculation_cone(layout, &definition, instruction.result, target)?;
+                let cone = self.speculation_cone(
+                    layout,
+                    &definition,
+                    instruction.result,
+                    target,
+                    &mut merges,
+                )?;
                 // Later operators must see the schedule we have already
                 // proved, rather than the original conditional locations.
                 // In particular, a tangent reads its primal's state record;
@@ -598,7 +618,10 @@ impl Lowerer<'_> {
                 hoisted[target].push(instruction.result);
             }
         }
-        Ok(hoisted)
+        Ok(Hoist {
+            at: hoisted,
+            merges,
+        })
     }
 
     /// The values an operator's operands need that are not available where the
@@ -648,9 +671,25 @@ impl Lowerer<'_> {
     ///   integration-scale readbacks. A guard exists to keep exactly these off
     ///   a path, and stepping over it would turn a well-formed evaluation into
     ///   a reported failure.
-    /// * **Block parameters.** A parameter is a merge of the arms that reach
-    ///   it, so there is no single value to move: speculating one would mean
-    ///   choosing an arm, which is a different program.
+    /// * **Block parameters a select cannot carry.** A parameter is a merge of
+    ///   the arms that reach it. A two-arm `if`/`else` merge is exactly
+    ///   `select(condition, then value, else value)`, which is what the shipped
+    ///   MIR route computes for it, so that one is speculated as that select
+    ///   (see [`Self::two_arm_merge`]). Any other merge has no single value to
+    ///   move, and is refused.
+    ///
+    /// Every operator that reaches this hoist sits under conditions that
+    /// cannot change during the simulation. Verilog-AMS LRM 2.4 section 4.5.15
+    /// requires every analog operator to be evaluated at every iteration, and
+    /// forbids one under a condition unless the conditional expression
+    /// "consists of terms which can not change their value during the course
+    /// of a simulation"; the semantic pass refuses the rest before a CFG
+    /// exists (`validate_stateful_analog_operator_placement`). OpenVAF draws
+    /// the same line: `sim_back/src/topology/lineralize.rs` gives a `ddt`
+    /// reached through an operating-point-dependent conditional its own
+    /// implicit equation. So the merge a select carries here is one whose
+    /// operator runs on a path fixed for the whole run; the select only makes
+    /// the untaken arm's value exist, as the shipped route's does.
     ///
     /// Everything admitted is a pure load or arithmetic. A call to a libm
     /// helper is *not* a hazard, though the block model's `Effects` groups
@@ -663,6 +702,7 @@ impl Lowerer<'_> {
         definition: &[Option<usize>],
         operator: CfgValueId,
         target: usize,
+        merges: &mut [Option<[CfgValueId; 3]>],
     ) -> JitResult<Vec<CfgValueId>> {
         let mut cone = Vec::new();
         let mut visited = vec![false; self.function.values.len()];
@@ -689,27 +729,120 @@ impl Lowerer<'_> {
             }
             // Available already: a leaf, which the entry block materializes, or
             // a value whose block dominates the destination.
-            match definition[index] {
+            let defined = match definition[index] {
                 None => continue,
-                Some(block) if dominates(&layout.idom, block, target) => continue,
-                Some(_) => {}
-            }
+                Some(defined) if dominates(&layout.idom, defined, target) => continue,
+                Some(defined) => defined,
+            };
             visited[index] = true;
             let kind = &self.function.value(value).kind;
-            if let Some(hazard) = speculation_hazard(kind) {
-                return Err(self.refuse(format!(
-                    "canonical analog operator {} runs under a condition and its operand cone \
-                     contains {}, which {hazard}",
-                    kind_name(&self.function.value(operator).kind),
-                    kind_name(kind)
-                )));
-            }
+            let operands = match kind {
+                CfgValueKind::BlockParameter => {
+                    let Some(arms) = self.two_arm_merge(layout, defined, value) else {
+                        return Err(self.refuse(format!(
+                            "canonical analog operator {} runs under a condition and its operand \
+                             cone contains BlockParameter, a merge of the arms reaching it other \
+                             than the two-arm if/else a select carries",
+                            kind_name(&self.function.value(operator).kind),
+                        )));
+                    };
+                    merges[index] = Some(arms);
+                    arms.to_vec()
+                }
+                kind => {
+                    if let Some(hazard) = speculation_hazard(kind) {
+                        return Err(self.refuse(format!(
+                            "canonical analog operator {} runs under a condition and its operand \
+                             cone contains {}, which {hazard}",
+                            kind_name(&self.function.value(operator).kind),
+                            kind_name(kind)
+                        )));
+                    }
+                    kind.operands()
+                }
+            };
             stack.push((value, true));
-            for operand in kind.operands() {
+            for operand in operands {
                 stack.push((operand, false));
             }
         }
         Ok(cone)
+    }
+
+    /// The `(condition, then value, else value)` a block parameter equals, when
+    /// its join is a two-arm `if`/`else`.
+    ///
+    /// The shape admitted is the one a structured conditional lowers to and
+    /// nothing looser: the join has exactly two predecessors and is outside any
+    /// loop; its immediate dominator ends in a `Branch` with two distinct
+    /// targets; each target is either the join itself (an empty arm, whose
+    /// edge is the branch's own) or a block only the branch enters; and each
+    /// predecessor lies in a different arm, reaching the join by a plain jump.
+    /// Then every execution that reaches the join took exactly one arm, and
+    /// took the then arm exactly when the condition held — so the parameter
+    /// holds the then value when the condition holds and the else value
+    /// otherwise, which is the select. The block model's branch and its
+    /// `IfElse` read a condition the same way; `branch_agreement` measures that
+    /// over the shipped corpus.
+    fn two_arm_merge(
+        &self,
+        layout: &Layout,
+        join: usize,
+        parameter: CfgValueId,
+    ) -> Option<[CfgValueId; 3]> {
+        let predecessors = &layout.predecessors[join];
+        if layout.in_loop[join] || predecessors.len() != 2 || predecessors[0] == predecessors[1] {
+            return None;
+        }
+        let branch = layout.idom[join].filter(|branch| *branch != join)?;
+        if layout.in_loop[branch] {
+            return None;
+        }
+        let CfgTerminator::Branch {
+            condition,
+            then_target,
+            then_args,
+            else_target,
+            else_args,
+        } = &self.function.blocks[branch].terminator
+        else {
+            return None;
+        };
+        let (then_target, else_target) = (usize::from(*then_target), usize::from(*else_target));
+        if then_target == else_target {
+            return None;
+        }
+        let slot = self.function.blocks[join]
+            .params
+            .iter()
+            .position(|param| *param == parameter)?;
+        // What one arm hands the join: the branch's own edge for an empty arm,
+        // otherwise the jump of the one predecessor that arm dominates.
+        let arm = |entry: usize, edge_args: &[CfgValueId]| -> Option<(usize, CfgValueId)> {
+            if entry == join {
+                return edge_args.get(slot).map(|value| (branch, *value));
+            }
+            if layout.predecessors[entry] != [branch] {
+                return None;
+            }
+            let mut within = predecessors
+                .iter()
+                .copied()
+                .filter(|predecessor| dominates(&layout.idom, entry, *predecessor));
+            let predecessor = within.next()?;
+            if within.next().is_some() {
+                return None;
+            }
+            match &self.function.blocks[predecessor].terminator {
+                CfgTerminator::Jump { target, args } if usize::from(*target) == join => {
+                    args.get(slot).map(|value| (predecessor, *value))
+                }
+                _ => None,
+            }
+        };
+        let (then_from, then_value) = arm(then_target, then_args)?;
+        let (else_from, else_value) = arm(else_target, else_args)?;
+        (then_from != else_from).then_some([*condition, then_value, else_value])
     }
 
     /// Which block defines each value, or `None` for an unpinned leaf.
@@ -1557,10 +1690,22 @@ fn analysis_code(name: &str) -> Option<u8> {
 
 /// What [`layout_order`] settles about one CFG: the order its blocks are laid
 /// out in, and the dominance the lowering reads back from that walk.
+/// Where the hoist puts the analog operators that run under a condition.
+struct Hoist {
+    /// Values each block emits after its own instructions, indexed by CFG
+    /// block, in an order that defines each before it is read.
+    at: Vec<Vec<CfgValueId>>,
+    /// The block parameters speculated as the select their two-arm merge
+    /// computes, `[condition, then value, else value]`, indexed by CFG value.
+    merges: Vec<Option<[CfgValueId; 3]>>,
+}
+
 struct Layout {
     order: Vec<CfgBlockId>,
     /// Immediate dominators over the CFG, indexed by raw block index.
     idom: Vec<Option<usize>>,
+    /// Each block's predecessors, indexed the same way.
+    predecessors: Vec<Vec<usize>>,
     /// The block that returns.
     exit: usize,
     /// Blocks inside a natural loop, indexed by raw CFG block index.
@@ -1666,6 +1811,7 @@ fn layout_order(function: &CfgFunction) -> JitResult<Layout> {
     Ok(Layout {
         order: order.into_iter().map(CfgBlockId::from).collect::<Vec<_>>(),
         idom,
+        predecessors,
         exit,
         in_loop,
     })

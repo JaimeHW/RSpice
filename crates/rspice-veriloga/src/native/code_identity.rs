@@ -114,6 +114,20 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 ///
 /// The corpus went from 107,656,654 bytes to 109,217,294.
 ///
+/// `8a79b3a6…` is the census of the change in which a guarded `ddt` whose
+/// operand an if/else merges takes the CFG plan, the merge carried as a
+/// select. It was measured as `d02fe069…` was, from an `x86_64-apple-darwin`
+/// release build under Rosetta. Exactly the two modules that kept the postfix
+/// plan for that one refusal moved, and the other fifty-eight are digest
+/// identical:
+/// - `mvsg_cmc`, 2,703,968 to 1,399,077 bytes and 6,570 to 5,017 helper calls;
+/// - the `BSIM_SOI_100.1.1` `bsimsoi`, 7,875,232 to 4,379,985 bytes and
+///   13,815 to 9,689 helper calls.
+///
+/// Both images are now CFG plans, and they shrank the way the rest of the
+/// corpus did when it left the postfix plan. The corpus went from 109,217,294
+/// bytes to 104,417,156.
+///
 /// # How it is re-baselined
 ///
 /// Only with evidence that names the modules that moved and why. The census
@@ -410,7 +424,7 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "d02fe069e76d6f248a5c5e966936db8f14f95dec56a7ca974f38ea2e9cf9ba8d";
+    "8a79b3a64920c329b25dfb1733e1b1618e5e41f1b5a2acd04103f1601bc00194";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
