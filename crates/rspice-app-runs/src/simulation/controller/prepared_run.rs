@@ -330,6 +330,26 @@ pub enum CampaignOutcome {
     },
 }
 
+/// The deck File ▸ Export ▸ Netlist writes, and the model-library Verilog-A
+/// it names by deck key, which the export writes beside it.
+#[derive(Debug, Clone)]
+pub struct ExportedDesignDeck {
+    pub netlist: String,
+    pub model_library_veriloga: Vec<rspice_simulation::veriloga::ModelLibraryVerilogAFiles>,
+    /// What the netlist generator raised while writing the design.
+    pub warnings: Vec<String>,
+}
+
+/// The design deck a run executes before its includes are read, with the
+/// sealed model sources it was bound from, the root schematic's file its
+/// relative includes resolve against, and the generator's warnings.
+struct DesignRunDeck {
+    source: String,
+    sealed_models: rspice_simulation::model_sources::SealedModelExecutionSources,
+    origin: Option<std::path::PathBuf>,
+    warnings: Vec<String>,
+}
+
 /// What the shell has seen of runs and campaigns, so that each one's end is
 /// announced exactly once.
 ///
@@ -512,6 +532,105 @@ impl SimulationController {
     pub fn prepare_design_netlist_for_inspection(
         model: &Model,
     ) -> Result<String, PreparationError> {
+        let deck = Self::design_run_deck(model)?;
+        let (source, _) = expand_generated_dependencies_with_sealed_sources(
+            &deck.source,
+            deck.origin.as_deref(),
+            &model.include_search_chain(),
+            Some(&deck.sealed_models),
+        )?;
+        Ok(source)
+    }
+
+    /// The deck File \u{25b8} Export \u{25b8} Netlist writes: the design deck
+    /// the run executes, with the plan's measurements and every enabled
+    /// analysis's card, so the CLI reads the circuit, models, options and
+    /// analyses the run does.
+    ///
+    /// Model cards the run binds from a section are written inline, as the
+    /// run materializes them. A library file the design includes stays a
+    /// reference to that file, as Spectre's netlister writes
+    /// `include "path" section=`, named by the absolute path the run read it
+    /// from: the CLI reads it where the run reads it, from any folder and
+    /// without the project's search chain. Verilog-A keeps its deck keys
+    /// here; the export writes those sources beside the deck, and
+    /// [`ExportedDesignDeck::model_library_veriloga`] is what it writes for
+    /// the model libraries'.
+    pub fn prepare_design_netlist_for_export(
+        model: &Model,
+    ) -> Result<ExportedDesignDeck, PreparationError> {
+        let deck = Self::design_run_deck(model)?;
+        // The browser reads libraries from the sealed bundle, by names no
+        // host folder holds, so its deck keeps them as written.
+        #[cfg(not(target_arch = "wasm32"))]
+        let design = {
+            let (_, dependencies) = expand_generated_dependencies_with_sealed_sources(
+                &deck.source,
+                deck.origin.as_deref(),
+                &model.include_search_chain(),
+                Some(&deck.sealed_models),
+            )?;
+            rspice_simulation::netlist_preparation::dependencies::name_resolved_includes(
+                &deck.source,
+                &dependencies,
+            )
+        };
+        #[cfg(target_arch = "wasm32")]
+        let design = deck.source.clone();
+        let mut source = Self::append_plan_measurements_to_generated_netlist(model, &design)?;
+        let plan = model
+            .sim_setup
+            .stable_analysis_plan()
+            .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        let inputs = analysis_inputs(model);
+        let mut cards = Vec::new();
+        for instance in plan
+            .instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+        {
+            let draft = instance.draft();
+            let card = rspice_simulation::analysis_preparation::analysis_draft_spec(&inputs, draft)
+                .and_then(|spec| {
+                    rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                        &inputs, draft, &spec,
+                    )
+                })
+                .map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("{}: {error}", instance.display_name()),
+                    )
+                })?;
+            cards.push(card);
+        }
+        if !cards.is_empty() {
+            source = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+                &source,
+                &cards.join("\n"),
+            );
+        }
+        let model_library_veriloga = deck
+            .sealed_models
+            .reference_model_library_veriloga_authority(model.sim_setup.reference_pvt.process)
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+            .map(|authority| rspice_simulation::veriloga::model_library_veriloga_files(&authority))
+            .transpose()
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::ModelBindings, error.to_string())
+            })?
+            .unwrap_or_default();
+        Ok(ExportedDesignDeck {
+            netlist: source,
+            model_library_veriloga,
+            warnings: deck.warnings,
+        })
+    }
+
+    /// The design deck a run executes before its includes are read: the
+    /// configured hierarchy, plan-owned design variables, reference-process
+    /// model cards, the model libraries' Verilog-A, and the solver options.
+    fn design_run_deck(model: &Model) -> Result<DesignRunDeck, PreparationError> {
         let projection = model
             .workspace
             .configuration_execution_projection(
@@ -626,13 +745,14 @@ impl SimulationController {
             &source,
             &model.sim_setup.options,
         );
-        let (source, _) = expand_generated_dependencies_with_sealed_sources(
-            &source,
-            root_schematic.current_file(),
-            &model.include_search_chain(),
-            Some(&sealed_models),
-        )?;
-        Ok(source)
+        Ok(DesignRunDeck {
+            source,
+            sealed_models,
+            origin: root_schematic
+                .current_file()
+                .map(std::path::Path::to_path_buf),
+            warnings: generated.warnings,
+        })
     }
 
     /// Include explicitly authored measurements in the generated primary and

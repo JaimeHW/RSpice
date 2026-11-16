@@ -1,6 +1,8 @@
-//! File ▸ Export ▸ Netlist and View Netlist: the deck the code feature
-//! generates, recorded in the model's Console and saved through the export
-//! workflow. A refusal is prompted on the session's status bar.
+//! File ▸ Export ▸ Netlist and View Netlist. The export writes the deck the
+//! run executes, with every enabled analysis's card and its Verilog-A beside
+//! it, so the file runs in the CLI as the design runs here; View Netlist shows
+//! the design deck the code feature generates. Both record in the model's
+//! Console, and a refusal is prompted on the session's status bar.
 
 use super::netlist_export::{
     build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
@@ -8,7 +10,6 @@ use super::netlist_export::{
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::Model;
-use crate::workbench::state::Workspace;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub fn action_export_netlist_with_io(
@@ -17,35 +18,23 @@ pub fn action_export_netlist_with_io(
     format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    let netlist_content = if wb.workspace == Workspace::Netlist {
-        if model.netlist_artifacts.generated_source.is_empty() {
-            wb.prompt("There is no generated netlist to export.");
-            return;
-        }
-        if model.netlist_artifacts.generation_error.is_some()
-            || model.netlist_artifacts.generated_input_digest
-                != model.netlist_artifacts.current_generation_input_digest
-        {
-            wb.prompt("The generated netlist is out of date; regenerate it to export.");
-            return;
-        }
-        model.netlist_artifacts.generated_source.clone()
-    } else {
-        if model.schematic.document().components.is_empty() {
-            wb.prompt("No circuit to export. Add components first.");
-            return;
-        }
-        match build_menu_netlist_in(model) {
-            Ok(generated) => {
-                record_netlist_warnings_in(model, generated.warnings);
-                generated.source
-            }
-            Err(reasons) => {
-                model.report_failure("Netlist export failed", reasons.join("; "));
+    // The deck the run executes, with every enabled analysis's card, so the
+    // file runs in the CLI as the design runs here.
+    if model.schematic.document().components.is_empty() {
+        wb.prompt("No circuit to export. Add components first.");
+        return;
+    }
+    let exported =
+        match crate::simulation::controller::SimulationController::prepare_design_netlist_for_export(
+            model,
+        ) {
+            Ok(exported) => exported,
+            Err(error) => {
+                model.report_failure("Netlist export failed", error.to_string());
                 return;
             }
-        }
-    };
+        };
+    record_netlist_warnings_in(model, exported.warnings.clone());
 
     let default_name = format!(
         "{}.{}",
@@ -71,20 +60,24 @@ pub fn action_export_netlist_with_io(
 
             // The deck names its sources relative to where it was saved, so
             // only now can it be written.
-            let (netlist_content, sources) = match format {
-                crate::io::NetlistFormat::Spectre => {
-                    let deck_stem = path
-                        .file_stem()
-                        .map_or_else(|| "netlist".into(), |stem| stem.to_string_lossy());
-                    let export = super::netlist_compat::spice_to_ahdl_export(
-                        &netlist_content,
-                        &model.workspace,
-                        &deck_stem,
-                    );
-                    (export.netlist, export.sources)
-                }
-                _ => (netlist_content, Vec::new()),
+            let deck_stem = path
+                .file_stem()
+                .map_or_else(|| "netlist".into(), |stem| stem.to_string_lossy());
+            let export = match format {
+                crate::io::NetlistFormat::Spectre => super::netlist_compat::spice_to_ahdl_export(
+                    &exported.netlist,
+                    &model.workspace,
+                    &exported.model_library_veriloga,
+                    &deck_stem,
+                ),
+                crate::io::NetlistFormat::Spice => super::netlist_compat::spice_export(
+                    &exported.netlist,
+                    &model.workspace,
+                    &exported.model_library_veriloga,
+                    &deck_stem,
+                ),
             };
+            let (netlist_content, sources) = (export.netlist, export.sources);
             if !sources.is_empty() && !io.saved_paths_are_reopenable() {
                 wb.prompt(
                     "This netlist uses project Verilog-A sources; export it from the Netlist \

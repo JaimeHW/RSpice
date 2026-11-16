@@ -10,7 +10,7 @@ use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_so
 
 #[cfg(not(target_arch = "wasm32"))]
 mod netlist_document;
-mod netlist_export;
+pub(super) mod netlist_export;
 mod netlist_first;
 mod netlist_first_drawn;
 mod netlist_generation;

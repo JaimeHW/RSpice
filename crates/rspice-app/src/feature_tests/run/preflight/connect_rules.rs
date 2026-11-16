@@ -110,14 +110,21 @@ fn edge_times(app: &mut RSpiceApp) -> (f64, f64) {
         .runs
         .first()
         .expect("the run is retained");
+    switch_times(run, "drive current")
+}
+
+/// When `run` switched: the first time the converter's output rises, and the
+/// first row whose `current` over the ramp's voltage reads the 1 mS the
+/// device takes with `mode` high.
+fn switch_times(run: &rspice_app_state::state::SimulationRun, current: &str) -> (f64, f64) {
     assert!(run.success, "{:?}", run.analyses);
     let waveforms = &run.analyses[0].waveforms;
     let amps = waveforms
         .iter()
-        .find(|waveform| waveform.name == "drive current")
+        .find(|waveform| waveform.name.eq_ignore_ascii_case(current))
         .unwrap_or_else(|| {
             panic!(
-                "the run saves the drive current: {:?} {:#?}",
+                "the run saves {current}: {:?} {:#?}",
                 waveforms
                     .iter()
                     .map(|w| w.name.as_str())
@@ -134,7 +141,7 @@ fn edge_times(app: &mut RSpiceApp) -> (f64, f64) {
         .iter()
         .zip(amps.y.iter())
         .find(|(t, i)| {
-            let volts = 3.3e6 * **t;
+            let volts = 3.3 * **t / 1e-6;
             volts > 0.05 && i.abs() / volts < 1.5e-3
         })
         .map(|(t, _)| *t)
@@ -162,6 +169,98 @@ fn edge_times(app: &mut RSpiceApp) -> (f64, f64) {
             )
         });
     (rose, row)
+}
+
+/// The deck File \u{25b8} Export \u{25b8} Netlist writes runs outside the
+/// application as the design runs in it. Exported with a 2 V threshold typed
+/// into the run's block, the deck carries the transient, the options and the
+/// block, and copies the device's Verilog-A and the connect library beside
+/// itself under relative names; moved to another folder whole and run there
+/// on the deck route, it converts at the same femtosecond and switches the
+/// device on the same row as the application's run.
+#[test]
+fn the_exported_deck_runs_with_the_converter_edge_the_application_ran() {
+    let mut page = Page::open(moded_device_on_a_ramp());
+    page.name_rules("run_rules");
+    page.retype("a2d Vth high", "2");
+    let (rose, row) = edge_times(&mut page.app);
+
+    let folder = std::env::temp_dir().join(format!("rspice_ramp_export_{}", std::process::id()));
+    let moved = folder.with_extension("moved");
+    for stale in [&folder, &moved] {
+        let _ = std::fs::remove_dir_all(stale);
+    }
+    crate::feature_tests::code::netlist_export::export_spice(
+        &mut page.app,
+        &folder.join("ramp.spice"),
+    );
+    std::fs::rename(&folder, &moved).expect("the export moves whole");
+    let path = moved.join("ramp.spice");
+    let deck = std::fs::read_to_string(&path).expect("the deck is written");
+    assert!(!deck.contains("__rspice_"), "{deck}");
+    assert!(
+        deck.lines()
+            .any(|line| line.trim() == ".tran 0.000000001 0.000001 0 0.000000001"),
+        "the deck carries the run's 1 ns, 1 us transient:\n{deck}"
+    );
+    assert!(
+        rules_card(&deck).is_some_and(|card| card.contains("connect a2d #(.vthi(2.0))")),
+        "{deck}"
+    );
+
+    let mut run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch_at(
+        &deck,
+        &path,
+        rspice_results::run::SimulationRunLifecycle::Completed,
+    );
+    let _ = std::fs::remove_dir_all(&moved);
+    // The deck route keeps every solver point; the application's run samples
+    // on the transient's 1 ns output grid. The same solve sampled on that
+    // grid is the same trace.
+    let current = run.analyses[0]
+        .waveforms
+        .iter_mut()
+        .find(|wave| wave.name.eq_ignore_ascii_case("I(V1)"))
+        .expect("the deck route keeps the drive current");
+    *current = rspice_simulation::output_contract::materialization::resample_selected_and_final(
+        &*current,
+        crate::feature_tests::code::netlist_export::output_grid(&deck),
+    )
+    .expect("the exported trace samples on the output grid");
+    let sampled = current.y.to_vec();
+    let ran = page
+        .app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run")
+        .analyses[0]
+        .waveforms
+        .iter()
+        .find(|wave| wave.name == "drive current")
+        .expect("the application's run saves the drive current")
+        .y
+        .to_vec();
+    assert_eq!(
+        sampled
+            .iter()
+            .map(|amps| amps.to_bits())
+            .collect::<Vec<_>>(),
+        ran.iter().map(|amps| amps.to_bits()).collect::<Vec<_>>(),
+        "the drive current on the output grid"
+    );
+    let (exported_rose, exported_row) = switch_times(&run, "I(V1)");
+    assert!(
+        (exported_rose - rose).abs() <= 1e-15,
+        "the exported deck converts at {exported_rose:e} s, the application at {rose:e} s"
+    );
+    assert_eq!(
+        exported_row, row,
+        "the exported deck switches on the row at {exported_row:e} s, the application on {row:e} s"
+    );
 }
 
 /// A threshold typed into the run's own block is the one the deck writes and

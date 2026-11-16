@@ -806,6 +806,88 @@ pub fn compile_pdk_source_runtime(
     )
 }
 
+/// One model-library Verilog-A root as a deck written outside the project
+/// needs it: the deck-key prefix the run installs the root's runtimes under,
+/// and the sealed sources, each by its path relative to the folder holding
+/// them all, so an `` `include `` between them still resolves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelLibraryVerilogAFiles {
+    /// Every deck key the root's runtimes install starts with this.
+    pub key_prefix: String,
+    /// The root source, relative to the folder.
+    pub root: String,
+    /// `(relative path, source)`, the root among them.
+    pub files: Vec<(String, String)>,
+}
+
+/// The sealed sources behind each model-library Verilog-A root, keyed the way
+/// [`compile_model_library_source_runtimes`] keys the runtimes it installs.
+pub fn model_library_veriloga_files(
+    authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
+) -> Result<Vec<ModelLibraryVerilogAFiles>, PreparedRuntimeError> {
+    // The sealed closure also holds the library's SPICE files, which the
+    // deck reads as its own model cards and no Verilog-A source includes.
+    let verilog = |path: &std::path::Path| {
+        path.extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|extension| {
+                ["va", "vams", "vh", "vah", "v", "sv", "svh", "h", "inc"]
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+    };
+    let mut sources = Vec::with_capacity(authority.sources().len());
+    for (path, source) in authority.sources() {
+        if verilog(path) {
+            sources.push((model_library_virtual_path(path)?, source.clone()));
+        }
+    }
+    let folder = common_folder(sources.iter().map(|(logical, _)| logical.as_str()));
+    let relative = |logical: &str| logical[folder.len()..].to_owned();
+    let mut roots = std::collections::BTreeSet::new();
+    for root in authority.roots() {
+        roots.insert(model_library_virtual_path(&root.path)?);
+    }
+    Ok(roots
+        .into_iter()
+        .map(|root_path| ModelLibraryVerilogAFiles {
+            key_prefix: format!(
+                "__rspice_model_library__/{}/{}/",
+                authority.closure_digest(),
+                model_library_root_identity(&root_path)
+            ),
+            root: relative(&root_path),
+            files: sources
+                .iter()
+                .map(|(logical, source)| (relative(logical), source.clone()))
+                .collect(),
+        })
+        .collect())
+}
+
+/// The longest `/`-ended prefix every path shares.
+fn common_folder<'a>(mut paths: impl Iterator<Item = &'a str>) -> String {
+    let Some(first) = paths.next() else {
+        return String::new();
+    };
+    let mut folder = first.rfind('/').map_or("", |end| &first[..=end]);
+    for path in paths {
+        while !path.starts_with(folder) {
+            folder = folder[..folder.len() - 1]
+                .rfind('/')
+                .map_or("", |end| &folder[..=end]);
+        }
+    }
+    folder.to_owned()
+}
+
+/// What a model-library root's deck keys name it by.
+fn model_library_root_identity(root_path: &str) -> rspice_vocabulary::product::ContentDigest {
+    rspice_vocabulary::product::ContentDigest::from_bytes(
+        Sha256::digest(root_path.as_bytes()).into(),
+    )
+}
+
 pub fn compile_model_library_source_runtimes(
     authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
     limits: rspice_veriloga::VirtualCompileLimits,
@@ -853,9 +935,7 @@ pub fn compile_model_library_source_runtimes(
                 ))
             })?;
         let module_names = prepared.module_names().collect::<Vec<_>>();
-        let root_identity = rspice_vocabulary::product::ContentDigest::from_bytes(
-            Sha256::digest(root_path.as_bytes()).into(),
-        );
+        let root_identity = model_library_root_identity(&root_path);
         for root in roots {
             if module_names.is_empty() && root.selected_module.is_none() {
                 let artifact = prepared.connection_artifact().ok_or_else(|| {
