@@ -41,17 +41,12 @@ pub struct RunSetState {
     /// what a user did in this sitting, not a property of the saved plan.
     #[serde(skip)]
     pub receipts: Vec<RunSetReceipt>,
-    /// Undo stack of editable snapshots.
-    #[serde(skip)]
-    pub history: Vec<RunSetSnapshot>,
-    /// Redo stack of editable snapshots.
-    #[serde(skip)]
-    pub future: Vec<RunSetSnapshot>,
 }
 
-/// The part of the state an undo restores. Receipts are evidence of what
-/// happened and are deliberately outside it: undoing an edit does not unmake
-/// the record that the edit was made.
+/// The declared space, as a step of the setup's history holds it. Receipts
+/// are evidence of what happened and are deliberately outside it: undoing an
+/// edit does not unmake the record that the edit was made, and a preview is
+/// made afresh for whatever space is restored.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSetSnapshot {
     pub revision: u32,
@@ -59,7 +54,6 @@ pub struct RunSetSnapshot {
     pub dimensions: Vec<RunSetDimension>,
     pub composition: RunSetComposition,
     pub budgets: RunSetBudgets,
-    pub preview: Option<RunSetForecast>,
 }
 
 impl Default for RunSetState {
@@ -106,8 +100,6 @@ impl Default for RunSetState {
             budgets: RunSetBudgets::default(),
             preview: None,
             receipts: Vec::new(),
-            history: Vec::new(),
-            future: Vec::new(),
         }
     }
 }
@@ -217,7 +209,6 @@ impl RunSetState {
             dimensions: self.dimensions.clone(),
             composition: self.composition.clone(),
             budgets: self.budgets,
-            preview: self.preview,
         }
     }
 
@@ -226,19 +217,11 @@ impl RunSetState {
     /// revision never names two different spaces, and the space is previewed
     /// afresh, as after any edit.
     pub fn restore_snapshot(&mut self, snapshot: RunSetSnapshot) {
-        let revision = self.revision.max(snapshot.revision).saturating_add(1);
-        self.restore(snapshot);
-        self.revision = revision;
-        self.preview = None;
-    }
-
-    /// Restore an editable snapshot, leaving the receipt log untouched.
-    pub(super) fn restore(&mut self, snapshot: RunSetSnapshot) {
-        self.revision = snapshot.revision;
+        self.revision = self.revision.max(snapshot.revision).saturating_add(1);
         self.sequence = snapshot.sequence;
         self.dimensions = snapshot.dimensions;
         self.composition = snapshot.composition;
         self.budgets = snapshot.budgets;
-        self.preview = snapshot.preview;
+        self.preview = None;
     }
 }

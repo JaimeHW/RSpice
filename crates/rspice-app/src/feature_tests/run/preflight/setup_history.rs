@@ -401,3 +401,60 @@ fn a_save_policy_switch_is_one_step_put_back_exactly() {
     page.click("Permit live delivery for outputs that request it");
     undo_and_redo(&mut page.app, "streaming switch", save_policy, before);
 }
+
+// ----------------------------------------------------------------- run set
+
+/// The run set's declared space: its axes, how they compose, its budgets and
+/// the next axis identity, without the revision a restore moves on.
+fn run_space(app: &RSpiceApp) -> String {
+    let run_set = &app.state.model.sim_setup.run_set;
+    format!(
+        "{:?}",
+        (
+            run_set.sequence,
+            &run_set.dimensions,
+            &run_set.composition,
+            &run_set.budgets
+        )
+    )
+}
+
+/// An axis added on the PVT, sweeps & variation page is one step of the
+/// setup's one Undo: Undo puts the space back exactly, and Redo adds the axis
+/// again.
+#[test]
+fn a_run_set_axis_added_on_its_page_is_one_step_put_back_exactly() {
+    use rspice_app_simulate::workbench::surfaces::simulate::page_runset::commit;
+    use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind};
+
+    let mut app = app_with_a_moded_device("").0;
+    app.state.simulate.simulation_page = SimulationPage::RunSet;
+    one_step(&mut app, "new axis", run_space, |app| {
+        commit(
+            &mut crate::workbench::features::cx(app),
+            RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
+        );
+    });
+}
+
+/// The reference process and temperature, and the temperature the options
+/// state with them.
+fn reference_pvt(app: &RSpiceApp) -> String {
+    let setup = &app.state.model.sim_setup;
+    format!("{:?}", (setup.reference_pvt, setup.options.temp))
+}
+
+/// A reference PVT chosen is one step: Undo puts the process and temperature
+/// back exactly, and Redo chooses them again.
+#[test]
+fn a_reference_pvt_chosen_is_one_step_put_back_exactly() {
+    let mut app = app_with_a_moded_device("").0;
+    one_step(&mut app, "reference PVT", reference_pvt, |app| {
+        rspice_app_simulate::workbench::simulate::chrome::commit_reference_pvt(
+            &mut crate::workbench::features::cx(app),
+            rspice_app_state::product::ProcessCorner::FF,
+            -40.0,
+        )
+        .expect("the reference PVT commits");
+    });
+}

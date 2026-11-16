@@ -363,23 +363,24 @@ fn a_refused_command_changes_nothing_and_still_leaves_a_receipt() {
 }
 
 #[test]
-fn undo_restores_the_declaration_and_keeps_the_receipt_log() {
+fn a_restored_snapshot_is_the_declaration_again_and_keeps_the_receipt_log() {
     let mut state = RunSetState::default();
+    let untouched = state.snapshot();
     set_values(&mut state, RunSetDimensionKind::Temperature, "0\n50");
     assert_eq!(validate(&state, 1).forecast.point_count, 18);
+    let edited = state.revision;
 
-    let transaction = dispatch(&mut state, RunSetAction::Undo, 1);
-    assert!(transaction.was_adopted());
+    state.restore_snapshot(untouched);
     assert_eq!(validate(&state, 1).forecast.point_count, 27);
+    assert!(
+        state.revision > edited,
+        "a restored space is a new revision, so no revision names two spaces"
+    );
     assert_eq!(
         state.receipts.len(),
-        2,
-        "undoing an edit does not unmake the record that it happened"
+        1,
+        "restoring a space does not unmake the record that the edit happened"
     );
-
-    let transaction = dispatch(&mut state, RunSetAction::Redo, 1);
-    assert!(transaction.was_adopted());
-    assert_eq!(validate(&state, 1).forecast.point_count, 18);
 }
 
 #[test]
@@ -815,19 +816,19 @@ fn an_exclusion_naming_no_point_is_refused_at_the_transaction() {
 }
 
 #[test]
-fn undo_restores_an_excluded_point_and_the_composition_it_changed() {
+fn a_restored_snapshot_includes_an_excluded_point_and_the_composition_it_changed() {
     let mut state = RunSetState::default();
+    let untouched = state.snapshot();
     let key = key_of(&state, 3);
     exclude(&mut state, &key);
     assert_eq!(validate(&state, 1).forecast.point_count, 26);
+    let excluded = state.snapshot();
 
-    let transaction = dispatch(&mut state, RunSetAction::Undo, 1);
-    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
+    state.restore_snapshot(untouched);
     assert_eq!(state.composition.mode, RunSetCompositionMode::Cartesian);
     assert_eq!(validate(&state, 1).forecast.point_count, 27);
 
-    let transaction = dispatch(&mut state, RunSetAction::Redo, 1);
-    assert!(transaction.was_adopted());
+    state.restore_snapshot(excluded);
     assert_eq!(state.composition.mode, RunSetCompositionMode::Filtered);
     assert_eq!(validate(&state, 1).forecast.point_count, 26);
 }

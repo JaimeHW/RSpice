@@ -313,20 +313,21 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
 
 // ------------------------------------------------------------- run-set toolbar
 
-/// Every toolbar action on the run-set route reaches the transaction.
+/// A run-set edit is a step of the setup's one Undo, and the toolbar's
+/// preview reaches the transaction.
 ///
-/// The two history controls and the preview are this page's only route into
-/// `page_runset::commit`, which is where a refused edit is recorded and a
-/// preview receipt is written. The model-level tests exercise the actions
-/// themselves; nothing exercised the wrapper, so a button bound to the wrong
-/// variant would have passed every one of them.
+/// The page has no history controls of its own: Edit > Undo on it takes back
+/// the edit, as on every Simulate page, and Redo makes it again. The preview
+/// is this page's route into `page_runset::commit` for a forecast, which is
+/// where its receipt is written; nothing else exercised that wrapper, so a
+/// button bound to the wrong variant would have passed every model test.
 #[test]
-fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
-    use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
+fn a_run_set_edit_undoes_from_edit_undo_and_the_toolbar_previews() {
+    use rspice_app_simulate::workbench::surfaces::simulate::page_runset::commit;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind};
 
     let mut app = RSpiceApp::test_instance();
-    // Something to undo, authored through the model so the toolbar is the only
-    // thing under test.
     let axis = app
         .state
         .model
@@ -346,26 +347,28 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
             .declared_temperatures_celsius(app.state.model.sim_setup.reference_pvt)
     };
     let authored = declared(&app).expect("the default axis is a list of temperatures");
-    let transaction = dispatch(
-        &mut app.state.model.sim_setup.run_set,
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
         RunSetAction::SetValues {
             id: axis,
             text: "-55\n27\n150".to_owned(),
         },
-        1,
     );
-    assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
     assert_eq!(declared(&app), Some(vec![-55.0, 27.0, 150.0]));
 
     let mut studio = Studio::open(app, SimulationPage::RunSet, DESKTOP);
-    studio.click(|label| label == "Undo");
+    studio.app.state.workbench.activate(Workspace::Simulate);
+    assert!(
+        !studio.announces(|announced| announced == "Undo" || announced == "Redo"),
+        "the page keeps no history controls of its own"
+    );
+    studio.app.execute_command_key(ids::UNDO);
     assert_eq!(
         declared(&studio.app),
         Some(authored.clone()),
         "Undo restores the declaration the edit replaced"
     );
-
-    studio.click(|label| label == "Redo");
+    studio.app.execute_command_key(ids::REDO);
     assert_eq!(
         declared(&studio.app),
         Some(vec![-55.0, 27.0, 150.0]),

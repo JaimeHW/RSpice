@@ -115,8 +115,6 @@ pub fn from_corner_config(config: &CornerConfig) -> RunSetState {
         budgets: RunSetBudgets::default(),
         preview: None,
         receipts: Vec::new(),
-        history: Vec::new(),
-        future: Vec::new(),
     };
 
     let sections: Vec<String> = config

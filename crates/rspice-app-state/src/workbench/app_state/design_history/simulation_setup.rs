@@ -23,7 +23,7 @@ use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 use rspice_simulation_contract::plan_payload::{
     SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
-use rspice_simulation_contract::run_set::RunSetSnapshot;
+use rspice_simulation_contract::run_set::{ReferencePoint, RunSetSnapshot};
 
 /// Which parts of the setup a step holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,8 @@ impl SetupParts {
     pub const ANALYSES: Self = Self(1 << 4);
     /// The run set's corners and sweeps.
     pub const RUN_SET: Self = Self(1 << 5);
+    /// The reference process and temperature the nominal run takes.
+    pub const REFERENCE_PVT: Self = Self(1 << 6);
 
     #[must_use]
     pub const fn and(self, other: Self) -> Self {
@@ -67,6 +69,7 @@ pub struct SetupSnapshot {
     plan_data: Option<Option<Box<SimulationPlanPayload>>>,
     analyses: Option<Box<SimulationPlan>>,
     run_set: Option<Box<RunSetSnapshot>>,
+    reference_pvt: Option<ReferencePoint>,
 }
 
 /// One committed setup edit.
@@ -107,6 +110,9 @@ impl Model {
             run_set: parts
                 .has(SetupParts::RUN_SET)
                 .then(|| Box::new(setup.run_set.snapshot())),
+            reference_pvt: parts
+                .has(SetupParts::REFERENCE_PVT)
+                .then_some(setup.reference_pvt),
         }
     }
 
@@ -254,6 +260,10 @@ fn restore(
     detail: &str,
 ) -> Result<(), String> {
     let mut setup = state.sim_setup.clone();
+    // Ahead of the options, which state its temperature again.
+    if let Some(point) = side.reference_pvt {
+        setup.set_reference_pvt(point.process, point.temperature_celsius)?;
+    }
     if let Some(options) = &side.options {
         setup.commit_options(options);
         setup.session.options_draft = OptionsDialogState::from_options(options);

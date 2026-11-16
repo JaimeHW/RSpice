@@ -48,8 +48,6 @@ fn forecast_line(model: &Model, validation: &RunSetValidation, revision: u32) ->
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
     let addable = cx.model.sim_setup.run_set.addable_kinds();
-    let can_undo = !cx.model.sim_setup.run_set.history.is_empty();
-    let can_redo = !cx.model.sim_setup.run_set.future.is_empty();
     let revision = cx.model.sim_setup.run_set.revision;
     let mut action: Option<RunSetAction> = None;
     let minimum_height = if cx.wb.coarse_pointer { 44.0 } else { 0.0 };
@@ -68,12 +66,6 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetVa
                 .icon(Icon::Add)
                 .min_height(minimum_height)
                 .max_width(inner_width);
-            let undo = Button::new("Undo")
-                .enabled(can_undo)
-                .min_height(minimum_height);
-            let redo = Button::new("Redo")
-                .enabled(can_redo)
-                .min_height(minimum_height);
             let preview = Button::new("Validate and preview")
                 .accent()
                 .icon(Icon::Grid)
@@ -86,13 +78,13 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetVa
                 .layout_no_wrap(status_text.clone(), status_font.clone(), t.color.text_faint)
                 .size()
                 .x;
-            let command_width = [&add, &undo, &redo, &preview]
+            let command_width = [&add, &preview]
                 .into_iter()
                 .map(|button| button.measured_width(ui))
                 .sum::<f32>();
             // Account for both the leading command row and its trailing
             // status group. Long revisions and changed fonts reflow too.
-            let single_row = command_width + status_width + 5.0 * ui.spacing().item_spacing.x + 4.0
+            let single_row = command_width + status_width + 3.0 * ui.spacing().item_spacing.x + 4.0
                 <= inner_width;
             let status = egui::RichText::new(status_text).color(t.color.text_faint);
             ui.horizontal_wrapped(|ui| {
@@ -116,12 +108,6 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetVa
                 ) && let Some(kind) = addable.get(index)
                 {
                     action = Some(RunSetAction::AddDimension(*kind));
-                }
-                if undo.show(ui).clicked() {
-                    action = Some(RunSetAction::Undo);
-                }
-                if redo.show(ui).clicked() {
-                    action = Some(RunSetAction::Redo);
                 }
                 let preview_clicked = if single_row {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

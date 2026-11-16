@@ -45,10 +45,6 @@ pub enum RunSetAction {
     SetBudgets(super::RunSetBudgets),
     /// Validate and freeze the forecast. Creates no numerical result.
     Preview,
-    /// Restore the previous editable state.
-    Undo,
-    /// Re-apply an undone editable state.
-    Redo,
 }
 
 impl RunSetAction {
@@ -69,8 +65,6 @@ impl RunSetAction {
             Self::IncludePoint { .. } => "include-point",
             Self::SetBudgets(_) => "set-budgets",
             Self::Preview => "preview",
-            Self::Undo => "undo",
-            Self::Redo => "redo",
         }
     }
 
@@ -89,15 +83,13 @@ impl RunSetAction {
             Self::SetComposition(composition) => composition.mode.as_str().to_owned(),
             Self::SetBudgets(_) => "budgets".to_owned(),
             Self::Preview => "run-set".to_owned(),
-            Self::Undo => "history".to_owned(),
-            Self::Redo => "future".to_owned(),
         }
     }
 
     /// Whether the command changes the declared space, and so must move the
     /// revision and invalidate any frozen preview.
     fn is_mutation(&self) -> bool {
-        !matches!(self, Self::Preview | Self::Undo | Self::Redo)
+        !matches!(self, Self::Preview)
     }
 }
 
@@ -156,7 +148,6 @@ fn dispatch_with_validation(
     validate_preview: impl FnOnce(&RunSetState) -> RunSetValidation,
 ) -> RunSetTransaction {
     let before_revision = state.revision;
-    let snapshot = state.snapshot();
     let mut next = state.clone();
     let mut refusal: Option<RunSetError> = None;
 
@@ -303,30 +294,6 @@ fn dispatch_with_validation(
             }
         }
         RunSetAction::Preview => {}
-        RunSetAction::Undo => match next.history.pop() {
-            Some(previous) => {
-                next.future.push(next.snapshot());
-                next.restore(previous);
-            }
-            None => {
-                refusal = Some(missing(
-                    "RUNSET-UNDO-EMPTY",
-                    "No run-set transaction is available to undo.",
-                ));
-            }
-        },
-        RunSetAction::Redo => match next.future.pop() {
-            Some(future) => {
-                next.history.push(next.snapshot());
-                next.restore(future);
-            }
-            None => {
-                refusal = Some(missing(
-                    "RUNSET-REDO-EMPTY",
-                    "No run-set transaction is available to redo.",
-                ));
-            }
-        },
     }
 
     let validation = matches!(action, RunSetAction::Preview).then(|| validate_preview(&next));
@@ -345,8 +312,6 @@ fn dispatch_with_validation(
                 next.preview = None;
             }
         } else if action.is_mutation() {
-            next.history.push(snapshot);
-            next.future.clear();
             next.revision += 1;
             next.preview = None;
         }

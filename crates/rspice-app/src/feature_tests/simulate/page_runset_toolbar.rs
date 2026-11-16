@@ -30,14 +30,6 @@ impl Fixture {
             &mut crate::workbench::features::cx(&mut app),
             RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
         );
-        commit(
-            &mut crate::workbench::features::cx(&mut app),
-            RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
-        );
-        commit(
-            &mut crate::workbench::features::cx(&mut app),
-            RunSetAction::Undo,
-        );
         app.state.model.sim_setup.run_set.revision = revision;
         let mut fixture = Self {
             app,
@@ -170,7 +162,7 @@ fn run_set_toolbar_keeps_status_and_every_control_inside_separate_bounds() {
                     fixture.frame(vec![]);
                     fixture.frame(vec![]);
                 }
-                assert_eq!(fixture.buttons.len(), 4);
+                assert_eq!(fixture.buttons.len(), 2);
                 assert_eq!(fixture.status.len(), 1);
                 let mut regions = fixture
                     .buttons
@@ -203,16 +195,6 @@ fn run_set_toolbar_pointer_actions_reach_their_own_controls_at_narrow_widths() {
     for width in [280.0, 560.0] {
         let mut fixture = Fixture::new(width, true, 3);
         let dimensions = fixture.app.state.model.sim_setup.run_set.dimensions.len();
-        fixture.click("Undo");
-        assert_eq!(
-            fixture.app.state.model.sim_setup.run_set.dimensions.len(),
-            dimensions - 1
-        );
-        fixture.click("Redo");
-        assert_eq!(
-            fixture.app.state.model.sim_setup.run_set.dimensions.len(),
-            dimensions
-        );
         let receipts = fixture.app.state.model.sim_setup.run_set.receipts.len();
         fixture.click("Validate and preview");
         assert!(fixture.app.state.model.sim_setup.run_set.receipts.len() > receipts);

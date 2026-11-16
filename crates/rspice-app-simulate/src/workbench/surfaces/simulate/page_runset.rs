@@ -10,11 +10,13 @@
 use egui::{Rect, Sense, Ui, vec2};
 
 use crate::simulation::plan::AnalysisKind;
+use crate::state::SimulationPage;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, IconButton, mono_input, select};
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
@@ -1851,6 +1853,11 @@ pub fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option
 /// it move together or not at all.
 pub fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
     let previewing = matches!(action, RunSetAction::Preview);
+    // The space and the analysis scopes it re-scopes are one step of Undo.
+    let step = (!previewing).then(|| {
+        cx.model
+            .setup_snapshot(SetupParts::RUN_SET.and(SetupParts::ANALYSES))
+    });
     let before = cx.model.sim_setup.run_set.clone();
     let kinds = enabled_analysis_kinds(cx.model);
     let (exact_task_count, workload_error) = match exact_plan_task_count(cx.model) {
@@ -1922,6 +1929,10 @@ pub fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
             transaction.receipt.action
         )) {
         Ok(receipt) => {
+            if let Some(step) = step {
+                cx.model
+                    .record_setup_change(SimulationPage::RunSet.label(), step);
+            }
             invalidate_preflight(cx);
             let mut line = receipt.status_line();
             if !pruned.is_empty() {

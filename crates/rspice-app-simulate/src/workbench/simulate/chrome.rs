@@ -137,6 +137,10 @@ pub fn commit_reference_pvt(
     {
         return Ok(false);
     }
+    let step = cx.model.setup_snapshot(
+        crate::workbench::app_state::design_history::SetupParts::REFERENCE_PVT
+            .and(crate::workbench::app_state::design_history::SetupParts::OPTIONS),
+    );
     let mut setup = cx.model.sim_setup.clone();
     setup.set_reference_pvt(process, temperature_celsius)?;
     let receipt = setup
@@ -146,6 +150,7 @@ pub fn commit_reference_pvt(
         ))
         .map_err(|error| error.to_string())?;
     cx.model.sim_setup = setup;
+    cx.model.record_setup_change("reference PVT", step);
     invalidate_preflight(cx);
     cx.model.record_plan_receipt(receipt.status_line());
     Ok(true)
