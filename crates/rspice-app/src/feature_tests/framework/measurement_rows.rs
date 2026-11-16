@@ -33,7 +33,7 @@ fn ac_run() -> SimulationRun {
 }
 
 fn row_names(app: &RSpiceApp) -> Vec<String> {
-    active_measurement_rows(app, &[])
+    active_measurement_rows(app)
         .into_iter()
         .map(|row| row.name)
         .collect()
@@ -41,9 +41,8 @@ fn row_names(app: &RSpiceApp) -> Vec<String> {
 
 /// A failed solve has no margins to report.
 ///
-/// The derived AC stability margins join the table as first-class rows, and a
-/// `phase_margin` specification binds to them exactly as it binds to a
-/// `.measure` result. Nothing asked whether the solve behind them succeeded.
+/// The derived AC stability margins join the table as rows of their own.
+/// Nothing asked whether the solve behind them succeeded.
 /// The retained vectors of a failed AC run are whatever the engine emitted
 /// before giving up, and a margin read off them is not a measurement — which
 /// is precisely why the Bode sheet refuses them.

@@ -736,26 +736,38 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     );
 }
 
+/// The plan's limit as Verify's sheet judged a value against it.
+fn sheet_verdict(
+    minimum: Option<f64>,
+    maximum: Option<f64>,
+    unit: &str,
+    signed_margin: f64,
+) -> ProjectVerdict {
+    ProjectVerdict {
+        minimum,
+        maximum,
+        unit: unit.to_owned(),
+        holds: signed_margin >= 0.0,
+        signed_margin: Some(signed_margin),
+    }
+}
+
+/// The table states the sheet's verdict and margin, not one of its own: a
+/// value inside the bare limit that the sheet failed (a guard band narrowed
+/// it) reads as the sheet reads it.
 #[test]
-fn measurement_table_uses_project_specification_for_verdict_and_margin() {
+fn measurement_table_states_the_sheets_verdict_and_margin() {
     let measurement = rspice_core::MeasureResult::success("gain", 9.5);
-    let spec = rspice_app_state::state::SpecEntry {
-        measurement: "GAIN".to_owned(),
-        expression: String::new(),
-        min: Some(9.0),
-        max: Some(10.0),
-        unit: "dB".to_owned(),
-        scope: rspice_app_state::state::SpecPointScope::AllPoints,
-    };
-    let row = measurement_table_row(&measurement, "AC", Some(&spec));
+    let passing = sheet_verdict(Some(9.0), Some(10.0), "dB", 0.5);
+    let row = measurement_table_row(&measurement, "AC", Some(&passing));
     assert_eq!(row.status, "PASS");
     assert!(!row.failed, "a pass is neutral");
     assert_eq!(row.specification, "9.000000 … 10.000000");
     assert_eq!(row.margin, "+500.000000 m");
     assert_eq!(row.worst_point, "AC");
 
-    let failed = rspice_core::MeasureResult::success("gain", 10.25);
-    let row = measurement_table_row(&failed, "AC", Some(&spec));
+    let guarded = sheet_verdict(Some(9.0), Some(10.0), "dB", -0.25);
+    let row = measurement_table_row(&measurement, "AC", Some(&guarded));
     assert_eq!(row.status, "FAIL");
     assert!(row.failed);
     assert_eq!(row.margin, "-250.000000 m");
@@ -806,14 +818,7 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
 
 #[test]
 fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
-    let spec = rspice_app_state::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(9.0),
-        max: Some(11.0),
-        unit: "dB".to_owned(),
-        scope: rspice_app_state::state::SpecPointScope::AllPoints,
-    };
+    let spec = sheet_verdict(Some(9.0), Some(11.0), "dB", 1.0);
     let passing = rspice_core::MeasureResult {
         name: "gain".to_owned(),
         value: Some(10.0),
@@ -857,6 +862,7 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
         expected: Some(12.0),
         ..passing
     };
+    let spec = sheet_verdict(Some(9.0), Some(11.0), "dB", -1.0);
     let row = measurement_table_row(&project_failure, "AC", Some(&spec));
     assert_eq!(row.status, "FAIL");
     assert_eq!(row.margin, "-1.000000");
@@ -1439,14 +1445,7 @@ fn measurement_units_keep_console_project_and_authored_contracts_distinct() {
     measured.expected = Some(0.25);
     measured.tolerance = Some(0.01);
     measured.failure_limit = Some(0.5);
-    let mut spec = rspice_app_state::state::SpecEntry {
-        measurement: "level".into(),
-        expression: String::new(),
-        min: Some(200.0),
-        max: Some(300.0),
-        unit: "mV".into(),
-        scope: rspice_app_state::state::SpecPointScope::AllPoints,
-    };
+    let mut spec = sheet_verdict(Some(200.0), Some(300.0), "mV", 50.0);
     let row = measurement_table_row(&measured, "TRAN", Some(&spec));
     assert_eq!(row.status, "PASS");
     assert!(

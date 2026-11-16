@@ -266,6 +266,143 @@ fn an_soa_limit_line_selects_its_check_in_verify() {
     );
 }
 
+/// A run whose limit was edited after it ran: the console's Measurements
+/// table states what Verify's sheet says against the plan as it stands, and a
+/// publication of the run keeps the verdict it was sealed with. The two
+/// differ, which is the point: one is the live judgement, the other a record.
+#[test]
+fn the_console_reads_the_sheet_and_a_publication_keeps_the_sealed_verdict() {
+    use crate::feature_tests::hardcopy::publication_reads;
+    use rspice_app_hardcopy::workbench::hardcopy_adapters::publication_snapshot::build_publication_snapshot;
+    use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use rspice_app_state::state::{
+        AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
+        PreparedRunReceipt, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+        PreparedSourceCheckReceipt, SimulationRun, SpecEntry, SpecPointScope,
+    };
+    use rspice_app_workbench::workbench::docks::console::active_measurement_rows;
+    use rspice_app_workbench::workbench::framework::feature::PublicationDraft;
+    use rspice_results::specification::{PreparedSpecification, PreparedSpecificationPolicy};
+    use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
+    use rspice_results::verification::{CellStatus, LimitsSinceRun};
+
+    let gain_at_least = |minimum: f64| SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: String::new(),
+        min: Some(minimum),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: SpecPointScope::AllPoints,
+    };
+    let mut app = RSpiceApp::test_instance();
+    let model = &mut app.state.model;
+    let plan_id = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the project has a plan")
+        .id();
+    // Sealed against gain >= 40 dB, which the measured 39.4 dB fails.
+    let source = AnalysisInstanceId::new();
+    let receipt = PreparedRunReceipt::new(PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x41; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x42; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: vec![PreparedSpecification::new(gain_at_least(40.0)).expect("a limit")],
+        specification_policy: PreparedSpecificationPolicy::default(),
+        tasks: vec![
+            PreparedRunTaskReceipt::new(
+                source,
+                ObjectRevision::INITIAL,
+                Vec::new(),
+                2,
+                ContentDigest::from_bytes([2; 32]),
+            )
+            .expect("a task receipt"),
+        ],
+    })
+    .expect("a run receipt");
+    let mut run = SimulationRun::new_prepared(1, receipt);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 39.4)])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    source,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x5a; 32]),
+                    Vec::new(),
+                )
+                .expect("analysis provenance"),
+            ),
+    );
+    model.simulation.retained.runs = vec![run].into();
+    assert!(model.simulation.select_run(0));
+    // The plan's limit, lowered after the run to gain >= 35 dB.
+    model
+        .workspace
+        .content
+        .replace_active_specs(plan_id, vec![gain_at_least(35.0)]);
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+
+    let sheet = model
+        .simulation
+        .verification_sheet()
+        .expect("the run is judged");
+    assert_eq!(sheet.summary.limits, LimitsSinceRun::Edited);
+    let point = sheet.point_of_analysis(0).expect("the analysis is a point");
+    assert_eq!(sheet.rows[0].cells[point].status, CellStatus::Pass);
+    let run = model.simulation.active_run().expect("the run is selected");
+    let sealed = SpecificationVerdict::evaluate(
+        run.prepared_receipt().expect("sealed").specifications(),
+        run.analyses.iter().map(|analysis| &analysis.data),
+    );
+    assert_eq!(sealed[0].status(), SpecificationVerdictStatus::BoundFailure);
+
+    let console = active_measurement_rows(&app);
+    let [row] = console.as_slice() else {
+        panic!("one measurement: {console:?}");
+    };
+    assert_eq!(
+        (row.status, row.failed, row.specification.as_str()),
+        ("PASS", false, "≥ 35.000000"),
+        "the console states the sheet's verdict against the plan's limit"
+    );
+
+    let snapshot = build_publication_snapshot(
+        publication_reads(&app.state),
+        &PublicationDraft {
+            title: "Edited limits".to_owned(),
+            author_display: "Test".to_owned(),
+            created_utc: "2026-11-16T00:00:00Z".to_owned(),
+            license: rspice_publication_contract::ContentLicense::CcBy40,
+            ..Default::default()
+        },
+    )
+    .expect("the run publishes");
+    let results = snapshot.results.expect("the run's results");
+    let [published] = results.measurements.as_slice() else {
+        panic!("one measurement: {:?}", results.measurements);
+    };
+    assert_eq!(
+        (published.passed, published.spec_display.as_deref()),
+        (Some(false), Some("≥ 40 dB")),
+        "the publication keeps the verdict the run was sealed with"
+    );
+    assert_ne!(
+        published.passed,
+        Some(!row.failed),
+        "the two must differ here"
+    );
+}
+
 /// A stored session reopens on the Verify view it was left on, stored and
 /// read back the way the application does it.
 #[test]

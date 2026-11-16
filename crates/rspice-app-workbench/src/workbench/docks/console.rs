@@ -20,6 +20,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
+use rspice_results::verification::{CellStatus, Sheet};
 
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
@@ -573,8 +574,7 @@ fn paint_row_mark(ui: &Ui, left: f32, top: f32, problem: Option<Problem>) {
 }
 
 fn measurements(ui: &mut Ui, app: &mut impl WorkbenchHost) {
-    let specifications = active_specifications(app);
-    let rows = active_measurement_rows(app, &specifications);
+    let rows = active_measurement_rows(app);
     let run_label = app
         .model()
         .simulation
@@ -723,49 +723,77 @@ pub struct MeasurementTableRow {
     pub failed: bool,
 }
 
-fn active_specifications(app: &impl WorkbenchHost) -> Vec<crate::state::SpecEntry> {
-    if let Some(receipt) = app
-        .model()
-        .simulation
-        .active_run()
-        .and_then(crate::state::SimulationRun::prepared_receipt)
-    {
-        return receipt
-            .specifications()
-            .iter()
-            .map(|specification| specification.entry().clone())
-            .collect();
-    }
-    let active = app
-        .model()
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .and_then(|plan| app.model().workspace.content.plan_data(plan.id()))
-        .map(|payload| payload.specs.as_slice())
-        .unwrap_or(app.model().workspace.content.specs.as_slice());
-    active.to_vec()
+/// What Verify's sheet says of one measurement: the limit the plan holds for
+/// it, and the judge's answer at the point the measurement's analysis solved.
+/// The console states no project verdict of its own, so it cannot disagree
+/// with Verify about a run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectVerdict {
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+    /// The unit the limit is stated in; empty for the measurement's own.
+    pub unit: String,
+    /// The value is inside the guarded limit.
+    pub holds: bool,
+    /// Room before the guarded limit; negative once it is broken.
+    pub signed_margin: Option<f64>,
 }
 
-pub fn active_measurement_rows(
-    app: &impl WorkbenchHost,
-    specifications: &[crate::state::SpecEntry],
-) -> Vec<MeasurementTableRow> {
+impl ProjectVerdict {
+    /// The first row of `sheet` that names `measurement` and judged a value
+    /// at the point of the run's analysis at position `analysis`. `None` when
+    /// the run answers none of the plan's limits or no such row judged one
+    /// there.
+    #[must_use]
+    pub fn of(sheet: &Sheet, measurement: &str, analysis: usize) -> Option<Self> {
+        if !sheet.is_judged() {
+            return None;
+        }
+        let point = sheet.point_of_analysis(analysis)?;
+        sheet
+            .rows
+            .iter()
+            .filter(|row| row.measurement.eq_ignore_ascii_case(measurement))
+            .find_map(|row| {
+                let cell = row.cells.get(point)?;
+                let holds = match cell.status {
+                    CellStatus::Pass | CellStatus::Near => true,
+                    CellStatus::Fail | CellStatus::Error => false,
+                    CellStatus::Excluded | CellStatus::Absent => return None,
+                };
+                let (minimum, maximum) = row.comparison.bounds();
+                Some(Self {
+                    minimum,
+                    maximum,
+                    unit: row.unit.clone(),
+                    holds,
+                    signed_margin: cell.signed_margin,
+                })
+            })
+    }
+}
+
+/// The selected run's measurements, each with what Verify's sheet says of it.
+pub fn active_measurement_rows(app: &impl WorkbenchHost) -> Vec<MeasurementTableRow> {
     let Some(run) = app.model().simulation.active_run() else {
         return Vec::new();
+    };
+    let sheet = app.model().simulation.verification_sheet();
+    let project = |measurement: &str, analysis: usize| {
+        sheet.and_then(|sheet| ProjectVerdict::of(sheet, measurement, analysis))
     };
     // Each measurement reads as its plan spells it; the engine folds it.
     let notations = crate::state::bus_notations(&app.model().workspace, &app.model().schematic);
     let mut rows: Vec<MeasurementTableRow> = run
         .analyses
         .iter()
-        .flat_map(|analysis| {
+        .enumerate()
+        .flat_map(|(position, analysis)| {
             let notations = &notations;
+            let project = &project;
             analysis.measurements.iter().map(move |measurement| {
-                let spec = specifications
-                    .iter()
-                    .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement.name));
-                let mut row = measurement_table_row(measurement, &analysis.label, spec);
+                let verdict = project(&measurement.name, position);
+                let mut row = measurement_table_row(measurement, &analysis.label, verdict.as_ref());
                 if let std::borrow::Cow::Owned(authored) =
                     notations.display_measurement(&measurement.name)
                 {
@@ -775,15 +803,14 @@ pub fn active_measurement_rows(
             })
         })
         .collect();
-    // Derived AC stability margins join the table as first-class rows: a
-    // `phase_margin` specification binds to them exactly like a .measure
-    // result, and the numbers are the stability inspector card's own. A
-    // deck-declared measurement of the same name keeps authority.
+    // Derived AC stability margins join the table as rows of their own, with
+    // the stability inspector card's numbers. A deck-declared measurement of
+    // the same name keeps authority. A plan limit on one states a verdict
+    // only where Verify's sheet judged a value at that point, as for any row.
     //
     // Fail closed exactly as the Bode sheet does. A failed solve's retained
     // vectors are whatever the engine emitted before it gave up, and a margin
-    // read off them is not a measurement — which matters more here than on
-    // the sheet, because a specification binds to these rows.
+    // read off them is not a measurement.
     if let Some(summary) = crate::state::ac_bode_summary_for_selection(
         run,
         app.model().simulation.view.active_analysis_idx,
@@ -802,9 +829,7 @@ pub fn active_measurement_rows(
             if rows.iter().any(|row| row.name.eq_ignore_ascii_case(name)) {
                 continue;
             }
-            let spec = specifications
-                .iter()
-                .find(|spec| spec.measurement.eq_ignore_ascii_case(name));
+            let verdict = project(name, summary.analysis_index);
             let derived = rspice_core::MeasureResult {
                 name: name.to_owned(),
                 value: Some(value),
@@ -818,18 +843,21 @@ pub fn active_measurement_rows(
                 event_axis,
                 units: None,
             };
-            rows.push(measurement_table_row(&derived, label, spec));
+            rows.push(measurement_table_row(&derived, label, verdict.as_ref()));
         }
     }
     rows
 }
 
+/// One measurement's row: its value, and its verdict against every contract
+/// that binds it: the plan's, as Verify's sheet judged it, and the deck's own
+/// GOAL and FAILVALUE.
 pub fn measurement_table_row(
     measurement: &rspice_core::MeasureResult,
     analysis_label: &str,
-    specification: Option<&crate::state::SpecEntry>,
+    project: Option<&ProjectVerdict>,
 ) -> MeasurementTableRow {
-    let requested_unit = specification.map_or("", |spec| spec.unit.as_str());
+    let requested_unit = project.map_or("", |project| project.unit.as_str());
     let value = measurement.value_in_unit(requested_unit).ok().flatten();
     let display_unit = if !requested_unit.trim().is_empty() {
         Some(requested_unit.trim())
@@ -839,7 +867,7 @@ pub fn measurement_table_row(
             .as_ref()
             .and_then(|units| units.value.symbol())
     };
-    let specification_text = measurement_contract_text(measurement, specification);
+    let specification_text = measurement_contract_text(measurement, project);
     let (status, failed, margin) = if let Some(error) = measurement
         .error
         .as_deref()
@@ -847,8 +875,8 @@ pub fn measurement_table_row(
         .filter(|error| !error.trim().is_empty())
     {
         ("ERROR", true, error.to_owned())
-    } else if measurement_has_contract(measurement, specification) {
-        measurement_contract_verdict(measurement, specification)
+    } else if measurement_has_contract(measurement, project) {
+        measurement_contract_verdict(measurement, project)
     } else if let Some(error) = measurement
         .error
         .as_deref()
@@ -882,21 +910,21 @@ pub fn measurement_table_row(
 
 fn measurement_has_contract(
     measurement: &rspice_core::MeasureResult,
-    specification: Option<&crate::state::SpecEntry>,
+    project: Option<&ProjectVerdict>,
 ) -> bool {
-    specification.is_some() || measurement.expected.is_some() || measurement.failure_limit.is_some()
+    project.is_some() || measurement.expected.is_some() || measurement.failure_limit.is_some()
 }
 
 fn measurement_contract_text(
     measurement: &rspice_core::MeasureResult,
-    specification: Option<&crate::state::SpecEntry>,
+    project: Option<&ProjectVerdict>,
 ) -> String {
     let mut contracts = Vec::with_capacity(3);
-    if let Some(specification) = specification {
-        let mut text = specification_text(specification);
-        if measurement.units.is_some() && !specification.unit.trim().is_empty() {
+    if let Some(project) = project {
+        let mut text = limit_text(project.minimum, project.maximum);
+        if measurement.units.is_some() && !project.unit.trim().is_empty() {
             text.push(' ');
-            text.push_str(specification.unit.trim());
+            text.push_str(project.unit.trim());
         }
         contracts.push(("PROJECT", text));
     }
@@ -947,7 +975,7 @@ fn measurement_contract_text(
 /// The status word, whether it is a failure, and the margin text.
 fn measurement_contract_verdict(
     measurement: &rspice_core::MeasureResult,
-    specification: Option<&crate::state::SpecEntry>,
+    project: Option<&ProjectVerdict>,
 ) -> (&'static str, bool, String) {
     let Some(value) = measurement.value else {
         return ("NO DATA", false, "—".to_owned());
@@ -956,15 +984,13 @@ fn measurement_contract_verdict(
         return ("NO DATA", false, "raw value unavailable".to_owned());
     }
 
+    let passed = measurement.passed && project.is_none_or(|project| project.holds);
     if let Some(units) = &measurement.units {
-        let project_value =
-            match measurement.value_in_unit(specification.map_or("", |spec| spec.unit.as_str())) {
-                Ok(Some(value)) => value,
-                Ok(None) => return ("NO DATA", false, "value unavailable".into()),
-                Err(error) => return ("ERROR", true, error),
-            };
-        let passed =
-            measurement.passed && specification.is_none_or(|spec| spec.passes(project_value));
+        match measurement.value_in_unit(project.map_or("", |project| project.unit.as_str())) {
+            Ok(Some(_)) => {}
+            Ok(None) => return ("NO DATA", false, "value unavailable".into()),
+            Err(error) => return ("ERROR", true, error),
+        }
         let mut margins = Vec::new();
         let show = |label: &str, margin: f64, unit: Option<&str>| {
             let value = format_signed_measure_value(margin);
@@ -973,21 +999,15 @@ fn measurement_contract_verdict(
                 unit.map_or(String::new(), |unit| format!(" {unit}"))
             )
         };
-        if let Some(spec) = specification {
-            let margin = spec
-                .min
-                .map(|min| project_value - min)
-                .into_iter()
-                .chain(spec.max.map(|max| max - project_value))
-                .reduce(f64::min);
-            if let Some(margin) = margin {
-                let unit = if spec.unit.trim().is_empty() {
-                    units.value.symbol()
-                } else {
-                    Some(spec.unit.trim())
-                };
-                margins.push(show("PROJECT", margin, unit));
-            }
+        if let Some(project) = project
+            && let Some(margin) = project.signed_margin
+        {
+            let unit = if project.unit.trim().is_empty() {
+                units.value.symbol()
+            } else {
+                Some(project.unit.trim())
+            };
+            margins.push(show("PROJECT", margin, unit));
         }
         if let Some((expected, tolerance)) = measurement.expected.zip(measurement.tolerance) {
             margins.push(show(
@@ -1022,14 +1042,10 @@ fn measurement_contract_verdict(
         );
     }
 
-    let project_passed = specification.is_none_or(|specification| specification.passes(value));
-    let passed = measurement.passed && project_passed;
-    let mut margins = Vec::with_capacity(4);
+    let mut margins = Vec::with_capacity(3);
     let has_numeric_bound = measurement.expected.zip(measurement.tolerance).is_some()
         || measurement.failure_limit.is_some()
-        || specification.is_some_and(|specification| {
-            specification.min.is_some() || specification.max.is_some()
-        });
+        || project.is_some_and(|project| project.minimum.is_some() || project.maximum.is_some());
 
     if let (Some(expected), Some(tolerance)) = (measurement.expected, measurement.tolerance) {
         margins.push(tolerance - (value - expected).abs());
@@ -1045,15 +1061,7 @@ fn measurement_contract_verdict(
             margin
         });
     }
-    if let Some(specification) = specification {
-        margins.extend(
-            specification
-                .min
-                .map(|minimum| value - minimum)
-                .into_iter()
-                .chain(specification.max.map(|maximum| maximum - value)),
-        );
-    }
+    margins.extend(project.and_then(|project| project.signed_margin));
 
     let limiting_margin = margins
         .into_iter()
@@ -1085,8 +1093,8 @@ fn measurement_contract_verdict(
     (if passed { "PASS" } else { "FAIL" }, !passed, margin)
 }
 
-fn specification_text(specification: &crate::state::SpecEntry) -> String {
-    match (specification.min, specification.max) {
+fn limit_text(minimum: Option<f64>, maximum: Option<f64>) -> String {
+    match (minimum, maximum) {
         (Some(minimum), Some(maximum)) => format!(
             "{} … {}",
             format_measure_value(minimum),

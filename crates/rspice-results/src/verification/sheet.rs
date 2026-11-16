@@ -185,6 +185,9 @@ pub struct Sheet {
     /// Trials that passed every specification with a yield; `None` when no
     /// specification has one.
     pub joint_yield: Option<JointYield>,
+    /// The point each analysis's own evidence sits at, by its position in the
+    /// run.
+    analysis_points: Vec<Option<usize>>,
 }
 
 impl Sheet {
@@ -259,7 +262,11 @@ impl Sheet {
             _ => LimitsSinceRun::NotSealed,
         };
         let joint_yield = super::statistics::joint_yield(&rows);
+        let analysis_points = (0..analyses.len())
+            .map(|analysis| points.of_analysis(analysis))
+            .collect();
         Self {
+            analysis_points,
             axes: points.varying_axes(),
             points: points.points,
             rows,
@@ -283,6 +290,15 @@ impl Sheet {
     #[must_use]
     pub const fn refusal(&self) -> Option<&'static str> {
         self.summary.evidence.refusal()
+    }
+
+    /// The point the run's analysis at position `analysis` gave its own
+    /// measurements at, which is the cell a row holds for them; `None` for an
+    /// analysis that is not one of the points, or whose family members are
+    /// its points and which measured nothing as a whole.
+    #[must_use]
+    pub fn point_of_analysis(&self, analysis: usize) -> Option<usize> {
+        self.analysis_points.get(analysis).copied().flatten()
     }
 }
 

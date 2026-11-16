@@ -115,7 +115,10 @@ impl SpecificationComparison {
         }
     }
 
-    fn bounds(&self) -> (Option<f64>, Option<f64>) {
+    /// The lowest and highest value the comparison admits, before any guard
+    /// band.
+    #[must_use]
+    pub fn bounds(&self) -> (Option<f64>, Option<f64>) {
         match *self {
             Self::Tracked => (None, None),
             Self::Minimum { limit } => (Some(limit), None),

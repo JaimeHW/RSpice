@@ -1504,23 +1504,10 @@ const SPECIFICATION_VERDICT_PATTERNS: &[&str] = &[
 
 /// Files that still judge a specification by its bare bounds, each with the
 /// reason it has not yet moved onto the sheet.
-const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[
-    (
-        "workbench/docks/console.rs",
-        "the console's Measurements table states a project verdict and margin \
-         per measurement from the run's sealed bounds; it reads the sheet's \
-         cells once a measurement row knows its point",
-    ),
-    (
-        "workbench/hardcopy_adapters/publication_snapshot.rs",
-        "a published document's project verdict per measurement, beside the \
-         sealed bounds it prints",
-    ),
-    (
-        "workbench/documents/code_workspace/automation/evidence.rs",
-        "the automation page's run evidence, which goes with the page",
-    ),
-];
+const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[(
+    "workbench/documents/code_workspace/automation/evidence.rs",
+    "the automation page's run evidence, which goes with the page",
+)];
 
 #[test]
 fn specifications_are_judged_by_the_judge() {

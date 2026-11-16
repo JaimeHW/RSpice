@@ -38,6 +38,8 @@ use rspice_hardcopy::render::{
     scene_from_resolved,
 };
 use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
+use rspice_results::specification::PreparedSpecification;
+use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 
 /// Why a snapshot could not be built. Every variant names the boundary that
 /// refused, so the publish surface can show an actionable message.
@@ -130,8 +132,7 @@ pub fn build_publication_snapshot(
         .then(|| effective_deck(reads))
         .flatten();
     let results = if draft.include_results {
-        let specifications = active_specs(reads);
-        results_section(reads.sources.model.simulation.active_run(), &specifications)?
+        results_section(reads.sources.model.simulation.active_run())?
     } else {
         None
     };
@@ -1135,36 +1136,44 @@ fn convert_scene(
 // Results
 // ---------------------------------------------------------------------------
 
-fn active_specs(reads: PublicationReads<'_>) -> Vec<SpecEntry> {
-    if let Some(receipt) = reads
-        .sources
-        .model
-        .simulation
-        .active_run()
-        .and_then(crate::state::SimulationRun::prepared_receipt)
-    {
-        return receipt
-            .specifications()
-            .iter()
-            .map(|specification| specification.entry().clone())
-            .collect();
-    }
-    reads
-        .sources
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .map(|plan| {
-            reads
-                .sources
-                .model
-                .workspace
-                .content
-                .active_specs(plan.id())
-        })
-        .unwrap_or(&[])
-        .to_vec()
+/// A requirement the run was sealed with that binds one published
+/// measurement, and what the sealed judge said of it.
+struct SealedContract<'a> {
+    entry: &'a SpecEntry,
+    holds: bool,
+}
+
+/// The first requirement the run was sealed with that names `measure` and
+/// admits the analysis that measured it, judged by the sealed judge over
+/// that analysis's evidence, its family members included.
+///
+/// A publication is a record of the run: it keeps the verdict the run was
+/// sealed with, so limits edited on the plan since never reach it. `None`
+/// when no sealed requirement names the measurement for this analysis: none
+/// names it, or each that does is scoped to other points or bound to another
+/// producing analysis.
+fn sealed_contract<'a>(
+    sealed: &'a [PreparedSpecification],
+    measure: &rspice_core::MeasureResult,
+    analysis: &AnalysisResult,
+) -> Option<SealedContract<'a>> {
+    let specification = sealed.iter().find(|specification| {
+        specification
+            .entry()
+            .measurement
+            .eq_ignore_ascii_case(&measure.name)
+            && specification.admits_analysis(&analysis.data)
+    })?;
+    let verdicts = SpecificationVerdict::evaluate(
+        std::slice::from_ref(specification),
+        std::iter::once(&analysis.data),
+    );
+    Some(SealedContract {
+        entry: specification.entry(),
+        holds: verdicts
+            .first()
+            .is_some_and(|verdict| verdict.status() == SpecificationVerdictStatus::Pass),
+    })
 }
 
 /// The sweep-axis identity the results views derive for each analysis kind.
@@ -1206,11 +1215,13 @@ fn bits_of(values: &[f64], trace: &str) -> Result<Vec<u64>, PublicationBuildErro
 
 fn results_section(
     run: Option<&SimulationRun>,
-    specs: &[SpecEntry],
 ) -> Result<Option<ResultsSection>, PublicationBuildError> {
     let Some(run) = run else {
         return Ok(None);
     };
+    let sealed = run
+        .prepared_receipt()
+        .map_or(&[][..], |receipt| receipt.specifications());
     let mut analyses = Vec::new();
     let mut datasets = Vec::new();
     let mut measurements = Vec::new();
@@ -1234,10 +1245,12 @@ fn results_section(
         )?);
 
         for measure in &analysis.measurements {
-            let spec = specs
-                .iter()
-                .find(|entry| entry.measurement.eq_ignore_ascii_case(&measure.name));
-            measurements.push(publication_measurement(measure, spec, analysis_id)?);
+            let contract = sealed_contract(sealed, measure, analysis);
+            measurements.push(publication_measurement(
+                measure,
+                contract.as_ref(),
+                analysis_id,
+            )?);
         }
     }
 
@@ -1310,9 +1323,10 @@ fn analysis_datasets(
 
 fn publication_measurement(
     measure: &rspice_core::MeasureResult,
-    spec: Option<&SpecEntry>,
+    contract: Option<&SealedContract<'_>>,
     analysis_id: u64,
 ) -> Result<Measurement, PublicationBuildError> {
+    let spec = contract.map(|contract| contract.entry);
     let converted = measure.value_in_unit(spec.map_or("", |entry| entry.unit.as_str()));
     let display = match converted.as_ref() {
         Ok(Some(value)) => {
@@ -1337,11 +1351,7 @@ fn publication_measurement(
     let passed = has_contract.then(|| {
         let value_available = measure.value.is_some();
         let raw_value_available = measure.failure_limit.is_none() || measure.raw_value.is_some();
-        let project_passed = match (spec, converted.as_ref().ok().copied().flatten()) {
-            (Some(entry), Some(value)) => entry.passes(value),
-            (Some(_), None) => false,
-            (None, _) => true,
-        };
+        let project_passed = contract.is_none_or(|contract| contract.holds);
         value_available && raw_value_available && measure.passed && project_passed
     });
     let fail_value = publication_fail_value_evidence(measure)?;
@@ -1838,6 +1848,37 @@ mod tests {
         ));
     }
 
+    /// `measure`, measured by an analysis of a run sealed with `spec`.
+    fn sealed_analysis(measure: &rspice_core::MeasureResult) -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![measure.clone()])
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new(
+                    crate::product::AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    crate::product::ContentDigest::from_bytes([0x5a; 32]),
+                    Vec::new(),
+                )
+                .expect("fixture provenance is internally valid"),
+            )
+    }
+
+    /// `measure` as a run sealed with `spec` publishes it: bound to the
+    /// sealed requirement and judged by the sealed judge.
+    fn publish_sealed(
+        measure: &rspice_core::MeasureResult,
+        spec: &SpecEntry,
+    ) -> Result<Measurement, PublicationBuildError> {
+        let sealed = [PreparedSpecification::new(spec.clone()).expect("a valid limit")];
+        let contract = sealed_contract(&sealed, measure, &sealed_analysis(measure));
+        assert!(
+            contract.is_some(),
+            "the sealed limit binds {}",
+            measure.name
+        );
+        publication_measurement(measure, contract.as_ref(), 1)
+    }
+
     #[test]
     fn measurements_join_specs_case_insensitively() {
         let measure = rspice_core::MeasureResult {
@@ -1861,8 +1902,7 @@ mod tests {
             unit: "s".to_string(),
             scope: crate::state::SpecPointScope::AllPoints,
         };
-        let published =
-            publication_measurement(&measure, Some(&spec), 1).expect("measurement publishes");
+        let published = publish_sealed(&measure, &spec).expect("measurement publishes");
         assert_eq!(published.passed, Some(true));
         assert!(
             published
@@ -1960,8 +2000,7 @@ mod tests {
             event_axis: None,
             units: None,
         };
-        let published =
-            publication_measurement(&passing, Some(&spec), 1).expect("combined contracts publish");
+        let published = publish_sealed(&passing, &spec).expect("combined contracts publish");
         let display = published.spec_display.expect("all contracts are disclosed");
         assert!(display.contains("PROJECT 9–11 dB"));
         assert!(display.contains("GOAL 10 ± 2"));
@@ -1976,7 +2015,7 @@ mod tests {
             ..passing.clone()
         };
         assert_eq!(
-            publication_measurement(&authored_failure, Some(&spec), 1)
+            publish_sealed(&authored_failure, &spec)
                 .expect("authored failure publishes")
                 .passed,
             Some(false),
@@ -1990,7 +2029,7 @@ mod tests {
             ..passing
         };
         assert_eq!(
-            publication_measurement(&project_failure, Some(&spec), 1)
+            publish_sealed(&project_failure, &spec)
                 .expect("project failure publishes")
                 .passed,
             Some(false),
@@ -2151,12 +2190,12 @@ mod tests {
             unit: "mV".into(),
             scope: crate::state::SpecPointScope::AllPoints,
         };
-        let publication = publication_measurement(&measured, Some(&spec), 1).unwrap();
+        let publication = publish_sealed(&measured, &spec).unwrap();
         assert_eq!(publication.passed, Some(true));
         assert_eq!(publication.display, "250 mV");
         assert_eq!(publication.value_bits, Some(0.25_f64.to_bits()));
         spec.unit = "mA".into();
-        let publication = publication_measurement(&measured, Some(&spec), 1).unwrap();
+        let publication = publish_sealed(&measured, &spec).unwrap();
         assert_eq!(publication.passed, Some(false));
         assert!(publication.display.contains("incompatible"));
     }
