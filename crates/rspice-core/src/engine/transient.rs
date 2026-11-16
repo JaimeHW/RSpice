@@ -12506,8 +12506,13 @@ impl Engine {
                     if let Some(events) = sink_events.as_mut() {
                         events.gathered(&mut rows, &mut result, &mut retained_result_values)?;
                     }
-                    if let Some(capture) = state_capture
-                        && capture.offer(
+                    // A capture that stops the run ends it once the next step
+                    // is proposed and checkpointed, as ngspice pauses after a
+                    // point's output and before its next delta is cut
+                    // (dctran.c): a checkpoint taken here then holds the step
+                    // the run goes on with.
+                    let stops_at_capture = match state_capture {
+                        Some(capture) => capture.offer(
                             t,
                             &circuit,
                             &solution,
@@ -12517,10 +12522,9 @@ impl Engine {
                                 coefficients: coeff,
                                 follows: switch_crossings.follows(accepted_from, t),
                             }),
-                        )?
-                    {
-                        tstop = t;
-                    }
+                        )?,
+                        None => false,
+                    };
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -12676,6 +12680,9 @@ impl Engine {
                         },
                     )?;
                     reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
+                    if stops_at_capture {
+                        tstop = t;
+                    }
                 }
                 if !force_accepted_rejected_lte_step {
                     restore_rejected_transient_nonlinear_state!();
@@ -13258,8 +13265,10 @@ impl Engine {
             if let Some(events) = sink_events.as_mut() {
                 events.gathered(&mut rows, &mut result, &mut retained_result_values)?;
             }
-            if let Some(capture) = state_capture
-                && capture.offer(
+            // As on the force-accepted path: the run stops after its next
+            // step is proposed and checkpointed.
+            let stops_at_capture = match state_capture {
+                Some(capture) => capture.offer(
                     t,
                     &circuit,
                     &solution,
@@ -13269,10 +13278,9 @@ impl Engine {
                         coefficients: coeff,
                         follows: switch_crossings.follows(accepted_from, t),
                     }),
-                )?
-            {
-                tstop = t;
-            }
+                )?,
+                None => false,
+            };
             if first_accepted_transient_step {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 let accepted_max_step = self
@@ -13672,6 +13680,9 @@ impl Engine {
                 },
             )?;
             reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
+            if stops_at_capture {
+                tstop = t;
+            }
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }

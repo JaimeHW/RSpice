@@ -204,3 +204,43 @@ fn resume_with_no_interrupted_run_runs_the_deck() {
     assert_eq!(circuit.datasets().len(), 1);
     assert_eq!(circuit.datasets()[0].name, "tran1");
 }
+
+/// `resume` continues the interrupted run where it stood, as ngspice's
+/// does (dctran.c's `resume:` label keeps the step, the order and the
+/// integrator history): the stop lands on a source corner the run steps to
+/// anyway, so stopping there and resuming takes every step the run takes
+/// without a stop, to the bit.
+#[test]
+fn a_stopped_and_resumed_transient_takes_the_steps_of_the_uninterrupted_run() {
+    let deck = |control: &str| {
+        format!(
+            "resume continuity\nv1 1 0 pwl(0 5 0.5m 5 2m 5)\nr1 1 2 1k\nc2 2 0 1u\n\
+             .control\n{control}.endc\n.end\n"
+        )
+    };
+    let transient = |source: &str| {
+        let (circuit, _, error) = run(source);
+        assert_eq!(error, None);
+        let ControlAnalysisResult::Transient(result) = &circuit.datasets()[0].result else {
+            panic!("expected a transient");
+        };
+        let node = result
+            .node_names
+            .iter()
+            .position(|name| name == "2")
+            .unwrap();
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        (bits(&result.time), bits(&result.voltages[node]))
+    };
+    let whole = transient(&deck("tran 10u 2ms 0 10u uic\n"));
+    let resumed = transient(&deck(
+        "stop when time = 0.5ms\ntran 10u 2ms 0 10u uic\nresume\n",
+    ));
+    assert_eq!(resumed.0.len(), 211, "accepted points");
+    assert_eq!(resumed, whole);
+}

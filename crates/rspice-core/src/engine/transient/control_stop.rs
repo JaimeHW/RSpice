@@ -5,15 +5,23 @@
 //! `resume` (frontend/runcoms2.c:63 com_resume) continues the same run from
 //! that point, with whatever `alter` changed in the meantime.
 //!
-//! Here the run ends at the stop time and keeps its state there twice: live,
-//! as a clone of the circuit, which holds every device's state, an XSPICE
-//! model's events included; and as a checkpoint, when every device's state
-//! serializes. A resume after `alter` changed only independent sources
-//! continues the live image with those sources driven anew, as ngspice's
-//! sources read their altered parameters from the next time point on. A
-//! resume after `alter` changed any other value builds the circuit from the
-//! altered netlist and restores the checkpoint into it, as a breakpoint
-//! restarts the integrator.
+//! Here the run ends at the stop time and keeps its state there: live, as a
+//! clone of the circuit, which holds every device's state, an XSPICE model's
+//! events included; and, when every device's state serializes, as two
+//! checkpoints. One holds the integrator as it stood, with the step it was
+//! about to take, its order and its history, as ngspice's resume keeps
+//! CKTdelta, CKTorder, CKTsaveDelta, the breakpoint table and the state
+//! vectors (dctran.c, the `resume:` label); the other holds it restarted, as
+//! a breakpoint restarts it.
+//!
+//! A resume after `alter` changed nothing, or only independent sources,
+//! continues the first checkpoint with those sources driven anew, as
+//! ngspice's sources read their altered parameters from the next time point
+//! on, so it takes every step the run takes without a stop. A circuit whose
+//! state does not serialize continues the live image instead, restarted at
+//! the stop. A resume after `alter` changed any other value builds the
+//! circuit from the altered netlist and restores the restarted checkpoint
+//! into it, as a breakpoint restarts the integrator.
 
 use super::state_capture::{CapturedTransientState, TransientStateCapture};
 use super::{
@@ -38,9 +46,12 @@ pub(in crate::engine) struct TransientStop {
     ran: Netlist,
     /// The run's state at the stop, live.
     image: CapturedTransientState,
-    /// The same state as a checkpoint, or why the circuit's state cannot be
-    /// one.
+    /// The same state as a checkpoint whose integrator restarts at the stop,
+    /// or why the circuit's state cannot be one.
     checkpoint: Result<TransientCheckpoint, SimulationError>,
+    /// The same state with the integrator as it stood at the stop, which
+    /// continues the run as if it had not stopped; only with `checkpoint`.
+    continued: Option<TransientCheckpoint>,
 }
 
 impl TransientStop {
@@ -83,9 +94,12 @@ impl SegmentStart<'_> {
     }
 }
 
-/// The state a segment kept at its stop: live, and as a checkpoint when it
-/// was asked to keep one.
-type StopState = (CapturedTransientState, Option<TransientCheckpoint>);
+/// The state a segment kept at its stop: live, and, when it was asked to
+/// keep them, as a restarted checkpoint and a continued one.
+type StopState = (
+    CapturedTransientState,
+    Option<(TransientCheckpoint, Option<TransientCheckpoint>)>,
+);
 
 impl Engine {
     /// Run the transient of `netlist` from its start and interrupt it at
@@ -130,11 +144,15 @@ impl Engine {
         )?;
         Ok((
             result,
-            reached.map(|(image, checkpoint)| TransientStop {
-                origin: netlist.clone(),
-                ran: netlist.clone(),
-                image,
-                checkpoint: kept(checkpoint, refusal),
+            reached.map(|(image, checkpoints)| {
+                let (checkpoint, continued) = kept(checkpoints, refusal);
+                TransientStop {
+                    origin: netlist.clone(),
+                    ran: netlist.clone(),
+                    image,
+                    checkpoint,
+                    continued,
+                }
             }),
         ))
     }
@@ -155,9 +173,21 @@ impl Engine {
             ran,
             image,
             checkpoint,
+            continued,
         } = from;
-        let (result, reached, refusal) =
-            match self.image_with_altered_sources(netlist, &ran, image)? {
+        let only_sources_altered = altered_sources(&ran, netlist).is_some();
+        let (result, reached, refusal) = match continued {
+            Some(continued) if only_sources_altered => {
+                let (result, reached) = self.control_segment(
+                    (netlist, &origin),
+                    SegmentStart::Checkpoint(&continued),
+                    window,
+                    (stop, true),
+                    abort,
+                )?;
+                (result, reached, None)
+            }
+            _ => match self.image_with_altered_sources(netlist, &ran, image)? {
                 Some(image) => {
                     let (result, reached) = self.control_segment(
                         (netlist, &origin),
@@ -179,14 +209,19 @@ impl Engine {
                     )?;
                     (result, reached, None)
                 }
-            };
+            },
+        };
         Ok((
             result,
-            reached.map(|(image, checkpoint)| TransientStop {
-                origin,
-                ran: netlist.clone(),
-                image,
-                checkpoint: kept(checkpoint, refusal),
+            reached.map(|(image, checkpoints)| {
+                let (checkpoint, continued) = kept(checkpoints, refusal);
+                TransientStop {
+                    origin,
+                    ran: netlist.clone(),
+                    image,
+                    checkpoint,
+                    continued,
+                }
             }),
         ))
     }
@@ -233,7 +268,7 @@ impl Engine {
     /// Run one segment of a control transient on `netlist` from `start` to
     /// `stop`, or to the run's end without one; every checkpoint it keeps
     /// carries `origin`'s identity. At a stop it keeps its live state, and
-    /// its checkpoint when `checkpointed`; a run a model finishes before its
+    /// its checkpoints when `checkpointed`; a run a model finishes before its
     /// stop keeps neither.
     fn control_segment(
         &self,
@@ -264,9 +299,14 @@ impl Engine {
                 TransientStateCapture::new(&times, tstop)?
             }
         };
+        // The continued checkpoint is the one scheduled at the stop: taken
+        // once the run has proposed its next step there, it holds the
+        // integrator as it stood.
+        let keeps_checkpoints = stop.is_some() && checkpointed;
+        let scheduled: &[Value] = if keeps_checkpoints { &times } else { &[] };
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        let (result, end, _) = engine.run_tran_resolved_with_resume(
+        let (result, end, mut continued) = engine.run_tran_resolved_with_resume(
             netlist,
             origin,
             TransientRunWindow {
@@ -283,12 +323,12 @@ impl Engine {
                     SegmentStart::Fresh(_) | SegmentStart::Image(_) => None,
                 },
                 resume_validation: ResumeValidation::ExactNetlist,
-                final_checkpoint_retention: if stop.is_some() && checkpointed {
+                final_checkpoint_retention: if keeps_checkpoints {
                     FinalCheckpointRetention::Retained
                 } else {
                     FinalCheckpointRetention::Discarded
                 },
-                scheduled_checkpoint_times: &[],
+                scheduled_checkpoint_times: scheduled,
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
                 result_sink: None,
@@ -298,27 +338,36 @@ impl Engine {
             return Ok((result, None));
         }
         let reached = capture.into_captured().pop().map(|image| {
-            let checkpoint = match end {
-                Some(TransientEnd::Checkpoint(checkpoint)) => Some(checkpoint),
+            let checkpoints = match end {
+                Some(TransientEnd::Checkpoint(checkpoint)) => Some((
+                    checkpoint,
+                    continued.pop().map(|scheduled| scheduled.checkpoint),
+                )),
                 _ => None,
             };
-            (image, checkpoint)
+            (image, checkpoints)
         });
         Ok((result, reached))
     }
 }
 
-/// The checkpoint a stop keeps, or why it keeps none.
+/// The checkpoints a stop keeps, or why it keeps none.
 fn kept(
-    checkpoint: Option<TransientCheckpoint>,
+    checkpoints: Option<(TransientCheckpoint, Option<TransientCheckpoint>)>,
     refusal: Option<SimulationError>,
-) -> Result<TransientCheckpoint, SimulationError> {
-    match (checkpoint, refusal) {
-        (Some(checkpoint), _) => Ok(checkpoint),
-        (None, Some(refusal)) => Err(refusal),
-        (None, None) => Err(SimulationError::Circuit(
-            "the interrupted transient kept no checkpoint at its stop".to_string(),
-        )),
+) -> (
+    Result<TransientCheckpoint, SimulationError>,
+    Option<TransientCheckpoint>,
+) {
+    match (checkpoints, refusal) {
+        (Some((checkpoint, continued)), _) => (Ok(checkpoint), continued),
+        (None, Some(refusal)) => (Err(refusal), None),
+        (None, None) => (
+            Err(SimulationError::Circuit(
+                "the interrupted transient kept no checkpoint at its stop".to_string(),
+            )),
+            None,
+        ),
     }
 }
 
