@@ -491,9 +491,10 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     for notice in notices {
         let wanted = attention_request(focused, notice.elapsed_seconds, notice.kind, attention);
         if wanted.is_some() {
-            // A tab has no taskbar to mark. Its own notification says it,
-            // where the reader turned those on.
-            rspice_app_services::workbench::browser::background_alerts::alert(
+            // The host's own notification says it outside the window: the
+            // desktop's notification centre, or a tab's notification where
+            // the reader turned those on (a tab has no taskbar to mark).
+            rspice_app_services::workbench::system_notification::post(
                 &notice.title,
                 &notice.detail,
             );
@@ -2176,6 +2177,12 @@ mod tests {
         use egui::{UserAttentionType, ViewportCommand, ViewportId, ViewportInfo};
         use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
+        // Nothing reaches the desktop the tests run on.
+        struct Unshown;
+        impl rspice_app_services::workbench::system_notification::Notifier for Unshown {
+            fn post(&self, _title: &str, _body: &str) {}
+        }
+        let _host = rspice_app_services::workbench::system_notification::stand_in(Unshown);
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
@@ -2218,6 +2225,81 @@ mod tests {
                 .any(|command| matches!(command, ViewportCommand::Focus)),
             "the window never takes focus: {commands:?}"
         );
+    }
+
+    /// A long run that ends while the reader is in another window is shown
+    /// in the host's notification centre with the words the bell keeps,
+    /// once per outcome, and only as the window's mark is: not while the
+    /// window is in front, not for work too short to have been waited for,
+    /// and only for the outcomes Task attention lets interrupt.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_long_run_ending_behind_the_readers_back_is_posted_to_the_host() {
+        use BackgroundTaskAttention::{BadgeAndNotify, NotifyOnFailureOnly, Silent};
+        use egui::{ViewportId, ViewportInfo};
+        use rspice_app_services::workbench::system_notification::{Notifier, stand_in};
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct Recorder(Rc<RefCell<Vec<(String, String)>>>);
+        impl Notifier for Recorder {
+            fn post(&self, title: &str, body: &str) {
+                self.0
+                    .borrow_mut()
+                    .push((title.to_owned(), body.to_owned()));
+            }
+        }
+
+        let completed = ("Run 2 complete".to_owned(), saved_detail(None, 0, 90.0));
+        let failed = ("Run 1 failed".to_owned(), NOTHING_RETAINED.to_owned());
+        let cases = [
+            (
+                Some(false),
+                90.0,
+                BadgeAndNotify,
+                vec![failed.clone(), completed],
+            ),
+            (Some(true), 90.0, BadgeAndNotify, vec![]),
+            (Some(false), 3.0, BadgeAndNotify, vec![]),
+            (Some(false), 90.0, NotifyOnFailureOnly, vec![failed.clone()]),
+            (Some(false), 90.0, Silent, vec![]),
+        ];
+        for (focused, elapsed, attention, expected) in cases {
+            let posted = Rc::new(RefCell::new(Vec::new()));
+            let _host = stand_in(Recorder(Rc::clone(&posted)));
+            let ctx = Context::default();
+            let mut app = RSpiceApp::test_instance();
+            app.state
+                .model
+                .preferences
+                .workspace_mut()
+                .unwrap()
+                .set_background_task_attention(attention);
+            app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
+            app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
+            announce_run_completion(&ctx, &mut app);
+            let runs = &mut app.state.model.simulation.retained.runs;
+            runs[0].lifecycle = Lifecycle::Completed;
+            runs[1].lifecycle = Lifecycle::Failed;
+            for run in runs.iter_mut() {
+                run.elapsed_time = elapsed;
+            }
+            let mut input = egui::RawInput::default();
+            input.viewports.insert(
+                ViewportId::ROOT,
+                ViewportInfo {
+                    focused,
+                    ..Default::default()
+                },
+            );
+
+            let _ = ctx.run_ui(input, |ui| announce_run_completion(ui.ctx(), &mut app));
+
+            let mut posted = posted.borrow().clone();
+            posted.sort();
+            assert_eq!(posted, expected, "{focused:?} {elapsed} {attention:?}");
+        }
     }
 
     /// The notice centre is for failures the reader has to be told about, so

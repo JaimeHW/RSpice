@@ -74,7 +74,22 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",
+    "Win32_System_Registry",
 ] }
+# A long run's end as a toast, under the packaged app's AppUserModelID.
+windows = { version = "0.62", features = ["Data_Xml_Dom", "UI_Notifications"] }
+
+# A long run's end in Notification Center, for the app bundle.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSError", "NSString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+
+# A long run's end through the desktop's notification service, on the
+# session bus AccessKit already reaches.
+[target.'cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }

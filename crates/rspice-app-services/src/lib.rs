@@ -62,6 +62,7 @@ pub mod workbench {
         pub mod recovery_checkpoint;
     }
     pub mod platform;
+    pub mod system_notification;
     pub mod slots {
         pub mod platform;
     }
