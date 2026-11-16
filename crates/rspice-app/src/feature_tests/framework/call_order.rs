@@ -165,6 +165,10 @@ const PREPARE_FRAME: &[Step] = &[
         "5.29.1",
         &[".refresh_yield_evidence(&model.sim_setup, &model.workspace.content)"],
     ),
+    (
+        "5.29.2",
+        &[".refresh_verification(&model.sim_setup, &model.workspace.content)"],
+    ),
     ("5.30", &["accessibility::publish_workspace_context("]),
     (
         "5.31",
