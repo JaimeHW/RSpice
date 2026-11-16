@@ -242,7 +242,12 @@ impl DataTable<'_> {
             {
                 super::super::raster::probe(ui, &format!("table.right.{column_index}"), text);
             }
-            if selected_column == Some(column_index) {
+            // The row's wash is the selection. A cell is boxed only where it
+            // edits, so the box says what Enter opens; a cell that only reads
+            // is marked by its row alone.
+            if selected_column == Some(column_index) && cell.editable {
+                #[cfg(any(test, feature = "test-support"))]
+                super::super::raster::probe(ui, "table.cell_box", cell_rect);
                 ui.painter().with_clip_rect(clip).rect_stroke(
                     cell_rect.shrink(0.5),
                     0.0,

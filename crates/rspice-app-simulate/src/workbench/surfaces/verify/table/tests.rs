@@ -715,6 +715,55 @@ fn cell_selection_follows_the_click_and_the_left_and_right_keys() {
     assert_eq!(state.selected_column(), Some(0));
 }
 
+/// The row's wash is the selection: a selected cell that only reads carries
+/// no box, and one that edits is boxed, as the cell Enter opens.
+#[test]
+fn only_a_selected_cell_that_edits_is_boxed() {
+    let ctx = context();
+    let columns = named_columns();
+    let mut state = TableState::default();
+    let row = |row: usize| {
+        let mut cells = named_row(row);
+        cells[1] = cells[1].clone().editable();
+        cells
+    };
+    let draw = |state: &mut TableState, events| {
+        frame(&ctx, WIDTH, events, |ui| {
+            DataTable::new("boxed", &columns, 3)
+                .state(state)
+                .cell_selection()
+                .show(ui, row)
+        })
+        .1
+    };
+    let geometry = draw(&mut state, Vec::new());
+    let name = Pos2::new(
+        cell(&geometry, 0).center().x,
+        geometry.one("table.line.1").expect("row").center().y,
+    );
+    let _ = draw(&mut state, click(name));
+    let geometry = draw(&mut state, Vec::new());
+    assert_eq!(state.selected_column(), Some(0));
+    assert_eq!(geometry.one("table.selected"), geometry.one("table.line.1"));
+    assert!(
+        geometry.one("table.cell_box").is_none(),
+        "a name cell that does not edit is not boxed"
+    );
+
+    let _ = draw(&mut state, vec![key(Key::ArrowRight)]);
+    let geometry = draw(&mut state, Vec::new());
+    assert_eq!(state.selected_column(), Some(1));
+    let line = geometry.one("table.line.1").expect("row");
+    let boxed = geometry.one("table.cell_box").expect("the cell that edits");
+    assert_eq!(boxed.x_range(), cell(&geometry, 1).x_range());
+    assert_eq!(boxed.y_range(), line.y_range());
+
+    let _ = draw(&mut state, vec![key(Key::ArrowRight)]);
+    let geometry = draw(&mut state, Vec::new());
+    assert_eq!(state.selected_column(), Some(2));
+    assert!(geometry.one("table.cell_box").is_none());
+}
+
 /// Twelve 120-point columns, wider than the 1100-point page.
 fn wide_columns(count: usize, width: f32) -> Vec<Column> {
     (0..count)
