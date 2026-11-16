@@ -221,7 +221,10 @@ fn entering_a_tolerance_judges_its_row_by_it_at_once() {
     let compared = comparison(&harness).compared.as_ref().expect("a pair");
     let (junit, _) =
         regression_ci_documents(&compared.receipt, &compared.cases).expect("the documents");
-    assert!(junit.contains("tolerance=rel 2 %"), "the failure quotes its rule");
+    assert!(
+        junit.contains("tolerance=rel 2 %"),
+        "the failure quotes its rule"
+    );
     let before = plan_revision(&harness);
     let builds = comparison(&harness).builds;
 
@@ -414,7 +417,6 @@ fn the_selected_row_states_its_rule_and_allowance() {
             format!("{} \u{00b7} Run 4", format_scalar(17.1e6)),
         ),
         ("Tolerance", "rel 2 %".to_owned()),
-        ("Method", "Absolute + relative envelope".to_owned()),
         ("Allowed change", format_scalar(0.02 * 18.2e6)),
     ] {
         assert!(

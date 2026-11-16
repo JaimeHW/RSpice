@@ -100,7 +100,8 @@ fn analysis_of<'m>(model: &'m Model, row: &CheckRow) -> Option<&'m crate::state:
 fn soa_rule(ui: &mut Ui, model: &Model, row: &CheckRow, soa: &SoaCheck) {
     let title = format!("{} {}", soa.device, soa_parameter_display(soa.parameter));
     section_header(ui, &title, Some(status_word(row.status)));
-    if !soa.description.is_empty() {
+    // A rule's description is stated when it says more than its title.
+    if !soa.description.is_empty() && !soa.description.eq_ignore_ascii_case(&title) {
         property_row(ui, "Rule", &soa.description);
     }
     property_row(ui, "Limit", &value(soa.limit, &soa.unit));

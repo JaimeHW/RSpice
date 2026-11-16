@@ -654,13 +654,15 @@ fn export(cx: &mut Cx<'_, SimulateFeature>) -> Result<(), String> {
 
 fn reference_columns() -> [Column; 7] {
     [
-        Column::name("Check", 140.0),
-        Column::number("Reference", 96.0),
-        Column::number("Current", 96.0),
+        Column::name("Check", 132.0),
+        Column::number("Reference", 88.0),
+        Column::number("Current", 88.0),
         Column::number("\u{0394}", 96.0).tooltip("Current minus reference"),
-        Column::number("\u{0394} %", 72.0).tooltip("The change as a share of the reference"),
-        Column::words("Tolerance", 200.0),
-        Column::words("Result", 120.0),
+        Column::number("\u{0394} %", 64.0).tooltip("The change as a share of the reference"),
+        // A waveform's rule is a whole phrase, "abs 20m + rel 2 % · skew 20n
+        // · 0 … 3u", and a column that elides it states nothing.
+        Column::words("Tolerance", 240.0),
+        Column::words("Result", 112.0),
     ]
 }
 
@@ -812,8 +814,11 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
     }
     match &row.rule {
         Some(rule) => {
-            rows.push(("Tolerance", format_tolerance_rule(rule)));
-            rows.push(("Method", rule.method.label().to_owned()));
+            // A waveform's skew and window have rows of their own, so the
+            // tolerance states only the allowance.
+            let text = format_tolerance_rule(rule);
+            let allowance = text.split(" \u{00b7} ").next().unwrap_or_default();
+            rows.push(("Tolerance", allowance.to_owned()));
             if rule.target.kind == RegressionTargetKind::Waveform {
                 rows.push((
                     "Time skew",
@@ -825,16 +830,11 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
         None => rows.push(("Tolerance", "None".to_owned())),
     }
     match &row.verdict {
-        Some(RegressionVerdict::Pass { allowed_delta, .. }) => {
+        Some(
+            RegressionVerdict::Pass { allowed_delta, .. }
+            | RegressionVerdict::Fail { allowed_delta, .. },
+        ) => {
             rows.push(("Allowed change", format_scalar(*allowed_delta)));
-        }
-        Some(RegressionVerdict::Fail {
-            allowed_delta,
-            detail,
-            ..
-        }) => {
-            rows.push(("Allowed change", format_scalar(*allowed_delta)));
-            rows.push(("Detail", detail.clone()));
         }
         Some(RegressionVerdict::NotEvaluated(detail)) => {
             rows.push(("Not evaluated", detail.clone()));
