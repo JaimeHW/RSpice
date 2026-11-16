@@ -374,7 +374,17 @@ pub(super) fn commit_options_transaction(
     let receipt = candidate
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .map_err(|error| error.to_string())?;
+    let before = cx.model.sim_setup.options.clone();
     cx.model.sim_setup = candidate;
+    // One step on the project's history, named for the page that took it.
+    let step = if before.connect_rules == options.connect_rules
+        && before.connect_rule_block == options.connect_rule_block
+    {
+        "Solver options"
+    } else {
+        "Connect rules"
+    };
+    cx.model.record_simulation_options_change(step, before);
     invalidate_preflight(cx);
     cx.model.record_plan_receipt(receipt.status_line());
     Ok(true)
