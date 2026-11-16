@@ -74,7 +74,7 @@
 //! [`every_swept_surface_has_a_case_that_presses_it`] is what keeps a surface
 //! the studio grows from having no case at all.
 //!
-//! What the cases share is the enumeration — thirty-five surfaces built and
+//! What the cases share is the enumeration — thirty-seven surfaces built and
 //! settled — and that is run once for the whole binary by
 //! [`studio_enumeration`]. What it caches is identities, names and rectangles.
 //! No `egui::Context` and no application outlive the pass that made them, and
@@ -525,9 +525,9 @@ fn announced(node: &Node) -> String {
 /// Distinct controls the sweep presses, per surface, in sweep order.
 ///
 /// A control is counted on the first surface that publishes it: identity here
-/// is egui's own widget identity, so the plan toolbar drawn on all nine setup
-/// routes is one control and not nine. The zeroes are honest — nine of the ten
-/// analysis-catalogue fixtures open the same window the tenth already
+/// is egui's own widget identity, so the plan toolbar drawn on all ten setup
+/// routes is one control and not ten. The zeroes are honest — ten of the eleven
+/// analysis-catalogue fixtures open the same window the eleventh already
 /// contributed, and the Outputs registry's own actions are all disabled over
 /// an empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
@@ -545,6 +545,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Specifications", 4),
     ("RunSet", 31),
     ("Models", 1),
+    ("ConnectRules", 2),
     ("Solver", 33),
     ("Save", 6),
     ("analysis catalogue · Analyses", 37),
@@ -554,6 +555,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Specifications", 0),
     ("analysis catalogue · RunSet", 0),
     ("analysis catalogue · Models", 0),
+    ("analysis catalogue · ConnectRules", 0),
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
@@ -614,7 +616,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// The plan manager's Compare and Export then moved behind its More menu
 /// button, which is one control here; the sweep presses the button and not
 /// the menu's rows (353).
-const PRESSED_FLOOR: usize = 353;
+///
+/// The Connect rules page added a route between Models and Solver with two
+/// controls of its own, and a catalogue fixture that opens the window the
+/// first one contributed (355).
+const PRESSED_FLOOR: usize = 355;
 
 /// Controls that are wired to nothing.
 ///
@@ -1005,44 +1011,46 @@ surface_press_cases! {
     (11, "Specifications", every_control_on_the_specifications_route_answers_its_press),
     (12, "RunSet", every_control_on_the_run_set_route_answers_its_press),
     (13, "Models", every_control_on_the_models_route_answers_its_press),
-    (14, "Solver", every_control_on_the_solver_route_answers_its_press),
-    (15, "Save", every_control_on_the_save_route_answers_its_press),
-    (16, "analysis catalogue · Analyses",
+    (14, "ConnectRules", every_control_on_the_connect_rules_route_answers_its_press),
+    (15, "Solver", every_control_on_the_solver_route_answers_its_press),
+    (16, "Save", every_control_on_the_save_route_answers_its_press),
+    (17, "analysis catalogue · Analyses",
         every_control_on_the_catalogue_over_analyses_answers_its_press),
-    (17, "analysis catalogue · Excitations",
+    (18, "analysis catalogue · Excitations",
         every_control_on_the_catalogue_over_excitations_answers_its_press),
-    (18, "analysis catalogue · Variables",
+    (19, "analysis catalogue · Variables",
         every_control_on_the_catalogue_over_variables_answers_its_press),
-    (19, "analysis catalogue · Outputs",
+    (20, "analysis catalogue · Outputs",
         every_control_on_the_catalogue_over_outputs_answers_its_press),
-    (20, "analysis catalogue · Specifications",
+    (21, "analysis catalogue · Specifications",
         every_control_on_the_catalogue_over_specifications_answers_its_press),
-    (21, "analysis catalogue · RunSet",
+    (22, "analysis catalogue · RunSet",
         every_control_on_the_catalogue_over_the_run_set_answers_its_press),
-    (22, "analysis catalogue · Models",
+    (23, "analysis catalogue · Models",
         every_control_on_the_catalogue_over_models_answers_its_press),
-    (23, "analysis catalogue · Solver",
+    (24, "analysis catalogue · ConnectRules",
+        every_control_on_the_catalogue_over_connect_rules_answers_its_press),
+    (25, "analysis catalogue · Solver",
         every_control_on_the_catalogue_over_the_solver_answers_its_press),
-    (24, "analysis catalogue · Save",
-        every_control_on_the_catalogue_over_save_answers_its_press),
-    (25, "analysis catalogue · Results workspace",
+    (26, "analysis catalogue · Save", every_control_on_the_catalogue_over_save_answers_its_press),
+    (27, "analysis catalogue · Results workspace",
         every_control_on_the_catalogue_over_the_results_workspace_answers_its_press),
-    (26, "analysis options · Operating point",
+    (28, "analysis options · Operating point",
         every_control_on_the_operating_point_options_answers_its_press),
-    (27, "plan manager", every_control_on_the_plan_manager_answers_its_press),
-    (28, "rename analysis", every_control_on_the_rename_analysis_dialog_answers_its_press),
-    (29, "run points", every_control_on_the_run_points_picker_answers_its_press),
-    (30, "design variable", every_control_on_the_design_variable_dialog_answers_its_press),
-    (31, "saved output", every_control_on_the_saved_output_dialog_answers_its_press),
-    (32, "clone plan", every_control_on_the_clone_plan_dialog_answers_its_press),
-    (33, "capture group", every_control_on_the_capture_group_dialog_answers_its_press),
-    (34, "design variable import",
+    (29, "plan manager", every_control_on_the_plan_manager_answers_its_press),
+    (30, "rename analysis", every_control_on_the_rename_analysis_dialog_answers_its_press),
+    (31, "run points", every_control_on_the_run_points_picker_answers_its_press),
+    (32, "design variable", every_control_on_the_design_variable_dialog_answers_its_press),
+    (33, "saved output", every_control_on_the_saved_output_dialog_answers_its_press),
+    (34, "clone plan", every_control_on_the_clone_plan_dialog_answers_its_press),
+    (35, "capture group", every_control_on_the_capture_group_dialog_answers_its_press),
+    (36, "design variable import",
         every_control_on_the_design_variable_import_dialog_answers_its_press),
 }
 
 /// The sweep is divided into cases and nothing falls between them.
 ///
-/// Splitting one case into thirty-five moved three things that used to be
+/// Splitting one case into thirty-seven moved three things that used to be
 /// checked once into places that are only checked if something reaches them, so
 /// each is re-made here as a claim about the division itself:
 ///
