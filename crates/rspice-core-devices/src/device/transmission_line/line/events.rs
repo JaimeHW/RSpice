@@ -477,14 +477,9 @@ impl TransmissionLine {
         let next_sample = self
             .history_event_at(next_sample.time)
             .map_or(next_sample, |event| &event.incoming);
-        let previous2 = if self.history_event_at(previous.time).is_some() {
-            None
-        } else {
-            next.checked_sub(2).and_then(|i| self.state_history.get(i))
-        };
         Self::delayed_interpolate_with_slope(
             self.lossless_interpolation_mode,
-            previous2,
+            self.lossless_third_sample(next),
             previous,
             next_sample,
             target,
@@ -497,6 +492,45 @@ impl TransmissionLine {
             },
         )
         .1
+    }
+
+    /// The sample a launched wave's quadratic reads the accepted interval
+    /// ending at `state_history[next]` with, beside the interval's two ends;
+    /// `None` reads it linearly.
+    ///
+    /// The sample before the interval, unless the interval starts at an
+    /// event: the event may turn the wave (a source corner, or a corner
+    /// arriving at the other port), so the sample before it can be on the far
+    /// side of a corner, and a quadratic through it bends across it. The
+    /// quadratic takes the sample after the interval instead, on the event's
+    /// outgoing side, unless the interval also ends at an event. A wave is as
+    /// smooth after an event as anywhere else, and reading it linearly strays
+    /// from it by up to its curvature times `h^2/8`: 2.8 mV for a 1 V,
+    /// 300 MHz sine at 80 ps. The linear and Xyce TRA readings keep their own
+    /// rule: Xyce reads the interval after a corner linearly
+    /// (N_DEV_TRA.C:1079-1120).
+    pub(super) fn lossless_third_sample(&self, next: usize) -> Option<&TlineStateSample> {
+        let start = next
+            .checked_sub(1)
+            .and_then(|i| self.state_history.get(i))?;
+        if self.history_event_at(start.time).is_none() {
+            return next.checked_sub(2).and_then(|i| self.state_history.get(i));
+        }
+        let end = self.state_history.get(next)?;
+        if self.lossless_interpolation_mode != DelayedInterpolationMode::Quadratic
+            || self.history_event_at(end.time).is_some()
+        {
+            return None;
+        }
+        let after = self.state_history.get(next + 1)?;
+        // Adjacent represented clocks carry the two sides of an ideal edge.
+        if end.time.next_up() == after.time {
+            return None;
+        }
+        Some(
+            self.history_event_at(after.time)
+                .map_or(after, |event| &event.incoming),
+        )
     }
 
     pub(super) fn incoming_buffer_sample(

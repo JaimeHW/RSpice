@@ -1665,12 +1665,7 @@ impl TransmissionLine {
         };
         Self::delayed_interpolate(
             self.lossless_interpolation_mode,
-            if self.history_event_at(previous.time).is_some() {
-                None
-            } else {
-                next.checked_sub(2)
-                    .and_then(|index| self.state_history.get(index))
-            },
+            self.lossless_third_sample(next),
             previous,
             sample,
             target,

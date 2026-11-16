@@ -432,3 +432,73 @@ fn line_event_slopes_follow_native_interpolation_and_solved_limits() {
         5.0
     );
 }
+
+#[test]
+fn the_interval_after_a_line_event_is_read_through_samples_after_it() {
+    // A launched wave that turns a corner at the event clock 2: t^2 before,
+    // 4 + 8 (t - 2) - (t - 2)^2 after. The far end reads it a delay later.
+    let before = |t: Value| t * t;
+    let after = |t: Value| 4.0 + 8.0 * (t - 2.0) - (t - 2.0) * (t - 2.0);
+    let delay = 4.0;
+    for mode in [
+        DelayedInterpolationMode::Quadratic,
+        DelayedInterpolationMode::XyceTra,
+    ] {
+        let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, delay);
+        line.lossless_interpolation_mode = mode;
+        for t in [0.0, 1.0] {
+            line.update_history(t, before(t), 0.0, -before(t), 0.0);
+        }
+        line.accept_history_event(TransmissionLineHistoryEvent {
+            time: 2.0,
+            incoming: [4.0, 0.0, -4.0, 0.0],
+            outgoing: [4.0, 0.0, -4.0, 0.0],
+            incoming_wave_slopes: [4.0, -4.0],
+            outgoing_wave_slopes: [8.0, -8.0],
+        })
+        .unwrap();
+        line.update_history(2.5, after(2.5), 0.0, -after(2.5), 0.0);
+        let read = |line: &TransmissionLine, t: Value| {
+            line.lossless_wave_on_side(t + delay, true, TransmissionLineTimeSide::Outgoing)
+        };
+        let chord = 4.0 + (after(2.5) - 4.0) * 0.5;
+        // With no sample after it yet, the newest interval is read linearly.
+        assert_eq!(read(&line, 2.25), chord);
+        line.update_history(3.0, after(3.0), 0.0, -after(3.0), 0.0);
+        let (value, slope) = if mode == DelayedInterpolationMode::Quadratic {
+            // The quadratic through 2, 2.5 and 3 is the wave itself.
+            (after(2.25), 7.5)
+        } else {
+            // Xyce reads the interval after a corner linearly.
+            (chord, (after(2.5) - 4.0) / 0.5)
+        };
+        assert!((read(&line, 2.25) - value).abs() < 1e-13, "{mode:?}");
+        let rate = line
+            .lossless_wave_slope_on_side(2.25 + delay, true, TransmissionLineTimeSide::Outgoing)
+            .unwrap();
+        assert!((rate - slope).abs() < 1e-12, "{mode:?}");
+        // Before the event the wave is read through the samples on its own
+        // side, the event's incoming value among them.
+        assert!((read(&line, 1.5) - before(1.5)).abs() < 1e-13, "{mode:?}");
+        // An interval with an event at each end has no third sample on its
+        // side of both, and is read linearly.
+        line.accept_history_event(TransmissionLineHistoryEvent {
+            time: 3.5,
+            incoming: [after(3.5), 0.0, -after(3.5), 0.0],
+            outgoing: [after(3.5), 0.0, -after(3.5), 0.0],
+            incoming_wave_slopes: [5.0, -5.0],
+            outgoing_wave_slopes: [0.0, 0.0],
+        })
+        .unwrap();
+        line.accept_history_event(TransmissionLineHistoryEvent {
+            time: 4.0,
+            incoming: [after(3.5), 0.0, -after(3.5), 0.0],
+            outgoing: [after(3.5), 0.0, -after(3.5), 0.0],
+            incoming_wave_slopes: [0.0, 0.0],
+            outgoing_wave_slopes: [0.0, 0.0],
+        })
+        .unwrap();
+        line.update_history(4.5, after(3.5), 0.0, -after(3.5), 0.0);
+        assert_eq!(read(&line, 3.75), after(3.5));
+    }
+}
