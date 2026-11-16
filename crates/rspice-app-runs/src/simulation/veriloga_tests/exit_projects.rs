@@ -23,6 +23,7 @@ use rspice_app_state::workbench::app_state::model::{
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::run::SimulationRunLifecycle;
 
+mod c02;
 mod c04;
 mod c06;
 mod c12;
@@ -193,6 +194,29 @@ impl Drawing {
         .unwrap_or_else(|| panic!("the browser offers {}", reference.display_path()));
         assert!(candidate.ready, "{name}: {}", candidate.unavailable_reason);
         self.place(candidate.binding, name, "", row, nets);
+    }
+
+    /// The built-in XSPICE code model the shelf lists as `stable_id`
+    /// (Digital event-driven), placed from the shelf as `name` with the model
+    /// parameters `params`, each pin on the net `nets` gives it.
+    fn shelf_xspice(
+        &mut self,
+        stable_id: &str,
+        name: &str,
+        params: &str,
+        row: i32,
+        nets: &[(&str, &str)],
+    ) {
+        use rspice_design::schematic::device_catalog::{
+            builtin_xspice_library_binding, engine_only_xspice_devices,
+        };
+        let descriptor = engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.stable_id == stable_id)
+            .unwrap_or_else(|| panic!("the shelf lists {stable_id}"));
+        let binding = builtin_xspice_library_binding(descriptor)
+            .unwrap_or_else(|error| panic!("{stable_id}: {error}"));
+        self.place(binding, name, params, row, nets);
     }
 
     /// Place `binding` as `name` with `params`, in row `row` below the
@@ -440,6 +464,12 @@ impl Drawing {
     /// The plan's one analysis: a transient to `stop` at `step`, every
     /// quantity saved.
     fn transient(&mut self, step: &str, stop: &str) {
+        self.transient_from(step, stop, false);
+    }
+
+    /// [`Self::transient`], starting from the circuit's initial conditions
+    /// instead of its operating point when `uic` is set.
+    fn transient_from(&mut self, step: &str, stop: &str, uic: bool) {
         self.state.model.sim_setup.run_set =
             rspice_simulation_contract::run_set::RunSetState::reference_only();
         let plan = self
@@ -465,6 +495,7 @@ impl Drawing {
             draft.stop = stop.into();
             draft.step = step.into();
             draft.max_step = String::new();
+            draft.uic = uic;
         })
         .expect("the transient");
         self.state.model.sim_setup.save_policy.output_selection_mode =
