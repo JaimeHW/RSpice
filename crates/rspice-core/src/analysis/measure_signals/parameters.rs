@@ -137,12 +137,14 @@ impl MeasureParameterSeries {
             super::super::measure::continuous::poll(abort, index)?;
             let column = self.columns.entry(name).or_default();
             let additional = self.rows.saturating_add(1).saturating_sub(column.len());
-            column
-                .try_reserve(additional)
-                .map_err(|source| SimulationError::Allocation {
-                    object: "measurement parameter series",
+            column.try_reserve(additional).map_err(|source| {
+                SimulationError::reserve_failed(
+                    &column,
+                    additional,
+                    "measurement parameter series",
                     source,
-                })?;
+                )
+            })?;
             while column.len() < self.rows {
                 super::super::measure::continuous::poll(abort, column.len())?;
                 column.push(baseline);

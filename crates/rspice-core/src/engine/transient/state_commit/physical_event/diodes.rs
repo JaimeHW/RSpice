@@ -51,9 +51,13 @@ pub(super) fn prepare(
     let mut values = Vec::new();
     values
         .try_reserve_exact(circuit.diodes.len())
-        .map_err(|source| SimulationError::Allocation {
-            object: "physical diode history",
-            source,
+        .map_err(|source| {
+            SimulationError::reserve_failed(
+                &values,
+                circuit.diodes.len(),
+                "physical diode history",
+                source,
+            )
         })?;
     for (index, diode) in circuit.diodes.devices.iter().enumerate() {
         if abort.is_aborted() {

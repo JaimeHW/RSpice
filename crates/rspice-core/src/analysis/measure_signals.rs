@@ -6796,12 +6796,14 @@ fn materialize_measure_expression_signals_from_index(
                 Err(LivePreparedExpressionCompileError::Detail(_)) => continue,
             };
         let mut waveform = Vec::new();
-        waveform
-            .try_reserve_exact(axis.len())
-            .map_err(|source| SimulationError::Allocation {
-                object: "measurement expression waveform",
+        waveform.try_reserve_exact(axis.len()).map_err(|source| {
+            SimulationError::reserve_failed(
+                &waveform,
+                axis.len(),
+                "measurement expression waveform",
                 source,
-            })?;
+            )
+        })?;
         for row in 0..axis.len() {
             super::measure::continuous::poll(abort, row)?;
             match expression.value_with(row, signal_index, params.base, abort, &mut |_| Ok(None)) {

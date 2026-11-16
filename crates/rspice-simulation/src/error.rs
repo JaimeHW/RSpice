@@ -736,12 +736,15 @@ impl From<rspice_core::SimulationError> for ServiceRunError {
                     limit: source.limit,
                 })
             }
-            rspice_core::SimulationError::Allocation { object, source } => {
-                Self::ResourceFailure(ResourceFailure::Allocation {
-                    object: object.into(),
-                    detail: source.to_string(),
-                })
-            }
+            rspice_core::SimulationError::Allocation {
+                object,
+                bytes,
+                source,
+            } => Self::ResourceFailure(ResourceFailure::Allocation {
+                object: object.into(),
+                bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
+                detail: source.to_string(),
+            }),
             rspice_core::SimulationError::Aborted => Self::Aborted,
             rspice_core::SimulationError::Configuration(
                 rspice_core::SimulationConfigError::ResourceLimit(error),
@@ -851,6 +854,7 @@ mod tests {
                 },
                 rspice_core::SimulationError::Allocation {
                     object: "BJT phase-history growth",
+                    bytes: 4096,
                     source: Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err(),
                 },
             ] {
@@ -878,6 +882,9 @@ mod tests {
                     assert_eq!(instance, "X1:Q2");
                     assert_eq!(resource, "transport_history_records");
                     assert_eq!((*requested, *limit), (11, 10));
+                }
+                if let ResourceFailure::Allocation { bytes, .. } = failure {
+                    assert_eq!(*bytes, 4096);
                 }
                 let wire = WorkerSimulationError::from(converted.clone());
                 let json = serde_json::to_string(&wire).unwrap();

@@ -231,9 +231,13 @@ impl Engine {
         let mut contributors = Vec::new();
         contributors
             .try_reserve_exact(candidate_count)
-            .map_err(|source| SimulationError::Allocation {
-                object: "DC mismatch contributors",
-                source,
+            .map_err(|source| {
+                SimulationError::reserve_failed(
+                    &contributors,
+                    candidate_count,
+                    "DC mismatch contributors",
+                    source,
+                )
             })?;
         let output = self.resolve_probe(&base, card, abort)?;
         let nominal = self.run_dc_op_state_with_startup_and_abort(

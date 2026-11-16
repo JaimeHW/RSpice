@@ -924,10 +924,14 @@ pub enum SimulationError {
 
     /// Storage could not be reserved. This is distinct from exceeding a
     /// configured policy: changing the circuit or convergence tolerances does
-    /// not remedy an allocator refusal. Reporting it requires no allocation.
-    #[error("Unable to allocate {object}: {source}")]
+    /// not remedy an allocator refusal. `bytes` is the size of the storage
+    /// the run asked for, so the user can tell a machine that is a little
+    /// short from a request no machine could meet. Reporting it requires no
+    /// allocation.
+    #[error("Unable to allocate {object}: {bytes} bytes were needed: {source}")]
     Allocation {
         object: &'static str,
+        bytes: usize,
         #[source]
         source: std::collections::TryReserveError,
     },
@@ -1056,8 +1060,9 @@ impl From<crate::device::behavioral::BehavioralBreakpointError> for SimulationEr
         match error {
             BehavioralBreakpointError::Aborted => Self::Aborted,
             BehavioralBreakpointError::Resource(error) => Self::ResourceLimit(error),
-            BehavioralBreakpointError::Allocation { source, .. } => Self::Allocation {
+            BehavioralBreakpointError::Allocation { bytes, source } => Self::Allocation {
                 object: "behavioral source-event schedule",
+                bytes,
                 source,
             },
             other => Self::Circuit(other.to_string()),
@@ -1158,7 +1163,58 @@ impl From<crate::device::StampError> for SimulationError {
     }
 }
 
+/// A container whose failed reservation can name the bytes it asked for.
+pub(crate) trait ReservedBytes {
+    /// The bytes the container holds once it has room for `additional` more
+    /// elements: the least a reservation of `additional` asks the allocator
+    /// for.
+    fn bytes_to_hold(&self, additional: usize) -> usize;
+}
+
+impl<T> ReservedBytes for Vec<T> {
+    fn bytes_to_hold(&self, additional: usize) -> usize {
+        self.len()
+            .saturating_add(additional)
+            .saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+impl<T> ReservedBytes for std::collections::VecDeque<T> {
+    fn bytes_to_hold(&self, additional: usize) -> usize {
+        self.len()
+            .saturating_add(additional)
+            .saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+impl ReservedBytes for String {
+    fn bytes_to_hold(&self, additional: usize) -> usize {
+        self.len().saturating_add(additional)
+    }
+}
+
+impl<C: ReservedBytes + ?Sized> ReservedBytes for &mut C {
+    fn bytes_to_hold(&self, additional: usize) -> usize {
+        (**self).bytes_to_hold(additional)
+    }
+}
+
 impl SimulationError {
+    /// The typed failure of `container.try_reserve(additional)` (or its
+    /// `_exact` form), naming the bytes the container needed.
+    pub(crate) fn reserve_failed<C: ReservedBytes + ?Sized>(
+        container: &C,
+        additional: usize,
+        object: &'static str,
+        source: std::collections::TryReserveError,
+    ) -> Self {
+        Self::Allocation {
+            object,
+            bytes: container.bytes_to_hold(additional),
+            source,
+        }
+    }
+
     /// The diagnostic of a device evaluation a Newton loop may reject as a
     /// failed iterate, or `None` when the failure has to end the run.
     ///

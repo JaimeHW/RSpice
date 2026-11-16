@@ -76,9 +76,16 @@ fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
         StbAnalysisError::InvalidConfiguration(error) => {
             SimulationError::Circuit(format!("Invalid STB config: {error}"))
         }
-        StbAnalysisError::Allocation { object, source, .. } => {
-            SimulationError::Allocation { object, source }
-        }
+        StbAnalysisError::Allocation {
+            object,
+            bytes,
+            source,
+            ..
+        } => SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        },
         StbAnalysisError::InvalidSample { .. } | StbAnalysisError::CapacityOverflow { .. } => {
             SimulationError::Circuit(error.to_string())
         }
@@ -92,17 +99,14 @@ fn try_reserve_stb_values<T>(
 ) -> Result<(), SimulationError> {
     values
         .try_reserve_exact(requested)
-        .map_err(|source| SimulationError::Allocation { object, source })
+        .map_err(|source| SimulationError::reserve_failed(&values, requested, object, source))
 }
 
 fn try_owned_probe_name(probe: &str) -> Result<String, SimulationError> {
     let mut owned = String::new();
-    owned
-        .try_reserve_exact(probe.len())
-        .map_err(|source| SimulationError::Allocation {
-            object: "STB probe name",
-            source,
-        })?;
+    owned.try_reserve_exact(probe.len()).map_err(|source| {
+        SimulationError::reserve_failed(&owned, probe.len(), "STB probe name", source)
+    })?;
     owned.push_str(probe);
     Ok(owned)
 }
@@ -482,10 +486,20 @@ mod tests {
             error.descriptor().category,
             crate::SimulationErrorCategory::ResourceLimit
         );
-        let SimulationError::Allocation { object, source } = error else {
+        let SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        } = error
+        else {
             panic!("STB projection allocation failure was reported as a circuit error");
         };
         assert_eq!(object, "STB Bode result");
+        assert_eq!(
+            bytes,
+            usize::MAX,
+            "a request past the address space saturates"
+        );
         assert_eq!(source, cause);
     }
 
@@ -498,10 +512,16 @@ mod tests {
             error.descriptor().code,
             crate::SimulationErrorCode::AllocationFailed
         );
-        let SimulationError::Allocation { object, source } = error else {
+        let SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        } = error
+        else {
             panic!("STB workspace allocation failure was reported as a circuit error");
         };
         assert_eq!(object, "STB test workspace");
+        assert_eq!(bytes, usize::MAX);
         let expected = Vec::<Complex64>::new()
             .try_reserve_exact(usize::MAX)
             .unwrap_err();
@@ -709,10 +729,19 @@ mod tests {
             error.descriptor().code,
             crate::SimulationErrorCode::AllocationFailed
         );
-        let SimulationError::Allocation { object, source } = error else {
+        let SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        } = error
+        else {
             panic!("frequency-grid allocation failure lost its category");
         };
         assert_eq!(object, "frequency grid");
+        assert_eq!(
+            bytes,
+            point_count.saturating_mul(std::mem::size_of::<Value>())
+        );
         let expected = Vec::<Value>::new()
             .try_reserve_exact(point_count)
             .unwrap_err();

@@ -897,12 +897,14 @@ parameters):
 `--error-format json` writes the fatal diagnostic (`schema_version: 2`) with a
 stable code and category, retry policy, exit code, the failing analysis and
 run-coordinate IDs, the deck path and line, the refused capability token, and
-numeric resource or convergence details; it also covers argument-parsing and
+numeric resource or convergence details (an allocation the machine refused
+gives its size as `bytes`); it also covers argument-parsing and
 timeout failures. `check --json`, `compare --json` and `run --summary -`
 reserve stdout for one JSON document without needing `--quiet`.
 
-The `--summary` document is at `schema_version: 4`. Beside each run's status
-and measurements it lists every `.ASSERT` report (`assertions`: name,
+The `--summary` document is at `schema_version: 6`. Each failed run's
+`error_details` carries the same fields as that diagnostic, `bytes` included.
+Beside each run's status and measurements it lists every `.ASSERT` report (`assertions`: name,
 analysis, level, the card's file and line, and each violation's start, end or
 `open`, extreme and where it was reached) and every HDL severity-task record
 (`hdl_diagnostics`: severity, text, time, scope, file and line).

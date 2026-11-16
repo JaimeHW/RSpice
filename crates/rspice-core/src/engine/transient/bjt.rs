@@ -22,8 +22,9 @@ pub(super) fn phase_acceptance_error(
                 },
             }
         }
-        DelayAcceptanceError::Allocation(source) => SimulationError::Allocation {
+        DelayAcceptanceError::Allocation { bytes, source } => SimulationError::Allocation {
             object: "BJT phase-history growth",
+            bytes,
             source,
         },
     }
@@ -67,20 +68,19 @@ impl Engine {
             )?;
         }
         let count = circuit.bjts.devices.len();
-        let allocation_error = |source| SimulationError::Allocation {
-            object: "BJT phase initialization",
-            source,
-        };
+        const OBJECT: &str = "BJT phase initialization";
         let mut phase = Vec::new();
         let mut weil_phase = Vec::new();
         let mut outgoing_slopes = Vec::new();
-        phase.try_reserve_exact(count).map_err(allocation_error)?;
-        weil_phase
+        phase
             .try_reserve_exact(count)
-            .map_err(allocation_error)?;
-        outgoing_slopes
-            .try_reserve_exact(count)
-            .map_err(allocation_error)?;
+            .map_err(|source| SimulationError::reserve_failed(&phase, count, OBJECT, source))?;
+        weil_phase.try_reserve_exact(count).map_err(|source| {
+            SimulationError::reserve_failed(&weil_phase, count, OBJECT, source)
+        })?;
+        outgoing_slopes.try_reserve_exact(count).map_err(|source| {
+            SimulationError::reserve_failed(&outgoing_slopes, count, OBJECT, source)
+        })?;
         outgoing_slopes.resize(count, None);
         for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
             let delay = bjt.legacy_excess_phase_delay();
@@ -111,7 +111,12 @@ impl Engine {
             }
             weil_phase.push(None);
             let mut buffer = rspice_veriloga_runtime::transport_delay::DelayBuffer::try_new(4)
-                .map_err(allocation_error)?;
+                .map_err(|source| SimulationError::Allocation {
+                    object: OBJECT,
+                    bytes: rspice_veriloga_runtime::transport_delay::DelayBuffer::new(0)
+                        .allocation_after_sample(None),
+                    source,
+                })?;
             buffer
                 .accept_sample(0.0, forward.current, delay, None)
                 .map_err(|error| phase_acceptance_error(&bjt.name, error))?;

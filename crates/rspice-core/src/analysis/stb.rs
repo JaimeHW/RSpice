@@ -744,6 +744,8 @@ pub enum StbAnalysisError {
         object: &'static str,
         /// Number of elements requested from the allocator.
         requested: usize,
+        /// Bytes those elements occupy.
+        bytes: usize,
         /// Original allocator refusal, including capacity overflow.
         source: std::collections::TryReserveError,
     },
@@ -767,11 +769,12 @@ impl std::fmt::Display for StbAnalysisError {
             Self::Allocation {
                 object,
                 requested,
+                bytes,
                 source,
             } => {
                 write!(
                     formatter,
-                    "unable to allocate {requested} elements for {object}: {source}"
+                    "unable to allocate {requested} elements ({bytes} bytes) for {object}: {source}"
                 )
             }
             Self::Aborted => formatter.write_str("STB result projection was aborted"),
@@ -1059,6 +1062,7 @@ fn try_reserve_exact<T>(
         .map_err(|source| StbAnalysisError::Allocation {
             object,
             requested,
+            bytes: requested.saturating_mul(std::mem::size_of::<T>()),
             source,
         })
 }
@@ -1070,6 +1074,7 @@ fn try_owned_message(message: &str, object: &'static str) -> Result<String, StbA
         .map_err(|source| StbAnalysisError::Allocation {
             object,
             requested: message.len(),
+            bytes: message.len(),
             source,
         })?;
     owned.push_str(message);
@@ -1092,6 +1097,7 @@ fn multiple_crossover_warning(count: usize) -> Result<String, StbAnalysisError> 
         .map_err(|source| StbAnalysisError::Allocation {
             object: "STB warning",
             requested: capacity,
+            bytes: capacity,
             source,
         })?;
     write!(&mut warning, "{PREFIX}{count})").map_err(|_| StbAnalysisError::CapacityOverflow {
@@ -1260,6 +1266,7 @@ mod tests {
             object,
             requested,
             source,
+            ..
         } = error
         else {
             panic!("projection allocation failure lost its cause");

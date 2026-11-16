@@ -1155,9 +1155,15 @@ pub(super) fn hb_kernel_failure(context: &str, error: crate::analysis::HbError) 
 pub(super) fn hb_kernel_error(error: crate::analysis::HbError) -> SimulationError {
     match error {
         crate::analysis::HbError::Aborted => SimulationError::Aborted,
-        crate::analysis::HbError::Allocation { object, source, .. } => {
-            SimulationError::Allocation { object, source }
-        }
+        crate::analysis::HbError::Allocation {
+            object,
+            bytes,
+            source,
+        } => SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        },
         other => SimulationError::Circuit(other.to_string()),
     }
 }

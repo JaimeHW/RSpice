@@ -64,12 +64,14 @@ fn constant_voltage_nodes(
         options.limits.max_result_values,
     )?;
     let mut roots = Vec::new();
-    roots
-        .try_reserve_exact(nodes + 1)
-        .map_err(|source| SimulationError::Allocation {
-            object: "constant event voltage constraints",
+    roots.try_reserve_exact(nodes + 1).map_err(|source| {
+        SimulationError::reserve_failed(
+            &roots,
+            nodes + 1,
+            "constant event voltage constraints",
             source,
-        })?;
+        )
+    })?;
     roots.extend(0..=nodes);
     fn root(roots: &mut [usize], mut node: usize) -> usize {
         while roots[node] != node {
@@ -846,10 +848,12 @@ impl<'a> PreparedEventCircuit<'a> {
                         options.limits.max_result_values,
                     )?;
                     ccvs_current_rows.try_reserve_exact(1).map_err(|source| {
-                        SimulationError::Allocation {
-                            object: "CCVS sensing cutsets",
+                        SimulationError::reserve_failed(
+                            &ccvs_current_rows,
+                            1,
+                            "CCVS sensing cutsets",
                             source,
-                        }
+                        )
                     })?;
                     ccvs_current_rows.push(control);
                     EventVoltageEquation::Sampled

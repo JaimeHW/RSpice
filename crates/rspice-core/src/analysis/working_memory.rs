@@ -59,6 +59,7 @@ impl From<WorkingMemoryRefusal> for crate::SimulationError {
     fn from(refusal: WorkingMemoryRefusal) -> Self {
         Self::Allocation {
             object: refusal.object,
+            bytes: refusal.bytes,
             source: refusal.source,
         }
     }

@@ -173,9 +173,13 @@ pub(super) fn startup_winding_currents(
     let mut currents = Vec::new();
     currents
         .try_reserve_exact(circuit.matrix_size())
-        .map_err(|source| SimulationError::Allocation {
-            object: "initial winding current coordinates",
-            source,
+        .map_err(|source| {
+            SimulationError::reserve_failed(
+                &currents,
+                circuit.matrix_size(),
+                "initial winding current coordinates",
+                source,
+            )
         })?;
     currents.resize(circuit.matrix_size(), 0.0);
     for (index, &ordinal) in l.branch_indices.iter().enumerate() {
@@ -439,6 +443,7 @@ impl Engine {
                 .saturating_add(fresh_bytes);
             *phase = DelayBuffer::try_new(4).map_err(|source| SimulationError::Allocation {
                 object: "GP startup phase history",
+                bytes: fresh_bytes,
                 source,
             })?;
         }

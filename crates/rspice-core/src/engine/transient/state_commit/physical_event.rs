@@ -115,9 +115,13 @@ fn prepare_windings(
     let mut prepared = Vec::new();
     prepared
         .try_reserve_exact(circuit.inductors.len())
-        .map_err(|source| SimulationError::Allocation {
-            object: "physical event winding history",
-            source,
+        .map_err(|source| {
+            SimulationError::reserve_failed(
+                &prepared,
+                circuit.inductors.len(),
+                "physical event winding history",
+                source,
+            )
         })?;
     for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
         if abort.is_aborted() {

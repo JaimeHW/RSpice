@@ -13,8 +13,12 @@ pub enum DelayAcceptanceError {
     Validation(String),
     /// Retained ordinary, left-limit, and derivative-order records after pruning.
     RecordLimit { requested: usize, limit: usize },
-    /// Storage for a valid candidate could not be reserved.
-    Allocation(TryReserveError),
+    /// Storage for a valid candidate could not be reserved. `bytes` is what
+    /// the grown history buffers needed in all.
+    Allocation {
+        bytes: usize,
+        source: TryReserveError,
+    },
 }
 
 impl From<String> for DelayAcceptanceError {
@@ -29,12 +33,6 @@ impl From<&str> for DelayAcceptanceError {
     }
 }
 
-impl From<TryReserveError> for DelayAcceptanceError {
-    fn from(error: TryReserveError) -> Self {
-        Self::Allocation(error)
-    }
-}
-
 impl fmt::Display for DelayAcceptanceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -43,9 +41,10 @@ impl fmt::Display for DelayAcceptanceError {
                 formatter,
                 "delay history requires {requested} accepted records inside its configured horizon; supported limit is {limit}"
             ),
-            Self::Allocation(error) => {
-                write!(formatter, "delay history allocation failed: {error}")
-            }
+            Self::Allocation { bytes, source } => write!(
+                formatter,
+                "delay history allocation failed: {bytes} bytes were needed: {source}"
+            ),
         }
     }
 }
@@ -53,7 +52,7 @@ impl fmt::Display for DelayAcceptanceError {
 impl std::error::Error for DelayAcceptanceError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Allocation(error) => Some(error),
+            Self::Allocation { source, .. } => Some(source),
             _ => None,
         }
     }

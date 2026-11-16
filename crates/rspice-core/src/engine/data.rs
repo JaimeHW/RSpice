@@ -36,7 +36,7 @@ fn reserve<T>(
 ) -> Result<(), SimulationError> {
     values
         .try_reserve_exact(count)
-        .map_err(|source| SimulationError::Allocation { object, source })
+        .map_err(|source| SimulationError::reserve_failed(&values, count, object, source))
 }
 
 // Row solvers see the remaining allowance. Report failures against the full

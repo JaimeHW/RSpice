@@ -673,8 +673,9 @@ fn ensure_cancellation_report(
 /// The JSON run summary's schema. Version 2 added `assertions` and
 /// `hdl_diagnostics`; version 3 added each run's `backends`; version 4 dropped
 /// `resource_limits.max_analysis_points`; version 5 added `stores`, the results
-/// stores the runs left beside their outputs.
-const RUN_SUMMARY_SCHEMA_VERSION: u32 = 5;
+/// stores the runs left beside their outputs; version 6 added
+/// `error_details.bytes`, the size of an allocation the machine refused.
+const RUN_SUMMARY_SCHEMA_VERSION: u32 = 6;
 
 /// Write the one-artifact JSON contract for automation: tool identity,
 /// per-run status with every measurement, the deck's checks (`.ASSERT`

@@ -147,12 +147,13 @@ impl PreparedBjtHistory {
         )?;
         for (index, value) in self.values.iter().enumerate() {
             if let Some(sample) = value.phase_sample {
-                history.phase[index]
-                    .as_mut()
-                    .expect("prepared phase owner")
-                    .try_reserve_sample(sample.event.map(|event| event.order))
+                let phase = history.phase[index].as_mut().expect("prepared phase owner");
+                let order = sample.event.map(|event| event.order);
+                phase
+                    .try_reserve_sample(order)
                     .map_err(|source| SimulationError::Allocation {
                         object: "BJT phase-history growth",
+                        bytes: phase.allocation_after_sample(order),
                         source,
                     })?;
             }
@@ -473,9 +474,13 @@ impl Engine {
         let mut values = Vec::new();
         values
             .try_reserve_exact(circuit.bjts.devices.len())
-            .map_err(|source| SimulationError::Allocation {
-                object: "BJT accepted-state preparation",
-                source,
+            .map_err(|source| {
+                SimulationError::reserve_failed(
+                    &values,
+                    circuit.bjts.devices.len(),
+                    "BJT accepted-state preparation",
+                    source,
+                )
             })?;
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(solution, bjt.node_collector);

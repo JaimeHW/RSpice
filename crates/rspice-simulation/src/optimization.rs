@@ -857,6 +857,7 @@ mod configured_search_limits {
             },
             ResourceFailure::Allocation {
                 object: "BJT phase-history growth".into(),
+                bytes: 4096,
                 detail: "allocator refused storage".into(),
             },
         ] {

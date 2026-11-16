@@ -962,7 +962,7 @@ impl DelayBuffer {
     ) -> Result<(), DelayAcceptanceError> {
         let sample = self.direct_sample(time, value, delay, max_delay)?;
         self.validate_candidate_commit(sample, time)?;
-        self.try_reserve_sample(None)?;
+        self.reserve_accepted_sample(None)?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
@@ -1002,7 +1002,7 @@ impl DelayBuffer {
         max_delay: Option<f64>,
     ) -> Result<(), DelayAcceptanceError> {
         let sample = self.discontinuity_sample(time, left, right, delay, max_delay)?;
-        self.try_reserve_sample(Some(DelayEventOrder::Unknown))?;
+        self.reserve_accepted_sample(Some(DelayEventOrder::Unknown))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())

@@ -88,9 +88,15 @@ fn numerical_error(error: QuasiPeriodicError) -> SimulationError {
     match error {
         QuasiPeriodicError::Aborted => SimulationError::Aborted,
         QuasiPeriodicError::ResourceLimit(error) => SimulationError::ResourceLimit(error),
-        QuasiPeriodicError::Allocation { object, source, .. } => {
-            SimulationError::Allocation { object, source }
-        }
+        QuasiPeriodicError::Allocation {
+            object,
+            bytes,
+            source,
+        } => SimulationError::Allocation {
+            object,
+            bytes,
+            source,
+        },
         QuasiPeriodicError::ConvergenceFailed { iterations, .. } => {
             SimulationError::ConvergenceFailed(iterations)
         }

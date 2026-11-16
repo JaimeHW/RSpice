@@ -24,12 +24,14 @@ impl PhysicalDeviceImpulses {
         let mut capacitor_charges = Vec::new();
         let mut terminal_charges = Vec::new();
         let mut diode_charges = Vec::new();
-        diode_charges
-            .try_reserve_exact(diodes)
-            .map_err(|source| SimulationError::Allocation {
-                object: "diode impulse preparation",
+        diode_charges.try_reserve_exact(diodes).map_err(|source| {
+            SimulationError::reserve_failed(
+                &diode_charges,
+                diodes,
+                "diode impulse preparation",
                 source,
-            })?;
+            )
+        })?;
         capacitor_charges
             .try_reserve_exact(capacitors)
             .map_err(|_| failure("cannot allocate capacitor impulse preparation"))?;

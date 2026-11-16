@@ -39,10 +39,8 @@ pub fn try_f64_buffer(len: usize, object: &str) -> Result<Vec<f64>, ResourceFail
 pub fn f64_allocation_failure(object: &str, len: usize, reason: &str) -> ResourceFailure {
     ResourceFailure::Allocation {
         object: object.to_owned(),
-        detail: format!(
-            "{len} values ({} bytes) were needed: {reason}",
-            len.saturating_mul(std::mem::size_of::<f64>())
-        ),
+        bytes: u64::try_from(len.saturating_mul(std::mem::size_of::<f64>())).unwrap_or(u64::MAX),
+        detail: reason.to_owned(),
     }
 }
 
@@ -113,16 +111,17 @@ mod tests {
         );
         let len = usize::MAX / 4;
         let failure = try_f64_buffer(len, "transfer buffer 7").expect_err("cannot be had");
-        let ResourceFailure::Allocation { object, detail } = &failure else {
+        let ResourceFailure::Allocation { object, bytes, .. } = &failure else {
             panic!("an allocation failure, not {failure:?}")
         };
         assert_eq!(object, "transfer buffer 7");
+        assert_eq!(*bytes, u64::try_from(usize::MAX).unwrap());
         assert!(
-            detail.starts_with(&format!(
-                "{len} values ({} bytes) were needed: ",
+            failure.to_string().starts_with(&format!(
+                "Unable to allocate transfer buffer 7: {} bytes were needed: ",
                 usize::MAX
             )),
-            "{detail}"
+            "{failure}"
         );
         assert_eq!(failure.code(), "allocation_failed");
     }

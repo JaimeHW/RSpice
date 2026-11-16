@@ -1163,7 +1163,7 @@ fn summary_json_carries_the_verdict() {
     );
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
-    assert_eq!(json["schema_version"], 5);
+    assert_eq!(json["schema_version"], 6);
     assert_eq!(json["status"], "failed");
     // A deck with no output keeps no results store.
     assert_eq!(json["stores"], serde_json::json!([]));

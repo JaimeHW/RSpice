@@ -64,12 +64,9 @@ impl RecordBudget {
                 + usize::from(record.target_axis.is_some())
                 + usize::from(record.failure_limit.is_some()),
         )?;
-        records
-            .try_reserve(1)
-            .map_err(|source| SimulationError::Allocation {
-                object: "continuous measurement records",
-                source,
-            })?;
+        records.try_reserve(1).map_err(|source| {
+            SimulationError::reserve_failed(&records, 1, "continuous measurement records", source)
+        })?;
         records.push(record);
         Ok(())
     }
@@ -199,12 +196,14 @@ impl MeasureEngine {
                 });
                 budget.admit((endpoints + usize::from(statement.fail_value.is_some())).max(1))?;
             }
-            results
-                .try_reserve(1)
-                .map_err(|source| SimulationError::Allocation {
-                    object: "continuous measurement streams",
+            results.try_reserve(1).map_err(|source| {
+                SimulationError::reserve_failed(
+                    &results,
+                    1,
+                    "continuous measurement streams",
                     source,
-                })?;
+                )
+            })?;
             results.push(result);
         }
         poll(abort, 0)?;

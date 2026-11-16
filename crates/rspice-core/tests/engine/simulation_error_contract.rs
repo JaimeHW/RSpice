@@ -454,6 +454,7 @@ fn one_of_every_variant() -> Vec<SimulationError> {
         },
         SimulationError::Allocation {
             object: "test history",
+            bytes: usize::MAX,
             source: Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err(),
         },
         SimulationError::Circuit("device stamp failed".to_string()),

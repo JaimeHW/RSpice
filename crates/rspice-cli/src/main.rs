@@ -120,6 +120,7 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                     "resource": details.resource,
                     "requested": details.requested,
                     "limit": details.limit,
+                    "bytes": details.bytes,
                     "instance_name": details.instance_name,
                     "canonical_instance_name": details.canonical_instance_name,
                     "missing_dependency": details.missing_dependency,

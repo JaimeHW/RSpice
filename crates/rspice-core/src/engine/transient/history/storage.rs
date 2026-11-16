@@ -10,11 +10,11 @@ pub(in crate::engine::transient) fn reserve_values<T>(
     #[cfg(test)]
     if count != 0 {
         history_reservation_attempt()
-            .map_err(|source| SimulationError::Allocation { object, source })?;
+            .map_err(|source| SimulationError::reserve_failed(&result, count, object, source))?;
     }
     result
         .try_reserve_exact(count)
-        .map_err(|source| SimulationError::Allocation { object, source })?;
+        .map_err(|source| SimulationError::reserve_failed(&result, count, object, source))?;
     Ok(result)
 }
 
@@ -87,12 +87,16 @@ impl BjtTransientHistory {
             phase.push(
                 history
                     .as_ref()
-                    .map(|history| history.try_clone())
-                    .transpose()
-                    .map_err(|source| SimulationError::Allocation {
-                        object: "BJT phase-history copy",
-                        source,
-                    })?,
+                    .map(|history| {
+                        history
+                            .try_clone()
+                            .map_err(|source| SimulationError::Allocation {
+                                object: "BJT phase-history copy",
+                                bytes: history.copy_allocation_bytes(),
+                                source,
+                            })
+                    })
+                    .transpose()?,
             );
         }
         Ok(Self {

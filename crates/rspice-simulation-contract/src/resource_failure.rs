@@ -13,8 +13,11 @@ pub enum ResourceFailure {
         requested: usize,
         limit: usize,
     },
+    /// Storage the run asked for could not be reserved. `bytes` is the size
+    /// of that storage; `detail` is the allocator's own reason.
     Allocation {
         object: String,
+        bytes: u64,
         detail: String,
     },
 }
@@ -41,9 +44,14 @@ impl fmt::Display for ResourceFailure {
                 formatter,
                 "Device '{instance}': {resource} limit exceeded: requested {requested}, limit {limit}"
             ),
-            Self::Allocation { object, detail } => {
-                write!(formatter, "Unable to allocate {object}: {detail}")
-            }
+            Self::Allocation {
+                object,
+                bytes,
+                detail,
+            } => write!(
+                formatter,
+                "Unable to allocate {object}: {bytes} bytes were needed: {detail}"
+            ),
         }
     }
 }

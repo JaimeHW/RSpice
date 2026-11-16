@@ -85,7 +85,7 @@ impl DelayBuffer {
         max_delay: Option<f64>,
     ) -> Result<(), DelayAcceptanceError> {
         let sample = self.event_sample(time, event, delay, max_delay)?;
-        self.try_reserve_sample(Some(event.order))?;
+        self.reserve_accepted_sample(Some(event.order))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())

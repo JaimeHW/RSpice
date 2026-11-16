@@ -399,6 +399,15 @@ mod tests {
             details.category,
             rspice_core::SimulationErrorCategory::ResourceLimit.as_str()
         );
+        // The grid's values past the address space: the size saturates, and
+        // the message and the details both name it.
+        assert_eq!(details.bytes, Some(u64::try_from(usize::MAX).unwrap()));
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("{} bytes were needed", usize::MAX)),
+            "{error}"
+        );
         assert!(matches!(
             error,
             CliError::CoreSimulationError {

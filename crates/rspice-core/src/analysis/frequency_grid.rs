@@ -92,8 +92,9 @@ impl FrequencyGridError {
         use crate::{ResourceKind, ResourceLimitError, SimulationError};
         match self {
             Self::Aborted => SimulationError::Aborted,
-            Self::Allocation { source, .. } => SimulationError::Allocation {
+            Self::Allocation { requested, source } => SimulationError::Allocation {
                 object: "frequency grid",
+                bytes: requested.saturating_mul(std::mem::size_of::<Value>()),
                 source,
             },
             Self::LimitExceeded { requested, limit } => ResourceLimitError {

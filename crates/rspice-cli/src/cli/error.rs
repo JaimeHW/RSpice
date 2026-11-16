@@ -51,6 +51,9 @@ pub struct ErrorDetails {
     pub requested: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
+    /// The bytes an allocation the machine refused had asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,6 +86,7 @@ impl ErrorDetails {
             resource: None,
             requested: None,
             limit: None,
+            bytes: None,
             instance_name: None,
             canonical_instance_name: None,
             missing_dependency: None,
@@ -546,6 +550,14 @@ impl CliError {
                 match source {
                     rspice_core::SimulationError::OutputCommitFailed(error) => {
                         details.path = Some(error.path.display().to_string());
+                    }
+                    rspice_core::SimulationError::Allocation { bytes, .. } => {
+                        details.bytes = Some(u64::try_from(*bytes).unwrap_or(u64::MAX));
+                    }
+                    rspice_core::SimulationError::ResultSink(
+                        rspice_core::result_sink::SinkStop::MemoryFull { bytes },
+                    ) => {
+                        details.bytes = *bytes;
                     }
                     rspice_core::SimulationError::BehavioralReference(error) => {
                         details.instance_name = Some(error.owner_name.clone());

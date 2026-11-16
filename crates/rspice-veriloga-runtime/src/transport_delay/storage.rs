@@ -63,6 +63,22 @@ impl DelayBuffer {
         Ok(())
     }
 
+    /// [`Self::try_reserve_sample`] as a step of an acceptance: a refusal
+    /// names the bytes the grown buffers needed. They are read after the
+    /// refusal, so an accepted sample pays nothing for them: a buffer that
+    /// did grow already holds the capacity the query names, and one that did
+    /// not still asks for it.
+    pub(super) fn reserve_accepted_sample(
+        &mut self,
+        event: Option<DelayEventOrder>,
+    ) -> Result<(), DelayAcceptanceError> {
+        self.try_reserve_sample(event)
+            .map_err(|source| DelayAcceptanceError::Allocation {
+                bytes: self.allocation_after_sample(event),
+                source,
+            })
+    }
+
     /// Backing storage of retained records, including spare capacity.
     /// The inline buffer and any checkpoint copy are accounted for by owners.
     pub fn allocated_bytes(&self) -> usize {
@@ -286,7 +302,7 @@ mod tests {
                 )
                 .unwrap_err();
             assert!(
-                matches!(error, DelayAcceptanceError::Allocation(_)),
+                matches!(error, DelayAcceptanceError::Allocation { .. }),
                 "{error}"
             );
             assert!(std::error::Error::source(&error).is_some());
