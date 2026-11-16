@@ -138,10 +138,6 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("results.run_details", DocsTopic::Results),
     ("results.create_result_document", DocsTopic::Results),
     ("results.result_document", DocsTopic::Results),
-    (
-        "simulate.regression_baseline_picker",
-        DocsTopic::Verification,
-    ),
     ("models.pdk_settings", DocsTopic::ModelsAndPdks),
     ("models.model_browser", DocsTopic::ModelsAndPdks),
     ("models.model_correlation", DocsTopic::ModelsAndPdks),

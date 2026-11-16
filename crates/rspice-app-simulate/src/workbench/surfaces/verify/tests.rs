@@ -101,60 +101,6 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     );
 }
 
-/// The baseline picker offers exactly the runs a commit accepts. A complete
-/// run of another plan is sound data but no baseline for this one, so it is
-/// not offered; nor is a run sharing nothing with the active run, nor the
-/// active run itself.
-#[test]
-fn the_baseline_picker_offers_only_the_runs_a_commit_accepts() {
-    let mut harness = SimulateTestHost::harness();
-    let plan_id = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let source_id = AnalysisInstanceId::new();
-    let measured = |label: &str| {
-        AnalysisResult::new(1, AnalysisType::Ac, label)
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)])
-    };
-    let candidate = sealed_run(4, plan_id, source_id, 2, measured("candidate"));
-    let baseline = sealed_run(3, plan_id, source_id, 2, measured("baseline"));
-    let other_plan = sealed_run(
-        2,
-        crate::product::SimulationPlanId::new(),
-        source_id,
-        2,
-        measured("another plan"),
-    );
-    let unshared = sealed_run(
-        1,
-        plan_id,
-        source_id,
-        2,
-        AnalysisResult::new(1, AnalysisType::Ac, "nothing shared"),
-    );
-    let runs = [&candidate, &baseline, &other_plan, &unshared].map(|run| run.run_id);
-    harness.model.simulation.retained.runs = vec![candidate, baseline, other_plan, unshared].into();
-    assert!(harness.model.simulation.select_run(0));
-
-    let offered = super::regression_baseline_candidates(&harness.model)
-        .into_iter()
-        .map(|(run_id, ..)| run_id)
-        .collect::<Vec<_>>();
-    assert_eq!(offered, [runs[1]]);
-    // A refused commit changes nothing, so every run the picker leaves out is
-    // tried first, then the one it offers.
-    for run_id in runs.iter().filter(|run_id| !offered.contains(run_id)) {
-        assert!(
-            commit_regression_baseline(&mut harness.cx(), *run_id).is_err(),
-            "a run the picker leaves out commits: {run_id}"
-        );
-    }
-    commit_regression_baseline(&mut harness.cx(), offered[0]).expect("the offered run commits");
-}
-
 fn retain_preflight_report(harness: &mut FeatureHarness<SimulateFeature>) {
     let (plan_id, plan_revision) = harness
         .model
@@ -732,7 +678,7 @@ fn ci_documents_are_deterministic_receipt_bound_and_cover_the_full_matrix() {
 
 #[test]
 fn empty_regression_matrix_exports_one_blocked_case_and_xml_controls_fail_closed() {
-    let cases = regression_export_cases(&[], &[], &[], &[], &[]);
+    let cases = regression_export_cases(&[], &[], &[], &[], &[], &[]);
     assert_eq!(cases.len(), 1);
     assert_eq!(cases[0].name, "coverage::no_comparable_targets");
     assert_eq!(cases[0].disposition, RegressionExportDisposition::Blocked);
@@ -785,6 +731,7 @@ fn empty_regression_matrix_exports_one_blocked_case_and_xml_controls_fail_closed
             worst_delta: 0.0,
             allowed_delta: 0.0,
         }],
+        &[],
         &[],
         &[],
         &[],
@@ -924,11 +871,6 @@ fn tolerance_digest_is_order_independent_and_receipts_fail_on_contract_mismatch(
         &baseline,
         &candidate,
     ));
-
-    let mut session = super::super::super::state::VerificationSessionState::default();
-    session.regression_comparison = Some(receipt);
-    let serialized = serde_json::to_value(session).unwrap();
-    assert!(serialized.get("regression_comparison").is_none());
 }
 
 /// A limit is answered by the worst of every attributed measurement of its
@@ -1089,10 +1031,6 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 }
 
 // ---------------------------------------------------------------------------
-// The SOA evidence gate
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // The page grammar: corners and SOA
 // ---------------------------------------------------------------------------
 
@@ -1109,169 +1047,6 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
         assert!(geometry.one("table.head").is_none(), "{page:?}");
         assert!(geometry.one("toolbar.summary").is_none(), "{page:?}");
     }
-}
-
-/// Regression is one table of every compared target, and the selected
-/// target's detail in a pane directly under it.
-#[test]
-fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
-    use super::raster::{PAGE_WIDTH, page_geometry};
-
-    let geometry = page_geometry(regression_app(), VerificationPage::Reference);
-    let toolbar = geometry.one("toolbar").expect("toolbar");
-    assert!(geometry.one("toolbar.summary").is_some());
-    let head = geometry.one("table.head").expect("checks table");
-    assert_eq!(
-        head.top(),
-        toolbar.bottom(),
-        "nothing between toolbar and table"
-    );
-    let rows = geometry.all("table.row");
-    assert_eq!(rows.len(), 5, "four measurements and one waveform");
-    assert!(rows.iter().all(|row| row.height() == 24.0));
-    assert_eq!(rows[0].top(), head.bottom());
-    let detail = geometry
-        .one("split")
-        .expect("the selected waveform's detail");
-    let last = rows.last().expect("rows");
-    assert_eq!(
-        detail.top(),
-        last.bottom() + 1.0,
-        "the detail sits under the table"
-    );
-    assert_eq!(detail.left(), 0.0);
-    assert_eq!(detail.right(), PAGE_WIDTH);
-    for (column, edges) in geometry.right_edges() {
-        assert_eq!(edges.len(), 1, "{column}: numbers end on one edge");
-    }
-    assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
-}
-
-// ---------------------------------------------------------------------------
-// The fixtures only these cases build
-// ---------------------------------------------------------------------------
-
-/// The canonical execution tag a transient task carries, which the receipt
-/// checks its result against.
-const TRANSIENT_TASK_TAG: u8 = 5;
-
-/// A second-order step response settling to 1 V.
-fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
-    let root = (1.0 - damping * damping).sqrt();
-    let damped = natural_rad_s * root;
-    time.iter()
-        .map(|t| {
-            1.0 - (-damping * natural_rad_s * t).exp()
-                * ((damped * t).cos() + damping / root * (damped * t).sin())
-        })
-        .collect()
-}
-
-/// Three microseconds of a step, at 12.5 ns.
-fn step_time() -> Vec<f64> {
-    (0..=240).map(|index| f64::from(index) * 12.5e-9).collect()
-}
-
-/// A transient step of the active plan's one analysis, with its measurements.
-fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
-    let time = step_time();
-    AnalysisResult::new(1, AnalysisType::Transient, "Step")
-        .with_waveforms(vec![
-            RetainedTrace::new(
-                "V(out)",
-                time.clone(),
-                step_response(damping, natural_rad_s, &time),
-                "#4c9be8",
-            )
-            .with_unit("V"),
-        ])
-        .with_measurements(
-            measurements
-                .iter()
-                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
-                .collect(),
-        )
-}
-
-/// Run 4 of the active plan against its baseline, Run 3: four measurements and
-/// the output waveform. Bandwidth breaks its 2 % rule, overshoot has no rule,
-/// and the waveform is selected, so its comparison opens under the table.
-fn regression_app() -> FeatureHarness<SimulateFeature> {
-    use crate::state::{
-        RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
-        RegressionTargetSelector, RegressionToleranceRule,
-    };
-
-    let mut harness = SimulateTestHost::harness();
-    let plan_id = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let source = AnalysisInstanceId::new();
-    let run = |number: u64, damping: f64, natural: f64, values: [f64; 4]| {
-        sealed_run(
-            number,
-            plan_id,
-            source,
-            TRANSIENT_TASK_TAG,
-            step_analysis(
-                damping,
-                natural,
-                &[
-                    ("gain", values[0]),
-                    ("bw", values[1]),
-                    ("tsettle", values[2]),
-                    ("overshoot", values[3]),
-                ],
-            ),
-        )
-    };
-    let baseline = run(3, 0.55, 4.49e6, [42.30, 18.2e6, 1.62e-6, 12.6]);
-    let candidate = run(4, 0.56, 4.45e6, [42.28, 17.1e6, 1.64e-6, 12.1]);
-    let baseline_id = baseline.run_id;
-    let rule = |target: RegressionTargetSelector, absolute: f64, relative: f64| {
-        let waveform = target.kind == crate::state::RegressionTargetKind::Waveform;
-        RegressionToleranceRule {
-            target,
-            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
-            absolute_tolerance: absolute,
-            relative_tolerance: relative,
-            time_skew_allowance: if waveform { 20.0e-9 } else { 0.0 },
-            comparison_window: waveform.then_some(RegressionComparisonWindow {
-                start: 0.0,
-                end: 3.0e-6,
-            }),
-        }
-    };
-    let mut rules = super::derive_regression_checks(&baseline, &candidate)
-        .into_iter()
-        .filter_map(|check| match check.name.as_str() {
-            "gain" => Some(rule(check.target, 0.1, 0.005)),
-            "bw" => Some(rule(check.target, 0.0, 0.02)),
-            "tsettle" => Some(rule(check.target, 0.0, 0.05)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let waveform = super::regression_waveform_pairs(&baseline, &candidate)
-        .first()
-        .map(|pair| pair.target.clone())
-        .expect("both runs hold V(out)");
-    rules.push(rule(waveform.clone(), 0.02, 0.02));
-    let payload = harness
-        .model
-        .workspace
-        .content
-        .ensure_active_plan_data(plan_id);
-    payload.regression_tolerances = rules;
-    payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
-    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
-    assert!(harness.model.simulation.select_run(1));
-    super::commit_regression_baseline(&mut harness.cx(), baseline_id)
-        .expect("the baseline commits");
-    harness.state.verification.regression_selected_target = Some(waveform);
-    harness
 }
 
 /// A seven-corner run of four limited outputs and two node voltages: gain

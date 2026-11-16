@@ -65,9 +65,9 @@ pub const fn default_analysis_index() -> usize {
     rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.singleton_index()
 }
 
-/// Immutable regression comparison receipt retained only for the active
-/// verification review session. The source runs and datasets remain the
-/// authoritative evidence owners.
+/// The receipt of comparing a run against its reference: kept with the
+/// Reference view's comparison and quoted by its CI export. The runs and
+/// their datasets remain the evidence it describes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegressionComparisonReceipt {
     pub plan_id: crate::product::SimulationPlanId,
@@ -98,16 +98,18 @@ pub struct RegressionComparisonReceipt {
     pub unevaluated_targets: usize,
 }
 
+/// The Reference view's tolerance cell open for entry.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RegressionToleranceDraft {
+pub struct ReferenceToleranceDraft {
+    /// The target whose tolerance is being entered.
     pub target: crate::state::RegressionTargetSelector,
-    pub method: crate::state::RegressionComparisonMethod,
-    pub absolute_tolerance: String,
-    pub relative_tolerance_percent: String,
-    pub time_skew_allowance: String,
-    pub comparison_window: String,
-    pub dirty: bool,
-    pub validation_error: Option<String>,
+    /// What the reader has typed.
+    pub text: String,
+    /// What the cell said when it opened: entering it unchanged changes
+    /// nothing.
+    pub seed: String,
+    /// Set until the cell first paints, so the field takes the keyboard once.
+    pub focus: bool,
 }
 
 /// The limit cell of the Monte Carlo table, open for entry.
@@ -191,16 +193,6 @@ pub struct VerificationSessionState {
     /// is the plan's only once it is applied.
     #[serde(skip)]
     pub yield_limit_draft: Option<YieldLimitDraft>,
-    #[serde(skip)]
-    pub regression_comparison: Option<RegressionComparisonReceipt>,
-    #[serde(skip)]
-    pub regression_baseline_picker_open: bool,
-    #[serde(skip)]
-    pub regression_baseline_picker_selection: Option<crate::product::RunId>,
-    #[serde(skip)]
-    pub regression_selected_target: Option<crate::state::RegressionTargetSelector>,
-    #[serde(skip)]
-    pub regression_tolerance_drafts: Vec<RegressionToleranceDraft>,
     /// Why the last Verify action the reader took could not be carried out,
     /// stated under the toolbar until the next action. An action that worked
     /// leaves nothing here: its result is the page itself.
@@ -250,6 +242,17 @@ pub struct VerificationSessionState {
     /// The Checks view's rows in the order it shows them.
     #[serde(skip)]
     pub checks_rows: CheckRowOrder,
+    /// The Reference view's table: its selection, sort and sideways scroll.
+    #[serde(skip)]
+    pub reference_table: crate::workbench::surfaces::verify::table::TableState,
+    /// The Reference view's tolerance cell open for entry. Transient: a
+    /// tolerance is the plan's only once it is entered.
+    #[serde(skip)]
+    pub reference_edit: Option<ReferenceToleranceDraft>,
+    /// The Reference view's comparison, built again only when the run read,
+    /// its reference or the plan's tolerances change.
+    #[serde(skip)]
+    pub(crate) reference: crate::workbench::surfaces::verify::reference::ReferenceComparison,
 }
 
 /// The Checks view's rows in the order it shows them: worst first, and only

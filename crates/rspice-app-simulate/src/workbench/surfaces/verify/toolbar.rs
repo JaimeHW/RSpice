@@ -149,6 +149,9 @@ pub(super) enum RunRole {
     /// The run the page reads, offered only when there is a choice to make.
     #[default]
     Read,
+    /// The run the page reads against, offered whenever there is one: the
+    /// selector is where the reader sees which it is, and changes it.
+    Reference,
 }
 
 impl RunRole {
@@ -156,6 +159,7 @@ impl RunRole {
     const fn words(self) -> (&'static str, &'static str) {
         match self {
             Self::Read => ("Run", "No run selected"),
+            Self::Reference => ("Reference", "No reference"),
         }
     }
 }
@@ -178,6 +182,7 @@ impl RunChoice {
     pub(super) fn offers_choice(&self) -> bool {
         match self.role {
             RunRole::Read => self.candidates.len() > 1,
+            RunRole::Reference => !self.candidates.is_empty(),
         }
     }
 }

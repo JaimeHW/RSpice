@@ -11,20 +11,20 @@ pub(crate) mod checks;
 mod corners;
 mod histogram;
 mod monte_carlo;
+pub(crate) mod reference;
 mod regression_contract;
-mod regression_panel;
 pub(crate) mod specification_edit;
 pub(crate) mod specifications;
 pub mod table;
 pub mod toolbar;
 
-use egui::{ScrollArea, Ui};
+use egui::Ui;
 use sha2::{Digest as _, Sha256};
 
 use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Problem};
+use crate::ui::widgets::Problem;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
@@ -36,8 +36,8 @@ use crate::state::VerificationPage;
 use checks::*;
 use corners::*;
 use monte_carlo::*;
+use reference::reference_view;
 use regression_contract::*;
-use regression_panel::*;
 use specifications::specifications;
 
 pub(crate) use corners::{FactSection, point_facts};
@@ -56,7 +56,6 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         cx.state.verification.action_problem = None;
         ui.ctx().data_mut(|data| data.insert_temp(shown_page, page));
     }
-    let ctx = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
     let surface = ui.available_rect_before_wrap();
     ui.painter().rect_filled(surface, 0.0, t.color.bg_app);
@@ -67,10 +66,9 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             VerificationPage::Corners => corners(ui, cx),
             VerificationPage::MonteCarlo => monte_carlo(ui, cx),
             VerificationPage::Checks => checks_view(ui, cx),
-            VerificationPage::Reference => regression(ui, cx),
+            VerificationPage::Reference => reference_view(ui, cx),
         }
     });
-    regression_baseline_picker(&ctx, cx);
 }
 
 /// The runs a page could read: the run it reads now, and every other run that
@@ -156,119 +154,6 @@ fn verification_evidence_domain(model: &Model) -> crate::state::EvidenceDomain {
     model
         .simulation
         .evidence_domain(verification_plan_id(model))
-}
-
-/// The runs the baseline picker offers, newest first: exactly the runs a
-/// commit takes as the active plan's baseline against the active run.
-fn regression_baseline_candidates(model: &Model) -> Vec<(crate::product::RunId, u64, String)> {
-    let mut candidates = model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .filter(|run| regression_baseline_eligibility(model, run.run_id).is_ok())
-        .map(|run| (run.run_id, run.id, run.label.clone()))
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.1.cmp(&left.1));
-    candidates
-}
-
-fn regression_baseline_picker(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
-    if !cx.state.verification.regression_baseline_picker_open {
-        return;
-    }
-
-    let candidates = regression_baseline_candidates(cx.model);
-
-    let mut selected = cx.state.verification.regression_baseline_picker_selection;
-    if selected.is_none_or(|selected| !candidates.iter().any(|row| row.0 == selected)) {
-        selected = candidates.first().map(|row| row.0);
-    }
-
-    let mut open = true;
-    let mut cancel = false;
-    let mut commit = false;
-    let viewport = ctx.content_rect().size();
-    let width = (viewport.x - 16.0).clamp(1.0, 620.0);
-    let candidate_height = (viewport.y - 210.0).clamp(90.0, 420.0);
-    egui::Window::new("Select regression baseline")
-        .id(egui::Id::new("workbench.verify.regression_baseline_picker"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(width)
-        .min_width(width)
-        .max_width(width)
-        .show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            if candidates.is_empty() {
-                ui.label(
-                    egui::RichText::new("No other runs to compare against.")
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text),
-                );
-            } else {
-                let list_width = ui.available_width();
-                ScrollArea::vertical()
-                    .id_salt("workbench.verify.regression_baseline_candidates")
-                    .max_height(candidate_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        egui::Frame::new()
-                            .fill(t.color.bg_panel)
-                            .stroke(egui::Stroke::new(1.0, t.color.border))
-                            .show(ui, |ui| {
-                                ui.set_width((list_width - 2.0).max(1.0));
-                                for (run_id, _, label) in &candidates {
-                                    let is_selected = selected == Some(*run_id);
-                                    let response = ui.selectable_label(
-                                        is_selected,
-                                        egui::RichText::new(label)
-                                            .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
-                                    );
-                                    if response.clicked() {
-                                        selected = Some(*run_id);
-                                    }
-                                }
-                            });
-                    });
-            }
-
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let can_commit = selected.is_some();
-                let use_baseline = Button::new("Use baseline").enabled(can_commit);
-                let use_baseline = if can_commit {
-                    use_baseline.accent()
-                } else {
-                    use_baseline
-                };
-                if use_baseline.show(ui).clicked() {
-                    commit = true;
-                }
-                if Button::new("Cancel").show(ui).clicked() {
-                    cancel = true;
-                }
-            });
-        });
-
-    if commit {
-        if let Some(run_id) = selected {
-            if let Err(error) = commit_regression_baseline(cx, run_id) {
-                cx.state.verification.action_problem =
-                    Some(format!("The baseline was not changed: {error}"));
-                cx.state.verification.regression_baseline_picker_selection = selected;
-                return;
-            }
-            cx.state.verification.action_problem = None;
-        }
-        open = false;
-    }
-    if cancel {
-        open = false;
-    }
-    cx.state.verification.regression_baseline_picker_selection = selected;
-    cx.state.verification.regression_baseline_picker_open = open;
 }
 
 fn verification_run_index(model: &Model) -> Option<usize> {
@@ -404,7 +289,7 @@ struct RegressionTargetObservation {
     validation_error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct RegressionCoverageIssue {
     target: Option<crate::state::RegressionTargetSelector>,
     label: String,

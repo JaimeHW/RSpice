@@ -666,62 +666,15 @@ pub(super) fn commit_regression_baseline(
         ));
     }
     setup
-        .commit_active_plan_configuration_change(format!(
-            "selected regression baseline run {run_id}"
-        ))
+        .commit_active_plan_configuration_change(format!("chose run {run_id} as the reference"))
         .map_err(|error| error.to_string())?;
     cx.model.workspace = workspace;
     cx.model.sim_setup = setup;
     cx.model.simulation = simulation;
     invalidate_plan_bound_preflight(cx);
     cx.state.verification.regression_baseline_run = Some(run_id);
-    cx.state.verification.regression_comparison = None;
-    cx.state.verification.regression_selected_target = None;
-    cx.state.verification.regression_tolerance_drafts.clear();
+    cx.state.verification.reference_edit = None;
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct RegressionTargetDescriptor {
-    pub(super) target: crate::state::RegressionTargetSelector,
-    pub(super) label: String,
-    pub(super) default_window: Option<crate::state::RegressionComparisonWindow>,
-}
-
-pub(super) fn regression_target_descriptors(
-    checks: &[RegressionCheck],
-    waveforms: &[RegressionWaveformPair<'_>],
-) -> Vec<RegressionTargetDescriptor> {
-    let mut targets = checks
-        .iter()
-        .map(|check| RegressionTargetDescriptor {
-            target: check.target.clone(),
-            label: format!("Measurement · {} · {}", check.name, check.source_identity),
-            default_window: None,
-        })
-        .collect::<Vec<_>>();
-    targets.extend(waveforms.iter().map(|pair| {
-        let finite_x = pair
-            .baseline
-            .x
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite())
-            .collect::<Vec<_>>();
-        let default_window = finite_x
-            .iter()
-            .copied()
-            .min_by(f64::total_cmp)
-            .zip(finite_x.iter().copied().max_by(f64::total_cmp))
-            .map(|(start, end)| crate::state::RegressionComparisonWindow { start, end });
-        RegressionTargetDescriptor {
-            target: pair.target.clone(),
-            label: format!("Waveform · {}", pair.current.name),
-            default_window,
-        }
-    }));
-    targets.sort_by(|left, right| left.label.cmp(&right.label));
-    targets
 }
 
 pub(super) fn format_regression_window(
@@ -739,99 +692,50 @@ pub(super) fn format_regression_window(
     )
 }
 
+/// A tolerance rule in the words its Reference cell states it, and a reader
+/// enters it: `abs 10m + rel 2 %` allows the sum of an absolute and a
+/// relative change, `max(abs 10m, rel 2 %)` the larger of the two at each
+/// point, and a waveform's rule adds the time skew it allows and the window it
+/// is compared over when it sets them: `abs 20m + rel 2 % · skew 20n · 0 … 3u`.
 pub(super) fn format_tolerance_rule(rule: &crate::state::RegressionToleranceRule) -> String {
     let relative = format!("{:.6}", rule.relative_tolerance * 100.0);
-    let relative = relative.trim_end_matches('0').trim_end_matches('.');
-    let mut text = format!(
-        "abs {} + rel {relative} %",
-        crate::simulation::dialog::options::format_si_value(rule.absolute_tolerance),
+    let relative = format!(
+        "rel {} %",
+        relative.trim_end_matches('0').trim_end_matches('.')
     );
+    let absolute = format!(
+        "abs {}",
+        crate::simulation::dialog::options::format_si_value(rule.absolute_tolerance)
+    );
+    let mut text = match rule.method {
+        crate::state::RegressionComparisonMethod::PointwiseRelative => {
+            format!("max({absolute}, {relative})")
+        }
+        crate::state::RegressionComparisonMethod::AbsoluteRelativeEnvelope => {
+            if rule.relative_tolerance == 0.0 {
+                absolute
+            } else if rule.absolute_tolerance == 0.0 {
+                relative
+            } else {
+                format!("{absolute} + {relative}")
+            }
+        }
+    };
     if rule.target.kind == crate::state::RegressionTargetKind::Waveform {
-        text.push_str(&format!(
-            " · skew {} · {}",
-            crate::simulation::dialog::options::format_si_value(rule.time_skew_allowance),
-            format_regression_window(rule.comparison_window)
-        ));
-    }
-    text
-}
-
-pub(super) fn regression_draft(
-    descriptor: &RegressionTargetDescriptor,
-    rule: Option<&crate::state::RegressionToleranceRule>,
-) -> super::super::super::state::RegressionToleranceDraft {
-    let method = rule.map_or(
-        crate::state::RegressionComparisonMethod::AbsoluteRelativeEnvelope,
-        |rule| rule.method,
-    );
-    super::super::super::state::RegressionToleranceDraft {
-        target: descriptor.target.clone(),
-        method,
-        absolute_tolerance: crate::simulation::dialog::options::format_si_value(
-            rule.map_or(0.0, |rule| rule.absolute_tolerance),
-        ),
-        relative_tolerance_percent: format_scalar(
-            rule.map_or(0.0, |rule| rule.relative_tolerance) * 100.0,
-        ),
-        time_skew_allowance: crate::simulation::dialog::options::format_si_value(
-            rule.map_or(0.0, |rule| rule.time_skew_allowance),
-        ),
-        comparison_window: format_regression_window(
-            rule.and_then(|rule| rule.comparison_window)
-                .or(descriptor.default_window),
-        ),
-        dirty: rule.is_none(),
-        validation_error: None,
-    }
-}
-
-pub(super) fn synchronize_regression_drafts(
-    cx: &mut Cx<'_, SimulateFeature>,
-    targets: &[RegressionTargetDescriptor],
-) {
-    let rules = cx
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .and_then(|plan| cx.model.workspace.content.plan_data(plan.id()))
-        .map(|payload| payload.regression_tolerances.clone())
-        .unwrap_or_default();
-    let state = &mut cx.state.verification;
-    state.regression_tolerance_drafts.retain(|draft| {
-        targets
-            .iter()
-            .any(|descriptor| descriptor.target == draft.target)
-    });
-    for descriptor in targets {
-        if state
-            .regression_tolerance_drafts
-            .iter()
-            .all(|draft| draft.target != descriptor.target)
-        {
-            state.regression_tolerance_drafts.push(regression_draft(
-                descriptor,
-                regression_rule(&rules, &descriptor.target),
+        if rule.time_skew_allowance > 0.0 {
+            text.push_str(&format!(
+                " \u{00b7} skew {}",
+                crate::simulation::dialog::options::format_si_value(rule.time_skew_allowance)
+            ));
+        }
+        if rule.comparison_window.is_some() {
+            text.push_str(&format!(
+                " \u{00b7} {}",
+                format_regression_window(rule.comparison_window)
             ));
         }
     }
-    if state
-        .regression_selected_target
-        .as_ref()
-        .is_none_or(|selected| {
-            !targets
-                .iter()
-                .any(|descriptor| descriptor.target == *selected)
-        })
-    {
-        state.regression_selected_target = targets
-            .iter()
-            .find(|descriptor| {
-                descriptor.target.kind == crate::state::RegressionTargetKind::Waveform
-            })
-            .or_else(|| targets.first())
-            .map(|descriptor| descriptor.target.clone());
-    }
+    text
 }
 
 pub(super) fn parse_regression_window(
@@ -859,147 +763,175 @@ pub(super) fn parse_regression_window(
     Ok(Some(window))
 }
 
-pub(super) fn parse_regression_draft(
-    draft: &super::super::super::state::RegressionToleranceDraft,
-) -> Result<crate::state::RegressionToleranceRule, String> {
-    let parse_nonnegative = |text: &str, label: &str| {
+/// `text` without `word` in front of it, ignoring case.
+fn strip_word<'t>(text: &'t str, word: &str) -> Option<&'t str> {
+    text.get(..word.len())
+        .filter(|head| head.eq_ignore_ascii_case(word))
+        .map(|_| &text[word.len()..])
+}
+
+/// The terms of a sum, split on each `+` that is not an exponent's sign.
+fn sum_terms(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut terms = Vec::new();
+    let mut start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        let exponent = index >= 2
+            && matches!(bytes[index - 1], b'e' | b'E')
+            && bytes[index - 2].is_ascii_digit();
+        if *byte == b'+' && !exponent {
+            terms.push(&text[start..index]);
+            start = index + 1;
+        }
+    }
+    terms.push(&text[start..]);
+    terms
+}
+
+/// The rule a reader entered in a Reference tolerance cell, in the words
+/// [`format_tolerance_rule`] states one in; `None` for an empty cell, which
+/// leaves the target without a rule. A bare number is an absolute allowance
+/// and a number with `%` a relative one, so `10m + 2 %` reads as
+/// `abs 10m + rel 2 %`.
+pub(super) fn parse_tolerance_rule(
+    text: &str,
+    target: &crate::state::RegressionTargetSelector,
+) -> Result<Option<crate::state::RegressionToleranceRule>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let nonnegative = |text: &str, label: &str| {
         let value = crate::simulation::dialog::options::parse_si_value(text.trim())
-            .map_err(|error| format!("invalid {label}: {error}"))?;
+            .map_err(|error| format!("the {label} is not a value: {error}"))?;
         if !value.is_finite() || value < 0.0 {
-            Err(format!("{label} must be finite and nonnegative"))
+            Err(format!("the {label} must be a finite value of at least 0"))
         } else {
             Ok(value)
         }
     };
-    let relative_text = draft
-        .relative_tolerance_percent
-        .trim()
-        .strip_suffix('%')
-        .unwrap_or(draft.relative_tolerance_percent.trim());
-    let measurement = draft.target.kind == crate::state::RegressionTargetKind::Measurement;
-    let rule = crate::state::RegressionToleranceRule {
-        target: draft.target.clone(),
-        method: draft.method,
-        absolute_tolerance: parse_nonnegative(&draft.absolute_tolerance, "absolute tolerance")?,
-        relative_tolerance: parse_nonnegative(relative_text, "relative tolerance")? / 100.0,
-        time_skew_allowance: if measurement {
-            0.0
-        } else {
-            parse_nonnegative(&draft.time_skew_allowance, "time-skew allowance")?
-        },
-        comparison_window: if measurement {
-            None
-        } else {
-            parse_regression_window(&draft.comparison_window)?
-        },
+    let mut parts = text.split('\u{00b7}').map(str::trim);
+    let allowance = parts.next().unwrap_or_default();
+    let mut rule = crate::state::RegressionToleranceRule {
+        target: target.clone(),
+        method: crate::state::RegressionComparisonMethod::AbsoluteRelativeEnvelope,
+        absolute_tolerance: 0.0,
+        relative_tolerance: 0.0,
+        time_skew_allowance: 0.0,
+        comparison_window: None,
     };
-    rule.validate()?;
-    Ok(rule)
-}
-
-pub(super) fn commit_regression_tolerance_drafts(
-    cx: &mut Cx<'_, SimulateFeature>,
-) -> Result<(), String> {
-    let plan_id = cx
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .map(crate::simulation::plan::SimulationPlan::id)
-        .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
-    let policy = active_regression_specification_policy(cx.model);
-    let drafts = cx
-        .state
-        .verification
-        .regression_tolerance_drafts
-        .iter()
-        .filter(|draft| {
-            regression_requires_waveforms(policy)
-                || draft.target.kind == crate::state::RegressionTargetKind::Measurement
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if drafts.is_empty() {
-        return Err(
-            "no aligned governed regression target is available for tolerance configuration"
-                .to_owned(),
-        );
-    }
-    let mut parsed = Vec::with_capacity(drafts.len());
-    for (index, draft) in drafts.iter().enumerate() {
-        match parse_regression_draft(draft) {
-            Ok(rule) => parsed.push(rule),
-            Err(error) => {
-                if let Some(authoritative) = cx
-                    .state
-                    .verification
-                    .regression_tolerance_drafts
-                    .get_mut(index)
-                {
-                    authoritative.validation_error = Some(error.clone());
-                }
-                return Err(error);
+    let terms = match strip_word(allowance, "max(").and_then(|inner| inner.strip_suffix(')')) {
+        Some(inner) => {
+            rule.method = crate::state::RegressionComparisonMethod::PointwiseRelative;
+            inner.split(',').collect()
+        }
+        None => sum_terms(allowance),
+    };
+    let (mut absolute, mut relative) = (None, None);
+    for term in terms {
+        let term = term.trim();
+        if term.is_empty() {
+            return Err("a term of the tolerance is empty".to_owned());
+        }
+        let (is_relative, value) = if let Some(value) = strip_word(term, "rel") {
+            (true, value.trim())
+        } else if let Some(value) = strip_word(term, "abs") {
+            (false, value.trim())
+        } else {
+            (term.ends_with('%'), term)
+        };
+        if is_relative {
+            let value = value.strip_suffix('%').unwrap_or(value);
+            let percent = nonnegative(value, "relative tolerance")?;
+            if relative.replace(percent / 100.0).is_some() {
+                return Err("the relative tolerance is given twice".to_owned());
+            }
+        } else {
+            if value.ends_with('%') {
+                return Err("an absolute tolerance is not a percentage".to_owned());
+            }
+            if absolute
+                .replace(nonnegative(value, "absolute tolerance")?)
+                .is_some()
+            {
+                return Err("the absolute tolerance is given twice".to_owned());
             }
         }
     }
-    let active_plan = cx
+    rule.absolute_tolerance = absolute.unwrap_or(0.0);
+    rule.relative_tolerance = relative.unwrap_or(0.0);
+    for part in parts {
+        if target.kind == crate::state::RegressionTargetKind::Measurement {
+            return Err("a measurement's tolerance has no time skew or window".to_owned());
+        }
+        match strip_word(part, "skew") {
+            Some(skew) => rule.time_skew_allowance = nonnegative(skew, "time skew")?,
+            None => rule.comparison_window = parse_regression_window(part)?,
+        }
+    }
+    rule.validate()?;
+    Ok(Some(rule))
+}
+
+/// Make `rule` the tolerance the active plan holds for `target`, or leave the
+/// target without one when `rule` is `None`: one plan commit, and the line
+/// its receipt states; `None` when the plan already held exactly that.
+pub(super) fn commit_regression_tolerance(
+    cx: &mut Cx<'_, SimulateFeature>,
+    target: &crate::state::RegressionTargetSelector,
+    rule: Option<crate::state::RegressionToleranceRule>,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let plan = cx
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .expect("plan identity was resolved above");
-    for rule in &parsed {
-        if rule.target.source_domain == crate::state::AnalysisResultSourceDomain::SimulationPlan
-            && active_plan
-                .instance(rule.target.source_instance_id)
-                .is_none()
-        {
-            return Err(format!(
-                "regression target '{}' references analysis {}, which is absent from the active plan",
-                rule.target.name, rule.target.source_instance_id
-            ));
-        }
+        .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
+    if target.source_domain == crate::state::AnalysisResultSourceDomain::SimulationPlan
+        && plan.instance(target.source_instance_id).is_none()
+    {
+        return Err(format!(
+            "its analysis {} is no longer in the plan",
+            target.source_instance_id
+        ));
     }
+    let plan_id = plan.id();
+    let detail = rule.as_ref().map_or_else(
+        || format!("removed the tolerance of {name}"),
+        |rule| {
+            format!(
+                "set the tolerance of {name} to {}",
+                format_tolerance_rule(rule)
+            )
+        },
+    );
     let mut workspace = cx.model.workspace.clone();
-    let payload = workspace.content.ensure_active_plan_data(plan_id);
-    let draft_targets = parsed
-        .iter()
-        .map(|rule| rule.target.clone())
-        .collect::<Vec<_>>();
-    payload
-        .regression_tolerances
-        .retain(|rule| !draft_targets.contains(&rule.target));
-    payload.regression_tolerances.extend(parsed);
+    let rules = &mut workspace
+        .content
+        .ensure_active_plan_data(plan_id)
+        .regression_tolerances;
+    match (rules.iter().position(|held| held.target == *target), rule) {
+        (Some(index), Some(rule)) if rules[index] == rule => return Ok(None),
+        (Some(index), Some(rule)) => rules[index] = rule,
+        (Some(index), None) => {
+            rules.remove(index);
+        }
+        (None, Some(rule)) => rules.push(rule),
+        (None, None) => return Ok(None),
+    }
     workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    if workspace
-        .content
-        .plan_data(plan_id)
-        .map(|payload| payload.regression_tolerances.as_slice())
-        == cx
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .map(|payload| payload.regression_tolerances.as_slice())
-    {
-        return Ok(());
-    }
     let mut setup = cx.model.sim_setup.clone();
-    setup
-        .commit_active_plan_configuration_change("updated regression tolerance contract")
+    let receipt = setup
+        .commit_active_plan_configuration_change(detail)
         .map_err(|error| error.to_string())?;
     cx.model.workspace = workspace;
     cx.model.sim_setup = setup;
     invalidate_plan_bound_preflight(cx);
-    for draft in &mut cx.state.verification.regression_tolerance_drafts {
-        draft.dirty = false;
-        draft.validation_error = None;
-    }
-    cx.state.verification.regression_comparison = None;
-    Ok(())
+    Ok(Some(receipt.status_line()))
 }
 
 pub(super) fn remove_orphaned_regression_rules(
@@ -1031,123 +963,126 @@ pub(super) fn remove_orphaned_regression_rules(
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let mut setup = cx.model.sim_setup.clone();
-    setup
-        .commit_active_plan_configuration_change("removed orphaned regression tolerance rules")
+    let receipt = setup
+        .commit_active_plan_configuration_change(if removed == 1 {
+            "deleted a tolerance rule whose target neither run holds"
+        } else {
+            "deleted the tolerance rules whose targets neither run holds"
+        })
         .map_err(|error| error.to_string())?;
     cx.model.workspace = workspace;
     cx.model.sim_setup = setup;
     invalidate_plan_bound_preflight(cx);
-    let verification = &mut cx.state.verification;
-    verification.regression_comparison = None;
-    verification.regression_selected_target = None;
-    verification.regression_tolerance_drafts.clear();
+    cx.model.record_plan_receipt(receipt.status_line());
+    cx.state.verification.reference_edit = None;
     Ok(removed)
 }
 
-pub(super) fn run_regression_comparison(cx: &mut Cx<'_, SimulateFeature>) {
-    if let Err(error) = commit_regression_tolerance_drafts(cx) {
-        cx.state.verification.regression_comparison = None;
-        cx.state.verification.action_problem = Some(format!("Regression not run: {error}."));
-        return;
-    }
-    let rules = cx
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .and_then(|plan| cx.model.workspace.content.plan_data(plan.id()))
-        .map(|payload| payload.regression_tolerances.clone())
-        .unwrap_or_default();
-    let (plan_id, plan_revision) = cx
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .map(|plan| (plan.id(), plan.revision()))
-        .expect("tolerance commit requires an active plan");
-    let tolerance_digest = regression_tolerance_digest(&rules);
-    let regression_policy = active_regression_specification_policy(cx.model);
-    let Some((baseline, current)) = regression_run_pair(cx.model, cx.state) else {
-        cx.state.verification.regression_comparison = None;
-        cx.state.verification.action_problem =
-            Some("Regression not run: select a baseline run other than this one.".to_owned());
-        return;
-    };
-    let baseline_run = baseline.run_id;
-    let candidate_run = current.run_id;
-    let baseline_seal = regression_run_seal(baseline).expect("run pair requires sealed baseline");
-    let candidate_seal = regression_run_seal(current).expect("run pair requires sealed candidate");
+/// One run compared against its reference under the plan's tolerances: every
+/// measurement and waveform the two share, each one's verdict, and what could
+/// not be compared.
+pub(super) struct RegressionComparison<'a> {
+    pub(super) checks: Vec<RegressionCheck>,
+    pub(super) check_verdicts: Vec<RegressionVerdict>,
+    pub(super) waveforms: Vec<RegressionWaveformPair<'a>>,
+    pub(super) waveform_verdicts: Vec<RegressionVerdict>,
+    pub(super) coverage_issues: Vec<RegressionCoverageIssue>,
+}
+
+/// Compare `current` against `baseline` under `rules`; the waveforms only
+/// when the plan's policy compares them.
+pub(super) fn compare_regression_runs<'a>(
+    baseline: &'a crate::state::SimulationRun,
+    current: &'a crate::state::SimulationRun,
+    rules: &[crate::state::RegressionToleranceRule],
+    policy: crate::state::RegressionSpecificationPolicy,
+) -> RegressionComparison<'a> {
     let checks = derive_regression_checks(baseline, current);
-    let waveforms = if regression_requires_waveforms(regression_policy) {
+    let waveforms = if regression_requires_waveforms(policy) {
         regression_waveform_pairs(baseline, current)
     } else {
         Vec::new()
     };
-    let coverage_issues =
-        regression_coverage_issues_for_policy(baseline, current, &rules, regression_policy);
     let check_verdicts = checks
         .iter()
-        .map(|check| evaluate_regression_check(check, regression_rule(&rules, &check.target)))
-        .collect::<Vec<_>>();
+        .map(|check| evaluate_regression_check(check, regression_rule(rules, &check.target)))
+        .collect();
     let waveform_verdicts = waveforms
         .iter()
-        .map(|pair| evaluate_regression_waveform(pair, regression_rule(&rules, &pair.target)))
-        .collect::<Vec<_>>();
-    let passed_checks = check_verdicts
-        .iter()
-        .filter(|verdict| verdict.passed())
-        .count();
-    let failed_checks = check_verdicts
-        .iter()
-        .filter(|verdict| verdict.failed())
-        .count();
-    let passed_waveforms = waveform_verdicts
-        .iter()
-        .filter(|verdict| verdict.passed())
-        .count();
-    let failed_waveforms = waveform_verdicts
-        .iter()
-        .filter(|verdict| verdict.failed())
-        .count();
-    let unconfigured_targets = check_verdicts
-        .iter()
-        .chain(&waveform_verdicts)
-        .filter(|verdict| matches!(verdict, RegressionVerdict::NotConfigured))
-        .count();
-    let unevaluated_targets = check_verdicts
-        .iter()
-        .chain(&waveform_verdicts)
-        .filter(|verdict| matches!(verdict, RegressionVerdict::NotEvaluated(_)))
-        .count()
-        + coverage_issues.len();
-    let changed_checks = checks.iter().filter(|check| check.changed()).count();
-    let aligned_checks = checks.len();
-    let aligned_waveforms = waveforms.len();
-    let receipt = super::super::super::state::RegressionComparisonReceipt {
-        plan_id,
-        plan_revision,
-        tolerance_digest,
-        baseline_run,
-        candidate_run,
-        baseline_dataset: baseline.dataset_id,
-        candidate_dataset: current.dataset_id,
-        baseline_content_digest: baseline_seal.content_digest,
-        candidate_content_digest: candidate_seal.content_digest,
-        baseline_authority_digest: baseline_seal.authority_digest,
-        candidate_authority_digest: candidate_seal.authority_digest,
-        aligned_checks,
-        aligned_waveforms,
-        changed_checks,
-        passed_checks,
-        failed_checks,
-        passed_waveforms,
-        failed_waveforms,
-        unconfigured_targets,
-        unevaluated_targets,
-    };
-    drop(waveforms);
-    cx.state.verification.regression_comparison = Some(receipt);
-    cx.state.verification.action_problem = None;
+        .map(|pair| evaluate_regression_waveform(pair, regression_rule(rules, &pair.target)))
+        .collect();
+    RegressionComparison {
+        checks,
+        check_verdicts,
+        waveform_verdicts,
+        waveforms,
+        coverage_issues: regression_coverage_issues_for_policy(baseline, current, rules, policy),
+    }
+}
+
+impl RegressionComparison<'_> {
+    /// The receipt of this comparison: the plan revision and tolerances it
+    /// was made under, both runs sealed by their content and authority, and
+    /// how it came out.
+    pub(super) fn receipt(
+        &self,
+        plan_id: crate::product::SimulationPlanId,
+        plan_revision: crate::product::ObjectRevision,
+        rules: &[crate::state::RegressionToleranceRule],
+        baseline: &crate::state::SimulationRun,
+        current: &crate::state::SimulationRun,
+    ) -> Result<super::super::super::state::RegressionComparisonReceipt, String> {
+        let baseline_seal = regression_run_seal(baseline)?;
+        let candidate_seal = regression_run_seal(current)?;
+        let count = |verdicts: &[RegressionVerdict], keep: fn(&RegressionVerdict) -> bool| {
+            verdicts.iter().filter(|verdict| keep(verdict)).count()
+        };
+        let both = |keep: fn(&RegressionVerdict) -> bool| {
+            count(&self.check_verdicts, keep) + count(&self.waveform_verdicts, keep)
+        };
+        Ok(super::super::super::state::RegressionComparisonReceipt {
+            plan_id,
+            plan_revision,
+            tolerance_digest: regression_tolerance_digest(rules),
+            baseline_run: baseline.run_id,
+            candidate_run: current.run_id,
+            baseline_dataset: baseline.dataset_id,
+            candidate_dataset: current.dataset_id,
+            baseline_content_digest: baseline_seal.content_digest,
+            candidate_content_digest: candidate_seal.content_digest,
+            baseline_authority_digest: baseline_seal.authority_digest,
+            candidate_authority_digest: candidate_seal.authority_digest,
+            aligned_checks: self.checks.len(),
+            aligned_waveforms: self.waveforms.len(),
+            changed_checks: self.checks.iter().filter(|check| check.changed()).count(),
+            passed_checks: count(&self.check_verdicts, RegressionVerdict::passed),
+            failed_checks: count(&self.check_verdicts, RegressionVerdict::failed),
+            passed_waveforms: count(&self.waveform_verdicts, RegressionVerdict::passed),
+            failed_waveforms: count(&self.waveform_verdicts, RegressionVerdict::failed),
+            unconfigured_targets: both(|verdict| {
+                matches!(verdict, RegressionVerdict::NotConfigured)
+            }),
+            unevaluated_targets: both(|verdict| {
+                matches!(verdict, RegressionVerdict::NotEvaluated(_))
+            }) + self.coverage_issues.len(),
+        })
+    }
+
+    /// The comparison as the cases the CI documents list, each quoting the
+    /// tolerance it was judged by.
+    pub(super) fn export_cases(
+        &self,
+        rules: &[crate::state::RegressionToleranceRule],
+    ) -> Vec<RegressionExportCase> {
+        regression_export_cases(
+            &self.checks,
+            &self.check_verdicts,
+            &self.waveforms,
+            &self.waveform_verdicts,
+            &self.coverage_issues,
+            rules,
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1255,14 +1190,17 @@ pub(super) fn regression_export_cases(
     waveforms: &[RegressionWaveformPair<'_>],
     waveform_verdicts: &[RegressionVerdict],
     coverage_issues: &[RegressionCoverageIssue],
+    rules: &[crate::state::RegressionToleranceRule],
 ) -> Vec<RegressionExportCase> {
     let source_domain = |domain| match domain {
         crate::state::AnalysisResultSourceDomain::SimulationPlan => "simulation_plan",
         crate::state::AnalysisResultSourceDomain::ManualDeck => "manual_deck",
         crate::state::AnalysisResultSourceDomain::LegacyUnclassified => "legacy_unclassified",
     };
-    let verdict_case = |name: String, verdict: &RegressionVerdict| {
-        let (disposition, detail) = match verdict {
+    let verdict_case = |name: String,
+                        target: &crate::state::RegressionTargetSelector,
+                        verdict: &RegressionVerdict| {
+        let (disposition, mut detail) = match verdict {
             RegressionVerdict::Pass {
                 worst_delta,
                 allowed_delta,
@@ -1288,6 +1226,9 @@ pub(super) fn regression_export_cases(
                 (RegressionExportDisposition::Blocked, detail.clone())
             }
         };
+        if let Some(rule) = regression_rule(rules, target) {
+            detail.push_str(&format!("; tolerance={}", format_tolerance_rule(rule)));
+        }
         RegressionExportCase {
             name,
             detail,
@@ -1306,6 +1247,7 @@ pub(super) fn regression_export_cases(
                     check.name,
                     check.target.occurrence
                 ),
+                &check.target,
                 verdict,
             )
         })
@@ -1322,6 +1264,7 @@ pub(super) fn regression_export_cases(
                             pair.target.name,
                             pair.target.occurrence
                         ),
+                        &pair.target,
                         verdict,
                     )
                 }),
@@ -1421,7 +1364,7 @@ pub(super) fn regression_ci_documents(
         ),
     ];
     let mut junit = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"RSpice Golden Regression\" tests=\"{}\" failures=\"{failures}\" errors=\"{blocked}\">\n  <properties>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"RSpice Reference Comparison\" tests=\"{}\" failures=\"{failures}\" errors=\"{blocked}\">\n  <properties>\n",
         cases.len()
     );
     for (name, value) in &properties {
@@ -1435,7 +1378,7 @@ pub(super) fn regression_ci_documents(
     junit.push_str("  </properties>\n");
     for case in cases {
         junit.push_str(&format!(
-            "  <testcase classname=\"rspice.golden_regression\" name=\"{}\">",
+            "  <testcase classname=\"rspice.reference\" name=\"{}\">",
             xml_escape(&case.name)
                 .map_err(|error| format!("invalid JUnit case name '{}': {error}", case.name))?
         ));
@@ -1493,8 +1436,8 @@ pub(super) fn export_regression_ci(cx: &mut Cx<'_, SimulateFeature>, junit: &str
 
     let result: Result<(), String> = (|| {
         let Some(path) = cx.handles.export_io.show_save_dialog(SaveDialogConfig {
-            title: "Export Golden Regression JUnit and TAP",
-            default_name: "rspice-golden-regression-ci.zip",
+            title: "Export the Reference Comparison as JUnit and TAP",
+            default_name: "rspice-reference-ci.zip",
             filter_name: "ZIP archive",
             filter_extensions: &["zip"],
         })?
@@ -1502,8 +1445,8 @@ pub(super) fn export_regression_ci(cx: &mut Cx<'_, SimulateFeature>, junit: &str
             return Ok(());
         };
         let package = crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
-            ("rspice-golden-regression.xml", junit.as_bytes()),
-            ("rspice-golden-regression.tap", tap.as_bytes()),
+            ("rspice-reference.xml", junit.as_bytes()),
+            ("rspice-reference.tap", tap.as_bytes()),
         ])
         .map_err(|error| error.to_string())?;
         let destination = cx.handles.export_io.observe_destination(&path)?;

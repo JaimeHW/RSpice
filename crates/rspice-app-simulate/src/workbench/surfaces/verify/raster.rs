@@ -893,6 +893,126 @@ pub fn seed_optimization(model: &mut Model) {
     );
 }
 
+/// A second-order step response settling to 1 V.
+fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
+    let root = (1.0 - damping * damping).sqrt();
+    let damped = natural_rad_s * root;
+    time.iter()
+        .map(|t| {
+            1.0 - (-damping * natural_rad_s * t).exp()
+                * ((damped * t).cos() + damping / root * (damped * t).sin())
+        })
+        .collect()
+}
+
+/// A transient step: three microseconds of the output at 12.5 ns, and its
+/// measurements.
+fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
+    let time = (0..=240)
+        .map(|index| f64::from(index) * 12.5e-9)
+        .collect::<Vec<_>>();
+    AnalysisResult::new(1, AnalysisType::Transient, "Step")
+        .with_waveforms(vec![
+            RetainedTrace::new(
+                "V(out)",
+                time.clone(),
+                step_response(damping, natural_rad_s, &time),
+                "#4c9be8",
+            )
+            .with_unit("V"),
+        ])
+        .with_measurements(
+            measurements
+                .iter()
+                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
+                .collect(),
+        )
+}
+
+/// The Reference fixture's seeding: Run 4 of the plan's transient read
+/// against its reference, Run 3 — four measurements and the output waveform,
+/// under the plan's tolerances. Bandwidth breaks its 2 % rule and overshoot
+/// has no rule.
+pub fn seed_reference(model: &mut Model) {
+    use crate::state::{
+        RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
+        RegressionTargetKind, RegressionTargetSelector, RegressionToleranceRule, RunRetention,
+    };
+
+    let plan = model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("default plan");
+    let (source, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("the plan takes a transient");
+    let (plan_id, revision) = (plan.id(), plan.revision());
+    model.sim_setup.refresh_legacy_analysis_projections();
+    let run = |number: u64, damping: f64, natural: f64, values: [f64; 4]| {
+        let mut run = sealed_run_at(
+            number,
+            plan_id,
+            (source, revision),
+            AnalysisKind::Transient.canonical_kind().tag(),
+            step_analysis(
+                damping,
+                natural,
+                &[
+                    ("gain", values[0]),
+                    ("bw", values[1]),
+                    ("tsettle", values[2]),
+                    ("overshoot", values[3]),
+                ],
+            ),
+        );
+        run.restore_lifecycle(SimulationRunLifecycle::Completed, 3.1)
+            .expect("a finite elapsed time");
+        run
+    };
+    let reference = run(3, 0.55, 4.49e6, [42.30, 18.2e6, 1.62e-6, 12.6]);
+    let current = run(4, 0.56, 4.45e6, [42.28, 17.1e6, 1.64e-6, 12.1]);
+    let rule = |target: RegressionTargetSelector, absolute: f64, relative: f64| {
+        let waveform = target.kind == RegressionTargetKind::Waveform;
+        RegressionToleranceRule {
+            target,
+            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
+            absolute_tolerance: absolute,
+            relative_tolerance: relative,
+            time_skew_allowance: if waveform { 20.0e-9 } else { 0.0 },
+            comparison_window: waveform.then_some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 3.0e-6,
+            }),
+        }
+    };
+    let mut rules = super::derive_regression_checks(&reference, &current)
+        .into_iter()
+        .filter_map(|check| match check.name.as_str() {
+            "gain" => Some(rule(check.target, 0.1, 0.005)),
+            "bw" => Some(rule(check.target, 0.0, 0.02)),
+            "tsettle" => Some(rule(check.target, 0.0, 0.05)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let waveform = super::regression_waveform_pairs(&reference, &current)
+        .first()
+        .map(|pair| pair.target.clone())
+        .expect("both runs hold V(out)");
+    rules.push(rule(waveform, 0.02, 0.02));
+    let reference_id = reference.run_id;
+    let payload = model.workspace.content.ensure_active_plan_data(plan_id);
+    payload.regression_tolerances = rules;
+    payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
+    payload.regression_baseline_run = Some(reference_id);
+    model.simulation.retained.runs = vec![reference, current].into();
+    assert!(
+        model
+            .simulation
+            .set_run_retention(reference_id, RunRetention::GoldenBaseline)
+    );
+    assert!(model.simulation.select_run(1));
+}
+
 /// The yield evidence memo of the run Verify reads, which the inspector and
 /// the session still read.
 pub fn fixture_yield_results(model: &Model) -> Vec<rspice_results::yield_analysis::YieldResult> {
