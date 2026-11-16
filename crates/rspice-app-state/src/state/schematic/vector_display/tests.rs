@@ -28,11 +28,11 @@ fn bus_sheet(declaration: &str) -> SchematicState {
     sheet
 }
 
-/// The lane's shared fixture: a design that declares `DATA[7:0]` and nothing
+/// The lane's shared fixture: a design that declares `data[7:0]` and nothing
 /// else. Every owned surface is checked against bit 3 of it, read inside
 /// instance `x1`.
 fn fixture_notations() -> BusNotations {
-    BusNotations::of_sheets(std::iter::once(bus_sheet("DATA[7:0]").document()))
+    BusNotations::of_sheets(std::iter::once(bus_sheet("data[7:0]").document()))
 }
 
 #[test]
@@ -41,7 +41,8 @@ fn a_declared_bit_renders_in_the_notation_its_bus_was_drawn_in() {
         let notations = BusNotations::of_sheets(std::iter::once(bus_sheet(declaration).document()));
 
         assert_eq!(notations.display("DATA#3"), bit);
-        assert_eq!(notations.display("data#3"), bit.to_ascii_lowercase());
+        // The bus's name reads as drawn, whatever case the engine answered in.
+        assert_eq!(notations.display("data#3"), bit);
         assert_eq!(notations.display("V(DATA#3)"), format!("V({bit})"));
     }
 }
@@ -132,7 +133,83 @@ fn a_vector_interface_pin_declares_its_own_bits() {
         .value = "BUS<3:0>".to_owned();
     let notations = BusNotations::of_sheets(std::iter::once(sheet.document()));
 
-    assert_eq!(notations.display("V(x1.bus#2)"), "V(x1.bus<2>)");
+    assert_eq!(notations.display("V(x1.bus#2)"), "V(x1.BUS<2>)");
+}
+
+/// One sheet with a net label for each of `names`, a supply rail `vdd`, and
+/// an interface port `fb`.
+fn labelled_sheet(names: &[&str]) -> SchematicState {
+    use crate::state::{NetLabel, NetLabelKind};
+    use rspice_design::schematic::net_label::SupplyGlyph;
+    let mut sheet = SchematicState::default();
+    let id = sheet.add_component(crate::state::ComponentType::Port, Point::new(0, 0));
+    sheet
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the placed port")
+        .value = "fb".to_owned();
+    let labels = &mut sheet.document_mut_for_test().net_labels;
+    for (index, name) in names.iter().enumerate() {
+        let id = u64::try_from(index).expect("a test identifier") + 1;
+        labels.push(NetLabel::new(
+            id,
+            Point::new(0, 40 * id as i32),
+            (*name).to_owned(),
+        ));
+    }
+    let mut rail = NetLabel::new(99, Point::new(200, 0), "vdd".to_owned());
+    rail.kind = NetLabelKind::Supply {
+        glyph: SupplyGlyph::Bar,
+    };
+    labels.push(rail);
+    sheet
+}
+
+/// The engine folds every node name to upper case; a net reads as the
+/// drawing spells it, in its instance's scope, under any accessor that reads
+/// a net, and a global rail as declared.
+#[test]
+fn a_drawn_net_reads_as_drawn() {
+    let notations =
+        BusNotations::of_sheets(std::iter::once(labelled_sheet(&["b0", "Vin"]).document()));
+
+    assert_eq!(notations.display("B0"), "b0");
+    assert_eq!(notations.display("V(B0)"), "V(b0)");
+    assert_eq!(notations.display("D(B0)"), "D(b0)");
+    assert_eq!(notations.display("phase(v(VIN))"), "phase(v(Vin))");
+    assert_eq!(notations.display("xldo.FB"), "xldo.fb");
+    assert_eq!(notations.display("V(x1.x2.B0)"), "V(x1.x2.b0)");
+    assert_eq!(notations.display("VDD!"), "vdd!");
+    // Already as drawn, or not drawn at all: the engine's spelling.
+    for untouched in ["b0", "B1", "x1.MP.__gint", "V(B0)-V(VIN)", "B0#branch"] {
+        assert_eq!(notations.display(untouched), untouched);
+    }
+}
+
+/// A current or a power names a device, which no net label spells, even when
+/// a net shares its name.
+#[test]
+fn a_device_named_like_a_net_keeps_its_name() {
+    let notations = BusNotations::of_sheets(std::iter::once(labelled_sheet(&["vin"]).document()));
+
+    assert_eq!(notations.display("I(VIN)"), "I(VIN)");
+    assert_eq!(notations.display("P(VIN)"), "P(VIN)");
+    assert_eq!(notations.display("V(VIN)"), "V(vin)");
+}
+
+/// Two drawings that spell one name two ways leave it as the engine spells
+/// it: quoting either would misquote the other.
+#[test]
+fn a_net_spelled_two_ways_keeps_its_engine_name() {
+    let notations = BusNotations::of_sheets([
+        labelled_sheet(&["Out"]).document(),
+        labelled_sheet(&["out"]).document(),
+    ]);
+
+    assert_eq!(notations.display("OUT"), "OUT");
+    assert_eq!(notations.display("FB"), "fb");
 }
 
 /// The lane's consistency guard: bit 3 of `DATA[7:0]` inside `x1` reads the
