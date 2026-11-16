@@ -6,8 +6,10 @@
 
 mod presentation;
 pub mod result_insert;
+use rspice_results::verification::CellStatus;
 use rspice_results_ui::report::composer::{PageMoveDirection, PageSettingEdit};
 use rspice_results_ui::report::inspector::DocumentPublicationEdit;
+use rspice_results_ui::report::preview::SummaryMetrics;
 use rspice_results_ui::report::session::{
     page_update_policy_from_index, report_template_from_index, report_template_index, valid_title,
 };
@@ -393,102 +395,35 @@ pub fn show(cx: &mut Cx<'_, HardcopyFeature>, ui: &mut Ui) {
     report::dialogs::show(ui.ctx(), &mut presentation::ReportHost(cx));
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ReportJointYield {
-    passing: usize,
-    total: usize,
-}
-
-impl ReportJointYield {
-    fn from_results(results: &[rspice_results::yield_analysis::YieldResult]) -> Option<Self> {
-        let total = results.first()?.total_runs;
-        if total == 0
-            || results
-                .iter()
-                .any(|result| result.total_runs != total || result.trail.len() != total)
-        {
-            return None;
-        }
-        let passing = (0..total)
-            .filter(|index| results.iter().all(|result| result.trail[*index]))
-            .count();
-        Some(Self { passing, total })
-    }
-
-    fn percent(self) -> f64 {
-        self.passing as f64 / self.total as f64 * 100.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReportSummaryMetrics {
-    pub checks_passing: usize,
-    pub checks_total: usize,
-    joint_yield: Option<ReportJointYield>,
-    pub pvt_completed: Option<usize>,
-    pub pvt_total: Option<usize>,
-}
-
-impl ReportSummaryMetrics {
-    pub fn from_model(model: &Model) -> Self {
-        let run = model.simulation.active_run();
-        let checks_total = model.workspace.content.specs.len();
-        let checks_passing = model
-            .workspace
-            .content
-            .specs
-            .iter()
-            .filter(|spec| {
-                run.and_then(|run| {
-                    run.analyses
-                        .iter()
-                        .rev()
-                        .filter(|analysis| analysis.success && analysis.provenance.is_some())
-                        .flat_map(|analysis| analysis.measurements.iter())
-                        .find(|measurement| {
-                            measurement.name.eq_ignore_ascii_case(&spec.measurement)
-                        })
-                        .filter(|measurement| measurement.passed && measurement.error.is_none())
-                        .and_then(|measurement| {
-                            measurement.value_in_unit(&spec.unit).ok().flatten()
-                        })
-                        .filter(|value| value.is_finite())
-                })
-                .is_some_and(|value| spec.passes(value))
+/// The report's summary, as the verification sheet judged the active run:
+/// the specifications that pass, the Monte Carlo joint yield, and the points
+/// no specification fails at. Nothing here judges a value; a run the sheet
+/// does not judge states nothing.
+#[must_use]
+pub fn summary_metrics(model: &Model) -> SummaryMetrics {
+    let Some(sheet) = model
+        .simulation
+        .verification_sheet()
+        .filter(|sheet| sheet.is_judged())
+    else {
+        return SummaryMetrics::default();
+    };
+    let counts = sheet.summary.counts;
+    let points = sheet.points.len();
+    let failing_points = (0..points)
+        .filter(|point| {
+            sheet.rows.iter().any(|row| {
+                row.cells
+                    .get(*point)
+                    .is_some_and(|cell| matches!(cell.status, CellStatus::Fail | CellStatus::Error))
             })
-            .count();
-
-        let joint_yield = model
-            .simulation
-            .yield_results_for_active_dataset()
-            .and_then(ReportJointYield::from_results);
-
-        let pvt_progress = run
-            .and_then(|run| {
-                run.analyses.iter().rev().find(|analysis| {
-                    analysis.analysis_type == crate::state::AnalysisType::Corner
-                        && analysis.success
-                        && analysis.provenance.is_some()
-                })
-            })
-            .and_then(|analysis| match analysis.family_metadata.as_ref() {
-                Some(crate::state::AnalysisResultFamilyMetadata::Corner {
-                    x_values,
-                    failed_corners,
-                    ..
-                }) if !x_values.is_empty() && *failed_corners <= x_values.len() => {
-                    Some((x_values.len() - *failed_corners, x_values.len()))
-                }
-                _ => None,
-            });
-
-        Self {
-            checks_passing,
-            checks_total,
-            joint_yield,
-            pvt_completed: pvt_progress.map(|(completed, _)| completed),
-            pvt_total: pvt_progress.map(|(_, total)| total),
-        }
+        })
+        .count();
+    SummaryMetrics {
+        specifications: (!sheet.rows.is_empty())
+            .then_some((counts.pass + counts.near, sheet.rows.len())),
+        joint_yield: sheet.joint_yield,
+        points: (points > 1).then_some((points - failing_points, points)),
     }
 }
 

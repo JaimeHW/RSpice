@@ -918,73 +918,83 @@ fn invalid_report_page_selection_chooses_a_retained_page() {
     );
 }
 
+/// The report's summary states the verification sheet's own counts: on the
+/// corner run, gain fails at the slow hot corner, so three of four
+/// specifications pass and six of seven points.
 #[test]
-fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
-    fn provenance(seed: u8) -> rspice_app_state::state::AnalysisResultProvenance {
-        rspice_app_state::state::AnalysisResultProvenance::new(
-            rspice_app_state::product::AnalysisInstanceId::new(),
-            rspice_app_state::product::ObjectRevision::INITIAL,
-            rspice_app_state::product::ContentDigest::from_bytes([seed; 32]),
-            Vec::new(),
-        )
-        .expect("test provenance is valid")
-    }
+fn report_summary_states_the_sheets_counts_on_the_corner_run() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::seed_corner;
+    use rspice_results_ui::report::preview::summary_cells;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.model.workspace.content.specs = vec![
-        rspice_app_state::state::SpecEntry {
-            measurement: "gain".to_owned(),
-            expression: String::new(),
-            min: Some(10.0),
-            max: None,
-            unit: "V/V".to_owned(),
-            scope: rspice_app_state::state::SpecPointScope::AllPoints,
-        },
-        rspice_app_state::state::SpecEntry {
-            measurement: "bandwidth".to_owned(),
-            expression: String::new(),
-            min: Some(1_000.0),
-            max: None,
-            unit: "Hz".to_owned(),
-            scope: rspice_app_state::state::SpecPointScope::AllPoints,
-        },
-    ];
-    let checks = rspice_app_state::state::AnalysisResult::new(
-        1,
-        rspice_app_state::state::AnalysisType::Ac,
-        "AC",
-    )
-    .with_measurements(vec![
-        rspice_core::MeasureResult::success("gain", 12.0),
-        rspice_core::MeasureResult::success("bandwidth", 900.0),
-    ])
-    .with_provenance(provenance(0x31));
-    let corners = rspice_app_state::state::AnalysisResult::new(
-        2,
-        rspice_app_state::state::AnalysisType::Corner,
-        "PVT",
-    )
-    .with_family_metadata(
-        rspice_app_state::state::AnalysisResultFamilyMetadata::Corner {
-            member_measurements: Vec::new(),
-            x_values: vec![0.0, 1.0, 2.0],
-            x_label: "corner".to_owned(),
-            x_unit: String::new(),
-            temperatures_c: vec![-40.0, 27.0, 125.0],
-            corner_labels: vec!["ss".to_owned(), "tt".to_owned(), "ff".to_owned()],
-            failed_corners: 1,
-        },
-    )
-    .with_provenance(provenance(0x32));
-    let mut run = rspice_app_state::state::SimulationRun::new(1);
-    run.add_analysis(checks);
-    run.add_analysis(corners);
-    app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
+    seed_corner(&mut app.state.model);
+    let sheet = app
+        .state
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("the corner run is judged");
+    let counts = sheet.summary.counts;
+    assert_eq!((counts.pass + counts.near, counts.fail), (3, 1));
 
-    let metrics = ReportSummaryMetrics::from_model(&app.state.model);
-    assert_eq!(metrics.checks_passing, 1);
-    assert_eq!(metrics.checks_total, 2);
-    assert_eq!(metrics.pvt_completed, Some(2));
-    assert_eq!(metrics.pvt_total, Some(3));
+    let metrics = summary_metrics(&app.state.model);
+    assert_eq!(
+        metrics.specifications,
+        Some((counts.pass + counts.near, sheet.rows.len()))
+    );
+    assert_eq!(metrics.points, Some((6, sheet.points.len())));
+    assert_eq!(metrics.joint_yield, None);
+    assert_eq!(
+        summary_cells(metrics).map(|(value, _)| value),
+        ["3 / 4", "not run", "6 / 7"]
+    );
+}
+
+/// A failing Monte Carlo run: the gain floor fails on three of forty trials,
+/// and the report's yield is the sheet's joint yield.
+#[test]
+fn report_summary_states_the_sheets_joint_yield_on_a_failing_run() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::seed_monte_carlo;
+    use rspice_results::verification::JointYield;
+    use rspice_results_ui::report::preview::summary_cells;
+
+    let mut app = RSpiceApp::test_instance();
+    seed_monte_carlo(&mut app.state.model);
+    let sheet = app
+        .state
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("the Monte Carlo run is judged");
+    assert_eq!(sheet.summary.counts.fail, 1);
+    assert!(matches!(
+        sheet.joint_yield,
+        Some(JointYield::Counted {
+            passing: 37,
+            total: 40,
+            ..
+        })
+    ));
+
+    let metrics = summary_metrics(&app.state.model);
+    assert_eq!(metrics.specifications, Some((0, 1)));
+    assert_eq!(metrics.joint_yield, sheet.joint_yield);
+    assert_eq!(
+        summary_cells(metrics).map(|(value, _)| value),
+        ["0 / 1", "92.5%", "not run"]
+    );
+}
+
+/// With nothing run, the summary states nothing it has not judged.
+#[test]
+fn report_summary_states_nothing_before_a_run() {
+    let mut app = RSpiceApp::test_instance();
+    let model = &mut app.state.model;
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+    assert_eq!(
+        summary_metrics(&app.state.model),
+        rspice_results_ui::report::preview::SummaryMetrics::default()
+    );
 }

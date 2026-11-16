@@ -6,6 +6,7 @@ use rspice_results::report_document::{
     ReportBlock, ReportBlockId, ReportBlockKind, ReportDocument, ReportPage, ReportPageId,
     ReportReferenceMode, ReportSourceId,
 };
+use rspice_results::verification::JointYield;
 use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -14,13 +15,42 @@ use rspice_ui_kit::{
 use rspice_vocabulary::product::ResultDocumentId;
 use std::borrow::Cow;
 
-#[derive(Debug, Clone, Copy)]
+/// The verification sheet's roll-up, as the report's summary states it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SummaryMetrics {
-    pub checks_passing: usize,
-    pub checks_total: usize,
-    pub joint_yield_percent: Option<f64>,
-    pub pvt_completed: Option<usize>,
-    pub pvt_total: Option<usize>,
+    /// Specifications that pass, of every specification; `None` while no
+    /// run is judged.
+    pub specifications: Option<(usize, usize)>,
+    /// Monte Carlo trials that pass every specification with a yield.
+    pub joint_yield: Option<JointYield>,
+    /// Points no specification fails at, of the points the run solved;
+    /// `None` for a run of one point.
+    pub points: Option<(usize, usize)>,
+}
+
+/// The summary's three cells, value and caption.
+#[must_use]
+pub fn summary_cells(metrics: SummaryMetrics) -> [(String, &'static str); 3] {
+    let not_run = || "not run".to_owned();
+    let fraction = |(passing, total): (usize, usize)| format!("{passing} / {total}");
+    let joint_yield = match metrics.joint_yield {
+        Some(JointYield::Counted { passing, total, .. }) if total > 0 => {
+            format!("{:.1}%", passing as f64 / total as f64 * 100.0)
+        }
+        Some(JointYield::DifferentTrials) => "not computed".to_owned(),
+        _ => not_run(),
+    };
+    [
+        (
+            metrics.specifications.map_or_else(not_run, fraction),
+            "specifications passing",
+        ),
+        (joint_yield, "Monte Carlo joint yield"),
+        (
+            metrics.points.map_or_else(not_run, fraction),
+            "points passing",
+        ),
+    ]
 }
 
 pub trait PreviewHost {
@@ -189,21 +219,7 @@ fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
 }
 
 fn summary_grid(ui: &mut Ui, metrics: SummaryMetrics, compact: bool) {
-    let yield_value = metrics
-        .joint_yield_percent
-        .map_or_else(|| "not run".to_owned(), |joint| format!("{:.1}%", joint));
-    let pvt_value = metrics.pvt_completed.zip(metrics.pvt_total).map_or_else(
-        || "not run".to_owned(),
-        |(completed, total)| format!("{completed} / {total}"),
-    );
-    let cells = [
-        (
-            format!("{} / {}", metrics.checks_passing, metrics.checks_total),
-            "configured checks passing",
-        ),
-        (yield_value, "Monte Carlo yield estimate"),
-        (pvt_value, "PVT points completed"),
-    ];
+    let cells = summary_cells(metrics);
     if compact {
         for (value, label) in cells {
             summary_cell(ui, &value, label);

@@ -1,24 +1,14 @@
 //! Source queries and authoritative edits for report presentation.
 use super::*;
 use rspice_results_ui::report::preview::report_block_element_title;
-use rspice_results_ui::report::{
-    inspector::InspectorHost,
-    preview::{PreviewHost, SummaryMetrics},
-};
+use rspice_results_ui::report::{inspector::InspectorHost, preview::PreviewHost};
 use rspice_vocabulary::product::ResultDocumentId;
 
 pub(super) struct ReportHost<'a, 'c>(pub(super) &'a mut Cx<'c, HardcopyFeature>);
 
 impl PreviewHost for ReportHost<'_, '_> {
     fn summary_metrics(&self) -> SummaryMetrics {
-        let metrics = ReportSummaryMetrics::from_model(self.0.model);
-        SummaryMetrics {
-            checks_passing: metrics.checks_passing,
-            checks_total: metrics.checks_total,
-            joint_yield_percent: metrics.joint_yield.map(ReportJointYield::percent),
-            pvt_completed: metrics.pvt_completed,
-            pvt_total: metrics.pvt_total,
-        }
+        summary_metrics(self.0.model)
     }
     fn selected_block(&self) -> Option<ReportBlockId> {
         self.0.state.report_authoring.selected_report_block
