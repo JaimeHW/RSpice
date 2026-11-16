@@ -9,11 +9,13 @@
 
 use egui::Ui;
 
+use crate::state::SimulationPage;
 use crate::state::model_library::{ModelSourceAuthority, SimulationPlanModelBinding, short_digest};
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::{ModelGateFact, QualificationGate};
@@ -471,6 +473,7 @@ fn corner_options(model: &Model, library: &str) -> Vec<String> {
 }
 
 pub fn apply_model_binding_action(cx: &mut Cx<'_, SimulateFeature>, action: ModelBindingAction) {
+    let before = cx.model.setup_snapshot(SetupParts::MODEL_BINDINGS);
     let mut candidate = cx.model.sim_setup.clone();
     let detail = match action {
         ModelBindingAction::SetCorner { index, corner } => {
@@ -524,6 +527,8 @@ pub fn apply_model_binding_action(cx: &mut Cx<'_, SimulateFeature>, action: Mode
     match candidate.commit_active_plan_configuration_change(detail) {
         Ok(receipt) => {
             cx.model.sim_setup = candidate;
+            cx.model
+                .record_setup_change(SimulationPage::Models.label(), before);
             invalidate_preflight(cx);
             cx.model.record_plan_receipt(receipt.status_line());
         }

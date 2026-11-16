@@ -329,3 +329,32 @@ fn a_variable_created_on_its_page_is_one_step_put_back_exactly() {
         );
     });
 }
+
+// ------------------------------------------------------------------ models
+
+/// The model libraries bound to the plan, in order, with their sections.
+fn bindings(app: &RSpiceApp) -> String {
+    format!("{:?}", app.state.model.sim_setup.model_bindings)
+}
+
+/// A library detached on the Models page is one step: Undo binds it again
+/// where it was, with its section, and Redo detaches it again.
+#[test]
+fn a_library_detached_on_the_models_page_is_one_step_put_back_exactly() {
+    use rspice_app_simulate::workbench::surfaces::simulate::page_models::{
+        ModelBindingAction, apply_model_binding_action,
+    };
+
+    let mut app = app_with_a_moded_device("").0;
+    app.state.simulate.simulation_page = SimulationPage::Models;
+    assert!(
+        !app.state.model.sim_setup.model_bindings.is_empty(),
+        "the design binds its connect modules"
+    );
+    one_step(&mut app, "detach", bindings, |app| {
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(app),
+            ModelBindingAction::Remove(0),
+        );
+    });
+}
