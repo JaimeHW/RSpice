@@ -46,7 +46,12 @@ fn transient(deck: &str, node: &str) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// Root-mean-square difference of `(time, value)` against `reference`,
-/// read at the nearest reference time at or after each point.
+/// read between its points as the straight line a transient's points stand
+/// for.
+///
+/// The two runs take their own steps, so a reference read as a staircase
+/// would charge each point with how far apart the two grids are wherever the
+/// response moves, not with how far apart the two answers are.
 fn rms_difference(time: &[f64], value: &[f64], reference: &(Vec<f64>, Vec<f64>)) -> f64 {
     let (reference_time, reference_value) = reference;
     let squares: f64 = time
@@ -55,8 +60,15 @@ fn rms_difference(time: &[f64], value: &[f64], reference: &(Vec<f64>, Vec<f64>))
         .map(|(&t, &v)| {
             let k = reference_time
                 .partition_point(|&x| x < t)
-                .min(reference_time.len() - 1);
-            (v - reference_value[k]).powi(2)
+                .clamp(1, reference_time.len() - 1);
+            let (t0, t1) = (reference_time[k - 1], reference_time[k]);
+            let (v0, v1) = (reference_value[k - 1], reference_value[k]);
+            let read = if t1 > t0 {
+                v0 + (v1 - v0) * ((t - t0) / (t1 - t0)).clamp(0.0, 1.0)
+            } else {
+                v1
+            };
+            (v - read).powi(2)
         })
         .sum();
     (squares / time.len() as f64).sqrt()
@@ -163,6 +175,32 @@ fn delay_names_the_transport_delay_the_table_already_holds() {
     );
     let rms = rms_difference(&time, &fitted, &reference);
     assert!(rms < 1e-3, "delayed step response RMS difference {rms}");
+    // Both against the closed form: the 1 us input ramp starting at 0.1 ms,
+    // delayed 0.2 ms, through the pole. A unit ramp's response is
+    // g(x) = x - (1 - e^(-pole x)) / pole.
+    let g = |x: f64| {
+        if x <= 0.0 {
+            0.0
+        } else {
+            x - (1.0 - (-pole * x).exp()) / pole
+        }
+    };
+    let (start, rise) = (0.1e-3 + delay, 1e-6);
+    let exact = |t: f64| (g(t - start) - g(t - start - rise)) / rise;
+    for (name, (time, value)) in [
+        ("FREQ", (&time, &fitted)),
+        ("LAPLACE", (&reference.0, &reference.1)),
+    ] {
+        let worst = time
+            .iter()
+            .zip(value)
+            .map(|(&t, &v)| (v - exact(t)).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            worst < 1e-4,
+            "{name} departs from the closed form by {worst}"
+        );
+    }
 }
 
 #[test]
