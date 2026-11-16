@@ -292,7 +292,7 @@ impl<'u> FormRows<'u> {
                     .margin(egui::Margin::symmetric(8, 4)),
             );
             form::name_control(ui, &response, label);
-            select_all_on_keyboard_focus(ui, &response, value);
+            select_all_until_focused(ui, &response, value);
             response
         })
     }
@@ -348,7 +348,7 @@ impl<'u> FormRows<'u> {
                 );
             }
             form::name_control(ui, &response, label);
-            select_all_on_keyboard_focus(ui, &response, value);
+            select_all_until_focused(ui, &response, value);
             if !note.is_empty() {
                 ui.add(
                     egui::Label::new(
@@ -1544,20 +1544,21 @@ fn paint_row_label(ui: &Ui, label: &str, rect: egui::Rect) {
     );
 }
 
-/// Select the whole value when a field takes focus from anything but a click.
+/// Keep the whole value selected while the field is without the keyboard, so
+/// it takes the keyboard with its value selected — when the form opens, or by
+/// Tab — and typing replaces a prefilled name. A click still lands the caret
+/// where it was aimed: the press places it over this selection.
 ///
 /// egui's own default is a caret at position zero, which for a prefilled name
-/// means the reader types in front of a suggestion instead of over it.
-fn select_all_on_keyboard_focus(ui: &Ui, response: &Response, value: &str) {
-    if !response.gained_focus() || value.is_empty() {
+/// means the reader types in front of a suggestion instead of over it. The
+/// selection waits for the keyboard rather than following it in, because the
+/// dialog hands its first field the keyboard only after drawing it, so the
+/// field never reports gaining focus as a form opens.
+fn select_all_until_focused(ui: &Ui, response: &Response, value: &str) {
+    if response.has_focus() || value.is_empty() {
         return;
     }
-    if ui.input(|input| input.pointer.any_down() || input.pointer.any_pressed()) {
-        return;
-    }
-    let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) else {
-        return;
-    };
+    let mut state = egui::TextEdit::load_state(ui.ctx(), response.id).unwrap_or_default();
     state
         .cursor
         .set_char_range(Some(egui::text::CCursorRange::two(
@@ -2617,6 +2618,73 @@ mod tests {
         let (choice, add) = list_frame(&ctx, id, &mut draft, vec![enter()]);
         assert!(!add, "an empty field has nothing to add");
         assert_eq!(choice, DialogChoice::Primary, "so Enter is the form's");
+    }
+
+    /// A form opens with its first field's prefilled value selected, so what
+    /// the reader types replaces it, and Tab selects the next field's whole
+    /// value too. The dialog hands its field the keyboard only after drawing
+    /// it, which egui never reports as the field gaining focus.
+    #[test]
+    fn a_form_opens_with_its_prefilled_value_selected_for_typing_over() {
+        fn frame(ctx: &Context, name: &mut String, width: &mut String, events: Vec<egui::Event>) {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1024.0, 640.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    let _ = CommandForm::new("Rename", "Rename").show(ctx, |rows| {
+                        let field = Id::new("command-form.open-select.name");
+                        rows.text("Name", field, name, "");
+                        rows.quantity(
+                            "Width",
+                            Id::new("command-form.open-select.width"),
+                            width,
+                            "",
+                            "m",
+                            "",
+                        );
+                        Some(field)
+                    });
+                },
+            );
+        }
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut name = String::from("old_name");
+        let mut width = String::from("10u");
+        for _ in 0..3 {
+            frame(&ctx, &mut name, &mut width, Vec::new());
+        }
+        frame(
+            &ctx,
+            &mut name,
+            &mut width,
+            vec![egui::Event::Text("amp".to_owned())],
+        );
+        assert_eq!(name, "amp", "typing replaced the prefilled name");
+
+        let tab = egui::Event::Key {
+            key: Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        frame(&ctx, &mut name, &mut width, vec![tab]);
+        frame(&ctx, &mut name, &mut width, Vec::new());
+        frame(
+            &ctx,
+            &mut name,
+            &mut width,
+            vec![egui::Event::Text("2".to_owned())],
+        );
+        assert_eq!(width, "2", "Tab selected the next field's whole value");
+        assert_eq!(name, "amp", "and left the first field as typed");
     }
 
     /// A long line is shortened from the middle, so both ends survive.

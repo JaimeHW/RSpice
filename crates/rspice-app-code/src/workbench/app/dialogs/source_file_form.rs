@@ -149,17 +149,12 @@ pub(in crate::workbench) fn render(
                 CodeSourceFileAction::Move => MessageId::CodeSourceFileNewPath,
                 _ => MessageId::CodeSourceFileNewName,
             });
-            // The dialog puts the keyboard on the field only after drawing it,
-            // so the field never reports gaining focus then. The selection is
-            // placed while the field waits for the keyboard instead.
-            if !ctx.memory(|memory| memory.has_focus(field)) {
-                let whole = draft.action == CodeSourceFileAction::Move;
-                place_selection(ctx, field, &proposed, whole);
-            }
             let response = rows.text(&label, field, &mut proposed, "");
             edited |= response.changed();
-            if draft.action != CodeSourceFileAction::Move {
-                select_stem_on_keyboard_focus(&response, &proposed);
+            // The form keeps the whole name selected for the keyboard to land
+            // on; a name, unlike a path, keeps its folder and extension.
+            if draft.action != CodeSourceFileAction::Move && !response.has_focus() {
+                select_stem(ctx, field, &proposed);
             }
             let line = match (name_line.as_deref(), rewrites.as_deref()) {
                 (Some(error), _) => FieldLine::Error(error),
@@ -434,14 +429,14 @@ fn stem_range(path: &str) -> (usize, usize) {
     )
 }
 
-/// Select the whole of `value` in the field `id`, or only its stem, for the
-/// keyboard to land on.
-fn place_selection(ctx: &Context, id: Id, value: &str, whole: bool) {
-    let (start, end) = if whole {
-        (0, value.chars().count())
-    } else {
-        stem_range(value)
-    };
+/// Select only the stem of `value` in the field `id`, for the keyboard to
+/// land on as every file manager does: typing replaces `untitled` and keeps
+/// `.va`.
+fn select_stem(ctx: &Context, id: Id, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    let (start, end) = stem_range(value);
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     state
         .cursor
@@ -450,20 +445,6 @@ fn place_selection(ctx: &Context, id: Id, value: &str, whole: bool) {
             egui::text::CCursor::new(end),
         )));
     egui::TextEdit::store_state(ctx, id, state);
-}
-
-/// Select the name's stem when the field takes focus from anything but a
-/// click, as every file manager does: typing replaces `untitled` and keeps
-/// `.va`. This overrides the form's select-all, which ran first.
-fn select_stem_on_keyboard_focus(response: &egui::Response, value: &str) {
-    let ctx = &response.ctx;
-    if !response.gained_focus() || value.is_empty() {
-        return;
-    }
-    if ctx.input(|input| input.pointer.any_down() || input.pointer.any_pressed()) {
-        return;
-    }
-    place_selection(ctx, response.id, value, false);
 }
 
 #[cfg(test)]
