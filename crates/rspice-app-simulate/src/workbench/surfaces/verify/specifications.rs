@@ -40,7 +40,7 @@ use super::table::{
     Verdict,
 };
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
-use super::{format_bound, format_value, record_action, verification_plan_id};
+use super::{difference_text, format_bound, format_value, record_action, verification_plan_id};
 
 const TABLE_ID: &str = "verify.specifications";
 const MENU_W: f32 = 240.0;
@@ -1001,12 +1001,6 @@ const fn status_severity(status: RowStatus) -> u8 {
     }
 }
 
-/// A difference in the unit, signed either way.
-fn signed_value(value: f64, unit: &str) -> String {
-    let sign = if value > 0.0 { "+" } else { "" };
-    format!("{sign}{}", format_value(value, unit))
-}
-
 /// Lay the sheet out for this frame, with the row `selected` names open to
 /// editing.
 fn sheet_view(model: &Model, selected: Option<&str>) -> SheetView {
@@ -1182,9 +1176,9 @@ fn cell(sheet: &Sheet, row: &Row, col: Col, open: bool) -> Cell {
         Col::Margin => row
             .worst
             .as_ref()
-            .and_then(|worst| worst.signed_margin)
-            .map_or_else(Cell::absent, |margin| {
-                Cell::number(signed_value(margin, unit)).sort_by(SortKey::Number(margin))
+            .and_then(|worst| worst.value.zip(worst.signed_margin))
+            .map_or_else(Cell::absent, |(value, margin)| {
+                Cell::number(difference_text(margin, value, unit)).sort_by(SortKey::Number(margin))
             }),
         Col::Yield => row
             .statistics

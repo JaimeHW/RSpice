@@ -259,19 +259,15 @@ fn limit_cell(row: &Row) -> Cell {
     }
 }
 
-/// A margin, signed either way, in the specification's unit.
-pub(crate) fn margin_text(margin: f64, unit: &str) -> String {
-    let sign = if margin > 0.0 { "+" } else { "" };
-    format!("{sign}{}", format_value(margin, unit))
-}
-
 /// One sheet cell as the table shows it, inked by its status and nothing
 /// else.
 pub(super) fn value_cell(cell: &SheetCell, unit: &str) -> Cell {
     let number =
         |value: f64| Cell::number(format_value(value, unit)).sort_by(SortKey::Number(value));
-    let margin = |shown: Cell| match cell.signed_margin {
-        Some(margin) => shown.hint(format!("Margin {}", margin_text(margin, unit))),
+    let margin = |shown: Cell| match cell.value.zip(cell.signed_margin) {
+        Some((value, margin)) => {
+            shown.hint(format!("Margin {}", difference_text(margin, value, unit)))
+        }
         None => shown,
     };
     match (cell.status, cell.value) {
@@ -617,8 +613,11 @@ pub(crate) fn point_facts(model: &Model, session: &VerificationSessionState) -> 
                 |value| format_value(value, &row.unit),
             ),
         )];
-        if let Some(margin) = cell.signed_margin {
-            rows.push(("Margin".to_owned(), margin_text(margin, &row.unit)));
+        if let Some((value, margin)) = cell.value.zip(cell.signed_margin) {
+            rows.push((
+                "Margin".to_owned(),
+                difference_text(margin, value, &row.unit),
+            ));
         }
         let limit = limit_text(row);
         if !limit.is_empty() {

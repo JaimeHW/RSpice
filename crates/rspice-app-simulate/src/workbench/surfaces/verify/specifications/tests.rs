@@ -443,8 +443,40 @@ fn every_way_of_writing_a_limit_reads_as_written() {
     );
 }
 
-/// A level in decibels, a percentage and an angle take no SI prefix: a
-/// margin of six tenths of a decibel is `-0.6000 dB`, never `-600.0 mdB`.
+/// A margin reads like the value it is the difference of: no finer than the
+/// worst value's last digit, in its own prefix, signed either way.
+#[test]
+fn a_margin_carries_the_resolution_of_its_worst_value() {
+    let mut harness = SimulateTestHost::harness();
+    seed_corner(&mut harness.model);
+    refresh(&mut harness);
+    let view = sheet_view(&harness.model, None);
+    let cell = |measurement: &str, col: Col| {
+        let row = view.row(measurement).expect("a row");
+        view.rows[row].cells[view.column(col).expect("a shown column")]
+            .text
+            .clone()
+    };
+    for (measurement, worst, margin) in [
+        ("gain", "39.40 dB", "-0.60 dB"),
+        ("bw", "11.90 MHz", "+1.90 MHz"),
+        ("pm", "47.00 deg", "+2.00 deg"),
+        ("idd", "1.160 mA", "+40 \u{b5}A"),
+    ] {
+        assert_eq!(cell(measurement, Col::Worst), worst, "{measurement}");
+        assert_eq!(cell(measurement, Col::Margin), margin, "{measurement}");
+    }
+
+    // Under the value's last digit a margin is zero spelled as the value is,
+    // on its side; past four significant digits it rounds as a value does.
+    assert_eq!(difference_text(-0.004, 39.996, "dB"), "-0.00 dB");
+    assert_eq!(difference_text(0.0, 1.2e-3, "A"), "0.000 mA");
+    assert_eq!(difference_text(12.345_6, 0.5, "V"), "+12.35 V");
+    assert_eq!(difference_text(-2.4e-9, 1.0e-6, "s"), "-2 ns");
+}
+
+/// A level in decibels, a percentage and an angle take no SI prefix: six
+/// tenths of a decibel is `-0.6000 dB`, never `-600.0 mdB`.
 #[test]
 fn a_level_or_an_angle_takes_no_si_prefix() {
     assert_eq!(format_value(-0.6, "dB"), "-0.6000 dB");

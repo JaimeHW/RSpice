@@ -83,7 +83,7 @@ fn the_reference_view_compares_every_shared_check() {
             "bw".to_owned(),
             "18.20 MHz".to_owned(),
             "17.10 MHz".to_owned(),
-            "-1.100 MHz".to_owned(),
+            "-1.10 MHz".to_owned(),
             "-6.04 %".to_owned(),
             "rel 2 %".to_owned(),
             "Fail".to_owned(),
@@ -420,7 +420,7 @@ fn the_selected_row_states_its_rule_and_allowance() {
     for (label, value) in [
         ("Reference", "18.20 MHz \u{00b7} Run 3"),
         ("Current", "17.10 MHz \u{00b7} Run 4"),
-        ("Change", "-1.100 MHz (-6.04 %)"),
+        ("Change", "-1.10 MHz (-6.04 %)"),
         ("Tolerance", "rel 2 %"),
         ("Allowed change", "364.0 kHz"),
     ] {

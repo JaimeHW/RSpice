@@ -690,7 +690,7 @@ fn the_selected_cell_states_its_point_value_margin_and_analysis() {
         .signed_margin
         .expect("a judged value has a margin");
     assert!(margin < 0.0);
-    assert_eq!(value("Margin"), Some(margin_text(margin, "dB").as_str()));
+    assert_eq!(value("Margin"), Some("-0.60 dB"));
     assert_eq!(value("Limit"), Some("\u{2265} 40 dB"));
     assert_eq!(value("Status"), Some("Fail"));
     assert_eq!(value("Analysis"), Some("Transient"));

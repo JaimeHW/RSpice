@@ -686,6 +686,16 @@ fn reference_columns() -> [Column; 7] {
     ]
 }
 
+/// The change from `reference` to `current`, no finer than the coarser of
+/// the two as printed.
+fn change_text(reference: f64, current: f64, unit: &str) -> String {
+    difference_text(
+        current - reference,
+        reference.abs().max(current.abs()),
+        unit,
+    )
+}
+
 fn row_cells(row: &ReferenceRow) -> Vec<Cell> {
     let unit = row.unit.as_str();
     let number =
@@ -703,7 +713,8 @@ fn row_cells(row: &ReferenceRow) -> Vec<Cell> {
             (
                 number(*reference),
                 number(*current),
-                Cell::number(signed_value(delta, unit)).sort_by(SortKey::Number(delta)),
+                Cell::number(change_text(*reference, *current, unit))
+                    .sort_by(SortKey::Number(delta)),
                 percent.map_or_else(Cell::absent, |percent| {
                     Cell::number(format!("{percent:+.2} %")).sort_by(SortKey::Number(percent))
                 }),
@@ -801,11 +812,11 @@ pub(crate) fn selected_reference(session: &VerificationSessionState) -> Option<R
             ));
             let delta = current - reference;
             let change = if *reference == 0.0 {
-                signed_value(delta, unit)
+                change_text(*reference, *current, unit)
             } else {
                 format!(
                     "{} ({:+.2} %)",
-                    signed_value(delta, unit),
+                    change_text(*reference, *current, unit),
                     delta / reference.abs() * 100.0
                 )
             };
