@@ -111,6 +111,12 @@ const CATALOG_TRACK_MIN_H: f32 = 120.0;
 
 enum ManagerAction {
     Command(CommandKey),
+    /// Create a project model of the device type at `device` in the engine's
+    /// table of new-model defaults, named `name`, and open it in the editor.
+    CreateModel {
+        device: usize,
+        name: String,
+    },
     ImportModelSource,
     RefreshLibrary {
         library: String,
@@ -351,6 +357,25 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     for action in pending_actions {
         match action {
             ManagerAction::Command(key) => cx.execute(key),
+            ManagerAction::CreateModel { device, name } => {
+                let Some(defaults) = rspice_core::library::DEVICE_MODEL_DEFAULTS.get(device) else {
+                    continue;
+                };
+                match crate::workbench::documents::model_editor::create_new_project_model_and_open(
+                    &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
+                    defaults,
+                    &name,
+                ) {
+                    Ok((library, model)) => {
+                        cx.model.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            format!("Created project model '{library}/{model}'."),
+                        );
+                    }
+                    Err(error) => cx.wb.prompt(format!("Cannot create the model: {error}")),
+                }
+            }
             ManagerAction::ImportModelSource => {
                 ModelsFeature::start_model_source_import(cx, &context)
             }

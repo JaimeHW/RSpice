@@ -740,6 +740,7 @@ const VERIFY_MENU: &[MenuEntry] = &[
 const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::Page(ModelsPage::Models)).access('L'),
     models(ModelsCommand::ModelBrowser).access('B'),
+    models(ModelsCommand::ModelNew).access('W'),
     models(ModelsCommand::ModelEditor).access('E'),
     models(ModelsCommand::ModelCreateProjectCopy).access('C'),
     models(ModelsCommand::ModelCorrelation).access('M'),

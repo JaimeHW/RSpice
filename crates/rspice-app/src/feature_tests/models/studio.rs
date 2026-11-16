@@ -19,6 +19,7 @@ use rspice_app_state::state::model_library::{
 use rspice_app_state::state::{Component, ComponentType, ModelsPage, Point};
 
 mod binned_family;
+mod new_model;
 mod provider_dialog;
 
 /// The Models page, rendered until its layout settles, holding both what it

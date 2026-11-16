@@ -826,6 +826,12 @@ impl PackReleaseConfirmation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelsWorkbenchDialog {
+    /// Models > New model: the device type, by its index in the engine's
+    /// table of new-model defaults, and the name the card will carry.
+    NewModel {
+        device: usize,
+        name: String,
+    },
     #[cfg(target_arch = "wasm32")]
     SelectBrowserImportRoot {
         candidates: Vec<String>,

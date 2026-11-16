@@ -101,34 +101,7 @@ pub fn create_editable_project_copy_and_open(
     source_library_name: &str,
     source_model_name: &str,
 ) -> Result<(String, String), String> {
-    if !parts.platform.project_lifecycle.is_open() {
-        return Err("Open a project before creating an editable model copy".to_owned());
-    }
-    if parts.model.safe_mode.project_read_only() {
-        return Err(
-            "An editable model copy cannot be created while the project is read-only".to_owned(),
-        );
-    }
-    if parts.platform.project_lifecycle.operation_in_progress() {
-        return Err(
-            "Wait for the current project operation before creating an editable model copy"
-                .to_owned(),
-        );
-    }
-    if parts.editor.qualification_execution.is_some() {
-        return Err(
-            "Finish or cancel the active model qualification run before creating another model"
-                .to_owned(),
-        );
-    }
-    if let Some(open) = parts.editor.draft.as_ref()
-        && open.is_dirty()
-    {
-        return Err(format!(
-            "Unsaved model candidate '{}/{}' is open; save or discard it before creating an editable copy",
-            open.library_name, open.model_name
-        ));
-    }
+    creation_refusal(parts, "an editable model copy")?;
 
     let project_library_name =
         available_project_copy_library_name(&parts.model.model_library_manager, source_model_name);
@@ -161,6 +134,173 @@ pub fn create_editable_project_copy_and_open(
             "create editable project model {source_library_name}/{source_model_name} as {project_library_name}/{project_model_name}"
         ),
     )?;
+    parts
+        .workbench
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::ModelEditor),
+            RouteTransitionSource::User,
+        )
+        .map_err(|error| error.to_string())?;
+    *parts.editor = editor;
+    crate::workbench::models::workspace_state::select_library_or_prompt(
+        parts.model,
+        parts.workbench,
+        &project_library_name,
+    );
+    *parts.selected_model = Some(project_model_name.clone());
+    Ok((project_library_name, project_model_name))
+}
+
+/// Attach `library` to the active plan, as the Simulate Models page's
+/// Attach does and as one step of the setup's history, unless the plan binds
+/// it already: a model made in the project is one the project's runs read.
+fn attach_library_to_active_plan(model: &mut Model, library: &str) -> Result<(), String> {
+    if model
+        .sim_setup
+        .model_bindings
+        .iter()
+        .any(|binding| binding.library_name.eq_ignore_ascii_case(library))
+    {
+        return Ok(());
+    }
+    let before = model
+        .setup_snapshot(crate::workbench::app_state::design_history::SetupParts::MODEL_BINDINGS);
+    let mut candidate = model.sim_setup.clone();
+    candidate.model_bindings.push(
+        model
+            .model_library_manager
+            .simulation_plan_binding(library)?,
+    );
+    model
+        .model_library_manager
+        .validate_simulation_plan_bindings(&candidate.model_bindings)?;
+    let receipt = candidate
+        .commit_active_plan_configuration_change(format!(
+            "Attached model library {library} to the plan."
+        ))
+        .map_err(|error| error.to_string())?;
+    model.sim_setup = candidate;
+    model.record_setup_change(crate::state::SimulationPage::Models.label(), before);
+    model.record_plan_receipt(receipt.status_line());
+    Ok(())
+}
+
+/// Why the editor cannot take a newly created project model now, naming
+/// `what` is being created: no project, a read-only one, a project operation
+/// in flight, a qualification run, or an unsaved candidate it would replace.
+fn creation_refusal(parts: &ModelEditorParts<'_>, what: &str) -> Result<(), String> {
+    if !parts.platform.project_lifecycle.is_open() {
+        return Err(format!("Open a project before creating {what}"));
+    }
+    if parts.model.safe_mode.project_read_only() {
+        return Err(format!(
+            "The project is read-only, so {what} cannot be created"
+        ));
+    }
+    if parts.platform.project_lifecycle.operation_in_progress() {
+        return Err(format!(
+            "Wait for the current project operation before creating {what}"
+        ));
+    }
+    if parts.editor.qualification_execution.is_some() {
+        return Err(
+            "Finish or cancel the active model qualification run before creating another model"
+                .to_owned(),
+        );
+    }
+    if let Some(open) = parts.editor.draft.as_ref()
+        && open.is_dirty()
+    {
+        return Err(format!(
+            "Unsaved model candidate '{}/{}' is open; save or discard it before creating {what}",
+            open.library_name, open.model_name
+        ));
+    }
+    Ok(())
+}
+
+/// Create a new project model of the device type `defaults` describes, named
+/// `name`: its card states the type, its level when it has more than one,
+/// and every parameter of the type at the engine's own default, each with
+/// its unit and what it is. The model is published as one undoable project
+/// revision in a library of its own and opened in the model editor, as an
+/// editable copy is.
+pub fn create_new_project_model_and_open(
+    parts: &mut ModelEditorParts<'_>,
+    defaults: &rspice_core::library::DeviceModelDefaults,
+    name: &str,
+) -> Result<(String, String), String> {
+    creation_refusal(parts, "a model")?;
+    let name = name.trim();
+    let mut numeric_parameters = std::collections::BTreeMap::new();
+    if let Some(level) = defaults.level {
+        numeric_parameters.insert("LEVEL".to_owned(), f64::from(level));
+    }
+    for parameter in defaults.parameters {
+        numeric_parameters.insert(parameter.name.to_owned(), parameter.default);
+    }
+    let base = ProjectModelDefinition {
+        name: name.to_owned(),
+        spice_type: defaults.spice_type.to_owned(),
+        description: defaults.label.to_owned(),
+        numeric_parameters,
+        string_parameters: std::collections::BTreeMap::new(),
+    };
+    let mut metadata = base.reconcile_metadata(None)?;
+    for parameter in &mut metadata.parameters {
+        if parameter.name == "LEVEL" {
+            parameter.description = "model level".to_owned();
+            continue;
+        }
+        if let Some(default) = defaults
+            .parameters
+            .iter()
+            .find(|default| default.name == parameter.name)
+        {
+            parameter.unit = (!default.unit.is_empty()).then(|| default.unit.to_owned());
+            default.description.clone_into(&mut parameter.description);
+        }
+    }
+    let definition = ProjectModelRevisionDefinition::new(base, metadata);
+
+    let project_library_name =
+        available_project_copy_library_name(&parts.model.model_library_manager, name);
+    let mut candidate = parts.model.model_library_manager.clone();
+    let commit = candidate.create_project_model_revision(
+        &project_library_name,
+        &definition,
+        &ModelQualificationState::default(),
+    )?;
+    let project_model_name = commit.model_name.clone();
+    let expected_project_revision = parts
+        .model
+        .workspace
+        .content
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    let mut editor = ModelEditorState::default();
+    editor.open(
+        &candidate,
+        &project_library_name,
+        &project_model_name,
+        expected_project_revision,
+    )?;
+    parts.model.publish_project_model_candidate(
+        candidate,
+        commit,
+        format!(
+            "create {} model {project_library_name}/{project_model_name}",
+            defaults.spice_type
+        ),
+    )?;
+    if let Err(error) = attach_library_to_active_plan(parts.model, &project_library_name) {
+        parts.model.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!("Model library '{project_library_name}' was not attached to the plan: {error}"),
+        );
+    }
     parts
         .workbench
         .navigate(

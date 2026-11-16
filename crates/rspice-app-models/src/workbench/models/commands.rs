@@ -16,6 +16,9 @@ pub enum ModelsCommand {
     /// Open the Models workspace on one of its pages.
     Page(ModelsPage),
     ModelBrowser,
+    /// Create a project model: the device type first, then its card with the
+    /// type's parameters at their defaults.
+    ModelNew,
     ModelCreateProjectCopy,
     ModelEditor,
     ModelCorrelation,
@@ -29,7 +32,7 @@ pub enum ModelsCommand {
 
 impl ModelsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Page(ModelsPage::Models),
         Self::Page(ModelsPage::Symbols),
         Self::Page(ModelsPage::Corners),
@@ -37,6 +40,7 @@ impl ModelsCommand {
         Self::Page(ModelsPage::Include),
         Self::Page(ModelsPage::Qualification),
         Self::ModelBrowser,
+        Self::ModelNew,
         Self::ModelCreateProjectCopy,
         Self::ModelEditor,
         Self::ModelCorrelation,
@@ -58,6 +62,7 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Include) => CommandKey::new("include-graph"),
             Self::Page(ModelsPage::Qualification) => ids::MODEL_QUALIFICATION,
             Self::ModelBrowser => CommandKey::new("model-browser"),
+            Self::ModelNew => CommandKey::new("model-new"),
             Self::ModelCreateProjectCopy => CommandKey::new("model-create-project-copy"),
             Self::ModelEditor => CommandKey::new("model-editor"),
             Self::ModelCorrelation => CommandKey::new("model-correlation"),
@@ -96,6 +101,7 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Include) => ("Include graph", page),
             Self::Page(ModelsPage::Qualification) => ("Model qualification", page),
             Self::ModelBrowser => ("Model browser…", open),
+            Self::ModelNew => ("New model…", writes),
             Self::ModelCreateProjectCopy => ("Create editable project copy", writes),
             Self::ModelEditor => ("Edit model…", writes),
             Self::ModelCorrelation => ("Measurement correlation…", CommandFlags::PALETTE_VISIBLE),

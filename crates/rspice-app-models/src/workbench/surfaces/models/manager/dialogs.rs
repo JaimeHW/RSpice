@@ -18,6 +18,7 @@ pub(super) fn render_dialog(
         return;
     };
     match dialog {
+        ModelsWorkbenchDialog::NewModel { device, name } => new_model(ui, app, device, name),
         ModelsWorkbenchDialog::HeldCatalog => super::held_catalog::dialog(ui, app, hub),
         #[cfg(target_arch = "wasm32")]
         ModelsWorkbenchDialog::SelectBrowserImportRoot {
@@ -842,6 +843,89 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::None => {}
             }
+        }
+    }
+}
+
+/// Models > New model, as Virtuoso and ADS create one: the device type
+/// first, from every type the engine's table of new-model defaults holds,
+/// then the name. Create publishes the card with the type's parameters at
+/// their defaults and opens it in the model editor.
+fn new_model(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, mut device: usize, mut name: String) {
+    let types = rspice_core::library::DEVICE_MODEL_DEFAULTS;
+    let device_type = &types[device.min(types.len() - 1)];
+    let problem = (!name.trim().is_empty())
+        .then(|| {
+            crate::state::model_library::ProjectModelDefinition {
+                name: name.trim().to_owned(),
+                spice_type: device_type.spice_type.to_owned(),
+                description: String::new(),
+                numeric_parameters: BTreeMap::new(),
+                string_parameters: BTreeMap::new(),
+            }
+            .validate()
+            .err()
+        })
+        .flatten();
+    let choice = Dialog::new("New model", "Create")
+        .size(DialogSize::CommandForm)
+        .overlay_scrollbar()
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .primary_enabled(!name.trim().is_empty() && problem.is_none())
+        .ghost("Cancel")
+        .show_with_initial_body_focus(ui.ctx(), |ui| {
+            let options = types
+                .iter()
+                .map(|defaults| format!("{} \u{b7} {}", defaults.spice_type, defaults.label))
+                .collect::<Vec<_>>();
+            egui::Grid::new("new-model-form")
+                .num_columns(2)
+                .spacing(egui::vec2(12.0, 6.0))
+                .show(ui, |ui| {
+                    ui.label("Device type");
+                    if let Some(index) = widgets::select(
+                        ui,
+                        "new-model-device-type",
+                        "Device type",
+                        &options[device.min(options.len() - 1)],
+                        &options,
+                        280.0,
+                    ) {
+                        device = index;
+                    }
+                    ui.end_row();
+                    ui.label("Name");
+                    let field = text_field(
+                        ui,
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text("model name")
+                            .font(theme::field_mono()),
+                        280.0,
+                    );
+                    widgets::name_control(ui, &field, "Model name");
+                    ui.end_row();
+                    if let Some(problem) = &problem {
+                        ui.label("");
+                        ui.colored_label(Tokens::get(ui.ctx()).color.err, problem);
+                        ui.end_row();
+                    }
+                    Some(field.id)
+                })
+                .inner
+        });
+    match choice {
+        DialogChoice::Primary => {
+            app.pending_actions.push(ManagerAction::CreateModel {
+                device,
+                name: name.trim().to_owned(),
+            });
+            app.state.models_view.dialog = None;
+        }
+        DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
+            app.state.models_view.dialog = None;
+        }
+        DialogChoice::None => {
+            app.state.models_view.dialog = Some(ModelsWorkbenchDialog::NewModel { device, name });
         }
     }
 }

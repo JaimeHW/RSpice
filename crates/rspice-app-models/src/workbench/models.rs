@@ -272,6 +272,7 @@ fn model_editor_parts<'a>(cx: &'a mut Cx<'_, ModelsFeature>) -> ModelEditorParts
 fn command_enabled(command: ModelsCommand, reads: &CommandReads<'_>) -> bool {
     let state = reads.state;
     match command {
+        ModelsCommand::ModelNew => !reads.model.safe_mode.project_read_only(),
         ModelsCommand::ModelCreateProjectCopy => {
             selected_model_for_project_copy(model_editor_reads(reads)).is_ok()
         }
@@ -347,6 +348,7 @@ fn command_enabled(command: ModelsCommand, reads: &CommandReads<'_>) -> bool {
 fn disabled_reason(command: ModelsCommand, reads: &CommandReads<'_>) -> &'static str {
     let state = reads.state;
     match command {
+        ModelsCommand::ModelNew => "the project is open read-only",
         ModelsCommand::ModelCreateProjectCopy => {
             selected_model_for_project_copy(model_editor_reads(reads))
                 .err()
@@ -420,6 +422,15 @@ impl CommandSet for ModelsCommand {
                 cx.state.models_page = page;
             }
             Self::ModelBrowser => cx.state.model_browser_state.open = true,
+            // The Models workspace draws its own dialogs.
+            Self::ModelNew => {
+                cx.wb.activate(Workspace::Models);
+                cx.state.models_page = ModelsPage::Models;
+                cx.state.models_view.dialog = Some(ModelsWorkbenchDialog::NewModel {
+                    device: 0,
+                    name: String::new(),
+                });
+            }
             // Disabled, with the reason, while nothing can be copied.
             Self::ModelCreateProjectCopy => {
                 if let Ok((library_name, model_name)) = selected_model_for_project_copy(
