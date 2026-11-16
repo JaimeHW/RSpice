@@ -4,8 +4,10 @@
 //! statistics, as the ADE Assembler yield view and the ADS yield summary put
 //! them: the yield with its confidence interval, the distribution's mean,
 //! sigma and extremes, its capability, and how many trials failed. Under the
-//! table, only once a row is selected, its histogram beside the trials that
-//! failed it; a trial opens in Results as the one member of its family.
+//! table, the selected row's histogram beside the trials that failed it; a
+//! trial opens in Results as the one member of its family. Nothing
+//! selected, the view selects the first row whose yield does not hold, else
+//! the first.
 //!
 //! Every number is the verification sheet's. A trial passes or fails by the
 //! sheet's word, a yield is the acceptance gate's own count, and a row's
@@ -618,6 +620,12 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let entry_allowed = verification_plan_id(cx.model).is_some()
         && verification_evidence_domain(cx.model).answers_a_plan_limit();
     let session = &mut cx.state.verification;
+    if selected_row(sheet, session).is_none() {
+        let first = first_shown(sheet, &rows, point, &gate);
+        session
+            .monte_carlo_table
+            .select(first, Some(RowKey::Number(rows[first] as u64)));
+    }
     let selected = selected_row(sheet, session);
     let body = ui.available_height();
     let detail_h = selected.map_or(0.0, |_| (body * 0.45).clamp(DETAIL_MIN_H, DETAIL_MAX_H));
@@ -802,6 +810,26 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             }
         }
     }
+}
+
+/// The row the view shows when the reader has selected none: the first whose
+/// yield at the shown point does not hold, else the first. By its place in
+/// `rows`, which is never empty here.
+fn first_shown(
+    sheet: &Sheet,
+    rows: &[usize],
+    point: Option<usize>,
+    gate: &MonteCarloSpecificationGate,
+) -> usize {
+    rows.iter()
+        .position(|row| {
+            sheet.rows[*row]
+                .statistics
+                .as_ref()
+                .and_then(|statistics| population(statistics, point)?.yield_count)
+                .is_some_and(|count| !yield_holds(&count, gate))
+        })
+        .unwrap_or(0)
 }
 
 /// The bounds a limit draws on the histogram.

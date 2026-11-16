@@ -136,16 +136,13 @@ fn each_row_states_the_sheets_statistics() {
     );
 }
 
-/// The table shows no detail until a row is selected, and a selected row's
-/// histogram sits under the table beside its failing trials.
+/// A selected row's histogram sits under the table beside its failing
+/// trials.
 #[test]
 fn the_selected_rows_histogram_sits_beside_its_failing_trials() {
     let ctx = context();
     let mut harness = monte_carlo_app();
     let (_, geometry) = settled(&ctx, &mut harness);
-    assert_eq!(geometry.all("table.row").len(), 1);
-    assert!(geometry.one("split").is_none(), "no detail without a row");
-    assert!(geometry.one("histogram").is_none());
     let head = geometry.one("table.head").expect("head");
     let toolbar = geometry.one("toolbar").expect("toolbar");
     assert_eq!(head.top(), toolbar.bottom());
@@ -206,6 +203,53 @@ fn the_selected_rows_histogram_sits_beside_its_failing_trials() {
             ("Analysis".to_owned(), "Monte Carlo".to_owned()),
         ]
     );
+}
+
+#[test]
+fn nothing_selected_selects_the_first_failing_row_else_the_first() {
+    let ctx = context();
+    let selected = |harness: &FeatureHarness<SimulateFeature>| {
+        harness
+            .state
+            .verification
+            .monte_carlo_table
+            .selected_key()
+            .cloned()
+    };
+    let mut harness = SimulateTestHost::harness();
+    seed_monte_carlo_over_different_trials(&mut harness.model);
+    harness.open(VerificationPage::MonteCarlo);
+    assert_eq!(selected(&harness), None);
+    let (_, geometry) = settled(&ctx, &mut harness);
+    assert_eq!(
+        selected(&harness),
+        Some(RowKey::Number(0)),
+        "every yield holds: the first row"
+    );
+    assert_eq!(geometry.one("table.selected"), geometry.one("table.line.0"));
+    assert!(geometry.one("histogram").is_some());
+
+    let limit = super::super::raster::limit;
+    super::super::raster::set_limits(
+        &mut harness.model,
+        vec![
+            limit("gain", Some(40.0), None, "dB"),
+            limit("idd", None, Some(0.85e-3), "A"),
+        ],
+    );
+    harness.state.verification.monte_carlo_table.selection = None;
+    let (_, geometry) = settled(&ctx, &mut harness);
+    assert_eq!(
+        selected(&harness),
+        Some(RowKey::Number(1)),
+        "the supply current fails its ceiling"
+    );
+    assert_eq!(geometry.one("table.selected"), geometry.one("table.line.1"));
+
+    // A row the reader picked stays picked.
+    select_row(&mut harness, 0);
+    let _ = settled(&ctx, &mut harness);
+    assert_eq!(selected(&harness), Some(RowKey::Number(0)));
 }
 
 /// A failing trial opens its Monte Carlo analysis in Results narrowed to
