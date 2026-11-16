@@ -391,7 +391,7 @@ fn read_back(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) 
     for (slot, signal) in signals.iter().enumerate().take(reader.slots()) {
         let values = reader.read_slot(slot, 0, rows).unwrap();
         match signal.quantity.as_str() {
-            "voltage" => {
+            "voltage" | "instance_current" | "instance_private" => {
                 next_node += shell.node_names[next_node..]
                     .iter()
                     .position(|name| *name == signal.name)

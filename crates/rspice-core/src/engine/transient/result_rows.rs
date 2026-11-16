@@ -154,24 +154,40 @@ impl TransientRowLayout {
     }
 
     /// The schema a sink is begun with: x is time, then a real signal per slot.
+    ///
+    /// Each signal says what it is, so a reader with neither the engine nor the netlist can name
+    /// it as the run does: a node's potential is a `voltage` in its discipline's unit, a branch
+    /// current a `current` in amperes, and a Verilog-A instance's own unknown, held in a node's
+    /// slot, an `instance_current` in amperes when the module names it as a branch and an
+    /// `instance_private` unknown otherwise.
     pub(super) fn schema(
         &self,
         node_names: &[String],
         potential_units: &[Option<String>],
+        instance_unknowns: &[Option<crate::solver::InstanceUnknown>],
         branch_names: &[String],
     ) -> ResultSchema {
+        use crate::solver::InstanceUnknown;
         let mut signals = Vec::with_capacity(self.width());
         for &node in &self.voltage_nodes {
-            let mut signal = ResultSignal::new(
-                node_names.get(node).cloned().unwrap_or_default(),
+            let potential = || {
                 potential_units
                     .get(node)
                     .cloned()
                     .flatten()
-                    .unwrap_or_else(|| "V".to_owned()),
+                    .unwrap_or_else(|| "V".to_owned())
+            };
+            let (unit, quantity) = match instance_unknowns.get(node).copied().flatten() {
+                None => (potential(), "voltage"),
+                Some(InstanceUnknown::BranchCurrent) => ("A".to_owned(), "instance_current"),
+                Some(InstanceUnknown::Private) => (potential(), "instance_private"),
+            };
+            let mut signal = ResultSignal::new(
+                node_names.get(node).cloned().unwrap_or_default(),
+                unit,
                 ResultSignalKind::Real,
             );
-            signal.quantity = "voltage".to_owned();
+            signal.quantity = quantity.to_owned();
             signals.push(signal);
         }
         for &branch in &self.current_branches {

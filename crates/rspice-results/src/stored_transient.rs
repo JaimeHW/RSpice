@@ -7,8 +7,177 @@
 //! from, and moves rows and events back into the shell, so every reader of a stored run (the
 //! command line's outputs, the simulation crate's post-processing) reads it the same way.
 
-use rspice_core::analysis::transient::TransientResult;
-use rspice_results_store::{SegmentIo, SegmentReader, StoreError};
+use rspice_core::analysis::transient::{
+    DigitalTrace, RealTrace, TransientDeviceOpTrace, TransientResult, TransientStoreTrace,
+};
+use rspice_core::solver::InstanceUnknown;
+use rspice_core::{CurrentImpulseOwner, CurrentImpulseTrace, VoltageImpulseTrace};
+use rspice_results_store::{Schema, SegmentIo, SegmentReader, StoreError};
+
+/// A stored transient opened from its segment alone: the result it names, with its events read
+/// back and its time and saved columns empty, and the rows to fill them from.
+pub struct StoredTransientRun<I: SegmentIo> {
+    /// The run's result: every name, unit and event trace, with empty columns.
+    pub shell: TransientResult,
+    /// The segment's rows.
+    pub reader: SegmentReader<I>,
+    /// Each value slot's place in [`Self::shell`].
+    pub targets: Vec<SlotTarget>,
+    /// `(device, parameter)` of each instance-parameter column.
+    pub parameters: Vec<(String, String)>,
+}
+
+impl<I: SegmentIo> StoredTransientRun<I> {
+    /// Open the transient a segment holds, with no engine and no netlist: the segment names
+    /// every signal as the run named it.
+    pub fn open(io: I) -> Result<Self, StoreError> {
+        let mut reader = SegmentReader::open(io)?;
+        let mut shell = transient_shell(reader.schema()).map_err(StoreError::Schema)?;
+        let targets = slot_targets(&reader, &shell).map_err(StoreError::Schema)?;
+        fill_events(&mut reader, &mut shell)?;
+        let parameters = instance_parameters(&reader);
+        Ok(Self {
+            shell,
+            reader,
+            targets,
+            parameters,
+        })
+    }
+
+    /// Read every row into the result, and each instance parameter as the constant trace the
+    /// run kept, so the result is the one the run returned in memory.
+    pub fn read_all(&mut self) -> Result<(), StoreError> {
+        let rows = usize::try_from(self.reader.rows()).map_err(|_| {
+            StoreError::Schema("the segment holds more rows than this host can address".into())
+        })?;
+        fill_rows(&mut self.reader, &self.targets, &mut self.shell, 0, rows)?;
+        for (slot, &target) in self.targets.iter().enumerate() {
+            let SlotTarget::Parameter(index) = target else {
+                continue;
+            };
+            let values = self.reader.read_slot(slot, 0, rows)?;
+            let (device, parameter) = &self.parameters[index];
+            self.shell
+                .adopt_instance_parameter(device, parameter, values);
+        }
+        Ok(())
+    }
+}
+
+/// The result a stored transient's schema names, with every column empty: its saved nodes (a
+/// Verilog-A instance's unknowns marked as the run marked them, each node's discipline unit
+/// kept), branches, step sizes, store traces, device values, event traces and impulse traces.
+/// Instance parameters are adopted when their rows are read.
+///
+/// A node or branch the run did not save is not named. An impulse trace is complete, as the
+/// engine records every impulse of a trace it keeps.
+pub fn transient_shell(schema: &Schema) -> Result<TransientResult, String> {
+    let mut shell = TransientResult {
+        time: Vec::new(),
+        step_sizes: Vec::new(),
+        voltages: Vec::new(),
+        branch_currents: Vec::new(),
+        num_nodes: 0,
+        node_names: Vec::new(),
+        branch_names: Vec::new(),
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
+        event_only_nodes: Vec::new(),
+        current_impulses: None,
+        voltage_impulses: None,
+        digital_traces: Vec::new(),
+        digital_buses: Vec::new(),
+        real_traces: Vec::new(),
+        hdl_sources: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+        fft_results: Vec::new(),
+    };
+    for signal in &schema.signals {
+        let name = signal.name.clone();
+        match signal.quantity.as_str() {
+            "voltage" | "instance_current" | "instance_private" => {
+                let (unknown, unit) = match signal.quantity.as_str() {
+                    "instance_current" => (Some(InstanceUnknown::BranchCurrent), None),
+                    "instance_private" => (Some(InstanceUnknown::Private), None),
+                    _ => (None, (signal.unit != "V").then(|| signal.unit.clone())),
+                };
+                shell.node_names.push(name);
+                shell.voltages.push(Vec::new());
+                shell.instance_unknowns.push(unknown);
+                shell.potential_units.push(unit);
+                shell.event_only_nodes.push(None);
+            }
+            "current" => {
+                shell.branch_names.push(name);
+                shell.branch_currents.push(Vec::new());
+            }
+            "store" => shell.store_traces.push(TransientStoreTrace {
+                name,
+                values: Vec::new(),
+            }),
+            "device_op" => shell.device_op_traces.push(TransientDeviceOpTrace {
+                device_name: signal.path.clone(),
+                parameter: name,
+                values: Vec::new(),
+            }),
+            "digital" => shell.digital_traces.push(DigitalTrace {
+                node_name: name,
+                points: Vec::new(),
+                hdl_time_precision: None,
+            }),
+            "real_event" => shell.real_traces.push(RealTrace {
+                node_name: name,
+                points: Vec::new(),
+            }),
+            "current_impulse" => {
+                let owner = if signal.path.is_empty() {
+                    CurrentImpulseOwner::Branch { branch_name: name }
+                } else {
+                    CurrentImpulseOwner::DeviceLead {
+                        device_name: signal.path.clone(),
+                        parameter: name,
+                    }
+                };
+                shell
+                    .current_impulses
+                    .get_or_insert_default()
+                    .push(CurrentImpulseTrace {
+                        owner,
+                        complete: true,
+                        points: Vec::new(),
+                        derivatives: Vec::new(),
+                    });
+            }
+            "voltage_impulse" => {
+                shell
+                    .voltage_impulses
+                    .get_or_insert_default()
+                    .push(VoltageImpulseTrace {
+                        node_name: name,
+                        complete: true,
+                        points: Vec::new(),
+                        derivatives: Vec::new(),
+                    })
+            }
+            // A trace's derivatives are read with its impulses; step sizes and instance
+            // parameters are rows.
+            "current_impulse_derivative"
+            | "voltage_impulse_derivative"
+            | "step_size"
+            | "instance_parameter" => {}
+            other => {
+                return Err(format!(
+                    "the transient store holds a '{other}' signal '{}' a transient result has no \
+                     place for",
+                    signal.name
+                ));
+            }
+        }
+    }
+    shell.num_nodes = shell.node_names.len();
+    Ok(shell)
+}
 
 /// Where one value slot of a row belongs in the in-memory result.
 #[derive(Debug, Clone, Copy)]
@@ -257,7 +426,9 @@ pub fn slot_targets<I: SegmentIo>(
             continue;
         }
         let (names, next, voltage) = match signal.quantity.as_str() {
-            "voltage" => (&shell.node_names, &mut next_node, true),
+            "voltage" | "instance_current" | "instance_private" => {
+                (&shell.node_names, &mut next_node, true)
+            }
             "current" => (&shell.branch_names, &mut next_branch, false),
             other => {
                 return Err(format!(
@@ -410,3 +581,6 @@ pub fn slot_name<'a>(
             .map_or("device", |trace| trace.parameter.as_str()),
     }
 }
+
+#[cfg(test)]
+mod tests;

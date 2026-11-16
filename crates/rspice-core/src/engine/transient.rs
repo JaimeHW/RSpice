@@ -4979,7 +4979,7 @@ impl Engine {
                 // Its one row, t = 0 with no saved value, goes to the sink.
                 let mut sink = sink.borrow_mut();
                 let mut rows = TransientRows::to_sink(TransientRowLayout::default(), &mut *sink);
-                let schema = rows.layout().schema(&[], &[], &[]);
+                let schema = rows.layout().schema(&[], &[], &[], &[]);
                 rows.begin(&schema)?;
                 rows.push(0.0)?;
                 rows.start()?;
@@ -6326,6 +6326,7 @@ impl Engine {
             let schema = rows.layout().schema(
                 &result.node_names,
                 &result.potential_units,
+                &result.instance_unknowns,
                 &result.branch_names,
             );
             rows.begin(&schema)?;
