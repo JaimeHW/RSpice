@@ -138,7 +138,7 @@ pub(super) fn run(
         stopped,
     } = match run {
         Ok(done) => done,
-        Err(source) => return Err(stopped_run(ctx, store, &segment, &sink, source)),
+        Err(source) => return Err(stopped_run(ctx, store, &segment, sink, source)),
     };
     let opened = sink
         .inner
@@ -164,6 +164,7 @@ pub(super) fn run(
     let targets = match slot_targets(&reader, &shell) {
         Ok(targets) => targets,
         Err(message) => {
+            drop(reader);
             store.discard();
             return Err(CliError::InternalError { message });
         }
@@ -171,6 +172,7 @@ pub(super) fn run(
     let mut shell = shell;
     if let Err(error) = fill_events(&mut reader, &mut shell) {
         let failure = store_error(&store.dir, error);
+        drop(reader);
         store.discard();
         return Err(failure);
     }
@@ -947,7 +949,11 @@ impl StoredRows {
         output: Option<&Path>,
         keep: bool,
     ) -> Result<Option<PathBuf>, CliError> {
-        self.store.publish(output, keep)
+        let Self { store, reader, .. } = self;
+        // The segment closes before its store moves or goes: Windows refuses to rename or
+        // delete a directory with a file open in it.
+        drop(reader);
+        store.publish(output, keep)
     }
 
     /// What the store kept and its digest, for the run summary.
@@ -1166,11 +1172,21 @@ fn stopped_run(
     ctx: &RunContext<'_>,
     store: RunStore,
     segment: &Path,
-    sink: &WatchedSink,
+    sink: WatchedSink,
     source: rspice_core::SimulationError,
 ) -> CliError {
     use rspice_core::result_sink::SinkStop;
-    if let Some((needed, available)) = sink.refused {
+    let WatchedSink {
+        inner,
+        free,
+        rows_needed,
+        refused,
+        ..
+    } = sink;
+    // The segment closes before its store is read, moved or deleted: Windows refuses to rename
+    // or delete a directory with a file open in it.
+    drop(inner);
+    if let Some((needed, available)) = refused {
         store.discard();
         return CliError::CoreSimulationError {
             source: rspice_core::SimulationError::ResultSink(SinkStop::DiskFull {
@@ -1180,7 +1196,7 @@ fn stopped_run(
             analysis: Some(format!(
                 "Transient, refused before solving: its results store needs at least {needed} \
                  bytes for {:.0} rows on a volume with {available} bytes free",
-                sink.rows_needed.ceil()
+                rows_needed.ceil()
             )),
         };
     }
@@ -1204,7 +1220,7 @@ fn stopped_run(
         });
     // A disk that filled before the segment held a readable chunk kept nothing.
     let Ok(mut reader) = kept else {
-        let free = (sink.free)();
+        let free = free();
         store.discard();
         return storage_full(None, SinkReceipt::default(), None, free);
     };
@@ -1213,6 +1229,7 @@ fn stopped_run(
         .checked_sub(1)
         .and_then(|last| reader.read_x(last, 1).ok())
         .and_then(|x| x.first().copied());
+    drop(reader);
     let bytes = std::fs::metadata(segment).map_or(0, |meta| meta.len());
     let output = ctx.resolve_output("tran").map(|resolved| resolved.path);
     let kept_at = match store.publish(output.as_deref(), true) {
@@ -1224,7 +1241,7 @@ fn stopped_run(
         bytes,
         ..SinkReceipt::default()
     };
-    storage_full(at, receipt, kept_at, (sink.free)())
+    storage_full(at, receipt, kept_at, free())
 }
 
 /// The stop of a run whose storage filled at `at`, with what `receipt` says it kept in the store
