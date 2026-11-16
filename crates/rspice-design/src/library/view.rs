@@ -118,6 +118,21 @@ impl ViewType {
         }
     }
 
+    /// The Verilog-family view type a root file of this name is the source
+    /// of, by its extension, case-insensitively: `.v` Verilog, `.va`
+    /// Verilog-A and `.vams` Verilog-AMS. The inverse of
+    /// [`Self::hdl_root_extension`]; any other file is the root of none.
+    pub fn of_hdl_root(file_name: &str) -> Option<Self> {
+        let (_, extension) = file_name.rsplit_once('.')?;
+        [ViewType::Verilog, ViewType::VerilogA, ViewType::VerilogAms]
+            .into_iter()
+            .find(|view_type| {
+                view_type
+                    .hdl_root_extension()
+                    .is_some_and(|root| root[1..].eq_ignore_ascii_case(extension))
+            })
+    }
+
     /// Parse view type from string
     pub fn from_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -241,5 +256,16 @@ mod caption_tests {
             .map(|view| view.hdl_root_extension())
             .collect::<Vec<_>>();
         assert_eq!(family, [Some(".v"), Some(".va"), Some(".vams")]);
+    }
+
+    /// A root file's extension names the view it is the source of, the
+    /// inverse of the extension a new view's root is created with.
+    #[test]
+    fn a_root_file_states_its_view_type_by_its_extension() {
+        assert_eq!(ViewType::of_hdl_root("sar8.v"), Some(ViewType::Verilog));
+        assert_eq!(ViewType::of_hdl_root("cmp.VA"), Some(ViewType::VerilogA));
+        assert_eq!(ViewType::of_hdl_root("tb.vams"), Some(ViewType::VerilogAms));
+        assert_eq!(ViewType::of_hdl_root("body.inc"), None);
+        assert_eq!(ViewType::of_hdl_root("vams"), None);
     }
 }

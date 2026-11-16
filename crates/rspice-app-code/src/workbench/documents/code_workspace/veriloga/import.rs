@@ -38,11 +38,11 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The pickers' file types: Verilog-A/AMS sources and the headers they
-/// include. Native pickers also offer every file.
+/// The pickers' file types: Verilog, Verilog-A and Verilog-AMS sources and
+/// the headers they include. Native pickers also offer every file.
 const VERILOGA_FILE_TYPES: (&str, &[&str]) = (
-    "Verilog-A/AMS",
-    &["va", "vams", "vh", "h", "inc", "include"],
+    "Verilog/Verilog-A/AMS",
+    &["v", "va", "vams", "vh", "h", "inc", "include"],
 );
 
 /// A file picked or dropped for import: its name, its text, and the folder it
@@ -86,7 +86,7 @@ pub fn poll_veriloga_import(
         } else if let Some(path) = &locating {
             format!("Locate {path}")
         } else {
-            "Import Verilog-A/AMS source".to_owned()
+            "Import Verilog/Verilog-A/AMS source".to_owned()
         };
         let (types, extensions) = VERILOGA_FILE_TYPES;
         let dialog = rfd::FileDialog::new()
@@ -406,19 +406,15 @@ pub fn complete_veriloga_files_pick(
     );
 }
 
-/// Whether `name` can be the root of an import: a `.va` or `.vams` file.
-fn is_veriloga_root(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("va") || extension.eq_ignore_ascii_case("vams")
-        })
+/// Whether `name` can be the root of an import: a `.v`, `.va` or `.vams`
+/// file, each the root of a view of its own language.
+fn is_hdl_root(name: &str) -> bool {
+    crate::state::ViewType::of_hdl_root(name).is_some()
 }
 
 /// Open File > Import's form for each root among `picked`, the first now
-/// and the rest in turn. A root is a `.va` or `.vams` file no other picked
-/// root includes; every picked file is a file each form can resolve.
+/// and the rest in turn. A root is a `.v`, `.va` or `.vams` file no other
+/// picked root includes; every picked file is a file each form can resolve.
 fn open_veriloga_import_forms(
     model: &Model,
     veriloga: &mut VerilogAWorkbenchState,
@@ -430,7 +426,7 @@ fn open_veriloga_import_forms(
         .collect::<BTreeMap<_, _>>();
     let candidates = picked
         .iter()
-        .filter(|file| is_veriloga_root(&file.name))
+        .filter(|file| is_hdl_root(&file.name))
         .collect::<Vec<_>>();
     let included = candidates
         .iter()
@@ -458,10 +454,12 @@ fn open_veriloga_import_forms(
     if forms.is_empty() {
         return Err(match picked.as_slice() {
             [one] => format!(
-                "{} is not a Verilog-A/AMS root file; import a .va or .vams file.",
+                "{} is not a Verilog, Verilog-A or Verilog-AMS root file; import a .v, .va or \
+                 .vams file.",
                 one.name
             ),
-            _ => "None of the files is a Verilog-A/AMS root file; import a .va or .vams file."
+            _ => "None of the files is a Verilog, Verilog-A or Verilog-AMS root file; import a \
+                  .v, .va or .vams file."
                 .to_owned(),
         });
     }

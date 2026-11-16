@@ -1,5 +1,7 @@
-//! File > Import Verilog-A/AMS: a root file and every file its includes
-//! reach become cell views of their own, whatever view is in front.
+//! File > Import Verilog/Verilog-A/AMS: a root file and every file its
+//! includes reach become cell views of their own, whatever view is in front.
+//! The views are of the root's language: a `.v` root makes `verilog` views,
+//! a `.va` root `veriloga` views and a `.vams` root `verilogams` views.
 //! Replacing an open view's source from a file is the Verilog-A editor's own
 //! command, and waits for the confirmation below.
 //!
@@ -15,7 +17,7 @@ use egui::Context;
 
 use crate::state::workspace::ImportedInclude;
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
-use crate::state::workspace::{DeclaredModule, declared_cell_interface, veriloga_cell_for_module};
+use crate::state::workspace::{DeclaredModule, declared_cell_interface, hdl_cell_for_module};
 use crate::state::{
     CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
     ProjectSourceLanguage, ProjectSourceOwner,
@@ -69,16 +71,19 @@ fn planned_cells(
     let interface_of = |cell: &crate::state::Cell, reference: &CellViewRef| {
         declared_cell_interface(&schematic_ports, cell, &reference.library)
     };
+    let view_type = crate::state::ViewType::of_hdl_root(&form.file_name)
+        .unwrap_or(crate::state::ViewType::VerilogA);
     let mut reserved = Vec::new();
     modules
         .iter()
         .map(|module| {
-            let (reference, new_cell) = veriloga_cell_for_module(
+            let (reference, new_cell) = hdl_cell_for_module(
                 &model.library_manager,
                 &interface_of,
                 &form.library,
                 module,
                 &reserved,
+                view_type,
             );
             reserved.push(reference.cell.clone());
             (module.clone(), reference, new_cell)
@@ -178,7 +183,7 @@ fn included_by(file: &crate::state::workspace::ImportClosureFile) -> &str {
     }
 }
 
-/// Draw Import Verilog-A/AMS… while it is open, over the Verilog-A views'
+/// Draw Import Verilog/Verilog-A/AMS… while it is open, over the Verilog-A views'
 /// state, the model and the reader's messages. Returns whether the reader
 /// asked to import a plan that is ready.
 pub(in crate::workbench) fn render_veriloga_import_dialog(
@@ -435,4 +440,64 @@ pub fn publish_veriloga_import(
             form.file_name
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ViewType;
+    use crate::workbench::code::tests::harness;
+    use crate::workbench::documents::code_workspace::{
+        PickedSource, import_dropped_veriloga_sources,
+    };
+
+    const COUNT: &str = "module count(clk, q);\n  input clk;\n  output reg q;\n  always @(posedge clk) q <= !q;\nendmodule\n";
+    const GAIN: &str = "`include \"disciplines.vams\"\nmodule gain(a, b);\n  inout a, b;\n  electrical a, b;\n  analog I(a, b) <+ V(a, b);\nendmodule\n";
+    const LEVEL: &str = "`include \"disciplines.vams\"\nmodule level(a, d);\n  inout a;\n  electrical a;\n  output d;\n  reg d;\n  initial d = 0;\n  analog V(a) <+ 0.5;\nendmodule\n";
+
+    /// File > Import makes each root's cells in the root's own language: a
+    /// `.v` file Verilog views, a `.va` file Verilog-A views and a `.vams`
+    /// file Verilog-AMS views, each named for its type as New View names it.
+    #[test]
+    fn an_import_makes_views_of_the_language_its_file_states() {
+        let mut harness = harness();
+        let dropped = [("count.v", COUNT), ("gain.va", GAIN), ("level.vams", LEVEL)]
+            .into_iter()
+            .map(|(name, contents)| PickedSource {
+                name: name.to_owned(),
+                contents: contents.to_owned(),
+                folder: None,
+            })
+            .collect();
+        import_dropped_veriloga_sources(
+            &harness.model,
+            &mut harness.state.code_workspace.veriloga,
+            dropped,
+        )
+        .expect("every file is a root");
+        for (cell, view, view_type) in [
+            ("count", "verilog", ViewType::Verilog),
+            ("gain", "veriloga", ViewType::VerilogA),
+            ("level", "verilogams", ViewType::VerilogAms),
+        ] {
+            let imported = publish_veriloga_import(
+                &mut harness.model,
+                &mut harness.state.code_workspace.veriloga,
+            )
+            .unwrap_or_else(|error| panic!("{cell}: {error}"));
+            assert_eq!(
+                (imported.first.cell.as_str(), imported.first.view.as_str()),
+                (cell, view)
+            );
+            let made = harness
+                .model
+                .library_manager
+                .get_library(&imported.first.library)
+                .and_then(|library| library.get_cell(cell))
+                .and_then(|cell| cell.get_view(view))
+                .map(|view| view.view_type);
+            assert_eq!(made, Some(view_type), "{cell}");
+        }
+        assert!(harness.state.code_workspace.veriloga.import_form.is_none());
+    }
 }

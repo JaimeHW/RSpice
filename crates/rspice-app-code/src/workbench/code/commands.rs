@@ -714,7 +714,7 @@ impl CodeCommand {
             Self::NewVerilogADevice => ("New Verilog-A device\u{2026}", "File", imports),
             Self::OpenNetlist => ("Open netlist as project\u{2026}", "File", opens_file),
             Self::ImportNetlist => ("Import SPICE deck\u{2026}", "File", imports),
-            Self::ImportVerilogA => ("Import Verilog-A/AMS\u{2026}", "File", imports),
+            Self::ImportVerilogA => ("Import Verilog/Verilog-A/AMS\u{2026}", "File", imports),
             Self::ImportLtspiceSchematic => ("Import LTspice schematic\u{2026}", "File", imports),
             Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),
             Self::ExportNetlist(NetlistFormat::Spectre) => {

@@ -19,8 +19,8 @@ mod veriloga_starter;
 pub(crate) use veriloga_cells::retire_code_workspace_veriloga;
 pub use veriloga_cells::{
     DeclaredModule, ImportClosure, ImportClosureFile, ImportedInclude, VERILOGA_LIBRARY_NAME,
-    VERILOGA_VIEW, declared_cell_interface, place_veriloga_view, resolve_veriloga_import,
-    survey_veriloga_bundle, veriloga_cell_for_module, veriloga_view,
+    VERILOGA_VIEW, declared_cell_interface, hdl_cell_for_module, hdl_view, place_veriloga_view,
+    resolve_veriloga_import, survey_veriloga_bundle, veriloga_cell_for_module, veriloga_view,
 };
 
 pub use veriloga_starter::{

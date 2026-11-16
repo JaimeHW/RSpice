@@ -135,7 +135,7 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[RoutedCommand {
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by: the source document dialogs, Find in source,
-/// Rename symbol, New Verilog-A device, Import Verilog-A/AMS, Replace
+/// Rename symbol, New Verilog-A device, Import Verilog/Verilog-A/AMS, Replace
 /// source from file and Build settings. Each is open while its form is.
 const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
     FeatureDialog {
@@ -656,7 +656,7 @@ impl CodeFeature {
         }
     }
 
-    /// Import Verilog-A/AMS….
+    /// Import Verilog/Verilog-A/AMS….
     fn render_veriloga_import_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if veriloga_import::render_veriloga_import_dialog(

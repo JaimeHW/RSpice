@@ -16,10 +16,10 @@ mod cells;
 mod libraries;
 
 use super::Model;
-use crate::state::workspace::{DeclaredModule, place_veriloga_view, veriloga_view};
+use crate::state::workspace::{DeclaredModule, hdl_view, place_veriloga_view};
 use crate::state::{
     CellViewRef, PreparedProjectLibraryMutation, ProjectLibraryMutation, ProjectSourceBundle,
-    ProjectSourceFile, ProjectSourceId, ProjectSourceRole,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceRole, ViewType,
 };
 
 /// What a change to the catalog leaves for the application to do outside
@@ -61,6 +61,10 @@ impl Model {
     /// Publish `bundle` and a view of it for each module of `plan`: all of it, or,
     /// when the catalog refuses, none of it. `build_profile` is added to the bundle
     /// as its build settings.
+    ///
+    /// Each view is of the type the bundle's root file states (a `.v` root
+    /// makes Verilog views, a `.vams` root Verilog-AMS ones, anything else
+    /// Verilog-A), under the name its plan entry gives it.
     pub fn publish_veriloga_cells(
         &mut self,
         plan: &[(DeclaredModule, CellViewRef, bool)],
@@ -72,6 +76,8 @@ impl Model {
             .first()
             .map(|(_, reference, _)| reference.clone())
             .ok_or_else(|| "The source declares no module.".to_owned())?;
+        let view_type =
+            ViewType::of_hdl_root(bundle.root().logical_path()).unwrap_or(ViewType::VerilogA);
         let mut libraries = self.library_manager.clone();
         let mut sources = self.workspace.content.project_sources.clone();
         for (module, reference, _) in plan {
@@ -80,7 +86,8 @@ impl Model {
                     .share_with(reference.clone())
                     .map_err(|error| error.to_string())?;
             }
-            place_veriloga_view(&mut libraries, reference, veriloga_view(Some(module))?)?;
+            let view = hdl_view(&reference.view, view_type, Some(module))?;
+            place_veriloga_view(&mut libraries, reference, view)?;
         }
         let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
         sources

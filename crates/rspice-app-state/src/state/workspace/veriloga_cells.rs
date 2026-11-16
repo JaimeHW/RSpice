@@ -16,7 +16,7 @@ use crate::state::{
     ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
 };
 
-/// The view every module is placed under.
+/// The view a Verilog-A module is placed under.
 pub const VERILOGA_VIEW: &str = "veriloga";
 
 /// The global library user-authored Verilog-A devices live in.
@@ -421,17 +421,8 @@ fn is_retired_demo(bundle: &ProjectSourceBundle) -> bool {
         && bundle.files().is_empty()
 }
 
-/// The cell view a module is placed in, and whether that cell is new.
-///
-/// `<module>` when no cell has that name. An existing cell of that name takes
-/// the view when it has no `veriloga` view and declares the module's
-/// interface; otherwise the module goes to the first free `<module>_va`,
-/// `<module>_va2`, and so on. `reserved` holds names an enclosing transaction
-/// has already claimed.
-///
-/// Names are compared by the canonical cell-view identity New Cell and the
-/// source registry use, so a module never lands in a cell that differs from
-/// one already there only by Unicode case or composition.
+/// The `veriloga` cell view a module is placed in, and whether that cell is
+/// new: [`hdl_cell_for_module`] for a Verilog-A source.
 pub fn veriloga_cell_for_module(
     libraries: &LibraryManager,
     interface_of: &dyn Fn(&Cell, &CellViewRef) -> Vec<String>,
@@ -439,6 +430,43 @@ pub fn veriloga_cell_for_module(
     module: &DeclaredModule,
     reserved: &[String],
 ) -> (CellViewRef, bool) {
+    hdl_cell_for_module(
+        libraries,
+        interface_of,
+        library,
+        module,
+        reserved,
+        ViewType::VerilogA,
+    )
+}
+
+/// The cell view of `view_type` a module is placed in, and whether that cell
+/// is new. The view is named for its type, as New View names it: `verilog`,
+/// `veriloga` or `verilogams`.
+///
+/// `<module>` when no cell has that name. An existing cell of that name takes
+/// the view when it has no view of that name and declares the module's
+/// interface; otherwise the module goes to the first free `<module>_<ext>`,
+/// `<module>_<ext>2`, and so on, `<ext>` being the type's root extension
+/// (`_v`, `_va`, `_vams`). `reserved` holds names an enclosing transaction
+/// has already claimed.
+///
+/// Names are compared by the canonical cell-view identity New Cell and the
+/// source registry use, so a module never lands in a cell that differs from
+/// one already there only by Unicode case or composition.
+pub fn hdl_cell_for_module(
+    libraries: &LibraryManager,
+    interface_of: &dyn Fn(&Cell, &CellViewRef) -> Vec<String>,
+    library: &str,
+    module: &DeclaredModule,
+    reserved: &[String],
+    view_type: ViewType,
+) -> (CellViewRef, bool) {
+    let view_name = view_type.display_name();
+    let suffix = view_type
+        .hdl_root_extension()
+        .unwrap_or(".va")
+        .trim_start_matches('.');
     let same = |left: &str, right: &str| {
         crate::state::canonical_cell_view_owner_key("", left, "")
             == crate::state::canonical_cell_view_owner_key("", right, "")
@@ -453,30 +481,27 @@ pub fn veriloga_cell_for_module(
     let base = cell_name_for_module(&module.name);
     if let Some(cell) = existing(&base)
         && !reserved.iter().any(|taken| same(taken, &base))
-        && !cell
-            .views
-            .values()
-            .any(|view| same(&view.name, VERILOGA_VIEW))
+        && !cell.views.values().any(|view| same(&view.name, view_name))
     {
-        let reference = CellViewRef::new(library, &cell.name, VERILOGA_VIEW);
+        let reference = CellViewRef::new(library, &cell.name, view_name);
         if same_terminal_contract(&interface_of(cell, &reference), &module.ports) {
             return (reference, false);
         }
     }
     if !claimed(&base) {
-        return (CellViewRef::new(library, &base, VERILOGA_VIEW), true);
+        return (CellViewRef::new(library, &base, view_name), true);
     }
     let name = (1_u32..)
         .map(|index| {
             if index == 1 {
-                format!("{base}_va")
+                format!("{base}_{suffix}")
             } else {
-                format!("{base}_va{index}")
+                format!("{base}_{suffix}{index}")
             }
         })
         .find(|candidate| !claimed(candidate))
         .expect("an unbounded sequence has a free name");
-    (CellViewRef::new(library, &name, VERILOGA_VIEW), true)
+    (CellViewRef::new(library, &name, view_name), true)
 }
 
 /// A module name as a cell name: every character a cell name cannot hold
@@ -532,7 +557,18 @@ pub fn declared_cell_interface(
 /// The `veriloga` view stating `module` and its ports, the way New View
 /// writes them. A module the source could not be read for states neither.
 pub fn veriloga_view(module: Option<&DeclaredModule>) -> Result<View, String> {
-    let mut view = View::new(VERILOGA_VIEW, ViewType::VerilogA);
+    hdl_view(VERILOGA_VIEW, ViewType::VerilogA, module)
+}
+
+/// The source view `name` of `view_type` stating `module` and its ports, the
+/// way New View writes them. A module the source could not be read for
+/// states neither.
+pub fn hdl_view(
+    name: &str,
+    view_type: ViewType,
+    module: Option<&DeclaredModule>,
+) -> Result<View, String> {
+    let mut view = View::new(name, view_type);
     if let Some(module) = module {
         view.metadata
             .insert("veriloga.module".to_owned(), module.name.clone());
