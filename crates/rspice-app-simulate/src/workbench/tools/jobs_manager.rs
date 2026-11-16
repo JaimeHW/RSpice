@@ -16,7 +16,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::RunId;
 use crate::state::{
     AnalysisResultSourceDomain, ExecutionTarget, SimulationRun, SimulationRunLifecycle,
-    SimulationRunProvenance,
+    SimulationRunProvenance, VerificationPage,
 };
 use crate::ui::{
     theme::{self, FontWeight},
@@ -108,12 +108,16 @@ struct RunRow {
     /// decks and drops the oldest first, so the route is offered only when
     /// there is a document behind it.
     executed_deck_points: usize,
+    /// The status states the verdict of the run's checks, so it opens them.
+    states_checks: bool,
 }
 
 impl RunRow {
     fn from_run(model: &Model, run: &SimulationRun, active: bool) -> Self {
         let executor_owned = active && !run.lifecycle.is_terminal();
         let current_analysis_progress = model.simulation.execution.progress.clamp(0.0, 1.0) as f32;
+        let states_checks =
+            run.lifecycle == SimulationRunLifecycle::Completed && run.check_verdict().is_some();
         let (status, tone) = match run.lifecycle {
             SimulationRunLifecycle::LegacyUnknown => {
                 ("Legacy status not retained".to_owned(), RunTone::Neutral)
@@ -225,6 +229,7 @@ impl RunRow {
             tasks,
             plan_id,
             campaign,
+            states_checks,
         }
     }
 }
@@ -348,6 +353,7 @@ impl SimulateFeature {
         cx.state.jobs_manager.selected_run_id = snapshot.selected_run_id;
         let mut requested_selection = None;
         let mut requested_open = None;
+        let mut requested_verify = None;
         let mut requested_open_deck: Option<u64> = None;
         let mut requested_scope = scope;
         let mut body_scroll_offset = cx.state.jobs_manager.scroll_offset;
@@ -393,6 +399,7 @@ impl SimulateFeature {
                         &snapshot,
                         &mut requested_selection,
                         &mut requested_open,
+                        &mut requested_verify,
                         &mut requested_open_deck,
                     );
                 });
@@ -413,6 +420,10 @@ impl SimulateFeature {
         // behind it.
         if let Some(run_id) = requested_open {
             open_run_in_results(cx, run_id);
+            return;
+        }
+        if let Some((run_id, page)) = requested_verify {
+            open_run_in_verify(cx, run_id, page);
             return;
         }
         // The same route the Netlist run strip offers, from the surface that
@@ -469,6 +480,32 @@ pub fn open_run_in_results(cx: &mut Cx<'_, SimulateFeature>, run_id: RunId) {
     }
     close_jobs_manager(cx.wb);
     cx.execute(ids::OPEN_RUN_IN_RESULTS);
+}
+
+/// Leave the manager on Verify's `page`, judging the run the reader chose:
+/// the run becomes the active run, as selecting it anywhere makes it.
+pub fn open_run_in_verify(cx: &mut Cx<'_, SimulateFeature>, run_id: RunId, page: VerificationPage) {
+    let Some(index) = cx
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .position(|run| run.run_id == run_id)
+    else {
+        cx.wb.prompt(format!(
+            "Run {run_id} is no longer retained, so it could not be opened in Verify."
+        ));
+        return;
+    };
+    if !cx.model.simulation.select_run(index) {
+        cx.wb.prompt(format!(
+            "Run {run_id} could not be selected, so Verify was left unchanged."
+        ));
+        return;
+    }
+    close_jobs_manager(cx.wb);
+    cx.execute(SimulateCommand::Verify(page).key());
 }
 
 /// The page's one toolbar row: the history scope, and one line saying what
@@ -562,12 +599,18 @@ fn render_content(
     snapshot: &JobsSnapshot,
     requested_selection: &mut Option<RunId>,
     requested_open: &mut Option<RunId>,
+    requested_verify: &mut Option<(RunId, VerificationPage)>,
     requested_open_deck: &mut Option<u64>,
 ) {
+    let mut requests = RowRequests {
+        selection: requested_selection,
+        open: requested_open,
+        verify: requested_verify,
+    };
     let narrow = ui.available_width() <= 1_020.0;
     if narrow {
-        render_queue_and_graph(ui, snapshot, requested_selection, requested_open);
-        render_inspector(ui, snapshot, requested_open, requested_open_deck);
+        render_queue_and_graph(ui, snapshot, &mut requests);
+        render_inspector(ui, snapshot, requests.open, requested_open_deck);
     } else {
         let width = ui.available_width();
         let left_width = ((width - 1.0) * 0.695).max(560.0);
@@ -579,7 +622,7 @@ fn render_content(
                     vec2(left_width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        render_queue_and_graph(ui, snapshot, requested_selection, requested_open);
+                        render_queue_and_graph(ui, snapshot, &mut requests);
                     },
                 );
                 let (divider, _) = ui.allocate_exact_size(vec2(1.0, 0.0), Sense::hover());
@@ -587,7 +630,7 @@ fn render_content(
                 ui.allocate_ui_with_layout(
                     vec2((width - left_width - 1.0).max(280.0), 0.0),
                     Layout::top_down(Align::Min),
-                    |ui| render_inspector(ui, snapshot, requested_open, requested_open_deck),
+                    |ui| render_inspector(ui, snapshot, requests.open, requested_open_deck),
                 );
             })
             .response;
@@ -600,12 +643,14 @@ fn render_content(
     }
 }
 
-fn render_queue_and_graph(
-    ui: &mut Ui,
-    snapshot: &JobsSnapshot,
-    requested_selection: &mut Option<RunId>,
-    requested_open: &mut Option<RunId>,
-) {
+/// What the reader asked of the run rows this frame.
+struct RowRequests<'a> {
+    selection: &'a mut Option<RunId>,
+    open: &'a mut Option<RunId>,
+    verify: &'a mut Option<(RunId, VerificationPage)>,
+}
+
+fn render_queue_and_graph(ui: &mut Ui, snapshot: &JobsSnapshot, requests: &mut RowRequests<'_>) {
     let t = Tokens::get(ui.ctx());
     ui.set_min_width(1.0);
     // An idle queue is the ordinary state and says nothing.
@@ -642,8 +687,11 @@ fn render_queue_and_graph(
             }
             for row in &snapshot.rows {
                 match run_table_row(ui, width, row, snapshot.selected_run_id == Some(row.run_id)) {
-                    Some(RunRowAction::Select) => *requested_selection = Some(row.run_id),
-                    Some(RunRowAction::Open) => *requested_open = Some(row.run_id),
+                    Some(RunRowAction::Select) => *requests.selection = Some(row.run_id),
+                    Some(RunRowAction::Open) => *requests.open = Some(row.run_id),
+                    Some(RunRowAction::Verify(page)) => {
+                        *requests.verify = Some((row.run_id, page));
+                    }
                     None => {}
                 }
             }
@@ -926,6 +974,8 @@ enum RunRowAction {
     Select,
     /// Leave the manager on this run's retained dataset.
     Open,
+    /// Leave the manager on Verify's page, judging this run.
+    Verify(VerificationPage),
 }
 
 fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Option<RunRowAction> {
@@ -993,10 +1043,58 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Optio
         row.tone.progress_fill(&t),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
+    let mut action = None;
+    // A status that states the checks' verdict is the way to those checks.
+    if row.states_checks {
+        let status = status_cell_rect(rect);
+        let checks = ui
+            .interact(status, response.id.with("checks"), Sense::click())
+            .on_hover_text(format!("Open Run {}'s checks in Verify", row.sequence))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        checks.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Link,
+                true,
+                format!(
+                    "{}: open Run {}'s checks in Verify",
+                    row.status, row.sequence
+                ),
+            )
+        });
+        if checks.clicked() {
+            action = Some(RunRowAction::Verify(VerificationPage::Checks));
+        }
+    }
+    egui::Popup::context_menu(&response).show(|ui| {
+        ui.set_min_width(180.0);
+        if ui
+            .add_enabled(openable, egui::Button::new("Open in Results"))
+            .on_disabled_hover_text("This run retained no dataset.")
+            .clicked()
+        {
+            action = Some(RunRowAction::Open);
+            ui.close();
+        }
+        if ui.button("Open in Verify").clicked() {
+            action = Some(RunRowAction::Verify(VerificationPage::Specifications));
+            ui.close();
+        }
+    });
+    if action.is_some() {
+        return action;
+    }
     if openable && response.double_clicked() {
         return Some(RunRowAction::Open);
     }
     response.clicked().then_some(RunRowAction::Select)
+}
+
+/// The status cell of a run row painted in `row`: the last column.
+fn status_cell_rect(row: Rect) -> Rect {
+    let leading = QUEUE_COLUMN_FRACTIONS[..QUEUE_COLUMN_FRACTIONS.len() - 1]
+        .iter()
+        .sum::<f32>();
+    Rect::from_min_max(pos2(row.left() + row.width() * leading, row.top()), row.max)
 }
 
 fn task_table_row(ui: &mut Ui, width: f32, task: &TaskRow) {
@@ -1632,6 +1730,94 @@ mod tests {
         );
     }
 
+    /// A run row's status cell that states the checks' verdict opens
+    /// Verify's Checks view on that run; a row with no checks has no such
+    /// link, and a click elsewhere on the row only selects it.
+    #[test]
+    fn the_checks_cell_opens_checks_and_the_row_selects() {
+        use crate::workbench::surfaces::verify::raster::{page_input, page_pass};
+        use rspice_core::config::HdlSeverity;
+
+        let state = SimulateTestHost::default();
+        let row = |severities: &[HdlSeverity]| {
+            let mut run = SimulationRun::new(3);
+            run.add_analysis(checked_analysis(severities));
+            run.lifecycle = SimulationRunLifecycle::Completed;
+            RunRow::from_run(&state.model, &run, false)
+        };
+        let press = |row: &RunRow, at: egui::Pos2| {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut action = None;
+            for events in [Vec::new(), click(at)] {
+                page_pass(&ctx, page_input(events), |ui| {
+                    action = run_table_row(ui, 1000.0, row, false);
+                });
+            }
+            action
+        };
+        let status = status_cell_rect(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 40.0)));
+        let checked = row(&[HdlSeverity::Error]);
+        assert!(checked.states_checks);
+        assert_eq!(
+            press(&checked, status.center()),
+            Some(RunRowAction::Verify(VerificationPage::Checks))
+        );
+        assert_eq!(
+            press(&checked, pos2(40.0, 20.0)),
+            Some(RunRowAction::Select)
+        );
+        let unchecked = row(&[]);
+        assert!(!unchecked.states_checks);
+        assert_eq!(
+            press(&unchecked, status.center()),
+            Some(RunRowAction::Select)
+        );
+    }
+
+    /// "Open in Verify" and the checks cell leave the history on Verify with
+    /// the chosen run as the app's active run.
+    #[test]
+    fn opening_a_run_in_verify_makes_it_the_active_run() {
+        use crate::workbench::framework::feature::Execute;
+        use crate::workbench::state::Workspace;
+
+        let mut harness = SimulateTestHost::harness();
+        let first = harness.model.simulation.start_run().run_id;
+        let second = harness.model.simulation.start_run().run_id;
+        assert_eq!(
+            harness.model.simulation.active_run().map(|run| run.run_id),
+            Some(second)
+        );
+        for (run, page) in [
+            (first, VerificationPage::Specifications),
+            (second, VerificationPage::Checks),
+        ] {
+            open_run_in_verify(&mut harness.cx(), run, page);
+            let Some(Execute(raised)) = harness.wb.outbox.take::<Execute>() else {
+                panic!("opening a run in Verify raises the view's command");
+            };
+            assert_eq!(raised, SimulateCommand::Verify(page).key());
+            harness.execute(raised);
+            assert_eq!(
+                harness.model.simulation.active_run().map(|run| run.run_id),
+                Some(run)
+            );
+            assert_eq!(harness.wb.workspace, Workspace::Verify);
+            assert_eq!(harness.state.verification_page, page);
+        }
+    }
+
+    fn click(pos: egui::Pos2) -> Vec<egui::Event> {
+        let edge = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        vec![egui::Event::PointerMoved(pos), edge(true), edge(false)]
+    }
+
     /// A transient whose testbench reported one record of each severity.
     fn checked_analysis(severities: &[rspice_core::config::HdlSeverity]) -> AnalysisResult {
         use rspice_core::config::{HdlOrigin, HdlPoint};
@@ -1679,7 +1865,15 @@ mod tests {
         }
         let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         let canvas = rspice_ui_kit::raster::render(egui::vec2(1000.0, 230.0), |ui, _| {
-            render_queue_and_graph(ui, &snapshot, &mut None, &mut None);
+            render_queue_and_graph(
+                ui,
+                &snapshot,
+                &mut RowRequests {
+                    selection: &mut None,
+                    open: &mut None,
+                    verify: &mut None,
+                },
+            );
         });
         std::fs::write(
             format!("{directory}/jobs-run-check-verdicts.png"),
