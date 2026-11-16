@@ -24,6 +24,7 @@ mod pipeline;
 mod rule_deck;
 mod setup_history;
 mod setup_page;
+mod specifications;
 mod startup;
 mod variants;
 mod waivers;

@@ -360,6 +360,12 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
         ),
         PreflightRemediation::NetlistSource { .. } => "netlist-source".to_owned(),
         PreflightRemediation::RuleSetup => "rule-setup".to_owned(),
+        PreflightRemediation::Specification { measurement: None } => {
+            "specification-acceptance".to_owned()
+        }
+        PreflightRemediation::Specification {
+            measurement: Some(measurement),
+        } => format!("specification:{}", measurement.to_ascii_lowercase()),
         // The drawn object, in the view that draws it: two engine refusals
         // about one net are one place, wherever the deck spelled it.
         PreflightRemediation::Drawing { cell_view, object } => match object {
@@ -438,7 +444,8 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         }
         PreflightRemediation::DesignChecks
         | PreflightRemediation::SimulationPlan { .. }
-        | PreflightRemediation::RuleSetup => (PREFLIGHT_PRODUCER, "RUN"),
+        | PreflightRemediation::RuleSetup
+        | PreflightRemediation::Specification { .. } => (PREFLIGHT_PRODUCER, "RUN"),
     }
 }
 
@@ -470,6 +477,12 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
         PreflightRemediation::NetlistSource { line: None } => "Generated netlist".to_owned(),
         PreflightRemediation::RuleSetup => "Rule deck".to_owned(),
         PreflightRemediation::Drawing { object, .. } => object.name().to_owned(),
+        PreflightRemediation::Specification {
+            measurement: Some(measurement),
+        } => format!("Specification {measurement}"),
+        PreflightRemediation::Specification { measurement: None } => {
+            "Specification acceptance".to_owned()
+        }
     }
 }
 

@@ -283,6 +283,14 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
             }
         }
         PreflightRemediation::RuleSetup => app.execute_command_key(DesignCommand::RuleSetup.key()),
+        // The specification's row, or none for a finding about the plan's
+        // acceptance: with nothing selected the view's inspector shows it.
+        PreflightRemediation::Specification { measurement } => {
+            if measurement.is_none() {
+                app.state.simulate.selected_specification = None;
+            }
+            open_specification(app, measurement);
+        }
         // The object an engine refusal named, in the view that draws it. The
         // view opens first so the object is looked up in its own drawing, and
         // one that drawing no longer holds is said rather than selected.

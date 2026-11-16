@@ -110,6 +110,16 @@ pub enum PreflightRemediation {
         cell_view: crate::state::CellViewRef,
         object: DrawnObject,
     },
+    /// Verify's Specifications view, on the specification a finding is
+    /// about, where both it and the plan's acceptance are edited.
+    Specification {
+        /// The measurement that names the specification's row, taken from the
+        /// definition the check was reading. `None` for a finding about the
+        /// plan's acceptance, such as its Monte Carlo yield gate: the view
+        /// opens with no row selected, which is when its inspector shows the
+        /// acceptance settings.
+        measurement: Option<String>,
+    },
 }
 
 /// An object on one sheet, named the way the sheet names it.

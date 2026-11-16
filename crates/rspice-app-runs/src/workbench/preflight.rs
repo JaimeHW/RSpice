@@ -838,6 +838,9 @@ fn collect(state: &impl RunHost) -> PreflightReport {
     }
 
     advisories.extend(temperature_validity_advisories(state.model()));
+    let (unmeasured, acceptance) = specification_findings(state.model());
+    blockers.extend(unmeasured);
+    advisories.extend(acceptance);
 
     let simulation_plan = state.model().active_plan_revision();
     let (topology_root, topology_revision, topology_closure) =
@@ -901,6 +904,94 @@ pub fn temperature_validity_advisories(model: &Model) -> Vec<PreflightAdvisory> 
             })
         })
         .collect()
+}
+
+/// What the active plan's specifications ask of the run set that it does not
+/// hold, each opening Verify's Specifications view on the row it is about.
+///
+/// A specification whose authored measurement no enabled analysis takes is a
+/// blocker: preparation would stop the run with the same sentence, after
+/// building everything before it, and a finding whose remedy is the run set
+/// or the specification belongs where the specification is. One that reads a
+/// measurement from an analysis the run set leaves disabled, and a Monte
+/// Carlo yield gate with no Monte Carlo analysis to judge, are advisories:
+/// the run is sound, and the sheet will say what it could not judge.
+fn specification_findings(model: &Model) -> (Vec<PreflightIssue>, Vec<PreflightAdvisory>) {
+    use crate::simulation::plan::AnalysisKind;
+    use crate::state::MonteCarloSpecificationGate;
+    use rspice_simulation::netlist_preparation::measurements::append_to_generated_source;
+
+    let mut blockers = Vec::new();
+    let mut advisories = Vec::new();
+    // A plan that will not load is the plan check's finding, reported above.
+    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
+        return (blockers, advisories);
+    };
+    let Some(payload) = model.workspace.content.plan_data(plan.id()) else {
+        return (blockers, advisories);
+    };
+    let enabled: std::collections::HashMap<_, _> = plan
+        .instances()
+        .iter()
+        .filter(|instance| instance.enabled())
+        .map(|instance| (instance.id(), instance.draft()))
+        .collect();
+    for definition in &payload.specification_definitions {
+        let row = || PreflightRemediation::Specification {
+            measurement: Some(definition.measurement.clone()),
+        };
+        if definition.define_measurement {
+            // The engine's own test of an authored card against the analyses
+            // that will run, on a deck that holds nothing else.
+            if let Err(error) =
+                append_to_generated_source(".end\n", std::slice::from_ref(definition), &enabled)
+            {
+                blockers.push(PreflightIssue {
+                    check: "Specification measurement".to_owned(),
+                    observed: error.message().to_owned(),
+                    required: "An enabled analysis that takes each specification's measurement"
+                        .to_owned(),
+                    remediation: row(),
+                });
+            }
+        } else if let Some(producer) = definition.producing_analysis
+            && !enabled.contains_key(&producer)
+        {
+            let analysis = plan
+                .instance(producer)
+                .map_or("an analysis the plan no longer holds", |instance| {
+                    instance.display_name()
+                });
+            advisories.push(PreflightAdvisory {
+                message: format!(
+                    "'{}' is measured by {analysis}, which this run set does not run; it will \
+                     be reported not measured",
+                    definition.measurement
+                ),
+                remediation: Some(row()),
+                about: ("unmeasured-specification", definition.measurement.clone()),
+            });
+        }
+    }
+    if let MonteCarloSpecificationGate::YieldAtLeast { percent } =
+        payload.specification_policy.monte_carlo
+        && !plan
+            .instances()
+            .iter()
+            .any(|instance| instance.enabled() && instance.kind() == AnalysisKind::MonteCarlo)
+    {
+        advisories.push(PreflightAdvisory {
+            message: format!(
+                "The plan accepts a Monte Carlo yield of at least {percent}%, and no Monte Carlo \
+                 analysis is enabled to judge it"
+            ),
+            // With no row selected, the view's inspector is the plan's
+            // acceptance, where the gate is set.
+            remediation: Some(PreflightRemediation::Specification { measurement: None }),
+            about: ("monte-carlo-yield-gate", plan.id().to_string()),
+        });
+    }
+    (blockers, advisories)
 }
 
 fn preparation_check_label(stage: crate::simulation::execution::PreparationStage) -> &'static str {
