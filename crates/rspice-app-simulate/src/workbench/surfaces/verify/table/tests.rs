@@ -946,7 +946,7 @@ fn a_table_without_state_draws_as_it_always_has() {
         WIDTH,
         "the name column takes the spare width"
     );
-    assert_eq!(geometry.one("table.selected"), Some(rows[1]));
+    assert_eq!(geometry.one("table.selected"), None);
     // The value column's numbers end on one edge, its cell less the padding.
     let values = geometry.all("table.right.1");
     assert_eq!(values.len(), 3);

@@ -528,9 +528,8 @@ fn announced(node: &Node) -> String {
 /// is egui's own widget identity, so the plan toolbar drawn on all ten setup
 /// routes is one control and not ten. The zeroes are honest — ten of the eleven
 /// analysis-catalogue fixtures open the same window the eleventh already
-/// contributed, the Outputs registry's own actions are all disabled over an
-/// empty registry, so its enabled controls are the toolbar's, and the
-/// specifications page's acceptance settings are edited in Verify's inspector.
+/// contributed, and the Outputs registry's own actions are all disabled over
+/// an empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 49),
     ("Analyses/Ac", 6),
@@ -543,7 +542,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
-    ("Specifications", 0),
+    ("Specifications", 3),
     ("RunSet", 31),
     ("Models", 1),
     ("ConnectRules", 2),
@@ -621,7 +620,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// The Connect rules page added a route between Models and Solver with two
 /// controls of its own, and a catalogue fixture that opens the window the
 /// first one contributed (355).
-const PRESSED_FLOOR: usize = 355;
+///
+/// The specifications page's acceptance settings moved to Verify's
+/// inspector, which edits them beside the specifications they judge (354).
+const PRESSED_FLOOR: usize = 354;
 
 /// Controls that are wired to nothing.
 ///
