@@ -37,6 +37,15 @@ const DECKS: &[(&str, &str, f64, f64, TransientStartupMode)] = &[
         0.05e-9,
         TransientStartupMode::OperatingPoint,
     ),
+    (
+        "memristor",
+        "memristor\nvin in 0 sin(0 1 1meg)\nr1 in mem 100\n\
+         .model mrm memristor level=2 ron=50 roff=1k\n\
+         ymemristor mr1 mem 0 mrm ivrelation=1\n.end\n",
+        2e-6,
+        5e-9,
+        TransientStartupMode::OperatingPoint,
+    ),
 ];
 
 fn bits(values: &[f64]) -> Vec<u64> {
@@ -44,8 +53,8 @@ fn bits(values: &[f64]) -> Vec<u64> {
 }
 
 /// The saved columns of an in-memory result, in the order a run writes them to its sink: node
-/// voltages in node order, then branch currents in branch order. A column output retention left
-/// out is empty.
+/// voltages in node order, then branch currents in branch order, then the step sizes and each
+/// store trace. A column output retention left out is empty.
 fn saved_columns(result: &TransientResult) -> Vec<(&str, &[f64])> {
     let voltages = result
         .node_names
@@ -57,9 +66,15 @@ fn saved_columns(result: &TransientResult) -> Vec<(&str, &[f64])> {
         .iter()
         .zip(&result.branch_currents)
         .filter(|(_, column)| !column.is_empty());
+    let stores = result
+        .store_traces
+        .iter()
+        .map(|trace| (trace.name.as_str(), trace.values.as_slice()));
     voltages
         .chain(currents)
         .map(|(name, column)| (name.as_str(), column.as_slice()))
+        .chain(std::iter::once(("step", result.step_sizes.as_slice())))
+        .chain(stores)
         .collect()
 }
 
@@ -91,10 +106,13 @@ fn a_transient_written_through_the_store_reads_back_as_the_in_memory_result() {
                 .all(Vec::is_empty),
             "{label}: the waveforms went to the sink"
         );
-        assert_eq!(
-            bits(&streamed.step_sizes),
-            bits(&memory.step_sizes),
-            "{label}: the same accepted steps"
+        assert!(
+            streamed.step_sizes.is_empty()
+                && streamed
+                    .store_traces
+                    .iter()
+                    .all(|trace| trace.values.is_empty()),
+            "{label}: the step sizes and store traces went to the sink"
         );
         assert_eq!(
             streamed.digital_traces, memory.digital_traces,
@@ -164,6 +182,15 @@ fn read_back(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) 
             }
             "instance_parameter" => {
                 shell.adopt_instance_parameter(&signal.path, &signal.name, values);
+            }
+            "step_size" => shell.step_sizes = values,
+            "store" => {
+                let trace = shell
+                    .store_traces
+                    .iter_mut()
+                    .find(|trace| trace.name == signal.name)
+                    .unwrap();
+                trace.values = values;
             }
             other => panic!("unexpected {other} column"),
         }

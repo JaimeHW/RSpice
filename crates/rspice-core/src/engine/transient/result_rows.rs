@@ -32,8 +32,12 @@ pub(super) struct TransientRowLayout {
     /// Nodes and branch traces the result has, saved or not.
     num_nodes: usize,
     num_branches: usize,
-    /// Constant columns after the currents: `(device, parameter, value)` of each instance
-    /// parameter a sink keeps with the rows.
+    /// A sink keeps each row's step, the one that reached its point, after the currents.
+    step_size: bool,
+    /// Then the value each per-point store trace (a memristor's resistance) holds, by name.
+    stores: Vec<String>,
+    /// Constant columns last: `(device, parameter, value)` of each instance parameter a sink
+    /// keeps with the rows.
     constants: Vec<(String, String, Value)>,
 }
 
@@ -58,8 +62,31 @@ impl TransientRowLayout {
             current_branches: saved(branch_currents, num_branches),
             num_nodes,
             num_branches,
+            step_size: false,
+            stores: Vec::new(),
             constants: Vec::new(),
         }
+    }
+
+    /// This layout with the columns a sink keeps that a run in memory holds beside its rows:
+    /// the step sizes, then the store traces named `stores`.
+    pub(super) fn with_step_and_stores(mut self, stores: Vec<String>) -> Self {
+        self.step_size = true;
+        self.stores = stores;
+        self
+    }
+
+    /// The slot of each row's step size, when the row carries it.
+    pub(super) fn step_slot(&self) -> Option<usize> {
+        self.step_size
+            .then(|| self.voltage_nodes.len() + self.current_branches.len())
+    }
+
+    /// The slot of the first store trace, when the rows carry them.
+    pub(super) fn store_slots(&self) -> Option<usize> {
+        (!self.stores.is_empty()).then(|| {
+            self.voltage_nodes.len() + self.current_branches.len() + usize::from(self.step_size)
+        })
     }
 
     /// This layout with `constants` as constant columns after the currents.
@@ -86,7 +113,11 @@ impl TransientRowLayout {
 
     /// Value slots in a row.
     pub(super) fn width(&self) -> usize {
-        self.voltage_nodes.len() + self.current_branches.len() + self.constants.len()
+        self.voltage_nodes.len()
+            + self.current_branches.len()
+            + usize::from(self.step_size)
+            + self.stores.len()
+            + self.constants.len()
     }
 
     /// The schema a sink is begun with: x is time, then a real signal per slot.
@@ -117,6 +148,16 @@ impl TransientRowLayout {
                 ResultSignalKind::Real,
             );
             signal.quantity = "current".to_owned();
+            signals.push(signal);
+        }
+        if self.step_size {
+            let mut signal = ResultSignal::new("step", "s", ResultSignalKind::Real);
+            signal.quantity = "step_size".to_owned();
+            signals.push(signal);
+        }
+        for name in &self.stores {
+            let mut signal = ResultSignal::new(name.clone(), "", ResultSignalKind::Real);
+            signal.quantity = "store".to_owned();
             signals.push(signal);
         }
         for (device, parameter, _) in &self.constants {

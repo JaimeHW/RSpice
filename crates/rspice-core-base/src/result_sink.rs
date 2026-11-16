@@ -208,7 +208,7 @@ impl std::error::Error for SinkStop {}
 /// The analysis calls [`begin`](Self::begin) once, then [`row`](Self::row) for every accepted
 /// point in order, with [`amend_open_row`](Self::amend_open_row) and [`events`](Self::events)
 /// between them. Whoever handed the sink to the run calls [`end`](Self::end) with how the run
-/// ended, which may come without `begin` when the run stopped before its first row. A refusal
+/// ended, once `begin` has succeeded; a run that stops before then calls neither. A refusal
 /// stops the run; the rows already accepted stay.
 ///
 /// `row` is in the solve loop: an implementation copies the values and returns, with no

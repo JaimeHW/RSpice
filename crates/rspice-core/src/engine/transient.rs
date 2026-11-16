@@ -2921,18 +2921,28 @@ impl Engine {
         } else {
             0
         };
+        // A sink keeps the step size and the store traces in the row.
+        let step_slot = rows.layout().step_slot();
+        let store_slots = rows.layout().store_slots();
+        let held_beside_rows = if step_slot.is_some() {
+            0
+        } else {
+            result.store_traces.len().saturating_add(1)
+        };
         self.ensure_result_shape(
             next_point_count,
             held_row_values
-                .saturating_add(result.store_traces.len())
-                .saturating_add(integral_count)
-                .saturating_add(1),
+                .saturating_add(held_beside_rows)
+                .saturating_add(integral_count),
         )?;
-        let mut added_values = 1usize;
+        let mut added_values = usize::from(step_slot.is_none());
         if let Some(trace) = integral_trace {
             added_values = added_values.saturating_add(trace.borrow_mut().record(circuit)?);
         }
-        result.step_sizes.push(step_size);
+        match step_slot {
+            Some(slot) => rows.gather().1[slot] = step_size,
+            None => result.step_sizes.push(step_size),
+        }
         // The saved values are gathered into the run's reused row buffer in
         // slot order, voltages then currents, and written as one row.
         let (layout, row) = rows.gather();
@@ -2954,8 +2964,13 @@ impl Engine {
             if let Some(resistance) = Self::xyce_memristor_resistance_output(binding, solution)? {
                 binding.resistance_store = resistance;
             }
-            trace.values.push(binding.resistance_store);
-            added_values = added_values.saturating_add(1);
+            match store_slots {
+                Some(first) => rows.gather().1[first + index] = binding.resistance_store,
+                None => {
+                    trace.values.push(binding.resistance_store);
+                    added_values = added_values.saturating_add(1);
+                }
+            }
         }
 
         // Solved branch unknowns are recorded verbatim. In particular, a
@@ -3614,7 +3629,7 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        let cell = std::cell::RefCell::new(sink_route::StopLatch { sink, stop: None });
+        let cell = std::cell::RefCell::new(sink_route::StopLatch::new(sink));
         let shared: &std::cell::RefCell<dyn ResultSink + '_> = &cell;
         let outcome = engine
             .run_tran_resolved_with_resume(
@@ -3639,7 +3654,7 @@ impl Engine {
                 },
             )
             .map(|(result, _, _)| result);
-        let sink_route::StopLatch { sink, stop } = cell.into_inner();
+        let sink_route::StopLatch { sink, begun, stop } = cell.into_inner();
         match outcome {
             Ok(result) => {
                 let status = match &stop {
@@ -3665,8 +3680,11 @@ impl Engine {
                     other => StopReason::Failed(other.to_string()),
                 };
                 // The run's own error is the one to report; a sink that also
-                // fails to close has already stopped writing.
-                let _ = sink.end(RunStatus::Stopped(reason));
+                // fails to close has already stopped writing. A sink the run
+                // never began has nothing to end.
+                if begun {
+                    let _ = sink.end(RunStatus::Stopped(reason));
+                }
                 Err(error)
             }
         }
@@ -6135,10 +6153,13 @@ impl Engine {
                 .saturating_add(store_traces.len())
                 .saturating_add(1),
         );
-        for trace in &mut store_traces {
-            trace
-                .values
-                .reserve(trace_capacity.saturating_sub(trace.values.len()));
+        // A run writing to a result sink keeps its store traces and step sizes in the rows.
+        if result_sink.is_none() {
+            for trace in &mut store_traces {
+                trace
+                    .values
+                    .reserve(trace_capacity.saturating_sub(trace.values.len()));
+            }
         }
         if !resumed {
             circuit
@@ -6146,8 +6167,13 @@ impl Engine {
                 .accept_transient_step(&solution, resume_time)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
-        let mut step_sizes = Vec::with_capacity(trace_capacity);
-        step_sizes.push(0.0);
+        let step_sizes = if result_sink.is_some() {
+            Vec::new()
+        } else {
+            let mut step_sizes = Vec::with_capacity(trace_capacity);
+            step_sizes.push(0.0);
+            step_sizes
+        };
         let branch_currents = Self::initial_transient_branch_currents(
             &mut circuit,
             &solution,
@@ -6279,7 +6305,15 @@ impl Engine {
                 // An instance parameter cannot move during the run: a sink
                 // keeps it as a constant column of every row.
                 Some(sink) => TransientRows::to_sink(
-                    layout.with_constants(circuit.requested_static_instance_parameters(netlist)),
+                    layout
+                        .with_step_and_stores(
+                            result
+                                .store_traces
+                                .iter()
+                                .map(|trace| trace.name.clone())
+                                .collect(),
+                        )
+                        .with_constants(circuit.requested_static_instance_parameters(netlist)),
                     sink,
                 ),
                 None => TransientRows::in_memory(layout, trace_capacity),
@@ -6304,6 +6338,15 @@ impl Engine {
                 .zip(layout.current_branches())
             {
                 *value = branch_currents[branch][0];
+            }
+            // Row 0's step is 0; its store traces hold the values they start from, which move
+            // into the row.
+            if let Some(first) = rows.layout().store_slots() {
+                let (_, row) = rows.gather();
+                for (slot, trace) in row[first..].iter_mut().zip(&mut result.store_traces) {
+                    *slot = trace.values.first().copied().unwrap_or(0.0);
+                    trace.values = Vec::new();
+                }
             }
             rows.push(resume_time)?;
         }

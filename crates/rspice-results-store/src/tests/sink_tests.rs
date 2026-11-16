@@ -114,12 +114,13 @@ fn rows_events_and_an_amended_row_zero_read_back_from_the_segment() {
 }
 
 #[test]
-fn a_run_that_never_began_writes_nothing_and_keeps_its_io() {
+fn a_run_that_never_began_writes_nothing_refuses_to_end_and_keeps_its_io() {
     let mut store = StoreSink::new(MemoryIo::new());
     assert!(matches!(store.row(0.0, &[1.0]), Err(SinkStop::Io(_))));
-    let receipt = store.end(sink::RunStatus::Completed).unwrap();
-    assert_eq!(receipt.rows, 0);
-    assert_eq!(receipt.digest, None);
+    assert!(matches!(
+        store.end(sink::RunStatus::Completed),
+        Err(SinkStop::Io(_))
+    ));
     assert!(store.into_io().unwrap().bytes().is_empty());
 }
 

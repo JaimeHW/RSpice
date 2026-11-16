@@ -15,7 +15,7 @@ use crate::{
 /// Writes a run's rows into one segment on `I`.
 ///
 /// The segment is created when the run begins and closed when it ends; the I/O comes back with
-/// [`StoreSink::into_io`]. A sink the run never began writes nothing.
+/// [`StoreSink::into_io`]. A sink the run never began writes nothing, and refuses to end.
 pub struct StoreSink<I: RunIo> {
     io: Option<I>,
     writer: Option<RunWriter<I>>,
@@ -87,7 +87,9 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
 
     fn end(&mut self, status: sink::RunStatus) -> Result<SinkReceipt, SinkStop> {
         let Some(writer) = self.writer.take() else {
-            return Ok(SinkReceipt::default());
+            return Err(SinkStop::Io(
+                "the results segment ended without being begun".to_owned(),
+            ));
         };
         let (receipt, io) = writer.finish(store_status(status)).map_err(sink_stop)?;
         self.io = Some(io);

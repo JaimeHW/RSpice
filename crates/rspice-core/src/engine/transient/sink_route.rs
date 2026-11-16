@@ -20,15 +20,29 @@ pub struct SinkTransient {
     pub stopped: Option<SinkStop>,
 }
 
-/// The caller's sink, remembering the first refusal of a row: the stop that ends the run.
+/// The caller's sink, remembering whether it began and the first refusal of a row: the stop
+/// that ends the run.
 pub(super) struct StopLatch<'s> {
     pub(super) sink: &'s mut dyn ResultSink,
+    pub(super) begun: bool,
     pub(super) stop: Option<SinkStop>,
+}
+
+impl<'s> StopLatch<'s> {
+    pub(super) fn new(sink: &'s mut dyn ResultSink) -> Self {
+        Self {
+            sink,
+            begun: false,
+            stop: None,
+        }
+    }
 }
 
 impl ResultSink for StopLatch<'_> {
     fn begin(&mut self, schema: &ResultSchema, meta: &RunMeta) -> Result<(), SinkStop> {
-        self.sink.begin(schema, meta)
+        let begun = self.sink.begin(schema, meta);
+        self.begun = begun.is_ok();
+        begun
     }
 
     #[inline]

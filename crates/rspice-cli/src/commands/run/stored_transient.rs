@@ -35,6 +35,26 @@ enum SlotTarget {
     /// An instance parameter the run kept as a constant column: its index in
     /// [`StoredRows::parameters`].
     Parameter(usize),
+    /// The step that reached each point.
+    StepSize,
+    /// A store trace (a memristor's resistance): its index in the result's store traces.
+    Store(usize),
+}
+
+impl SlotTarget {
+    /// The result column this slot's values fill; an instance parameter's is adopted whole.
+    fn column(self, result: &mut TransientResult) -> Option<&mut Vec<f64>> {
+        match self {
+            SlotTarget::Voltage(node) => result.voltages.get_mut(node),
+            SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
+            SlotTarget::StepSize => Some(&mut result.step_sizes),
+            SlotTarget::Store(index) => result
+                .store_traces
+                .get_mut(index)
+                .map(|trace| &mut trace.values),
+            SlotTarget::Parameter(_) => None,
+        }
+    }
 }
 
 /// A transient whose rows are in a store: the result holds everything else.
@@ -173,6 +193,24 @@ fn slot_targets(
         if signal.quantity == "instance_parameter" {
             targets.push(SlotTarget::Parameter(parameters));
             parameters += 1;
+            continue;
+        }
+        if signal.quantity == "step_size" {
+            targets.push(SlotTarget::StepSize);
+            continue;
+        }
+        if signal.quantity == "store" {
+            let index = shell
+                .store_traces
+                .iter()
+                .position(|trace| trace.name == signal.name)
+                .ok_or_else(|| {
+                    format!(
+                        "the transient store's trace '{}' is not a result store trace",
+                        signal.name
+                    )
+                })?;
+            targets.push(SlotTarget::Store(index));
             continue;
         }
         let (names, next, voltage) = match signal.quantity.as_str() {
@@ -454,7 +492,8 @@ fn probe_plan(
     let column = |target: SlotTarget| match target {
         SlotTarget::Voltage(node) => shell.voltages.get(node),
         SlotTarget::Current(branch) => shell.branch_currents.get(branch),
-        SlotTarget::Parameter(_) => None,
+        // An output that reads these reads the run back.
+        SlotTarget::Parameter(_) | SlotTarget::StepSize | SlotTarget::Store(_) => None,
     };
     let inventory = match rspice_core::execution::transient_projection_signals(shell) {
         Ok(inventory) => inventory,
@@ -543,15 +582,10 @@ impl StoredRows {
         let failed = |error| store_error(&dir, error);
         result.time = self.reader.read_x(first, count).map_err(failed)?;
         for (slot, &target) in self.targets.iter().enumerate() {
-            let column = match target {
-                SlotTarget::Voltage(node) => result.voltages.get_mut(node),
-                SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
-                SlotTarget::Parameter(_) => continue,
+            let Some(column) = target.column(result) else {
+                continue;
             };
-            let values = self.reader.read_slot(slot, first, count).map_err(failed)?;
-            if let Some(column) = column {
-                *column = values;
-            }
+            *column = self.reader.read_slot(slot, first, count).map_err(failed)?;
         }
         Ok(())
     }
@@ -559,12 +593,7 @@ impl StoredRows {
     fn clear(&self, result: &mut TransientResult) {
         result.time = Vec::new();
         for &target in &self.targets {
-            let column = match target {
-                SlotTarget::Voltage(node) => result.voltages.get_mut(node),
-                SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
-                SlotTarget::Parameter(_) => None,
-            };
-            if let Some(column) = column {
+            if let Some(column) = target.column(result) {
                 *column = Vec::new();
             }
         }
@@ -587,7 +616,13 @@ impl StoredRows {
         let mut values = Vec::new();
         for (chunk, &(start, _)) in spans.iter().enumerate() {
             for (slot, found) in first.iter_mut().enumerate() {
-                if found.is_some() {
+                // The in-memory check reads the saved waveforms and parameters only.
+                if found.is_some()
+                    || matches!(
+                        self.targets[slot],
+                        SlotTarget::StepSize | SlotTarget::Store(_)
+                    )
+                {
                     continue;
                 }
                 self.reader
@@ -615,6 +650,11 @@ impl StoredRows {
                 .parameters
                 .get(index)
                 .map_or("parameter", |(_, parameter)| parameter.as_str()),
+            SlotTarget::StepSize => "step",
+            SlotTarget::Store(index) => shell
+                .store_traces
+                .get(index)
+                .map_or("store", |trace| trace.name.as_str()),
         };
         Err(super::shared::non_finite_error(
             "Transient",
