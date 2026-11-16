@@ -1542,7 +1542,7 @@ fn finish_transient_products(
                         ),
                     );
                 }
-                TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_document(
+                TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_stream(
                     &output_path,
                     &result.digital_traces,
                     &result.real_traces,
@@ -1588,7 +1588,7 @@ fn finish_transient_products(
                 result_kind: None,
                 schema: match &document {
                     TransientOutputDocument::Vcd(events) => {
-                        crate::commands::vcd_io::event_schema(&output_path, events)?
+                        crate::commands::vcd_io::event_schema(&output_path, events.header())?
                     }
                     _ => super::document::scalar_schema(&signals)?,
                 },
@@ -1751,7 +1751,7 @@ fn write_raw_event_plots(
         .map_err(|error| CliError::output_error(path, error))
 }
 
-pub(super) enum TransientOutputDocument {
+pub(super) enum TransientOutputDocument<'r> {
     Hdf5(Box<Hdf5SimulationData>),
     /// The flat tabular projection, and the event timelines the run captured.
     ///
@@ -1775,11 +1775,12 @@ pub(super) enum TransientOutputDocument {
     ///
     /// This is the one transient artifact that carries no analog waveform:
     /// the analysis grid is what the other formats are for, and an event dump
-    /// is for the times the events actually happened.
-    Vcd(Box<rspice_core::io::VcdDocument>),
+    /// is for the times the events actually happened. Its changes are read from the run's
+    /// traces as it is written.
+    Vcd(Box<rspice_core::execution::EventVcdStream<rspice_core::execution::HeldEvents<'r>>>),
 }
 
-impl TransientOutputDocument {
+impl TransientOutputDocument<'_> {
     pub(super) fn write_to(
         &self,
         writer: &mut dyn std::io::Write,
@@ -1799,8 +1800,7 @@ impl TransientOutputDocument {
                 table.write_to(writer, path, format)?;
                 write_raw_event_plots(writer, path, format, events, buses)
             }
-            Self::Vcd(document) => rspice_core::io::write_vcd(&mut *writer, document)
-                .map_err(|error| crate::commands::vcd_io::write_error(path, error)),
+            Self::Vcd(events) => crate::commands::vcd_io::write_event_stream(writer, path, events),
             Self::Typed(document) => {
                 let json = document
                     .to_json_with_abort(&crate::abort::ProcessAbort, byte_limit)

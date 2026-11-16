@@ -40,6 +40,9 @@ use crate::io::vcd::{
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use std::collections::BTreeSet;
 
+mod stream;
+pub use stream::{EventPoints, EventSource, EventVcdStream, HeldEvents, event_vcd_stream};
+
 /// Femtoseconds in one second: the finest tick VCD's `$timescale` can name.
 const FEMTOSECONDS_PER_SECOND: f64 = 1e15;
 

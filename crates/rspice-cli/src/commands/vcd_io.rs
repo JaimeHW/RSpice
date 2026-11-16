@@ -29,7 +29,8 @@ use rspice_core::engine::{
     DigitalBusDeclaration, DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint,
 };
 use rspice_core::execution::{
-    EventProjectionError, RawEventTraces, ResultPayload, event_vcd_document, split_bus_notation,
+    EventProjectionError, EventSource, EventVcdStream, HeldEvents, RawEventTraces, ResultPayload,
+    event_vcd_document, event_vcd_stream, split_bus_notation,
 };
 use rspice_core::io::{
     VcdBit, VcdChange, VcdDocument, VcdSignal, VcdSignalKind, VcdValue, VcdVariable,
@@ -135,6 +136,57 @@ pub(crate) fn event_document(
 ) -> Result<VcdDocument, CliError> {
     event_vcd_document(EVENT_SCOPE, digital_traces, real_traces, digital_buses)
         .map_err(|error| projection_error(path, &error))
+}
+
+/// [`event_document`]'s dump, with its changes read from the traces while it is written
+/// rather than gathered into a document first: the histories are checked here, and refused as
+/// the document refuses them.
+pub(crate) fn event_stream<'t>(
+    path: &Path,
+    digital_traces: &'t [DigitalTrace],
+    real_traces: &'t [RealTrace],
+    digital_buses: &[DigitalBusDeclaration],
+) -> Result<EventVcdStream<HeldEvents<'t>>, CliError> {
+    let held = HeldEvents {
+        digital: digital_traces,
+        real: real_traces,
+    };
+    event_vcd_stream(
+        EVENT_SCOPE,
+        digital_traces,
+        real_traces,
+        digital_buses,
+        held,
+    )
+    .map_err(|error| projection_error(path, &error))
+}
+
+/// Write a dump whose changes are read from their source as they are written.
+pub(crate) fn write_event_stream<S: EventSource>(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    stream: &EventVcdStream<S>,
+) -> Result<(), CliError> {
+    enum Failure {
+        Projection(EventProjectionError),
+        Vcd(rspice_core::io::VcdError),
+    }
+    impl From<rspice_core::io::VcdError> for Failure {
+        fn from(error: rspice_core::io::VcdError) -> Self {
+            Self::Vcd(error)
+        }
+    }
+    rspice_core::io::write_vcd_streamed(
+        writer,
+        stream.header(),
+        stream
+            .changes()
+            .map(|change| change.map_err(Failure::Projection)),
+    )
+    .map_err(|failure| match failure {
+        Failure::Projection(error) => projection_error(path, &error),
+        Failure::Vcd(error) => write_error(path, error),
+    })
 }
 
 /// Describe the declarations actually written to an event dump. Its inventory

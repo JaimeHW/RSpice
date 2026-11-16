@@ -1090,7 +1090,55 @@ fn record_change(
 pub fn write_vcd(writer: impl Write, document: &VcdDocument) -> Result<(), VcdError> {
     validate_writable(document)?;
     let mut writer = writer;
+    let identifiers = write_header(&mut writer, document)?;
+    write_changes(&mut writer, document, &identifiers)
+}
 
+/// [`write_vcd`] of a document whose changes arrive one at a time rather than in its signals:
+/// `header`'s declarations, then each `(tick, signal, value)` of `changes`, which come in the
+/// order [`write_vcd`] writes a document's changes: by tick, then by signal, and each signal's
+/// in its own order. `header`'s own changes are not written.
+///
+/// The header is validated before a byte is written, as [`write_vcd`] validates a document;
+/// a change is checked against its signal as it arrives.
+pub fn write_vcd_streamed<E: From<VcdError>>(
+    writer: impl Write,
+    header: &VcdDocument,
+    changes: impl Iterator<Item = Result<(u64, usize, VcdValue), E>>,
+) -> Result<(), E> {
+    validate_writable(header)?;
+    let mut writer = writer;
+    let identifiers = write_header(&mut writer, header)?;
+    let mut previous: Vec<Option<u64>> = vec![None; header.signals.len()];
+    let mut groups = ChangeGroups::default();
+    for change in changes {
+        let (tick, signal_index, value) = change?;
+        let signal = header
+            .signals
+            .get(signal_index)
+            .ok_or_else(|| unwritable("a value change names no signal"))?;
+        let previous = previous
+            .get_mut(signal_index)
+            .ok_or_else(|| unwritable("a value change names no signal"))?;
+        if previous.is_some_and(|earlier| tick < earlier) {
+            return Err(unwritable(format!(
+                "'{}' changes at tick {tick} after a later one",
+                signal_label(signal)
+            ))
+            .into());
+        }
+        *previous = Some(tick);
+        check_change(signal, &value)?;
+        groups.write(&mut writer, tick, &identifiers[signal_index], &value)?;
+    }
+    groups.finish(&mut writer)?;
+    Ok(())
+}
+
+/// Write a document's header blocks and declarations, and return the identifier code of each
+/// of its signals.
+fn write_header(writer: &mut impl Write, document: &VcdDocument) -> Result<Vec<String>, VcdError> {
+    let mut writer = writer;
     write_block(&mut writer, "date", &document.date)?;
     write_block(&mut writer, "version", &document.version)?;
     for comment in &document.comments {
@@ -1121,10 +1169,60 @@ pub fn write_vcd(writer: impl Write, document: &VcdDocument) -> Result<(), VcdEr
             )?;
         }
     }
-    retarget_scope(&mut writer, &mut open, &[])?;
+    retarget_scope(&mut *writer, &mut open, &[])?;
     writeln!(writer, "$enddefinitions $end")?;
+    Ok(identifiers)
+}
 
-    write_changes(&mut writer, document, &identifiers)
+/// The value changes after the declarations, grouped under each tick, the first group inside
+/// `$dumpvars`.
+#[derive(Default)]
+struct ChangeGroups {
+    tick: Option<u64>,
+    groups: usize,
+}
+
+impl ChangeGroups {
+    fn write(
+        &mut self,
+        writer: &mut impl Write,
+        tick: u64,
+        identifier: &str,
+        value: &VcdValue,
+    ) -> Result<(), VcdError> {
+        if self.tick != Some(tick) {
+            if self.groups == 1 {
+                writeln!(writer, "$end")?;
+            }
+            writeln!(writer, "#{tick}")?;
+            if self.groups == 0 {
+                writeln!(writer, "$dumpvars")?;
+            }
+            self.tick = Some(tick);
+            self.groups += 1;
+        }
+        match value {
+            VcdValue::Logic(bits) => match bits.as_slice() {
+                [bit] => writeln!(writer, "{bit}{identifier}")?,
+                bits => {
+                    write!(writer, "b")?;
+                    for bit in bits {
+                        write!(writer, "{bit}")?;
+                    }
+                    writeln!(writer, " {identifier}")?;
+                }
+            },
+            VcdValue::Real(real) => writeln!(writer, "r{real:?} {identifier}")?,
+        }
+        Ok(())
+    }
+
+    fn finish(self, writer: &mut impl Write) -> Result<(), VcdError> {
+        if self.groups == 1 {
+            writeln!(writer, "$end")?;
+        }
+        Ok(())
+    }
 }
 
 fn write_block(writer: &mut impl Write, keyword: &str, body: &str) -> Result<(), VcdError> {
@@ -1178,45 +1276,20 @@ fn write_changes(
     }
     ordered.sort_unstable();
 
-    for (group_index, group) in ordered
-        .chunk_by(|left, right| left.0 == right.0)
-        .enumerate()
-    {
-        let Some((tick, _, _)) = group.first() else {
-            continue;
+    let mut groups = ChangeGroups::default();
+    for (tick, signal_index, change_index) in ordered {
+        let (Some(signal), Some(identifier)) = (
+            document.signals.get(signal_index),
+            identifiers.get(signal_index),
+        ) else {
+            return Err(unwritable("a value change names no signal"));
         };
-        writeln!(writer, "#{tick}")?;
-        if group_index == 0 {
-            writeln!(writer, "$dumpvars")?;
-        }
-        for (_, signal_index, change_index) in group {
-            let (Some(signal), Some(identifier)) = (
-                document.signals.get(*signal_index),
-                identifiers.get(*signal_index),
-            ) else {
-                return Err(unwritable("a value change names no signal"));
-            };
-            let Some(change) = signal.changes.get(*change_index) else {
-                return Err(unwritable("a value change names no time"));
-            };
-            match &change.value {
-                VcdValue::Logic(bits) => match bits.as_slice() {
-                    [bit] => writeln!(writer, "{bit}{identifier}")?,
-                    bits => {
-                        write!(writer, "b")?;
-                        for bit in bits {
-                            write!(writer, "{bit}")?;
-                        }
-                        writeln!(writer, " {identifier}")?;
-                    }
-                },
-                VcdValue::Real(real) => writeln!(writer, "r{real:?} {identifier}")?,
-            }
-        }
-        if group_index == 0 {
-            writeln!(writer, "$end")?;
-        }
+        let Some(change) = signal.changes.get(change_index) else {
+            return Err(unwritable("a value change names no time"));
+        };
+        groups.write(writer, tick, identifier, &change.value)?;
     }
+    groups.finish(writer)?;
     Ok(())
 }
 
@@ -1307,27 +1380,39 @@ fn validate_writable(document: &VcdDocument) -> Result<(), VcdError> {
                 )));
             }
             previous = Some(change.tick);
-            match (&change.value, signal.kind) {
-                (VcdValue::Logic(bits), VcdSignalKind::Logic) => {
-                    if bits.len() != signal.width as usize {
-                        return Err(unwritable(format!(
-                            "a change on '{label}' carries {} bits for a {}-bit variable",
-                            bits.len(),
-                            signal.width
-                        )));
-                    }
-                }
-                (VcdValue::Real(real), VcdSignalKind::Real) => {
-                    if !real.is_finite() {
-                        return Err(unwritable(format!("a change on '{label}' is not finite")));
-                    }
-                }
-                _ => {
-                    return Err(unwritable(format!(
-                        "a change on '{label}' does not match its declared kind"
-                    )));
-                }
+            check_change(signal, &change.value)?;
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a change that does not fit its signal's declaration.
+fn check_change(signal: &VcdSignal, value: &VcdValue) -> Result<(), VcdError> {
+    let label = || signal_label(signal);
+    match (value, signal.kind) {
+        (VcdValue::Logic(bits), VcdSignalKind::Logic) => {
+            if bits.len() != signal.width as usize {
+                return Err(unwritable(format!(
+                    "a change on '{}' carries {} bits for a {}-bit variable",
+                    label(),
+                    bits.len(),
+                    signal.width
+                )));
             }
+        }
+        (VcdValue::Real(real), VcdSignalKind::Real) => {
+            if !real.is_finite() {
+                return Err(unwritable(format!(
+                    "a change on '{}' is not finite",
+                    label()
+                )));
+            }
+        }
+        _ => {
+            return Err(unwritable(format!(
+                "a change on '{}' does not match its declared kind",
+                label()
+            )));
         }
     }
     Ok(())

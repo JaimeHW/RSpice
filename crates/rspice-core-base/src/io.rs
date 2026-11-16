@@ -55,7 +55,7 @@ pub use raw_export::{
 pub use vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdDumpOff, VcdError, VcdMagnitude,
     VcdSignal, VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable,
-    parse_vcd_bytes_with_limits, parse_vcd_reader_with_limits, write_vcd,
+    parse_vcd_bytes_with_limits, parse_vcd_reader_with_limits, write_vcd, write_vcd_streamed,
 };
 pub use xyce_prn::{
     XycePrnError, XycePrnFooter, XycePrnLimits, XycePrnScientificStyle, XycePrnTable,

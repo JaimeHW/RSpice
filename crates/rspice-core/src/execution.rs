@@ -57,8 +57,9 @@ pub use event_export::{
     EventPlotError, RawEventTraces, decode_event_plots, transient_bus_plots, transient_event_plots,
 };
 pub use event_projection::{
-    EventProjectionError, VcdEventHistories, digital_value_from_vcd_bit, digital_value_to_vcd_bit,
-    event_code_to_vcd_bit, event_vcd_document, vcd_event_histories,
+    EventPoints, EventProjectionError, EventSource, EventVcdStream, HeldEvents, VcdEventHistories,
+    digital_value_from_vcd_bit, digital_value_to_vcd_bit, event_code_to_vcd_bit,
+    event_vcd_document, event_vcd_stream, vcd_event_histories,
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{
