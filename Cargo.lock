@@ -5692,6 +5692,7 @@ dependencies = [
  "rspice-formats",
  "rspice-output",
  "rspice-results",
+ "rspice-results-store",
  "rspice-simulation",
  "rspice-veriloga",
  "rspice-veriloga-runtime",

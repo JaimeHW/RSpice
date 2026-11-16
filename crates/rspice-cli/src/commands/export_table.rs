@@ -573,14 +573,58 @@ impl ExportTable {
         if valid {
             Ok(())
         } else {
-            Err(CliError::output_error(
-                path,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "table columns must match the coordinate length and contain only finite present values",
-                ),
-            ))
+            Err(invalid_samples(path))
         }
+    }
+
+    /// Serialize this table's header and layout around `points` dense real rows read from
+    /// `value(row, variable)`, where variable 0 is the scale, instead of from the table's own
+    /// samples: the table of a run whose rows stream from a results store. Raw and delimited
+    /// formats only, and every column real. The rows are written exactly as the same samples
+    /// held in the table would be.
+    pub(crate) fn write_streamed_to(
+        &self,
+        writer: &mut dyn Write,
+        path: &Path,
+        format: OutputFormat,
+        points: usize,
+        mut value: impl FnMut(usize, usize) -> f64,
+    ) -> Result<(), CliError> {
+        if self
+            .columns
+            .iter()
+            .any(|column| !matches!(column.data, ColumnData::Real(_)))
+        {
+            return Err(CliError::InternalError {
+                message: "a streamed table has a column that is not dense real".to_owned(),
+            });
+        }
+        let delimiter = match format {
+            OutputFormat::Raw | OutputFormat::RawAscii => {
+                let binary = format == OutputFormat::Raw;
+                return self.write_raw_rows(writer, path, binary, points, |row, variable| {
+                    (value(row, variable), 0.0)
+                });
+            }
+            OutputFormat::Csv => ',',
+            OutputFormat::Tsv => '\t',
+            OutputFormat::Json | OutputFormat::Hdf5 | OutputFormat::Vcd => {
+                return Err(CliError::InternalError {
+                    message: format!("a {format:?} table is not written from streamed rows"),
+                });
+            }
+        };
+        let io_err = |e: std::io::Error| CliError::output_error(path, e);
+        let record = self.write_delimited_header(writer, path, delimiter)?;
+        let columns = self.columns.len();
+        for row in 0..points {
+            write!(writer, "{:.17e}", value(row, 0)).map_err(io_err)?;
+            for column in 1..=columns {
+                write!(writer, "{}{:.17e}", delimiter, value(row, column)).map_err(io_err)?;
+            }
+            writeln!(writer).map_err(io_err)?;
+        }
+        Self::write_delimited_record(writer, path, delimiter, record)
     }
 
     /// Value of `column` at row `row` as (real, imag).
@@ -612,6 +656,28 @@ impl ExportTable {
         if let std::borrow::Cow::Owned(table) = encoded {
             return table.write_raw(writer, path, binary);
         }
+        self.write_raw_rows(
+            writer,
+            path,
+            binary,
+            self.scale.len(),
+            |row, variable| match variable.checked_sub(1) {
+                None => (self.scale[row], 0.0),
+                Some(column) => Self::value_at(&self.columns[column].data, row),
+            },
+        )
+    }
+
+    /// A rawfile of `points` rows of this table's variables, each value read from `value(row,
+    /// variable)`, where variable 0 is the scale. The table's own samples are not read.
+    fn write_raw_rows<W: Write + ?Sized>(
+        &self,
+        writer: &mut W,
+        path: &Path,
+        binary: bool,
+        points: usize,
+        value: impl FnMut(usize, usize) -> (f64, f64),
+    ) -> Result<(), CliError> {
         let complex = self.is_complex();
         let io_err = |e: std::io::Error| CliError::output_error(path, e);
 
@@ -677,7 +743,7 @@ impl ExportTable {
             complex,
             logarithmic: self.logarithmic,
             variables: &declared,
-            points: self.scale.len(),
+            points,
         };
         let format = if binary {
             raw_export::RawFormat::Binary
@@ -689,10 +755,7 @@ impl ExportTable {
             &layout,
             format,
             raw_export::write_raw_exponent,
-            |row, variable| match variable.checked_sub(1) {
-                None => (self.scale[row], 0.0),
-                Some(column) => Self::value_at(&self.columns[column].data, row),
-            },
+            value,
         )
         .map_err(io_err)
     }
@@ -703,6 +766,43 @@ impl ExportTable {
         path: &Path,
         delimiter: char,
     ) -> Result<(), CliError> {
+        let io_err = |e: std::io::Error| CliError::output_error(path, e);
+        let record = self.write_delimited_header(writer, path, delimiter)?;
+        for (row, scale_value) in self.scale.iter().enumerate() {
+            write!(writer, "{:.17e}", scale_value).map_err(io_err)?;
+            for column in &self.columns {
+                let (re, im) = Self::value_at(&column.data, row);
+                match column.data {
+                    ColumnData::NullableReal(ref values) => {
+                        write!(writer, "{delimiter}").map_err(io_err)?;
+                        if let Some(value) = values[row] {
+                            write!(writer, "{value:.17e}").map_err(io_err)?;
+                        }
+                    }
+                    ColumnData::Real(_) => {
+                        write!(writer, "{}{:.17e}", delimiter, re).map_err(io_err)?;
+                    }
+                    ColumnData::NullableComplex(ref values) if values[row].is_none() => {
+                        write!(writer, "{delimiter}{delimiter}").map_err(io_err)?;
+                    }
+                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
+                        write!(writer, "{0}{1:.17e}{0}{2:.17e}", delimiter, re, im)
+                            .map_err(io_err)?;
+                    }
+                }
+            }
+            writeln!(writer).map_err(io_err)?;
+        }
+        Self::write_delimited_record(writer, path, delimiter, record)
+    }
+
+    /// The header line of a delimited table, and the trailing layout record it needs, if any.
+    fn write_delimited_header<W: Write + ?Sized>(
+        &self,
+        writer: &mut W,
+        path: &Path,
+        delimiter: char,
+    ) -> Result<Option<Vec<String>>, CliError> {
         let io_err = |e: std::io::Error| CliError::output_error(path, e);
         let metadata = self.delimited_metadata();
         let headers = metadata
@@ -771,33 +871,16 @@ impl ExportTable {
             }
         }
         writeln!(writer).map_err(io_err)?;
+        Ok(record)
+    }
 
-        for (row, scale_value) in self.scale.iter().enumerate() {
-            write!(writer, "{:.17e}", scale_value).map_err(io_err)?;
-            for column in &self.columns {
-                let (re, im) = Self::value_at(&column.data, row);
-                match column.data {
-                    ColumnData::NullableReal(ref values) => {
-                        write!(writer, "{delimiter}").map_err(io_err)?;
-                        if let Some(value) = values[row] {
-                            write!(writer, "{value:.17e}").map_err(io_err)?;
-                        }
-                    }
-                    ColumnData::Real(_) => {
-                        write!(writer, "{}{:.17e}", delimiter, re).map_err(io_err)?;
-                    }
-                    ColumnData::NullableComplex(ref values) if values[row].is_none() => {
-                        write!(writer, "{delimiter}{delimiter}").map_err(io_err)?;
-                    }
-                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
-                        write!(writer, "{0}{1:.17e}{0}{2:.17e}", delimiter, re, im)
-                            .map_err(io_err)?;
-                    }
-                }
-            }
-            writeln!(writer).map_err(io_err)?;
-        }
-
+    fn write_delimited_record<W: Write + ?Sized>(
+        writer: &mut W,
+        path: &Path,
+        delimiter: char,
+        record: Option<Vec<String>>,
+    ) -> Result<(), CliError> {
+        let io_err = |e: std::io::Error| CliError::output_error(path, e);
         if let Some(record) = record {
             for (index, field) in record.iter().enumerate() {
                 if index > 0 {
@@ -898,6 +981,17 @@ impl ExportTable {
             .map_err(|e| CliError::output_error(path, e))?;
         Ok(())
     }
+}
+
+/// A table whose samples are not all finite and on the coordinate is not published.
+pub(crate) fn invalid_samples(path: &Path) -> CliError {
+    CliError::output_error(
+        path,
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "table columns must match the coordinate length and contain only finite present values",
+        ),
+    )
 }
 
 fn needs_raw_escape(value: &str) -> bool {

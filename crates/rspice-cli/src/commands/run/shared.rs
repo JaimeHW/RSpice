@@ -192,23 +192,39 @@ pub(super) fn ensure_finite_series<'a>(
     }
     for (name, values) in signals {
         if let Some(index) = values.iter().position(|v| !v.is_finite()) {
-            let location = if values.len() > 1 {
-                format!(" at point {index}")
-            } else {
-                String::new()
-            };
-            return Err(CliError::SimulationError {
-                message: format!(
-                    "{name} is non-finite ({}){location}; the solution is not \
-                     physical — check the circuit topology (e.g. conflicting \
-                     voltage sources). Use --allow-nonfinite to export anyway.",
-                    values[index]
-                ),
-                analysis: Some(analysis.to_string()),
-            });
+            return Err(non_finite_error(
+                analysis,
+                name,
+                values[index],
+                index as u64,
+                values.len() as u64,
+            ));
         }
     }
     Ok(())
+}
+
+/// The refusal of a non-finite `value` of `name` at `point` of a series of `points` values.
+pub(super) fn non_finite_error(
+    analysis: &str,
+    name: &str,
+    value: f64,
+    point: u64,
+    points: u64,
+) -> CliError {
+    let location = if points > 1 {
+        format!(" at point {point}")
+    } else {
+        String::new()
+    };
+    CliError::SimulationError {
+        message: format!(
+            "{name} is non-finite ({value}){location}; the solution is not \
+             physical — check the circuit topology (e.g. conflicting \
+             voltage sources). Use --allow-nonfinite to export anyway."
+        ),
+        analysis: Some(analysis.to_string()),
+    }
 }
 
 /// One report row for a continuous-measurement stream.

@@ -740,6 +740,7 @@ pub(super) fn run_transient(
     max_step: Option<f64>,
     uic: bool,
     state_times: &[f64],
+    store: TransientStore,
 ) -> Result<TransientOutcome, CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
@@ -1027,6 +1028,23 @@ pub(super) fn run_transient(
             ctx.hold_shared_transient_states(state_times, states);
             result
         })
+    } else if store == TransientStore::Allowed
+        && rspice_core::engine::transient_output_reading_waveforms(ctx.netlist)
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Transient".to_string()),
+            })?
+            .is_none()
+    {
+        let stored = super::stored_transient::run(
+            ctx,
+            tstop,
+            internal_max_step,
+            startup_mode,
+            &crate::abort::ProgressAbort::new(&pb),
+        );
+        pb.finish_and_clear();
+        return finish_stored_transient(ctx, stored?, tstart, tstop);
     } else {
         let result = ctx.engine.run_tran_with_startup_mode_and_abort(
             ctx.netlist,
@@ -1065,6 +1083,50 @@ pub(super) fn run_transient(
     }
 }
 
+/// Whether a transient may keep its rows in a results store rather than in its result: only a
+/// caller that reads nothing of the result's waveforms afterwards can take one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TransientStore {
+    Allowed,
+    InMemory,
+}
+
+/// Publish a transient whose rows are in a store, streaming them from it when the outputs allow
+/// and reading them back otherwise, then leave the store beside the output or delete it.
+fn finish_stored_transient(
+    ctx: &RunContext<'_>,
+    mut stored: super::stored_transient::StoredTransient,
+    tstart: f64,
+    tstop: f64,
+) -> Result<TransientOutcome, CliError> {
+    let plan = stored.stream_plan(ctx, tstart)?;
+    let (result, mut rows) = match plan {
+        Some(_) => (stored.shell, stored.rows),
+        None => stored.into_result()?,
+    };
+    let mut output = super::stored_transient::StoredOutput {
+        rows: &mut rows,
+        plan: plan.as_ref(),
+        published: None,
+    };
+    let finished =
+        finish_transient_outputs(ctx, &result, tstart, tstop, None, None, Some(&mut output));
+    let published = output.published.take();
+    match finished {
+        Ok(()) => {
+            super::stored_transient::record_store(rows, published.as_deref(), !ctx.args.no_store)?;
+        }
+        Err(error) => {
+            let _ = rows.publish(None, false);
+            return Err(error);
+        }
+    }
+    Ok(TransientOutcome {
+        result,
+        post_results: None,
+    })
+}
+
 pub(super) fn finish_transient_result(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::transient::TransientResult,
@@ -1072,6 +1134,73 @@ pub(super) fn finish_transient_result(
     tstop: f64,
     post_results: Option<&rspice_core::engine::TransientPostResults>,
     compression_report: Option<&rspice_core::engine::TransientCompressionReport>,
+) -> Result<(), CliError> {
+    finish_transient_outputs(
+        ctx,
+        result,
+        tstart,
+        tstop,
+        post_results,
+        compression_report,
+        None,
+    )
+}
+
+/// Report, measure and publish one transient. With `stored`, its rows are in a store: a run with
+/// a stream plan has `result` without waveforms and reads them from the store; one without has
+/// them read back into `result`.
+fn finish_transient_outputs(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::transient::TransientResult,
+    tstart: f64,
+    tstop: f64,
+    post_results: Option<&rspice_core::engine::TransientPostResults>,
+    compression_report: Option<&rspice_core::engine::TransientCompressionReport>,
+    mut stored: Option<&mut super::stored_transient::StoredOutput<'_>>,
+) -> Result<(), CliError> {
+    if let Some(stored) = stored.as_deref_mut().filter(|stored| stored.plan.is_some()) {
+        stored
+            .rows
+            .ensure_finite(ctx.args.allow_nonfinite, result)?;
+    } else {
+        finite_transient_columns(ctx, result)?;
+    }
+
+    if !ctx.quiet && !ctx.compress {
+        let (points, last_time) = match stored.as_deref_mut().filter(|stored| stored.plan.is_some())
+        {
+            Some(stored) => (stored.rows.rows() as usize, stored.rows.last_time()?),
+            None => (result.time.len(), result.time.last().copied()),
+        };
+        // A model's `$finish` ends a run successfully at the point the solver
+        // accepted; the headline must not claim the requested interval.
+        match last_time.filter(|last| tstop - last > 1e-9 * tstop.abs()) {
+            Some(last) => crate::console::line(format_args!(
+                "Transient ended early at {} of the requested {}: {} time points computed",
+                crate::console::si_seconds(last),
+                crate::console::si_seconds(tstop),
+                points
+            ))?,
+            None => crate::console::line(format_args!(
+                "✓ Transient complete: {} time points computed",
+                points
+            ))?,
+        }
+    }
+    finish_transient_products(
+        ctx,
+        result,
+        tstart,
+        tstop,
+        post_results,
+        compression_report,
+        stored,
+    )
+}
+
+fn finite_transient_columns(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::transient::TransientResult,
 ) -> Result<(), CliError> {
     super::shared::ensure_finite_series(
         ctx.args.allow_nonfinite,
@@ -1102,30 +1231,18 @@ pub(super) fn finish_transient_result(
                         (name, waveform.as_slice())
                     }),
             ),
-    )?;
+    )
+}
 
-    if !ctx.quiet && !ctx.compress {
-        // A model's `$finish` ends a run successfully at the point the solver
-        // accepted; the headline must not claim the requested interval.
-        match result
-            .time
-            .last()
-            .copied()
-            .filter(|last| tstop - last > 1e-9 * tstop.abs())
-        {
-            Some(last) => crate::console::line(format_args!(
-                "Transient ended early at {} of the requested {}: {} time points computed",
-                crate::console::si_seconds(last),
-                crate::console::si_seconds(tstop),
-                result.time.len()
-            ))?,
-            None => crate::console::line(format_args!(
-                "✓ Transient complete: {} time points computed",
-                result.time.len()
-            ))?,
-        }
-    }
-
+fn finish_transient_products(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::transient::TransientResult,
+    tstart: f64,
+    tstop: f64,
+    post_results: Option<&rspice_core::engine::TransientPostResults>,
+    compression_report: Option<&rspice_core::engine::TransientCompressionReport>,
+    mut stored: Option<&mut super::stored_transient::StoredOutput<'_>>,
+) -> Result<(), CliError> {
     // A compressed run already carries the `.MEASURE` results the core
     // evaluated on the exact accepted trajectory. Re-evaluating them
     // here would measure the decimated expansion and report different
@@ -1188,13 +1305,17 @@ pub(super) fn finish_transient_result(
 
     // Perform checked SAVE/PRINT materialization independently of
     // file publication, matching OP and DC behavior.
-    let mut signals = transient_export_signals(
-        ctx.netlist,
-        result,
-        ctx.engine.config().resource_limits,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
+    let plan = stored.as_ref().and_then(|stored| stored.plan);
+    let mut signals = match plan {
+        Some(plan) => plan.signals.clone(),
+        None => transient_export_signals(
+            ctx.netlist,
+            result,
+            ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?,
+    };
 
     validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
 
@@ -1248,20 +1369,34 @@ pub(super) fn finish_transient_result(
         );
         let analysis_id = resolved.analysis("tran")?;
         let output_path = resolved.path;
-        let projection = output_projection()?;
-        let output_time = projection.times().to_vec();
-        for signal in &mut signals {
-            signal.values = projection
-                .project(&signal.values)
-                .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+        if let Some(stored) = stored.as_deref_mut() {
+            stored.published = Some(output_path.clone());
         }
-        super::shared::ensure_finite_series(
-            ctx.args.allow_nonfinite,
-            "Transient output projection",
-            signals
-                .iter()
-                .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
-        )?;
+        // A streamed run's rows stay in its store: the table is written from
+        // there, its finite values already checked with the whole run's.
+        let mut streamed_rows = None;
+        let output_time = match (plan, stored.as_deref_mut()) {
+            (Some(_), Some(stored)) => {
+                streamed_rows = Some(stored.rows.output_rows(tstart, tstop)?);
+                Vec::new()
+            }
+            _ => {
+                let projection = output_projection()?;
+                for signal in &mut signals {
+                    signal.values = projection
+                        .project(&signal.values)
+                        .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                }
+                super::shared::ensure_finite_series(
+                    ctx.args.allow_nonfinite,
+                    "Transient output projection",
+                    signals
+                        .iter()
+                        .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+                )?;
+                projection.times().to_vec()
+            }
+        };
         let document = match ctx.format {
             OutputFormat::Hdf5 => {
                 let mut data = Hdf5SimulationData::new();
@@ -1377,13 +1512,42 @@ pub(super) fn finish_transient_result(
 
         let fft_output_path = if result.fft_results.is_empty() {
             publish::artifact(&output_path, |writer| {
-                document.write_to(
-                    writer,
-                    &output_path,
-                    ctx.format,
-                    super::document::json_byte_limit(ctx),
-                    ctx.args.timeout,
-                )
+                match (&document, streamed_rows, plan, stored) {
+                    (
+                        TransientOutputDocument::Table {
+                            table,
+                            events,
+                            buses,
+                        },
+                        Some((first, points)),
+                        Some(plan),
+                        Some(stored),
+                    ) => {
+                        let points =
+                            usize::try_from(points).map_err(|_| CliError::InternalError {
+                                message: "a transient output has more rows than this host \
+                                          can address"
+                                    .to_owned(),
+                            })?;
+                        let mut cursor = stored.rows.cursor(plan, first);
+                        table.write_streamed_to(
+                            writer,
+                            &output_path,
+                            ctx.format,
+                            points,
+                            |row, variable| cursor.value(row, variable),
+                        )?;
+                        cursor.finish(&output_path)?;
+                        write_raw_event_plots(writer, &output_path, ctx.format, events, buses)
+                    }
+                    _ => document.write_to(
+                        writer,
+                        &output_path,
+                        ctx.format,
+                        super::document::json_byte_limit(ctx),
+                        ctx.args.timeout,
+                    ),
+                }
             })
             .map_err(|error| map_atomic_output_error(&output_path, error))?;
             None
@@ -1429,6 +1593,28 @@ pub(super) fn finish_transient_result(
         }
     }
     Ok(())
+}
+
+/// Append a rawfile's event plots after its table, inside the caller's staging closure, so a
+/// rawfile that carries them is still published whole or not at all. Other formats carry none.
+fn write_raw_event_plots(
+    writer: &mut dyn std::io::Write,
+    path: &Path,
+    format: OutputFormat,
+    events: &[rspice_core::io::RawEventTimeline],
+    buses: &[rspice_core::io::RawBusTimeline],
+) -> Result<(), CliError> {
+    let raw_format = match format {
+        OutputFormat::Raw => rspice_core::io::RawFormat::Binary,
+        OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
+        OutputFormat::Csv
+        | OutputFormat::Tsv
+        | OutputFormat::Json
+        | OutputFormat::Hdf5
+        | OutputFormat::Vcd => return Ok(()),
+    };
+    rspice_core::io::write_event_plots(writer, events, buses, raw_format)
+        .map_err(|error| CliError::output_error(path, error))
 }
 
 pub(super) enum TransientOutputDocument {
@@ -1477,20 +1663,7 @@ impl TransientOutputDocument {
                 buses,
             } => {
                 table.write_to(writer, path, format)?;
-                // Appended inside the caller's staging closure, so a rawfile
-                // that carries event plots is still published whole or not at
-                // all.
-                let raw_format = match format {
-                    OutputFormat::Raw => rspice_core::io::RawFormat::Binary,
-                    OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
-                    OutputFormat::Csv
-                    | OutputFormat::Tsv
-                    | OutputFormat::Json
-                    | OutputFormat::Hdf5
-                    | OutputFormat::Vcd => return Ok(()),
-                };
-                rspice_core::io::write_event_plots(writer, events, buses, raw_format)
-                    .map_err(|error| CliError::output_error(path, error))
+                write_raw_event_plots(writer, path, format, events, buses)
             }
             Self::Vcd(document) => rspice_core::io::write_vcd(&mut *writer, document)
                 .map_err(|error| crate::commands::vcd_io::write_error(path, error)),

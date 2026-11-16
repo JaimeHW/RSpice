@@ -1035,6 +1035,13 @@ impl<'a> RunContext<'a> {
                     })?;
                 self.next_transient_ordinal.set(next);
                 let state_times = frequency::shared_state_times(self, analysis);
+                // A transient a `.FOUR` card reads is kept whole in memory;
+                // every other one keeps its rows in a results store.
+                let store = if self.plans_fourier_for(self.current_transient_instance()?) {
+                    basic::TransientStore::InMemory
+                } else {
+                    basic::TransientStore::Allowed
+                };
                 let outcome = basic::run_transient(
                     self,
                     *stop,
@@ -1043,6 +1050,7 @@ impl<'a> RunContext<'a> {
                     *max_step,
                     *uic,
                     &state_times,
+                    store,
                 )?;
                 let analysis = self.current_transient_instance()?;
                 // Only a transient a planned `.FOUR` card names is kept:

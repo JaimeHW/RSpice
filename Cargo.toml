@@ -195,6 +195,7 @@ rspice-schematic-editor = { path = "crates/rspice-schematic-editor", version = "
 rspice-results-ui = { path = "crates/rspice-results-ui", version = "0.1.0" }
 rspice-vocabulary = { path = "crates/rspice-vocabulary", version = "0.1.0" }
 rspice-results = { path = "crates/rspice-results", version = "0.1.0" }
+rspice-results-store = { path = "crates/rspice-results-store", version = "0.1.0" }
 rspice-units = { path = "crates/rspice-units", version = "0.1.0" }
 rspice-hardcopy-contract = { path = "crates/rspice-hardcopy-contract", version = "0.1.0" }
 rspice-hardcopy = { path = "crates/rspice-hardcopy", version = "0.1.0" }

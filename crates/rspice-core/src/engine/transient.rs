@@ -11,6 +11,7 @@ mod hdl_variables;
 mod integral_trace;
 mod lead_power;
 mod post_results;
+mod sink_route;
 use super::result::canonical_event_name;
 use super::{
     DigitalBusDeclaration, Engine, SimulationError, SpiceDialect, TransientPostResults,
@@ -48,6 +49,7 @@ use crate::numerics::integration::{
 use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
 pub use post_results::{evaluate_transient_fourier_results, evaluate_transient_post_results};
+pub use sink_route::transient_output_reading_waveforms;
 use std::collections::{HashMap, HashSet};
 
 use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};
@@ -2911,10 +2913,17 @@ impl Engine {
         let integral_count =
             integral_trace.map_or(0, |_| circuit.behavioral_sources.integral_count());
         let next_point_count = rows.points().saturating_add(1);
+        // A row written to the caller's sink is the sink's to hold; only what
+        // stays in the result counts against the run's result budget.
+        let keeps_rows = rows.keeps_rows();
+        let held_row_values = if keeps_rows {
+            capture.analog_values_per_sample()
+        } else {
+            0
+        };
         self.ensure_result_shape(
             next_point_count,
-            capture
-                .analog_values_per_sample()
+            held_row_values
                 .saturating_add(result.store_traces.len())
                 .saturating_add(integral_count)
                 .saturating_add(1),
@@ -2931,7 +2940,9 @@ impl Engine {
         for (value, &node) in row.iter_mut().zip(layout.voltage_nodes()) {
             *value = solution.get(node).copied().unwrap_or(0.0);
         }
-        added_values = added_values.saturating_add(saved_voltages);
+        if keeps_rows {
+            added_values = added_values.saturating_add(saved_voltages);
+        }
         for (index, binding) in circuit.xyce_memristors.iter_mut().enumerate() {
             let trace = result.store_traces.get_mut(index).ok_or_else(|| {
                 SimulationError::Circuit(format!(
@@ -2976,7 +2987,9 @@ impl Engine {
                 }
             };
         }
-        added_values = added_values.saturating_add(layout.current_branches().len());
+        if keeps_rows {
+            added_values = added_values.saturating_add(layout.current_branches().len());
+        }
         rows.push(time)?;
         if record_device_op_traces {
             added_values = added_values.saturating_add(

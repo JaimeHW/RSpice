@@ -127,6 +127,39 @@ fn every_row_reads_back_bit_for_bit_with_the_status_and_digest() {
 }
 
 #[test]
+fn chunk_by_chunk_reads_cover_every_row_once_bit_for_bit() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, values) = rows(1000, slots, 7);
+    let mut writer = SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    let (_, io) = writer.finish(RunStatus::Completed).unwrap();
+    let mut reader = SegmentReader::open(io).unwrap();
+    let spans = reader.chunk_spans().collect::<Vec<_>>();
+    assert_eq!(spans.len(), 1000usize.div_ceil(64));
+    let (mut chunk_x, mut chunk_slot) = (Vec::new(), Vec::new());
+    let mut next = 0u64;
+    for (chunk, &(first, rows)) in spans.iter().enumerate() {
+        assert_eq!(first, next);
+        next += rows as u64;
+        reader.read_chunk_x(chunk, &mut chunk_x).unwrap();
+        assert_eq!(bits(&chunk_x), bits(&x[first as usize..next as usize]));
+        for slot in 0..slots {
+            reader
+                .read_chunk_slot(chunk, slot, &mut chunk_slot)
+                .unwrap();
+            assert_eq!(
+                bits(&chunk_slot),
+                bits(&reader.read_slot(slot, first, rows).unwrap())
+            );
+        }
+    }
+    assert_eq!(next, 1000);
+    assert!(reader.read_chunk_x(spans.len(), &mut chunk_x).is_err());
+    assert!(reader.read_chunk_slot(0, slots, &mut chunk_slot).is_err());
+}
+
+#[test]
 fn a_segment_cut_at_any_byte_reads_as_a_prefix_of_its_rows() {
     let schema = mixed_schema();
     let slots = schema.slots();

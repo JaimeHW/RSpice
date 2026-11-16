@@ -247,10 +247,17 @@ impl<'s> TransientRows<'s> {
         }
     }
 
+    /// The rows stay in this process: the run keeps them in memory rather than writing them to
+    /// the caller's sink. Rows a sink takes are not result values the run holds.
+    pub(super) fn keeps_rows(&self) -> bool {
+        matches!(self.target, Target::Memory(_))
+    }
+
     /// Values the run has written that its result does not hold yet: the time and every saved
-    /// slot of each row, until the rows a run kept in memory move into its result.
+    /// slot of each row, until the rows a run kept in memory move into its result. Rows written
+    /// to the caller's sink are held by the sink, not by the run.
     pub(super) fn unfilled_values(&self) -> usize {
-        if self.filled {
+        if self.filled || !self.keeps_rows() {
             return 0;
         }
         self.points

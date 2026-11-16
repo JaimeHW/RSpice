@@ -398,6 +398,11 @@ pub struct RunArgs {
     #[arg(long)]
     pub allow_nonfinite: bool,
 
+    /// Delete the results store (`<output>.rsr/`) a transient leaves beside
+    /// its output once the output is written
+    #[arg(long)]
+    pub no_store: bool,
+
     /// Abort the run after this many seconds (exit code 124). Transient
     /// and DC sweep analyses stop at the next safe point.
     #[arg(long, value_name = "SECONDS", value_parser = spice_value)]

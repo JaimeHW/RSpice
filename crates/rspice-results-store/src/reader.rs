@@ -848,6 +848,54 @@ impl<I: SegmentIo> SegmentReader<I> {
         self.read_block_range(slot + 1, first, count)
     }
 
+    /// The chunks of the readable rows in row order: each one's first row and row count.
+    ///
+    /// A reader that streams a whole run reads it chunk by chunk with [`Self::read_chunk_x`] and
+    /// [`Self::read_chunk_slot`], which decode each block once into the caller's buffer.
+    pub fn chunk_spans(&self) -> impl ExactSizeIterator<Item = (u64, usize)> + '_ {
+        self.catalogue
+            .chunks
+            .iter()
+            .map(|chunk| (chunk.first_row, chunk.rows as usize))
+    }
+
+    /// x of every row of chunk `chunk`, into `out`, resized to the chunk's rows.
+    pub fn read_chunk_x(&mut self, chunk: usize, out: &mut Vec<f64>) -> Result<(), StoreError> {
+        self.read_chunk_block(chunk, 0, out)
+    }
+
+    /// Value slot `slot` of every row of chunk `chunk`, into `out`, resized to the chunk's rows.
+    pub fn read_chunk_slot(
+        &mut self,
+        chunk: usize,
+        slot: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), StoreError> {
+        if slot >= self.slots {
+            return Err(StoreError::OutOfRange(format!(
+                "slot {slot} of a {}-slot schema",
+                self.slots
+            )));
+        }
+        self.read_chunk_block(chunk, slot + 1, out)
+    }
+
+    fn read_chunk_block(
+        &mut self,
+        chunk: usize,
+        block: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), StoreError> {
+        let Some(&chunk_ref) = self.catalogue.chunks.get(chunk) else {
+            return Err(StoreError::OutOfRange(format!(
+                "chunk {chunk} of a segment with {} chunks",
+                self.catalogue.chunks.len()
+            )));
+        };
+        out.resize(chunk_ref.rows as usize, 0.0);
+        self.decode_block(&chunk_ref, block, out)
+    }
+
     /// Recompute the logical digest from the readable data; equal to `END`'s for a complete
     /// segment.
     pub fn digest(&mut self) -> Result<Digest, StoreError> {

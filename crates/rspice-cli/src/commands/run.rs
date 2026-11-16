@@ -37,6 +37,7 @@ mod quasi_periodic;
 mod restart;
 mod shared;
 mod sources;
+mod stored_transient;
 mod xyce_files;
 
 pub(crate) use crate::commands::export_table as export;
@@ -671,8 +672,9 @@ fn ensure_cancellation_report(
 
 /// The JSON run summary's schema. Version 2 added `assertions` and
 /// `hdl_diagnostics`; version 3 added each run's `backends`; version 4 dropped
-/// `resource_limits.max_analysis_points`.
-const RUN_SUMMARY_SCHEMA_VERSION: u32 = 4;
+/// `resource_limits.max_analysis_points`; version 5 added `stores`, the results
+/// stores the runs left beside their outputs.
+const RUN_SUMMARY_SCHEMA_VERSION: u32 = 5;
 
 /// Write the one-artifact JSON contract for automation: tool identity,
 /// per-run status with every measurement, the deck's checks (`.ASSERT`
@@ -744,6 +746,15 @@ fn write_run_summary(
         },
         "resource_limits": resource_limits_summary(resource_limits),
         "outputs": outputs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        "stores": stored_transient::stores_left().iter().map(|store| {
+            serde_json::json!({
+                "path": store.path.display().to_string(),
+                "rows": store.rows,
+                "events": store.events,
+                "bytes": store.bytes,
+                "digest": store.digest,
+            })
+        }).collect::<Vec<_>>(),
         "aborted": abort_reason.map(|reason| match reason {
             crate::abort::AbortReason::Interrupt => "interrupt",
             crate::abort::AbortReason::Timeout => "timeout",
