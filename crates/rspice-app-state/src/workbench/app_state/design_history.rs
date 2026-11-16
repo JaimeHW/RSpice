@@ -58,6 +58,9 @@ pub struct ProjectDesignHistory {
     /// pages and nowhere else.
     setup_undo: Vec<simulation_setup::SimulationSetupRecord>,
     setup_redo: Vec<simulation_setup::SimulationSetupRecord>,
+    /// The plan and revision the setup's steps stand on: where the last one
+    /// recorded, undone or redone left the plan.
+    setup_at: Option<(crate::product::SimulationPlanId, ObjectRevision)>,
     /// Where the newest transaction committed here sits in the global order.
     /// Undo and redo only move records between the stacks, so they leave it.
     committed: Option<UndoSequence>,

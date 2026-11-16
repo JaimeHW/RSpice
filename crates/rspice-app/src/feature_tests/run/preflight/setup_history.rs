@@ -111,6 +111,32 @@ fn a_solver_value_typed_a_keystroke_at_a_time_is_one_step_of_undo() {
     assert_eq!(stored_options(&page.app), after);
 }
 
+/// Steps are taken back one after another, newest first, each to exactly the
+/// options it replaced, and Redo makes them again in order.
+#[test]
+fn two_solver_edits_undo_one_after_the_other_and_redo_in_order() {
+    let mut page = Page::open_on(app_with_a_moded_device("").0, SimulationPage::Solver);
+    let drawn = stored_options(&page.app);
+    page.type_slowly("relative update", "2e-3");
+    let first = stored_options(&page.app);
+    page.type_slowly("relative update", "3e-3");
+    let second = stored_options(&page.app);
+
+    page.app.execute_command_key(ids::UNDO);
+    assert_eq!(stored_options(&page.app), first, "the newer edit first");
+    page.app.execute_command_key(ids::UNDO);
+    assert_eq!(
+        stored_options(&page.app),
+        drawn,
+        "then the older one ({:?})",
+        page.app.state.prompt_text()
+    );
+    page.app.execute_command_key(ids::REDO);
+    assert_eq!(stored_options(&page.app), first);
+    page.app.execute_command_key(ids::REDO);
+    assert_eq!(stored_options(&page.app), second);
+}
+
 // ---------------------------------------------------------------- analyses
 
 /// The analyses as a step has to put them back: each one's settings, name,

@@ -10,7 +10,7 @@
 //! The steps are a history beside the project's design history, not in it:
 //! Undo on a Simulate page takes back that page's last setup edit and never a
 //! schematic edit, and Undo on the schematic never takes back a setup edit.
-//! Each step is guarded by the plan and the revision it expects to find: the
+//! The history stands on the plan revision its last step left: the
 //! active plan replaced, or a plan edit made since outside this history,
 //! refuses the step and says which.
 
@@ -74,9 +74,6 @@ pub struct SetupSnapshot {
 pub struct SimulationSetupRecord {
     description: String,
     plan: SimulationPlanId,
-    /// The revision the plan must stand at for the step to be taken in the
-    /// direction its stack offers it.
-    guard: ObjectRevision,
     before: SetupSnapshot,
     after: SetupSnapshot,
 }
@@ -127,10 +124,15 @@ impl Model {
             return;
         }
         let history = &mut self.project_design_history;
+        if history.setup_at != Some((plan_before, revision_before)) {
+            // The plan was edited outside this history since its last step,
+            // so the steps below describe a setup that no longer stands.
+            history.setup_undo.clear();
+        }
+        history.setup_at = Some((plan, revision));
         history.setup_undo.push(SimulationSetupRecord {
             description: description.to_owned(),
             plan,
-            guard: revision,
             before,
             after,
         });
@@ -191,9 +193,12 @@ enum Direction {
 }
 
 impl SimulationSetupRecord {
-    /// Whether the plan stands where this step expects it.
+    /// Whether the plan stands where this step expects it: on the revision
+    /// the history's last step left, with no edit made outside it since.
     fn stands(&self, state: &Model) -> bool {
-        state.active_plan_revision() == Some((self.plan, self.guard))
+        let standing = state.active_plan_revision();
+        standing.is_some_and(|(plan, _)| plan == self.plan)
+            && standing == state.project_design_history.setup_at
             && state.project_open.is_open()
             && !state.safe_mode.project_read_only()
     }
@@ -214,8 +219,10 @@ impl SimulationSetupRecord {
                 "The {description} edit cannot be {verb} while the project is read-only."
             ));
         }
-        match state.active_plan_revision() {
-            Some((plan, revision)) if plan == self.plan && revision == self.guard => {}
+        let standing = state.active_plan_revision();
+        match standing {
+            Some((plan, _))
+                if plan == self.plan && standing == state.project_design_history.setup_at => {}
             Some((plan, _)) if plan == self.plan => {
                 return Err(format!(
                     "The {description} edit cannot be {verb} because the plan changed since."
@@ -233,9 +240,7 @@ impl SimulationSetupRecord {
         };
         let detail = format!("{past} the {description} edit.");
         restore(state, self.plan, side, &detail)?;
-        self.guard = state
-            .active_plan_revision()
-            .map_or(self.guard, |(_, revision)| revision);
+        state.project_design_history.setup_at = state.active_plan_revision();
         Ok(detail)
     }
 }
