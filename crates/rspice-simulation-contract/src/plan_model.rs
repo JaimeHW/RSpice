@@ -826,25 +826,29 @@ impl SimulationPlan {
             .any(|instance| instance.lifecycle.is_executing())
     }
 
-    /// Make this plan's analyses the ones `snapshot` held again: the same
-    /// instances in the same order, each with its settings, name, enablement,
-    /// dependencies and participation, and the same removed set.
+    /// Make this plan's analyses the ones `snapshot` held again, as one
+    /// configuration change named `detail`: the same instances in the same
+    /// order, each with its settings, name, enablement, dependencies and
+    /// participation. An analysis the snapshot does not hold is retired, so
+    /// every receipt still names an analysis the plan knows.
     ///
-    /// The receipts and the revision stay this plan's. The configuration
-    /// change committed after this takes the next revision, and every
+    /// The receipts stay this plan's, and the revision advances once. Every
     /// instance whose settings this changes is stamped with that revision and
     /// left a draft, as an edit leaves it, so a revision never names two
-    /// different settings of one analysis.
-    /// Refused while this plan owns executing work.
-    pub fn restore_analyses(&mut self, snapshot: &Self) -> Result<(), AnalysisPlanError> {
-        if let Some(instance) = self
-            .instances
-            .iter()
-            .find(|instance| instance.lifecycle.is_executing())
-        {
-            return Err(AnalysisPlanError::InstanceExecuting(instance.id));
-        }
-        let committed = self.revision.next()?;
+    /// different settings of one analysis. Atomic, and refused while this plan
+    /// owns queued or executing work, as any configuration change is.
+    pub fn restore_analyses(
+        &mut self,
+        snapshot: &Self,
+        detail: impl Into<String>,
+    ) -> Result<SimulationPlanConfigurationReceipt, AnalysisPlanError> {
+        self.commit_configuration_change_with(detail, |candidate, committed| {
+            candidate.adopt_analyses(snapshot, committed);
+        })
+    }
+
+    /// Adopt `snapshot`'s analyses on a candidate committing at `committed`.
+    fn adopt_analyses(&mut self, snapshot: &Self, committed: ObjectRevision) {
         // What a user set, without the revision that stamped it or the state
         // a run left it in.
         let settings = |instance: &AnalysisInstance| {
@@ -880,10 +884,32 @@ impl SimulationPlan {
                     }
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // Every analysis a receipt names stays known: the ones the snapshot
+        // retired stay retired, and one this restore takes out of the list,
+        // an added analysis undone among them, is retired now.
+        let mut known: HashSet<AnalysisInstanceId> =
+            instances.iter().map(|instance| instance.id).collect();
+        let mut tombstones = Vec::with_capacity(snapshot.tombstones.len());
+        for tombstone in snapshot.tombstones.iter().chain(&self.tombstones) {
+            if known.insert(tombstone.id) {
+                tombstones.push(tombstone.clone());
+            }
+        }
+        for instance in &self.instances {
+            if known.insert(instance.id) {
+                tombstones.push(AnalysisTombstone {
+                    id: instance.id,
+                    kind: instance.kind,
+                    created_revision: instance.created_revision,
+                    last_modified_revision: instance.modified_revision,
+                    removed_revision: committed,
+                    prior_run_ids: Vec::new(),
+                });
+            }
+        }
         self.instances = instances;
-        self.tombstones.clone_from(&snapshot.tombstones);
-        Ok(())
+        self.tombstones = tombstones;
     }
 
     /// Commit a project-owned plan configuration change without fabricating
@@ -897,6 +923,17 @@ impl SimulationPlan {
     pub fn commit_configuration_change(
         &mut self,
         detail: impl Into<String>,
+    ) -> Result<SimulationPlanConfigurationReceipt, AnalysisPlanError> {
+        self.commit_configuration_change_with(detail, |_, _| {})
+    }
+
+    /// [`Self::commit_configuration_change`], with `change` made on the
+    /// candidate at the revision it commits at, before it is digested and
+    /// validated.
+    fn commit_configuration_change_with(
+        &mut self,
+        detail: impl Into<String>,
+        change: impl FnOnce(&mut Self, ObjectRevision),
     ) -> Result<SimulationPlanConfigurationReceipt, AnalysisPlanError> {
         let detail = detail.into();
         let detail = detail.trim();
@@ -926,6 +963,7 @@ impl SimulationPlan {
         let sequence = candidate.next_receipt_sequence;
         candidate.revision = committed_revision;
         candidate.next_receipt_sequence = next_sequence;
+        change(&mut candidate, committed_revision);
         // The digest states the plan as adopted, so it is taken after the
         // revision advances and before the receipt that carries it is
         // retained: a receipt cannot be an input to its own digest.

@@ -1,11 +1,12 @@
 //! Undo and Redo on the Simulate setup pages: each page's committed edit is
 //! one step of the setup's own history, put back exactly, and Undo follows
-//! the focus: on a Simulate page it takes back the setup's last edit, on the
-//! schematic the schematic's, whichever was made last.
+//! the focus: on a Simulate page it takes back the setup's last edit, and on
+//! the schematic the schematic's.
 
 use super::engine::app_with_a_moded_device;
 use super::setup_page::{Page, stored_options};
 use super::*;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
@@ -108,4 +109,180 @@ fn a_solver_value_typed_a_keystroke_at_a_time_is_one_step_of_undo() {
     );
     page.app.execute_command_key(ids::REDO);
     assert_eq!(stored_options(&page.app), after);
+}
+
+// ---------------------------------------------------------------- analyses
+
+/// The analyses as a step has to put them back: each one's settings, name,
+/// enablement and place, without the revision that stamped them or the state
+/// a run left them in.
+fn analyses(app: &RSpiceApp) -> serde_json::Value {
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan");
+    let mut value = serde_json::to_value(plan).expect("the plan serializes");
+    for instance in value["instances"]
+        .as_array_mut()
+        .expect("the plan's instances")
+    {
+        let fields = instance.as_object_mut().expect("an instance");
+        fields.remove("modified_revision");
+        fields.remove("lifecycle");
+    }
+    value["instances"].take()
+}
+
+/// The id of the analysis at `position` in the list.
+fn analysis_at(app: &RSpiceApp, position: usize) -> rspice_app_state::product::AnalysisInstanceId {
+    app.state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan")
+        .instances()[position]
+        .id()
+}
+
+/// Make `edit` on the Simulate page, then check it is one step of Undo:
+/// `read` gives back exactly what it read before after Undo, and what the
+/// edit left after Redo.
+fn one_step<T: PartialEq + std::fmt::Debug>(
+    app: &mut RSpiceApp,
+    edit: &str,
+    read: impl Fn(&RSpiceApp) -> T,
+    make: impl FnOnce(&mut RSpiceApp),
+) {
+    app.state.workbench.activate(Workspace::Simulate);
+    let before = read(app);
+    make(app);
+    let after = read(app);
+    assert_ne!(before, after, "the {edit} changes the setup");
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(
+        read(app),
+        before,
+        "Undo takes the {edit} back exactly ({:?})",
+        app.state.prompt_text()
+    );
+    app.execute_command_key(ids::REDO);
+    assert_eq!(read(app), after, "Redo makes the {edit} again");
+}
+
+/// Open `dialog` and press its `button`, as a hand does.
+fn press_in_the_dialog(app: &mut RSpiceApp, dialog: SimulationWorkflowDialog, button: &str) {
+    use rspice_app_simulate::workbench::simulate::SimulateFeature;
+
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    app.state.simulate.simulation_workflow = Some(dialog);
+    let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                SimulateFeature::render_workflow_dialogs(
+                    &mut crate::workbench::features::cx(app),
+                    ctx,
+                );
+                app.after_contribution();
+            },
+        )
+    };
+    let _ = frame(app, Vec::new());
+    let output = frame(app, Vec::new());
+    let update = output
+        .platform_output
+        .accesskit_update
+        .expect("the dialog's tree");
+    let bounds = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(button))
+        .and_then(|(_, node)| node.bounds())
+        .unwrap_or_else(|| panic!("the dialog offers {button}"));
+    let at = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let _ = frame(
+        app,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ],
+    );
+}
+
+/// Adding, renaming, reordering, disabling and removing an analysis are each
+/// one step of Undo on the Simulate page: Undo puts the list back exactly,
+/// every analysis with its settings, name, enablement and place, and Redo
+/// makes the edit again.
+/// Adding, renaming, reordering, disabling and removing an analysis are each
+/// one step of Undo on the Simulate page: Undo puts the list back exactly,
+/// every analysis with its settings, name, enablement and place, and Redo
+/// makes the edit again.
+#[test]
+fn each_edit_of_the_analysis_list_is_one_step_put_back_exactly() {
+    use rspice_app_simulate::workbench::state::workflow_drafts::RenameAnalysisDraft;
+    use rspice_app_simulate::workbench::surfaces::simulate::AnalysisAction;
+    use rspice_app_simulate::workbench::surfaces::simulate::lifecycle::{
+        apply_analysis_action, insert_analysis_instance,
+    };
+    use rspice_app_state::simulation::plan::AnalysisKind;
+
+    fn act(app: &mut RSpiceApp, position: usize, action: AnalysisAction) {
+        let id = analysis_at(app, position);
+        apply_analysis_action(&mut crate::workbench::features::cx(app), id, action);
+    }
+
+    let mut app = app_with_a_moded_device("").0;
+    let drawn = analyses(&app);
+    one_step(&mut app, "add", analyses, |app| {
+        insert_analysis_instance(&mut crate::workbench::features::cx(app), AnalysisKind::Ac)
+            .expect("an AC analysis is added");
+    });
+    one_step(&mut app, "rename", analyses, |app| {
+        let mut draft = RenameAnalysisDraft::for_instance(analysis_at(app, 1), "", "");
+        draft.name = "Loop gain".to_owned();
+        press_in_the_dialog(
+            app,
+            SimulationWorkflowDialog::RenameAnalysis(draft),
+            "Apply name",
+        );
+    });
+    one_step(&mut app, "reorder", analyses, |app| {
+        act(app, 1, AnalysisAction::Earlier(0));
+    });
+    one_step(&mut app, "disable", analyses, |app| {
+        act(app, 0, AnalysisAction::SetEnabled(false));
+    });
+    one_step(&mut app, "remove", analyses, |app| {
+        act(app, 0, AnalysisAction::Remove);
+    });
+    assert_eq!(
+        analyses(&app),
+        drawn,
+        "the analysis added, renamed, moved, disabled and removed is gone again"
+    );
 }

@@ -18,11 +18,12 @@ use std::collections::HashSet;
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::state::SpecPointScope;
+use crate::state::{SimulationPage, SpecPointScope};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::AnalysisRunPointsDraft;
@@ -318,6 +319,21 @@ pub fn open_point_picker(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceI
     );
 }
 
+/// Scope one analysis to `run_at` from the Analyses page, as one step of the
+/// setup's Undo. The run set's own edits settle scopes through
+/// [`commit_run_at`] inside their own step.
+pub(super) fn set_run_at(
+    cx: &mut Cx<'_, SimulateFeature>,
+    id: AnalysisInstanceId,
+    run_at: AnalysisRunAt,
+) -> Result<(), String> {
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
+    let committed = commit_run_at(cx, id, run_at);
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
+    committed
+}
+
 /// Commit one analysis's run-set participation.
 ///
 /// Deliberately the same shape as [`super::lifecycle::commit_numeric_override`]:
@@ -384,7 +400,7 @@ pub(super) fn commit_point_selection(
     } else {
         AnalysisRunAt::SelectedPoints(draft.selected.clone())
     };
-    commit_run_at(cx, draft.instance, run_at)?;
+    set_run_at(cx, draft.instance, run_at)?;
     Ok(format!(
         "This analysis now runs at {count} of {total} run-set points. The run set keeps every \
          point it declares, and every other instance keeps its own scope."

@@ -265,13 +265,6 @@ fn restore(
     if let Some(run_set) = &side.run_set {
         setup.run_set.restore_snapshot((**run_set).clone());
     }
-    if let Some(analyses) = &side.analyses {
-        setup
-            .stable_analysis_plan_mut()?
-            .restore_analyses(analyses)
-            .map_err(|error| error.to_string())?;
-        setup.refresh_legacy_analysis_projections();
-    }
     let workspace = match &side.plan_data {
         Some(payload) => {
             let mut workspace = state.workspace.clone();
@@ -298,9 +291,24 @@ fn restore(
         }
         None => None,
     };
-    let receipt = setup
-        .commit_active_plan_configuration_change(detail)
-        .map_err(|error| error.to_string())?;
+    // The analyses commit with the plan's revision, which stamps them, so
+    // they are the transaction itself when the step holds them.
+    let receipt = match &side.analyses {
+        Some(analyses) => {
+            setup
+                .validate_plan_catalog()
+                .map_err(|error| error.to_string())?;
+            let receipt = setup
+                .stable_analysis_plan_mut()?
+                .restore_analyses(analyses, detail)
+                .map_err(|error| error.to_string())?;
+            setup.refresh_legacy_analysis_projections();
+            receipt
+        }
+        None => setup
+            .commit_active_plan_configuration_change(detail)
+            .map_err(|error| error.to_string())?,
+    };
     state.sim_setup = setup;
     if let Some(workspace) = workspace {
         state.workspace = workspace;

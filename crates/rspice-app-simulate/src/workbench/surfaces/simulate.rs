@@ -1737,7 +1737,7 @@ fn analysis_editor(
     if let Some(asked) = participation_action {
         match asked {
             participation::ParticipationAction::Set(run_at) => {
-                let _ = participation::commit_run_at(cx, selected.id, run_at);
+                let _ = participation::set_run_at(cx, selected.id, run_at);
             }
             participation::ParticipationAction::ChoosePoints => {
                 participation::open_point_picker(cx, selected.id);

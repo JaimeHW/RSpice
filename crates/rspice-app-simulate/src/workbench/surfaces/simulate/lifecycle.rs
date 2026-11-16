@@ -10,6 +10,7 @@ use super::*;
 
 use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 
@@ -221,12 +222,15 @@ pub(super) fn commit_draft(
     id: AnalysisInstanceId,
     draft: AnalysisDraft,
 ) {
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .edit(id, |target| target.clone_from(&draft))
             .map_err(|error| error.to_string()),
         Err(error) => Err(error),
     };
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     match result {
         Ok(((), receipt)) => {
             refresh_analysis_projections(cx);
@@ -248,12 +252,15 @@ pub(super) fn commit_numeric_override(
     id: AnalysisInstanceId,
     record: Option<crate::simulation::plan::AnalysisNumericOverride>,
 ) -> Result<(), String> {
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .set_numeric_override(id, record)
             .map_err(|error| error.to_string()),
         Err(error) => Err(error),
     };
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     match result {
         Ok(receipt) => {
             refresh_analysis_projections(cx);
@@ -296,6 +303,7 @@ pub fn insert_analysis_instance(
     cx.model.sim_setup.session.palette_active = 0;
     cx.model.sim_setup.session.palette_scroll_to_active = false;
     let repair_context = build_envelope_source_catalog(cx.model).dependency_repair_context();
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let result: InsertAnalysisResult = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
@@ -310,6 +318,8 @@ pub fn insert_analysis_instance(
         },
         Err(error) => Err(error),
     };
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     match result {
         Ok((id, insert_receipt, bind_receipt)) => {
             refresh_analysis_projections(cx);
@@ -370,10 +380,13 @@ pub fn apply_analysis_action(
 ) {
     match action {
         AnalysisAction::Clone => {
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan.clone_instance(id).map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok((clone_id, receipt)) => {
                     refresh_analysis_projections(cx);
@@ -384,12 +397,15 @@ pub fn apply_analysis_action(
             }
         }
         AnalysisAction::Earlier(position) | AnalysisAction::Later(position) => {
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .reorder(id, position)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(cx);
@@ -401,12 +417,15 @@ pub fn apply_analysis_action(
         AnalysisAction::BindDependencies => {
             let repair_context =
                 build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .auto_bind_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(cx);
@@ -419,12 +438,15 @@ pub fn apply_analysis_action(
             prerequisite,
             target,
         } => {
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .bind_dependency(id, prerequisite, target)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(cx);
@@ -436,12 +458,15 @@ pub fn apply_analysis_action(
         AnalysisAction::RepairDependencies => {
             let repair_context =
                 build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .repair_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(cx);
@@ -480,6 +505,7 @@ pub fn apply_analysis_action(
             };
             let repair_context =
                 build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .prepare_prerequisite_for_configuration(
@@ -491,6 +517,8 @@ pub fn apply_analysis_action(
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok((pss_id, receipt)) => {
                     refresh_analysis_projections(cx);
@@ -506,12 +534,15 @@ pub fn apply_analysis_action(
         AnalysisAction::Validate => validate_analysis_instance(cx, id),
         AnalysisAction::Remove => remove_analysis_instance(cx, id),
         AnalysisAction::SetEnabled(enabled) => {
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
             let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .set_enabled(id, enabled)
                     .map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
                 Ok(receipt) => {
                     refresh_analysis_projections(cx);
@@ -724,12 +755,15 @@ fn commit_analysis_removal(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanc
     // inside it: the plan speaks in instance ids and is right to, and the names
     // that make a refusal readable are only resolvable out here, against the
     // plan a refused transaction left standing.
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .remove(id, prior_run_ids)
             .map_err(RemovalFailure::Refused),
         Err(error) => Err(RemovalFailure::Unavailable(error)),
     };
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     match result {
         Ok(receipt) => {
             refresh_analysis_projections(cx);

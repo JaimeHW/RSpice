@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::slots::SimulateState;
@@ -171,6 +172,7 @@ fn commit_clear_analysis_name(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &RenameAnalysisDraft,
 ) -> Result<String, String> {
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let receipt = cx
         .model
         .sim_setup
@@ -179,6 +181,8 @@ fn commit_clear_analysis_name(
             plan.clear_instance_name(draft.instance_id)
                 .map_err(|error| error.to_string())
         })?;
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     super::lifecycle::refresh_analysis_projections(cx);
     cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
@@ -191,6 +195,7 @@ fn commit_rename_analysis(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &RenameAnalysisDraft,
 ) -> Result<String, String> {
+    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
     let receipt = cx
         .model
         .sim_setup
@@ -199,6 +204,8 @@ fn commit_rename_analysis(
             plan.set_instance_name(draft.instance_id, &draft.name)
                 .map_err(|error| error.to_string())
         })?;
+    cx.model
+        .record_setup_change(SimulationPage::Analyses.label(), step);
     super::lifecycle::refresh_analysis_projections(cx);
     // Selection is held by identity, and a rename does not mint one, so the
     // renamed analysis stays selected. Saying so here is what keeps a later
