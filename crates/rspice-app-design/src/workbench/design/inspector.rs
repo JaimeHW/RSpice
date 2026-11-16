@@ -452,11 +452,7 @@ pub fn sheet_connectivity(model: &Model) -> SheetConnectivity {
     };
     let hierarchy =
         HierarchySource::from_design_projection(model.library_manager.catalog(), &projection);
-    let nets = rspice_design::connectivity::summary::projection_nets(
-        model.library_manager.catalog(),
-        &projection,
-        &model.workspace.content.active_view.key(),
-    );
+    let nets = viewed_nets(model, &projection);
 
     let mut bound: HashMap<(u64, &str), &str> = HashMap::new();
     for net in nets.iter() {
@@ -503,6 +499,30 @@ pub fn sheet_connectivity(model: &Model) -> SheetConnectivity {
         nets,
         terminals,
         unresolved: None,
+    }
+}
+
+/// The open sheet's nets as the occurrence it is open at joins them: below
+/// the root, an interface port's net reads the kind of the net it joins
+/// through the instance pins above it, as the run does.
+pub fn viewed_nets(
+    model: &Model,
+    projection: &rspice_design::projection::DesignProjection,
+) -> std::sync::Arc<Vec<DesignNet>> {
+    let content = &model.workspace.content;
+    match content.active_occurrence() {
+        Some(occurrence) if occurrence.terminal_master() == &content.active_view => {
+            rspice_design::connectivity::summary::occurrence_nets(
+                model.library_manager.catalog(),
+                projection,
+                occurrence,
+            )
+        }
+        _ => rspice_design::connectivity::summary::projection_nets(
+            model.library_manager.catalog(),
+            projection,
+            &content.active_view.key(),
+        ),
     }
 }
 

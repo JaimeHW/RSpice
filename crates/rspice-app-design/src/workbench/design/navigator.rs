@@ -623,26 +623,22 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
             return;
         }
     };
-    let nets = rspice_design::connectivity::summary::projection_nets(
-        cx.model.library_manager.catalog(),
-        &projection,
-        &cx.model.workspace.content.active_view.key(),
-    )
-    .iter()
-    .filter(|net| net_is_in_scope(cx.model, scope, net))
-    .filter(|net| {
-        matches_query(
-            &query,
-            &[
-                net.name.as_str(),
-                net.class.keyword(),
-                net.domain.label(),
-                "net",
-            ],
-        )
-    })
-    .cloned()
-    .collect::<Vec<_>>();
+    let nets = super::inspector::viewed_nets(cx.model, &projection)
+        .iter()
+        .filter(|net| net_is_in_scope(cx.model, scope, net))
+        .filter(|net| {
+            matches_query(
+                &query,
+                &[
+                    net.name.as_str(),
+                    net.class.keyword(),
+                    net.domain.label(),
+                    "net",
+                ],
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     if !navigator_section_header(ui, DesignNavigatorSection::Nets, &nets.len().to_string()) {
         return;
     }

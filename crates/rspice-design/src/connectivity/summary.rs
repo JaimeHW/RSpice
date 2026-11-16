@@ -174,6 +174,168 @@ pub fn projection_nets(
         .unwrap_or_else(|_| extract())
 }
 
+/// The nets of the sheet `occurrence` opens, each interface port's net
+/// reading the kind of what it joins through the instance pins above it, as
+/// the flattened deck the engine plans with does.
+///
+/// A master read alone sees only its own side of a port: its `en` reaching
+/// one inverter input is one event endpoint. Opened under an instance whose
+/// pin another inverter drives, the run's net is that whole net, so the
+/// port's net reads it. The parent's net at the pin already counts what
+/// meets inside the master, so the kind is the outermost net the port chain
+/// reaches. Retained by the projection per occurrence; a root occurrence is
+/// [`projection_nets`] itself.
+pub fn occurrence_nets(
+    catalog: &crate::library::LibraryCatalog,
+    projection: &crate::projection::DesignProjection,
+    occurrence: &crate::occurrence::DocumentOccurrence,
+) -> Arc<Vec<DesignNet>> {
+    let viewed = occurrence.terminal_master().key();
+    let nets = projection_nets(catalog, projection, &viewed);
+    if occurrence.steps.is_empty() {
+        return nets;
+    }
+    let path = occurrence
+        .steps
+        .iter()
+        .map(|step| step.instance_name.as_str())
+        .collect::<Vec<_>>()
+        .join("/");
+    let memo = format!("{viewed}@{}/{path}", occurrence.root.key());
+    let extract = || -> Arc<Vec<DesignNet>> {
+        let mut joined = (*nets).clone();
+        join_through_ports(catalog, projection, occurrence, &mut joined);
+        Arc::new(joined)
+    };
+    projection
+        .memo_nets(&memo, || extract() as Arc<dyn Any + Send + Sync>)
+        .downcast::<Vec<DesignNet>>()
+        .unwrap_or_else(|_| extract())
+}
+
+/// Give each interface-port net of `nets` (the occurrence's sheet) the kind
+/// of the outermost net its port chain reaches, one level at a time.
+fn join_through_ports(
+    catalog: &crate::library::LibraryCatalog,
+    projection: &crate::projection::DesignProjection,
+    occurrence: &crate::occurrence::DocumentOccurrence,
+    nets: &mut [DesignNet],
+) {
+    let hierarchy = HierarchySource::from_design_projection(catalog, projection);
+    let sheet = |master: &rspice_design_model::cell_view::CellViewRef| {
+        let key = master.key();
+        projection
+            .schematic_buffers()
+            .iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+            .map(|(_, schematic)| AsRef::<SchematicDocument>::as_ref(schematic))
+    };
+    let masters: Vec<_> = std::iter::once(&occurrence.root)
+        .chain(occurrence.steps.iter().map(|step| &step.master))
+        .collect();
+    // Each net, by its index here and its name at the level reached; a net
+    // that is no port's conductor at a level stops there.
+    let mut reached: Vec<(usize, String)> = nets
+        .iter()
+        .enumerate()
+        .map(|(index, net)| (index, net.name.clone()))
+        .collect();
+    for level in (1..masters.len()).rev() {
+        let (Some(inner), Some(parent)) = (sheet(masters[level]), sheet(masters[level - 1])) else {
+            return;
+        };
+        let name = &occurrence.steps[level - 1].instance_name;
+        let Some(instance) = parent.components.iter().find(|component| {
+            component.name.eq_ignore_ascii_case(name)
+                || component.spice_instance_name().eq_ignore_ascii_case(name)
+        }) else {
+            return;
+        };
+        let extracted = extract_with_hierarchy(parent, Some(&hierarchy));
+        let parent_nets = projection_nets(catalog, projection, &masters[level - 1].key());
+        let ports = inner.interface_ports();
+        reached.retain_mut(|(index, net)| {
+            let Some(outer) = port_conductor(&ports, net)
+                .and_then(|conductor| {
+                    parent_net_at(parent, instance, conductor, &extracted, &hierarchy)
+                })
+                .and_then(|outer| {
+                    parent_nets
+                        .iter()
+                        .find(|candidate| candidate.name.eq_ignore_ascii_case(&outer))
+                })
+            else {
+                return false;
+            };
+            nets[*index].domain = outer.domain;
+            net.clone_from(&outer.name);
+            true
+        });
+        if reached.is_empty() {
+            return;
+        }
+    }
+}
+
+/// The interface port of a sheet whose conductor the net `name` is: the
+/// port's name, and for a vector port which bit, most significant first.
+fn port_conductor<'a>(
+    ports: &'a [rspice_design_model::port::PortSpec],
+    name: &str,
+) -> Option<(&'a str, Option<usize>)> {
+    ports.iter().find_map(|port| {
+        if port.name.eq_ignore_ascii_case(name) {
+            return Some((port.name.as_str(), None));
+        }
+        let declaration = crate::schematic::bus::declared_vector(&port.name)?;
+        declaration
+            .members()
+            .iter()
+            .position(|member| {
+                deck_bit_name(&declaration.name, member.index).eq_ignore_ascii_case(name)
+            })
+            .map(|position| (port.name.as_str(), Some(position)))
+    })
+}
+
+/// The name of the net in `parent` on `instance`'s pin for a port conductor:
+/// the scalar net on the pin, or the bit of the bus the vector pin meets.
+/// A placement with no symbol numbers its pins; its binding's terminal order
+/// says which port each number is.
+fn parent_net_at(
+    parent: &SchematicDocument,
+    instance: &Component,
+    (port, bit): (&str, Option<usize>),
+    extracted: &super::ExtractedConnectivity,
+    hierarchy: &HierarchySource<'_>,
+) -> Option<String> {
+    let order = instance
+        .library_cell
+        .as_ref()
+        .map_or(&[][..], |binding| binding.terminal_order.as_slice());
+    let position = terminal_positions_with_hierarchy(instance, Some(hierarchy))
+        .into_iter()
+        .enumerate()
+        .find(|(index, (pin, _))| {
+            pin.eq_ignore_ascii_case(port)
+                || order
+                    .get(*index)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(port))
+        })
+        .map(|(_, (_, position))| position)?;
+    let Some(bit) = bit else {
+        return net_at_schematic_point(parent, &extracted.nets, &extracted.point_to_net, position)
+            .map(super::Net::spice_name);
+    };
+    let vector = extracted
+        .vector_nets
+        .nets
+        .iter()
+        .find(|vector| vector.terminals.contains(&position))?;
+    let member = vector.declaration.members().into_iter().nth(bit)?;
+    Some(deck_bit_name(&vector.declaration.name, member.index))
+}
+
 /// Resolved terminal names for every placed component, in the same order and
 /// with the same authored-symbol authority used by hierarchical netlisting.
 ///

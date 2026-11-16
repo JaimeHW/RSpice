@@ -890,6 +890,32 @@ fn draw_bus(
     );
 }
 
+/// Each net's kind as the rail and the net inspector read it with the sheet
+/// open at the occurrence the workspace is on.
+fn occurrence_kinds(state: &RunTestHost) -> Vec<(String, String)> {
+    let model = &state.model;
+    let projection = model
+        .workspace
+        .design_projection(
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
+        )
+        .expect("the design resolves");
+    rspice_design::connectivity::summary::occurrence_nets(
+        model.library_manager.catalog(),
+        &projection,
+        model
+            .workspace
+            .content
+            .active_occurrence()
+            .expect("an open document"),
+    )
+    .iter()
+    .map(|net| (net.name.to_ascii_lowercase(), net.kind_label().into_owned()))
+    .collect()
+}
+
 /// An interface port's net reads what it joins through the instance pin
 /// above it, and a placed schematic's vector pin reads each bit's kind
 /// inside: `wrap` passes its port `en` to `level`'s logic input, and `blink`
@@ -933,7 +959,7 @@ fn a_port_net_reads_the_kind_it_joins_through_the_instance_above() {
         Point::new(0, 300),
         &["en"],
     );
-    let (wrap, _) = take_master(&mut state, "wrap");
+    let (wrap, wrap_drawing) = take_master(&mut state, "wrap");
 
     // wrapv: the bus port mode[1:0] on moded's bus pin.
     let moded_at = Point::new(300, 300);
@@ -970,7 +996,7 @@ fn a_port_net_reads_the_kind_it_joins_through_the_instance_above() {
         (port_pin, port_at),
         (*moded_pin, moded_at),
     );
-    let (wrapv, _) = take_master(&mut state, "wrapv");
+    let (wrapv, wrapv_drawing) = take_master(&mut state, "wrapv");
 
     // The top: blink drives wrap's en on d; count drives wrapv over mode[1:0].
     place(&mut state, &blink, "XB", Point::new(300, 0), &[("q", "d")]);
@@ -1014,4 +1040,33 @@ fn a_port_net_reads_the_kind_it_joins_through_the_instance_above() {
     // module port alone on a node.
     assert_eq!(kind(&kinds, "mode#1"), "logic", "{kinds:?}");
     assert_eq!(kind(&kinds, "mode#0"), "logic", "{kinds:?}");
+    let top = state.model.workspace.content.active_view.clone();
+
+    // Inside XW, en alone is one module port; at this occurrence it is the
+    // top's d.
+    let top_drawing = state.model.schematic.document().clone();
+    for (instance, master, drawing, nets) in [
+        ("XW", &wrap, &wrap_drawing, &["en"][..]),
+        ("XV", &wrapv, &wrapv_drawing, &["mode#1", "mode#0"][..]),
+    ] {
+        state.model.workspace.descend_into(
+            instance.to_owned(),
+            master.clone(),
+            ViewType::Schematic,
+        );
+        state.model.schematic = crate::state::SchematicState::default();
+        *state.model.schematic.document_mut_for_test() = drawing.clone();
+        let alone = net_kinds(&state);
+        let joined = occurrence_kinds(&state);
+        for net in nets {
+            assert_eq!(kind(&alone, net), "mixed (converter at run)", "{alone:?}");
+            assert_eq!(kind(&joined, net), "logic", "{joined:?}");
+        }
+        state
+            .model
+            .workspace
+            .open_as_root(top.clone(), ViewType::Schematic);
+        state.model.schematic = crate::state::SchematicState::default();
+        *state.model.schematic.document_mut_for_test() = top_drawing.clone();
+    }
 }
