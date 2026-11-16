@@ -2,14 +2,6 @@ use super::*;
 use faer::Mat;
 use faer::linalg::solvers::Solve;
 
-/// Maximum dense real APFT interpolation matrix retained by one source
-/// projection.  The matrix has one row and column for every signed frequency
-/// (plus DC), so qualifying the square before allocation is essential: the
-/// public HB harmonic ceiling is intentionally much larger than a practical
-/// dense APFT factorization.
-const MAX_HB_APFT_MATRIX_VALUES: usize = 4_194_304;
-const MAX_HB_APFT_LATTICE_WORK: usize = 16_777_216;
-
 impl Engine {
     /// Minimum basis for the authored clocks supported by the HB source
     /// stamper. This is a lower bound, not a nonlinear spectral-error estimate.
@@ -670,8 +662,36 @@ impl Engine {
             .max()
             .unwrap_or(1);
         let mixing_order = config.max_mixing_order.min(largest_axis_order);
+        // The solve holds one dense real matrix with a row and a column for
+        // every signed frequency, and its factorization beside it. Confirm the
+        // machine can hold both before anything is built: the size follows from
+        // the authored harmonic count alone, as Xyce's dense interpolation
+        // matrix does (N_ANP_HB.C, `idftMatrix_.reshape(size_, size_)`).
+        let basis_size = config
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                HbError::InvalidConfig(
+                    "Xyce APFT signed-frequency cardinality exceeds this platform".to_string(),
+                )
+            })?;
+        crate::analysis::confirm_working_values(
+            "Xyce APFT interpolation matrix and its factorization",
+            basis_size.saturating_mul(basis_size).saturating_mul(2),
+        )?;
+        // Every entry a tone adds survives every later tone's expansion (its
+        // zero coefficient), so an entry outside the authored band refuses the
+        // lattice as soon as it appears. The lattice therefore never holds more
+        // than the `2 * num_harmonics + 1` signed frequencies of the band, and a
+        // tone reaches only the coefficients its remaining mixing order allows.
+        let out_of_band = |frequency: i64| {
+            HbError::InvalidConfig(format!(
+                "Xyce APFT cannot preserve the authored signed-frequency grid in the dense common-frequency HB kernel: contains out-of-band common harmonic {}",
+                frequency.unsigned_abs()
+            ))
+        };
         let mut lattice = std::collections::BTreeMap::<i64, usize>::from([(0, 0)]);
-        let mut lattice_work = 0usize;
         for (axis_harmonic, authored_order) in &authored_axes {
             let retained_axis_order = (*authored_order).min(mixing_order);
             let axis_harmonic = i64::try_from(*axis_harmonic).map_err(|_| {
@@ -681,28 +701,18 @@ impl Engine {
             })?;
             let mut expanded = std::collections::BTreeMap::<i64, usize>::new();
             for (frequency, accumulated_order) in &lattice {
-                for coefficient in -(retained_axis_order as i64)..=(retained_axis_order as i64) {
-                    lattice_work = lattice_work.checked_add(1).ok_or_else(|| {
-                        HbError::InvalidConfig(
-                            "Xyce APFT lattice-construction work exceeds this platform".to_string(),
-                        )
-                    })?;
-                    if lattice_work > MAX_HB_APFT_LATTICE_WORK {
-                        return Err(HbError::InvalidConfig(format!(
-                            "Xyce APFT lattice construction exceeds the production work bound {MAX_HB_APFT_LATTICE_WORK}"
-                        ))
-                        .into());
-                    }
-                    let order = accumulated_order
-                        .checked_add(coefficient.unsigned_abs() as usize)
-                        .ok_or_else(|| {
+                // An entry's order never exceeds the mixing order, so the
+                // coefficients this tone may add are those within what remains.
+                let reach =
+                    i64::try_from(retained_axis_order.min(mixing_order - accumulated_order))
+                        .map_err(|_| {
                             HbError::InvalidConfig(
-                                "Xyce APFT intermodulation order exceeds this platform".to_string(),
-                            )
+                            "Xyce APFT intermodulation order exceeds signed lattice coordinates"
+                                .to_string(),
+                        )
                         })?;
-                    if order > mixing_order {
-                        continue;
-                    }
+                for coefficient in -reach..=reach {
+                    let order = accumulated_order + coefficient.unsigned_abs() as usize;
                     let frequency = frequency
                         .checked_add(coefficient.checked_mul(axis_harmonic).ok_or_else(|| {
                             HbError::InvalidConfig(
@@ -714,6 +724,9 @@ impl Engine {
                                 "Xyce APFT signed-frequency coordinate overflows".to_string(),
                             )
                         })?;
+                    if frequency.unsigned_abs() > config.num_harmonics as u64 {
+                        return Err(out_of_band(frequency).into());
+                    }
                     expanded
                         .entry(frequency)
                         .and_modify(|known_order| *known_order = (*known_order).min(order))
@@ -764,15 +777,6 @@ impl Engine {
             .into());
         }
 
-        let basis_size = config
-            .num_harmonics
-            .checked_mul(2)
-            .and_then(|count| count.checked_add(1))
-            .ok_or_else(|| {
-                HbError::InvalidConfig(
-                    "Xyce APFT signed-frequency cardinality exceeds this platform".to_string(),
-                )
-            })?;
         if let Some(points) = config.collocation_points
             && points != basis_size
         {
@@ -781,18 +785,6 @@ impl Engine {
             ))
             .into());
         }
-        let matrix_values = basis_size.checked_mul(basis_size).ok_or_else(|| {
-            HbError::InvalidConfig(
-                "Xyce APFT interpolation-matrix size exceeds this platform".to_string(),
-            )
-        })?;
-        if matrix_values > MAX_HB_APFT_MATRIX_VALUES {
-            return Err(HbError::InvalidConfig(format!(
-                "Xyce APFT interpolation matrix requires {matrix_values} values, above the production bound {MAX_HB_APFT_MATRIX_VALUES}"
-            ))
-            .into());
-        }
-
         let signed_frequencies = (-(config.num_harmonics as i64)..=(config.num_harmonics as i64))
             .map(|harmonic| harmonic as Value * config.fundamental_freq)
             .collect::<Vec<_>>();

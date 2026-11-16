@@ -3288,6 +3288,99 @@ mod tests {
         assert!(error.to_string().contains("authored grid requests 15"));
     }
 
+    /// A PULSE the APFT tests project: two cycles in the common period.
+    fn apft_test_pulse() -> SourceSpec {
+        SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: 10.0e-9,
+            fall: 10.0e-9,
+            width: 0.24e-6,
+            period: 0.5e-6,
+            pulse_count: 0.0,
+            width_defaults_to_zero: false,
+        }
+    }
+
+    #[test]
+    fn an_apft_grid_no_machine_can_hold_is_refused_as_an_allocation_failure() {
+        // A one-megahertz tone of order 2^28 asks for a dense interpolation
+        // matrix of (2^29 + 1)^2 values with its factorization beside it.
+        let config = HbConfig::multi_tone(vec![
+            crate::analysis::harmonic_balance::HbTone::new(1.0e6, 1 << 28),
+            crate::analysis::harmonic_balance::HbTone::new(2.0e6, 1),
+        ]);
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&apft_test_pulse()),
+            &config,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("no allocator backs the matrix");
+        assert!(
+            matches!(
+                error,
+                SimulationError::Allocation {
+                    object: "Xyce APFT interpolation matrix and its factorization",
+                    ..
+                }
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_out_of_band_apft_entry_refuses_the_lattice_before_it_grows() {
+        // Thirteen tones that each fit the 1000-harmonic band, mixed without
+        // an order limit. Their lattice leaves the band at its second tone,
+        // but the expansion ran all thirteen first: 17,170,759 steps, which
+        // the old work bound refused instead.
+        let mut config = HbConfig::multi_tone(
+            [
+                (1, 1000),
+                (2, 500),
+                (3, 333),
+                (5, 200),
+                (7, 142),
+                (11, 90),
+                (13, 76),
+                (17, 58),
+                (19, 52),
+                (23, 43),
+                (29, 34),
+                (31, 32),
+                (37, 27),
+            ]
+            .into_iter()
+            .map(|(harmonic, order)| {
+                crate::analysis::harmonic_balance::HbTone::new(harmonic as Value * 1.0e6, order)
+            })
+            .collect(),
+        );
+        assert_eq!(config.num_harmonics, 1000);
+        config.max_mixing_order = 1_000_000;
+        let error = Engine::hb_source_spectrum(
+            0.0,
+            0.0,
+            0.0,
+            Some(&apft_test_pulse()),
+            &config,
+            &[2],
+            SpiceDialect::Xyce,
+        )
+        .expect_err("an out-of-band lattice is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("authored signed-frequency grid in the dense common-frequency HB kernel: contains out-of-band common harmonic 1001"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn xyce_single_filtered_tone_uses_the_single_tone_collocation_transform() {
         let ordinary = HbConfig::new(1.0e6)
