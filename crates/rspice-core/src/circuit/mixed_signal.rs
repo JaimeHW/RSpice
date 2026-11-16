@@ -1019,16 +1019,29 @@ impl CircuitData {
             .map(MixedSignalHost::coupled_nodes)
     }
 
-    /// Every bus the mixed modules' vector boundary ports declare over deck
-    /// nodes, in instantiation order.
+    /// The buses the mixed modules' vector boundary ports declare over deck
+    /// nodes, in instantiation order, one per conductor.
     ///
-    /// Wiring data the builder recorded, handed on unchanged: this says which
-    /// deck nodes are one word, and naming them is the caller's job because
-    /// only the analysis holds the run's node-name table.
+    /// Wiring data the builder recorded: this says which deck nodes are one
+    /// word, and naming them is the caller's job because only the analysis
+    /// holds the run's node-name table. A bus is a net, not a port: two
+    /// instances whose vector ports meet on the same bits are one word on one
+    /// set of conductors, and a conductor in two declarations has no single
+    /// bit order, so a result carrying both is refused whole. The first port
+    /// in instantiation order declares it; a later port over a bit already
+    /// declared adds no second bus, and its bits stay recorded node by node.
     pub(crate) fn mixed_signal_boundary_buses(&self) -> impl Iterator<Item = &BoundaryBus> + '_ {
+        let mut declared = std::collections::BTreeSet::new();
         self.mixed_signal_hosts
             .iter()
             .flat_map(MixedSignalHost::boundary_buses)
+            .filter(move |bus| {
+                let fresh = bus.members.iter().all(|member| !declared.contains(member));
+                if fresh {
+                    declared.extend(bus.members.iter().copied());
+                }
+                fresh
+            })
     }
 
     /// Stamp every mixed module for one Newton evaluation, committing nothing.

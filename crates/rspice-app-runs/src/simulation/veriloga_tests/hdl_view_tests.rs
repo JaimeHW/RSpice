@@ -466,6 +466,8 @@ struct Twin {
         String,
         Vec<rspice_results::events::DigitalEventPointEvidence>,
     )>,
+    /// The buses the run declared over those nets.
+    buses: Vec<rspice_results::events::DigitalBusEvidence>,
     deck: String,
 }
 
@@ -524,6 +526,12 @@ fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f6
     };
     let committed = events(&designed);
     assert_eq!(committed, events(&manual), "the same committed events");
+    let buses = |run: &crate::state::SimulationRun| match run.analyses[0].result_payload.as_ref() {
+        Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) => digital_buses.clone(),
+        _ => Vec::new(),
+    };
+    let declared = buses(&designed);
+    assert_eq!(declared, buses(&manual), "the same buses");
 
     // A design run names a node's trace `V(OUT)` and samples it on the
     // transient's output grid; a manual deck's run names the node itself and
@@ -574,6 +582,7 @@ fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f6
     Twin {
         traces: designed,
         events: committed,
+        buses: declared,
         deck,
     }
 }
@@ -611,10 +620,16 @@ fn verilog_and_verilog_ams_views_run_as_their_hdl_deck_twin() {
 /// the engine binds, most significant first: a counter's `mode[1:0]` drawn
 /// to a conductance's `mode[1:0]` runs bit for bit as the deck that names
 /// `mode#1` and `mode#0` on both instance cards, and the conductance reads
-/// each bit at its own weight.
+/// each bit at its own weight. Each bit publishes its `D()` history on both
+/// routes, and the two ports meeting on those bits declare them as one bus.
 #[test]
 fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
-    let Twin { traces, deck, .. } = run_against_twin(
+    let Twin {
+        traces,
+        events,
+        buses,
+        deck,
+    } = run_against_twin(
         bus_design(),
         &[("count", "count.v", COUNT), ("moded", "moded.vams", MODED)],
         25e-9,
@@ -639,6 +654,47 @@ fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
             p.at(seconds)
         );
     }
+    // The counter's bits as its two event nets commit them: bit 0 toggles
+    // every 5 ns and bit 1 every 10 ns, from 0.
+    let bit = |name: &str| {
+        events
+            .iter()
+            .find(|(node, _)| node == name)
+            .unwrap_or_else(|| panic!("no D({name}) in {events:?}"))
+            .1
+            .iter()
+            .map(|point| (point.time_s, point.value_code))
+            .collect::<Vec<_>>()
+    };
+    for (name, expected) in [
+        (
+            "MODE#0",
+            &[
+                (0.0, 0),
+                (5e-9, 1),
+                (10e-9, 0),
+                (15e-9, 1),
+                (20e-9, 0),
+                (25e-9, 1),
+            ][..],
+        ),
+        ("MODE#1", &[(0.0, 0), (10e-9, 1), (20e-9, 0)][..]),
+    ] {
+        let history = bit(name);
+        assert_eq!(history.len(), expected.len(), "{name}: {history:?}");
+        for ((time, code), (want_time, want_code)) in history.iter().zip(expected) {
+            assert!((time - want_time).abs() < 1e-15, "{name}: {history:?}");
+            assert_eq!(code, want_code, "{name}: {history:?}");
+        }
+    }
+    assert_eq!(
+        buses
+            .iter()
+            .map(|bus| (bus.msb, bus.lsb, bus.members.clone()))
+            .collect::<Vec<_>>(),
+        [(1, 0, vec!["MODE#1".to_owned(), "MODE#0".to_owned()])],
+        "one bus over both bits, most significant first"
+    );
 }
 
 /// Each net's kind as the rail and the net inspector read it: from the

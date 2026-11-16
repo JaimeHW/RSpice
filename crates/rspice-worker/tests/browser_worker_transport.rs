@@ -1163,6 +1163,125 @@ fn an_unsealed_file_the_hdl_reads_is_a_located_warning_in_the_worker() {
     }
 }
 
+const COUNT: &str = "`timescale 1ns/1ps\nmodule count(mode);\n  output [1:0] mode;\n  \
+                     reg [1:0] mode;\n  initial mode = 2'd0;\n  \
+                     always #5 mode = mode + 2'd1;\nendmodule\n";
+const MODED: &str = "`include \"disciplines.vams\"\n`timescale 1ns/1ps\n\
+                     module moded(p, n, mode);\n  inout p, n;\n  input [1:0] mode;\n  \
+                     electrical p, n;\n  logic mode;\n  \
+                     analog I(p, n) <+ (1m + (mode[1] ? 2m : 0.0) + (mode[0] ? 1m : 0.0)) \
+                     * V(p, n);\nendmodule\n";
+
+/// A counter's two-bit port drawn to a conductance's two-bit port runs in
+/// the worker as on the desktop: each bit publishes its own `D()` history,
+/// and the two ports meeting on those bits declare them as one bus, most
+/// significant first, which the desktop route can retain.
+#[wasm_bindgen_test]
+fn a_bus_between_two_hdl_modules_publishes_every_bit_in_the_worker() {
+    let count = [("count.v", COUNT)];
+    let moded = [("moded.vams", MODED)];
+    let (count_key, count_digest) = deck_key(&count, &["count.v"], "count");
+    let (moded_key, moded_digest) = deck_key(&moded, &["moded.vams"], "moded");
+    let deck = format!(
+        "Worker HDL bus\n.veriloga \"{count_key}\" count\n.veriloga \"{moded_key}\" moded\n\
+         XC mode#1 mode#0 count\nXM p 0 mode#1 mode#0 moded\nV1 a 0 1\nR1 a p 1k\n.end\n"
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let runtimes = vec![
+        sealed_runtime(
+            &netlist,
+            count_key,
+            count_digest,
+            &count,
+            &["count.v"],
+            "count",
+        ),
+        sealed_runtime(
+            &netlist,
+            moded_key,
+            moded_digest,
+            &moded,
+            &["moded.vams"],
+            "moded",
+        ),
+    ];
+    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+        .expect("two runtimes are a set");
+    let mut request = worker_request_json(
+        31,
+        serde_json::json!({"Transient": {
+            "stop_time": 25e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] =
+        serde_json::to_value(&set).unwrap();
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let events = &metadata["outcome"]["Success"]["Transient"]["events"];
+    let digital = events["digital"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"));
+    let bit = |name: &str| -> Vec<(f64, u64)> {
+        digital
+            .iter()
+            .find(|trace| {
+                trace["node_name"]
+                    .as_str()
+                    .is_some_and(|node| node.eq_ignore_ascii_case(name))
+            })
+            .unwrap_or_else(|| panic!("no D({name}): {metadata}"))["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|point| {
+                (
+                    point["time_s"].as_f64().unwrap(),
+                    point["value_code"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // The same histories the desktop's design and deck routes commit.
+    for (name, expected) in [
+        (
+            "mode#0",
+            &[
+                (0.0, 0),
+                (5e-9, 1),
+                (10e-9, 0),
+                (15e-9, 1),
+                (20e-9, 0),
+                (25e-9, 1),
+            ][..],
+        ),
+        ("mode#1", &[(0.0, 0), (10e-9, 1), (20e-9, 0)][..]),
+    ] {
+        let history = bit(name);
+        assert_eq!(history.len(), expected.len(), "{name}: {history:?}");
+        for ((time, code), (want_time, want_code)) in history.iter().zip(expected) {
+            assert!((time - want_time).abs() < 1e-15, "{name}: {history:?}");
+            assert_eq!(code, want_code, "{name}: {history:?}");
+        }
+    }
+    let buses = events["buses"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"));
+    assert_eq!(buses.len(), 1, "one bus over the shared bits: {buses:?}");
+    assert_eq!(
+        buses[0]["members"],
+        serde_json::json!(["MODE#1", "MODE#0"]),
+        "{buses:?}"
+    );
+}
+
 /// The worker runs `deck` with its sealed runtime set: `q` toggles every
 /// 5 ns, and the default `d2a` drives the 1 kΩ load through its 20 Ω
 /// `rhi`/`rlo` from 3.3 V or 0 V.

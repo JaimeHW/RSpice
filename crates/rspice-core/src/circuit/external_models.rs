@@ -1098,7 +1098,11 @@ impl CircuitData {
                     _ => None,
                 })
                 .collect();
-            for bus in self.mixed_signal_boundary_buses() {
+            for bus in self
+                .mixed_signal_hosts
+                .iter()
+                .flat_map(|host| host.boundary_buses())
+            {
                 for node in &bus.members {
                     nodes.remove(node);
                 }

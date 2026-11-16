@@ -983,6 +983,70 @@ fn a_vector_discrete_port_bridges_one_net_per_bit() {
     );
 }
 
+const VECTOR_READER: &str = r#"
+`include "disciplines.vams"
+module vector_reader(p, n, mode);
+    inout p, n;
+    electrical p, n;
+    input [1:0] mode;
+    logic mode;
+    analog I(p, n) <+ (1m + (mode[1] ? 2m : 0.0) + (mode[0] ? 1m : 0.0)) * V(p, n);
+endmodule
+"#;
+
+/// **Two vector ports meeting on the same bits declare one bus.**
+///
+/// A bus is a net, not a port: the counter's `count[1:0]` and the reader's
+/// `mode[1:0]` on the same two deck nodes are one word on one set of
+/// conductors. A conductor in two declarations has no single bit order, and
+/// every route that carries a bus table refuses one that claims a member
+/// twice, so the run whose ports both declared it published no event history
+/// at all on the prepared route and failed its VCD export. The first port in
+/// instantiation order declares the bus; the bits keep their own traces.
+#[test]
+fn two_vector_ports_on_the_same_bits_declare_one_bus() {
+    let counter = ModelFile::new("vector", VECTOR_PORT);
+    let reader = ModelFile::new("vector_reader", VECTOR_READER);
+    let deck = format!(
+        "* a counter's two bits read by a second module's vector port\n\
+         x1 p 0 count#1 count#0 vector_mixed\n\
+         x2 q 0 count#1 count#0 vector_reader\n\
+         rp p 0 1meg\n\
+         vq a 0 1\n\
+         rq a q 1k\n\
+         .va \"{}\" vector_mixed\n\
+         .va \"{}\" vector_reader\n\
+         .tran 1n 20n\n\
+         .end\n",
+        counter.deck_path(),
+        reader.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    assert_eq!(
+        result
+            .digital_buses
+            .iter()
+            .map(|bus| (bus.name.as_str(), bus.members.clone()))
+            .collect::<Vec<_>>(),
+        [(
+            "X1.COUNT",
+            vec!["COUNT#1".to_string(), "COUNT#0".to_string()]
+        )],
+        "one bus over the shared bits, declared by the first port"
+    );
+    rspice_core::engine::validate_digital_bus_table(
+        &result.digital_buses,
+        result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str()),
+    )
+    .expect("the bus table a run publishes is one every route accepts");
+    assert!(change_times(&result, "count#0").len() >= 3);
+    assert!(!change_times(&result, "count#1").is_empty());
+}
+
 /// An analog net bus on a port takes one deck node per member, leading index
 /// first, as a vector port does (IEEE 1364-2005 section 12.3.9: the port's
 /// MSB meets the connection's first position). `p[1]` is 2k to ground and
