@@ -286,6 +286,7 @@ impl<'u> FormRows<'u> {
                 egui::TextEdit::singleline(value)
                     .id(id)
                     .font(theme::field_mono())
+                    .text_color(t.color.text)
                     .hint_text(hint)
                     .vertical_align(Align::Center)
                     .margin(egui::Margin::symmetric(8, 4)),
@@ -327,6 +328,7 @@ impl<'u> FormRows<'u> {
                 egui::TextEdit::singleline(value)
                     .id(id)
                     .font(font.clone())
+                    .text_color(t.color.text)
                     .hint_text(hint)
                     .vertical_align(Align::Center)
                     .margin(egui::Margin {
@@ -375,10 +377,17 @@ impl<'u> FormRows<'u> {
     ) -> Response {
         self.row(label, |ui, _| {
             let t = Tokens::get(ui.ctx());
-            let response = ui.add_sized(
-                vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
-                egui::DragValue::new(value).range(range).speed(1.0),
-            );
+            // A drag value has no colour of its own to state; its value is
+            // set in the text tone as every typed value is.
+            let response = ui
+                .scope(|ui| {
+                    ui.visuals_mut().override_text_color = Some(t.color.text);
+                    ui.add_sized(
+                        vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
+                        egui::DragValue::new(value).range(range).speed(1.0),
+                    )
+                })
+                .inner;
             form::name_control(ui, &response, label);
             ui.label(
                 egui::RichText::new(allowed)
@@ -412,6 +421,7 @@ impl<'u> FormRows<'u> {
                 egui::TextEdit::multiline(value)
                     .id(id)
                     .font(theme::field_sans())
+                    .text_color(t.color.text)
                     .hint_text(hint)
                     .margin(egui::Margin::symmetric(8, 4)),
             );
@@ -439,6 +449,7 @@ impl<'u> FormRows<'u> {
                     egui::TextEdit::singleline(value)
                         .id(id.with(axis))
                         .font(theme::field_mono())
+                        .text_color(t.color.text)
                         .hint_text(axis)
                         .vertical_align(Align::Center)
                         .margin(egui::Margin::symmetric(8, 4)),
@@ -1040,6 +1051,7 @@ impl<'u> FormRows<'u> {
                             egui::TextEdit::singleline(draft)
                                 .id(id)
                                 .font(theme::field_mono())
+                                .text_color(t.color.text)
                                 .hint_text(hint)
                                 .vertical_align(Align::Center)
                                 .margin(egui::Margin::symmetric(8, 4)),
@@ -1858,6 +1870,121 @@ mod tests {
                 );
                 Some(field.id)
             })
+    }
+
+    /// A typed value is set in the tone a picked value is, and a hint in its
+    /// own fainter one. egui sets a field's text in the inactive widget tone
+    /// unless told otherwise, which sat within 1.15:1 of the hint, so a typed
+    /// value and a hint could not be told apart.
+    #[test]
+    fn a_typed_value_reads_as_a_value_and_a_hint_as_a_hint() {
+        fn ink(text: &egui::epaint::TextShape) -> Color32 {
+            let section = text
+                .galley
+                .job
+                .sections
+                .first()
+                .map_or(Color32::PLACEHOLDER, |section| section.format.color);
+            text.override_text_color
+                .unwrap_or(if section == Color32::PLACEHOLDER {
+                    text.fallback_color
+                } else {
+                    section
+                })
+        }
+        fn inks(shape: &egui::Shape, into: &mut Vec<(String, Color32)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.job.text.clone(), ink(text))),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| inks(shape, into)),
+                _ => {}
+            }
+        }
+        for mode in [Mode::Dark, Mode::Light] {
+            let ctx = Context::default();
+            crate::Theme {
+                mode,
+                ..crate::Theme::default()
+            }
+            .apply(&ctx);
+            let mut values = [
+                String::from("typed-name"),
+                String::new(),
+                String::from("12.5"),
+                String::from("typed prose"),
+                String::from("3"),
+                String::from("4"),
+                String::from("typed-entry"),
+            ];
+            let mut count = 2usize;
+            let mut output = None;
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1024.0, 900.0))),
+                    ..Default::default()
+                };
+                output = Some(ctx.run_ui(input, |ui| {
+                    let [name, empty, quantity, prose, x, y, entry] = &mut values;
+                    let _ = CommandForm::new("Values", "Apply").show(ui.ctx(), |rows| {
+                        rows.text("Name", Id::new("ink.name"), name, "");
+                        rows.text("Empty", Id::new("ink.empty"), empty, "a-hint");
+                        rows.quantity("Length", Id::new("ink.length"), quantity, "", "m", "");
+                        rows.number("Count", &mut count, 0..=9, "");
+                        rows.text_multiline("Note", Id::new("ink.note"), prose, "", 2);
+                        rows.point("At", Id::new("ink.at"), x, y);
+                        let _ = rows.list(
+                            "Entries",
+                            Id::new("ink.entries"),
+                            &[],
+                            entry,
+                            ListWords {
+                                hint: "",
+                                add: "Add",
+                                remove: "Remove",
+                            },
+                        );
+                        let _ = rows.select(
+                            "Picked",
+                            "ink.picked",
+                            "picked-value",
+                            &["picked-value".to_owned()],
+                        );
+                        None
+                    });
+                }));
+            }
+            let mut painted = Vec::new();
+            for clipped in &output.expect("a pass ran").shapes {
+                inks(&clipped.shape, &mut painted);
+            }
+            let of = |text: &str| {
+                painted
+                    .iter()
+                    .find(|(painted, _)| painted == text)
+                    .map(|(_, ink)| *ink)
+                    .unwrap_or_else(|| panic!("{mode:?}: {text:?} was not painted"))
+            };
+            let picked = of("picked-value");
+            let hint = of("a-hint");
+            assert_ne!(
+                picked, hint,
+                "{mode:?}: a picked value and a hint share a tone"
+            );
+            for typed in [
+                "typed-name",
+                "12.5",
+                "2",
+                "typed prose",
+                "3",
+                "4",
+                "typed-entry",
+            ] {
+                assert_eq!(
+                    of(typed),
+                    picked,
+                    "{mode:?}: {typed:?} is not set as a value"
+                );
+            }
+        }
     }
 
     /// Nothing the shell paints leaves the card, at any viewport it is offered
