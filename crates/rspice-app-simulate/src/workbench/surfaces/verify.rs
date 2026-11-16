@@ -40,7 +40,7 @@ use regression_contract::*;
 use specifications::specifications;
 
 pub(crate) use corners::{FactSection, point_facts};
-pub(crate) use monte_carlo::{campaign_facts, trial_facts};
+pub(crate) use monte_carlo::{campaign_facts, monte_carlo_gate, trial_facts, yields_below_gate};
 
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let page = cx.state.verification_page;

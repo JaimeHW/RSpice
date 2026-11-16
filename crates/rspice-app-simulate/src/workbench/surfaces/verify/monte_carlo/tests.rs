@@ -233,6 +233,41 @@ fn a_failing_trial_opens_in_results_as_its_member() {
     );
 }
 
+/// The navigator's Monte Carlo line fails exactly when the toolbar does: a
+/// yield that clears the plan's 90 % gate is plain though three trials fail
+/// their limit, and one under a 95 % gate fails in both.
+#[test]
+fn the_navigator_takes_the_toolbars_tone() {
+    for (percent, failing) in [(90.0, false), (95.0, true)] {
+        let mut harness = monte_carlo_app();
+        let plan_id = verification_plan_id(&harness.model).expect("default plan");
+        harness
+            .model
+            .workspace
+            .content
+            .ensure_active_plan_data(plan_id)
+            .specification_policy
+            .monte_carlo = MonteCarloSpecificationGate::YieldAtLeast { percent };
+        let gate = monte_carlo_gate(&harness.model);
+        assert_eq!(gate, MonteCarloSpecificationGate::YieldAtLeast { percent });
+        let sheet = sheet(&harness);
+        assert!(
+            population(sheet.rows[0].statistics.as_ref().expect("trials"), None)
+                .is_some_and(|shown| shown.failing().len() == 3),
+            "three trials fail at every gate"
+        );
+        let toolbar = monte_carlo_summary(sheet, &gate).problem;
+        let navigator = crate::workbench::docks::navigator::verify::verification_flow_presentation(
+            &harness.model,
+            &harness.state,
+            VerificationPage::MonteCarlo,
+        )
+        .problem;
+        assert_eq!(toolbar, failing.then_some(Problem::Failure), "{percent} %");
+        assert_eq!(navigator, toolbar, "{percent} %");
+    }
+}
+
 /// Two specifications judged over different trials have no joint yield,
 /// and the toolbar says why.
 #[test]

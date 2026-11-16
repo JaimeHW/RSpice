@@ -10,7 +10,7 @@
 use egui::Ui;
 
 use crate::product::RunId;
-use rspice_results::verification::{CellStatus, CheckCounts, Checks, JointYield, RowStatus};
+use rspice_results::verification::{CellStatus, CheckCounts, Checks, JointYield};
 
 use crate::state::SimulationRunLifecycle;
 use crate::ui::tokens::Tokens;
@@ -18,7 +18,9 @@ use crate::ui::widgets::Problem;
 use crate::workbench::app_state::Model;
 use crate::workbench::slots::SimulateState;
 use crate::workbench::surfaces::verify::specifications::{counts_line, counts_problem};
-use crate::workbench::surfaces::verify::{reference_eligibility, reference_run};
+use crate::workbench::surfaces::verify::{
+    monte_carlo_gate, reference_eligibility, reference_run, yields_below_gate,
+};
 
 use super::super::super::design_system::section_header;
 use super::flow_row::flow_row;
@@ -242,14 +244,13 @@ fn corners_line(model: &Model) -> (String, Option<Problem>) {
 
 /// "92.5 % joint yield · 40 trials": the share of trials that pass every
 /// specification with a limit, or how many trials ran when no one share can
-/// be stated.
+/// be stated. It fails exactly when the view's toolbar does: a yield that does
+/// not hold under the plan's Monte Carlo gate.
 fn monte_carlo_line(model: &Model) -> (String, Option<Problem>) {
     let Some(sheet) = model.simulation.verification_sheet() else {
         return (String::new(), None);
     };
-    let failing = sheet.rows.iter().any(|row| {
-        row.statistics.is_some() && matches!(row.status, Some(RowStatus::Fail | RowStatus::Error))
-    });
+    let failing = !yields_below_gate(sheet, &monte_carlo_gate(model)).is_empty();
     let problem = failing.then_some(Problem::Failure);
     match sheet.joint_yield {
         Some(JointYield::Counted { passing, total, .. }) if total > 0 => (

@@ -158,6 +158,33 @@ pub(super) fn yield_holds(count: &YieldCount, gate: &MonteCarloSpecificationGate
     }
 }
 
+/// The plan's Monte Carlo gate; ungated when Verify reads no plan.
+pub(crate) fn monte_carlo_gate(model: &Model) -> MonteCarloSpecificationGate {
+    verification_plan_id(model)
+        .and_then(|plan_id| model.workspace.content.plan_data(plan_id))
+        .map(|payload| payload.specification_policy.monte_carlo.clone())
+        .unwrap_or_default()
+}
+
+/// The specifications whose yield does not hold under `gate`, in sheet order.
+/// It is the one word on whether Monte Carlo fails: the toolbar names them,
+/// and the navigator's line takes its tone from them.
+pub(crate) fn yields_below_gate<'s>(
+    sheet: &'s Sheet,
+    gate: &MonteCarloSpecificationGate,
+) -> Vec<&'s Row> {
+    sheet
+        .rows
+        .iter()
+        .filter(|row| {
+            row.statistics
+                .as_ref()
+                .and_then(|statistics| statistics.yield_count)
+                .is_some_and(|count| !yield_holds(&count, gate))
+        })
+        .collect()
+}
+
 /// A percentage to the places a reader needs: tenths, or whole percent
 /// across a wide interval.
 fn percent(value: f64, whole: bool) -> String {
@@ -195,15 +222,14 @@ fn gate_text(gate: &MonteCarloSpecificationGate) -> Option<String> {
 /// The joint yield is the run's, over every trial at every point: the gate
 /// signs off the whole population, whichever point the table states.
 pub(super) fn monte_carlo_summary(sheet: &Sheet, gate: &MonteCarloSpecificationGate) -> Summary {
-    let judged = sheet
-        .rows
-        .iter()
-        .filter_map(|row| Some((row, row.statistics.as_ref()?.yield_count?)))
-        .collect::<Vec<_>>();
-    let failing = judged
-        .iter()
-        .filter(|(_, count)| !yield_holds(count, gate))
-        .map(|(row, _)| row.name.as_str())
+    let judged = sheet.rows.iter().any(|row| {
+        row.statistics
+            .as_ref()
+            .is_some_and(|statistics| statistics.yield_count.is_some())
+    });
+    let failing = yields_below_gate(sheet, gate)
+        .into_iter()
+        .map(|row| row.name.as_str())
         .collect::<Vec<_>>();
     let mut text = match sheet.joint_yield {
         Some(JointYield::Counted { passing, total, .. }) if total > 0 => {
@@ -232,7 +258,7 @@ pub(super) fn monte_carlo_summary(sheet: &Sheet, gate: &MonteCarloSpecificationG
             format!("{trials} trials \u{00b7} no limits")
         }
     };
-    if let Some(gate_words) = gate_text(gate).filter(|_| !judged.is_empty()) {
+    if let Some(gate_words) = gate_text(gate).filter(|_| judged) {
         match failing.as_slice() {
             [] => text.push_str(&format!(" \u{00b7} clears {gate_words}")),
             [name] => text.push_str(&format!(" \u{00b7} {name} below {gate_words}")),
@@ -513,10 +539,7 @@ fn monte_carlo_in_run(model: &Model) -> Option<bool> {
 
 pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let recorded = monte_carlo_in_run(cx.model);
-    let gate = verification_plan_id(cx.model)
-        .and_then(|plan_id| cx.model.workspace.content.plan_data(plan_id))
-        .map(|payload| payload.specification_policy.monte_carlo.clone())
-        .unwrap_or_default();
+    let gate = monte_carlo_gate(cx.model);
     let sheet = cx.model.simulation.verification_sheet();
     let point = sheet.and_then(|sheet| shown_point(sheet, &cx.state.verification));
     let rows = sheet.map_or_else(Vec::new, |sheet| monte_carlo_rows(sheet, point));
