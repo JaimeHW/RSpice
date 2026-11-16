@@ -91,6 +91,8 @@ pub mod specification_verdict;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_value;
 pub mod stability;
+#[cfg(feature = "engine-evidence")]
+pub mod stored_transient;
 pub mod transfer_function;
 #[cfg(feature = "engine-evidence")]
 pub mod transient_checkpoint;

@@ -21,6 +21,10 @@ use rspice_core::engine::{
 };
 use rspice_core::netlist::OutputDirectiveKind;
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
+use rspice_results::stored_transient::{
+    SlotTarget, clear_rows, fill_events, fill_rows, fill_span, first_non_finite,
+    instance_parameters, slot_name, slot_targets,
+};
 use rspice_results_store::{
     FileIo, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError, StoreSink,
 };
@@ -31,42 +35,6 @@ use crate::commands::run_signals::ScalarSignal;
 
 /// Store directories this process has opened, so concurrent runs never share one.
 static NEXT_STORE: AtomicU64 = AtomicU64::new(0);
-
-/// Where one value slot of a row belongs in the in-memory result.
-#[derive(Debug, Clone, Copy)]
-enum SlotTarget {
-    Voltage(usize),
-    Current(usize),
-    /// An instance parameter the run kept as a constant column: its index in
-    /// [`StoredRows::parameters`].
-    Parameter(usize),
-    /// The step that reached each point.
-    StepSize,
-    /// A store trace (a memristor's resistance): its index in the result's store traces.
-    Store(usize),
-    /// A device operating-point value: its index in the result's device traces.
-    DeviceOp(usize),
-}
-
-impl SlotTarget {
-    /// The result column this slot's values fill; an instance parameter's is adopted whole.
-    fn column(self, result: &mut TransientResult) -> Option<&mut Vec<f64>> {
-        match self {
-            SlotTarget::Voltage(node) => result.voltages.get_mut(node),
-            SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
-            SlotTarget::StepSize => Some(&mut result.step_sizes),
-            SlotTarget::Store(index) => result
-                .store_traces
-                .get_mut(index)
-                .map(|trace| &mut trace.values),
-            SlotTarget::DeviceOp(index) => result
-                .device_op_traces
-                .get_mut(index)
-                .map(|trace| &mut trace.values),
-            SlotTarget::Parameter(_) => None,
-        }
-    }
-}
 
 /// A transient whose rows are in a store: the result holds everything else.
 pub(super) struct StoredTransient {
@@ -346,13 +314,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
     let stored = StoredTransient {
         shell,
         rows: StoredRows {
-            parameters: reader
-                .schema()
-                .signals
-                .iter()
-                .filter(|signal| signal.quantity == "instance_parameter")
-                .map(|signal| (signal.path.clone(), signal.name.clone()))
-                .collect(),
+            parameters: instance_parameters(&reader),
             store,
             reader,
             targets,
@@ -460,244 +422,6 @@ fn reopen_beside_output(
             None
         }
     }
-}
-
-/// Read the run's event signals back into the traces the result names: its digital and real
-/// event traces and its impulse traces, each of which the run moved to the store as it went.
-fn fill_events(
-    reader: &mut SegmentReader<FileIo>,
-    shell: &mut TransientResult,
-) -> Result<(), StoreError> {
-    use rspice_core::analysis::transient::{DigitalTracePoint, RealTracePoint};
-    use rspice_core::xspice::DigitalValue;
-    use rspice_core::{
-        CurrentImpulseOwner, CurrentImpulsePoint, ImpulseDerivative, VoltageImpulsePoint,
-    };
-    use rspice_results_store::EventValue;
-    let events: Vec<(usize, String, String, String)> = reader
-        .schema()
-        .signals
-        .iter()
-        .enumerate()
-        .filter(|(_, signal)| signal.kind.slots() == 0)
-        .map(|(id, signal)| {
-            (
-                id,
-                signal.quantity.clone(),
-                signal.name.clone(),
-                signal.path.clone(),
-            )
-        })
-        .collect();
-    let malformed = |what: &str, name: &str| StoreError::Io {
-        kind: std::io::ErrorKind::InvalidData,
-        message: format!("the transient store's {what} signal '{name}' holds a change it cannot"),
-    };
-    for (id, quantity, name, path) in events {
-        let changes = reader.events(id, f64::NEG_INFINITY, f64::INFINITY)?;
-        let real = |value: &EventValue| match value {
-            EventValue::Real(value) => Some(*value),
-            _ => None,
-        };
-        let current = |owner: &CurrentImpulseOwner| match owner {
-            CurrentImpulseOwner::Branch { branch_name } => path.is_empty() && *branch_name == name,
-            CurrentImpulseOwner::DeviceLead {
-                device_name,
-                parameter,
-            } => *device_name == path && *parameter == name,
-        };
-        match quantity.as_str() {
-            "digital" => {
-                let Some(trace) = shell
-                    .digital_traces
-                    .iter_mut()
-                    .find(|t| t.node_name == name)
-                else {
-                    continue;
-                };
-                trace.points = changes
-                    .iter()
-                    .map(|change| {
-                        DigitalValue::from_store_strength(change.strength)
-                            .map(|value| DigitalTracePoint {
-                                time: change.time,
-                                value,
-                            })
-                            .ok_or_else(|| malformed("digital", &name))
-                    })
-                    .collect::<Result<_, _>>()?;
-            }
-            "real_event" => {
-                let Some(trace) = shell.real_traces.iter_mut().find(|t| t.node_name == name) else {
-                    continue;
-                };
-                trace.points = changes
-                    .iter()
-                    .map(|change| {
-                        real(&change.value)
-                            .map(|value| RealTracePoint {
-                                time: change.time,
-                                value,
-                            })
-                            .ok_or_else(|| malformed("real event", &name))
-                    })
-                    .collect::<Result<_, _>>()?;
-            }
-            "current_impulse" | "current_impulse_derivative" => {
-                let Some(trace) = shell
-                    .current_impulses
-                    .iter_mut()
-                    .flatten()
-                    .find(|trace| current(&trace.owner))
-                else {
-                    continue;
-                };
-                if quantity == "current_impulse" {
-                    trace.points = changes
-                        .iter()
-                        .map(|change| {
-                            real(&change.value)
-                                .map(|charge_coulombs| CurrentImpulsePoint {
-                                    time: change.time,
-                                    charge_coulombs,
-                                })
-                                .ok_or_else(|| malformed("impulse", &name))
-                        })
-                        .collect::<Result<_, _>>()?;
-                } else {
-                    trace.derivatives =
-                        derivatives(&changes).ok_or_else(|| malformed("impulse", &name))?;
-                }
-            }
-            "voltage_impulse" | "voltage_impulse_derivative" => {
-                let Some(trace) = shell
-                    .voltage_impulses
-                    .iter_mut()
-                    .flatten()
-                    .find(|trace| trace.node_name == name)
-                else {
-                    continue;
-                };
-                if quantity == "voltage_impulse" {
-                    trace.points = changes
-                        .iter()
-                        .map(|change| {
-                            real(&change.value)
-                                .map(|volt_seconds| VoltageImpulsePoint {
-                                    time: change.time,
-                                    volt_seconds,
-                                })
-                                .ok_or_else(|| malformed("impulse", &name))
-                        })
-                        .collect::<Result<_, _>>()?;
-                } else {
-                    trace.derivatives =
-                        derivatives(&changes).ok_or_else(|| malformed("impulse", &name))?;
-                }
-            }
-            _ => {}
-        }
-    }
-    /// An impulse derivative's order is its change's sequence.
-    fn derivatives(
-        changes: &[rspice_results_store::EventChange],
-    ) -> Option<Vec<ImpulseDerivative>> {
-        changes
-            .iter()
-            .map(|change| match change.value {
-                EventValue::Real(coefficient) => Some(ImpulseDerivative {
-                    time: change.time,
-                    order: change.sequence,
-                    coefficient,
-                }),
-                _ => None,
-            })
-            .collect()
-    }
-    Ok(())
-}
-
-/// Each slot's place in the result: the store's voltages are the saved nodes in node order, then
-/// its currents the saved branches in branch order, so each name is the next one of its kind.
-fn slot_targets(
-    reader: &SegmentReader<FileIo>,
-    shell: &TransientResult,
-) -> Result<Vec<SlotTarget>, String> {
-    let (mut next_node, mut next_branch, mut parameters) = (0usize, 0usize, 0usize);
-    let mut targets = Vec::with_capacity(reader.slots());
-    for signal in &reader.schema().signals {
-        // An event signal takes no slot; its changes are read on their own.
-        if signal.kind.slots() == 0 {
-            continue;
-        }
-        if signal.quantity == "instance_parameter" {
-            targets.push(SlotTarget::Parameter(parameters));
-            parameters += 1;
-            continue;
-        }
-        if signal.quantity == "step_size" {
-            targets.push(SlotTarget::StepSize);
-            continue;
-        }
-        if signal.quantity == "device_op" {
-            let index = shell
-                .device_op_traces
-                .iter()
-                .position(|trace| {
-                    trace.device_name == signal.path && trace.parameter == signal.name
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "the transient store's device value '{}' of '{}' is not a result device \
-                         trace",
-                        signal.name, signal.path
-                    )
-                })?;
-            targets.push(SlotTarget::DeviceOp(index));
-            continue;
-        }
-        if signal.quantity == "store" {
-            let index = shell
-                .store_traces
-                .iter()
-                .position(|trace| trace.name == signal.name)
-                .ok_or_else(|| {
-                    format!(
-                        "the transient store's trace '{}' is not a result store trace",
-                        signal.name
-                    )
-                })?;
-            targets.push(SlotTarget::Store(index));
-            continue;
-        }
-        let (names, next, voltage) = match signal.quantity.as_str() {
-            "voltage" => (&shell.node_names, &mut next_node, true),
-            "current" => (&shell.branch_names, &mut next_branch, false),
-            other => {
-                return Err(format!(
-                    "the transient store holds a '{other}' signal '{}' the result has no column for",
-                    signal.name
-                ));
-            }
-        };
-        let found = names[(*next).min(names.len())..]
-            .iter()
-            .position(|name| *name == signal.name)
-            .map(|offset| *next + offset)
-            .ok_or_else(|| {
-                format!(
-                    "the transient store's signal '{}' is not a result column",
-                    signal.name
-                )
-            })?;
-        *next = found + 1;
-        targets.push(if voltage {
-            SlotTarget::Voltage(found)
-        } else {
-            SlotTarget::Current(found)
-        });
-    }
-    Ok(targets)
 }
 
 impl StoredTransient {
@@ -1150,50 +874,19 @@ impl StoredRows {
         let count = usize::try_from(count).map_err(|_| CliError::InternalError {
             message: "a transient store holds more rows than this host can address".to_owned(),
         })?;
-        let dir = self.store.dir.clone();
-        let failed = |error| store_error(&dir, error);
-        result.time = self.reader.read_x(first, count).map_err(failed)?;
-        for (slot, &target) in self.targets.iter().enumerate() {
-            let Some(column) = target.column(result) else {
-                continue;
-            };
-            *column = self.reader.read_slot(slot, first, count).map_err(failed)?;
-        }
-        Ok(())
+        fill_rows(&mut self.reader, &self.targets, result, first, count)
+            .map_err(|error| store_error(&self.store.dir, error))
     }
 
     /// Move the first and last rows into `result`'s time and saved columns: what a statement
     /// that reads only event operands reads of the run, and the row a PARAM reads.
     fn fill_span(&mut self, result: &mut TransientResult) -> Result<(), CliError> {
-        let rows = self.rows();
-        let ends: &[u64] = if rows > 1 { &[0, rows - 1] } else { &[0] };
-        let dir = self.store.dir.clone();
-        let failed = |error| store_error(&dir, error);
-        result.time.clear();
-        for &row in ends {
-            result
-                .time
-                .extend(self.reader.read_x(row, 1).map_err(failed)?);
-        }
-        for (slot, &target) in self.targets.iter().enumerate() {
-            let Some(column) = target.column(result) else {
-                continue;
-            };
-            column.clear();
-            for &row in ends {
-                column.extend(self.reader.read_slot(slot, row, 1).map_err(failed)?);
-            }
-        }
-        Ok(())
+        fill_span(&mut self.reader, &self.targets, result)
+            .map_err(|error| store_error(&self.store.dir, error))
     }
 
     fn clear(&self, result: &mut TransientResult) {
-        result.time = Vec::new();
-        for &target in &self.targets {
-            if let Some(column) = target.column(result) {
-                *column = Vec::new();
-            }
-        }
+        clear_rows(&self.targets, result);
     }
 
     /// Refuse a non-finite saved value as the in-memory check does: the first column in result
@@ -1207,56 +900,12 @@ impl StoredRows {
             return Ok(());
         }
         let rows = self.rows();
-        let mut first: Vec<Option<(u64, f64)>> = vec![None; self.targets.len()];
-        let dir = self.store.dir.clone();
-        let spans = self.reader.chunk_spans().collect::<Vec<_>>();
-        let mut values = Vec::new();
-        for (chunk, &(start, _)) in spans.iter().enumerate() {
-            for (slot, found) in first.iter_mut().enumerate() {
-                // The in-memory check reads the saved waveforms and parameters only.
-                if found.is_some()
-                    || matches!(
-                        self.targets[slot],
-                        SlotTarget::StepSize | SlotTarget::Store(_) | SlotTarget::DeviceOp(_)
-                    )
-                {
-                    continue;
-                }
-                self.reader
-                    .read_chunk_slot(chunk, slot, &mut values)
-                    .map_err(|error| store_error(&dir, error))?;
-                if let Some(at) = values.iter().position(|value| !value.is_finite()) {
-                    *found = Some((start + at as u64, values[at]));
-                }
-            }
-        }
-        let Some((slot, (point, value))) = first
-            .iter()
-            .enumerate()
-            .find_map(|(slot, found)| found.map(|found| (slot, found)))
+        let Some((slot, point, value)) = first_non_finite(&mut self.reader, &self.targets)
+            .map_err(|error| store_error(&self.store.dir, error))?
         else {
             return Ok(());
         };
-        let name = match self.targets[slot] {
-            SlotTarget::Voltage(node) => shell.node_names.get(node).map_or("node", String::as_str),
-            SlotTarget::Current(branch) => shell
-                .branch_names
-                .get(branch)
-                .map_or("branch", String::as_str),
-            SlotTarget::Parameter(index) => self
-                .parameters
-                .get(index)
-                .map_or("parameter", |(_, parameter)| parameter.as_str()),
-            SlotTarget::StepSize => "step",
-            SlotTarget::Store(index) => shell
-                .store_traces
-                .get(index)
-                .map_or("store", |trace| trace.name.as_str()),
-            SlotTarget::DeviceOp(index) => shell
-                .device_op_traces
-                .get(index)
-                .map_or("device", |trace| trace.parameter.as_str()),
-        };
+        let name = slot_name(self.targets[slot], shell, &self.parameters);
         Err(super::shared::non_finite_error(
             "Transient",
             name,

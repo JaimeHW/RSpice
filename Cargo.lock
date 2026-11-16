@@ -6127,6 +6127,7 @@ dependencies = [
  "ron",
  "rspice-core",
  "rspice-design-model",
+ "rspice-results-store",
  "rspice-units",
  "rspice-vocabulary",
  "rustfft",
