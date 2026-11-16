@@ -363,8 +363,8 @@ pub(crate) fn signal_abscissa(model: &StripModel, name: &str) -> Option<Resolved
             .iter()
             .map(|trace| AbscissaSeries {
                 member: MemberKey::of(trace),
-                grid: Arc::clone(&trace.x),
-                values: Arc::clone(&trace.y),
+                grid: trace.x.clone(),
+                values: trace.y.clone(),
                 cache_key: trace_key(model, trace),
             })
             .collect(),

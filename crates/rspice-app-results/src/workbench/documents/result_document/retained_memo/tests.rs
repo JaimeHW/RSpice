@@ -1,7 +1,6 @@
 //! Retained evidence must be rechecked without relying on a painted frame.
 
 use crate::workbench::documents::result_document::test_fixtures::analysis;
-use std::sync::Arc;
 
 use super::super::*;
 
@@ -42,7 +41,10 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
     let key = key(&state);
     let version = state.model.simulation.view.data_version;
     assert!(retained_evidence_is_valid(state.results_reads(), key));
-    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y).pop();
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
+        .pop();
     assert!(
         state.model.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
@@ -52,7 +54,9 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
         !retained_evidence_is_valid(state.results_reads(), key),
         "a stale success hid corrupt evidence"
     );
-    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
         .push(1.0);
     assert!(
         retained_evidence_is_valid(state.results_reads(), key),
@@ -90,8 +94,9 @@ fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
     };
     assert!(answer(&state));
     let version = state.model.simulation.view.data_version;
-    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x)[0] =
-        -1.0;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .x
+        .make_mut()[0] = -1.0;
     assert!(!structural_gate_is_answered_directly(
         gate,
         &state.model.simulation.retained.runs[0].analyses[0]
@@ -100,7 +105,9 @@ fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
         !answer(&state),
         "the gate kept accepting an invalid frequency grid"
     );
-    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x)[0] = 1.0;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .x
+        .make_mut()[0] = 1.0;
     assert!(
         answer(&state),
         "the gate kept rejecting the repaired frequency grid"
@@ -124,7 +131,10 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     let old = view_context::resolve_displayed_result_view(state.results_reads()).unwrap();
     assert!(old.run(state.results_reads()).is_some());
     let mut incoming = state.model.simulation.clone();
-    Arc::make_mut(&mut incoming.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
+    incoming.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
+        .fill(2.0);
     let restored =
         crate::io::simulation_state_from_results(crate::io::capture_simulation_results(&incoming))
             .unwrap();
@@ -189,7 +199,9 @@ fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
             state.results_reads(),
             &state.model.simulation.retained.runs[0],
         );
-        Arc::make_mut(&mut clone.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
+        clone.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+            .y
+            .make_mut()
             .fill(2.0);
         assert_eq!(
             retained_dataset_digest(

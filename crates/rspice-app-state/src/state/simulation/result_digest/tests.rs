@@ -321,7 +321,6 @@ fn operating_point_mna_and_context_are_field_sensitive_content_identity() {
     assert_ne!(baseline, changed.result_data_digest());
 }
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 fn analysis(kind: AnalysisType) -> AnalysisResult {
     AnalysisResult::new(1, kind, "presentation label").with_waveforms(vec![
@@ -359,15 +358,14 @@ fn analysis_digest_is_deterministic_and_ignores_presentation_cache() {
 fn analysis_digest_detects_real_imaginary_and_kind_changes() {
     let source = analysis(AnalysisType::Ac);
     let mut real_changed = source.clone();
-    Arc::make_mut(&mut real_changed.waveforms[0].y)[1] = 0.500_000_000_000_000_1;
+    real_changed.waveforms[0].y.make_mut()[1] = 0.500_000_000_000_000_1;
     let mut imaginary_changed = source.clone();
-    Arc::make_mut(
-        &mut imaginary_changed.waveforms[0]
-            .complex
-            .as_mut()
-            .expect("complex evidence")
-            .imag,
-    )[1] = 1.0e-30;
+    imaginary_changed.waveforms[0]
+        .complex
+        .as_mut()
+        .expect("complex evidence")
+        .imag
+        .make_mut()[1] = 1.0e-30;
     let kind_changed = analysis(AnalysisType::Transient);
 
     assert_ne!(
@@ -415,8 +413,8 @@ fn retained_waveform_unit_is_content_identity() {
 fn canonical_float_encoding_normalizes_signed_zero_and_nan_payloads() {
     let mut positive_zero = analysis(AnalysisType::Ac);
     let mut negative_zero = positive_zero.clone();
-    Arc::make_mut(&mut positive_zero.waveforms[0].y)[0] = 0.0;
-    Arc::make_mut(&mut negative_zero.waveforms[0].y)[0] = -0.0;
+    positive_zero.waveforms[0].y.make_mut()[0] = 0.0;
+    negative_zero.waveforms[0].y.make_mut()[0] = -0.0;
     assert_eq!(
         positive_zero.result_data_digest(),
         negative_zero.result_data_digest()
@@ -424,8 +422,8 @@ fn canonical_float_encoding_normalizes_signed_zero_and_nan_payloads() {
 
     let mut first_nan = positive_zero.clone();
     let mut second_nan = positive_zero;
-    Arc::make_mut(&mut first_nan.waveforms[0].y)[0] = f64::from_bits(0x7ff8_0000_0000_0001);
-    Arc::make_mut(&mut second_nan.waveforms[0].y)[0] = f64::from_bits(0x7fff_ffff_ffff_ffff);
+    first_nan.waveforms[0].y.make_mut()[0] = f64::from_bits(0x7ff8_0000_0000_0001);
+    second_nan.waveforms[0].y.make_mut()[0] = f64::from_bits(0x7fff_ffff_ffff_ffff);
     assert_eq!(
         first_nan.result_data_digest(),
         second_nan.result_data_digest()

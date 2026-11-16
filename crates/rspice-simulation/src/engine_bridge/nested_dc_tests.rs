@@ -131,7 +131,7 @@ fn dc_display_order_preserves_actual_terminal_coordinates_and_branch_units() {
                     "{name}: {} != {expected}",
                     trace.y[last]
                 );
-                assert!(std::sync::Arc::ptr_eq(&result.waveforms[0].x, &trace.x));
+                assert_eq!(result.waveforms[0].x.as_ptr(), trace.x.as_ptr());
             }
         }
     }

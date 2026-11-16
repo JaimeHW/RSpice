@@ -9,7 +9,12 @@ pub use retained::{
 };
 
 mod trace;
+mod values;
 pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DisplayWaveformCache, RetainedTrace};
+pub use values::{
+    ColumnReadFailure, ColumnSource, StoredWindow, WaveformValues, WindowLead,
+    take_column_read_failures,
+};
 
 //=============================================================================
 // Sampled Waveform
@@ -21,11 +26,12 @@ pub struct SampledWaveform {
     /// Signal name (e.g., "V(out)", "I(R1)")
     pub name: String,
 
-    /// X-axis values (time for transient, frequency for AC)
-    pub x_values: Vec<f64>,
+    /// X-axis values (time for transient, frequency for AC), shared by every waveform of the
+    /// run that holds the same axis.
+    pub x_values: WaveformValues,
 
     /// Y-axis values (voltage, current, etc.)
-    pub y_values: Vec<f64>,
+    pub y_values: WaveformValues,
 
     /// Unit for Y-axis (V, A, dB, degrees, etc.)
     pub y_unit: String,
@@ -39,7 +45,11 @@ pub struct SampledWaveform {
 
 impl SampledWaveform {
     /// Create a new time-domain node-voltage waveform.
-    pub fn new_time_domain(name: impl Into<String>, time: Vec<f64>, values: Vec<f64>) -> Self {
+    pub fn new_time_domain(
+        name: impl Into<String>,
+        time: impl Into<WaveformValues>,
+        values: impl Into<WaveformValues>,
+    ) -> Self {
         Self::new_time_domain_in_unit(name, time, values, "V")
     }
 
@@ -51,14 +61,14 @@ impl SampledWaveform {
     /// than inherit volts from [`Self::new_time_domain`].
     pub fn new_time_domain_in_unit(
         name: impl Into<String>,
-        time: Vec<f64>,
-        values: Vec<f64>,
+        time: impl Into<WaveformValues>,
+        values: impl Into<WaveformValues>,
         y_unit: impl Into<String>,
     ) -> Self {
         Self {
             name: name.into(),
-            x_values: time,
-            y_values: values,
+            x_values: time.into(),
+            y_values: values.into(),
             y_unit: y_unit.into(),
             is_complex: false,
             y_imag: None,
@@ -68,8 +78,8 @@ impl SampledWaveform {
     /// Create new complex frequency-domain waveform
     pub fn new_complex(
         name: impl Into<String>,
-        freq: Vec<f64>,
-        real: Vec<f64>,
+        freq: impl Into<WaveformValues>,
+        real: impl Into<WaveformValues>,
         imag: Vec<f64>,
     ) -> Self {
         Self::new_complex_in_unit(name, freq, real, imag, "")
@@ -78,15 +88,15 @@ impl SampledWaveform {
     /// Create a complex frequency-domain waveform with its producer's unit.
     pub fn new_complex_in_unit(
         name: impl Into<String>,
-        freq: Vec<f64>,
-        real: Vec<f64>,
+        freq: impl Into<WaveformValues>,
+        real: impl Into<WaveformValues>,
         imag: Vec<f64>,
         unit: impl Into<String>,
     ) -> Self {
         Self {
             name: name.into(),
-            x_values: freq,
-            y_values: real,
+            x_values: freq.into(),
+            y_values: real.into(),
             y_unit: unit.into(),
             is_complex: true,
             y_imag: Some(imag),

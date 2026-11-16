@@ -600,8 +600,8 @@ pub(super) fn authenticated_pstb_result() -> SimulationResult {
             name.to_owned(),
             SampledWaveform {
                 name: name.to_owned(),
-                x_values: mode_indices.clone(),
-                y_values: vec![value],
+                x_values: mode_indices.clone().into(),
+                y_values: vec![value].into(),
                 y_unit: unit.to_owned(),
                 is_complex: false,
                 y_imag: None,

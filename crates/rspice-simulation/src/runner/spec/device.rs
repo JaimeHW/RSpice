@@ -370,7 +370,7 @@ fn run_soa(
                     |(name, wave)| rspice_results::soa_source::SoaSourceWaveform {
                         name,
                         unit: wave.y_unit,
-                        values: wave.y_values,
+                        values: wave.y_values.into_vec(),
                     },
                 )
                 .collect(),

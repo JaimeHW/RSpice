@@ -120,7 +120,7 @@ fn soa_current_envelope_draft_dispatch_retains_limits_and_retained_configuration
                 .unwrap();
             // Use an interior point below the cap so voltage tampering changes its limit.
             let i = volts.y.iter().position(|v| *v > 2.0 && *v < 9.0).unwrap();
-            std::sync::Arc::make_mut(&mut wave.y)[i] *= 1.2;
+            wave.y.make_mut()[i] *= 1.2;
             assert!(altered.validate_retained_evidence().is_err());
         }
         let mut missing = retained.clone();

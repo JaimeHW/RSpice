@@ -4,6 +4,7 @@ use rspice_results::analysis_type::AnalysisType;
 use rspice_results::executed_deck::ExecutedDeckArchive;
 use rspice_results::provenance::AnalysisResultProvenance;
 use rspice_results::run::{ExecutionTarget, SimulationRun};
+use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 
@@ -82,7 +83,10 @@ fn a_monte_carlo_transient_draws_its_trials_as_one_family_on_one_strip() {
         assert!(trace.visible && !trace.overlay);
         // Each curve is the member's own retained samples, never a copy.
         let source = &run.analyses[analysis].waveforms[0];
-        assert!(Arc::ptr_eq(&trace.x, &source.x) && Arc::ptr_eq(&trace.y, &source.y));
+        assert!(
+            SharedWaveformValues::ptr_eq(&trace.x, &source.x)
+                && SharedWaveformValues::ptr_eq(&trace.y, &source.y)
+        );
     }
     let keys: HashSet<_> = strip
         .traces
@@ -174,7 +178,10 @@ fn a_stepped_dc_sweep_draws_its_points_as_one_family_on_one_strip() {
     assert_eq!(names, ["I(VD) · c = 1", "I(VD) · c = 2", "I(VD) · c = 3"]);
     for (index, trace) in strip.traces.iter().enumerate() {
         assert_eq!(trace.family_group_ordinal, Some(index));
-        assert!(Arc::ptr_eq(&trace.y, &run.analyses[index].waveforms[0].y));
+        assert!(SharedWaveformValues::ptr_eq(
+            &trace.y,
+            &run.analyses[index].waveforms[0].y
+        ));
     }
 }
 

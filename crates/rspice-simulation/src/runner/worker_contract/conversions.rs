@@ -1173,7 +1173,7 @@ pub(super) fn validate_pss_display_contract(
             .map_err(SimulationError::InvalidConfig)?;
         if display.name != display_name
             || display.x_values.as_slice() != time
-            || display.y_values != expected
+            || *display.y_values != expected
             || display.y_unit != unit
             || display.is_complex
             || display.y_imag.is_some()

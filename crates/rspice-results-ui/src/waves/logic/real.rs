@@ -30,8 +30,8 @@ pub fn real_step_trace(
     ResolvedExpr {
         // A real lane is no expression; the pane it is drawn in chose it.
         slot: usize::MAX,
-        x: Arc::new(x),
-        y: Arc::new(y),
+        x: rspice_results::waveform::WaveformValues::from(x),
+        y: rspice_results::waveform::WaveformValues::from(y),
         shape,
         color,
         cache_key,

@@ -68,11 +68,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         let series = &mut state.results.session.derived;
         let re = series.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
-            || std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>()),
+            || points.iter().map(|p| p.real).collect::<Vec<_>>().into(),
         );
         let im = series.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, IMAGINARY_SERIES),
-            || std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>()),
+            || points.iter().map(|p| p.imag).collect::<Vec<_>>().into(),
         );
         let stats = derived(state).map(|cached| cached.stability);
         Some((re, im, stats))

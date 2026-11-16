@@ -240,7 +240,7 @@ fn dc_family_materialization_is_atomic_when_the_last_member_collides() {
         let owners = analysis
             .waveforms
             .iter()
-            .map(|waveform| (Arc::clone(&waveform.x), Arc::clone(&waveform.y)))
+            .map(|waveform| (waveform.x.clone(), waveform.y.clone()))
             .collect::<Vec<_>>();
         assert!(
             materialize_deferred_saved_output(&mut analysis, 0)
@@ -260,8 +260,14 @@ fn dc_family_materialization_is_atomic_when_the_last_member_collides() {
             names.iter().collect::<Vec<_>>()
         );
         for (waveform, (x, y)) in analysis.waveforms.iter().zip(owners) {
-            assert!(Arc::ptr_eq(&waveform.x, &x));
-            assert!(Arc::ptr_eq(&waveform.y, &y));
+            assert!(rspice_results::waveform::WaveformValues::ptr_eq(
+                &waveform.x,
+                &x
+            ));
+            assert!(rspice_results::waveform::WaveformValues::ptr_eq(
+                &waveform.y,
+                &y
+            ));
         }
     }
 }
@@ -307,8 +313,14 @@ fn deferred_dc_family_shares_each_exact_source_and_rebuilds_every_display_cache(
                 .find(|waveform| waveform.name == name)
                 .unwrap();
             assert_eq!(count as usize, source.x.len());
-            assert!(Arc::ptr_eq(&waveform.x, &source.x));
-            assert!(Arc::ptr_eq(&waveform.y, &source.y));
+            assert!(rspice_results::waveform::WaveformValues::ptr_eq(
+                &waveform.x,
+                &source.x
+            ));
+            assert!(rspice_results::waveform::WaveformValues::ptr_eq(
+                &waveform.y,
+                &source.y
+            ));
             assert!(waveform.display_cache.is_some());
         }
         let names = analysis.saved_output_receipts[0]
@@ -318,7 +330,7 @@ fn deferred_dc_family_shares_each_exact_source_and_rebuilds_every_display_cache(
             .collect::<HashSet<_>>();
         for waveform in &mut analysis.waveforms {
             if names.contains(&waveform.name) {
-                waveform.x = Arc::new(vec![0.0, 0.25, 1.0]);
+                waveform.x = rspice_results::waveform::WaveformValues::from(vec![0.0, 0.25, 1.0]);
             }
         }
         assert!(
@@ -438,10 +450,14 @@ fn dc_family_receipts_reject_missing_reordered_and_misrepresented_raw_members() 
             2 => members[0].sample_count += 1,
             3 => members[0].waveform_name.push_str(" changed"),
             4 => analysis.waveforms[0].unit = Some("V".to_owned()),
-            5 => analysis.waveforms[0].x = Arc::new(vec![0.0, 0.25, 1.0]),
+            5 => {
+                analysis.waveforms[0].x =
+                    rspice_results::waveform::WaveformValues::from(vec![0.0, 0.25, 1.0])
+            }
             6 => {
                 for waveform in &mut analysis.waveforms {
-                    waveform.x = Arc::new(vec![1.0, 0.5, 0.0]);
+                    waveform.x =
+                        rspice_results::waveform::WaveformValues::from(vec![1.0, 0.5, 0.0]);
                 }
             }
             _ => unreachable!(),

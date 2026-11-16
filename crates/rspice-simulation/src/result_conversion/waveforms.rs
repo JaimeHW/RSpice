@@ -2,8 +2,8 @@
 
 use super::ResultConversion;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
+use rspice_results::waveform::WaveformValues;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 type OrderedNoiseSeries = (
     Vec<f64>,
@@ -15,7 +15,7 @@ type OrderedNoiseSeries = (
 impl<Clock: Fn() -> f64> ResultConversion<Clock> {
     pub(super) fn build_waveforms_with_shared_x_owned(
         &self,
-        x_values: Vec<f64>,
+        x_values: WaveformValues,
         waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
         self.build_sorted_waveforms_with_shared_x_owned(x_values, waveforms, |name, waveform| {
@@ -25,10 +25,10 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
 
     pub(super) fn build_time_waveforms_owned(
         &self,
-        time: Vec<f64>,
+        time: WaveformValues,
         waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
-        let shared_time = Arc::new(time);
+        let shared_time = time;
         let sample_count = shared_time.len();
         let mut waveforms = waveforms.into_iter().collect::<Vec<_>>();
         waveforms.sort_by(|a, b| a.0.cmp(&b.0));
@@ -37,11 +37,11 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
         for (name, waveform) in waveforms {
             let unit = waveform.y_unit;
             let real = waveform.y_values;
-            if !Self::samples_match_shared_axis(&real, sample_count) {
+            if !Self::samples_match_shared_axis(real.len(), sample_count) {
                 continue;
             }
             if let Some(imag) = waveform.y_imag {
-                if !Self::samples_match_shared_axis(&imag, sample_count) {
+                if !Self::samples_match_shared_axis(imag.len(), sample_count) {
                     continue;
                 }
                 let magnitude = real
@@ -57,7 +57,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 results.push(
                     rspice_results::waveform::RetainedWaveform::new(
                         format!("|{name}|"),
-                        Arc::clone(&shared_time),
+                        shared_time.clone(),
                         magnitude,
                     )
                     .with_unit(unit)
@@ -66,7 +66,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 results.push(
                     rspice_results::waveform::RetainedWaveform::new(
                         format!("phase({name})"),
-                        Arc::clone(&shared_time),
+                        shared_time.clone(),
                         phase,
                     )
                     .with_unit("°"),
@@ -75,7 +75,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 results.push(
                     rspice_results::waveform::RetainedWaveform::new(
                         name,
-                        Arc::clone(&shared_time),
+                        shared_time.clone(),
                         real,
                     )
                     .with_unit(unit),
@@ -100,26 +100,26 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 input_noise,
                 contributors,
             );
-        let shared_freqs = Arc::new(frequencies);
+        let shared_freqs = WaveformValues::from(frequencies);
         let freq_len = shared_freqs.len();
         let mut results = Vec::new();
 
         // The caller attaches the producer's explicit output unit. Historical
         // data may lack it because this vector also carries dBc/Hz phase noise.
-        if Self::samples_match_shared_axis(&output_noise, freq_len) {
+        if Self::samples_match_shared_axis(output_noise.len(), freq_len) {
             results.push(rspice_results::waveform::RetainedWaveform::new(
                 "onoise".to_string(),
-                Arc::clone(&shared_freqs),
+                shared_freqs.clone(),
                 output_noise,
             ));
         }
 
         if let Some(inoise) = input_noise
-            && Self::samples_match_shared_axis(&inoise, freq_len)
+            && Self::samples_match_shared_axis(inoise.len(), freq_len)
         {
             let mut waveform = rspice_results::waveform::RetainedWaveform::new(
                 "inoise".to_string(),
-                Arc::clone(&shared_freqs),
+                shared_freqs.clone(),
                 inoise,
             );
             if let Some(quantity) = input_quantity {
@@ -131,12 +131,12 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
         let mut contributors: Vec<_> = contributors.into_iter().collect();
         contributors.sort_by(|a, b| a.0.cmp(&b.0));
         for (source, values) in contributors {
-            if !Self::samples_match_shared_axis(&values, freq_len) {
+            if !Self::samples_match_shared_axis(values.len(), freq_len) {
                 continue;
             }
             results.push(rspice_results::waveform::RetainedWaveform::new(
                 format!("noise({})", source),
-                Arc::clone(&shared_freqs),
+                shared_freqs.clone(),
                 values,
             ));
         }
@@ -243,7 +243,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
         frequencies: Vec<f64>,
         waveforms: HashMap<String, crate::results::SampledWaveform>,
     ) -> Vec<rspice_results::waveform::RetainedWaveform> {
-        let shared_freqs = Arc::new(frequencies);
+        let shared_freqs = WaveformValues::from(frequencies);
         let freq_len = shared_freqs.len();
         let mut waveforms: Vec<_> = waveforms.into_iter().collect();
         waveforms.sort_by(|a, b| a.0.cmp(&b.0));
@@ -256,16 +256,16 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             let unit = waveform.y_unit;
             let waveform_x = waveform.x_values;
             let real = waveform.y_values;
-            let x = if Self::samples_match_shared_axis(&real, waveform_x.len()) {
-                Arc::new(waveform_x)
-            } else if Self::samples_match_shared_axis(&real, freq_len) {
-                Arc::clone(&shared_freqs)
+            let x = if Self::samples_match_shared_axis(real.len(), waveform_x.len()) {
+                waveform_x
+            } else if Self::samples_match_shared_axis(real.len(), freq_len) {
+                shared_freqs.clone()
             } else {
                 continue;
             };
             match waveform.y_imag {
                 Some(imag) => {
-                    if !Self::samples_match_shared_axis(&imag, x.len()) {
+                    if !Self::samples_match_shared_axis(imag.len(), x.len()) {
                         continue;
                     }
                     let magnitude_values: Vec<f64> = real
@@ -281,7 +281,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
 
                     let magnitude = rspice_results::waveform::RetainedWaveform::new(
                         format!("|{}|", name),
-                        Arc::clone(&x),
+                        x.clone(),
                         magnitude_values,
                     )
                     .with_unit(unit)
@@ -291,7 +291,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                     results.push(
                         rspice_results::waveform::RetainedWaveform::new(
                             format!("phase({})", name),
-                            Arc::clone(&x),
+                            x.clone(),
                             phase,
                         )
                         .with_unit("°"),
@@ -316,14 +316,14 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
 
     pub(super) fn build_sorted_waveforms_with_shared_x_owned<F>(
         &self,
-        x_values: Vec<f64>,
+        x_values: WaveformValues,
         waveforms: HashMap<String, crate::results::SampledWaveform>,
         value_mapper: F,
     ) -> Vec<rspice_results::waveform::RetainedWaveform>
     where
-        F: Fn(String, crate::results::SampledWaveform) -> (String, Vec<f64>),
+        F: Fn(String, crate::results::SampledWaveform) -> (String, WaveformValues),
     {
-        let shared_x = Arc::new(x_values);
+        let shared_x = x_values;
         let mut waveforms: Vec<_> = waveforms.into_iter().collect();
         waveforms.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -334,13 +334,13 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             // from the samples or the name.
             let unit = waveform.y_unit.clone();
             let (display_name, y_values) = value_mapper(name, waveform);
-            if !Self::samples_match_shared_axis(&y_values, shared_x.len()) {
+            if !Self::samples_match_shared_axis(y_values.len(), shared_x.len()) {
                 continue;
             }
             results.push(
                 rspice_results::waveform::RetainedWaveform::new(
                     display_name,
-                    Arc::clone(&shared_x),
+                    shared_x.clone(),
                     y_values,
                 )
                 .with_unit(unit),
@@ -350,7 +350,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
         results
     }
 
-    fn samples_match_shared_axis(samples: &[f64], axis_len: usize) -> bool {
-        axis_len > 0 && samples.len() == axis_len
+    fn samples_match_shared_axis(samples: usize, axis_len: usize) -> bool {
+        axis_len > 0 && samples == axis_len
     }
 }

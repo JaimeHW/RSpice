@@ -143,7 +143,7 @@ fn retained_bytes(analyses: &[AnalysisResult]) -> usize {
     let mut bytes = 0;
     for waveform in analyses.iter().flat_map(|analysis| &analysis.waveforms) {
         for values in [&waveform.x, &waveform.y] {
-            if seen.insert(std::sync::Arc::as_ptr(values) as *const u8 as usize) {
+            if seen.insert(values.as_ptr() as usize) {
                 bytes += values.len() * std::mem::size_of::<f64>();
             }
         }

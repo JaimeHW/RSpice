@@ -22,8 +22,8 @@ impl SimulationResult {
         {
             let waveform = SampledWaveform {
                 name: trace.name.clone(),
-                x_values: trace.frequencies,
-                y_values: trace.real,
+                x_values: trace.frequencies.into(),
+                y_values: trace.real.into(),
                 y_unit: trace.unit.into(),
                 is_complex: trace.imaginary.is_some(),
                 y_imag: trace.imaginary,

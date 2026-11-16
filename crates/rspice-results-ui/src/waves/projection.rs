@@ -69,7 +69,7 @@ fn selected_series_pair(
     selection: Option<&SourceSampleSelection>,
 ) -> Option<(SharedWaveformValues, SharedWaveformValues)> {
     let Some(selection) = selection else {
-        return Some((Arc::clone(x), Arc::clone(y)));
+        return Some((x.clone(), y.clone()));
     };
     selected_series_pair_indices(x, y, &selection.source_indices)
 }
@@ -82,9 +82,18 @@ fn selected_series_pair_indices(
     if x.len() != y.len() || source_indices.last().is_some_and(|index| *index >= x.len()) {
         return None;
     }
-    let selected_x = source_indices.iter().map(|index| x[*index]).collect();
-    let selected_y = source_indices.iter().map(|index| y[*index]).collect();
-    Some((Arc::new(selected_x), Arc::new(selected_y)))
+    let selected_x = source_indices
+        .iter()
+        .map(|index| x[*index])
+        .collect::<Vec<f64>>();
+    let selected_y = source_indices
+        .iter()
+        .map(|index| y[*index])
+        .collect::<Vec<f64>>();
+    Some((
+        SharedWaveformValues::from(selected_x),
+        SharedWaveformValues::from(selected_y),
+    ))
 }
 
 struct FamilyProjection<'a> {
@@ -101,8 +110,8 @@ fn projected_family_series<'a>(
     let Some(selection) = selection else {
         return vec![FamilyProjection {
             group: None,
-            x: Arc::clone(x),
-            y: Arc::clone(y),
+            x: x.clone(),
+            y: y.clone(),
         }];
     };
     let groups = selection
@@ -116,7 +125,7 @@ fn projected_family_series<'a>(
                 selected_series_pair_indices(x, y, &group.source_indices).and_then(|(_, y)| {
                     (group.x_values.len() == y.len()).then(|| FamilyProjection {
                         group: Some(group),
-                        x: Arc::new(group.x_values.clone()),
+                        x: SharedWaveformValues::from(group.x_values.clone()),
                         y,
                     })
                 })
@@ -767,15 +776,15 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         let Some(complex) = &overlay_waveform.complex else {
                             continue;
                         };
-                        Arc::clone(&complex.real)
+                        complex.real.clone()
                     }
                     TraceKind::Imaginary => {
                         let Some(complex) = &overlay_waveform.complex else {
                             continue;
                         };
-                        Arc::clone(&complex.imag)
+                        complex.imag.clone()
                     }
-                    _ => Arc::clone(&overlay_waveform.y),
+                    _ => overlay_waveform.y.clone(),
                 };
                 let projected = if let Some(plan) = overlay_family_plan.as_ref() {
                     let Some(group) = family_group_ordinal
@@ -797,7 +806,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         incompatible_source = true;
                         break;
                     }
-                    (Arc::new(group.x_values.clone()), y)
+                    (SharedWaveformValues::from(group.x_values.clone()), y)
                 } else if let Some(selection) = sample_selection {
                     let Some(series) =
                         selected_series_pair(&overlay_waveform.x, &source_y, Some(selection))
@@ -807,7 +816,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     };
                     series
                 } else {
-                    (Arc::clone(&overlay_waveform.x), source_y)
+                    (overlay_waveform.x.clone(), source_y)
                 };
                 let shape = derived.shape_or(
                     shape_key(
@@ -959,7 +968,7 @@ fn lane_trace(
         kind,
         unit: waveform.unit.clone(),
         color,
-        x: Arc::clone(&waveform.x),
+        x: waveform.x.clone(),
         visible: waveform.visible,
     })
 }
@@ -1007,7 +1016,7 @@ fn history_lane_traces(
             kind,
             unit: None,
             color,
-            x: Arc::clone(grid),
+            x: grid.clone(),
             visible: false,
         });
     }
@@ -1022,7 +1031,7 @@ fn displayed_phase_series(
     if continuous {
         derived.unwrapped(key, phase_degrees)
     } else {
-        Arc::clone(phase_degrees)
+        phase_degrees.clone()
     }
 }
 

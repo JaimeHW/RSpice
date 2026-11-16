@@ -12,8 +12,8 @@ impl SimulationResult {
                 trace.name.clone(),
                 SampledWaveform {
                     name: trace.name,
-                    x_values: Arc::unwrap_or_clone(trace.x),
-                    y_values: Arc::unwrap_or_clone(trace.y),
+                    x_values: trace.x,
+                    y_values: trace.y,
                     y_unit: trace.unit.unwrap_or_default(),
                     is_complex: false,
                     y_imag: None,
@@ -29,8 +29,12 @@ impl SimulationResult {
                         .nyquist_points
                         .iter()
                         .map(|p| p.frequency)
-                        .collect(),
-                    response.nyquist_points.iter().map(|p| p.real).collect(),
+                        .collect::<Vec<_>>(),
+                    response
+                        .nyquist_points
+                        .iter()
+                        .map(|p| p.real)
+                        .collect::<Vec<_>>(),
                     response.nyquist_points.iter().map(|p| p.imag).collect(),
                     "1",
                 ),
@@ -57,11 +61,11 @@ impl SimulationResult {
         })
     }
 }
-use std::sync::Arc;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     #[test]
     fn stb_studies_keep_defined_raw_zero_but_no_phase_at_zero() {
         let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())

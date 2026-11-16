@@ -1,7 +1,5 @@
 //! Retained evidence rechecked through a result document a whole application holds.
 
-use std::sync::Arc;
-
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::analysis;
@@ -54,7 +52,9 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
         matches!(bound.owner, view_context::ResultViewOwner::VisualizationPane { document_id, .. } if document_id == document)
     );
     let version = app.state.model.simulation.view.data_version;
-    Arc::make_mut(&mut app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
+    app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
         .fill(2.0);
     let error = view_context::resolve_displayed_result_view(app.state.results_reads())
         .expect_err("the immutable pane must reject changed content even before the next frame");

@@ -1482,8 +1482,8 @@ fn insert_scalar_waveform_checked(
     super::ensure_not_aborted(abort)?;
     let waveform = SampledWaveform {
         name: name.clone(),
-        x_values: clone_values_with_abort(frequencies, abort)?,
-        y_values: values,
+        x_values: clone_values_with_abort(frequencies, abort)?.into(),
+        y_values: values.into(),
         y_unit: unit.to_owned(),
         is_complex: false,
         y_imag: None,

@@ -852,7 +852,7 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
                             .collect(),
                     );
                 } else {
-                    observation.real.insert(key, waveform.y_values.clone());
+                    observation.real.insert(key, waveform.y_values.to_vec());
                 }
             }
         };

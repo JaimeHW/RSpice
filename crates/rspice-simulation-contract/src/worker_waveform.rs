@@ -18,8 +18,8 @@ impl From<SampledWaveform> for WorkerWaveform {
     fn from(value: SampledWaveform) -> Self {
         Self {
             name: value.name,
-            x_values: value.x_values,
-            y_values: value.y_values,
+            x_values: value.x_values.into_vec(),
+            y_values: value.y_values.into_vec(),
             y_unit: value.y_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,
@@ -31,8 +31,8 @@ impl From<WorkerWaveform> for SampledWaveform {
     fn from(value: WorkerWaveform) -> Self {
         Self {
             name: value.name,
-            x_values: value.x_values,
-            y_values: value.y_values,
+            x_values: value.x_values.into(),
+            y_values: value.y_values.into(),
             y_unit: value.y_unit,
             is_complex: value.is_complex,
             y_imag: value.y_imag,

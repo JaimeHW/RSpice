@@ -9,7 +9,6 @@ use egui::Ui;
 use rspice_results::phase_noise::retained_measurement;
 use rspice_results::phase_noise::retained_phase_noise_carrier;
 use rspice_results_ui::phase_noise as view;
-use std::sync::Arc;
 
 /// Exactly one phase-noise waveform selected from the active immutable run.
 struct PhaseNoiseModel {
@@ -95,8 +94,8 @@ fn model_from_analysis(
             analysis.analysis_type,
             analysis.family_metadata.as_ref(),
         )?,
-        offset_hz: Arc::clone(&waveform.x),
-        level_dbc_per_hz: Arc::clone(&waveform.y),
+        offset_hz: waveform.x.clone(),
+        level_dbc_per_hz: waveform.y.clone(),
     })
 }
 

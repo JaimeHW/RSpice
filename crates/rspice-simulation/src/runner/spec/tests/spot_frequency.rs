@@ -115,6 +115,6 @@ fn single_frequency_noise_stb_and_disto_execute_and_publish_one_point() {
             .unwrap()
             .1;
         assert!((f1.y_values[0] - 0.5).abs() < 1e-12);
-        assert_eq!(thd.y_values, [0.0]);
+        assert_eq!(thd.y_values, vec![0.0]);
     }
 }

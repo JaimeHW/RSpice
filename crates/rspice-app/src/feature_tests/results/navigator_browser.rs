@@ -563,7 +563,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
 fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
     let mut app = result_navigator_app();
     let run = &mut app.state.model.simulation.retained.runs[0];
-    run.analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0]);
+    run.analyses[0].waveforms[0].y = vec![0.0].into();
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",

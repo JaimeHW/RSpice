@@ -76,9 +76,9 @@ impl OwnedTrace {
         SmithPlotTrace {
             index,
             name: &self.name,
-            frequencies: Arc::clone(&self.frequencies),
-            real: Arc::clone(&self.real),
-            imaginary: Arc::clone(&self.imaginary),
+            frequencies: self.frequencies.clone(),
+            real: self.real.clone(),
+            imaginary: self.imaginary.clone(),
             reference_impedance_ohm: self.reference,
             visible: true,
             removable: false,
@@ -90,9 +90,9 @@ impl OwnedTrace {
 fn owned_trace(name: &str, points: &[(f64, f64, f64)], reference: Option<f64>) -> OwnedTrace {
     OwnedTrace {
         name: name.to_owned(),
-        frequencies: Arc::new(points.iter().map(|point| point.0).collect()),
-        real: Arc::new(points.iter().map(|point| point.1).collect()),
-        imaginary: Arc::new(points.iter().map(|point| point.2).collect()),
+        frequencies: points.iter().map(|point| point.0).collect(),
+        real: points.iter().map(|point| point.1).collect(),
+        imaginary: points.iter().map(|point| point.2).collect(),
         reference,
     }
 }

@@ -126,10 +126,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
                 .label
                 .push_str(" changed")
         },
-        |state| {
-            std::sync::Arc::make_mut(&mut state.retained.runs[0].analyses[0].waveforms[0].y)[1] =
-                9.0
-        },
+        |state| state.retained.runs[0].analyses[0].waveforms[0].y.make_mut()[1] = 9.0,
         |state| state.retained.executed_decks.retain(deck("changed deck")),
         |state| state.retained.executed_decks.retain_runs(|_| false),
         |state| {
@@ -230,14 +227,14 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
         "returning to accepted content must be clean"
     );
 
-    std::sync::Arc::make_mut(
-        &mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x,
-    )[1] = f64::NAN;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .x
+        .make_mut()[1] = f64::NAN;
     assert!(snapshot(&state).is_err());
     assert!(has_unsaved_changes(&state));
-    std::sync::Arc::make_mut(
-        &mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x,
-    )[1] = 1.0;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .x
+        .make_mut()[1] = 1.0;
     assert!(!has_unsaved_changes(&state));
 }
 

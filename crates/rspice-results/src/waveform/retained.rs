@@ -1,8 +1,9 @@
 //! Exact shared waveform samples, independent of application presentation.
 
-use std::sync::Arc;
+pub use super::values::WaveformValues;
 
-pub type SharedWaveformValues = Arc<Vec<f64>>;
+/// A waveform's samples, shared by every clone: in memory, or a window of a stored column.
+pub type SharedWaveformValues = WaveformValues;
 
 /// Original complex samples associated with a display trace.
 #[derive(Debug, Clone)]

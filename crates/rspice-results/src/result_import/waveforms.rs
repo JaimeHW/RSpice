@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(imported.waveforms[0].name, "|V(out)|");
         assert_eq!(imported.waveforms[0].unit.as_deref(), Some("V"));
         assert_eq!(imported.waveforms[1].y.as_ptr(), scalar_ptr);
-        assert!(Arc::ptr_eq(
+        assert!(crate::waveform::WaveformValues::ptr_eq(
             &imported.waveforms[0].x,
             &imported.waveforms[1].x
         ));

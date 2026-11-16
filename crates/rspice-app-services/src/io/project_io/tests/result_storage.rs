@@ -62,7 +62,7 @@ fn immutable_result_validation_is_shared_and_mutation_invalidates_both_verdicts(
 
         // A nested edit cannot inherit an earlier success. Repeating the
         // same invalid query is cached too, until the data is repaired.
-        std::sync::Arc::make_mut(&mut candidate.runs[0].analyses[0].waveforms[0].y)[1] = 9.0;
+        candidate.runs[0].analyses[0].waveforms[0].y.make_mut()[1] = 9.0;
         let before = validation_passes();
         let failure = candidate.validate().unwrap_err();
         assert_eq!(candidate.validate().unwrap_err(), failure);
@@ -70,7 +70,7 @@ fn immutable_result_validation_is_shared_and_mutation_invalidates_both_verdicts(
         assert_eq!(validation_passes() - before, 1);
         assert_eq!(serde_json::to_vec(&accepted).unwrap(), frozen);
 
-        std::sync::Arc::make_mut(&mut candidate.runs[0].analyses[0].waveforms[0].y)[1] = 1.0;
+        candidate.runs[0].analyses[0].waveforms[0].y.make_mut()[1] = 1.0;
         let before = validation_passes();
         candidate.validate().unwrap();
         candidate.validate().unwrap();

@@ -383,8 +383,7 @@ mod tests {
         // Replace the stress history with one that never crosses the warning
         // band, so the interval the plan reports has to change.
         let flattened: Vec<f64> = vec![0.1; 32];
-        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
-            std::sync::Arc::new(flattened);
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y = flattened.into();
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 

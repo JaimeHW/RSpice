@@ -113,7 +113,7 @@ mod tests {
             .iter_mut()
             .find(|waveform| waveform.complex.is_some())
             .unwrap();
-        Arc::make_mut(&mut trace.complex.as_mut().unwrap().real)[1] += 0.1;
+        trace.complex.as_mut().unwrap().real.make_mut()[1] += 0.1;
         assert!(altered.validate_retained_evidence().is_err());
         let Some(rspice_results::analysis_payload::AnalysisResultPayload::Qpss { operating_point }) =
             retained.result_payload

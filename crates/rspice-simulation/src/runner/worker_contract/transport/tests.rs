@@ -247,7 +247,7 @@ fn worker_pss_reporting_grid_validates_display_and_worker_ingress() {
     let SimulationResult::Transient { waveforms, .. } = &mut altered else {
         unreachable!()
     };
-    waveforms.values_mut().next().unwrap().y_values[0] += 1.0;
+    waveforms.values_mut().next().unwrap().y_values.make_mut()[0] += 1.0;
     assert!(WorkerSimulationResult::try_from(altered).is_err());
     let response = WorkerResponse::from_result_for_transfer(279, Ok(display));
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();

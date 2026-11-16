@@ -10,7 +10,7 @@ pub struct ProjectWaveformData {
     pub x: rspice_results::waveform::SharedWaveformValues,
     /// Schema v43 uses explicit nulls for unavailable samples.
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize",
+        serialize_with = "crate::numeric::sample_serde::serialize_shared",
         deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
     )]
     pub y: rspice_results::waveform::SharedWaveformValues,
@@ -106,12 +106,12 @@ impl ProjectWaveformData {
 pub struct ProjectComplexWaveformComponents {
     pub source_name: String,
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize",
+        serialize_with = "crate::numeric::sample_serde::serialize_shared",
         deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
     )]
     pub real: rspice_results::waveform::SharedWaveformValues,
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize",
+        serialize_with = "crate::numeric::sample_serde::serialize_shared",
         deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
     )]
     pub imag: rspice_results::waveform::SharedWaveformValues,

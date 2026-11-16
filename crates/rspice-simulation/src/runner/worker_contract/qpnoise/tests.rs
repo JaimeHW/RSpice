@@ -62,7 +62,7 @@ fn qpnoise_worker_retained_evidence_and_typed_plots_roundtrip() {
     };
     assert_eq!(response, &expected);
     let mut changed = retained.clone();
-    Arc::make_mut(&mut changed.waveforms[0].x)[0] += 1.0;
+    changed.waveforms[0].x.make_mut()[0] += 1.0;
     assert!(changed.validate_retained_evidence().is_err());
     let mut changed = retained.clone();
     changed.waveforms[0].unit = Some("wrong".into());

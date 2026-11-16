@@ -80,20 +80,20 @@ fn waveform_storage_detaches_edits_without_changing_accepted_samples_or_wire_for
         })
     );
     let live = &mut state.retained.runs[0].analyses[0].waveforms[0];
-    std::sync::Arc::make_mut(&mut live.x)[1] = 2.5;
-    std::sync::Arc::make_mut(&mut live.y)[1] = 4.5;
+    live.x.make_mut()[1] = 2.5;
+    live.y.make_mut()[1] = 4.5;
     let complex = live.complex.as_mut().unwrap();
-    std::sync::Arc::make_mut(&mut complex.real)[1] = 6.5;
-    std::sync::Arc::make_mut(&mut complex.imag)[1] = 8.5;
+    complex.real.make_mut()[1] = 6.5;
+    complex.imag.make_mut()[1] = 8.5;
     assert_eq!(serde_json::to_vec(&accepted).unwrap(), frozen);
     assert_eq!(serde_json::to_vec(&candidate).unwrap(), frozen);
 
     let draft = &mut candidate.runs[0].analyses[0].waveforms[0];
-    std::sync::Arc::make_mut(&mut draft.x)[1] = 3.0;
-    std::sync::Arc::make_mut(&mut draft.y)[1] = 5.0;
+    draft.x.make_mut()[1] = 3.0;
+    draft.y.make_mut()[1] = 5.0;
     let complex = draft.complex.as_mut().unwrap();
-    std::sync::Arc::make_mut(&mut complex.real)[1] = 7.0;
-    std::sync::Arc::make_mut(&mut complex.imag)[1] = 9.0;
+    complex.real.make_mut()[1] = 7.0;
+    complex.imag.make_mut()[1] = 9.0;
     assert_eq!(serde_json::to_vec(&accepted).unwrap(), frozen);
     assert_eq!(live.x[1], 2.5);
     assert_eq!(live.y[1], 4.5);

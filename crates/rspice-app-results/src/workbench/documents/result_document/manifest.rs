@@ -124,7 +124,7 @@ mod tests {
         let original = active_manifest(&mut state.results_parts()).unwrap();
         let version = state.model.simulation.view.data_version;
         let mut replacement = state.model.simulation.clone();
-        replacement.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
+        replacement.retained.runs[0].analyses[0].waveforms[0].y = vec![0.0, 9.0].into();
         state.model.simulation = crate::io::simulation_state_from_results(
             crate::io::capture_simulation_results(&replacement),
         )
@@ -180,7 +180,7 @@ mod tests {
         }
         assert_eq!(work.since().total(), 0);
         other.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
-            Arc::new(vec![3.0; 100_000]);
+            vec![3.0; 100_000].into();
         assert_ne!(
             active_manifest(&mut other.results_parts())
                 .unwrap()
@@ -230,8 +230,7 @@ mod tests {
             active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         let before_digest = before.model.dataset_digest.clone();
 
-        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
-            std::sync::Arc::new(vec![0.0, 9.0]);
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y = vec![0.0, 9.0].into();
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
 

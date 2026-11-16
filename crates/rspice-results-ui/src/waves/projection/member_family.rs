@@ -18,7 +18,6 @@
 //! [`AnalysisResult::family_member`] answers for either origin.
 //!
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
@@ -177,7 +176,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 TraceKind::PhaseDeg => {
                     displayed_phase_series(derived, derived_key, samples, context.phase_continuous)
                 }
-                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => Arc::clone(samples),
+                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => samples.clone(),
             };
             let visibility_key = FamilyTraceVisibilityKey::new(
                 context.analysis_key,
@@ -185,7 +184,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 &trace.source_waveform_name,
                 trace.kind,
             );
-            let x = Arc::clone(&waveform.x);
+            let x = waveform.x.clone();
             let shape = derived.shape_or(
                 shape_key(
                     context.analysis_key,

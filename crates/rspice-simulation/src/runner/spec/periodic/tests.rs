@@ -166,7 +166,10 @@ fn an_authored_fourier_run_reports_every_output() {
         .iter()
         .map(|time| (std::f64::consts::TAU * time).sin())
         .collect::<Vec<_>>();
-    let halved = fundamental.iter().map(|value| value / 2.0).collect();
+    let halved = fundamental
+        .iter()
+        .map(|value| value / 2.0)
+        .collect::<Vec<_>>();
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
         hdl_output: Vec::new(),
@@ -289,7 +292,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
     let values = time
         .iter()
         .map(|time| (std::f64::consts::TAU * time).sin())
-        .collect();
+        .collect::<Vec<f64>>();
     let mut metrics = rspice_core::diagnostics::ConvergenceQuality::default();
     metrics.record_force_accept(10);
     let quality = std::sync::Arc::new(
@@ -473,7 +476,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
             let values = time
                 .iter()
                 .map(|t| (index + 1) as f64 * (std::f64::consts::TAU * t).sin())
-                .collect();
+                .collect::<Vec<f64>>();
             (
                 name.clone(),
                 SampledWaveform::new_time_domain(name, time.clone(), values),

@@ -763,7 +763,7 @@ fn transient_out(result: &SimulationResult) -> (Vec<f64>, Vec<f64>) {
     let out = waveforms
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("v(out)") || name.eq_ignore_ascii_case("out"))
-        .map(|(_, waveform)| waveform.y_values.clone())
+        .map(|(_, waveform)| waveform.y_values.to_vec())
         .unwrap_or_else(|| panic!("v(out) among {:?}", waveforms.keys().collect::<Vec<_>>()));
     (time.clone(), out)
 }

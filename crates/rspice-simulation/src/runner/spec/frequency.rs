@@ -1187,8 +1187,8 @@ fn pac_traces_to_complex_waveforms(
         }
         let waveform = SampledWaveform {
             name: name.clone(),
-            x_values: frequencies,
-            y_values: real,
+            x_values: frequencies.into(),
+            y_values: real.into(),
             y_unit: unit.to_owned(),
             is_complex: true,
             y_imag: Some(imaginary),
@@ -1364,7 +1364,7 @@ mod pxf_group_delay_tests {
                 .iter_mut()
                 .find(|wave| wave.name == "group_delay")
                 .unwrap();
-            std::sync::Arc::make_mut(&mut delay.y)[index] = if index == 0 { f64::NAN } else { 0.0 };
+            delay.y.make_mut()[index] = if index == 0 { f64::NAN } else { 0.0 };
             assert!(altered.validate_retained_evidence().is_err());
         }
         let mut wrong_domain = retained.clone();

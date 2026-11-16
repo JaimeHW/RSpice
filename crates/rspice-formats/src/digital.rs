@@ -12,7 +12,6 @@ use rspice_results::result_import::waveforms::{
 use rspice_results::waveform::RetainedWaveform;
 use std::collections::{BTreeSet, HashSet};
 use std::io::Cursor;
-use std::sync::Arc;
 
 /// Resource policy supplied by the importing host, including decoded sample limits.
 #[derive(Debug, Clone, Copy)]
@@ -669,8 +668,8 @@ fn append_digital_aliases(
         })?;
         alias_waveforms.push(RetainedWaveform::new(
             name,
-            Arc::clone(&canonical.x),
-            Arc::clone(&canonical.y),
+            canonical.x.clone(),
+            canonical.y.clone(),
         ));
     }
     parsed.waveforms.extend(alias_waveforms);
@@ -809,7 +808,7 @@ mod tests {
             vec!["top.clk", "top.clock"]
         );
         assert_eq!(parsed.data.waveforms[0].y, parsed.data.waveforms[1].y);
-        assert!(Arc::ptr_eq(
+        assert!(rspice_results::waveform::WaveformValues::ptr_eq(
             &parsed.data.waveforms[0].y,
             &parsed.data.waveforms[1].y
         ));

@@ -83,8 +83,8 @@ fn ground_waveform<W: OutputWaveform>(
         .filter(|wave| !wave.as_ref().x.is_empty())
         .ok_or_else(|| "ground probe has no retained analysis axis".to_owned())?;
     let zeros = Arc::new(vec![0.0; axis.as_ref().x.len()]);
-    let mut result = RetainedWaveform::new(name, Arc::clone(&axis.as_ref().x), Arc::clone(&zeros))
-        .with_unit("V");
+    let mut result =
+        RetainedWaveform::new(name, axis.as_ref().x.clone(), zeros.clone()).with_unit("V");
     if complex_domain || axis.as_ref().complex.is_some() {
         result = result.with_complex_components(name, Arc::clone(&zeros), zeros);
     }
@@ -118,7 +118,7 @@ fn negate_waveform<W: OutputWaveform>(
         ))
     } else {
         let mut result = clone_with_name(source, name);
-        result.as_mut().y = Arc::new(source.as_ref().y.iter().map(|value| -value).collect());
+        result.as_mut().y = source.as_ref().y.iter().map(|value| -value).collect();
         Ok(result)
     }
 }
@@ -129,7 +129,7 @@ fn complex_result<W: OutputWaveform>(source: &W, name: &str, real: Vec<f64>, ima
         .zip(&imag)
         .map(|(real, imag)| real.hypot(*imag))
         .collect::<Vec<_>>();
-    let mut result = RetainedWaveform::new(name, Arc::clone(&source.as_ref().x), magnitude)
+    let mut result = RetainedWaveform::new(name, source.as_ref().x.clone(), magnitude)
         .with_complex_components(name, real, imag);
     result.unit = source.as_ref().unit.clone();
     W::from_retained(result)
@@ -175,7 +175,7 @@ fn subtract_waveforms<W: OutputWaveform>(
             .zip(negative.as_ref().y.iter())
             .map(|(p, n)| p - n)
             .collect::<Vec<_>>();
-        let mut result = RetainedWaveform::new(name, Arc::clone(&positive.as_ref().x), y);
+        let mut result = RetainedWaveform::new(name, positive.as_ref().x.clone(), y);
         result.unit = positive.as_ref().unit.clone();
         Ok(W::from_retained(result))
     }

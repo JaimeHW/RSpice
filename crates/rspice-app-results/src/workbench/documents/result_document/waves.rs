@@ -293,7 +293,7 @@ type CursorMarkerTarget = (
     WaveformPresentationKey,
     String,
     f64,
-    std::sync::Arc<Vec<f64>>,
+    rspice_results::waveform::SharedWaveformValues,
 );
 
 fn cursor_marker_target(

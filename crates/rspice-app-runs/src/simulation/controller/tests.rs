@@ -663,8 +663,8 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
         "V(out)".to_string(),
         rspice_simulation::results::SampledWaveform {
             name: "V(out)".to_string(),
-            x_values: Vec::new(),
-            y_values: values,
+            x_values: Vec::new().into(),
+            y_values: values.into(),
             y_unit: "V".to_string(),
             is_complex: false,
             y_imag: None,
@@ -742,8 +742,8 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
         "V(out)".to_string(),
         rspice_simulation::results::SampledWaveform {
             name: "V(out)".to_string(),
-            x_values: Vec::new(),
-            y_values: values,
+            x_values: Vec::new().into(),
+            y_values: values.into(),
             y_unit: "V".to_string(),
             is_complex: false,
             y_imag: None,

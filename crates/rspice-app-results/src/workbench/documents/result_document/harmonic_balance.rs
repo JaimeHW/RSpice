@@ -87,8 +87,8 @@ fn build_model(state: ResultsReads<'_>, tokens: &Tokens) -> Option<HarmonicBalan
                 || waveform.name.clone(),
                 |complex| complex.source_name.clone(),
             ),
-            frequency: Arc::clone(&waveform.x),
-            magnitude: Arc::clone(&waveform.y),
+            frequency: waveform.x.clone(),
+            magnitude: waveform.y.clone(),
             color: palette[traces.len() % palette.len()],
             cache_key: harmonic_trace_cache_key(analysis.id, waveform_index),
         });

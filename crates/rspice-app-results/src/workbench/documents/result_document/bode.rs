@@ -4,8 +4,6 @@
 //! the waves pane-stack; margins and curves read the same data by
 //! construction.
 
-use std::sync::Arc;
-
 use egui::Ui;
 
 use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
@@ -191,7 +189,7 @@ fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
     let run = state.model.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
     let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
-    let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
+    let frequency = analysis.waveforms.get(shape.anchor)?.x.clone();
     let (total_rms, input_rms, band) = analysis
         .noise_summary
         .as_ref()

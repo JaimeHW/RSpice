@@ -14,8 +14,6 @@
 //! mode the drawing plane is a radial warp of the complex plane, so Cartesian
 //! tick numbers beside it would name coordinates that are not the data's.
 
-use std::sync::Arc;
-
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
 use rspice_results::renderability::{
@@ -660,9 +658,9 @@ fn locus_of(analysis: &AnalysisResult, quantity: &PolarQuantity) -> Option<Polar
         label: quantity.label.clone(),
         unit: quantity.unit.clone(),
         reference_impedance_ohm: quantity.reference_impedance_ohm,
-        x: Arc::clone(&waveform.x),
-        real: Arc::clone(&complex.real),
-        imag: Arc::clone(&complex.imag),
+        x: waveform.x.clone(),
+        real: complex.real.clone(),
+        imag: complex.imag.clone(),
     })
 }
 
@@ -1526,9 +1524,9 @@ mod tests {
             label: "S21 \u{b7} Port 2 \u{2190} Port 1".to_owned(),
             unit: String::new(),
             reference_impedance_ohm: None,
-            x: Arc::new(x),
-            real: Arc::new(real),
-            imag: Arc::new(imag),
+            x: x.into(),
+            real: real.into(),
+            imag: imag.into(),
         }
     }
 
@@ -1635,9 +1633,9 @@ mod tests {
             label: name.to_owned(),
             unit: String::new(),
             reference_impedance_ohm: None,
-            x: Arc::new(x),
-            real: Arc::new(real),
-            imag: Arc::new(imag),
+            x: x.into(),
+            real: real.into(),
+            imag: imag.into(),
         }
     }
 

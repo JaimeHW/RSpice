@@ -495,7 +495,7 @@ mod availability_tests {
         // A waveform with more coordinates than values is exactly what
         // `validate_retained_evidence` exists to refuse.
         let mut corrupt = RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
-        corrupt.y = std::sync::Arc::new(vec![0.0]);
+        corrupt.y = vec![0.0].into();
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![corrupt])
             .with_result_payload(payload);

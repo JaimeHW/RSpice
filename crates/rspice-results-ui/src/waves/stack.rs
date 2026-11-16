@@ -1108,7 +1108,7 @@ fn pane_expressions(
             visible: true,
             at_cursor,
             curves: members.len(),
-            values: Arc::clone(&first.y),
+            values: first.y.clone(),
         })
     });
     let hidden = pane.hidden_expressions.iter().filter_map(|&slot| {
@@ -1122,7 +1122,7 @@ fn pane_expressions(
             visible: false,
             at_cursor: None,
             curves: 0,
-            values: Arc::default(),
+            values: Default::default(),
         })
     });
     drawn.chain(hidden).collect()

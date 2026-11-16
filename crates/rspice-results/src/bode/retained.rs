@@ -3,7 +3,6 @@
 use super::{AcBodeMetrics, metrics_from_curves};
 use crate::analysis_type::AnalysisType;
 use crate::waveform::{RetainedWaveform, SharedWaveformValues};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AcBodeSummary {
@@ -123,14 +122,14 @@ pub fn ac_bode_summary_for_analysis<W: AsRef<RetainedWaveform>>(
     let mag = waveforms.get(mag_index)?.as_ref();
     // STB retains decibels; every other response retains linear magnitude.
     let gain_db = if analysis_type == AnalysisType::Stb {
-        Arc::clone(&mag.y)
+        mag.y.clone()
     } else {
         magnitude_to_db(&mag.y)
     };
-    let frequency = Arc::clone(&mag.x);
+    let frequency = mag.x.clone();
     let phase_deg = phase_index
         .and_then(|index| waveforms.get(index))
-        .map(|waveform| Arc::clone(&waveform.as_ref().y));
+        .map(|waveform| waveform.as_ref().y.clone());
     let metrics = metrics_from_curves(
         frequency.as_slice(),
         gain_db.as_slice(),
@@ -162,12 +161,7 @@ fn select_magnitude_trace<W: AsRef<RetainedWaveform>>(
 }
 
 fn magnitude_to_db(magnitude: &[f64]) -> SharedWaveformValues {
-    Arc::new(
-        magnitude
-            .iter()
-            .map(|&m| 20.0 * m.log10())
-            .collect::<Vec<_>>(),
-    )
+    magnitude.iter().map(|&m| 20.0 * m.log10()).collect()
 }
 
 #[cfg(test)]

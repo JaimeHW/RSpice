@@ -401,7 +401,7 @@ fn baseline_digest_changes_when_retained_evidence_changes() {
     let plan_id = SimulationPlanId::new();
     let mut baseline = prepared_run(plan_id, ObjectRevision::INITIAL, ObjectRevision::INITIAL);
     let original = simulation_run_digest(&baseline).expect("baseline digest");
-    baseline.analyses[0].waveforms[0].y = Arc::new(vec![1.0, 2.001]);
+    baseline.analyses[0].waveforms[0].y = vec![1.0, 2.001].into();
     let changed = simulation_run_digest(&baseline).expect("changed digest");
     assert_ne!(original, changed);
 }

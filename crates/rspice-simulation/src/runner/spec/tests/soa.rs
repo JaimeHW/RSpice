@@ -930,7 +930,7 @@ fn soa_derating_survives_draft_worker_thermal_transient_and_retained_results() {
         .iter_mut()
         .find(|w| w.name == "SOA_PDISS_LIMIT(Q1)")
         .unwrap();
-    std::sync::Arc::make_mut(&mut wave.y)[0] += 0.001;
+    wave.y.make_mut()[0] += 0.001;
     assert!(tampered.validate_retained_evidence().is_err());
     let mut missing = retained.clone();
     missing

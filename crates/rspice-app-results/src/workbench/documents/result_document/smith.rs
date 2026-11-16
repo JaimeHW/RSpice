@@ -326,7 +326,7 @@ fn prepare<'a>(
     pin: Option<(usize, usize)>,
 ) -> Prepared<'a> {
     let mut traces = Vec::new();
-    let empty = || Arc::new(Vec::new());
+    let empty = rspice_results::waveform::WaveformValues::default;
     // Network coefficients: every retained term, in the inventory's order.
     //
     // The cache and the traces live in disjoint halves of the session, so the
@@ -343,13 +343,17 @@ fn prepare<'a>(
         let points = &trace.points;
         let key = owner ^ ((index as u64) << 8);
         let frequencies = derived.get_or(key ^ 0x501_0002, || {
-            Arc::new(points.iter().map(|p| p.frequency).collect::<Vec<_>>())
+            points
+                .iter()
+                .map(|p| p.frequency)
+                .collect::<Vec<_>>()
+                .into()
         });
         let real = derived.get_or(key ^ 0x501_0000, || {
-            Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
+            points.iter().map(|p| p.s.re).collect::<Vec<_>>().into()
         });
         let imaginary = derived.get_or(key ^ 0x501_0001, || {
-            Arc::new(points.iter().map(|p| p.s.im).collect::<Vec<_>>())
+            points.iter().map(|p| p.s.im).collect::<Vec<_>>().into()
         });
         traces.push(SmithPlotTrace {
             index,
@@ -377,13 +381,17 @@ fn prepare<'a>(
             let points = &trace.points;
             (
                 derived.get_or(key ^ 0x502_0002, || {
-                    Arc::new(points.iter().map(|p| p.frequency).collect::<Vec<_>>())
+                    points
+                        .iter()
+                        .map(|p| p.frequency)
+                        .collect::<Vec<_>>()
+                        .into()
                 }),
                 derived.get_or(key ^ 0x502_0000, || {
-                    Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
+                    points.iter().map(|p| p.s.re).collect::<Vec<_>>().into()
                 }),
                 derived.get_or(key ^ 0x502_0001, || {
-                    Arc::new(points.iter().map(|p| p.s.im).collect::<Vec<_>>())
+                    points.iter().map(|p| p.s.im).collect::<Vec<_>>().into()
                 }),
             )
         } else {
@@ -392,7 +400,7 @@ fn prepare<'a>(
                 match analysis.map(|analysis| evaluate_expression(analysis, text)) {
                     Some(Ok((frequencies, real, imag))) => {
                         stash = Some((real, imag));
-                        Arc::new(frequencies)
+                        frequencies.into()
                     }
                     _ => empty(),
                 }
@@ -414,8 +422,8 @@ fn prepare<'a>(
                     })
                     .unwrap_or_default()
             };
-            let real = derived.get_or(key ^ 0x503_0000, || Arc::new(evaluated(0)));
-            let imag = derived.get_or(key ^ 0x503_0001, || Arc::new(evaluated(1)));
+            let real = derived.get_or(key ^ 0x503_0000, || evaluated(0).into());
+            let imag = derived.get_or(key ^ 0x503_0001, || evaluated(1).into());
             (frequencies, real, imag)
         };
         if frequencies.is_empty()
@@ -437,8 +445,8 @@ fn prepare<'a>(
             )
         };
         let mapped = key ^ reading_key;
-        let real = derived.get_or(mapped ^ 0x504_0000, || gamma(0));
-        let imaginary = derived.get_or(mapped ^ 0x504_0001, || gamma(1));
+        let real = derived.get_or(mapped ^ 0x504_0000, || gamma(0).into());
+        let imaginary = derived.get_or(mapped ^ 0x504_0001, || gamma(1).into());
         let index = smith.traces.len() + position;
         traces.push(SmithPlotTrace {
             index,
@@ -869,7 +877,7 @@ mod tests {
             .results
             .session
             .derived
-            .get_or(key ^ 0x501_0000, || std::sync::Arc::new(Vec::new()));
+            .get_or(key ^ 0x501_0000, || Vec::new().into());
         assert_eq!(
             cached.first().copied(),
             Some(-0.6),

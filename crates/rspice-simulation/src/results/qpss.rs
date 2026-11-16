@@ -11,7 +11,7 @@ impl SimulationResult {
             .map_err(|error| error.to_string())?;
         let mut waveforms = HashMap::new();
         for (name, coefficients) in data.spectra {
-            let (real, imaginary) = coefficients
+            let (real, imaginary): (Vec<f64>, Vec<f64>) = coefficients
                 .iter()
                 .map(|value| (value.re, value.im))
                 .unzip();

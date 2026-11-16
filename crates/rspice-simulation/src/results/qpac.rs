@@ -21,7 +21,8 @@ impl SimulationResult {
         let frequencies = response.metadata.request.offsets_hz.clone();
         let mut waveforms = HashMap::new();
         for (name, unit, values) in traces {
-            let (real, imaginary) = values.into_iter().map(|v| (v.re, v.im)).unzip();
+            let (real, imaginary): (Vec<f64>, Vec<f64>) =
+                values.into_iter().map(|v| (v.re, v.im)).unzip();
             let mut waveform =
                 SampledWaveform::new_complex(&name, frequencies.clone(), real, imaginary);
             waveform.y_unit = unit.into();

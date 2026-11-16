@@ -121,7 +121,7 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
     retain_plan_saved_outputs(&mut analysis, &[contract]);
     assert_eq!(analysis.waveforms.len(), 1);
     assert_eq!(analysis.waveforms[0].name, "Input alias");
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(rspice_results::waveform::WaveformValues::ptr_eq(
         &source_samples,
         &analysis.waveforms[0].y
     ));

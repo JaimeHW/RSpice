@@ -253,7 +253,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             } => {
                 let mut result =
                     AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
-                        .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
+                        .with_waveforms(self.build_time_waveforms_owned(time.into(), waveforms))
                         .with_measurements(measurements);
                 result.checks = checks.into_run_checks();
                 let event_payload = transient_events_payload(events);
@@ -520,7 +520,10 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 let mut result =
                     AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
                         .with_waveforms(
-                            self.build_waveforms_with_shared_x_owned(sweep_values, waveforms),
+                            self.build_waveforms_with_shared_x_owned(
+                                sweep_values.into(),
+                                waveforms,
+                            ),
                         )
                         .with_measurements(measurements);
                 result.checks = checks.into_run_checks();
@@ -680,7 +683,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 let retained_sweep_values = sweep_values.clone();
                 AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
                     .with_waveforms(
-                        self.build_waveforms_with_shared_x_owned(sweep_values, waveforms),
+                        self.build_waveforms_with_shared_x_owned(sweep_values.into(), waveforms),
                     )
                     .with_family_metadata(AnalysisResultFamilyMetadata::Parametric {
                         target,
@@ -702,7 +705,9 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             } => {
                 let retained_x_values = x_values.clone();
                 AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
-                    .with_waveforms(self.build_waveforms_with_shared_x_owned(x_values, waveforms))
+                    .with_waveforms(
+                        self.build_waveforms_with_shared_x_owned(x_values.into(), waveforms),
+                    )
                     .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
                         x_values: retained_x_values,
                         x_label,
@@ -725,7 +730,9 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             } => {
                 let retained_iterations = iterations.clone();
                 AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
-                    .with_waveforms(self.build_waveforms_with_shared_x_owned(iterations, waveforms))
+                    .with_waveforms(
+                        self.build_waveforms_with_shared_x_owned(iterations.into(), waveforms),
+                    )
                     .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
                         iterations: retained_iterations,
                         best_cost,
@@ -747,7 +754,8 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 let retained_time = source_history
                     .as_ref()
                     .map_or_else(|| time.clone(), |source| source.time.clone());
-                let retained_waveforms = self.build_waveforms_with_shared_x_owned(time, waveforms);
+                let retained_waveforms =
+                    self.build_waveforms_with_shared_x_owned(time.into(), waveforms);
                 let mut violations = violations
                     .into_iter()
                     .map(|violation| SoaViolationEvidence {
@@ -1038,8 +1046,8 @@ mod waveform_unit_conversion_tests {
     ) -> crate::results::SampledWaveform {
         crate::results::SampledWaveform {
             name: name.to_owned(),
-            x_values: Vec::new(),
-            y_values,
+            x_values: Vec::new().into(),
+            y_values: y_values.into(),
             y_unit: y_unit.to_owned(),
             is_complex: false,
             y_imag: None,

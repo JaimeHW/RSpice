@@ -355,9 +355,9 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                 }
                 _ => {
                     if change_time {
-                        std::sync::Arc::make_mut(&mut analysis.waveforms[0].x)[1] = 2.0;
+                        analysis.waveforms[0].x.make_mut()[1] = 2.0;
                     } else {
-                        std::sync::Arc::make_mut(&mut analysis.waveforms[0].y)[1] = 4.0;
+                        analysis.waveforms[0].y.make_mut()[1] = 4.0;
                     }
                 }
             }

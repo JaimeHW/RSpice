@@ -194,8 +194,8 @@ pub fn show(
             .iter()
             .map(|trace| {
                 (
-                    Arc::clone(&trace.frequency),
-                    Arc::clone(&trace.magnitude),
+                    trace.frequency.clone(),
+                    trace.magnitude.clone(),
                     trace.color,
                 )
             })

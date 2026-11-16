@@ -82,7 +82,9 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     );
     assert_eq!(stats(&mut results, &before[0]), Some((0.0, 0.0, 0.0)));
     let version = simulation.view.data_version;
-    Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].y)
+    simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
         .copy_from_slice(&[1.0, 10.0, 100.0]);
 
     let after = spectrum_models(&simulation, &mut results);
@@ -95,7 +97,9 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     let actual_stats = stats(&mut results, &after[0]).unwrap();
     assert_eq!((actual_stats.0, actual_stats.1), (0.0, 40.0));
 
-    Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].x)
+    simulation.retained.runs[0].analyses[0].waveforms[0]
+        .x
+        .make_mut()
         .copy_from_slice(&[3.0, 2.0, 1.0]);
     let reversed = spectrum_models(&simulation, &mut results);
     assert!(!reversed[0].traces[0].shape.is_single_ascending());
@@ -137,7 +141,9 @@ fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
     state.results.results.session.cursor_strip = Some(0);
     state.results.results.session.cursors.a = Some(1.0);
-    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
         .fill(10.0);
 
     let copied =
@@ -199,7 +205,10 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         &pane,
     );
     assert!(!old.series().is_empty());
-    for sample in Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].y) {
+    for sample in simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .make_mut()
+    {
         *sample += 100.0;
     }
     let updated = cached_models(

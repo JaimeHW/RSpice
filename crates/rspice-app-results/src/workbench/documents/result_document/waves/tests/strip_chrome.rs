@@ -800,7 +800,7 @@ fn hold(state: &mut ResultsTestHost, node: &str, value: f64) {
     for analysis in &mut state.model.simulation.retained.runs[0].analyses {
         for waveform in &mut analysis.waveforms {
             if waveform.name == node {
-                waveform.y = std::sync::Arc::new(vec![value; waveform.y.len()]);
+                waveform.y = vec![value; waveform.y.len()].into();
             }
         }
     }

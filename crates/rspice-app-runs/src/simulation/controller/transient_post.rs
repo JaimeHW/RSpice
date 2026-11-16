@@ -454,8 +454,8 @@ impl SimulationController {
         Some(DerivedWaveformSource {
             analysis: analysis_key,
             source_name,
-            time: Arc::clone(&waveform.x),
-            values: Arc::clone(&waveform.y),
+            time: waveform.x.clone(),
+            values: waveform.y.clone(),
             fft_options: state.fft_input_options(&waveform.x),
             eye_timebase: state.eye_timebase_for(analysis_key),
         })

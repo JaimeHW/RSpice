@@ -576,8 +576,8 @@ mod tests {
             "V(out)".to_owned(),
             rspice_simulation::results::SampledWaveform {
                 name: "V(out)".to_owned(),
-                x_values: Vec::new(),
-                y_values: vec![0.0, 1.0],
+                x_values: Vec::new().into(),
+                y_values: vec![0.0, 1.0].into(),
                 y_unit: "V".to_owned(),
                 is_complex: false,
                 y_imag: None,

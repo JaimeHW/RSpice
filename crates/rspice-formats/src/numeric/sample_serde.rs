@@ -1,10 +1,11 @@
 //! Explicit nulls at persistence boundaries, NaN gaps only inside numeric code.
 //! Infinity is never an unavailable sample and is refused in both directions.
 
+#[cfg(feature = "project-results")]
+use rspice_results::waveform::SharedWaveformValues;
 use serde::de::{Error as _, SeqAccess, Visitor};
 use serde::ser::{Error as _, SerializeSeq};
 use serde::{Deserializer, Serializer};
-use std::sync::Arc;
 
 pub fn serialize<S: Serializer>(values: &[f64], serializer: S) -> Result<S::Ok, S::Error> {
     let mut sequence = serializer.serialize_seq(Some(values.len()))?;
@@ -43,10 +44,21 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f64
     deserializer.deserialize_seq(Samples)
 }
 
+#[cfg(feature = "project-results")]
+/// Shared samples, read from their stored column if they are a window of one: a column that
+/// cannot be read refuses the write by name instead of writing its samples as unavailable.
+pub fn serialize_shared<S: Serializer>(
+    values: &SharedWaveformValues,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serialize(values.try_values().map_err(S::Error::custom)?, serializer)
+}
+
+#[cfg(feature = "project-results")]
 pub fn deserialize_shared<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<Arc<Vec<f64>>, D::Error> {
-    deserialize(deserializer).map(Arc::new)
+) -> Result<SharedWaveformValues, D::Error> {
+    deserialize(deserializer).map(SharedWaveformValues::from)
 }
 
 #[cfg(test)]
@@ -55,14 +67,14 @@ mod tests {
 
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Wire {
-        #[serde(serialize_with = "serialize", deserialize_with = "deserialize_shared")]
-        samples: Arc<Vec<f64>>,
+        #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+        samples: Vec<f64>,
     }
 
     #[test]
     fn missing_samples_are_null_and_infinities_cannot_be_mislabeled_missing() {
         let wire = Wire {
-            samples: Arc::new(vec![1.0, f64::NAN, -0.0]),
+            samples: vec![1.0, f64::NAN, -0.0],
         };
         let encoded = serde_json::to_string(&wire).unwrap();
         assert_eq!(encoded, r#"{"samples":[1.0,null,-0.0]}"#);
@@ -73,7 +85,7 @@ mod tests {
         for value in [f64::INFINITY, f64::NEG_INFINITY] {
             assert!(
                 serde_json::to_string(&Wire {
-                    samples: Arc::new(vec![value])
+                    samples: vec![value]
                 })
                 .is_err()
             );

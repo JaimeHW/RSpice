@@ -477,8 +477,8 @@ fn insert_scalar_waveform(
         name.clone(),
         SampledWaveform {
             name,
-            x_values,
-            y_values,
+            x_values: x_values.into(),
+            y_values: y_values.into(),
             y_unit: y_unit.to_string(),
             is_complex: false,
             y_imag: None,
@@ -1668,7 +1668,7 @@ R2 out 0 1k\n\
         waveforms
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("out"))
-            .map(|(_, waveform)| waveform.y_values.clone())
+            .map(|(_, waveform)| waveform.y_values.to_vec())
             .unwrap_or_else(|| {
                 panic!(
                     "the divider's output node is retained; the run returned {:?}",

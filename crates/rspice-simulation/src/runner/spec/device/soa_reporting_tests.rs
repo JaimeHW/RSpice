@@ -144,7 +144,7 @@ fn soa_reporting_preserves_between_sample_violations_through_worker_and_retentio
             "altered peak must not authenticate"
         );
         retained.result_payload = before;
-        std::sync::Arc::make_mut(&mut retained.waveforms[0].y)[0] += 0.25;
+        retained.waveforms[0].y.make_mut()[0] += 0.25;
         assert!(
             retained.validate_retained_evidence().is_err(),
             "altered report must not authenticate"

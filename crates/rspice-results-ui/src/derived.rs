@@ -204,17 +204,17 @@ impl DerivedSeries {
         build: impl FnOnce() -> SharedWaveformValues,
     ) -> SharedWaveformValues {
         if let Some(hit) = self.map.get(&key) {
-            return std::sync::Arc::clone(hit);
+            return hit.clone();
         }
         let series = build();
-        self.map.insert(key, std::sync::Arc::clone(&series));
+        self.map.insert(key, series.clone());
         series
     }
 
     /// 20·log₁₀ of a linear-magnitude series, cached under `key`.
     pub fn db(&mut self, key: u64, magnitude: &[f64]) -> SharedWaveformValues {
         self.get_or(key, || {
-            std::sync::Arc::new(
+            SharedWaveformValues::from(
                 magnitude
                     .iter()
                     .map(|&m| 20.0 * m.log10())
@@ -236,7 +236,7 @@ impl DerivedSeries {
     /// rather than inventing NaNs the plot would silently drop.
     pub fn noise_density_nv(&mut self, key: u64, psd_v2_per_hz: &[f64]) -> SharedWaveformValues {
         self.get_or(Self::NOISE_DENSITY_KEY_BIT | key, || {
-            std::sync::Arc::new(
+            SharedWaveformValues::from(
                 psd_v2_per_hz
                     .iter()
                     .map(|&value| {
@@ -255,7 +255,7 @@ impl DerivedSeries {
     /// cached under `key` like `db`.
     pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> SharedWaveformValues {
         self.get_or(Self::UNWRAP_KEY_BIT | key, || {
-            std::sync::Arc::new(rspice_results::calculator::functions::unwrap_phase_deg(
+            SharedWaveformValues::from(rspice_results::calculator::functions::unwrap_phase_deg(
                 phase_deg,
             ))
         })

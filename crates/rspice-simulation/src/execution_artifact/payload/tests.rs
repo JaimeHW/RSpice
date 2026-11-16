@@ -359,8 +359,11 @@ fn hb_result() -> SimulationResult {
             "V(out)".to_owned(),
             SampledWaveform::new_complex(
                 "V(out)",
-                (0..=8).map(|harmonic| harmonic as f64).collect(),
-                coefficients.iter().map(|value| value.re * 2.0).collect(),
+                (0..=8).map(|harmonic| harmonic as f64).collect::<Vec<_>>(),
+                coefficients
+                    .iter()
+                    .map(|value| value.re * 2.0)
+                    .collect::<Vec<_>>(),
                 coefficients.iter().map(|value| value.im * 2.0).collect(),
             ),
         )]),

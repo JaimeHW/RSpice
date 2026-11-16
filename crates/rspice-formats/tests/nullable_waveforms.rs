@@ -76,15 +76,14 @@ fn project_rejects_infinities_missing_coordinates_and_partial_complex_samples() 
         assert!(serde_json::to_string(&invalid).is_err());
     }
     let mut invalid = project(f64::NAN, true);
-    std::sync::Arc::make_mut(
-        &mut invalid.runs[0].analyses[0].waveforms[0]
-            .complex
-            .as_mut()
-            .unwrap()
-            .imag,
-    )[1] = 0.0;
+    invalid.runs[0].analyses[0].waveforms[0]
+        .complex
+        .as_mut()
+        .unwrap()
+        .imag
+        .make_mut()[1] = 0.0;
     assert!(invalid.validate().unwrap_err().contains("availability"));
     let mut invalid = project(f64::NAN, false);
-    std::sync::Arc::make_mut(&mut invalid.runs[0].analyses[0].waveforms[0].x)[1] = f64::NAN;
+    invalid.runs[0].analyses[0].waveforms[0].x.make_mut()[1] = f64::NAN;
     assert!(invalid.validate().is_err());
 }

@@ -278,7 +278,7 @@ fn regression_waveforms_align_by_stable_source_and_signal_identity() {
     assert_eq!(aligned.len(), 1);
     assert_eq!(aligned[0].baseline.name, "V(out)");
 
-    current.analyses[0].waveforms[0].x = std::sync::Arc::new(vec![0.0, 1.0, 2.5]);
+    current.analyses[0].waveforms[0].x = vec![0.0, 1.0, 2.5].into();
     assert_eq!(regression_waveform_pairs(&baseline, &current).len(), 1);
 }
 

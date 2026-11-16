@@ -808,7 +808,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
         .expect("the fixture retains an SOA analysis");
     let mut shortened = analysis.waveforms[0].y.as_ref().clone();
     shortened.pop();
-    analysis.waveforms[0].y = std::sync::Arc::new(shortened);
+    analysis.waveforms[0].y = shortened.into();
     state.model.simulation.view.data_version =
         state.model.simulation.view.data_version.wrapping_add(1);
 

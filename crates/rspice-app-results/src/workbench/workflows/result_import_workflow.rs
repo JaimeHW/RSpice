@@ -1305,7 +1305,10 @@ mod tests {
         assert_eq!(parsed.waveforms[1].y.as_slice(), &[10e-6, 11e-6, 12e-6]);
         assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
         assert_eq!(parsed.waveforms[1].unit.as_deref(), Some("A"));
-        assert!(Arc::ptr_eq(&parsed.waveforms[0].x, &parsed.waveforms[1].x));
+        assert!(rspice_results::waveform::WaveformValues::ptr_eq(
+            &parsed.waveforms[0].x,
+            &parsed.waveforms[1].x
+        ));
         assert_eq!(parsed.source_format, ResultImportFormat::CsvRfc4180);
         assert!(parsed.family_metadata.is_none());
     }

@@ -576,8 +576,8 @@ impl EngineBridge {
             sweep_values.reverse();
             for waveform in waveforms.values_mut() {
                 ensure_not_aborted(abort)?;
-                waveform.x_values.reverse();
-                waveform.y_values.reverse();
+                waveform.x_values.make_mut().reverse();
+                waveform.y_values.make_mut().reverse();
             }
         }
         evidence

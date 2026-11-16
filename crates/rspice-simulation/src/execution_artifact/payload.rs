@@ -169,8 +169,12 @@ impl TransientTrajectoryArtifact {
                     "transient waveform '{name}' does not use the result's canonical time axis"
                 )));
             }
+            let values = waveform
+                .y_values
+                .try_values()
+                .map_err(|failure| ExecutionArtifactError::InvalidPayload(failure.to_string()))?;
             if artifact_waveforms
-                .insert(name.clone(), waveform.y_values.clone())
+                .insert(name.clone(), values.clone())
                 .is_some()
             {
                 return Err(ExecutionArtifactError::InvalidPayload(format!(

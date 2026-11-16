@@ -145,8 +145,8 @@ mod tests {
                     name.clone(),
                     SampledWaveform {
                         name,
-                        x_values: frequencies.clone(),
-                        y_values: vec![0.5, 0.4],
+                        x_values: frequencies.clone().into(),
+                        y_values: vec![0.5, 0.4].into(),
                         y_unit: String::new(),
                         is_complex: true,
                         y_imag: Some(vec![0.0, 0.0]),
@@ -189,8 +189,8 @@ mod tests {
                 name.into(),
                 SampledWaveform {
                     name: name.into(),
-                    x_values: frequencies.clone(),
-                    y_values: vec![value; 2],
+                    x_values: frequencies.clone().into(),
+                    y_values: vec![value; 2].into(),
                     y_unit: if name == "Rn" { "Ω" } else { "1" }.into(),
                     is_complex: imaginary.is_some(),
                     y_imag: imaginary,

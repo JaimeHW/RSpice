@@ -1,7 +1,6 @@
 //! Integration checks for retained history revision tracking.
 
 use super::{RunHistory, SimulationRun};
-use std::sync::Arc;
 
 #[cfg(test)]
 mod tests {
@@ -28,7 +27,7 @@ mod tests {
             )]),
         );
         let revision = runs.revision();
-        Arc::make_mut(&mut runs[0].analyses[0].waveforms[0].y)[1] = 3.0;
+        runs[0].analyses[0].waveforms[0].y.make_mut()[1] = 3.0;
         assert_ne!(runs.revision(), revision);
     }
 }
