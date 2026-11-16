@@ -38,6 +38,7 @@ mod restart;
 mod shared;
 mod sources;
 mod stored_transient;
+pub(crate) use stored_transient::{RowCursor, signal_slots};
 mod xyce_files;
 
 pub(crate) use crate::commands::export_table as export;

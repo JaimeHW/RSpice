@@ -998,25 +998,6 @@ fn probe_plan(
     targets: &[SlotTarget],
     events: Option<&RunEvents<'_>>,
 ) -> Result<Option<StreamPlan>, CliError> {
-    let column = |target: SlotTarget| stream_column(shell, target);
-    let inventory = match rspice_core::execution::transient_projection_signals(shell) {
-        Ok(inventory) => inventory,
-        Err(_) => return Ok(None),
-    };
-    let mut by_name: std::collections::HashMap<&str, Option<usize>> =
-        std::collections::HashMap::new();
-    for signal in &inventory {
-        let rspice_core::execution::ProjectionValues::Real(values) = signal.values() else {
-            continue;
-        };
-        let slot = targets
-            .iter()
-            .position(|&target| column(target).map(|c| c.as_ptr()) == Some(values.as_ptr()));
-        by_name
-            .entry(signal.descriptor().display_name())
-            .and_modify(|seen| *seen = None)
-            .or_insert(slot);
-    }
     let Ok(mut signals) = crate::commands::run_signals::transient_export_signals(
         ctx.netlist,
         shell,
@@ -1024,6 +1005,9 @@ fn probe_plan(
         &crate::abort::ProcessAbort,
     ) else {
         // The run read back whole reports the same failure the in-memory run would.
+        return Ok(None);
+    };
+    let Some(signal_slots) = signal_slots(shell, targets, &signals) else {
         return Ok(None);
     };
     let event_columns: std::collections::HashSet<String> = match events {
@@ -1044,8 +1028,8 @@ fn probe_plan(
     };
     let mut real_checked = false;
     let mut slots = Vec::with_capacity(signals.len());
-    for signal in &mut signals {
-        let Some(&Some(slot)) = by_name.get(signal.display_name.as_str()) else {
+    for (signal, slot) in signals.iter_mut().zip(signal_slots) {
+        let Some(slot) = slot else {
             if event_columns.contains(&signal.display_name) {
                 signal.values = Vec::new();
                 continue;
@@ -1064,18 +1048,6 @@ fn probe_plan(
             }
             return Ok(None);
         };
-        let Some(values) = column(targets[slot]) else {
-            return Ok(None);
-        };
-        let same = signal.values.len() == values.len()
-            && signal
-                .values
-                .iter()
-                .zip(values)
-                .all(|(a, b)| a.to_bits() == b.to_bits());
-        if !same {
-            return Ok(None);
-        }
         signal.values = Vec::new();
         slots.push(slot);
     }
@@ -1087,6 +1059,48 @@ fn probe_plan(
         slots,
         measurements: None,
     }))
+}
+
+/// Each of `signals`' value slot in the store: the store column `shell`'s projection names it
+/// after, holding the signal's own values, bit for bit, on the rows `shell` holds; `None` for a
+/// signal that is no store column. `None` overall when `shell` has no projection.
+pub(crate) fn signal_slots(
+    shell: &TransientResult,
+    targets: &[SlotTarget],
+    signals: &[ScalarSignal],
+) -> Option<Vec<Option<usize>>> {
+    let column = |target: SlotTarget| stream_column(shell, target);
+    let inventory = rspice_core::execution::transient_projection_signals(shell).ok()?;
+    let mut by_name: std::collections::HashMap<&str, Option<usize>> =
+        std::collections::HashMap::new();
+    for signal in &inventory {
+        let rspice_core::execution::ProjectionValues::Real(values) = signal.values() else {
+            continue;
+        };
+        let slot = targets
+            .iter()
+            .position(|&target| column(target).map(|c| c.as_ptr()) == Some(values.as_ptr()));
+        by_name
+            .entry(signal.descriptor().display_name())
+            .and_modify(|seen| *seen = None)
+            .or_insert(slot);
+    }
+    Some(
+        signals
+            .iter()
+            .map(|signal| {
+                let slot = (*by_name.get(signal.display_name.as_str())?)?;
+                let values = column(*targets.get(slot)?)?;
+                let same = signal.values.len() == values.len()
+                    && signal
+                        .values
+                        .iter()
+                        .zip(values)
+                        .all(|(a, b)| a.to_bits() == b.to_bits());
+                same.then_some(slot)
+            })
+            .collect(),
+    )
 }
 
 /// Whether every value of the `traces` real event traces in `events` reads as finite.
@@ -1252,19 +1266,7 @@ impl StoredRows {
 
     /// A reader of rows `first ..` for `plan`'s signals, chunk by chunk.
     pub(super) fn cursor<'r>(&'r mut self, plan: &'r StreamPlan, first: u64) -> RowCursor<'r> {
-        let spans = self.reader.chunk_spans().collect();
-        RowCursor {
-            dir: &self.store.dir,
-            reader: &mut self.reader,
-            slots: &plan.slots,
-            spans,
-            first,
-            chunk: None,
-            x: None,
-            columns: vec![None; plan.slots.len()],
-            error: None,
-            non_finite: false,
-        }
+        RowCursor::over(&self.store.dir, &mut self.reader, &plan.slots, first)
     }
 
     /// Leave the store beside `output` as `<stem>.rsr/`, replacing an earlier run's store there,
@@ -1290,7 +1292,7 @@ impl StoredRows {
 /// Reads the values of an output's rows from the store a chunk at a time, decoding each column of
 /// a chunk once, when it is first asked for. An error or a non-finite value is recorded rather
 /// than returned, since a table writer asks for numbers, and checked once the table is written.
-pub(super) struct RowCursor<'r> {
+pub(crate) struct RowCursor<'r> {
     dir: &'r Path,
     reader: &'r mut SegmentReader<FileIo>,
     slots: &'r [usize],
@@ -1311,9 +1313,32 @@ pub(super) enum ColumnStop {
     Failed(CliError),
 }
 
-impl RowCursor<'_> {
+impl<'r> RowCursor<'r> {
+    /// A cursor over rows `first..` of the store in `dir` that `reader` reads, whose output
+    /// signal `n` (variable `n + 1`) is value slot `slots[n]`.
+    pub(crate) fn over(
+        dir: &'r Path,
+        reader: &'r mut SegmentReader<FileIo>,
+        slots: &'r [usize],
+        first: u64,
+    ) -> Self {
+        let spans = reader.chunk_spans().collect();
+        Self {
+            dir,
+            reader,
+            slots,
+            spans,
+            first,
+            chunk: None,
+            x: None,
+            columns: vec![None; slots.len()],
+            error: None,
+            non_finite: false,
+        }
+    }
+
     /// Variable `variable` (0 is time, then each output signal) of output row `row`.
-    pub(super) fn value(&mut self, row: usize, variable: usize) -> f64 {
+    pub(crate) fn value(&mut self, row: usize, variable: usize) -> f64 {
         let row = self.first + row as u64;
         let chunk = match self.chunk {
             Some(chunk) if self.spans[chunk].0 <= row => {
@@ -1400,7 +1425,7 @@ impl RowCursor<'_> {
     }
 
     /// Fail when a read failed or a value was not finite, as a table that held them would.
-    pub(super) fn finish(self, path: &Path) -> Result<(), CliError> {
+    pub(crate) fn finish(self, path: &Path) -> Result<(), CliError> {
         if let Some(error) = self.error {
             return Err(store_error(self.dir, error));
         }

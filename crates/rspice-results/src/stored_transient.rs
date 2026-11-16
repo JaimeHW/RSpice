@@ -36,6 +36,19 @@ impl<I: SegmentIo> StoredTransientRun<I> {
     /// trace; a segment closed without it (a crash, a full disk) is named from its schema alone
     /// ([`transient_shell`]).
     pub fn open(io: I) -> Result<Self, StoreError> {
+        Self::open_filling(io, fill_events)
+    }
+
+    /// [`Self::open`] with the digital and real event histories left in the segment, for a
+    /// [`StoreEvents`] to read there or [`fill_event_traces`] to read back.
+    pub fn open_leaving_events(io: I) -> Result<Self, StoreError> {
+        Self::open_filling(io, fill_impulses)
+    }
+
+    fn open_filling(
+        io: I,
+        fill: fn(&mut SegmentReader<I>, &mut TransientResult) -> Result<(), StoreError>,
+    ) -> Result<Self, StoreError> {
         let mut reader = SegmentReader::open(io)?;
         let mut shell = match reader.annotation(TRANSIENT_SHELL_ANNOTATION) {
             Some(bytes) => decode_transient_shell(bytes),
@@ -43,7 +56,7 @@ impl<I: SegmentIo> StoredTransientRun<I> {
         }
         .map_err(StoreError::Schema)?;
         let targets = slot_targets(&reader, &shell).map_err(StoreError::Schema)?;
-        fill_events(&mut reader, &mut shell)?;
+        fill(&mut reader, &mut shell)?;
         let parameters = instance_parameters(&reader);
         Ok(Self {
             shell,

@@ -401,8 +401,21 @@ impl ExportTable {
     /// Keep only the requested columns, matching names without case sensitivity.
     /// Qualified names select exactly that column; a bare alias must be unique.
     pub(crate) fn select_variables(&mut self, requested: &[String]) -> Result<(), CliError> {
-        if requested.is_empty() {
+        let Some(keep) = self.selected_columns(requested)? else {
             return Ok(());
+        };
+        let mut keep = keep.into_iter();
+        self.columns.retain(|_| keep.next().unwrap_or(false));
+        Ok(())
+    }
+
+    /// Which columns [`Self::select_variables`] keeps, or `None` when it keeps them all.
+    pub(crate) fn selected_columns(
+        &self,
+        requested: &[String],
+    ) -> Result<Option<Vec<bool>>, CliError> {
+        if requested.is_empty() {
+            return Ok(None);
         }
 
         let mut aliases = std::collections::HashMap::<String, Vec<usize>>::new();
@@ -462,9 +475,7 @@ impl ExportTable {
                 }
             }
         }
-        let mut keep = keep.into_iter();
-        self.columns.retain(|_| keep.next().unwrap_or(false));
-        Ok(())
+        Ok(Some(keep))
     }
 
     /// Keep only rows whose scale value lies within `[start, stop]`.

@@ -85,6 +85,13 @@ impl ResultSnapshot {
                 }
                 InputFormat::Touchstone => touchstone::parse(path, bytes, limits, section)?.into(),
                 InputFormat::Hdf5 => unreachable!("HDF5 snapshots own their reader"),
+                InputFormat::Rsr => {
+                    return Err(conversion_error(
+                        path,
+                        "a results store is a directory of segments, not one result file; \
+                         convert it to a result file first",
+                    ));
+                }
             },
         };
         validate_result(path, result, limits)

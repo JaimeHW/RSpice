@@ -65,6 +65,7 @@ pub(crate) fn detect_format(path: &Path) -> InputFormat {
         Some("json") => InputFormat::Json,
         Some("h5") | Some("hdf5") => InputFormat::Hdf5,
         Some("vcd") => InputFormat::Vcd,
+        Some("rsr") => InputFormat::Rsr,
         _ => InputFormat::Raw,
     }
 }
@@ -134,6 +135,9 @@ pub(crate) fn load_result_selected(
             crate::commands::vcd_io::load_vcd_table(path, resource_limits).map(Into::into)
         }
         InputFormat::Touchstone => touchstone::load(path, resource_limits, section).map(Into::into),
+        InputFormat::Rsr => {
+            crate::commands::store_input::load_table(path, resource_limits).map(Into::into)
+        }
     }?;
     validate_result(path, result, resource_limits)
 }

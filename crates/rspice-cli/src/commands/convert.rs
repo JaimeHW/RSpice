@@ -11,9 +11,9 @@
 //! when it does not. [`crate::commands::vcd_io`] holds both directions and
 //! states what each one keeps.
 
-use crate::cli::{CliError, Config, ConvertArgs, NumericBound, OutputFormat};
-use crate::commands::vcd_io;
+use crate::cli::{CliError, Config, ConvertArgs, InputFormat, NumericBound, OutputFormat};
 use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
+use crate::commands::{store_input, vcd_io};
 
 /// Execute the convert command
 pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
@@ -39,6 +39,24 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
 
     if args.expand_buses {
         vcd_io::expand_buses_needs_vcd("--expand-buses", args.to)?;
+    }
+
+    // A results store converts a chunk at a time where it can.
+    if from_format == InputFormat::Rsr {
+        let streamed = if args.to == OutputFormat::Vcd {
+            store_input::convert_vcd_streamed(&args)?
+        } else {
+            store_input::convert_streamed(&args, config.resources.limits())?
+        };
+        if streamed {
+            if !quiet {
+                crate::console::line(format_args!(
+                    "✓ Conversion complete: {}",
+                    args.output.display()
+                ))?;
+            }
+            return Ok(());
+        }
     }
 
     if args.to == OutputFormat::Vcd {

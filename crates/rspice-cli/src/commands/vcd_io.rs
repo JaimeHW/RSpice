@@ -353,6 +353,11 @@ pub(crate) fn load_vcd_document(
     if format == InputFormat::Json {
         return load_json_document(path, resource_limits, expand_buses);
     }
+    if format == InputFormat::Rsr
+        && let Some(traces) = crate::commands::store_input::event_traces(path)?
+    {
+        return traces_document(path, &traces, expand_buses);
+    }
 
     let table = load_table_selected(path, format, resource_limits, section)?;
     LoadedVcdDocument::from_table(path, &table)

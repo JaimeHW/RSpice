@@ -998,6 +998,8 @@ pub enum InputFormat {
     Hdf5,
     Vcd,
     Touchstone,
+    /// A transient's results store (`out.rsr/`), as a run leaves it beside its output.
+    Rsr,
 }
 
 impl From<OutputFormat> for InputFormat {
