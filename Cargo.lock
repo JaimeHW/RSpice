@@ -6161,10 +6161,12 @@ name = "rspice-results-store"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "libc",
  "lz4_flex 0.13.1",
  "rspice-core",
  "rspice-core-base",
  "sha2 0.11.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

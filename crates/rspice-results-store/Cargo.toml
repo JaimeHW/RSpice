@@ -24,6 +24,13 @@ sha2 = { version = "=0.11.0", default-features = false }
 # of the engine's base crate; the engine itself is above the store.
 rspice-core-base.workspace = true
 
+# The free space of the store's volume, for the disk watch.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 # A small transient run through the sink, read back against the in-memory one.
 rspice-core.workspace = true

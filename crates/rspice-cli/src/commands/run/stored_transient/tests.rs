@@ -5,14 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
-use rspice_core::engine::{Engine, TransientStartupMode};
-use rspice_core::netlist::Netlist;
-use rspice_core::result_sink::SinkStop;
 use rspice_results_store::{
-    FileIo, RunStatus, SegmentReader, SegmentState, StopReason, StoreDir, StoreSink,
+    CLOSING_RESERVE, FileIo, FreeSpace, RunStatus, SegmentReader, SegmentState, StopReason,
+    StoreDir,
 };
 
-use super::{CLOSING_RESERVE, FreeSpace, WatchedIo};
 use crate::cli::error::ExitCode;
 use crate::cli::{Cli, CliError, Commands, Config, FailureCategory};
 
@@ -35,111 +32,6 @@ pub(super) fn quota(segment: &Path, quota: u64) -> FreeSpace {
         let used = std::fs::metadata(&segment).map_or(0, |meta| meta.len());
         Some(quota.saturating_sub(used))
     })
-}
-
-#[test]
-fn a_write_that_would_eat_the_closing_reserve_is_refused_and_the_closing_writes_are_not() {
-    use rspice_results_store::SegmentIo;
-    let dir = scratch("io");
-    let segment = dir.join("segment");
-    let mut io = WatchedIo {
-        io: FileIo::create(&segment).unwrap(),
-        free: quota(&segment, CLOSING_RESERVE + 100),
-        full: false,
-    };
-    io.write_at(0, &[1; 100]).unwrap();
-    // Rewriting what is there grows nothing.
-    io.write_at(0, &[2; 100]).unwrap();
-    let refused = io.write_at(100, &[3; 1]).unwrap_err();
-    assert_eq!(refused.kind(), std::io::ErrorKind::StorageFull);
-    // The writer closing the segment uses the reserve.
-    io.write_at(100, &[4; 4096]).unwrap();
-    assert_eq!(io.size().unwrap(), 4196);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn a_run_whose_storage_fills_stops_typed_with_its_whole_chunks_equal_to_the_run_in_memory() {
-    let dir = scratch("run");
-    let segment = dir.join("segment");
-    let netlist = Netlist::parse(
-        "rc\nv1 in 0 sin(0 1 100k)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 200u\n.end\n",
-    )
-    .unwrap();
-    let engine = Engine::default();
-    let expected = engine
-        .run_tran_with_startup_mode_and_abort(
-            &netlist,
-            200e-6,
-            1e-9,
-            TransientStartupMode::OperatingPoint,
-            &rspice_core::NoAbort,
-        )
-        .unwrap();
-
-    let mut sink = StoreSink::new(WatchedIo {
-        io: FileIo::create(&segment).unwrap(),
-        free: quota(&segment, CLOSING_RESERVE + 256 * 1024),
-        full: false,
-    });
-    let run = engine
-        .run_tran_into_sink_with_startup_mode_and_abort(
-            &netlist,
-            200e-6,
-            1e-9,
-            TransientStartupMode::OperatingPoint,
-            &rspice_core::NoAbort,
-            &mut sink,
-        )
-        .unwrap();
-    assert!(
-        matches!(run.stopped, Some(SinkStop::DiskFull { .. })),
-        "{:?}",
-        run.stopped
-    );
-
-    // The reserve left room to close the segment over its whole chunks.
-    let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
-    assert!(matches!(
-        reader.state(),
-        SegmentState::Complete {
-            status: RunStatus::Stopped(StopReason::DiskFull),
-            ..
-        }
-    ));
-    let rows = reader.rows() as usize;
-    assert_eq!(run.receipt.rows, rows as u64);
-    assert!(
-        rows > 1000 && rows < expected.time.len(),
-        "{rows} of {} rows kept",
-        expected.time.len()
-    );
-    let bits = |values: &[f64]| {
-        values
-            .iter()
-            .map(|value| value.to_bits())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        bits(&reader.read_x(0, rows).unwrap()),
-        bits(&expected.time[..rows])
-    );
-    let out = expected
-        .node_names
-        .iter()
-        .position(|name| name == "OUT")
-        .unwrap();
-    let slot = reader
-        .schema()
-        .signals
-        .iter()
-        .position(|signal| signal.name == "OUT")
-        .unwrap();
-    assert_eq!(
-        bits(&reader.read_slot(slot, 0, rows).unwrap()),
-        bits(&expected.voltages[out][..rows])
-    );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

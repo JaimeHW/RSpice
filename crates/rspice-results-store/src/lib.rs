@@ -6,8 +6,9 @@
 //! Memory while writing is one chunk's buffers and one index's entries whatever the run's length;
 //! a reader opens any prefix a crash left behind by scanning forward from the last durable index.
 //!
-//! The crate depends on `std`, `lz4_flex`, `crc32fast` and `sha2`, and on the engine base crate
-//! for the result sink trait [`StoreSink`] implements. It does all I/O through [`SegmentIo`], so
+//! The crate depends on `std`, `lz4_flex`, `crc32fast` and `sha2`, on the engine base crate for
+//! the result sink trait [`StoreSink`] implements, and on the host's free-space query for the
+//! disk watch [`WatchedSink`]. It does all I/O through [`SegmentIo`], so
 //! the same code writes a file, a buffer in memory, or a browser's origin-private file system.
 
 mod codec;
@@ -23,6 +24,7 @@ mod schema;
 mod sink;
 mod summary;
 mod tile;
+mod watch;
 mod writer;
 
 #[cfg(test)]
@@ -42,4 +44,9 @@ pub use run_writer::{RunIo, RunWriter};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use sink::{StoreSink, sink_stop};
 pub use tile::{Tile, pixel_of};
+#[cfg(any(unix, windows))]
+pub use watch::volume_free_space;
+pub use watch::{
+    CLOSING_RESERVE, FreeSpace, SpaceWarning, WatchedIo, WatchedSink, available_bytes,
+};
 pub use writer::{RunStatus, SegmentWriter, StopReason, StoreReceipt};

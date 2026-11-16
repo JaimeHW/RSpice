@@ -28,7 +28,8 @@ use rspice_results::stored_transient::{
     instance_parameters, slot_name, slot_targets,
 };
 use rspice_results_store::{
-    FileIo, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError, StoreSink,
+    FileIo, FreeSpace, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError,
+    StoreSink, WatchedIo, WatchedSink,
 };
 
 use super::context::RunContext;
@@ -83,7 +84,7 @@ pub(super) enum Segment<'c> {
 struct OpenStore {
     store: RunStore,
     segment: PathBuf,
-    sink: StoreSink<WatchedIo>,
+    sink: StoreSink<WatchedIo<FileIo>>,
     free: FreeSpace,
 }
 
@@ -256,13 +257,23 @@ pub(super) fn run_with<T: StoreRunEnd>(
         None => create_store(ctx)?,
     };
     let rows = span.tstop - span.start;
-    let mut sink = WatchedSink {
+    let mut sink = WatchedSink::new(
         inner,
         free,
-        rows_needed: rows / span.max_step,
-        rows_likely: rows / span.max_step.min(span.tstep),
-        refused: None,
-    };
+        rows / span.max_step,
+        rows / span.max_step.min(span.tstep),
+    )
+    .with_space_warning(Box::new(|likely, free| {
+        crate::observability::diagnostic(
+            "results_store_space",
+            None,
+            format_args!(
+                "Warning: this transient likely writes about {likely} bytes of results and \
+                 their volume has {free} bytes free; it stops, keeping what it wrote, if the \
+                 volume fills"
+            ),
+        );
+    }));
     let (
         SinkTransient {
             result: shell,
@@ -278,9 +289,10 @@ pub(super) fn run_with<T: StoreRunEnd>(
         store.fingerprint = end.checkpoint_fingerprint();
     }
     let opened = sink
-        .inner
+        .into_parts()
+        .0
         .into_io()
-        .map(|io| io.io)
+        .map(WatchedIo::into_inner)
         .ok_or_else(|| StoreError::Io {
             kind: std::io::ErrorKind::Other,
             message: "the results segment was not closed".to_owned(),
@@ -342,11 +354,7 @@ fn create_store(ctx: &RunContext<'_>) -> Result<OpenStore, CliError> {
     Ok(OpenStore {
         store,
         segment,
-        sink: StoreSink::new(WatchedIo {
-            io,
-            free: free.clone(),
-            full: false,
-        }),
+        sink: StoreSink::new(WatchedIo::new(io, free.clone())),
         free,
     })
 }
@@ -394,16 +402,7 @@ fn reopen_beside_output(
     let free = free_space(&dir);
     let reopened = FileIo::open_writable(&segment)
         .map_err(StoreError::from)
-        .and_then(|io| {
-            StoreSink::appending(
-                WatchedIo {
-                    io,
-                    free: free.clone(),
-                    full: false,
-                },
-                checkpoint.time,
-            )
-        });
+        .and_then(|io| StoreSink::appending(WatchedIo::new(io, free.clone()), checkpoint.time));
     match reopened {
         Ok(sink) => Some(OpenStore {
             store: RunStore {
@@ -1407,17 +1406,12 @@ fn stopped_run(
     ctx: &RunContext<'_>,
     store: RunStore,
     segment: &Path,
-    sink: WatchedSink,
+    sink: WatchedSink<FileIo>,
     source: rspice_core::SimulationError,
 ) -> CliError {
     use rspice_core::result_sink::SinkStop;
-    let WatchedSink {
-        mut inner,
-        free,
-        rows_needed,
-        refused,
-        ..
-    } = sink;
+    let (refused, rows_needed) = (sink.refused(), sink.rows_needed());
+    let (mut inner, free) = sink.into_parts();
     if store.in_place {
         // A resumed run that failed before it began leaves the store it reopened closed over the
         // rows it held; one that began was closed with how it stopped, and refuses a second end.
@@ -1527,202 +1521,12 @@ fn storage_full(
     }
 }
 
-/// Free bytes on the store's volume, asked when the run begins and before each write that grows
-/// its segment.
-type FreeSpace = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
-
 fn free_space(dir: &Path) -> FreeSpace {
     #[cfg(test)]
     if let Some(quota) = tests::QUOTA.with(std::cell::Cell::get) {
         return tests::quota(&dir.join(StoreDir::segment_name(0)), quota);
     }
-    let dir = dir.to_path_buf();
-    std::sync::Arc::new(move || available_bytes(&dir))
-}
-
-/// Bytes an unprivileged writer may still use on the volume holding `path`.
-#[cfg(unix)]
-fn available_bytes(path: &Path) -> Option<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
-    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    // SAFETY: `path` is NUL-terminated and outlives the call, and `stat` is a writable `statvfs`
-    // that the call fills when it returns 0, the only case in which it is read.
-    let stat = unsafe {
-        if libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) != 0 {
-            return None;
-        }
-        stat.assume_init()
-    };
-    #[allow(clippy::unnecessary_cast)]
-    Some((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
-}
-
-/// Bytes the calling user may still use on the volume holding `path`, quotas included.
-#[cfg(windows)]
-fn available_bytes(path: &Path) -> Option<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-    // A share's root is named with its trailing separator.
-    if wide.last() != Some(&u16::from(b'\\')) {
-        wide.push(u16::from(b'\\'));
-    }
-    wide.push(0);
-    let mut available = 0u64;
-    // SAFETY: `wide` is NUL-terminated and outlives the call, `available` is a writable `u64` the
-    // call fills when it succeeds, and the two totals it is not asked for are null.
-    let succeeded = unsafe {
-        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    (succeeded != 0).then_some(available)
-}
-
-/// Without a free-space query, the operating system's own refusal of a write is the stop.
-#[cfg(not(any(unix, windows)))]
-fn available_bytes(_path: &Path) -> Option<u64> {
-    None
-}
-
-/// Free space a segment keeps for closing once a write was refused: its last index and `END`.
-const CLOSING_RESERVE: u64 = 1 << 20;
-
-/// A segment file that keeps room on its volume for the segment to close: a write that grows it
-/// past the free space less [`CLOSING_RESERVE`] fails as storage full. Every write after that is
-/// the writer closing the segment, which the reserve is for.
-struct WatchedIo {
-    io: FileIo,
-    free: FreeSpace,
-    full: bool,
-}
-
-impl rspice_results_store::SegmentIo for WatchedIo {
-    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
-        self.io.read_at(offset, buf)
-    }
-
-    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        if !self.full {
-            let grows = (offset + data.len() as u64).saturating_sub(self.io.size()?);
-            if grows > 0
-                && (self.free)().is_some_and(|free| free < grows.saturating_add(CLOSING_RESERVE))
-            {
-                self.full = true;
-                return Err(std::io::ErrorKind::StorageFull.into());
-            }
-        }
-        let written = self.io.write_at(offset, data);
-        // The volume filled before the watch saw it: the writes closing the segment still try.
-        if written
-            .as_ref()
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::StorageFull)
-        {
-            self.full = true;
-        }
-        written
-    }
-
-    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.io.truncate(len)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.io.flush()
-    }
-
-    fn size(&self) -> std::io::Result<u64> {
-        self.io.size()
-    }
-}
-
-/// The store's sink with the disk preflight: when the run begins, the rows it cannot avoid
-/// writing must fit in the free space.
-struct WatchedSink {
-    inner: StoreSink<WatchedIo>,
-    free: FreeSpace,
-    /// The fewest rows the run can write: no step is longer than its largest.
-    rows_needed: f64,
-    /// The rows it likely writes.
-    rows_likely: f64,
-    /// `(bytes needed, bytes free)` when the preflight refused the run.
-    refused: Option<(u64, u64)>,
-}
-
-impl WatchedSink {
-    /// Bytes `rows` rows of `slots` values take in a segment at most: every value uncompressed,
-    /// plus 3.5 % for frames, indexes and summaries.
-    fn bytes(rows: f64, slots: usize) -> u64 {
-        let bytes = (rows.max(1.0) * (slots as f64 + 1.0) * 8.0 * 1.035).ceil();
-        if bytes.is_finite() && bytes < u64::MAX as f64 {
-            bytes as u64
-        } else {
-            u64::MAX
-        }
-    }
-}
-
-impl rspice_core::result_sink::ResultSink for WatchedSink {
-    fn begin(
-        &mut self,
-        schema: &rspice_core::result_sink::ResultSchema,
-        meta: &rspice_core::result_sink::RunMeta,
-    ) -> Result<(), rspice_core::result_sink::SinkStop> {
-        if let Some(free) = (self.free)() {
-            let needed = Self::bytes(self.rows_needed, schema.slots());
-            if needed > free {
-                self.refused = Some((needed, free));
-                return Err(rspice_core::result_sink::SinkStop::DiskFull {
-                    needed: Some(needed),
-                    available: Some(free),
-                });
-            }
-            let likely = Self::bytes(self.rows_likely, schema.slots());
-            if likely > free {
-                crate::observability::diagnostic(
-                    "results_store_space",
-                    None,
-                    format_args!(
-                        "Warning: this transient likely writes about {likely} bytes of results \
-                         and their volume has {free} bytes free; it stops, keeping what it \
-                         wrote, if the volume fills"
-                    ),
-                );
-            }
-        }
-        self.inner.begin(schema, meta)
-    }
-
-    #[inline]
-    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), rspice_core::result_sink::SinkStop> {
-        self.inner.row(x, values)
-    }
-
-    fn amend_open_row(
-        &mut self,
-        row: u64,
-        column: u32,
-        value: f64,
-    ) -> Result<(), rspice_core::result_sink::SinkStop> {
-        self.inner.amend_open_row(row, column, value)
-    }
-
-    fn events(
-        &mut self,
-        changes: &[rspice_core::result_sink::EventChange],
-    ) -> Result<(), rspice_core::result_sink::SinkStop> {
-        self.inner.events(changes)
-    }
-
-    fn end(
-        &mut self,
-        status: rspice_core::result_sink::RunStatus,
-    ) -> Result<SinkReceipt, rspice_core::result_sink::SinkStop> {
-        self.inner.end(status)
-    }
+    rspice_results_store::volume_free_space(dir)
 }
 
 #[cfg(test)]

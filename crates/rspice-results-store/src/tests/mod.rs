@@ -10,4 +10,6 @@ mod run_writer_tests;
 mod sink_tests;
 mod support;
 mod tile_tests;
+#[cfg(any(unix, windows))]
+mod watch_tests;
 mod writer_tests;
