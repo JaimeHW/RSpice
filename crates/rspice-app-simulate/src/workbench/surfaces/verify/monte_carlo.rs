@@ -110,7 +110,7 @@ pub(super) fn population(statistics: &Statistics, point: Option<usize>) -> Optio
     (statistics.per_point.is_empty()
         && trials.len() == statistics.trials.len()
         && !trials.is_empty())
-    .then(|| Population {
+    .then_some(Population {
         statistics,
         yield_count: statistics.yield_count,
         distribution: &statistics.distribution,
