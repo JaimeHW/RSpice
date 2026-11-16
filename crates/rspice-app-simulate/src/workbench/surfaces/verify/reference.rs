@@ -392,16 +392,14 @@ pub(super) fn reference_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             Summary::plain(text)
         }
     });
-    let actions = [ToolbarAction::new(EXPORT)];
+    let actions = [ToolbarAction::new(EXPORT)
+        .enabled(comparison.compared.is_some())
+        .disabled_reason("Choose a reference run first.")];
     let output = PageToolbar {
         title: VerificationPage::Reference.label(),
         runs: &runs,
         summary,
-        actions: if comparison.compared.is_some() {
-            &actions
-        } else {
-            &[]
-        },
+        actions: &actions,
     }
     .show(ui);
     if let Some(index) = output.run
