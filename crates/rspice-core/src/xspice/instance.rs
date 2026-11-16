@@ -1679,6 +1679,7 @@ impl XspiceInstance {
     #[doc(hidden)]
     pub fn bind_mixed_input_thresholds(&mut self) {
         self.mixed_input_thresholds_bound = true;
+        self.context.bind_coupled_crossing_root();
     }
 
     #[doc(hidden)]

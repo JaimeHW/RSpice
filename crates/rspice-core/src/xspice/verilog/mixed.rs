@@ -189,7 +189,9 @@ use super::host::DigitalHost;
 use crate::xspice::event_scheduler::{Instant, SchedulerError, SchedulerLimits, TimeResolution};
 use crate::xspice::models::OFFICIAL_BRIDGE_TIMING_MIN;
 use crate::xspice::settle_cost;
-use crate::xspice::threshold_crossing::threshold_crossing_time;
+use crate::xspice::threshold_crossing::{
+    crossing_below_resolution, endpoint_root_window, first_landing_after, threshold_crossing_time,
+};
 
 /// Read an analog time as an HDL-visible tick, through the instant it is.
 ///
@@ -6550,61 +6552,6 @@ impl MixedSignalHost {
         }
         Ok(())
     }
-}
-
-/// How near the end of `[start, time]` a crossing has to fall to *be* that
-/// endpoint rather than a root inside the interval.
-///
-/// Endpoint roundoff at these magnitudes — 64 ulps of the larger endpoint,
-/// which is what an interpolation across the interval can be trusted to —
-/// widened to `floor`, the smallest step the solver can actually advance by,
-/// because a physical root cannot be resolved more finely than that however
-/// exactly it is named. In seconds throughout, independent of HDL precision.
-///
-/// Written once and called from every site that asks the question, so "this
-/// crossing is the endpoint" cannot be answered two ways that disagree by a few
-/// ulps. Two derivations of one number is how `settle_into` and
-/// [`MixedSignalHost::boundary_refinement_time`] came to be able to
-/// disagree about whether a landing had been reached.
-fn endpoint_root_window(time: f64, start: f64, floor: f64) -> f64 {
-    (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(floor)
-}
-
-/// The earliest instant a root may land after the accepted point `start`:
-/// one minimum step past it, and never on it.
-fn first_landing_after(start: f64, minimum_timestep: f64) -> f64 {
-    let mut first = (start + minimum_timestep).max(start.next_up());
-    if first - start < minimum_timestep {
-        first = first.next_up();
-    }
-    first
-}
-
-/// Whether both samples of a crossing lie within floating-point resolution of
-/// the threshold — 64 ulps of the larger magnitude, the trust
-/// [`endpoint_root_window`] gives an interpolation.
-///
-/// Such a crossing has no instant inside the interval: the signal never left
-/// the threshold by more than roundoff across it, so the interpolated root is
-/// roundoff too. Refining towards it cannot converge. A landed sample reads
-/// the threshold to within the same few ulps and the decision law may hold the
-/// old state there, so the next interval chases a root from that sample, one
-/// solver floor at a time. That pinned C4's `full` SAR at the floor from
-/// t = 0: its comparator output rests on exactly `vcc/2`, the converter's
-/// threshold, while the top plate is grounded, and drifts a few ulps either
-/// side of it at every step. The first instant the decision law reads the new
-/// state is the candidate endpoint, so the transition is dated there; its
-/// error is bounded by an interval across which the signal sat on the
-/// threshold.
-///
-/// A crossing with either sample farther away — including an edge driven
-/// through a converter resting on the threshold — is interpolated and refined
-/// as before.
-fn crossing_below_resolution(accepted: f64, voltage: f64, threshold: f64) -> bool {
-    let at_threshold = |sample: f64| {
-        (sample - threshold).abs() <= 64.0 * f64::EPSILON * threshold.abs().max(sample.abs())
-    };
-    at_threshold(accepted) && at_threshold(voltage)
 }
 
 /// Put the bits one settle moved, their crossing times, and how each of those

@@ -13,9 +13,8 @@ use rspice_core::{Engine, Netlist};
 
 /// The ramp's slope, volts per second: 0 to 3.3 V over 100 ns.
 const SLOPE: f64 = 3.3 / 100e-9;
-/// The transient's largest step. An A/D converter no loop reads back from is
-/// dated at the first accepted point past its threshold (ngspice's
-/// `adc_bridge` law), so this bounds how late its event may be.
+/// The transient's largest step. A connect-rule A/D edge is a `cross()`
+/// event, dated at the crossing whatever the step (VAMS-LRM 2.4 5.10.3.1).
 const MAX_STEP: f64 = 0.1e-9;
 
 /// A ramp into an XSPICE inverter's input: the node `din` is an A/D boundary,
@@ -105,7 +104,7 @@ fn a_deck_block_moves_the_a2d_switching_point_to_its_threshold() {
             .time;
         let crossing = threshold / SLOPE;
         assert!(
-            (0.0..=MAX_STEP).contains(&(switched - crossing)),
+            (switched - crossing).abs() <= 1.0e-15,
             "vth = {threshold} V: switched at {switched:e} s, the ramp crosses at {crossing:e} s"
         );
     }

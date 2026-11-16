@@ -25,7 +25,11 @@
 //!
 //! At their defaults the A/D is bit-identical to the HDL host's built-in
 //! converter with `txdel = inf` and to `adc_bridge` with `txdel = 0`, and the
-//! D/A to the HDL host's built-in D/A; the tests hold them to it.
+//! D/A to the HDL host's built-in D/A; the tests hold them to it. The A/D's
+//! edges are `cross()` events, though: with no coupled run's root to locate
+//! them, it locates its own and dates each at its crossing
+//! ([`chord_crossing`]), where `adc_bridge` keeps ngspice's law and dates its
+//! edge at the first sample past the threshold.
 //!
 //! # ngspice's stock bridges in this vocabulary
 //!
@@ -58,6 +62,9 @@ use super::bridges::{
 use super::{AdcBridge, DacBridge};
 use crate::Value;
 use crate::xspice::logic_map;
+use crate::xspice::threshold_crossing::{
+    crossing_below_resolution, endpoint_root_window, first_landing_after, threshold_crossing_time,
+};
 use crate::xspice::verilog::store::BitDrive;
 use crate::xspice::{
     AnalogBandLaw, AnalogInputThreshold, AnalogThresholdBehavior, CmContext, CmError, CmResult,
@@ -459,6 +466,12 @@ struct AdcSlots {
     /// First real state: the compared quantity per element, then the
     /// band-entry time per element.
     state: usize,
+    /// Whether the converter locates its own crossings where no coupled
+    /// root does ([`chord_crossing`]): only one whose probe the stepper asks
+    /// for a landing (`candidate_event_time`) can, so that an edge it dates
+    /// at a crossing is never dated a whole step before the instant it is
+    /// published at.
+    locates_crossings: bool,
 }
 
 fn init_adc(ctx: &mut CmContext, slots: AdcSlots, width: usize) {
@@ -487,8 +500,8 @@ fn evaluate_adc(
 ) -> CmResult<()> {
     let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
     let supply = tracking.then(|| tracked_supply(ctx));
-    let (unpowered, unpowered_at) = located_power(ctx, supply)
-        .unwrap_or_else(|| (unpowered(supply, law.supply_min), ctx.time));
+    let (unpowered, unpowered_at) =
+        located_power(ctx, supply).unwrap_or_else(|| (unpowered(supply, law.supply_min), ctx.time));
     let timed = law.band.timeout > 0.0 && law.band.timeout.is_finite();
     for index in 0..width {
         let (sample, low, high) =
@@ -496,7 +509,14 @@ fn evaluate_adc(
         // Where a coupled run's root located a crossing this candidate lands
         // on or past, the law reads the input on the crossing's far side, and
         // an edge it causes is dated at the crossing; see `located_term`.
+        // With no coupled root, the converter locates its own crossing on the
+        // chord from the accepted sample, as `cross()` does; see
+        // `chord_crossing`.
         let (term, dated) = located_term(ctx, slots.input, index, tracking, sample, low, high)
+            .or_else(|| {
+                chord_crossing(ctx, law.band, slots, index, sample, low, high)
+                    .map(|crossing| (crossing.term, crossing.time))
+            })
             .unwrap_or((sample, ctx.time));
         let previous = ctx.int_state(index);
         let held = match previous {
@@ -623,6 +643,103 @@ fn located_term(
     Some((term, located.time))
 }
 
+/// Where an A/D element's input crossed the band edge that changes its
+/// decision, on the chord from the accepted sample to `sample`, when no
+/// coupled run's root locates its crossings.
+///
+/// A connect-rule converter is a Verilog-AMS connect module, and its edges
+/// are `@(cross(...))` events: the event occurs at the threshold crossing,
+/// within the crossing's time tolerance (VAMS-LRM 2.4 5.10.3.1), not at the
+/// first accepted point past it, which is ngspice's `adc_bridge` law. So the
+/// converter dates its edge at the chord's crossing, and its
+/// `candidate_event_time` asks the stepper to land there when
+/// the crossing lies further inside the step than the endpoint window. At
+/// that landing the chord meets the edge within the window, on either side,
+/// and the crossing decides, whichever side the sample's last bits fall on.
+/// A crossing whose samples both rest on the edge to within resolution has
+/// no instant to land on and is decided by the sample
+/// ([`crossing_below_resolution`]).
+///
+/// `term` is the compared quantity on the edge's far side, `time` the
+/// crossing, and `land` whether a landing can still refine it.
+fn chord_crossing(
+    ctx: &CmContext,
+    band: AnalogBandLaw,
+    slots: AdcSlots,
+    index: usize,
+    sample: Value,
+    low: Value,
+    high: Value,
+) -> Option<ChordCrossing> {
+    let start = ctx.time_prev;
+    let span = ctx.time - start;
+    let stepped = span > 0.0 && span.is_finite() && start >= 0.0;
+    if !slots.locates_crossings
+        || ctx.has_coupled_crossing_root()
+        || !ctx.is_transient()
+        || !stepped
+    {
+        return None;
+    }
+    let held = match ctx.int_state(index) {
+        0 => Some(DigitalState::Zero),
+        1 => Some(DigitalState::One),
+        ADC_UNINITIALIZED_STATE => return None,
+        _ => None,
+    };
+    let accepted = ctx.state_prev(slots.state + index);
+    let motion = sample - accepted;
+    if motion == 0.0 || !motion.is_finite() {
+        return None;
+    }
+    let rising = motion > 0.0;
+    let window = endpoint_root_window(ctx.time, start, ctx.coincidence);
+    let edges = if rising { [low, high] } else { [high, low] };
+    for edge in edges {
+        // How far along the motion the edge lies past the accepted sample,
+        // and how far the sample lies past the edge.
+        let ahead = (edge - accepted) * motion.signum();
+        let past = (sample - edge) * motion.signum();
+        if ahead < 0.0 || (past < 0.0 && -past / motion.abs() * span > window) {
+            continue;
+        }
+        let far = if rising {
+            edge.next_up()
+        } else {
+            edge.next_down()
+        };
+        let term = if past > 0.0 { sample } else { far };
+        let Some((state, _)) = band.decision(term, Some(accepted), held, low, high, false) else {
+            continue;
+        };
+        if Some(state) == held {
+            continue;
+        }
+        if crossing_below_resolution(accepted, sample, edge) {
+            return None;
+        }
+        // An accepted sample on the edge is the crossing itself.
+        let time = if ahead == 0.0 {
+            start
+        } else {
+            threshold_crossing_time(ctx.time, start, span, accepted, sample, edge)
+        };
+        return Some(ChordCrossing {
+            term,
+            time,
+            land: ahead > 0.0 && ctx.time - time > window,
+        });
+    }
+    None
+}
+
+/// A crossing [`chord_crossing`] located.
+struct ChordCrossing {
+    term: Value,
+    time: Value,
+    land: bool,
+}
+
 /// Without a coupled run there is no root to locate a crossing.
 #[cfg(not(feature = "veriloga"))]
 fn located_term(
@@ -668,6 +785,7 @@ const ADC_SLOTS: AdcSlots = AdcSlots {
     input: "in",
     output: "out",
     state: 0,
+    locates_crossings: true,
 };
 
 impl CodeModel for ConnectAdc {
@@ -754,6 +872,32 @@ impl CodeModel for ConnectAdc {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking)?;
         evaluate_adc(ctx, law, self.tracking, ADC_SLOTS, width)
+    }
+
+    /// A probe reads the input and commits nothing: no output, state or event.
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
+    }
+
+    /// The landing one representable instant past the earliest crossing
+    /// [`chord_crossing`] located inside the step, where it lies further
+    /// inside than the endpoint window and a landing can still be made.
+    fn candidate_event_time(&self, ctx: &CmContext) -> Option<Value> {
+        let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking).ok()?;
+        let supply = self.tracking.then(|| tracked_supply(ctx));
+        let start = ctx.time_prev;
+        let first = first_landing_after(start, ctx.coincidence);
+        (0..width)
+            .filter_map(|index| {
+                let (sample, low, high) = law.terms(
+                    analog_vector_input_value(ctx, ADC_SLOTS.input, index),
+                    supply,
+                );
+                let crossing = chord_crossing(ctx, law.band, ADC_SLOTS, index, sample, low, high)?;
+                let landing = crossing.time.max(start).next_up().max(first);
+                (crossing.land && landing < ctx.time).then_some(landing)
+            })
+            .reduce(Value::min)
     }
 }
 
@@ -1420,6 +1564,9 @@ fn bidi_adc_slots(width: usize) -> AdcSlots {
         input: "sense",
         output: "d",
         state: width * DAC_STATE_STRIDE,
+        // Its probe drives the D/A half, so the stepper does not ask it for
+        // a landing: with no coupled root its A/D half is sample-dated.
+        locates_crossings: false,
     }
 }
 

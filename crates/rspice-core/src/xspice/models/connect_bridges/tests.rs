@@ -155,6 +155,21 @@ fn run_adc(
             }
             next = high;
         }
+        // The stepper lands where the converter's probe of the candidate
+        // asks it to (`CodeModel::candidate_event_time`), as a transient
+        // run does.
+        loop {
+            let mut probe = ctx.clone();
+            probe.time = next;
+            probe.set_input(port, analog(&[input(next)]));
+            set_supply(&mut probe, supply.map(|s| s(next)));
+            probe.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+            model.evaluate(&mut probe).expect("the probe evaluates");
+            match model.candidate_event_time(&probe) {
+                Some(landing) if landing > time && landing < next => next = landing,
+                _ => break,
+            }
+        }
         published.extend(adc_step(
             model,
             ctx,
@@ -274,6 +289,11 @@ fn assert_adcs_identical(
 ) {
     let (ours, our_ctx) = ours;
     let (theirs, their_ctx) = theirs;
+    // The law alone, as a coupled run's root decides it: with no root a
+    // connect-rule converter dates its edges at the crossing instead
+    // (`an_uncoupled_connect_adc_dates_its_edge_at_the_crossing`).
+    our_ctx.bind_coupled_crossing_root();
+    their_ctx.bind_coupled_crossing_root();
     for (step, input) in inputs.iter().enumerate() {
         let time = step as Value * 37.0e-9;
         let supply = supplies.map(|supplies| supplies[step]);
@@ -323,6 +343,90 @@ fn assert_adcs_identical(
                 .to_bits()
         );
     }
+}
+
+/// With no coupled root, a connect-rule A/D edge is a `cross()` event dated
+/// at the crossing (VAMS-LRM 2.4 5.10.3.1). A probe of a candidate past the
+/// crossing asks the stepper to land one representable instant past it, and
+/// the edge is dated at the crossing there, and on a candidate the stepper
+/// could not cut. `adc_bridge` keeps ngspice-46's law and dates the same
+/// edge at the first sample past the threshold
+/// (icm/digital/adc_bridge/cfunc.mod:217-257).
+#[test]
+fn an_uncoupled_connect_adc_dates_its_edge_at_the_crossing() {
+    let slope = 3.3 / 100.0e-9;
+    let ramp = |t: Value| slope * t;
+    let crossing = 1.2 / slope;
+    let (start, candidate) = (36.0e-9, 36.5e-9);
+    let delay = 1.0e-9;
+    let ours = ConnectAdc { tracking: false };
+    let mut ctx = context(&ours, 1, &[("vtlo", 1.2), ("vthi", 1.2), ("tdrise", delay)]);
+    for time in [0.0, start] {
+        assert!(adc_step(&ours, &mut ctx, "in", time, &[ramp(time)], None).len() <= 1);
+    }
+    let accepted = ctx.clone();
+
+    ctx.time = candidate;
+    ctx.set_input("in", analog(&[ramp(candidate)]));
+    ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+    ours.evaluate(&mut ctx).expect("the probe evaluates");
+    assert!(
+        ctx.take_pending_events().is_empty(),
+        "a probe publishes nothing"
+    );
+    let landing = ours
+        .candidate_event_time(&ctx)
+        .expect("a crossing inside the step asks for a landing");
+    assert!(
+        landing > crossing && landing - crossing <= 4.0 * f64::EPSILON * crossing,
+        "lands one representable instant past the crossing: {landing:e} vs {crossing:e}"
+    );
+
+    let one = |published: Vec<Published>| {
+        assert_eq!(published.len(), 1, "{published:?}");
+        assert_eq!(published[0].1, DigitalValue::one());
+        published[0].2
+    };
+    for time in [landing, candidate] {
+        let mut ctx = accepted.clone();
+        let at = one(adc_step(&ours, &mut ctx, "in", time, &[ramp(time)], None));
+        assert!(
+            (at - (crossing + delay)).abs() <= 4.0 * f64::EPSILON * at,
+            "accepted at {time:e}: the edge is dated at the crossing plus its delay, {at:e}"
+        );
+    }
+    let mut landed = accepted.clone();
+    landed.time = landing;
+    landed.set_input("in", analog(&[ramp(landing)]));
+    landed.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+    ours.evaluate(&mut landed).expect("the probe evaluates");
+    assert_eq!(
+        ours.candidate_event_time(&landed),
+        None,
+        "the landing is the crossing"
+    );
+
+    let mut theirs = context(
+        &AdcBridge,
+        1,
+        &[("in_low", 1.2), ("in_high", 1.2), ("rise_delay", delay)],
+    );
+    for time in [0.0, start] {
+        adc_step(&AdcBridge, &mut theirs, "in", time, &[ramp(time)], None);
+    }
+    let at = one(adc_step(
+        &AdcBridge,
+        &mut theirs,
+        "in",
+        candidate,
+        &[ramp(candidate)],
+        None,
+    ));
+    assert_eq!(
+        at,
+        candidate + delay,
+        "adc_bridge dates its edge at the sample"
+    );
 }
 
 /// `txdel = 0` is `adc_bridge`, bit for bit, on a 50-point random trace.

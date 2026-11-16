@@ -614,6 +614,10 @@ pub struct CmContext {
     /// them; see [`Self::located_crossing`]. Empty everywhere else.
     #[cfg(feature = "veriloga")]
     located_crossings: Vec<LocatedInputCrossing>,
+    /// Whether a coupled run's root locates the crossings on this model's
+    /// declared thresholds ([`Self::has_coupled_crossing_root`]).
+    #[cfg(feature = "veriloga")]
+    coupled_crossing_root: bool,
     /// Last event time for scalar digital input ports.
     input_event_times: CopyOnWrite<HashMap<String, Value>>,
     /// Last event time for vector digital input ports, per element.
@@ -850,6 +854,8 @@ impl CmContext {
             hdl_drives: CopyOnWrite::default(),
             #[cfg(feature = "veriloga")]
             located_crossings: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            coupled_crossing_root: false,
             input_event_times: CopyOnWrite::default(),
             input_vector_event_times: CopyOnWrite::default(),
             port_total_loads: CopyOnWrite::default(),
@@ -1510,6 +1516,20 @@ impl CmContext {
             }),
             (None, None) => {}
         }
+    }
+
+    /// Whether a coupled run's root locates the crossings on this model's
+    /// declared thresholds and hands them in ([`Self::located_crossing`]).
+    /// A converter with none locates its own, where it dates by the crossing.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn has_coupled_crossing_root(&self) -> bool {
+        self.coupled_crossing_root
+    }
+
+    /// Bind this model's declared thresholds to a coupled run's root.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn bind_coupled_crossing_root(&mut self) {
+        self.coupled_crossing_root = true;
     }
 
     /// The crossing a coupled run's root located on the `threshold`-th
@@ -2658,6 +2678,8 @@ impl CmContext {
             hdl_drives,
             #[cfg(feature = "veriloga")]
             located_crossings,
+            #[cfg(feature = "veriloga")]
+            coupled_crossing_root,
         } = source;
         self.time = *time;
         self.time_prev = *time_prev;
@@ -2716,6 +2738,10 @@ impl CmContext {
         self.hdl_drives.clone_from(hdl_drives);
         #[cfg(feature = "veriloga")]
         self.located_crossings.clone_from(located_crossings);
+        #[cfg(feature = "veriloga")]
+        {
+            self.coupled_crossing_root = *coupled_crossing_root;
+        }
     }
 
     /// Let go of the resources this context shares, before it is kept only
