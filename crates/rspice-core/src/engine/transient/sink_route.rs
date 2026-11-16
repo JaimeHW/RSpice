@@ -151,6 +151,67 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint: &TransientCheckpoint,
+        window: (Value, Value),
+        abort: &dyn AbortSignal,
+        sink: &mut dyn ResultSink,
+    ) -> Result<(SinkTransient, TransientEnd), SimulationError> {
+        let validation = ResumeValidation::ExactNetlist;
+        self.resume_into_sink(netlist, (checkpoint, validation), window, abort, sink)
+    }
+
+    /// [`Engine::run_tran_restart_resume_with_abort`] writing every accepted point to `sink`, as
+    /// [`Engine::run_tran_resume_into_sink_with_abort`] does: the deck resumes the checkpoint an
+    /// `.OPTIONS RESTART` run wrote.
+    pub fn run_tran_restart_resume_into_sink_with_abort(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        window: (Value, Value),
+        abort: &dyn AbortSignal,
+        sink: &mut dyn ResultSink,
+    ) -> Result<(SinkTransient, TransientEnd), SimulationError> {
+        let validation = ResumeValidation::AuthoredRestart;
+        self.resume_into_sink(netlist, (checkpoint, validation), window, abort, sink)
+    }
+
+    /// [`Engine::run_tran_checkpoint_schedule_with_startup_mode_and_abort`] writing every accepted
+    /// point to `sink`, as [`Engine::run_tran_into_sink_with_startup_mode_and_abort`] does; the
+    /// run returns the checkpoints it took at `checkpoint_times`.
+    pub fn run_tran_checkpoint_schedule_into_sink_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        (tstop, max_step): (Value, Value),
+        startup_mode: TransientStartupMode,
+        checkpoint_times: &[Value],
+        abort: &dyn AbortSignal,
+        sink: &mut dyn ResultSink,
+    ) -> Result<(SinkTransient, Vec<ScheduledTransientCheckpoint>), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        self.validate_transient_checkpoint_schedule(0.0, tstop, checkpoint_times)?;
+        let engine = self.resolved_for_netlist(netlist);
+        let (run, _, scheduled) = engine.tran_into_sink(
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+                dc_seed: None,
+                integral_trace: None,
+            },
+            SinkRunPlan {
+                scheduled_checkpoint_times: checkpoint_times,
+                ..SinkRunPlan::to_stop(None, FinalCheckpointRetention::Discarded)
+            },
+            abort,
+            sink,
+        )?;
+        Ok((run, scheduled))
+    }
+
+    fn resume_into_sink(
+        &self,
+        netlist: &Netlist,
+        (checkpoint, validation): (&TransientCheckpoint, ResumeValidation),
         (tstop, max_step): (Value, Value),
         abort: &dyn AbortSignal,
         sink: &mut dyn ResultSink,
@@ -173,7 +234,10 @@ impl Engine {
         let (run, end, _) = engine.tran_into_sink(
             netlist,
             window,
-            SinkRunPlan::to_stop(Some(checkpoint), FinalCheckpointRetention::Retained),
+            SinkRunPlan {
+                resume_validation: validation,
+                ..SinkRunPlan::to_stop(Some(checkpoint), FinalCheckpointRetention::Retained)
+            },
             abort,
             sink,
         )?;

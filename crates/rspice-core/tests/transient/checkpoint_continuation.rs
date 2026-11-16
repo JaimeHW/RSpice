@@ -223,3 +223,75 @@ fn checkpointed_and_resumed_runs_write_the_same_rows_to_a_result_sink() {
         );
     }
 }
+
+/// The authored restart routes and the shared-state run write to a sink what they hold in memory:
+/// a checkpoint schedule takes the same steps and the same checkpoints, a restart resumed from one
+/// of them takes the same steps, and a run capturing states lands on the same times.
+#[test]
+fn restart_schedules_restart_resumes_and_state_captures_write_their_rows_to_a_sink() {
+    let engine = Engine::default();
+    let mode = TransientStartupMode::OperatingPoint;
+    let netlist = Netlist::parse(
+        "lossless line\nvin 1 0 pulse(0 5 0 0.1n 0.1n 5n 25n)\nrin 1 2 50\n\
+         tline 2 0 3 0 z0=50 td=10n\nrl 3 0 50\n.tran 0.25n 20n\n.end\n",
+    )
+    .unwrap();
+    let (tstop, max_step) = (20e-9, 20e-9 / 50.0);
+    let times = [5e-9, 10e-9, 15e-9];
+    let time_bits = |time: &[f64]| time.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
+
+    let (in_memory, checkpoints) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            &netlist, tstop, max_step, mode, &times, &NoAbort,
+        )
+        .unwrap();
+    let mut sink = VecSink::new();
+    let (_, sunk) = engine
+        .run_tran_checkpoint_schedule_into_sink_with_startup_mode_and_abort(
+            &netlist,
+            (tstop, max_step),
+            mode,
+            &times,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    assert_eq!(time_bits(sink.x()), time_bits(&in_memory.time));
+    assert_eq!(
+        sunk, checkpoints,
+        "the schedule's checkpoints do not depend on the sink"
+    );
+
+    let checkpoint = &checkpoints[1].checkpoint;
+    let (resumed, _) = engine
+        .run_tran_restart_resume_with_abort(&netlist, checkpoint, tstop, max_step, &NoAbort)
+        .unwrap();
+    let mut sink = VecSink::new();
+    engine
+        .run_tran_restart_resume_into_sink_with_abort(
+            &netlist,
+            checkpoint,
+            (tstop, max_step),
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    assert_eq!(time_bits(sink.x()), time_bits(&resumed.time));
+
+    let (captured, states) = engine
+        .run_tran_capturing_states_to_stop(&netlist, tstop, max_step, mode, &times, &NoAbort)
+        .unwrap();
+    let mut sink = VecSink::new();
+    let (_, sunk_states) = engine
+        .run_tran_capturing_states_to_stop_into_sink(
+            &netlist,
+            (tstop, max_step),
+            mode,
+            &times,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    assert_eq!(time_bits(sink.x()), time_bits(&captured.time));
+    assert_eq!(sunk_states.len(), states.len());
+}

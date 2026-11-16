@@ -276,6 +276,60 @@ impl Engine {
         ))
     }
 
+    /// [`Self::run_tran_capturing_states_to_stop`] writing every accepted point to `sink`, as
+    /// [`Self::run_tran_into_sink_with_startup_mode_and_abort`] does.
+    pub fn run_tran_capturing_states_to_stop_into_sink(
+        &self,
+        netlist: &Netlist,
+        (tstop, max_step): (Value, Value),
+        startup_mode: TransientStartupMode,
+        times: &[Value],
+        abort: &dyn AbortSignal,
+        sink: &mut dyn crate::result_sink::ResultSink,
+    ) -> Result<
+        (
+            super::sink_route::SinkTransient,
+            Vec<crate::engine::TransientState>,
+        ),
+        SimulationError,
+    > {
+        validate_transient_window(tstop, max_step)?;
+        let capture = TransientStateCapture::through_stop(times, tstop)?;
+        self.reset_convergence_quality();
+        let engine = self.resolved_for_netlist(netlist);
+        let (run, _, _) = engine.tran_into_sink(
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+                dc_seed: None,
+                integral_trace: None,
+            },
+            super::sink_route::SinkRunPlan {
+                state_capture: Some(&capture),
+                ..super::sink_route::SinkRunPlan::to_stop(None, FinalCheckpointRetention::Discarded)
+            },
+            abort,
+            sink,
+        )?;
+        let requested = capture.times().len();
+        let captured = capture.into_captured();
+        if captured.len() != requested {
+            return Err(SimulationError::Circuit(format!(
+                "the transient captured {} of {requested} requested states",
+                captured.len(),
+            )));
+        }
+        Ok((
+            run,
+            captured
+                .into_iter()
+                .map(crate::engine::TransientState)
+                .collect(),
+        ))
+    }
+
     fn run_tran_with_state_capture(
         &self,
         netlist: &Netlist,
