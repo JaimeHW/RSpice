@@ -397,6 +397,29 @@ fn a_tracked_requirement_has_no_verdict() {
     );
 }
 
+/// A requirement with no limit whose measurement failed reads as the error
+/// it is, not as a tracked value.
+#[test]
+fn a_tracked_requirement_whose_measurement_failed_is_an_error() {
+    let specifications = vec![governed(&entry("idd", None, None, "A"), |_| {})];
+    let policy = SpecificationPolicy::default();
+    let run = history(vec![
+        AnalysisResult::new(1, AnalysisType::DcOp, "DcOp", 0.0)
+            .with_measurements(vec![rspice_core::MeasureResult::failed(
+                "idd",
+                "the supply branch was not found",
+            )])
+            .with_provenance(provenance(Some(at("TT", 1.8, 27.0, true)))),
+    ]);
+    let sheet = build(&specifications, &policy, &run, None);
+    assert_rows_agree(&sheet, &specifications, &policy, &run);
+
+    assert_eq!(cell_statuses(&sheet, 0), [CellStatus::Error]);
+    assert_eq!(sheet.rows[0].status, Some(RowStatus::Error));
+    assert_eq!(sheet.summary.counts.error, 1);
+    assert_eq!(sheet.summary.counts.tracked, 0);
+}
+
 /// Another plan's run shows its values and no verdict: its limits are not
 /// this plan's to judge it by.
 #[test]

@@ -362,9 +362,12 @@ fn row<W: AsRef<RetainedWaveform>>(
             SpecificationVerdictStatus::MissingEvidence => RowStatus::NotMeasured,
         };
         let waived = definition.is_some_and(|definition| definition.waiver.is_some());
+        // A failed measurement is never hidden: having no limit leaves a row
+        // unjudged, not unchecked.
         match base {
-            _ if !limited => RowStatus::Tracked,
             RowStatus::Fail | RowStatus::Error if waived => RowStatus::Waived,
+            RowStatus::Error => RowStatus::Error,
+            _ if !limited => RowStatus::Tracked,
             base => base,
         }
     });
