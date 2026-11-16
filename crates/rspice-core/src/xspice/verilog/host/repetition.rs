@@ -7,13 +7,22 @@
 //! zero-time counter, a deep nonblocking chain) from a loop; a repeated state
 //! does. The search is Brent's (BIT 20, 1980): one saved state, replaced each
 //! time the distance from it reaches a power of two, compared with the live
-//! state after every delta cycle. A cycle of period λ entered after μ delta
-//! cycles is found within about 2(μ + λ) of the search starting.
+//! state. Compared after every delta cycle, a cycle of period λ entered after
+//! μ delta cycles is found within about 2(μ + λ) of the search starting;
+//! compared every s delta cycles, within about 2(μ + lcm(λ, s)).
 //!
 //! The search starts only once a step has run [`REPETITION_SUSPICION`] delta
-//! cycles, so a step that settles sooner pays nothing for it. From then on a
-//! delta cycle costs one comparison of the state, which stops at the first
-//! difference, and the saved copy is refilled in place at each power of two.
+//! cycles, so a step that settles sooner pays nothing for it. A comparison
+//! visits every process and every signal, while a delta cycle of a long legal
+//! chain may touch one of each: compared after every delta cycle, a count of
+//! 200,000 delta cycles beside 2,000 idle processes ran 25 times slower. So
+//! the state is compared once every [`comparison_stride`] delta cycles, a
+//! number that grows with the size of the state, which keeps the comparisons
+//! to a small part of the step however large the design. The saved copy is
+//! refilled in place at each power of two. A repeat found that way is a
+//! multiple of the design's period, and the period itself divides it: the
+//! search runs on from the repeat, comparing only at those divisors, and
+//! names the first one at which the state comes back.
 
 use super::*;
 use crate::xspice::event_scheduler::DueEvent;
@@ -23,10 +32,27 @@ use crate::xspice::event_scheduler::DueEvent;
 ///
 /// The longest settling a legal design was measured to need without a `#0`
 /// is 76 delta cycles (the mixed-signal corpus) and 12 in the ivtest
-/// selection; a step past this is unusual enough that comparing its state is
-/// worth the time, and a loop it proves is still refused in a fraction of a
-/// second.
-pub(super) const REPETITION_SUSPICION: u32 = 1 << 16;
+/// selection. Past this, the search costs a small part of the step
+/// ([`comparison_stride`]), and an astable startup or a zero-delay loop is
+/// refused after about a thousand delta cycles instead of after spinning
+/// through tens of thousands.
+pub(super) const REPETITION_SUSPICION: u32 = 1 << 10;
+
+/// Processes and signals a comparison may visit per delta cycle it stands
+/// for. A comparison visits one in about the time an interpreted delta cycle
+/// takes to run one process and dispatch what it wrote, so at this rate the
+/// comparisons cost about a twentieth of the delta cycles they cover.
+const ELEMENTS_PER_DELTA_CYCLE: usize = 16;
+
+/// What a comparison costs before it reaches the processes and signals (the
+/// kernel's due events, the work that must be absent), in the same units.
+const COMPARISON_OVERHEAD: usize = 128;
+
+/// Delta cycles between two comparisons of `host`'s state.
+fn comparison_stride(host: &DigitalHost) -> u32 {
+    let elements = host.slots.len() + host.waiters.len() + COMPARISON_OVERHEAD;
+    u32::try_from(elements / ELEMENTS_PER_DELTA_CYCLE).map_or(u32::MAX, |stride| stride.max(1))
+}
 
 /// Brent's search over one time step's states.
 #[derive(Default)]
@@ -37,45 +63,91 @@ pub(super) struct RepetitionSearch {
     armed: bool,
     /// The kernel's due events in `saved`.
     saved_due: Vec<DueEvent>,
-    /// The kernel's due events now, reused across delta cycles.
+    /// The kernel's due events now, reused across comparisons.
     due: Vec<DueEvent>,
-    /// Delta cycles since `saved` was taken.
+    /// Delta cycles between two comparisons.
+    stride: u32,
+    /// Delta cycles left before the next comparison.
+    countdown: u32,
+    /// Comparisons since `saved` was taken.
     distance: u32,
     /// The distance at which `saved` is replaced.
     power: u32,
+    /// Once the state has come back: how many delta cycles it took, which
+    /// the period divides, and how many have run since.
+    refining: Option<(u32, u32)>,
 }
 
 impl RepetitionSearch {
-    /// Compare the state the delta cycle just counted left with the saved
-    /// one. `Some(period)` when it is the same: the step repeats every
-    /// `period` delta cycles and can never settle.
-    /// Start the search over when `hidden` is set, and say whether it did.
-    pub(super) fn reset_if(&mut self, hidden: bool) -> bool {
-        if hidden {
-            self.armed = false;
-        }
-        hidden
-    }
-
-    pub(super) fn observe(&mut self, host: &DigitalHost, bound: Instant) -> Option<u32> {
-        host.scheduler.due_events_into(bound, &mut self.due);
+    /// Account for the delta cycle just counted. `Some(period)` once the
+    /// state is proven to repeat: the step goes round every `period` delta
+    /// cycles and can never settle.
+    ///
+    /// `hidden` says whether a participant holds state of its own that could
+    /// break a cycle the host's state alone repeats. It is asked only where a
+    /// state is taken or compared: a state taken while it does is no proof,
+    /// and the search starts over.
+    pub(super) fn observe(
+        &mut self,
+        host: &DigitalHost,
+        bound: Instant,
+        hidden: impl FnOnce() -> bool,
+    ) -> Option<u32> {
         if !self.armed {
-            self.save(host);
-            self.power = 1;
+            if !hidden() {
+                self.stride = comparison_stride(host);
+                self.countdown = self.stride;
+                self.refining = None;
+                self.power = 1;
+                host.scheduler.due_events_into(bound, &mut self.due);
+                self.save(host);
+            }
+            return None;
+        }
+        if let Some((multiple, elapsed)) = &mut self.refining {
+            *elapsed += 1;
+            let (multiple, elapsed) = (*multiple, *elapsed);
+            // `saved` is the state the repeat was found in. The period
+            // divides `multiple`, so only a divisor can be it, and at
+            // `multiple` itself the state is back whatever else holds.
+            return (multiple % elapsed == 0
+                && (elapsed == multiple || (!hidden() && self.matches(host, bound))))
+            .then_some(elapsed);
+        }
+        self.countdown -= 1;
+        if self.countdown > 0 {
+            return None;
+        }
+        self.countdown = self.stride;
+        if hidden() {
+            self.armed = false;
             return None;
         }
         self.distance += 1;
-        let saved = self.saved.as_deref()?;
-        if self.due == self.saved_due && host.repeats(saved) {
-            return Some(self.distance);
-        }
-        if self.distance == self.power {
+        if self.matches(host, bound) {
+            let multiple = self.distance * self.stride;
+            if self.stride == 1 {
+                return Some(multiple);
+            }
+            self.refining = Some((multiple, 0));
+        } else if self.distance == self.power {
             self.save(host);
             self.power = self.power.saturating_mul(2);
         }
         None
     }
 
+    /// Whether `host`, whose due events are the kernel's at `bound`, is in
+    /// the saved state.
+    fn matches(&mut self, host: &DigitalHost, bound: Instant) -> bool {
+        host.scheduler.due_events_into(bound, &mut self.due);
+        self.saved
+            .as_deref()
+            .is_some_and(|saved| self.due == self.saved_due && host.repeats(saved))
+    }
+
+    /// Take `host`, whose due events were just read into `due`, as the state
+    /// compared against.
     fn save(&mut self, host: &DigitalHost) {
         match &mut self.saved {
             Some(saved) => (**saved).clone_from(host),

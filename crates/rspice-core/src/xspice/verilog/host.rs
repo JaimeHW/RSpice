@@ -1526,16 +1526,26 @@ impl DigitalHost {
             self.scheduler
                 .note_delta_cycle(bound)
                 .map_err(|error| name_oscillating_tick(resolution, error))?;
-            // A participant that keeps state of its own could break a cycle
-            // the host's state alone repeats: while it does, the search
-            // starts over.
             if self.scheduler.slot_delta_cycles() >= REPETITION_SUSPICION
-                && !search.reset_if(participant.holds_hidden_step_state())
-                && let Some(period) = search.observe(self, bound)
+                && let Some(period) =
+                    search.observe(self, bound, || participant.holds_hidden_step_state())
             {
                 // A thread that can only ever wait on `#0` again is the more
-                // exact reason, when it is the one.
-                self.refuse_zero_delay_loop(tick, self.scheduler.slot_zero_delays())?;
+                // exact reason, when it is the one. Wherever in the cycle the
+                // repeat was found, such a thread is either waiting in the
+                // inactive region or due to run.
+                let mut due = Vec::new();
+                self.scheduler.due_events_into(bound, &mut due);
+                let due_threads = due.iter().filter_map(|event| {
+                    let target = event.target();
+                    let index = *self.process_of_target.get(usize::from(target))?;
+                    (self.targets.get(index) == Some(&target)).then_some(index)
+                });
+                self.refuse_zero_delay_loop(
+                    tick,
+                    self.scheduler.slot_zero_delays(),
+                    self.inactive.iter().copied().chain(due_threads),
+                )?;
                 let error = self.scheduler.repeated_state(bound, period);
                 return Err(name_oscillating_tick(resolution, error).into());
             }
@@ -1558,7 +1568,7 @@ impl DigitalHost {
                 // design asked for, not events waking each other.
                 let resumptions = self.scheduler.note_zero_delay();
                 if resumptions >= ZERO_DELAY_SUSPICION && resumptions.is_power_of_two() {
-                    self.refuse_zero_delay_loop(tick, resumptions)?;
+                    self.refuse_zero_delay_loop(tick, resumptions, self.inactive.iter().copied())?;
                 }
                 for index in std::mem::take(&mut self.inactive) {
                     self.queue_ready(index, tick)?;
@@ -2258,11 +2268,16 @@ impl DigitalHost {
         self.scratch.recycle_terms(terms);
     }
 
-    /// Refuse the step if a thread about to resume from `#0` can only ever
-    /// wait on `#0` again: it holds the time step open forever. The graph
-    /// says so as soon as the step looks suspicious.
-    fn refuse_zero_delay_loop(&self, tick: u64, resumptions: u32) -> Result<(), DigitalRunError> {
-        for &index in &self.inactive {
+    /// Refuse the step if one of `threads`, each about to run in it, can only
+    /// ever wait on `#0` again: it holds the time step open forever. The
+    /// graph says so as soon as the step looks suspicious.
+    fn refuse_zero_delay_loop(
+        &self,
+        tick: u64,
+        resumptions: u32,
+        threads: impl IntoIterator<Item = usize>,
+    ) -> Result<(), DigitalRunError> {
+        for index in threads {
             let Some(slot) = self.slots.get(index) else {
                 continue;
             };

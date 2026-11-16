@@ -990,6 +990,14 @@ pub(crate) struct DueEvent {
     value: EventValue,
 }
 
+#[cfg(feature = "veriloga")]
+impl DueEvent {
+    /// The target the event activates.
+    pub(crate) fn target(&self) -> TargetId {
+        self.target
+    }
+}
+
 /// What one settled instant did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeSlotReport {
@@ -2137,7 +2145,16 @@ impl EventScheduler {
         }
         // An event back-dated below the bound waits in the future tier, whose
         // slice is in heap order: sorted by the total order, it is in running
-        // order. Collecting none allocates nothing.
+        // order. Collecting none allocates nothing, and the heap's least
+        // event says when there are none without visiting the rest.
+        if self
+            .queues
+            .future
+            .peek()
+            .is_none_or(|Reverse(queued)| queued.0.at > bound)
+        {
+            return;
+        }
         let mut back_dated: Vec<&PendingEvent> = self
             .queues
             .future

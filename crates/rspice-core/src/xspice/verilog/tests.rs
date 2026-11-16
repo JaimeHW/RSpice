@@ -2162,7 +2162,7 @@ fn a_unit_without_a_module_reports_its_front_end_errors() {
 }
 
 /// Two processes that wake each other with no `#0` between them never settle
-/// (Icarus 13 runs the same source forever). Once the step has run 2^16 delta
+/// (Icarus 13 runs the same source forever). Once the step has run 2^10 delta
 /// cycles the host finds it back in a state it was in, which proves it never
 /// settles, and refuses it naming the loop.
 #[test]
@@ -2190,7 +2190,7 @@ endmodule
     };
     // Proven within twice the delta cycles the search waits for.
     assert!(
-        (1 << 16..1 << 17).contains(&diagnostic.delta_cycles),
+        (1 << 10..1 << 11).contains(&diagnostic.delta_cycles),
         "{}",
         diagnostic.delta_cycles
     );
@@ -2250,6 +2250,39 @@ endmodule
     ] {
         assert!(text.contains(expected), "missing `{expected}`: {text}");
     }
+}
+
+/// A ring of three inverters goes round in a period the search does not
+/// compare at: it finds a multiple of it, and names the period itself.
+#[test]
+fn a_ring_is_named_by_its_own_period() {
+    let error = run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module tb;
+  reg go = 0;
+  wire a, b, c;
+  assign a = go ? ~c : 1'b0;
+  assign b = ~a;
+  assign c = ~b;
+  initial #1 go = 1;
+endmodule
+"
+            .into(),
+        )],
+        &HdlTestbenchOptions::default(),
+    )
+    .expect_err("the ring never settles");
+    let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &error else {
+        panic!("expected an oscillation, got {error:?}");
+    };
+    assert!(
+        matches!(
+            diagnostic.cause,
+            OscillationCause::RepeatedState { period: 6 }
+        ),
+        "{error}"
+    );
 }
 
 /// A count through 200,000 delta cycles at one time step never returns to a
