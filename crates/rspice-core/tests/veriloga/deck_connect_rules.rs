@@ -166,3 +166,60 @@ fn connectrules_selects_a_deck_block_by_name() {
         "{unknown}"
     );
 }
+
+/// A port no one-way statement fits converts through the bidirectional one,
+/// as section 7.8.3.1's Figure 7-9 has a `bidir` rule beside a `d2a` rule
+/// take the input ports: the input `din` gets the bidirectional converter,
+/// which senses the ramp at its own threshold, and `dout` keeps `d2a`.
+#[test]
+fn an_input_port_only_a_bidir_rule_covers_converts_through_it() {
+    let deck = ramp_deck(
+        "+ connect bidir #(.vsup(3.3), .ftlo(0.7), .fthi(0.7));\n\
+         + connect d2a #(.vsup(3.3));\n",
+    );
+    let records = converters(&deck);
+    let din = records
+        .iter()
+        .find(|record| record.boundary == "DIN")
+        .expect("din converts");
+    assert_eq!(
+        (
+            din.kind,
+            din.module.as_str(),
+            din.direction,
+            din.location.as_deref()
+        ),
+        (
+            ConverterKind::Bidir,
+            "bidir",
+            rspice_core::xspice::PortDirection::In,
+            Some("line 8")
+        ),
+        "{din:#?}"
+    );
+    let dout = records
+        .iter()
+        .find(|record| record.boundary == "DOUT")
+        .expect("dout converts");
+    assert_eq!(
+        (dout.kind, dout.module.as_str()),
+        (ConverterKind::D2a, "d2a")
+    );
+
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 100e-9, MAX_STEP)
+        .unwrap_or_else(|error| panic!("transient solves: {error}"));
+    let switched = result
+        .digital_trace_named("DIN")
+        .expect("din has a digital side")
+        .iter()
+        .find(|point| point.value.state == DigitalState::One)
+        .expect("the ramp crosses the threshold")
+        .time;
+    let crossing = 0.7 * 3.3 / SLOPE;
+    assert!(
+        (0.0..=MAX_STEP).contains(&(switched - crossing)),
+        "switched at {switched:e} s, the ramp crosses fthi at {crossing:e} s"
+    );
+}

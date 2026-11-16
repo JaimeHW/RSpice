@@ -5785,7 +5785,12 @@ fn add_connect_rule_converter(
             boundary_supply::supply_source(bridge.supply.as_ref())
         },
     );
-    let law = connect_modules::converter_law(selected, bridge.kind, supply)?;
+    // What converts the boundary: as planned, or the bidirectional converter
+    // where only a bidirectional rule covers a one-way port.
+    let converts = selected.map_or(bridge.kind, |selected| {
+        connect_modules::delegated_kind(&selected.name, bridge.kind)
+    });
+    let law = connect_modules::converter_law(selected, converts, supply)?;
     let tracking = live_supply.is_some();
 
     // A D/A reads the code models that drive its event node: every driver of
@@ -5798,7 +5803,7 @@ fn add_connect_rule_converter(
         .mixed_signal_hosts
         .iter()
         .any(|host| host.driven_event_nodes().any(|node| node == event_node));
-    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac && !module_drives {
+    let drivers = if converts == XspiceAutoBridgeKind::Dac && !module_drives {
         connect_modules::event_node_drivers(circuit, event_node)
     } else {
         Vec::new()
@@ -5808,7 +5813,7 @@ fn add_connect_rule_converter(
         &str,
         std::sync::Arc<dyn crate::xspice::CodeModel>,
         Vec<PortConnection>,
-    ) = match bridge.kind {
+    ) = match converts {
         XspiceAutoBridgeKind::Adc => (
             "adc",
             std::sync::Arc::new(crate::xspice::models::ConnectAdc { tracking }),
@@ -5870,7 +5875,7 @@ fn add_connect_rule_converter(
     // the code models that drive its segment beside it, unless code models
     // alone drive the segment.
     if bridge.event_node.is_some() && !taps_code_models {
-        match bridge.kind {
+        match converts {
             XspiceAutoBridgeKind::Adc => {}
             XspiceAutoBridgeKind::Dac => instance.read_hdl_drives("in"),
             _ => instance.read_hdl_drives("d"),
@@ -5886,11 +5891,11 @@ fn add_connect_rule_converter(
     let (module, rules) = match selected {
         Some(selected) => (selected.name.clone(), selected.rules()),
         None => (
-            connect_modules::module_name(bridge.kind).to_string(),
+            connect_modules::module_name(converts).to_string(),
             connect_modules::ParameterSource::RuleSet(crate::circuit::BUILTIN_RULE_SET.into()),
         ),
     };
-    let kind = match bridge.kind {
+    let kind = match converts {
         XspiceAutoBridgeKind::Adc => crate::circuit::ConverterKind::A2d,
         XspiceAutoBridgeKind::Dac => crate::circuit::ConverterKind::D2a,
         _ => crate::circuit::ConverterKind::Bidir,

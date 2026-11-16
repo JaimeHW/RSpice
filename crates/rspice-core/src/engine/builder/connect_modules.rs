@@ -424,6 +424,26 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
     }
 }
 
+/// What a delegating connect module named `module` converts a boundary
+/// planned as `kind` with.
+///
+/// A port matches a bidirectional connect statement when no one-way statement
+/// fits its direction (section 7.8.3.1, Figure 7-9: a `bidir` rule beside a
+/// `d2a` rule takes the input ports), so `bidir` converts an input or an
+/// output port as the bidirectional converter: it senses the node as `a2d`
+/// does and releases it while the port does not drive. Every other module
+/// converts the boundary as planned.
+pub(super) fn delegated_kind(
+    module: &str,
+    kind: super::XspiceAutoBridgeKind,
+) -> super::XspiceAutoBridgeKind {
+    use super::XspiceAutoBridgeKind as Kind;
+    match (kind, module) {
+        (Kind::Adc | Kind::Dac, "bidir") => Kind::Bidi,
+        _ => kind,
+    }
+}
+
 /// The law of the real-valued converter a delegating module selects: every
 /// parameter, checked, with where it came from.
 pub(super) fn real_converter_law(
@@ -1029,6 +1049,26 @@ impl DesignConnectRules {
         else {
             return Ok(None);
         };
+        if matches!(
+            kind,
+            super::XspiceAutoBridgeKind::VToReal | super::XspiceAutoBridgeKind::RealToV
+        ) && selected.name == "rbidir"
+            && self.builtin_delegations.contains_key("rbidir")
+        {
+            // The real converter reads its resolved net back onto the node
+            // it drives, which a one-way port's net never resolves to.
+            let (needed, port) = if kind == super::XspiceAutoBridgeKind::VToReal {
+                ("e2r", "input")
+            } else {
+                ("r2e", "output")
+            };
+            return Err(connect_refusal(format!(
+                "node '{node_label}' is a mixed-discipline connection to the {port} port                  '{instance_name}.{port_name}', and the only connect statement that covers it                  selects rbidir, which converts inout ports only; add a connect {needed}                  statement for {port} ports"
+            ))
+            .instance(instance_name)
+            .module("rbidir")
+            .into());
+        }
         let rule = table
             .select_typed(
                 DECK_DISCIPLINE,
@@ -1065,11 +1105,10 @@ impl DesignConnectRules {
         let mut executions = self.executions.borrow_mut();
         let execution = executions.entry(key).or_insert_with(|| {
             std::sync::Arc::new(
-                if let Some(signature) = self
-                    .builtin_delegations
-                    .get(&selected.name)
-                    .filter(|_| expected_library_module(kind) == Some(selected.name.as_str()))
-                {
+                if let Some(signature) = self.builtin_delegations.get(&selected.name).filter(|_| {
+                    expected_library_module(delegated_kind(&selected.name, kind))
+                        == Some(selected.name.as_str())
+                }) {
                     super::connect_execution::ConnectExecution::Delegated(*signature)
                 } else {
                     super::connect_execution::ConnectExecution::Authored(
