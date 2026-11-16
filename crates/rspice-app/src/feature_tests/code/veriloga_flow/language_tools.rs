@@ -23,7 +23,7 @@ pub(super) const CTRL_SHIFT: Modifiers = Modifiers {
 pub(super) const NONE: Modifiers = Modifiers::NONE;
 
 pub(super) fn op_amp() -> User {
-    let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
+    let (mut user, _, _) = new_device("opamp_bhv", ["inp inn", "out", "vdd vss"]);
     super::super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);
     user.settle();
     user

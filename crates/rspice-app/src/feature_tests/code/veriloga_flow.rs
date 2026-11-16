@@ -247,7 +247,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     use rspice_app_code::workbench::documents::code_workspace::CodeEditorSeverity;
     use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
 
-    let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
+    let (mut user, _, _) = new_device("opamp_bhv", ["inp inn", "out", "vdd vss"]);
     super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);
     user.settle();
     compile(&mut user);
@@ -411,7 +411,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted() {
-    let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
+    let (mut user, _, _) = new_device("opamp_bhv", ["inp inn", "out", "vdd vss"]);
     let broken = OPAMP
         .replace("vslew = slew(", "vslw = slew(")
         .replace("* gbw)", "* gbww)");
@@ -509,7 +509,7 @@ fn long_module(links: usize) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
-    let (mut user, _, _) = new_device("chain", "p n");
+    let (mut user, _, _) = new_device("chain", ["", "", "p n"]);
     let module = long_module(1000);
     assert!(module.lines().count() >= 2000);
     super::veriloga_interface_tests::edit_source(&mut user.app, &module);

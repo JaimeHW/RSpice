@@ -17,7 +17,8 @@ use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 
 const SIZE: egui::Vec2 = egui::vec2(1440.0, 900.0);
 pub(crate) const CELL: &str = "vcvs_gain";
-pub(crate) const PORTS: &str = "inp:in inn:in out:out gnd";
+/// The device's ports as typed in Inputs, Outputs and Inouts.
+pub(crate) const PORTS: [&str; 3] = ["inp inn", "out", "gnd"];
 /// The module the user writes: `out` driven `gain` times the input
 /// difference above `gnd`.
 pub(crate) const MODULE: &str = "`include \"disciplines.vams\"\n\nmodule vcvs_gain(inp, inn, out, gnd);\n  input inp, inn;\n  output out;\n  inout gnd;\n  electrical inp, inn, out, gnd;\n  (* units=\"V/V\", desc=\"Voltage gain\" *) parameter real gain = 10 from (0:inf);\n  analog V(out, gnd) <+ gain * (V(inp) - V(inn));\nendmodule\n";
@@ -289,10 +290,10 @@ pub(crate) struct Device {
     pub(crate) view: CellViewRef,
 }
 
-/// Steps 1 and 2: a new project, and the device `cell` with `ports` created
-/// from its canvas. Returns the top schematic and the device's view, which
-/// the Design workspace shows.
-pub(crate) fn new_device(cell: &str, ports: &str) -> (User, CellViewRef, CellViewRef) {
+/// Steps 1 and 2: a new project, and the device `cell` with `ports` typed in
+/// Inputs, Outputs and Inouts, created from its canvas. Returns the top
+/// schematic and the device's view, which the Design workspace shows.
+pub(crate) fn new_device(cell: &str, ports: [&str; 3]) -> (User, CellViewRef, CellViewRef) {
     let (mut user, top) = new_project();
     let library = top.library.clone();
 
@@ -308,7 +309,7 @@ pub(crate) fn new_device(cell: &str, ports: &str) -> (User, CellViewRef, CellVie
         "the form offers the project's design library"
     );
     form.name = cell.to_owned();
-    form.ports = ports.to_owned();
+    [form.inputs, form.outputs, form.inouts] = ports.map(str::to_owned);
     user.settle();
     user.click("Create");
     let view = CellViewRef::new(&library, cell, "veriloga");

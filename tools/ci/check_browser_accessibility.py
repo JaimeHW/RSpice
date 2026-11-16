@@ -113,7 +113,8 @@ def device_dialog(browser):
     if first[0]["name"] != "New Verilog-A device":
         raise AssertionError(f"The dialog is not named: {first[0]}")
     fields = {field["name"]: field for field in first[1]}
-    if fields.get("Library", {}).get("text") != "user" or "Cell name" not in fields or "Ports" not in fields:
+    if fields.get("Library", {}).get("text") != "user" or any(
+            name not in fields for name in ("Cell name", "Inputs", "Outputs", "Inouts")):
         raise AssertionError(f"Field names or values are missing: {first[1]}")
     if not fields.get("Create", {}).get("properties", {}).get("disabled"):
         raise AssertionError(f"Create should read as unavailable: {first[1]}")
