@@ -53,7 +53,7 @@ impl SourceClockSink for BreakpointManager {
         self.add(time);
     }
     fn clock_count(&self) -> usize {
-        self.times().len()
+        self.scheduled_len()
     }
 }
 
@@ -1417,7 +1417,7 @@ impl Engine {
         circuit
             .capacitors
             .collect_transient_breakpoints(tstop, clocks, abort, max_points, false)?;
-        if let Some(expression_clocks) = expression_clocks {
+        if let Some(mut expression_clocks) = expression_clocks {
             breakpoints.extend_expression_clocks(expression_clocks.times());
         }
 

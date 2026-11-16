@@ -180,6 +180,18 @@ impl Ord for BreakpointTimeKey {
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
     breakpoints: Vec<Value>,
+    /// Breakpoints added out of order, not yet merged into `breakpoints`.
+    ///
+    /// Several sources' corners arrive one source after another, so each
+    /// later source's corners land between earlier ones, and a run adds
+    /// arrivals just ahead of the clock; inserting each into the sorted table
+    /// moved the rest of it, which made a schedule of a few million corners
+    /// take hours. An add looks up its neighbours in both sets, so it keeps or
+    /// drops a time exactly as an insert into one table would. Every query
+    /// reads both sets, and they merge in one pass (`settle`) once this set is
+    /// as large as the part of the table not yet passed, or before an
+    /// operation that rewrites the table.
+    pending: BTreeSet<BreakpointTimeKey>,
     /// Runtime XSPICE breakpoints/events for the next transient advance.
     ///
     /// Code-model event requests are re-issued from accepted model state. They
@@ -267,6 +279,7 @@ impl BreakpointManager {
         };
         Self {
             breakpoints: Vec::new(),
+            pending: BTreeSet::new(),
             runtime_breakpoints: BTreeSet::new(),
             landings: BTreeSet::new(),
             current_index: 0,
@@ -303,6 +316,7 @@ impl BreakpointManager {
     pub fn empty_like(&self) -> Self {
         Self {
             breakpoints: Vec::new(),
+            pending: BTreeSet::new(),
             runtime_breakpoints: BTreeSet::new(),
             landings: BTreeSet::new(),
             current_index: 0,
@@ -331,12 +345,92 @@ impl BreakpointManager {
 
     /// Add a breakpoint time (deduplicates automatically)
     pub fn add(&mut self, time: Value) -> bool {
-        Self::insert_sorted_unique(
-            &mut self.breakpoints,
-            time,
-            self.tolerance,
-            self.inclusive_tolerance,
-        )
+        // A time near one already passed is that breakpoint, as an insert
+        // into the whole table found it.
+        if !time.is_finite() || self.neighbour_within_tolerance(time, 0).is_some() {
+            return false;
+        }
+        if self.pending.is_empty()
+            && self
+                .breakpoints
+                .last()
+                .is_none_or(|last| last.total_cmp(&time).is_lt())
+        {
+            self.breakpoints.push(time);
+            return true;
+        }
+        self.pending.insert(BreakpointTimeKey(time));
+        if self.pending.len() >= self.breakpoints.len().saturating_sub(self.current_index) {
+            self.settle();
+        }
+        true
+    }
+
+    /// Merge the pending adds into the part of the sorted table not yet
+    /// passed.
+    ///
+    /// The two sets hold no pair within the merge tolerance of each other, so
+    /// this is a plain merge. The stepper steps past pending entries as it
+    /// passes table entries, so the processed prefix keeps its index.
+    fn settle(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending);
+        let table = self.breakpoints.split_off(self.current_index);
+        let mut merged = std::mem::take(&mut self.breakpoints);
+        merged.reserve(table.len() + pending.len());
+        let mut table = table.into_iter().peekable();
+        for BreakpointTimeKey(time) in pending {
+            while let Some(earlier) = table.next_if(|existing| existing.total_cmp(&time).is_lt()) {
+                merged.push(earlier);
+            }
+            merged.push(time);
+        }
+        merged.extend(table);
+        self.breakpoints = merged;
+    }
+
+    /// The not-yet-passed permanent breakpoint nearest `time` from below,
+    /// or else from above, that lies within the merge tolerance of it.
+    fn permanent_neighbour_within_tolerance(&self, time: Value) -> Option<Value> {
+        self.neighbour_within_tolerance(time, self.current_index)
+    }
+
+    /// The permanent breakpoint from table index `from` on, or pending,
+    /// nearest `time` from below, or else from above, that lies within the
+    /// merge tolerance of it.
+    ///
+    /// These are the two neighbours `time` would have in the merged table,
+    /// and they are checked in that order, as a lookup in the table is.
+    fn neighbour_within_tolerance(&self, time: Value, from: usize) -> Option<Value> {
+        let remaining = self.breakpoints.get(from..).unwrap_or(&[]);
+        let position = Self::sorted_insert_position(remaining, time);
+        let key = BreakpointTimeKey(time);
+        let below = [
+            position
+                .checked_sub(1)
+                .and_then(|index| remaining.get(index))
+                .copied(),
+            self.pending.range(..key).next_back().map(|key| key.0),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by(Value::total_cmp);
+        let above = [
+            remaining.get(position).copied(),
+            self.pending.range(key..).next().map(|key| key.0),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(Value::total_cmp);
+        [below, above].into_iter().flatten().find(|neighbour| {
+            Self::difference_within_tolerance(
+                (time - neighbour).abs(),
+                self.tolerance,
+                self.inclusive_tolerance,
+            )
+        })
     }
 
     /// Deliver every permanent breakpoint less than one `floor` before `stop`
@@ -352,6 +446,7 @@ impl BreakpointManager {
     /// keeps its own instant.
     #[doc(hidden)]
     pub fn reconcile_onto_stop(&mut self, stop: Value, floor: Value) {
+        self.settle();
         let pending = self.current_index.min(self.breakpoints.len());
         let mut ahead = self.breakpoints.split_off(pending);
         let before = ahead.len();
@@ -373,6 +468,7 @@ impl BreakpointManager {
     where
         I: IntoIterator<Item = Value>,
     {
+        self.settle();
         let processed_through = self
             .current_index
             .checked_sub(1)
@@ -459,12 +555,7 @@ impl BreakpointManager {
             if !time.is_finite() || time < 0.0 {
                 continue;
             }
-            if Self::contains_sorted_within_tolerance(
-                &self.breakpoints[self.current_index..],
-                time,
-                self.tolerance,
-                self.inclusive_tolerance,
-            ) {
+            if self.permanent_neighbour_within_tolerance(time).is_some() {
                 continue;
             }
             Self::insert_runtime_unique(
@@ -699,6 +790,7 @@ impl BreakpointManager {
         schedule: &EdgeCompletionSchedule,
         stop: Value,
     ) {
+        self.settle();
         for &completion in &schedule.completions {
             if !completion.is_finite() || completion < 0.0 {
                 continue;
@@ -767,6 +859,7 @@ impl BreakpointManager {
     /// until the first accepted point asks the models anew.
     #[doc(hidden)]
     pub fn restore_model_requests(&mut self, times: &[Value], stop: Value) {
+        self.settle();
         for &time in times {
             if !time.is_finite() || time < 0.0 {
                 continue;
@@ -822,6 +915,7 @@ impl BreakpointManager {
     /// `stop` is a landing again unless it is also a breakpoint that restarts.
     #[doc(hidden)]
     pub fn restore_model_landings(&mut self, times: &[Value], stop: Value) {
+        self.settle();
         for &time in times {
             if !time.is_finite() || time < 0.0 {
                 continue;
@@ -897,6 +991,7 @@ impl BreakpointManager {
         }
     }
 
+    #[cfg(test)]
     fn insert_sorted_unique(
         values: &mut Vec<Value>,
         time: Value,
@@ -998,6 +1093,15 @@ impl BreakpointManager {
             .skip(self.current_index)
             .copied()
             .find(|&t| t > threshold);
+        let pending = self
+            .pending
+            .range((Excluded(BreakpointTimeKey(threshold)), Unbounded))
+            .next()
+            .map(|time| time.0);
+        let permanent = match (permanent, pending) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         let runtime = self
             .runtime_breakpoints
             .range((Excluded(BreakpointTimeKey(threshold)), Unbounded))
@@ -1013,11 +1117,7 @@ impl BreakpointManager {
 
     /// Treat breakpoints at or before `time` as already handled.
     pub fn discard_through(&mut self, time: Value) {
-        while self.current_index < self.breakpoints.len()
-            && self.breakpoints[self.current_index] <= time + self.tolerance
-        {
-            self.current_index += 1;
-        }
+        self.pass_through(time);
         self.remove_runtime_through(time);
         if self
             .edge_crossing
@@ -1027,28 +1127,28 @@ impl BreakpointManager {
         }
     }
 
+    /// Step past every permanent breakpoint at or before `time`.
+    ///
+    /// A pending one is dropped rather than merged behind the processed
+    /// prefix, so passing one costs no more than its own removal.
+    fn pass_through(&mut self, time: Value) {
+        let through = time + self.tolerance;
+        while self.current_index < self.breakpoints.len()
+            && self.breakpoints[self.current_index] <= through
+        {
+            self.current_index += 1;
+        }
+        while self.pending.first().is_some_and(|first| first.0 <= through) {
+            self.pending.pop_first();
+        }
+    }
+
     fn permanent_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
         if !time.is_finite() {
             return None;
         }
 
-        let remaining = self.breakpoints.get(self.current_index..)?;
-        let position = match remaining.binary_search_by(|breakpoint| breakpoint.total_cmp(&time)) {
-            Ok(position) | Err(position) => position,
-        };
-        let first_candidate = position.saturating_sub(1);
-
-        remaining
-            .get(first_candidate..position.saturating_add(1).min(remaining.len()))?
-            .iter()
-            .copied()
-            .find(|breakpoint| {
-                Self::difference_within_tolerance(
-                    (time - breakpoint).abs(),
-                    self.tolerance,
-                    self.inclusive_tolerance,
-                )
-            })
+        self.permanent_neighbour_within_tolerance(time)
     }
 
     fn runtime_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
@@ -1178,12 +1278,7 @@ impl BreakpointManager {
     /// Mark that we just solved at a breakpoint (call after solving at BP)
     /// Returns the dialect-specific restart timestep.
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
-        // Advance current_index past this breakpoint
-        while self.current_index < self.breakpoints.len()
-            && self.breakpoints[self.current_index] <= time + self.tolerance
-        {
-            self.current_index += 1;
-        }
+        self.pass_through(time);
         self.remove_runtime_through(time);
         self.just_passed_breakpoint = true;
         let saved_delta = self.saved_delta_before_breakpoint.take();
@@ -1210,6 +1305,7 @@ impl BreakpointManager {
 
     /// Reset the manager for a new simulation
     pub fn reset(&mut self) {
+        self.settle();
         self.current_index = 0;
         self.runtime_breakpoints.clear();
         self.landings.clear();
@@ -1222,16 +1318,24 @@ impl BreakpointManager {
 
     /// Get total number of breakpoints
     pub fn len(&self) -> usize {
-        self.breakpoints.len() + self.runtime_breakpoints.len()
+        self.breakpoints.len() + self.pending.len() + self.runtime_breakpoints.len()
     }
 
     /// Check if empty
     pub fn is_empty(&self) -> bool {
-        self.breakpoints.is_empty() && self.runtime_breakpoints.is_empty()
+        self.breakpoints.is_empty()
+            && self.pending.is_empty()
+            && self.runtime_breakpoints.is_empty()
     }
 
-    /// Borrow the sorted breakpoint schedule.
-    pub fn times(&self) -> &[Value] {
+    /// How many permanent breakpoints the schedule holds.
+    pub fn scheduled_len(&self) -> usize {
+        self.breakpoints.len() + self.pending.len()
+    }
+
+    /// The sorted breakpoint schedule.
+    pub fn times(&mut self) -> &[Value] {
+        self.settle();
         &self.breakpoints
     }
 
@@ -1260,6 +1364,110 @@ impl BreakpointManager {
 #[cfg(test)]
 mod breakpoint_manager_tests {
     use super::*;
+
+    /// Each source's corners in order, one source after another, as the
+    /// transient setup adds them; neighbours a fraction of the tolerance apart
+    /// make the first-added-wins coalescing do real work.
+    fn interleaved_corners(sources: usize, cycles: usize) -> Vec<Value> {
+        let mut times = Vec::with_capacity(sources * cycles * 2);
+        for source in 0..sources {
+            let offset = source as Value * 0.25e-9 + (source % 2) as Value * 0.3e-15;
+            for cycle in 0..cycles {
+                let start = cycle as Value * 1.0e-9 + offset;
+                times.push(start);
+                times.push(start + 0.1e-9);
+            }
+        }
+        times
+    }
+
+    #[test]
+    fn interleaved_adds_keep_exactly_the_times_a_sorted_insert_keeps() {
+        for policy in [BreakpointStepPolicy::Ngspice, BreakpointStepPolicy::Xyce] {
+            let mut manager = BreakpointManager::new_with_tolerance_and_policy(1.0e-15, policy);
+            let mut reference = Vec::new();
+            for time in interleaved_corners(5, 2_000) {
+                let kept = manager.add(time);
+                let expected = BreakpointManager::insert_sorted_unique(
+                    &mut reference,
+                    time,
+                    manager.tolerance,
+                    manager.inclusive_tolerance,
+                );
+                assert_eq!(kept, expected, "add({time:e}) under {policy:?}");
+            }
+            assert_eq!(manager.scheduled_len(), reference.len());
+            for (index, &time) in reference.iter().enumerate().step_by(97) {
+                assert_eq!(
+                    manager.next_after(time - 0.5e-12),
+                    Some(time),
+                    "entry {index}"
+                );
+                assert!(manager.at_breakpoint(time + 0.2e-15));
+            }
+            let times = manager.times().to_vec();
+            assert_eq!(
+                times.iter().map(|time| time.to_bits()).collect::<Vec<_>>(),
+                reference
+                    .iter()
+                    .map(|time| time.to_bits())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn an_add_after_the_run_has_passed_a_breakpoint_lands_in_the_table() {
+        let mut manager = BreakpointManager::new_with_tolerance(1.0e-15);
+        for time in interleaved_corners(3, 10) {
+            manager.add(time);
+        }
+        manager.discard_through(2.0e-9);
+        assert!(manager.add(5.05e-9));
+        assert!(!manager.add(5.05e-9 + 0.5e-15));
+        assert_eq!(manager.next_after(5.0e-9 + 1.0e-12), Some(5.05e-9));
+    }
+
+    #[test]
+    fn adds_during_the_run_are_landed_on_in_order_like_table_entries() {
+        let mut manager = BreakpointManager::new_with_tolerance(1.0e-15);
+        let mut reference = Vec::new();
+        for time in interleaved_corners(3, 200) {
+            manager.add(time);
+            BreakpointManager::insert_sorted_unique(
+                &mut reference,
+                time,
+                manager.tolerance,
+                manager.inclusive_tolerance,
+            );
+        }
+        let start = 50.0e-9;
+        manager.discard_through(start);
+        for time in interleaved_corners(2, 400) {
+            let time = time + 0.05e-9;
+            let expected = BreakpointManager::insert_sorted_unique(
+                &mut reference,
+                time,
+                manager.tolerance,
+                manager.inclusive_tolerance,
+            );
+            assert_eq!(manager.add(time), expected, "add({time:e})");
+        }
+        let mut landed = Vec::new();
+        let mut time = start;
+        while let Some(next) = manager.next_after(time) {
+            assert!(manager.at_breakpoint(next));
+            manager.mark_breakpoint_solved(next);
+            landed.push(next.to_bits());
+            time = next;
+        }
+        let expected = reference
+            .iter()
+            .filter(|&&time| time > start + 1.0e-15)
+            .map(|time| time.to_bits())
+            .collect::<Vec<_>>();
+        assert_eq!(landed, expected);
+    }
 
     #[test]
     fn clocks_less_than_one_floor_apart_are_one_instant() {
