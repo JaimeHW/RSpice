@@ -22,6 +22,18 @@ pub struct StoreSink<I: RunIo> {
     receipt: Option<StoreReceipt>,
     /// Event changes converted for the writer, reused across calls.
     changes: Vec<EventChange>,
+    /// A sink appending to a segment a resumed run continues: the x of the segment's last kept
+    /// row, which the run's own rows and changes at or before it repeat.
+    seam: Option<Seam>,
+}
+
+/// Where a resumed run meets the segment it continues.
+struct Seam {
+    through: f64,
+    /// The segment's rows when it was reopened.
+    kept: u64,
+    /// The run's rows at or before `through`, which the segment already holds.
+    repeated: u64,
 }
 
 impl<I: RunIo> StoreSink<I> {
@@ -32,7 +44,29 @@ impl<I: RunIo> StoreSink<I> {
             writer: None,
             receipt: None,
             changes: Vec::new(),
+            seam: None,
         }
+    }
+
+    /// A sink that appends a resumed run to the segment on `io`, which holds the rows of the run
+    /// it continues: the segment keeps its rows and event changes up to its row at `through`, the
+    /// resumed run's start, and drops the rest; the run's rows and changes at or before `through`,
+    /// which the segment already holds, are not written again. The run must record the same
+    /// signals. A segment with no row at `through` is left as it was and refused with
+    /// [`StoreError::NoRowAt`].
+    pub fn appending(io: I, through: f64) -> Result<Self, StoreError> {
+        let writer = RunWriter::reopen(io, through)?;
+        Ok(Self {
+            io: None,
+            seam: Some(Seam {
+                through,
+                kept: writer.rows(),
+                repeated: 0,
+            }),
+            writer: Some(writer),
+            receipt: None,
+            changes: Vec::new(),
+        })
     }
 
     /// What `END` recorded, once the run ended.
@@ -55,6 +89,18 @@ impl<I: RunIo> StoreSink<I> {
 
 impl<I: RunIo> ResultSink for StoreSink<I> {
     fn begin(&mut self, schema: &sink::ResultSchema, meta: &sink::RunMeta) -> Result<(), SinkStop> {
+        if self.seam.is_some() {
+            let mut bytes = Vec::new();
+            store_schema(schema).encode(&mut bytes);
+            return if self.writer()?.schema_bytes() == bytes.as_slice() {
+                Ok(())
+            } else {
+                Err(SinkStop::Io(
+                    "the resumed run does not record the signals of the run it continues"
+                        .to_owned(),
+                ))
+            };
+        }
         let io = self
             .io
             .take()
@@ -67,10 +113,29 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
 
     #[inline]
     fn row(&mut self, x: f64, values: &[f64]) -> Result<(), SinkStop> {
+        if let Some(seam) = &mut self.seam
+            && x <= seam.through
+        {
+            seam.repeated += 1;
+            return Ok(());
+        }
         self.writer()?.push_row(x, values).map_err(sink_stop)
     }
 
     fn amend_open_row(&mut self, row: u64, column: u32, value: f64) -> Result<(), SinkStop> {
+        let row = match &self.seam {
+            Some(seam) => seam
+                .kept
+                .checked_add(row)
+                .and_then(|row| row.checked_sub(seam.repeated))
+                .filter(|_| row >= seam.repeated)
+                .ok_or_else(|| {
+                    SinkStop::Io(format!(
+                        "the resumed run amended its row {row}, which the store already holds"
+                    ))
+                })?,
+            None => row,
+        };
         self.writer()?
             .amend_open_row(row, column as usize, value)
             .map_err(sink_stop)
@@ -79,7 +144,13 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
     fn events(&mut self, changes: &[sink::EventChange]) -> Result<(), SinkStop> {
         let mut converted = std::mem::take(&mut self.changes);
         converted.clear();
-        converted.extend(changes.iter().map(store_change));
+        let seam = self.seam.as_ref();
+        converted.extend(
+            changes
+                .iter()
+                .filter(|change| seam.is_none_or(|seam| change.time > seam.through))
+                .map(store_change),
+        );
         let pushed = self.writer()?.push_events(&converted).map_err(sink_stop);
         self.changes = converted;
         pushed

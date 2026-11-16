@@ -6,8 +6,10 @@
 //! 64 buckets of one level and is written when its 64th bucket completes; at the end every level
 //! writes what it has, up to the first level whose whole run fits in one frame.
 
+use crate::StoreError;
 use crate::format::{
-    FrameBuf, FrameKind, SUMMARY_FANOUT, SUMMARY_FRAME_BUCKETS, canonical, fold_max, fold_min,
+    FrameBuf, FrameKind, SUMMARY_FANOUT, SUMMARY_FRAME_BUCKETS, bucket_rows, canonical, fold_max,
+    fold_min, summary_frame_rows,
 };
 
 const PAIRS: usize = 2 * SUMMARY_FRAME_BUCKETS;
@@ -37,6 +39,9 @@ impl Level {
         }
     }
 }
+
+/// One stored bucket: its x range and each signal's `(min, max)`.
+pub(crate) type StoredBucket = (f64, f64, Vec<f64>);
 
 /// The writer's summary levels 2 and up. Memory is one 64-bucket frame per level.
 pub(crate) struct Pyramid {
@@ -68,13 +73,29 @@ impl Pyramid {
     }
 
     fn push(&mut self, mut index: usize, mut x_lo: f64, mut x_hi: f64) {
+        while self.fold_child(index, x_lo, x_hi) {
+            let level = &self.levels[index];
+            let at = 2 * (level.buckets - 1);
+            x_lo = level.x[at];
+            x_hi = level.x[at + 1];
+            for signal in 0..self.signals {
+                self.child[2 * signal] = level.values[signal * PAIRS + at];
+                self.child[2 * signal + 1] = level.values[signal * PAIRS + at + 1];
+            }
+            index += 1;
+        }
+    }
+
+    /// Fold the child bucket in the child buffer, spanning `x_lo ..= x_hi`, into level `index`'s
+    /// open bucket; returns whether that completed the bucket.
+    fn fold_child(&mut self, index: usize, x_lo: f64, x_hi: f64) -> bool {
         let Self {
             signals,
             levels,
             child,
         } = self;
         let signals = *signals;
-        loop {
+        {
             if index == levels.len() {
                 levels.push(Level::new(signals));
             }
@@ -100,18 +121,79 @@ impl Pyramid {
             }
             level.children += 1;
             if level.children < SUMMARY_FANOUT {
-                return;
+                return false;
             }
             level.children = 0;
             level.buckets += 1;
-            x_lo = level.x[at];
-            x_hi = level.x[at + 1];
-            for signal in 0..signals {
-                child[2 * signal] = level.values[signal * PAIRS + at];
-                child[2 * signal + 1] = level.values[signal * PAIRS + at + 1];
+            true
+        }
+    }
+
+    /// The pyramid a writer holds once it has folded `rows` rows (a whole number of level-1
+    /// buckets), rebuilt from the buckets the segment already stores: `stored(level, first, end)`
+    /// gives level `level`'s buckets over rows `first .. end`, each as `(x_lo, x_hi, (min, max)
+    /// per signal)`, read from the chunks' level-1 summaries for level 1 and from the written
+    /// `SUMMARY` frames above it.
+    ///
+    /// Each level's open frame is folded from at most 1,024 children: the level below's written
+    /// frames since that open frame began, and the level below's own open frame, rebuilt first.
+    /// The reads are therefore bounded by the pyramid's height, not by the rows.
+    pub(crate) fn rebuild(
+        signals: usize,
+        rows: u64,
+        stored: &mut dyn FnMut(u8, u64, u64) -> Result<Vec<StoredBucket>, StoreError>,
+    ) -> Result<Self, StoreError> {
+        let mut pyramid = Self::new(signals);
+        let mut index = 0;
+        while rows >= bucket_rows(index as u8 + 1) {
+            let level = index as u8 + 2;
+            let frame_rows = summary_frame_rows(level);
+            let frames = rows / frame_rows;
+            let start = frames * frame_rows;
+            let mut children = Vec::new();
+            if index == 0 {
+                children = stored(1, start, rows)?;
+            } else {
+                let below = &pyramid.levels[index - 1];
+                let below_start = below.frames * summary_frame_rows(level - 1);
+                if start < below_start {
+                    children = stored(level - 1, start, below_start)?;
+                }
+                let below = &pyramid.levels[index - 1];
+                for bucket in 0..below.buckets {
+                    let at = 2 * bucket;
+                    let pairs = (0..signals)
+                        .flat_map(|signal| {
+                            let slot = signal * PAIRS + at;
+                            [below.values[slot], below.values[slot + 1]]
+                        })
+                        .collect();
+                    children.push((below.x[at], below.x[at + 1], pairs));
+                }
+            }
+            let expected = (rows - start) / bucket_rows(level - 1);
+            if children.len() as u64 != expected
+                || children
+                    .iter()
+                    .any(|(_, _, pairs)| pairs.len() != 2 * signals)
+            {
+                return Err(StoreError::corrupt(
+                    0,
+                    format!(
+                        "the segment's level-{} summaries do not cover its rows",
+                        level - 1
+                    ),
+                ));
+            }
+            pyramid.levels.push(Level::new(signals));
+            pyramid.levels[index].frames = frames;
+            for (x_lo, x_hi, pairs) in children {
+                pyramid.child.copy_from_slice(&pairs);
+                pyramid.fold_child(index, x_lo, x_hi);
             }
             index += 1;
         }
+        Ok(pyramid)
     }
 
     /// Whether level `index`'s open frame holds all its buckets.

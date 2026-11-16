@@ -10,7 +10,7 @@ use crate::StoreError;
 
 /// Superblock: magic, format version, then the durable pointers the writer rewrites in place.
 pub(crate) const SEGMENT_MAGIC: [u8; 8] = *b"RSPSEG\r\n";
-pub(crate) const FORMAT_VERSION: u32 = 1;
+pub(crate) const FORMAT_VERSION: u32 = 2;
 pub(crate) const SUPERBLOCK_LEN: u64 = 64;
 /// Offset of the pointer block: last durable index offset u64, rows it covers u64, END offset u64,
 /// reserved u64. It is written as one aligned 32-byte write; zero means "none".

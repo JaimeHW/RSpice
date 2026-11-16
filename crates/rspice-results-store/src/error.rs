@@ -32,6 +32,9 @@ pub enum StoreError {
     OutOfRange(String),
     /// The writer was used after it stopped on an earlier error.
     WriterStopped,
+    /// A resume named a point (`x`, as its bits) the segment holds no row at, so the segment
+    /// cannot continue from it.
+    NoRowAt { x_bits: u64 },
 }
 
 impl StoreError {
@@ -86,6 +89,11 @@ impl fmt::Display for StoreError {
             Self::WriterStopped => {
                 f.write_str("the results writer already stopped on an earlier error")
             }
+            Self::NoRowAt { x_bits } => write!(
+                f,
+                "the results segment holds no row at x = {:e}",
+                f64::from_bits(*x_bits)
+            ),
         }
     }
 }

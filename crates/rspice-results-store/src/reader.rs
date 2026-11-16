@@ -306,8 +306,41 @@ impl<I: SegmentIo> SegmentReader<I> {
         (!lo.is_nan()).then_some((lo, hi))
     }
 
+    /// The chunks of the readable rows, in row order.
+    pub(crate) fn chunk_refs(&self) -> &[ChunkRef] {
+        &self.catalogue.chunks
+    }
+
+    /// The `SUMMARY` frames read, per level from level 2.
+    pub(crate) fn summary_refs(&self) -> &[Vec<SummaryRef>] {
+        &self.catalogue.summaries
+    }
+
+    /// The `EVENTS` frames of the event signal at `position` among the event signals.
+    pub(crate) fn event_refs(&self, position: usize) -> &[EventsRef] {
+        self.catalogue
+            .events
+            .get(position)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The event signals in id order: (signal id, kind).
+    pub(crate) fn event_kinds(&self) -> &[(u32, EventKind)] {
+        &self.event_signals
+    }
+
+    /// The last `INDEX` frame read.
+    pub(crate) fn last_index_offset(&self) -> Option<u64> {
+        self.catalogue.last_index
+    }
+
+    /// The segment's I/O.
+    pub(crate) fn into_io(self) -> I {
+        self.io
+    }
+
     /// Read and check the frame at `offset`.
-    fn read_frame(&self, offset: u64) -> Result<(FrameHeader, Vec<u8>), StoreError> {
+    pub(crate) fn read_frame(&self, offset: u64) -> Result<(FrameHeader, Vec<u8>), StoreError> {
         let mut header_bytes = [0u8; FRAME_HEADER_LEN];
         if !offset.is_multiple_of(8) || offset + FRAME_HEADER_LEN as u64 > self.size {
             return Err(StoreError::corrupt(offset, "no frame header here"));

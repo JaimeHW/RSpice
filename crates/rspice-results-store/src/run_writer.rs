@@ -54,6 +54,23 @@ impl<I: RunIo> RunWriter<I> {
         Ok(Self { inner })
     }
 
+    /// Reopen the segment on `io` to append after its row at `through` (bit for bit), as a
+    /// resumed run does: every row and event change after that row is dropped in place, and the
+    /// rows pushed next follow it. A segment with no row at `through` is left as it was and
+    /// refused with [`StoreError::NoRowAt`].
+    pub fn reopen(io: I, through: f64) -> Result<Self, StoreError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let inner = threaded::Threaded::reopen(io, through, threaded::SYNC_INTERVAL)?;
+        #[cfg(target_arch = "wasm32")]
+        let inner = SegmentWriter::reopen(io, through)?;
+        Ok(Self { inner })
+    }
+
+    /// The canonical bytes of the schema the segment's rows follow.
+    pub fn schema_bytes(&self) -> &[u8] {
+        self.inner.schema_bytes()
+    }
+
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn with_options(
         io: I,
@@ -236,7 +253,24 @@ mod threaded {
             interval: Duration,
         ) -> Result<Self, StoreError> {
             let encoder = Encoder::create(io, schema, meta, chunk_rows, true)?;
+            Self::start(encoder, Batch::new(chunk_rows, schema.slots()), interval)
+        }
+
+        /// Reopen a segment after its row at `through`; see [`super::RunWriter::reopen`].
+        pub(super) fn reopen(io: I, through: f64, interval: Duration) -> Result<Self, StoreError> {
+            let (mut encoder, mut kept) = Encoder::reopen(io, through, None, true)?;
+            encoder.restage(&mut kept.batch, &kept.changes)?;
+            Self::start(encoder, kept.batch, interval)
+        }
+
+        pub(super) fn schema_bytes(&self) -> &[u8] {
+            &self.layout.schema_bytes
+        }
+
+        /// Hand `encoder` to a new writer thread; `open` is the chunk the solve thread stages.
+        fn start(encoder: Encoder<I>, open: Batch, interval: Duration) -> Result<Self, StoreError> {
             let layout = encoder.layout().clone();
+            let chunk_rows = layout.chunk_rows;
             let slots = layout.slots;
             let (work_tx, work) = sync_channel(2);
             let (rows_tx, free_rows) = sync_channel(2);
@@ -259,7 +293,7 @@ mod threaded {
                 .name("results store writer".into())
                 .spawn(move || thread.run())?;
             Ok(Self {
-                open: Batch::new(chunk_rows, slots),
+                open,
                 events: Vec::with_capacity(EVENTS_PER_FRAME),
                 layout,
                 work: Some(work_tx),

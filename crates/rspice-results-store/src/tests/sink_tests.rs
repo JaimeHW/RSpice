@@ -145,3 +145,60 @@ fn storage_and_memory_exhaustion_stay_typed_as_sink_stops() {
         SinkStop::Io("a result row carries 1 values; the schema has 2 value slots".into())
     );
 }
+
+/// A resumed run appended to the segment of the run it continues: the run repeats its start row
+/// and the changes there, which the segment already holds, and the segment it finishes is the
+/// uninterrupted run's.
+#[test]
+fn a_resumed_run_appends_to_the_segment_it_continues() {
+    let meta = sink::RunMeta::default();
+    let x: Vec<f64> = (0..2000).map(|row| row as f64 * 1e-9).collect();
+    let row = |at: usize| [(at as f64 * 0.01).sin(), at as f64];
+    let change = |at: usize| sink::EventChange {
+        signal: 1,
+        time: x[at],
+        sequence: 0,
+        value: sink::EventValue::Logic(if at.is_multiple_of(2) {
+            sink::Logic::One
+        } else {
+            sink::Logic::Zero
+        }),
+        strength: 0,
+    };
+    let run = |sink: &mut dyn ResultSink, rows: std::ops::Range<usize>, begin: bool| {
+        if begin {
+            sink.begin(&schema(), &meta).unwrap();
+        }
+        for at in rows {
+            sink.row(x[at], &row(at)).unwrap();
+            if at.is_multiple_of(37) {
+                sink.events(&[change(at)]).unwrap();
+            }
+        }
+        sink.end(sink::RunStatus::Completed).unwrap()
+    };
+    let mut whole = StoreSink::new(MemoryIo::new());
+    let whole_receipt = run(&mut whole, 0..x.len(), true);
+    let mut first = StoreSink::new(MemoryIo::new());
+    run(&mut first, 0..1500, true);
+    let through = 1110;
+    let mut resumed = StoreSink::appending(first.into_io().unwrap(), x[through]).unwrap();
+    let receipt = run(&mut resumed, through..x.len(), true);
+    assert_eq!(receipt, whole_receipt);
+    assert!(resumed.into_io().unwrap().bytes() == whole.into_io().unwrap().bytes());
+
+    // A resumed run that records other signals is refused before its first row.
+    let mut first = StoreSink::new(MemoryIo::new());
+    run(&mut first, 0..1500, true);
+    let mut other = StoreSink::appending(first.into_io().unwrap(), x[through]).unwrap();
+    let mut signals = schema();
+    signals.signals.pop();
+    assert!(matches!(
+        ResultSink::begin(&mut other, &signals, &meta),
+        Err(SinkStop::Io(_))
+    ));
+    assert!(matches!(
+        StoreSink::appending(MemoryIo::new(), 0.0),
+        Err(StoreError::Corrupt { .. })
+    ));
+}

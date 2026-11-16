@@ -3,6 +3,7 @@
 mod events_tests;
 mod manifest_tests;
 mod reader_tests;
+mod reopen_tests;
 #[cfg(not(target_arch = "wasm32"))]
 mod run_writer_tests;
 #[cfg(not(target_arch = "wasm32"))]

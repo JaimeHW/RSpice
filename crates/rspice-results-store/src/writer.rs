@@ -18,6 +18,8 @@
 //! not: the reader finds either by its CRC and keeps the prefix before it.
 
 use crate::digest::{Digest, LogicalDigest};
+
+mod reopen;
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
 use crate::format::{
     FLAG_PARTIAL, FORMAT_VERSION, FRAME_HEADER_LEN, FrameBuf, FrameKind, INDEX_CHUNKS,
@@ -311,6 +313,8 @@ pub(crate) struct Encoder<I: SegmentIo> {
     /// Whether blocks may be compressed (tests write `plain`-only segments to compare digests).
     compress: bool,
     digest: LogicalDigest,
+    /// The provisional frames of the open chunk, gathered for their one write.
+    provisional: Vec<u8>,
 }
 
 impl<I: SegmentIo> Encoder<I> {
@@ -322,14 +326,39 @@ impl<I: SegmentIo> Encoder<I> {
         compress: bool,
     ) -> Result<Self, StoreError> {
         schema.validate()?;
-        let layout = Layout::new(schema, chunk_rows);
+        io.truncate(0)?;
+        let mut encoder = Self::with_layout(io, Layout::new(schema, chunk_rows), compress);
+        let mut superblock = [0u8; SUPERBLOCK_LEN as usize];
+        superblock[..8].copy_from_slice(&SEGMENT_MAGIC);
+        superblock[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+        encoder.io.write_at(0, &superblock)?;
+        encoder.file_end = SUPERBLOCK_LEN;
+
+        encoder.frame.begin(FrameKind::Schema, 0);
+        let schema_bytes = std::mem::take(&mut encoder.layout.schema_bytes);
+        encoder.frame.put(&schema_bytes);
+        encoder.layout.schema_bytes = schema_bytes;
+        encoder.emit_real()?;
+
+        let mut meta_bytes = Vec::new();
+        meta.encode(&mut meta_bytes);
+        encoder.frame.begin(FrameKind::RunMeta, 0);
+        encoder.frame.put(&meta_bytes);
+        encoder.emit_real()?;
+        Ok(encoder)
+    }
+
+    /// An encoder on `io` for `layout` that has written nothing: its buffers, and every count at
+    /// zero.
+    fn with_layout(io: I, layout: Layout, compress: bool) -> Self {
+        let chunk_rows = layout.chunk_rows;
         let block_bytes = codec::max_encoded_len(chunk_rows * 8);
         let buckets = chunk_rows.div_ceil(LEVEL1_ROWS);
         let chunk_frame = 64
             + 12 * (layout.slots + 1)
             + 16 * buckets * (layout.analog.len() + 1)
             + block_bytes * (layout.slots + 1);
-        let mut encoder = Self {
+        Self {
             frame: FrameBuf::with_capacity(chunk_frame),
             columns: vec![0.0; layout.slots * column_stride(chunk_rows)],
             planes: vec![0; chunk_rows * 8],
@@ -354,30 +383,10 @@ impl<I: SegmentIo> Encoder<I> {
             event_scratch: EventScratch::new(compress),
             compress,
             digest: LogicalDigest::new(layout.events.iter().map(|&(id, _)| id)),
+            provisional: Vec::new(),
             layout,
-            io: {
-                io.truncate(0)?;
-                io
-            },
-        };
-        let mut superblock = [0u8; SUPERBLOCK_LEN as usize];
-        superblock[..8].copy_from_slice(&SEGMENT_MAGIC);
-        superblock[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-        encoder.io.write_at(0, &superblock)?;
-        encoder.file_end = SUPERBLOCK_LEN;
-
-        encoder.frame.begin(FrameKind::Schema, 0);
-        let schema_bytes = std::mem::take(&mut encoder.layout.schema_bytes);
-        encoder.frame.put(&schema_bytes);
-        encoder.layout.schema_bytes = schema_bytes;
-        encoder.emit_real()?;
-
-        let mut meta_bytes = Vec::new();
-        meta.encode(&mut meta_bytes);
-        encoder.frame.begin(FrameKind::RunMeta, 0);
-        encoder.frame.put(&meta_bytes);
-        encoder.emit_real()?;
-        Ok(encoder)
+            io,
+        }
     }
 
     /// After an error stopped the writer: sync what was written, if the device still lets us.
@@ -515,7 +524,20 @@ impl<I: SegmentIo> Encoder<I> {
         }
         let chunk_index = self.next_chunk;
         let (x_min, x_max) = self.encode_chunk(batch, chunk_index, 0);
-        let offset = self.emit_real()?;
+        // The frame ends with the digest's row stream after this chunk, which a reopened segment
+        // continues from. A chunk the segment does not keep leaves the stream as it was.
+        let mark = self.digest.rows_mark();
+        self.digest
+            .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
+        let state = self.digest.rows_state();
+        self.frame.put(&state);
+        let offset = match self.emit_real() {
+            Ok(offset) => offset,
+            Err(error) => {
+                self.digest.resume_rows(mark.0, mark.1);
+                return Err(error);
+            }
+        };
         self.entries.push(IndexEntry {
             kind: FrameKind::Chunk,
             level: 0,
@@ -526,8 +548,6 @@ impl<I: SegmentIo> Encoder<I> {
             x_min,
             x_max,
         });
-        self.digest
-            .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
         self.next_chunk += 1;
         self.rows += batch.rows as u64;
         // The chunk is in the segment: its summaries join the pyramid before any later write can
@@ -642,7 +662,18 @@ impl<I: SegmentIo> Encoder<I> {
         let (first, count, t_min, t_max) =
             buffer.encode(0, &mut self.frame, &mut self.event_scratch);
         let signal = buffer.signal;
-        let offset = self.emit_real()?;
+        // As a chunk does, the frame ends with its signal's digest stream after its changes.
+        let mark = self.digest.events_mark(position);
+        buffer.digest(self.digest.event_stream(position, count));
+        let state = self.digest.event_state(position);
+        self.frame.put(&state);
+        let offset = match self.emit_real() {
+            Ok(offset) => offset,
+            Err(error) => {
+                self.digest.resume_events(position, mark.0, mark.1);
+                return Err(error);
+            }
+        };
         self.entries.push(IndexEntry {
             kind: FrameKind::Events,
             level: 0,
@@ -653,16 +684,17 @@ impl<I: SegmentIo> Encoder<I> {
             x_min: t_min,
             x_max: t_max,
         });
-        let buffer = &mut self.events[position];
-        buffer.digest(self.digest.event_stream(position, count));
-        buffer.clear();
+        self.events[position].clear();
         Ok(())
     }
 
     /// Write the open chunk as provisional frames at the tail, without advancing the tail, and point
     /// the superblock at the last index. Nothing is synced: the operating system has the bytes.
     pub(crate) fn write_provisional(&mut self, batch: &Batch) -> Result<(), StoreError> {
-        let mut at = self.tail;
+        // One write carries every provisional frame, so a crash keeps all of them or, at worst,
+        // tears that one write; never the changes without the rows they go with.
+        let mut frames = std::mem::take(&mut self.provisional);
+        frames.clear();
         for position in 0..self.events.len() {
             if self.events[position].len() > 0 {
                 self.events[position].encode(
@@ -670,17 +702,21 @@ impl<I: SegmentIo> Encoder<I> {
                     &mut self.frame,
                     &mut self.event_scratch,
                 );
-                let bytes = self.frame.finish()?;
-                self.io.write_at(at, bytes)?;
-                at += bytes.len() as u64;
+                frames.extend_from_slice(self.frame.finish()?);
             }
         }
         if batch.rows > 0 {
             self.encode_chunk(batch, self.next_chunk, FLAG_PARTIAL);
-            let bytes = self.frame.finish()?;
-            self.io.write_at(at, bytes)?;
-            at += bytes.len() as u64;
+            frames.extend_from_slice(self.frame.finish()?);
         }
+        let at = self.tail + frames.len() as u64;
+        let written = if frames.is_empty() {
+            Ok(())
+        } else {
+            self.io.write_at(self.tail, &frames)
+        };
+        self.provisional = frames;
+        written?;
         if self.file_end > at {
             self.io.truncate(at)?;
         }
@@ -798,6 +834,34 @@ impl<I: SegmentIo> SegmentWriter<I> {
             stopped: false,
             full: false,
         })
+    }
+
+    /// Reopen the segment on `io` to append after its row at `through` (bit for bit): every row
+    /// and event change after that row is dropped, in place, and the rows pushed next follow it.
+    /// A segment with no row at `through` is left as it was and refused with
+    /// [`StoreError::NoRowAt`].
+    pub fn reopen(io: I, through: f64) -> Result<Self, StoreError> {
+        Self::reopen_with_chunk_rows(io, through, None)
+    }
+
+    pub(crate) fn reopen_with_chunk_rows(
+        io: I,
+        through: f64,
+        chunk_rows: Option<usize>,
+    ) -> Result<Self, StoreError> {
+        let (mut encoder, mut kept) = Encoder::reopen(io, through, chunk_rows, true)?;
+        encoder.restage(&mut kept.batch, &kept.changes)?;
+        Ok(Self {
+            open: kept.batch,
+            encoder,
+            stopped: false,
+            full: false,
+        })
+    }
+
+    /// The canonical bytes of the schema the segment's rows follow.
+    pub fn schema_bytes(&self) -> &[u8] {
+        &self.encoder.layout().schema_bytes
     }
 
     /// Rows accepted so far.

@@ -44,6 +44,14 @@ pub(crate) fn canonical_bits(value: f64) -> u64 {
 #[derive(Clone, Default)]
 pub(crate) struct Sha256(sha2::Sha256);
 
+/// The bytes of a [`ValueHasher`]'s state, as a frame's trailer records it for a reopened
+/// segment to continue from.
+pub(crate) const HASH_STATE_LEN: usize = {
+    use sha2::digest::common::hazmat::SerializableState;
+    use sha2::digest::typenum::Unsigned;
+    <sha2::Sha256 as SerializableState>::SerializedStateSize::USIZE
+};
+
 impl Sha256 {
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         sha2::Digest::update(&mut self.0, bytes);
@@ -57,6 +65,7 @@ impl Sha256 {
 const DIGEST_DOMAIN: &[u8] = b"rspice-results-store logical digest 1";
 
 /// Canonical bytes staged through a fixed buffer, so hashing a chunk allocates nothing.
+#[derive(Clone)]
 pub(crate) struct ValueHasher {
     hasher: Sha256,
     buffer: Box<[u8; 8192]>,
@@ -124,6 +133,26 @@ impl ValueHasher {
         self.drain();
         self.hasher.finish()
     }
+
+    /// The state reached so far: everything hashed, as [`Self::resumed`] continues it.
+    pub(crate) fn state(&mut self) -> [u8; HASH_STATE_LEN] {
+        use sha2::digest::common::hazmat::SerializableState;
+        self.drain();
+        let mut state = [0u8; HASH_STATE_LEN];
+        state.copy_from_slice(&self.hasher.0.serialize());
+        state
+    }
+
+    /// A hasher continuing from `state`, as [`Self::state`] recorded it.
+    pub(crate) fn resumed(state: &[u8]) -> Option<Self> {
+        use sha2::digest::common::hazmat::SerializableState;
+        let state = state.try_into().ok()?;
+        let hasher = sha2::Sha256::deserialize(state).ok()?;
+        Some(Self {
+            hasher: Sha256(hasher),
+            ..Self::default()
+        })
+    }
 }
 
 /// Accumulates the logical digest of a segment as its rows and events are written.
@@ -163,6 +192,40 @@ impl LogicalDigest {
             }
         }
         self.row_count += x.len() as u64;
+    }
+
+    /// The row stream's state after every row hashed so far.
+    pub(crate) fn rows_state(&mut self) -> [u8; HASH_STATE_LEN] {
+        self.rows.state()
+    }
+
+    /// The row stream and its row count, to put back with [`Self::resume_rows`] when the rows
+    /// hashed after this point are not kept.
+    pub(crate) fn rows_mark(&self) -> (ValueHasher, u64) {
+        (self.rows.clone(), self.row_count)
+    }
+
+    /// The `index`-th event signal's stream and count, as [`Self::rows_mark`] keeps the rows'.
+    pub(crate) fn events_mark(&self, index: usize) -> (ValueHasher, u64) {
+        let (_, stream, count) = &self.events[index];
+        (stream.clone(), *count)
+    }
+
+    /// Continue the row stream from `state`, after `row_count` rows.
+    pub(crate) fn resume_rows(&mut self, rows: ValueHasher, row_count: u64) {
+        self.rows = rows;
+        self.row_count = row_count;
+    }
+
+    /// The `index`-th event signal's stream state after every change hashed so far.
+    pub(crate) fn event_state(&mut self, index: usize) -> [u8; HASH_STATE_LEN] {
+        self.events[index].1.state()
+    }
+
+    /// Continue the `index`-th event signal's stream from `stream`, after `count` changes.
+    pub(crate) fn resume_events(&mut self, index: usize, stream: ValueHasher, count: u64) {
+        self.events[index].1 = stream;
+        self.events[index].2 = count;
     }
 
     /// The digest stream of the `index`-th event signal, which `count` more changes will enter.

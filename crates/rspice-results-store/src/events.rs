@@ -228,6 +228,14 @@ impl EventBuffer {
         self.times.len()
     }
 
+    /// Continue a signal whose frames hold `written` changes, the last of them `last`: the next
+    /// frame records it as its value before.
+    pub(crate) fn continue_after(&mut self, written: u64, last: &EventChange) {
+        self.push(last);
+        self.clear();
+        self.written = written;
+    }
+
     /// Append one change; returns whether the buffer is now full.
     pub(crate) fn push(&mut self, change: &EventChange) -> bool {
         self.times.push(change.time);
