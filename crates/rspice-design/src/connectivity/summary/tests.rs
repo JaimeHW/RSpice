@@ -98,3 +98,83 @@ fn a_net_labelled_zero_is_the_ground_net() {
     wire_ids.sort_unstable();
     assert_eq!(wire_ids, vec![10, 11]);
 }
+
+/// The kind of the net `component`'s pin `index` is on.
+fn kind_at(nets: &[DesignNet], component: &Component, pin: &str) -> NetDomain {
+    nets.iter()
+        .find(|net| {
+            net.terminals.iter().any(|terminal| {
+                terminal.component_id == component.id && terminal.pin.eq_ignore_ascii_case(pin)
+            })
+        })
+        .unwrap_or_else(|| panic!("no net on {}.{pin}", component.name))
+        .domain
+}
+
+/// An XSPICE gate placed from the shelf by its own kind carries no frozen
+/// contract, so its pins are typed from the engine's code-model table: an
+/// inverter's ports are digital, and two of them meet on a logic net. A
+/// resistor on an output makes that net one the run converts.
+#[test]
+fn a_code_model_gate_placed_by_its_kind_reads_its_ports_from_the_engine() {
+    let a1 = placed(1, ComponentType::XspiceInverter, "A1", Point::new(0, 0));
+    let a2 = placed(2, ComponentType::XspiceInverter, "A2", Point::new(400, 0));
+    let r1 = placed(3, ComponentType::Resistor, "R1", Point::new(800, 0));
+    let wires = vec![
+        elbow(10, terminal(&a1, 1), terminal(&a2, 0)),
+        elbow(11, terminal(&a2, 1), terminal(&r1, 0)),
+    ];
+    let schematic = SchematicDocument {
+        components: vec![a1.clone(), a2.clone(), r1],
+        wires,
+        ..SchematicDocument::default()
+    };
+    let nets = design_nets(&schematic);
+    assert_eq!(kind_at(&nets, &a1, "out"), NetDomain::Logic);
+    assert_eq!(
+        kind_at(&nets, &a2, "out"),
+        NetDomain::Mixed(EventOnlyNetKind::Digital)
+    );
+}
+
+/// A pin of a placed schematic takes the kind of its net inside the master,
+/// as the flattened deck does: the master's port `en` reaches only an
+/// inverter's input, so the parent's net between another inverter and that
+/// pin is a logic net, not an electrical one.
+#[test]
+fn a_placed_schematics_pin_reads_the_kind_of_its_net_inside() {
+    let port = placed(1, ComponentType::Port, "P1", Point::new(0, 0)).with_name_value("P1", "en");
+    let inner = placed(2, ComponentType::XspiceInverter, "A1", Point::new(400, 0));
+    let r_out = placed(3, ComponentType::Resistor, "R1", Point::new(800, 0));
+    let master = SchematicDocument {
+        wires: vec![
+            elbow(10, terminal(&port, 0), terminal(&inner, 0)),
+            elbow(11, terminal(&inner, 1), terminal(&r_out, 0)),
+        ],
+        components: vec![port, inner, r_out],
+        ..SchematicDocument::default()
+    };
+    let mut binding = LibraryCellInstance::new("work", "blk", "schematic");
+    binding.bind_interface(&[rspice_design_model::port::PortSpec {
+        name: "en".to_owned(),
+        direction: PortDirection::In,
+    }]);
+    let block =
+        placed(5, ComponentType::CellInstance, "X1", Point::new(400, 0)).with_library_cell(binding);
+    let driver = placed(6, ComponentType::XspiceInverter, "A2", Point::new(0, 0));
+    let top = SchematicDocument {
+        wires: vec![elbow(
+            20,
+            terminal(&driver, 1),
+            terminal_positions_with_hierarchy(&block, None)[0].1,
+        )],
+        components: vec![driver.clone(), block],
+        ..SchematicDocument::default()
+    };
+    let buffers = HashMap::from([
+        ("work/blk/schematic".to_owned(), master),
+        ("work/top/schematic".to_owned(), top.clone()),
+    ]);
+    let nets = design_nets_with_hierarchy(&top, &HierarchySource::from_buffers(&buffers));
+    assert_eq!(kind_at(&nets, &driver, "out"), NetDomain::Logic);
+}

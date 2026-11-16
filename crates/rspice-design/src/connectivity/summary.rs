@@ -13,10 +13,11 @@ use crate::schematic::document::SchematicDocument;
 /// What a net carries at run, and which event side a converted net has.
 pub use rspice_core_base::event_net::{EventOnlyNetKind, NetDomain};
 use rspice_core_base::event_net::{NetEndpoints, PortCarrier};
+use rspice_design_model::Point;
 use rspice_design_model::port::PortDirection;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Electrical class of a design net.
 ///
@@ -96,7 +97,10 @@ impl DesignNet {
 /// by `topology_version`.
 pub fn design_nets(schematic: &impl AsRef<SchematicDocument>) -> Vec<DesignNet> {
     let schematic = schematic.as_ref();
-    collect_design_nets(schematic, None)
+    collect_design_nets(schematic, None, &mut Vec::new())
+        .into_iter()
+        .map(|(net, _)| net)
+        .collect()
 }
 
 /// Live net summary with project hierarchy/symbol resolution enabled.
@@ -105,7 +109,10 @@ pub fn design_nets_with_hierarchy(
     hierarchy: &HierarchySource<'_>,
 ) -> Vec<DesignNet> {
     let schematic = schematic.as_ref();
-    collect_design_nets(schematic, Some(hierarchy))
+    collect_design_nets(schematic, Some(hierarchy), &mut Vec::new())
+        .into_iter()
+        .map(|(net, _)| net)
+        .collect()
 }
 
 /// Net summary of one cell view of a frozen design projection, extracted once
@@ -167,10 +174,16 @@ pub fn component_pin_names_with_hierarchy(
         .collect()
 }
 
+/// Every net of `schematic` with what meets on it, counted through the
+/// hierarchy: a pin of a placed schematic counts what meets on its net inside
+/// that master, as the flattened deck the engine plans with does.
+/// `visiting` holds the masters being read, so a master that places itself
+/// is read once.
 fn collect_design_nets(
     schematic: &SchematicDocument,
     hierarchy: Option<&HierarchySource<'_>>,
-) -> Vec<DesignNet> {
+    visiting: &mut Vec<String>,
+) -> Vec<(DesignNet, NetEndpoints)> {
     let super::ExtractedConnectivity {
         nets: extracted_nets,
         point_to_net,
@@ -197,39 +210,53 @@ fn collect_design_nets(
         .iter()
         .flat_map(|vector| vector.terminals.iter().copied())
         .collect();
-    // A module's ports are read once per master, however often it is placed.
-    let mut module_carriers: HashMap<String, PinCarriers> = HashMap::new();
+    // A master's pins are read once, however often it is placed.
+    let mut master_pins: HashMap<String, PinCarriers> = HashMap::new();
     let no_carriers = PinCarriers::new();
     for component in &schematic.components {
         // A ground symbol or an interface port is a name for a net, not a
         // conductor on it.
         let conductor = !component.kind.spice_prefix().is_empty();
+        let pins = terminal_positions_with_hierarchy(component, hierarchy);
         let contract;
         let carriers = match component.library_cell.as_ref() {
             Some(binding) if binding.builtin_xspice.is_some() => {
                 contract = code_model_carriers(binding);
                 &contract
             }
-            Some(binding) => module_carriers
+            Some(binding) => master_pins
                 .entry(HierarchySource::placed_master(binding).key())
-                .or_insert_with(|| module_port_carriers(binding, hierarchy)),
-            None => &no_carriers,
+                .or_insert_with(|| master_pin_carriers(binding, hierarchy, visiting)),
+            None => {
+                contract = legacy_code_model_carriers(component, &pins);
+                &contract
+            }
         };
-        for (pin, position) in terminal_positions_with_hierarchy(component, hierarchy) {
-            let (carrier, module_port) = carriers
+        let carriers = if conductor { carriers } else { &no_carriers };
+        // A placement with no symbol to name its pins numbers them; its
+        // binding's terminal order says which port each number is, as the
+        // deck writes them.
+        let order = component
+            .library_cell
+            .as_ref()
+            .map_or(&[][..], |binding| binding.terminal_order.as_slice());
+        for (index, (pin, position)) in pins.into_iter().enumerate() {
+            let pin_endpoints = carriers
                 .get(&pin.to_ascii_lowercase())
+                .or_else(|| {
+                    order
+                        .get(index)
+                        .and_then(|port| carriers.get(&port.to_ascii_lowercase()))
+                })
                 .copied()
-                .unwrap_or((PortCarrier::Electrical, false));
+                .unwrap_or_else(|| one_conductor(PortCarrier::Electrical, false));
             let on_bus = vector_terminals.contains(&position);
             if conductor && on_bus {
-                vector_pins.insert(position, (carrier, module_port));
+                vector_pins.insert(position, pin_endpoints);
             }
             if let Some(net) = net_at(position) {
                 if conductor && !on_bus {
-                    endpoints
-                        .entry(net.id)
-                        .or_default()
-                        .add(carrier, module_port);
+                    join(endpoints.entry(net.id).or_default(), pin_endpoints);
                 }
                 terminals.entry(net.id).or_default().push(NetTerminal {
                     component_id: component.id,
@@ -246,13 +273,13 @@ fn collect_design_nets(
         .collect();
     for vector in &vector_nets.nets {
         for point in &vector.terminals {
-            let Some(&(carrier, module_port)) = vector_pins.get(point) else {
+            let Some(&pin_endpoints) = vector_pins.get(point) else {
                 continue;
             };
             for member in vector.declaration.members() {
                 let name = deck_bit_name(&vector.declaration.name, member.index);
                 if let Some(id) = net_ids.get(&name.to_ascii_lowercase()) {
-                    endpoints.entry(*id).or_default().add(carrier, module_port);
+                    join(endpoints.entry(*id).or_default(), pin_endpoints);
                 }
             }
         }
@@ -268,15 +295,15 @@ fn collect_design_nets(
         }
     }
 
-    let mut nets: Vec<DesignNet> = extracted_nets
+    let mut nets: Vec<(DesignNet, NetEndpoints)> = extracted_nets
         .iter()
         .map(|net| {
             let name = net.spice_name();
             let authored_name = net.label.is_some();
             let port = ports.get(&name.to_ascii_lowercase()).copied();
             let ground = ground_net == Some(net.id) || name == "0";
-            let mut domain = endpoints.remove(&net.id).unwrap_or_default();
-            domain.ground = ground;
+            let mut met = endpoints.remove(&net.id).unwrap_or_default();
+            met.ground = ground;
             let class = if ground {
                 NetClass::Ground
             } else if port == Some(PortDirection::Supply) || power_labelled.contains(&net.id) {
@@ -284,15 +311,16 @@ fn collect_design_nets(
             } else {
                 NetClass::Signal
             };
-            DesignNet {
+            let net = DesignNet {
                 authored_name,
                 class,
                 port,
                 terminals: terminals.remove(&net.id).unwrap_or_default(),
                 wire_ids: net.wires.clone(),
-                domain: domain.domain(),
+                domain: met.domain(),
                 name,
-            }
+            };
+            (net, met)
         })
         .collect();
 
@@ -301,7 +329,7 @@ fn collect_design_nets(
         name.strip_prefix("net")
             .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
     };
-    nets.sort_by(|a, b| {
+    nets.sort_by(|(a, _), (b, _)| {
         (
             !a.is_port(),
             autonamed(&a.name),
@@ -316,9 +344,147 @@ fn collect_design_nets(
     nets
 }
 
-/// What each pin of a placed component carries, by folded pin name, with
-/// whether it is a module port. A pin it does not name is electrical.
-type PinCarriers = HashMap<String, (PortCarrier, bool)>;
+/// What each pin of a placed component puts on its net, by folded pin name:
+/// one conductor for a device or a module port, and for a pin of a placed
+/// schematic what meets on its net inside the master. A pin it does not name
+/// is one electrical conductor.
+type PinCarriers = HashMap<String, NetEndpoints>;
+
+/// One conductor carrying `carrier`; `module_port` as [`NetEndpoints::add`].
+fn one_conductor(carrier: PortCarrier, module_port: bool) -> NetEndpoints {
+    let mut endpoints = NetEndpoints::default();
+    endpoints.add(carrier, module_port);
+    endpoints
+}
+
+/// Count what `more` puts on a net into `net`.
+fn join(net: &mut NetEndpoints, more: NetEndpoints) {
+    net.ground |= more.ground;
+    net.electrical += more.electrical;
+    net.logic += more.logic;
+    net.real += more.real;
+    net.module_ports += more.module_ports;
+}
+
+/// The carrier of a code-model port of `port_type`: logic and real ports are
+/// event endpoints, every other type is an electrical terminal.
+fn code_model_port_carrier(port_type: rspice_core::xspice::PortType) -> PortCarrier {
+    match port_type {
+        rspice_core::xspice::PortType::Digital => PortCarrier::Logic,
+        rspice_core::xspice::PortType::Real => PortCarrier::Real,
+        _ => PortCarrier::Electrical,
+    }
+}
+
+/// The pins of a code-model device placed by its own kind (an XSPICE gate
+/// from the shelf, with no frozen contract), typed by the engine's code-model
+/// table. The terminals are the model's ports in the order the deck writes
+/// them; a gate's input terminals all meet its one vector input, so a model
+/// whose ports all carry one thing types every terminal so. A device that is
+/// not a code model has none.
+fn legacy_code_model_carriers(component: &Component, pins: &[(String, Point)]) -> PinCarriers {
+    let crate::schematic::device_descriptor::DeviceImplementation::Xspice { model_type } =
+        component.kind.descriptor().implementation
+    else {
+        return PinCarriers::new();
+    };
+    let Some(ports) = code_model_port_carriers(model_type) else {
+        return PinCarriers::new();
+    };
+    let carrier_of = |index: usize| match ports {
+        [first, rest @ ..] if rest.iter().all(|carrier| carrier == first) => Some(*first),
+        _ if ports.len() == pins.len() => Some(ports[index]),
+        _ => None,
+    };
+    pins.iter()
+        .enumerate()
+        .filter_map(|(index, (pin, _))| {
+            carrier_of(index)
+                .map(|carrier| (pin.to_ascii_lowercase(), one_conductor(carrier, false)))
+        })
+        .collect()
+}
+
+/// The carrier of each port of the code model `model_type`, in port order,
+/// read once from the engine's built-in code-model table.
+fn code_model_port_carriers(model_type: &str) -> Option<&'static [PortCarrier]> {
+    static TABLE: OnceLock<HashMap<&'static str, Vec<PortCarrier>>> = OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let registry = rspice_core::xspice::CodeModelRegistry::with_builtins();
+            crate::schematic::component_type::ComponentType::ALL
+                .iter()
+                .filter_map(|kind| match kind.descriptor().implementation {
+                    crate::schematic::device_descriptor::DeviceImplementation::Xspice {
+                        model_type,
+                    } => {
+                        let model = registry.get(model_type)?;
+                        let carriers = model
+                            .ports()
+                            .iter()
+                            .map(|port| code_model_port_carrier(port.default_type))
+                            .collect();
+                        Some((model_type, carriers))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .get(model_type)
+        .map(Vec::as_slice)
+}
+
+/// The pins of a placed master: what meets on each pin's net inside a
+/// schematic master, or the ports an HDL view states.
+fn master_pin_carriers(
+    binding: &LibraryCellInstance,
+    hierarchy: Option<&HierarchySource<'_>>,
+    visiting: &mut Vec<String>,
+) -> PinCarriers {
+    let Some(source) = hierarchy else {
+        return PinCarriers::new();
+    };
+    let master = HierarchySource::placed_master(binding);
+    let hdl = source
+        .cell_declaration(&master)
+        .and_then(|(_, view)| view)
+        .is_some_and(|view| view.view_type.is_hdl_source());
+    match source.schematic_master_for_binding(binding) {
+        Some(inner) if !hdl => schematic_pin_carriers(inner, source, master.key(), visiting),
+        _ => module_port_carriers(binding, hierarchy),
+    }
+}
+
+/// Each interface port of the schematic master `inner`, by what meets on its
+/// net inside it.
+fn schematic_pin_carriers(
+    inner: &SchematicDocument,
+    source: &HierarchySource<'_>,
+    key: String,
+    visiting: &mut Vec<String>,
+) -> PinCarriers {
+    if visiting.contains(&key) {
+        return PinCarriers::new();
+    }
+    visiting.push(key);
+    let nets = collect_design_nets(inner, Some(source), visiting);
+    visiting.pop();
+    inner
+        .interface_ports()
+        .iter()
+        .map(|port| {
+            let met = nets
+                .iter()
+                .find(|(net, _)| net.name.eq_ignore_ascii_case(&port.name))
+                .map(|(_, met)| NetEndpoints {
+                    ground: false,
+                    ..*met
+                })
+                .unwrap_or_default();
+            (port.name.to_ascii_lowercase(), met)
+        })
+        .collect()
+}
 
 /// A built-in code model's event pins, as its frozen contract types them.
 fn code_model_carriers(binding: &LibraryCellInstance) -> PinCarriers {
@@ -338,7 +504,7 @@ fn code_model_carriers(binding: &LibraryCellInstance) -> PinCarriers {
             .iter()
             .filter_map(|terminal| binding.terminal_order.get(*terminal))
         {
-            carriers.insert(pin.to_ascii_lowercase(), (carrier, false));
+            carriers.insert(pin.to_ascii_lowercase(), one_conductor(carrier, false));
         }
     }
     carriers
@@ -362,7 +528,10 @@ fn module_port_carriers(
         .and_then(|view| view.metadata.get(VERILOGA_PORTS_KEY))
         .and_then(|encoded| decode_source_view_ports(encoded));
     for port in ports.into_iter().flatten() {
-        carriers.insert(port.name.to_ascii_lowercase(), (port.carrier, true));
+        carriers.insert(
+            port.name.to_ascii_lowercase(),
+            one_conductor(port.carrier, true),
+        );
     }
     carriers
 }
