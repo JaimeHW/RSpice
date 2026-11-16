@@ -2154,27 +2154,29 @@ fn load_xyce_pem_table(
     parameter: &str,
     path: &str,
 ) -> Result<crate::device::XycePemPwlTable, SimulationError> {
-    let contents = crate::xspice::read_data_file_to_string_limited(
-        path,
-        crate::device::XYCE_PEM_MAX_TABLE_BYTES,
-    )
-    .map_err(|error| {
+    // Read as every other external data file is read, under the external
+    // data policy; the table's own records are reserved fallibly.
+    let contents = crate::xspice::read_data_file_to_string(path).map_err(|error| {
         SimulationError::Circuit(format!(
             "PEM memristor '{}' model '{}' failed to read {parameter} table '{}': {error}",
             element_name, model_name, path
         ))
     })?;
-    let table = crate::device::parse_xyce_7_10_legacy_two_column_table_bounded(
-        path,
-        &contents,
-        crate::device::XYCE_PEM_MAX_TABLE_POINTS,
-    )
-    .map_err(|error| {
-        SimulationError::Circuit(format!(
-            "PEM memristor '{}' model '{}' could not parse {parameter}: {error}",
-            element_name, model_name
-        ))
-    })?;
+    let table = crate::device::parse_xyce_7_10_legacy_two_column_table(path, &contents).map_err(
+        |error| {
+            if let Some((bytes, source)) = error.allocation() {
+                return SimulationError::Allocation {
+                    object: "PEM memristor state table",
+                    bytes,
+                    source: source.clone(),
+                };
+            }
+            SimulationError::Circuit(format!(
+                "PEM memristor '{}' model '{}' could not parse {parameter}: {error}",
+                element_name, model_name
+            ))
+        },
+    )?;
     Ok(table)
 }
 

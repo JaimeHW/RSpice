@@ -22,11 +22,6 @@ use crate::engine::SimulationError;
 use crate::netlist::{Element, ElementKind, SourceSpec};
 use crate::numerics::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_output};
 
-/// Hard cap on generated samples per source. 4M samples is ~64 MB of PWL
-/// points — beyond that the deck should raise NT rather than the simulator
-/// silently degrading the spectrum.
-pub(super) const MAX_NOISE_SAMPLES: usize = 1 << 22;
-
 /// The run seed a deck that names none draws every noise stream from.
 ///
 /// Shared with transient device noise so that a deck mixing an authored
@@ -34,9 +29,15 @@ pub(super) const MAX_NOISE_SAMPLES: usize = 1 << 22;
 pub(super) const DEFAULT_NOISE_SEED: u64 = 0x5EED_0001;
 
 /// Convert a floating sample-grid quotient only after proving that the final
-/// count, including the generator's required tail points, fits the hard cap.
-/// Rust's float-to-integer cast saturates, and adding the tail afterward can
-/// then overflow or wrap; neither behavior is an acceptable resource check.
+/// count, including the generator's required tail points, is a count this
+/// platform can name. Rust's float-to-integer cast saturates, and adding the
+/// tail afterward can then overflow or wrap; neither is an acceptable count.
+///
+/// There is no ceiling below that. Like ngspice, which allocates
+/// `tstop/NT + 10` flicker samples with no limit (`trnoise_state_gen`,
+/// `1-f-code.c`), a run generates every sample its deck asks for; the
+/// buffers are reserved fallibly, so a train the machine cannot hold is a
+/// typed allocation failure that names its bytes.
 pub(super) fn checked_noise_sample_count(
     source_kind: &str,
     name: &str,
@@ -45,27 +46,68 @@ pub(super) fn checked_noise_sample_count(
     ratio_name: &str,
     remedy: &str,
 ) -> Result<usize, String> {
-    let maximum_grid_count = MAX_NOISE_SAMPLES.saturating_sub(required_tail);
     if !quotient.is_finite() {
         return Err(format!(
-            "{source_kind} source '{name}' has a non-finite sample count from {ratio_name}; \
-             the limit is {MAX_NOISE_SAMPLES}. {remedy}"
+            "{source_kind} source '{name}' has a non-finite sample count from {ratio_name}. \
+             {remedy}"
         ));
     }
 
     // A transient stop before the source's first sample retains the historic
     // one/two-tail-point behavior rather than manufacturing a negative count.
     let grid_count = quotient.ceil().max(0.0);
-    if grid_count > maximum_grid_count as Value {
+    let maximum_grid_count = usize::MAX.saturating_sub(required_tail);
+    // `usize::MAX as Value` rounds up to 2^64, so the strict comparison
+    // refuses every quotient the cast would saturate.
+    if grid_count >= maximum_grid_count as Value {
         return Err(format!(
-            "{source_kind} source '{name}' sample count from {ratio_name} exceeds the limit of \
-             {MAX_NOISE_SAMPLES} (including {required_tail} required tail samples). {remedy}"
+            "{source_kind} source '{name}' sample count from {ratio_name} ({grid_count:e}) is \
+             more than this platform can count. {remedy}"
         ));
     }
 
     // Both the cast and addition are safe because the floating value was
-    // bounded against MAX_NOISE_SAMPLES - required_tail above.
+    // bounded below `usize::MAX - required_tail` above.
     Ok(grid_count as usize + required_tail)
+}
+
+/// An empty buffer with room for `len` elements, or the typed failure naming
+/// the bytes `object` needed.
+pub(super) fn try_with_capacity<T>(
+    len: usize,
+    object: &'static str,
+) -> Result<Vec<T>, SimulationError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|source| SimulationError::reserve_failed(&values, len, object, source))?;
+    Ok(values)
+}
+
+/// `len` copies of `value`, reserved as [`try_with_capacity`] reserves.
+pub(super) fn try_filled<T: Clone>(
+    len: usize,
+    value: T,
+    object: &'static str,
+) -> Result<Vec<T>, SimulationError> {
+    let mut values = try_with_capacity(len, object)?;
+    values.resize(len, value);
+    Ok(values)
+}
+
+/// Grow `values` to `len` elements of `value`, reserving fallibly.
+fn try_resize<T: Clone>(
+    values: &mut Vec<T>,
+    len: usize,
+    value: T,
+    object: &'static str,
+) -> Result<(), SimulationError> {
+    let additional = len.saturating_sub(values.len());
+    values
+        .try_reserve_exact(additional)
+        .map_err(|source| SimulationError::reserve_failed(&*values, additional, object, source))?;
+    values.resize(len, value);
+    Ok(())
 }
 
 /// Expand the elaborated sources in place, after instance parameters and
@@ -269,7 +311,7 @@ fn generate_noise_points(
             "TRNOISE source '{name}' sample times exceed finite precision"
         )));
     }
-    let mut samples = vec![0.0; n];
+    let mut samples = try_filled(n, 0.0, "TRNOISE sample train")?;
     // Separate component streams: enabling another component or extending the
     // requested horizon must not change samples already drawn from this one.
     let mut white_rng = SplitMix64::new(seed);
@@ -294,7 +336,7 @@ fn generate_noise_points(
     }
     // The noise component starts at zero. Expansion adds any explicit DC
     // offset after generation, including at the origin.
-    let mut points = Vec::with_capacity(n);
+    let mut points = try_with_capacity(n, "TRNOISE source points")?;
     for (index, value) in samples.into_iter().enumerate() {
         if index.is_multiple_of(512) {
             check_noise_abort(abort)?;
@@ -376,16 +418,17 @@ fn add_rts_points(
             break;
         }
         let next = if state == 0.0 { amplitude } else { 0.0 };
+        events.try_reserve(1).map_err(|source| {
+            SimulationError::reserve_failed(&events, 1, "TRNOISE random-telegraph events", source)
+        })?;
         events.push((time, state, next));
         state = next;
-        if events.len() > MAX_NOISE_SAMPLES {
-            return Err(SimulationError::Circuit(
-                "TRNOISE RTS generated too many transitions".to_string(),
-            ));
-        }
     }
 
-    let mut output = Vec::with_capacity(base.len() + events.len() * 2);
+    let mut output = try_with_capacity(
+        base.len().saturating_add(events.len().saturating_mul(2)),
+        "TRNOISE random-telegraph points",
+    )?;
     let mut event_index = 0usize;
     let mut state = 0.0;
     for (index, &(time, value)) in base.iter().enumerate() {
@@ -458,7 +501,11 @@ fn generate_trrandom_points(
         )));
     }
     let mut rng = SplitMix64::new(seed);
-    let mut points = vec![(0.0, offset.0)];
+    let mut points = try_with_capacity(
+        count.saturating_mul(2).saturating_add(3),
+        "TRRANDOM source points",
+    )?;
+    points.push((0.0, offset.0));
     if delay > 0.0 {
         points.push((delay, offset.0));
     }
@@ -537,8 +584,10 @@ pub(super) fn kasdin_one_over_f(
     if n == 0 {
         return Ok(Vec::new());
     }
-    let size = n.next_power_of_two();
-    let mut h = vec![1.0; size];
+    // A count past the largest power of two cannot be held; its reservation
+    // below reports that as the allocation failure it is.
+    let size = n.checked_next_power_of_two().unwrap_or(usize::MAX);
+    let mut h = try_filled(size, 1.0, "flicker-noise filter")?;
     for k in 1..size {
         if k.is_multiple_of(512) {
             check_noise_abort(abort)?;
@@ -577,27 +626,27 @@ pub(super) fn filtered_white_noise(
     if n == 0 {
         return Ok(Vec::new());
     }
-    let size = n.next_power_of_two();
+    let size = n.checked_next_power_of_two().unwrap_or(usize::MAX);
     let padded;
     let h: &[Value] = if taps.len() >= size {
         &taps[..size]
     } else {
         padded = {
-            let mut extended = Vec::with_capacity(size);
+            let mut extended = try_with_capacity(size, "noise filter taps")?;
             extended.extend_from_slice(taps);
             extended.resize(size, 0.0);
             extended
         };
         &padded
     };
-    let mut white = Vec::with_capacity(n);
+    let mut white = try_with_capacity(n, "white-noise samples")?;
     for index in 0..n {
         if index.is_multiple_of(512) {
             check_noise_abort(abort)?;
         }
         white.push(amplitude * rng.gaussian());
     }
-    let mut result = vec![0.0; n];
+    let mut result = try_filled(n, 0.0, "filtered-noise samples")?;
     let mut planner = FftPlanner::new();
     let mut kernels: Vec<Option<Vec<Complex<Value>>>> = vec![None; size.ilog2() as usize + 1];
     let mut work = Vec::new();
@@ -624,23 +673,23 @@ pub(super) fn filtered_white_noise(
         let length = block * 2;
         let forward = planner.plan_fft_forward(length);
         let inverse = planner.plan_fft_inverse(length);
-        scratch.resize(
+        try_resize(
+            &mut scratch,
             forward
                 .get_inplace_scratch_len()
                 .max(inverse.get_inplace_scratch_len()),
             Complex::default(),
-        );
+            "noise FFT scratch",
+        )?;
         if kernels[level].is_none() {
-            let mut kernel: Vec<_> = h[..length]
-                .iter()
-                .map(|value| Complex::new(*value, 0.0))
-                .collect();
+            let mut kernel = try_with_capacity(length, "noise filter spectrum")?;
+            kernel.extend(h[..length].iter().map(|value| Complex::new(*value, 0.0)));
             forward.process_with_scratch(&mut kernel, &mut scratch);
             kernels[level] = Some(kernel);
             check_noise_abort(abort)?;
         }
         let kernel = kernels[level].as_ref().expect("kernel initialized");
-        work.resize(length, Complex::default());
+        try_resize(&mut work, length, Complex::default(), "noise FFT block")?;
         work.fill(Complex::default());
         for (entry, value) in work.iter_mut().zip(&white[left..midpoint]) {
             entry.re = *value;
@@ -1402,12 +1451,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn sample_cap_is_enforced_with_a_clear_error() {
-        let err = generate_noise_points(
+    fn white_train(nt: Value, tstop: Value) -> Result<Vec<(Value, Value)>, SimulationError> {
+        generate_noise_points(
             TrNoiseSpectrum {
                 na: 1e-3,
-                nt: 1e-12,
+                nt,
                 nalpha: 0.0,
                 namp: 0.0,
             },
@@ -1416,65 +1464,54 @@ mod tests {
                 rts_capture: 0.0,
                 rts_emit: 0.0,
             },
-            1.0,
+            tstop,
             1,
             "vbig",
             &NoAbort,
         )
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("Raise NT"),
-            "diagnostic explains the fix: {err}"
-        );
     }
 
     #[test]
-    fn sample_count_boundaries_include_required_tail_points() {
-        assert_eq!(
-            checked_noise_sample_count(
-                "TRNOISE",
-                "vn",
-                (MAX_NOISE_SAMPLES - 2) as Value,
-                2,
-                "tstop/NT",
-                "Raise NT.",
-            )
-            .unwrap(),
-            MAX_NOISE_SAMPLES
-        );
+    fn a_train_past_the_old_four_million_sample_ceiling_is_generated_whole() {
+        // 5,000,002 samples, where 4,194,304 used to be refused.
+        let points = white_train(1e-9, 5e-3).unwrap();
+        assert_eq!(points.len(), 5_000_002);
+        assert_eq!(points[0], (0.0, 0.0));
+        assert_eq!(points[4_999_999].0, 4_999_999.0 * 1e-9);
+        // Closed form: independent Gaussian samples of RMS NA. Over five
+        // million of them the sample RMS sits within 0.2 % of it (the
+        // standard error is 0.03 %).
+        let mean_square =
+            points[1..].iter().map(|(_, v)| v * v).sum::<Value>() / (points.len() - 1) as Value;
+        let rms = mean_square.sqrt();
+        assert!((rms / 1e-3 - 1.0).abs() < 2e-3, "rms {rms:e}");
+    }
+
+    #[test]
+    fn a_train_no_machine_can_hold_is_a_typed_allocation_failure_with_its_bytes() {
+        let error = white_train(5e-19, 1.0).unwrap_err();
+        let count = checked_noise_sample_count("TRNOISE", "vbig", 1.0 / 5e-19, 2, "", "").unwrap();
+        let SimulationError::Allocation { object, bytes, .. } = error else {
+            panic!("a train past the address space is an allocation failure: {error}");
+        };
+        assert_eq!(object, "TRNOISE sample train");
+        assert_eq!(bytes, count * std::mem::size_of::<Value>());
+        assert!(bytes > isize::MAX as usize, "{bytes}");
+    }
+
+    #[test]
+    fn a_count_the_platform_cannot_name_is_refused_with_the_remedy() {
+        let error = white_train(1e-30, 1.0).unwrap_err();
         assert!(
-            checked_noise_sample_count(
-                "TRNOISE",
-                "vn",
-                (MAX_NOISE_SAMPLES - 1) as Value,
-                2,
-                "tstop/NT",
-                "Raise NT.",
-            )
-            .is_err()
+            error
+                .to_string()
+                .contains("more than this platform can count")
+                && error.to_string().contains("Raise NT"),
+            "{error}"
         );
         assert_eq!(
-            checked_noise_sample_count(
-                "TRRANDOM",
-                "vr",
-                (MAX_NOISE_SAMPLES - 1) as Value,
-                1,
-                "(tstop-delay)/TS",
-                "Raise TS.",
-            )
-            .unwrap(),
-            MAX_NOISE_SAMPLES
-        );
-        assert!(
-            checked_noise_sample_count(
-                "TRRANDOM",
-                "vr",
-                MAX_NOISE_SAMPLES as Value,
-                1,
-                "(tstop-delay)/TS",
-                "Raise TS.",
-            )
-            .is_err()
+            checked_noise_sample_count("TRRANDOM", "vr", 7.0, 1, "(tstop-delay)/TS", "Raise TS."),
+            Ok(8)
         );
     }
 

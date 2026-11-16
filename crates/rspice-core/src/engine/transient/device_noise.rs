@@ -110,8 +110,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::noise::{
-    DEFAULT_NOISE_SEED, MAX_NOISE_SAMPLES, SplitMix64, check_noise_abort,
-    checked_noise_sample_count, kasdin_one_over_f,
+    DEFAULT_NOISE_SEED, SplitMix64, check_noise_abort, checked_noise_sample_count,
+    kasdin_one_over_f,
 };
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
@@ -132,39 +132,12 @@ use processes::{
 use shaped::{ShapedRealization, ShapingRefusal};
 use table::{TableShape, tabulated_unit_train};
 
-/// Total materialized samples one run may hold, across every source.
-///
-/// A flat mechanism costs no memory at all, so this bounds the flicker and
-/// tabulated trains, warm-ups included, a shaped process's own train and its
-/// filter's warm-up among them. The shaping filter itself is streamed from a
-/// few state values and costs nothing here. 16M values is 128 MB, past which a
-/// deck should raise `NOISEFMAX`'s reciprocal or shorten the run rather than
-/// have the simulator quietly take the machine.
-const MAX_TOTAL_MATERIALIZED_SAMPLES: usize = 1 << 24;
-
 /// The largest `1/f^ef` exponent the fractional integrator represents.
 ///
 /// `ef = 2` is already a random walk; above it the filter's low-frequency
 /// power grows faster than any finite record can represent and the "lowest
 /// represented frequency" stops meaning anything.
 const MAX_FLICKER_EXPONENT: Value = 2.0;
-
-/// Charge `total` materialized samples against a run's remaining allowance.
-fn charge_materialized_budget(
-    budget: &mut usize,
-    total: usize,
-    describe: &str,
-) -> Result<(), SimulationError> {
-    if total > *budget {
-        return Err(SimulationError::Circuit(format!(
-            "transient noise materialized trains exceed the {MAX_TOTAL_MATERIALIZED_SAMPLES}-sample \
-             budget at source '{describe}'. Raise NOISEFMIN, lower NOISEFMAX, or shorten the \
-             transient."
-        )));
-    }
-    *budget -= total;
-    Ok(())
-}
 
 /// How one mechanism's amplitude is derived from its spectral density.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -466,8 +439,6 @@ pub(super) struct TransientNoiseRuntime {
     /// Whether the circuit holds Verilog-A processes, so a refresh has to
     /// look for processes that become active after the operating point.
     tracks_processes: bool,
-    /// What remains of the run's materialized-sample allowance.
-    materialized_budget: usize,
     /// Newton's own statement of when two solutions are the same bias.
     reltol: Value,
     node_abstol: Value,
@@ -719,14 +690,7 @@ impl TransientNoiseRuntime {
         Ok(match (law, operands) {
             (AmplitudeLaw::Flat, _) => NoiseTrain::Flat { stream_seed: seed },
             (AmplitudeLaw::PowerLaw, FrozenOperands::Exponent(ef)) => NoiseTrain::Materialized {
-                samples: Arc::new(Engine::flicker_unit_train(
-                    *ef,
-                    grid,
-                    seed,
-                    &mut self.materialized_budget,
-                    named,
-                    abort,
-                )?),
+                samples: Arc::new(Engine::flicker_unit_train(*ef, grid, seed, named, abort)?),
             },
             (AmplitudeLaw::Tabulated, FrozenOperands::Table { points, log_interp }) => {
                 NoiseTrain::Materialized {
@@ -736,7 +700,6 @@ impl TransientNoiseRuntime {
                         grid.sample_count,
                         grid.fmin,
                         seed,
-                        &mut self.materialized_budget,
                         named,
                         abort,
                     )?),
@@ -1412,7 +1375,6 @@ impl Engine {
             processes: Vec::new(),
             process_index: HashMap::new(),
             tracks_processes: plan.tracks_processes,
-            materialized_budget: MAX_TOTAL_MATERIALIZED_SAMPLES,
             reltol: convergence.voltage_reltol,
             node_abstol,
             branch_abstol: convergence.current_abstol,
@@ -1538,7 +1500,6 @@ impl Engine {
         ef: Value,
         grid: NoiseGrid,
         seed: u64,
-        budget: &mut usize,
         named: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
@@ -1555,17 +1516,11 @@ impl Engine {
             )));
         }
         let taps = (periods.ceil() as usize).min(sample_count);
-        let total = sample_count
-            .checked_add(taps)
-            .filter(|total| *total <= MAX_NOISE_SAMPLES)
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "transient noise source '{named}' needs {sample_count} samples plus a \
-                     {taps}-sample warm-up, past the {MAX_NOISE_SAMPLES} limit. Raise \
-                     NOISEFMIN, lower NOISEFMAX, or shorten the transient."
-                ))
-            })?;
-        charge_materialized_budget(budget, total, named)?;
+        // The warm-up is at most the record itself, so the sum is at most
+        // twice a count the grid already proved this platform can name; a
+        // record the machine cannot hold is refused by the generator's
+        // reservation, with its bytes.
+        let total = sample_count.saturating_add(taps);
 
         let variance = (2.0 * std::f64::consts::PI * nt).powf(ef) / (2.0 * nt);
         if !(variance.is_finite() && variance > 0.0) {

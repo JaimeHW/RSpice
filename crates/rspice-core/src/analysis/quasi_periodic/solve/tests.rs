@@ -373,3 +373,26 @@ fn qpss_constant_constraints_preserve_small_spectral_residuals() {
         }
     }
 }
+
+#[test]
+fn a_chosen_dense_solve_is_budgeted_past_the_auto_switch_not_refused() {
+    let mut basis = QuasiPeriodicGridConfig::new(vec![1.0, std::f64::consts::SQRT_2], vec![16, 16]);
+    basis.max_mixing_order = Some(16);
+    let grid = Arc::new(
+        QuasiPeriodicGrid::new_with_abort(basis, &ResourceLimits::default(), &NoAbort).unwrap(),
+    );
+    // One unknown on 545 grid points: past the 512 at which `Auto` takes
+    // Krylov and an explicit `Direct` used to be refused. A full solve of this
+    // size (a cubic shunt driven at DC) gives 1.3413194066709104 on both
+    // backends, bit for bit, and x - 0.1 x^3 = 1.1 holds to 2.4e-6.
+    assert_eq!(grid.len(), 545);
+    let direct = QuasiPeriodicLinearConfig {
+        method: QuasiPeriodicLinearMethod::Direct,
+        ..QuasiPeriodicLinearConfig::default()
+    };
+    assert!(!direct.uses_krylov(grid.len()));
+    let (base_values, _) = check_workload(1, &grid, &direct, &ResourceLimits::default())
+        .expect("a chosen dense solve is taken at any size");
+    assert!(base_values >= grid.len() * grid.len() * 16, "{base_values}");
+    assert!(QuasiPeriodicLinearConfig::default().uses_krylov(grid.len()));
+}

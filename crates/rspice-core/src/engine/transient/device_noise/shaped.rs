@@ -40,9 +40,8 @@
 //!
 //! The filter is streamed: its state is a handful of values per process, and
 //! each sample is computed from the committed state and the index-addressed
-//! train, so nothing is materialized and no sample budget applies beyond the
-//! train's own. The cost is bounded by the sample count, which the grid
-//! already bounds.
+//! train, so nothing is materialized beyond the train's own. The cost is the
+//! sample count's.
 
 use super::processes::{
     CollectedNoiseProcess, NoiseProcessRoute, ProcessRealization, RealizationFailure,

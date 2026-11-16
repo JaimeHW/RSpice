@@ -31,6 +31,9 @@ use crate::abort_signal::AbortSignal;
 use crate::{Complex64, ResourceKind, ResourceLimitError, ResourceLimits, Value};
 use std::sync::Arc;
 
+/// The size above which `Auto` takes the Krylov backend instead of a dense
+/// factorization: the point where the dense factor's cubic cost passes the
+/// iterative solve's. A solve that names `Direct` is dense at any size.
 const MAX_DENSE_UNKNOWNS: usize = 512;
 /// The largest direct system a sparse solve that fails its backward-error
 /// check retries with extended-precision dense elimination. The retry is
@@ -256,14 +259,14 @@ pub(crate) fn check_bordered_workload(
         ));
     }
     let size = unknowns.saturating_mul(grid.len()).saturating_add(border);
+    // A dense solve the user chose is taken at any size: its matrix is
+    // budgeted below and probed before the solve, so one this machine cannot
+    // hold is an allocation failure naming its bytes. `Auto` still switches
+    // to Krylov above the dense cutoff.
     ResourceLimitError::ensure(
         ResourceKind::MatrixUnknowns,
         size,
-        if linear.uses_krylov(size) {
-            limits.max_matrix_unknowns
-        } else {
-            limits.max_matrix_unknowns.min(MAX_DENSE_UNKNOWNS)
-        },
+        limits.max_matrix_unknowns,
     )?;
     // The iterative backend stores circuit-sized frequency blocks and a
     // bounded Arnoldi basis, never a full coupled Jacobian or inverse.

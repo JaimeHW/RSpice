@@ -27,14 +27,6 @@ pub const XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE: &str = "filep.dat";
 /// Xyce 7.10's default negative-state table filename.
 pub const XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE: &str = "filem.dat";
 
-/// Hard byte budget for one externally supplied PEM state table.
-#[doc(hidden)]
-pub const XYCE_PEM_MAX_TABLE_BYTES: usize = 64 * 1024 * 1024;
-
-/// Hard point-count budget for one externally supplied PEM state table.
-#[doc(hidden)]
-pub const XYCE_PEM_MAX_TABLE_POINTS: usize = 1_000_000;
-
 /// Parameters on a Xyce `.MODEL ... MEMRISTOR LEVEL=4` card.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct XycePemModelParams {
@@ -299,7 +291,9 @@ pub enum XycePemLegacyTableParseErrorKind {
     NonFiniteFirstValue,
     NonFiniteSecondValue,
     TooFewPoints,
-    TooManyPoints,
+    /// The table's storage could not be reserved; the error's
+    /// [`XycePemLegacyTableParseError::allocation`] names the bytes.
+    Allocation,
     NonIncreasingAbscissa,
 }
 
@@ -312,6 +306,8 @@ pub struct XycePemLegacyTableParseError {
     /// One-based byte column when `line` is present.
     column: Option<usize>,
     kind: XycePemLegacyTableParseErrorKind,
+    /// The bytes and the allocator's refusal of an `Allocation` failure.
+    allocation: Option<(usize, std::collections::TryReserveError)>,
 }
 
 impl XycePemLegacyTableParseError {
@@ -326,6 +322,7 @@ impl XycePemLegacyTableParseError {
             line: Some(line),
             column: Some(column),
             kind,
+            allocation: None,
         }
     }
 
@@ -335,7 +332,28 @@ impl XycePemLegacyTableParseError {
             line: None,
             column: None,
             kind,
+            allocation: None,
         }
+    }
+
+    fn allocation_failed(
+        source_name: &str,
+        bytes: usize,
+        source: std::collections::TryReserveError,
+    ) -> Self {
+        Self {
+            allocation: Some((bytes, source)),
+            ..Self::file(source_name, XycePemLegacyTableParseErrorKind::Allocation)
+        }
+    }
+
+    /// The bytes a refused table reservation asked for, and the
+    /// allocator's reason, when the table could not be held.
+    #[inline]
+    pub fn allocation(&self) -> Option<(usize, &std::collections::TryReserveError)> {
+        self.allocation
+            .as_ref()
+            .map(|(bytes, source)| (*bytes, source))
     }
 
     #[inline]
@@ -368,6 +386,12 @@ impl fmt::Display for XycePemLegacyTableParseError {
                 write!(f, ":{column}")?;
             }
         }
+        if let Some((bytes, source)) = &self.allocation {
+            return write!(
+                f,
+                ": unable to allocate the table: {bytes} bytes were needed: {source}"
+            );
+        }
         let reason = match self.kind {
             XycePemLegacyTableParseErrorKind::MissingFirstValue => "missing first numeric value",
             XycePemLegacyTableParseErrorKind::MissingSeparator => "missing separator character",
@@ -377,9 +401,7 @@ impl fmt::Display for XycePemLegacyTableParseError {
             XycePemLegacyTableParseErrorKind::TooFewPoints => {
                 "table requires at least two data rows"
             }
-            XycePemLegacyTableParseErrorKind::TooManyPoints => {
-                "table exceeds the configured point-count safety limit"
-            }
+            XycePemLegacyTableParseErrorKind::Allocation => "unable to allocate the table",
             XycePemLegacyTableParseErrorKind::NonIncreasingAbscissa => {
                 "first-column values must be strictly increasing"
             }
@@ -390,8 +412,12 @@ impl fmt::Display for XycePemLegacyTableParseError {
 
 impl Error for XycePemLegacyTableParseError {}
 
-/// Parse a PEM table with Xyce 7.10's legacy two-extraction convention,
-/// enforcing a hard point-count budget before each allocation.
+/// Parse a PEM table with Xyce 7.10's legacy two-extraction convention.
+///
+/// Like Xyce's reader (`N_DEV_MemristorPEM.C`, an `ifstream` feeding
+/// `push_back` with no limit), it takes every record the text holds. Each
+/// record's storage is reserved fallibly, so a table the machine cannot hold
+/// is an `Allocation` failure that names its bytes.
 ///
 /// Xyce extracts `double`, then `char`, then `double`.  A comma-delimited row
 /// therefore behaves normally.  On a whitespace-delimited row, formatted
@@ -411,10 +437,9 @@ impl Error for XycePemLegacyTableParseError {}
 /// diagnostic policy and does not change valid-table semantics. The point
 /// limit is independent from the byte cap applied by the loader.
 #[doc(hidden)]
-pub fn parse_xyce_7_10_legacy_two_column_table_bounded(
+pub fn parse_xyce_7_10_legacy_two_column_table(
     source_name: &str,
     text: &str,
-    max_points: usize,
 ) -> Result<XycePemPwlTable, XycePemLegacyTableParseError> {
     let mut points: Vec<XycePemPwlPoint> = Vec::new();
     let mut source_lines = Vec::new();
@@ -520,14 +545,26 @@ pub fn parse_xyce_7_10_legacy_two_column_table_bounded(
                 XycePemLegacyTableParseErrorKind::NonIncreasingAbscissa,
             ));
         }
-        if points.len() >= max_points {
-            return Err(XycePemLegacyTableParseError::at(
+        points.try_reserve(1).map_err(|source| {
+            XycePemLegacyTableParseError::allocation_failed(
                 source_name,
-                line_number,
-                first_column,
-                XycePemLegacyTableParseErrorKind::TooManyPoints,
-            ));
-        }
+                points
+                    .len()
+                    .saturating_add(1)
+                    .saturating_mul(std::mem::size_of::<XycePemPwlPoint>()),
+                source,
+            )
+        })?;
+        source_lines.try_reserve(1).map_err(|source| {
+            XycePemLegacyTableParseError::allocation_failed(
+                source_name,
+                source_lines
+                    .len()
+                    .saturating_add(1)
+                    .saturating_mul(std::mem::size_of::<usize>()),
+                source,
+            )
+        })?;
         points.push(XycePemPwlPoint::new(first, second));
         source_lines.push(line_number);
     }
@@ -1108,10 +1145,9 @@ mod tests {
 
     #[test]
     fn legacy_parser_handles_csv_and_column_one_comments() {
-        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
+        let data = parse_xyce_7_10_legacy_two_column_table(
             "positive.csv",
             "# x,f(x)\n0.0,1.0\n0.5, 0.25\n1.0,0.0\n",
-            usize::MAX,
         )
         .unwrap();
         assert_eq!(
@@ -1126,10 +1162,9 @@ mod tests {
 
     #[test]
     fn legacy_parser_reproduces_whitespace_separator_character_quirk() {
-        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
+        let data = parse_xyce_7_10_legacy_two_column_table(
             "legacy.dat",
             "9.33E-02 6.30E-01\n1.00E-01 -7.25E-01\n",
-            usize::MAX,
         )
         .unwrap();
         assert_close(data.points()[0].value, 0.030, 1e-15, 1e-15);
@@ -1139,10 +1174,9 @@ mod tests {
 
     #[test]
     fn legacy_parser_extracts_records_as_a_continuous_stream() {
-        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
+        let data = parse_xyce_7_10_legacy_two_column_table(
             "stream.csv",
             "# header\n0.0,1.0 0.5,\n0.25 1.0,0.0\n",
-            usize::MAX,
         )
         .expect("records may share or span physical lines");
         assert_eq!(
@@ -1156,26 +1190,39 @@ mod tests {
     }
 
     #[test]
-    fn bounded_legacy_parser_rejects_before_allocating_an_extra_point() {
-        let error =
-            parse_xyce_7_10_legacy_two_column_table_bounded("bounded.csv", "0,0\n1,1\n2,2\n", 2)
-                .expect_err("third point exceeds the hard budget");
-        assert_eq!(error.line(), Some(3));
-        assert_eq!(error.column(), Some(1));
+    fn a_table_past_the_old_million_point_ceiling_is_read_whole() {
+        let rows = 1_000_001usize;
+        let mut text = String::new();
+        for index in 0..rows {
+            text.push_str(&format!("{index},{}\n", index % 7));
+        }
+        let table = parse_xyce_7_10_legacy_two_column_table("big.csv", &text)
+            .expect("every record is read");
+        assert_eq!(table.points().len(), rows);
         assert_eq!(
-            error.kind(),
-            XycePemLegacyTableParseErrorKind::TooManyPoints
+            table.points()[rows - 1],
+            XycePemPwlPoint::new((rows - 1) as Value, ((rows - 1) % 7) as Value)
+        );
+    }
+
+    #[test]
+    fn a_table_the_machine_cannot_hold_names_its_bytes() {
+        let refusal = Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err();
+        let error =
+            XycePemLegacyTableParseError::allocation_failed("huge.dat", 48, refusal.clone());
+        assert_eq!(error.kind(), XycePemLegacyTableParseErrorKind::Allocation);
+        assert_eq!(error.allocation(), Some((48, &refusal)));
+        assert_eq!(
+            error.to_string(),
+            format!("huge.dat: unable to allocate the table: 48 bytes were needed: {refusal}")
         );
     }
 
     #[test]
     fn legacy_parser_reports_stable_file_line_and_column_errors() {
-        let error = parse_xyce_7_10_legacy_two_column_table_bounded(
-            "bad.dat",
-            "# header\n0.0,1.0\n0.5,broken\n",
-            usize::MAX,
-        )
-        .unwrap_err();
+        let error =
+            parse_xyce_7_10_legacy_two_column_table("bad.dat", "# header\n0.0,1.0\n0.5,broken\n")
+                .unwrap_err();
         assert_eq!(error.source_name(), "bad.dat");
         assert_eq!(error.line(), Some(3));
         assert_eq!(error.column(), Some(5));
@@ -1188,9 +1235,7 @@ mod tests {
             "bad.dat:3:5: missing second numeric value"
         );
 
-        let error =
-            parse_xyce_7_10_legacy_two_column_table_bounded("empty.csv", "# only\n", usize::MAX)
-                .unwrap_err();
+        let error = parse_xyce_7_10_legacy_two_column_table("empty.csv", "# only\n").unwrap_err();
         assert_eq!(error.line(), None);
         assert_eq!(error.kind(), XycePemLegacyTableParseErrorKind::TooFewPoints);
     }

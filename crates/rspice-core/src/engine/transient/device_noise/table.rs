@@ -31,7 +31,7 @@
 //! stationary from its first sample and depends only on the seed and the
 //! sample index — a prefix of a longer record is the shorter record.
 
-use super::super::noise::{MAX_NOISE_SAMPLES, SplitMix64, filtered_white_noise};
+use super::super::noise::{SplitMix64, filtered_white_noise, try_filled, try_with_capacity};
 use crate::Value;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::NoiseSource;
@@ -77,8 +77,8 @@ fn table_filter_taps(
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
     use rustfft::{FftPlanner, num_complex::Complex};
-    let length = 2 * bins;
-    let mut spectrum = vec![Complex::new(0.0, 0.0); length];
+    let length = bins.saturating_mul(2);
+    let mut spectrum = try_filled(length, Complex::new(0.0, 0.0), "tabulated noise spectrum")?;
     for k in 0..=bins {
         if k.is_multiple_of(512) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -96,7 +96,7 @@ fn table_filter_taps(
     let scale = 1.0 / length as Value;
     // h[m] for m in -L..=L, read from the periodic response; the shared
     // sample at m = ±L is split between its two ends.
-    let mut taps = Vec::with_capacity(length + 1);
+    let mut taps = try_with_capacity(length.saturating_add(1), "tabulated noise filter")?;
     for tap in 0..=length {
         let lag = tap as isize - bins as isize;
         let periodic = lag.rem_euclid(length as isize) as usize;
@@ -108,17 +108,12 @@ fn table_filter_taps(
 
 /// One process's unit train for a tabulated density: one-sided density
 /// `T(f)` per unit of the table's scale once held on the sample grid.
-///
-/// `budget` is the run's remaining materialized-sample allowance; the train
-/// and its warm-up are charged to it.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn tabulated_unit_train(
     shape: &TableShape,
     nt: Value,
     sample_count: usize,
     fmin: Value,
     seed: u64,
-    budget: &mut usize,
     describe: &str,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
@@ -130,17 +125,9 @@ pub(super) fn tabulated_unit_train(
         ))
     })?;
     let warm_up = 2 * bins;
-    let total = sample_count
-        .checked_add(warm_up)
-        .filter(|total| *total <= MAX_NOISE_SAMPLES)
-        .ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "transient noise source '{describe}' needs {sample_count} samples plus a \
-                 {warm_up}-sample warm-up, past the {MAX_NOISE_SAMPLES} limit. Raise NOISEFMIN, \
-                 lower NOISEFMAX, or shorten the transient."
-            ))
-        })?;
-    super::charge_materialized_budget(budget, total, describe)?;
+    // A record the machine cannot hold is refused by the generator's
+    // reservation, with its bytes.
+    let total = sample_count.saturating_add(warm_up);
 
     let taps = table_filter_taps(shape, fmax, bins, abort)?;
     if taps.iter().any(|tap| !tap.is_finite()) {
@@ -206,11 +193,10 @@ mod tests {
     fn a_tabulated_train_is_a_prefix_of_its_longer_records() {
         let shape = TableShape::new(&[(1.0e3, 1.0e-18), (1.0e6, 1.0e-20)], false);
         let nt = 1.0e-7;
-        let mut budget = usize::MAX;
-        let short = tabulated_unit_train(&shape, nt, 300, 1.0e5, 9, &mut budget, "X1", &NoAbort)
-            .expect("short train");
-        let long = tabulated_unit_train(&shape, nt, 900, 1.0e5, 9, &mut budget, "X1", &NoAbort)
-            .expect("long train");
+        let short =
+            tabulated_unit_train(&shape, nt, 300, 1.0e5, 9, "X1", &NoAbort).expect("short train");
+        let long =
+            tabulated_unit_train(&shape, nt, 900, 1.0e5, 9, "X1", &NoAbort).expect("long train");
         assert_eq!(short.len(), 300);
         assert_eq!(&long[..300], short.as_slice());
     }

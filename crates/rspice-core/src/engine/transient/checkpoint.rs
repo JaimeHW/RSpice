@@ -657,7 +657,6 @@ fn hash_dependency(
     path: &str,
     source_path: Option<&std::path::Path>,
     xspice_virtual_aware: bool,
-    max_bytes: Option<usize>,
 ) {
     let resolved = resolved_dependency_path(path, source_path);
     let resolved_text = resolved.to_string_lossy();
@@ -665,28 +664,12 @@ fn hash_dependency(
     if xspice_virtual_aware
         && let Some(contents) = crate::xspice::checkpoint_virtual_data_file_contents(&resolved_text)
     {
-        if max_bytes.is_some_and(|limit| contents.len() > limit) {
-            hash_field(hasher, "dependency_kind", "oversized_virtual");
-            hash_field(hasher, "dependency_length", contents.len());
-            hash_field(hasher, "dependency_limit", max_bytes);
-            return;
-        }
         hash_field(hasher, "dependency_kind", "virtual");
         hasher.update(&(contents.len() as u64).to_le_bytes());
         hasher.update(blake3::hash(contents.as_bytes()).as_bytes());
     } else {
         match std::fs::File::open(&resolved) {
             Ok(mut file) => {
-                let metadata_length = file.metadata().ok().map(|metadata| metadata.len());
-                if let (Some(limit), Some(length)) = (max_bytes, metadata_length)
-                    && length > limit as u64
-                {
-                    hash_field(hasher, "dependency_kind", "oversized_native");
-                    hash_field(hasher, "dependency_length", length);
-                    hash_field(hasher, "dependency_limit", limit);
-                    return;
-                }
-
                 let mut content_hasher = blake3::Hasher::new();
                 let mut length = 0usize;
                 let mut buffer = [0u8; 64 * 1024];
@@ -695,12 +678,6 @@ fn hash_dependency(
                         Ok(0) => break,
                         Ok(read) => {
                             length = length.saturating_add(read);
-                            if max_bytes.is_some_and(|limit| length > limit) {
-                                hash_field(hasher, "dependency_kind", "oversized_native");
-                                hash_field(hasher, "dependency_length_at_least", length);
-                                hash_field(hasher, "dependency_limit", max_bytes);
-                                return;
-                            }
                             content_hasher.update(&buffer[..read]);
                         }
                         Err(error) => {
@@ -736,7 +713,7 @@ fn hash_source_dependencies(
         | SourceSpec::DcAcTransient { transient, .. } => {
             hash_source_dependencies(hasher, transient, source_path);
         }
-        SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false, None),
+        SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false),
         _ => {}
     }
 }
@@ -781,7 +758,7 @@ fn hash_expression_dependencies(
                 if file_lookup_function(*func)
                     && let Some(Expr::StringLiteral(path)) = args.first()
                 {
-                    hash_dependency(hasher, path, source_path, false, None);
+                    hash_dependency(hasher, path, source_path, false);
                 }
                 for argument in args {
                     visit(hasher, argument, source_path);
@@ -892,15 +869,7 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
                 } else {
                     source_path
                 };
-                let max_bytes = model_string_is_pem_table_dependency(name)
-                    .then_some(crate::device::XYCE_PEM_MAX_TABLE_BYTES);
-                hash_dependency(
-                    hasher,
-                    path,
-                    dependency_source_path,
-                    virtual_aware,
-                    max_bytes,
-                );
+                hash_dependency(hasher, path, dependency_source_path, virtual_aware);
             }
         }
 
@@ -923,13 +892,7 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
                     continue;
                 }
                 let path = xyce_pem_default_table_path(netlist, default);
-                hash_dependency(
-                    hasher,
-                    &path.to_string_lossy(),
-                    None,
-                    true,
-                    Some(crate::device::XYCE_PEM_MAX_TABLE_BYTES),
-                );
+                hash_dependency(hasher, &path.to_string_lossy(), None, true);
             }
         }
     }
@@ -939,13 +902,12 @@ fn hash_external_dependencies(hasher: &mut blake3::Hasher, netlist: &Netlist) {
             &include.file_path.to_string_lossy(),
             source_path,
             false,
-            None,
         );
     }
     // A `.VEC` file's inputs drive the trajectory: a resume against an edited
     // file is a different run. Its path is already the one the build reads.
     for reference in &netlist.vector_files {
-        hash_dependency(hasher, &reference.path, None, true, None);
+        hash_dependency(hasher, &reference.path, None, true);
     }
 }
 
@@ -13946,26 +13908,6 @@ mod tests {
         assert_ne!(
             changed_positive, changed_negative,
             "replacing default filem.dat contents must invalidate checkpoint provenance"
-        );
-    }
-
-    #[test]
-    fn oversized_pem_dependency_identity_is_bounded_without_hashing_contents() {
-        let path = "virtual://checkpoint/pem-oversized-identity";
-        crate::xspice::register_data_file(path, "first")
-            .expect("register oversized identity fixture");
-        let mut first = blake3::Hasher::new();
-        hash_dependency(&mut first, path, None, true, Some(4));
-        crate::xspice::register_data_file(path, "other")
-            .expect("replace oversized identity fixture");
-        let mut second = blake3::Hasher::new();
-        hash_dependency(&mut second, path, None, true, Some(4));
-        crate::xspice::unregister_data_file(path).expect("unregister oversized fixture");
-
-        assert_eq!(
-            first.finalize(),
-            second.finalize(),
-            "invalid over-budget dependencies must be identified by kind/length/limit without reading their payload"
         );
     }
 

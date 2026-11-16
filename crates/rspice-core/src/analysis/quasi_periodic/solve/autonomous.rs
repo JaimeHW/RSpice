@@ -268,11 +268,7 @@ fn workspace<'a>(
     ResourceLimitError::ensure(
         ResourceKind::MatrixUnknowns,
         size,
-        if config.linear.uses_krylov(size) {
-            limits.max_matrix_unknowns
-        } else {
-            limits.max_matrix_unknowns.min(MAX_DENSE_UNKNOWNS)
-        },
+        limits.max_matrix_unknowns,
     )?;
     // Select and budget the backend for the bordered size, including its
     // frequency unknown. Auto can cross the dense cutoff at this extra row.
