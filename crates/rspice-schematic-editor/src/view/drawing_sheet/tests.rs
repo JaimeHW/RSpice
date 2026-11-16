@@ -1055,6 +1055,36 @@ fn component_overflow_includes_the_hardcopy_name_and_value_extent() {
     assert_eq!(item.severity, DrawingSheetOverflowSeverity::OffPaper);
 }
 
+/// A PWL source of 64 points letters "PWL", its point count and its end
+/// times, not its table: drawn well inside the sheet, it is not reported as
+/// running off the paper by the length of the table it does not letter.
+#[test]
+fn a_long_pwl_source_is_measured_by_the_summary_it_letters() {
+    let table = (0..64)
+        .map(|k| format!("{k}.501u 0.123456789"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut document = SchematicDocument::default();
+    document.components.push(
+        Component::new(62, ComponentType::VoltageSourcePwl, Point::new(20, 400))
+            .with_name_value("vin", &table),
+    );
+    let symbol_context = SchematicSymbolContext::default();
+    let sheet = test_sheet();
+    let object = active_object_bounds(&test_view(&document), &symbol_context)
+        .into_iter()
+        .find(|object| object.target == DrawingSheetOverflowTarget::Component(62))
+        .expect("the source is printable");
+    assert!(
+        sheet.geometry.drawing_area.contains_rect(object.bounds),
+        "{:?} against {:?}",
+        object.bounds,
+        sheet.geometry.drawing_area
+    );
+    let report = drawing_sheet_overflow_summary(&test_view(&document), &symbol_context, &sheet);
+    assert!(report.is_clear(), "{:?}", report.items);
+}
+
 #[test]
 fn conductor_title_collision_uses_segments_not_the_route_bounding_box() {
     let title_block = WorldRect {

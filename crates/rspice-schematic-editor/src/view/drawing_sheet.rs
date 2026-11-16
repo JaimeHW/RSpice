@@ -973,11 +973,15 @@ fn active_object_bounds<'a>(
             // the instance anchor. Its semantic bounds authority gives the
             // longer label two world units per source character, so include
             // the same deterministic horizontal extent in sheet previews and
-            // canvas overflow rather than reviewing only the symbol body.
+            // canvas overflow rather than reviewing only the symbol body. A
+            // source letters its waveform as a summary, line by line, not its
+            // whole table, so its longest lettered line is what is measured.
+            let value = rspice_design::schematic::value_label::component_value_label(component);
+            let value_width = value.lines().map(str::len).max().unwrap_or(0);
             let label_width = component
                 .name
                 .len()
-                .max(component.value.len())
+                .max(value_width)
                 .saturating_mul(2)
                 .min(i32::MAX as usize) as i32;
             let label_max =
