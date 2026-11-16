@@ -2271,3 +2271,17 @@ fn the_piece_of_a_split_wire_between_the_pins_shorts_the_part() {
         "only the piece between the pins shorts the part"
     );
 }
+
+/// A behavioral source reads each node its expression names in a `v()`
+/// access, a differential access naming both, and no other word that ends
+/// in a `v`; any other instance reads none.
+#[test]
+fn a_behavioral_source_reads_the_nodes_its_expression_names() {
+    let mut source = Component::new(1, ComponentType::BehavioralSource, Point::origin());
+    source.value = "V = v(b7)*(1.8-V( samp_d ))/1.8 + dev(x) + v(a, b) - v(B7)".to_owned();
+    assert_eq!(expression_reads(&source), ["b7", "samp_d", "a", "b"]);
+
+    let mut resistor = Component::new(2, ComponentType::Resistor, Point::origin());
+    resistor.value = "v(b7)".to_owned();
+    assert!(expression_reads(&resistor).is_empty());
+}

@@ -766,6 +766,11 @@ impl DrcChecker {
 
     /// Report every node with fewer connections than the configured minimum.
     ///
+    /// A node a behavioral source's expression reads by name is read there
+    /// as surely as through a terminal, so each such reader counts as one
+    /// connection: a register bit wired only to the register's pin and read
+    /// by `V = v(b7)*...` is not dangling.
+    ///
     /// A node that continues outside the cellview — through an interface port,
     /// or as a global the deck declares — is connected to something no
     /// terminal here represents, so that counts as one connection: an
@@ -794,7 +799,8 @@ impl DrcChecker {
             {
                 continue;
             }
-            let connections = net.connection_count + usize::from(net.continues_outside);
+            let connections =
+                net.connection_count + usize::from(net.continues_outside) + net.expression_readers;
             if connections < self.config.min_connections && !net.is_ground {
                 let id = self.next_id();
                 self.add_violation(

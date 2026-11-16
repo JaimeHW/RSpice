@@ -72,6 +72,9 @@ pub struct ComponentInfo {
     /// not name exactly one instance of its cellview, so the deck cannot
     /// write them as an element the engine has.
     pub broken_references: Vec<BrokenReference>,
+    /// The nodes this instance's expression reads by name, as a behavioral
+    /// source's `v(b7)` does: the deck spelling of each, once.
+    pub expression_reads: Vec<String>,
 }
 
 /// One reference an instance makes to another by name — a current-controlled

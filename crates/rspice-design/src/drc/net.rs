@@ -33,6 +33,10 @@ pub(super) struct NetInfo {
     /// terminal here represents, so the node is not floating for want of it.
     /// Whether a global is touched anywhere else is judged over the whole walk.
     pub(super) continues_outside: bool,
+    /// How many instances read this node by name in an expression, as a
+    /// behavioral source's `v(b7)` does. Each reads the node as surely as a
+    /// terminal on it would, though no terminal stands there.
+    pub(super) expression_readers: usize,
     /// How many of those terminals belong to drawn ground symbols. A ground
     /// symbol that reaches nothing else grounds nothing.
     pub(super) ground_symbol_count: usize,
@@ -145,6 +149,19 @@ pub(super) fn fold_nets(
                 }
             }
             entry.on_node.push(terminal);
+        }
+    }
+
+    for component in components {
+        for read in &component.expression_reads {
+            // The deck spells a node as drawn, and the engine reads it
+            // whatever the case.
+            if let Some(net) = nets
+                .iter_mut()
+                .find_map(|(name, net)| name.eq_ignore_ascii_case(read).then_some(net))
+            {
+                net.expression_readers += 1;
+            }
         }
     }
 

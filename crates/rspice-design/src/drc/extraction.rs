@@ -841,6 +841,7 @@ fn extract_components(
             missing_parameters: missing_parameters(comp, &property_registry),
             out_of_range_parameters: out_of_range_parameters(comp, &property_registry),
             broken_references: broken_references(comp, &schematic.components),
+            expression_reads: expression_reads(comp),
         });
     }
 
@@ -853,6 +854,43 @@ fn extract_components(
 /// A current-controlled source names its controlling element. The netlister
 /// resolves that reference with [`resolve_instance_reference`] and writes the
 /// emitted name it finds, so this asks the same question of the same function.
+/// The nodes a behavioral source's expression reads, `b7` and `samp_d` for
+/// `V = v(b7)*(1.8-v(samp_d))/1.8`: each argument of a `v()` access, a
+/// differential `v(a, b)` naming both. Any other instance reads none.
+fn expression_reads(component: &Component) -> Vec<String> {
+    if component.kind != ComponentType::BehavioralSource {
+        return Vec::new();
+    }
+    let text = component.value.as_str();
+    let bytes = text.as_bytes();
+    let mut reads = Vec::new();
+    let mut index = 0;
+    while let Some(offset) = text[index..].find(['v', 'V']) {
+        let at = index + offset;
+        index = at + 1;
+        let starts_word =
+            at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
+        let rest = text[at + 1..].trim_start();
+        if !starts_word || !rest.starts_with('(') {
+            continue;
+        }
+        let Some(close) = rest.find(')') else {
+            break;
+        };
+        for node in rest[1..close].split(',') {
+            let node = node.trim();
+            if !node.is_empty()
+                && !reads
+                    .iter()
+                    .any(|read: &String| read.eq_ignore_ascii_case(node))
+            {
+                reads.push(node.to_owned());
+            }
+        }
+    }
+    reads
+}
+
 fn broken_references(component: &Component, cellview: &[Component]) -> Vec<BrokenReference> {
     if !matches!(component.kind, ComponentType::Ccvs | ComponentType::Cccs) {
         return Vec::new();

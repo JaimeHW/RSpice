@@ -86,6 +86,7 @@ fn resistor(id: u64, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
         broken_references: Vec::new(),
+        expression_reads: Vec::new(),
     }
 }
 
@@ -108,6 +109,7 @@ fn vsource(id: u64, name: &str, plus_net: &str, minus_net: &str) -> ComponentInf
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
         broken_references: Vec::new(),
+        expression_reads: Vec::new(),
     }
 }
 
@@ -133,6 +135,7 @@ fn interface_port(id: u64, net: &str, attached: bool) -> ComponentInfo {
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
         broken_references: Vec::new(),
+        expression_reads: Vec::new(),
     }
 }
 
@@ -164,6 +167,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
         missing_parameters: Vec::new(),
         out_of_range_parameters: Vec::new(),
         broken_references: Vec::new(),
+        expression_reads: Vec::new(),
     }
 }
 
@@ -349,6 +353,22 @@ fn single_connection_net_is_floating() {
     // marks.
     assert_eq!(floating[0].related_items(), vec!["R2.2".to_string()]);
     assert_eq!(floating[0].related[0].relation, DrcRelation::OnNode);
+}
+
+/// A node a behavioral source's expression reads is read there: a register
+/// bit wired only to the register's pin and read by `V = v(B7)*...` is not
+/// floating, whatever case the expression spells it in.
+#[test]
+fn a_node_an_expression_reads_is_not_floating() {
+    let mut components = minimal_circuit();
+    components.push(resistor(2, "R2", vec![pin("1", "vin"), pin("2", "b7")]));
+    let mut reader = resistor(3, "B1", vec![pin("1", "vin"), pin("2", "GND")]);
+    reader.expression_reads = vec!["B7".to_owned()];
+    components.push(reader);
+
+    let result = check(&components, DrcConfig::default());
+    let floating = of_type(&result, DrcViolationType::FloatingNode);
+    assert!(floating.is_empty(), "{floating:?}");
 }
 
 #[test]
