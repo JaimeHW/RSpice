@@ -12,7 +12,7 @@ use crate::format::{Cursor, PutLe};
 use crate::{Digest, RunStatus, StoreError};
 
 const MANIFEST_MAGIC: [u8; 8] = *b"RSPMAN\r\n";
-const MANIFEST_VERSION: u32 = 1;
+const MANIFEST_VERSION: u32 = 2;
 
 /// One run of a store.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -28,6 +28,9 @@ pub struct Member {
     /// `None` while the member runs.
     pub status: Option<RunStatus>,
     pub digest: Option<Digest>,
+    /// The netlist fingerprint of the checkpoints the member's run wrote. A run resumed from one
+    /// of them continues this member, and may append to its segment.
+    pub checkpoint_fingerprint: Option<u64>,
 }
 
 /// The members of a store.
@@ -104,6 +107,13 @@ impl Manifest {
                 }
                 None => out.put_u8(0),
             }
+            match member.checkpoint_fingerprint {
+                Some(fingerprint) => {
+                    out.put_u8(1);
+                    out.put_u64(fingerprint);
+                }
+                None => out.put_u8(0),
+            }
         }
         let crc = crc32fast::hash(&out);
         out.put_u32(crc);
@@ -175,6 +185,11 @@ impl Manifest {
             } else {
                 None
             };
+            let checkpoint_fingerprint = if flag(&mut cursor)? {
+                Some(cursor.u64()?)
+            } else {
+                None
+            };
             if members
                 .last()
                 .is_some_and(|last: &Member| last.index >= index)
@@ -191,6 +206,7 @@ impl Manifest {
                 temperature,
                 status,
                 digest,
+                checkpoint_fingerprint,
             });
         }
         if cursor.remaining() != 0 {

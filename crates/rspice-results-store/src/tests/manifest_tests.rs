@@ -19,6 +19,9 @@ fn member(index: u32) -> Member {
             _ => None,
         },
         digest: (index % 2 == 1).then_some(Digest([index as u8; 32])),
+        checkpoint_fingerprint: index
+            .is_multiple_of(2)
+            .then_some(0x9e37_79b9_7f4a_7c15 ^ u64::from(index)),
     }
 }
 
