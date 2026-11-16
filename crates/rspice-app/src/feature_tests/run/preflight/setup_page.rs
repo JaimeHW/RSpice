@@ -10,7 +10,9 @@ use rspice_app_state::state::SimulationPage;
 #[derive(Debug, Clone)]
 pub(super) struct Control {
     pub(super) label: String,
+    pub(super) role: egui::accesskit::Role,
     pub(super) value: Option<String>,
+    pub(super) description: Option<String>,
     pub(super) rect: Rect,
 }
 
@@ -19,6 +21,11 @@ pub(super) struct Page {
     ctx: egui::Context,
     pub(super) app: RSpiceApp,
     pub(super) controls: Vec<Control>,
+    /// The label of the control holding keyboard focus.
+    pub(super) focused: Option<String>,
+    /// The route the page asked for in the last pass.
+    pub(super) routed:
+        Option<rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute>,
 }
 
 impl Page {
@@ -33,6 +40,8 @@ impl Page {
             ctx,
             app,
             controls: Vec::new(),
+            focused: None,
+            routed: None,
         };
         // Twice: the first pass builds the fonts the second lays out with.
         page.pass(Vec::new());
@@ -59,10 +68,19 @@ impl Page {
                     });
             },
         );
+        if let Some(route) = self.app.state.model.diagnostics.take_pending_route() {
+            self.routed = Some(route.clone());
+            self.app.state.model.diagnostics.request_route(route);
+        }
         crate::workbench::diagnostic_routes::apply_pending(&self.ctx, &mut self.app);
         let Some(update) = output.platform_output.accesskit_update else {
             return;
         };
+        self.focused = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .and_then(|(_, node)| node.label().map(str::to_owned));
         self.controls = update
             .nodes
             .iter()
@@ -70,7 +88,9 @@ impl Page {
                 let bounds = node.bounds()?;
                 Some(Control {
                     label: node.label()?.to_owned(),
+                    role: node.role(),
                     value: node.value().map(str::to_owned),
+                    description: node.description().map(str::to_owned),
                     rect: Rect::from_min_max(
                         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                         egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
@@ -154,6 +174,13 @@ impl Page {
             events.push(egui::Event::Text(text.to_owned()));
         }
         self.pass(events);
+    }
+
+    /// Click the field called `label`, type `text` over it and Tab off it.
+    pub(super) fn retype(&mut self, label: &str, text: &str) {
+        self.click(label);
+        self.type_over(text);
+        self.key(egui::Key::Tab);
     }
 
     /// Click the field called `label`, clear it and type `text` one

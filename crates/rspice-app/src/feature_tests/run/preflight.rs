@@ -18,6 +18,7 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
+mod connect_rules;
 mod engine;
 mod pipeline;
 mod rule_deck;

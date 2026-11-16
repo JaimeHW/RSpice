@@ -681,7 +681,7 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
 }
 
 /// Edit the plan's transient as `edit` does.
-fn edit_the_transient(
+pub(super) fn edit_the_transient(
     state: &mut AppState,
     edit: impl FnOnce(&mut rspice_simulation_contract::drafts::TranSetup),
 ) {

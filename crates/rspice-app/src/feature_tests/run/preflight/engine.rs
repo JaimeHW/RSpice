@@ -176,6 +176,69 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
 pub(super) fn app_with_a_moded_device(
     rule_blocks: &str,
 ) -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
+    moded_device_with(rule_blocks, "gnd", "")
+}
+
+/// The moded device with its analog pin `p` on `drv` as well, driven by a
+/// 3.3 V/µs ramp over a 1 µs transient taken in 1 ns steps, the drive's
+/// current `I(V1)` saved as `drive current`: that current over the ramp's voltage is the
+/// device's conductance, 2 mS while `mode` reads low and 1 mS once the
+/// converter drives it high.
+pub(super) fn moded_device_on_a_ramp() -> RSpiceApp {
+    use rspice_app_state::state::{
+        ComponentType, SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let (mut app, _, _) = moded_device_with("", "drv", "");
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.kind == ComponentType::VoltageSource)
+        .expect("the drive")
+        .value = "PWL(0 0 1u 3.3)".to_owned();
+    app.state.sync_active_schematic_to_workspace();
+    super::pipeline::edit_the_transient(&mut app.state, |draft| {
+        draft.stop = "1u".to_owned();
+        draft.step = "1n".to_owned();
+        draft.max_step = "1n".to_owned();
+    });
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan")
+        .id();
+    let drive = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "drive current",
+        "I(V1)",
+        SavedOutputCompatibility::OpTranAc,
+        SavedOutputPolicy::SelectedAndFinalPoints,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .expect("a current output");
+    app.state
+        .model
+        .workspace
+        .content
+        .add_saved_output(plan, drive)
+        .expect("the plan saves the drive's current");
+    app
+}
+
+/// The moded device, its pin `p` on `p_net`, with `source_tail` written after
+/// the module in its Verilog-A source.
+pub(super) fn moded_device_with(
+    rule_blocks: &str,
+    p_net: &str,
+    source_tail: &str,
+) -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
     use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, ProjectSourceBundle,
         ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
@@ -241,8 +304,11 @@ pub(super) fn app_with_a_moded_device(
         ProjectSourceOwner::cell_view(device.clone()),
         ProjectSourceLanguage::VerilogA,
         "moded.va".to_owned(),
-        "`include \"disciplines.vams\"\nmodule moded(p, n, mode);\n  inout p, n;\n  input mode;\n  \
-         electrical p, n;\n  logic mode;\n  analog I(p, n) <+ (mode ? 1m : 2m) * V(p, n);\nendmodule\n",
+        format!(
+            "`include \"disciplines.vams\"\nmodule moded(p, n, mode);\n  inout p, n;\n  input mode;\n  \
+             electrical p, n;\n  logic mode;\n  analog I(p, n) <+ (mode ? 1m : 2m) * V(p, n);\nendmodule\n\
+             {source_tail}"
+        ),
         [],
         [],
     )
@@ -287,7 +353,7 @@ pub(super) fn app_with_a_moded_device(
         .map(|(_, at)| at)
         .collect();
     assert_eq!(terminals.len(), 3, "p, n and mode");
-    for (at, net) in terminals.into_iter().zip(["gnd", "gnd", "drv"]) {
+    for (at, net) in terminals.into_iter().zip([p_net, "gnd", "drv"]) {
         let outward = if (at.x - origin.x).abs() >= (at.y - origin.y).abs() {
             Point::new(at.x + (at.x - origin.x).signum() * 20, at.y)
         } else {
@@ -396,7 +462,7 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
 }
 
 /// Two blocks that each convert the crossing, at different supplies.
-const TWO_RULE_BLOCKS: &str = "connectrules Low; connect a2d #(.vsup(1.0)); endconnectrules\n\
+pub(super) const TWO_RULE_BLOCKS: &str = "connectrules Low; connect a2d #(.vsup(1.0)); endconnectrules\n\
                                connectrules High; connect a2d #(.vsup(5.0)); endconnectrules\n";
 
 /// A design whose libraries declare two connect-rule blocks has no block until
