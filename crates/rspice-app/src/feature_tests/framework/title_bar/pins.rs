@@ -202,6 +202,60 @@ fn every_menu_shows_exactly_its_pinned_rows() {
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
 }
 
+/// Specifications is one command in one place: a single row across the menu
+/// bar, with a project open or not, a single palette entry and a button on
+/// the Results toolbar, and from Results it opens Verify on its
+/// Specifications view.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn specifications_is_one_command_that_opens_verify_on_its_view() {
+    use rspice_app_results::workbench::chrome::toolbar::results::offered_tool_groups;
+    use rspice_app_workbench::workbench::app::command_palette::palette_commands;
+
+    let names_specifications = |text: &str| text.to_lowercase().contains("specification");
+    for (context, app) in [
+        ("a drawing", title_test_app()),
+        ("no project", no_project_app()),
+    ] {
+        let rows = ALL_MENUS
+            .into_iter()
+            .flat_map(|menu| menu_pin(application_menu_entries(menu), &app))
+            .filter(|row| names_specifications(row))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "with {context}: {rows:?}");
+        assert!(
+            rows[0].starts_with("Specifications | verify-specifications |"),
+            "with {context}: {rows:?}"
+        );
+    }
+
+    let mut app = title_test_app();
+    let listed = palette_commands(&app)
+        .map(|command| command.key())
+        .filter(|key| {
+            command_registry()
+                .spec(*key)
+                .is_some_and(|spec| names_specifications(spec.label))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(listed, [ids::VERIFY_SPECIFICATIONS]);
+
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.simulate.verification_page = VerificationPage::Corners;
+    let offered = offered_tool_groups(app.state.results_reads())
+        .flatten()
+        .map(|&(key, _)| key)
+        .collect::<Vec<_>>();
+    assert!(offered.contains(&ids::VERIFY_SPECIFICATIONS), "{offered:?}");
+
+    app.execute_command_key(ids::VERIFY_SPECIFICATIONS);
+    assert_eq!(app.state.workbench.workspace, Workspace::Verify);
+    assert_eq!(
+        app.state.simulate.verification_page,
+        VerificationPage::Specifications
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
     (

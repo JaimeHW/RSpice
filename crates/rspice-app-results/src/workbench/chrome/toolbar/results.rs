@@ -46,15 +46,20 @@ const DATASET: ToolGroup = &[
     (ids::PRINT_HARDCOPY, WorkbenchIcon::File),
 ];
 
+/// The run's specifications, which Verify judges and edits: the one place
+/// they are, opened from here under the Verify workspace's own glyph.
+const SPECIFICATIONS: ToolGroup = &[(ids::VERIFY_SPECIFICATIONS, WorkbenchIcon::Verify)];
+
 /// The Results toolbar's groups, in the order it lays them out: the linked
-/// cursors, the calculator, which a historical document is not offered, and
-/// the dataset's commands.
+/// cursors, the calculator, which a historical document is not offered, the
+/// dataset's commands, and the specifications.
 pub fn offered_tool_groups(state: ResultsReads<'_>) -> impl Iterator<Item = ToolGroup> + use<> {
     let historical = results_document_is_historical(state);
     [
         Some(LINKED_CURSORS),
         (!historical).then_some(CALCULATOR),
         Some(DATASET),
+        Some(SPECIFICATIONS),
     ]
     .into_iter()
     .flatten()

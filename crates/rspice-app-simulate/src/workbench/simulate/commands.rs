@@ -139,9 +139,7 @@ impl SimulateCommand {
             Self::Page(SimulationPage::ConnectRules) => CommandKey::new("simulation-connect-rules"),
             Self::Page(SimulationPage::Solver) => CommandKey::new("simulation-solver"),
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
-            Self::Verify(VerificationPage::Specifications) => {
-                CommandKey::new("verify-specifications")
-            }
+            Self::Verify(VerificationPage::Specifications) => ids::VERIFY_SPECIFICATIONS,
             Self::Verify(VerificationPage::Corners) => CommandKey::new("verify-corners"),
             Self::Verify(VerificationPage::MonteCarlo) => CommandKey::new("verify-monte-carlo"),
             Self::Verify(VerificationPage::Checks) => CommandKey::new("verify-checks"),

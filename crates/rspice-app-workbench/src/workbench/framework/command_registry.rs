@@ -708,6 +708,7 @@ pub mod ids {
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
         UNDO = "undo";
         UPDATE_INSTANCE_INTERFACE = "update-instance-interface";
+        VERIFY_SPECIFICATIONS = "verify-specifications";
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";
