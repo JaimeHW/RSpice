@@ -34,12 +34,13 @@ APPLE_BUNDLE_IDENTIFIER = "app.rspice.RSpice"
 APPLE_ICON = "RSpice.icns"
 BRAND_ICON = Path("assets") / "brand" / "rspice.ico"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-# The icns slots that take a PNG of each edge length the brand icon carries
-# (Apple's icns types: icp4-icp6 and ic07/ic08 at 1x, ic11-ic13 at 2x).
+# The icns slots that take a PNG of each edge length the brand icon carries:
+# icp4, icp5, icp6 (48 px), ic07 and ic08 at 1x; ic11, ic12 and ic13 at 2x.
 ICNS_SLOTS = {
     16: (b"icp4",),
     32: (b"icp5", b"ic11"),
-    64: (b"icp6", b"ic12"),
+    48: (b"icp6",),
+    64: (b"ic12",),
     128: (b"ic07",),
     256: (b"ic08", b"ic13"),
 }
