@@ -120,6 +120,17 @@ pub fn run_manual_batch_at(
     path: &Path,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
+    run_manual_batch_at_within(source, path, expected_lifecycle, FIXTURE_BATCH_LIMIT)
+}
+
+/// [`run_manual_batch_at`] for a deck whose run takes longer than a
+/// fixture's, given `limit` before it is taken to have hung.
+pub fn run_manual_batch_at_within(
+    source: &str,
+    path: &Path,
+    expected_lifecycle: SimulationRunLifecycle,
+    limit: Duration,
+) -> crate::state::SimulationRun {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(source.to_owned());
@@ -128,12 +139,25 @@ pub fn run_manual_batch_at(
     controller
         .validate_manual_deck_document(&state)
         .expect("fixture source passes complete preparation");
-    run_batch(state, controller, expected_lifecycle)
+    run_batch_session(&mut state, controller, expected_lifecycle, limit)
 }
 
 pub fn run_generated_batch(
+    state: RunTestHost,
+    expected_lifecycle: SimulationRunLifecycle,
+) -> crate::state::SimulationRun {
+    run_generated_batch_within(state, expected_lifecycle, FIXTURE_BATCH_LIMIT)
+}
+
+/// How long a fixture batch may run before it is taken to have hung.
+const FIXTURE_BATCH_LIMIT: Duration = Duration::from_secs(60);
+
+/// [`run_generated_batch`] for a design whose run takes longer than a
+/// fixture's, given `limit` before it is taken to have hung.
+pub fn run_generated_batch_within(
     mut state: RunTestHost,
     expected_lifecycle: SimulationRunLifecycle,
+    limit: Duration,
 ) -> crate::state::SimulationRun {
     state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     state.sync_active_schematic_to_workspace();
@@ -145,7 +169,7 @@ pub fn run_generated_batch(
     controller
         .prepare_run_set_for_preflight(&state)
         .expect("prepare the complete fixture plan");
-    run_batch(state, controller, expected_lifecycle)
+    run_batch_session(&mut state, controller, expected_lifecycle, limit)
 }
 
 /// Run `source` as a manual deck through the real controller and hand back
@@ -160,7 +184,12 @@ pub fn run_manual_batch_session<H: RunHost + Default>(source: &str) -> H {
     controller
         .validate_manual_deck_document(&state)
         .expect("fixture source passes complete preparation");
-    run_batch_session(&mut state, controller, SimulationRunLifecycle::Completed);
+    run_batch_session(
+        &mut state,
+        controller,
+        SimulationRunLifecycle::Completed,
+        FIXTURE_BATCH_LIMIT,
+    );
     state
 }
 
@@ -169,7 +198,12 @@ fn run_batch(
     controller: SimulationController,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
-    run_batch_session(&mut state, controller, expected_lifecycle)
+    run_batch_session(
+        &mut state,
+        controller,
+        expected_lifecycle,
+        FIXTURE_BATCH_LIMIT,
+    )
 }
 
 /// Run the batch `controller` prepared to its end on `state`, whichever
@@ -178,11 +212,12 @@ fn run_batch_session(
     state: &mut impl RunHost,
     mut controller: SimulationController,
     expected_lifecycle: SimulationRunLifecycle,
+    limit: Duration,
 ) -> crate::state::SimulationRun {
     let export_io = MockExportWorkflowIo::default();
     state.model_mut().simulation.execution.trigger_simulation = true;
     controller.update(state, &export_io);
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + limit;
     while controller.has_active_batch() {
         assert!(Instant::now() < deadline, "fixture batch timed out");
         std::thread::sleep(Duration::from_millis(1));
