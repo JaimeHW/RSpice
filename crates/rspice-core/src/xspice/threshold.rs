@@ -171,12 +171,13 @@ impl AnalogThresholdBehavior {
 /// input can still read a rounding short of the threshold. A converter that
 /// decided by that sample would hold, and the run would chase the same
 /// crossing one solver floor later. So once a crossing is located, the side
-/// of it a candidate lies on decides: past it, the converter takes `state`; on
-/// it exactly, the converter applies its own law to `threshold`, which is how
-/// ngspice reads a sample that falls on a threshold. The event is dated at
-/// `time`, not at the candidate. The root hands one over only where the landed
-/// sample reads the crossing to within the root's window; a sample further
-/// short is a curved signal the root goes on refining.
+/// of it a candidate lies on decides: on it or past it, the converter takes
+/// `state`. A candidate on the crossing is where the event happened, as a
+/// Verilog-AMS `cross()` event occurs at the located crossing (VAMS-LRM 2.4
+/// 5.10.3.1); the sign a rounding leaves there decides nothing. The event is
+/// dated at `time`, not at the candidate. The root hands one over only where
+/// the landed sample reads the crossing to within the root's window; a sample
+/// further short is a curved signal the root goes on refining.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[doc(hidden)]

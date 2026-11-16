@@ -676,7 +676,7 @@ impl HeldCrossing {
     /// `sample`, in the interval from the accepted point `start` and its
     /// sample `start_sample`.
     ///
-    /// On the crossing exactly it does: the law reads the threshold. Past it,
+    /// On the crossing exactly it does: the event happened there. Past it,
     /// it does when the chord from the accepted sample through this one meets
     /// the threshold within `window` of `time`, on either side. That is a
     /// sample taken on the crossing, and which side of the threshold its last
@@ -4770,8 +4770,7 @@ impl MixedSignalHost {
                 .then_some(self.state.accepted_adc_voltages[index]);
             // On or past a crossing this candidate's root located, the
             // crossing decides rather than the sample, which can read a
-            // rounding short of the threshold at the landing. On it exactly,
-            // the law reads the threshold itself. See
+            // rounding short of the threshold at the landing. See
             // `crate::xspice::LocatedCrossing`.
             if bridge.decides_by_located
                 && let Some(located) = scratch.ledger.located_at(index, time_seconds)
@@ -4788,15 +4787,8 @@ impl MixedSignalHost {
                     .ledger
                     .mark_decided(index, decides.then_some(time_seconds));
                 if decides {
-                    let bit = if time_seconds > located.time {
-                        Some(located.bit)
-                    } else {
-                        bridge
-                            .decision(located.threshold, previous, held)
-                            .map(|(bit, _)| bit)
-                    };
-                    if let Some(bit) = bit
-                        && held != Some(bit)
+                    let bit = located.bit;
+                    if held != Some(bit)
                         && let Some(trial) = self.trial.as_mut()
                     {
                         trial.vectors.adc_decisions[index] = Some(bit);
@@ -8647,7 +8639,7 @@ endmodule
         }
         assert!(
             located.decides(crossing, start, 0.0, 0.0, window),
-            "on the crossing the law reads the threshold"
+            "a candidate on the crossing is decided by it"
         );
         ledger.mark_decided(3, Some(landing));
         assert!(ledger.decided(3, landing).is_some());

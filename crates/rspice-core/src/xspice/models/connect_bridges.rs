@@ -487,7 +487,7 @@ fn evaluate_adc(
 ) -> CmResult<()> {
     let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
     let supply = tracking.then(|| tracked_supply(ctx));
-    let (unpowered, unpowered_at) = located_power(ctx, supply, law.supply_min)
+    let (unpowered, unpowered_at) = located_power(ctx, supply)
         .unwrap_or_else(|| (unpowered(supply, law.supply_min), ctx.time));
     let timed = law.band.timeout > 0.0 && law.band.timeout.is_finite();
     for index in 0..width {
@@ -578,14 +578,14 @@ fn evaluate_adc(
 /// `None` reads the sample. See [`crate::xspice::LocatedCrossing`].
 ///
 /// The root lands one representable instant past the crossing, where the
-/// sample can read a rounding short of the edge. So past the crossing the
-/// law reads the quantity on the edge's far side, and an edge it causes is
-/// dated at the crossing; on the crossing exactly it reads the edge itself,
-/// as `adc_bridge` does. `low` and `high` are the band edges in the units of
-/// `sample` ([`AdcLaw::terms`]). A tracking converter declares each band edge
-/// as a threshold of its own crossing function, the `threshold`-th edge
-/// first low then high; a fixed one declares the band as one threshold, and
-/// the located threshold is the edge crossed.
+/// sample can read a rounding short of the edge. So on or past the crossing
+/// the law reads the quantity on the edge's far side, and an edge it causes
+/// is dated at the crossing, as `adc_bridge` does. `low` and `high` are the
+/// band edges in the units of `sample` ([`AdcLaw::terms`]). A tracking
+/// converter declares each band edge as a threshold of its own crossing
+/// function, the `threshold`-th edge first low then high; a fixed one
+/// declares the band as one threshold, and the located threshold is the edge
+/// crossed.
 #[cfg(feature = "veriloga")]
 fn located_term(
     ctx: &CmContext,
@@ -605,9 +605,6 @@ fn located_term(
         let located = ctx.located_crossing(port, index, 0)?;
         (located.threshold, located)
     };
-    if ctx.time == located.time {
-        return Some((edge, ctx.time));
-    }
     if ctx.time < located.time {
         return None;
     }
@@ -642,33 +639,18 @@ fn located_term(
 
 /// Whether a tracking converter is unpowered where a coupled run's root
 /// located its supply crossing `vsupmin`, and the instant the X that loss
-/// publishes is dated at; `None` reads the sampled supply. Past the
-/// crossing the supply is on its far side; on it exactly it reads
-/// `vsupmin` itself, which is powered. See [`located_term`].
+/// publishes is dated at; `None` reads the sampled supply. On or past the
+/// crossing the supply is on its far side. See [`located_term`].
 #[cfg(feature = "veriloga")]
-fn located_power(
-    ctx: &CmContext,
-    supply: Option<Value>,
-    supply_min: Value,
-) -> Option<(bool, Value)> {
+fn located_power(ctx: &CmContext, supply: Option<Value>) -> Option<(bool, Value)> {
     supply?;
     let located = ctx.located_crossing("sup", 0, 0)?;
-    if ctx.time == located.time {
-        Some((unpowered(Some(located.threshold), supply_min), ctx.time))
-    } else if ctx.time > located.time {
-        Some((located.state != DigitalState::One, located.time))
-    } else {
-        None
-    }
+    (ctx.time >= located.time).then_some((located.state != DigitalState::One, located.time))
 }
 
 /// Without a coupled run there is no root to locate a crossing.
 #[cfg(not(feature = "veriloga"))]
-fn located_power(
-    _ctx: &CmContext,
-    _supply: Option<Value>,
-    _supply_min: Value,
-) -> Option<(bool, Value)> {
+fn located_power(_ctx: &CmContext, _supply: Option<Value>) -> Option<(bool, Value)> {
     None
 }
 
