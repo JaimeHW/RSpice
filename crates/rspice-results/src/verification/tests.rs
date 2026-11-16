@@ -1,5 +1,6 @@
 //! The sheet and the checks, held to the judges they restate.
 
+mod checks;
 mod sheet;
 mod statistics;
 

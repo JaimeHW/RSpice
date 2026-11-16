@@ -7,11 +7,18 @@
 //! from, a row restates the judge's verdict, and a yield is the acceptance
 //! gate's own count. A view that read anything else could disagree with the
 //! sign-off about the same run; reading this, it cannot.
+//!
+//! The checks are the run's other verdicts: its SOA rules, `.ASSERT` cards and
+//! HDL severity records, each at the point it ran.
 
+mod checks;
 mod points;
 mod sheet;
 mod statistics;
 
+pub use checks::{
+    AssertionCheck, AssertionOutcome, Check, CheckRow, CheckStatus, Checks, SoaCheck,
+};
 pub use points::{Point, PointAxis, PointSource};
 pub use sheet::{
     Acceptance, Cell, CellStatus, LimitsSinceRun, NEAR_LIMIT_FRACTION, Row, RowStatus, Sheet,
