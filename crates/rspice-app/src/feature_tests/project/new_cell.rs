@@ -466,3 +466,31 @@ fn a_created_cell_ends_where_the_creation_carried_out_in_place_did() {
         assert_eq!(in_front(&handed).1, veriloga_only);
     }
 }
+
+/// A cell made without views, as one for a Verilog module starts, is the
+/// cell File > New cell view… adds to next, though nothing of it opens:
+/// the view does not land in the cell that was open before.
+#[test]
+fn new_cell_view_adds_to_the_cell_just_created_without_views() {
+    use egui::accesskit::Role;
+
+    let mut replay = super::super::replay::Replay::new();
+    replay.click("File", Role::MenuItem);
+    replay.click("New project\u{2026}", Role::MenuItem);
+    replay.click("Project name", Role::TextInput);
+    replay.type_text("sar");
+    replay.click("Create project", Role::Button);
+    let before = replay.app.state.model.workspace.content.active_view.clone();
+    replay.click("File", Role::MenuItem);
+    replay.click("New cell\u{2026}", Role::MenuItem);
+    replay.click("Cell name", Role::TextInput);
+    replay.type_text("sar8");
+    replay.click("Schematic", Role::CheckBox);
+    replay.click("Create", Role::Button);
+    assert_eq!(replay.app.state.model.workspace.content.active_view, before);
+
+    replay.click("File", Role::MenuItem);
+    let form = replay.click("New cell view\u{2026}", Role::MenuItem);
+    let cell = super::super::replay::only(&form, "Cell", Role::Label);
+    assert_eq!(cell.value, "sar8");
+}

@@ -248,6 +248,9 @@ pub fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
         }
     };
     cx.model.library_manager = candidate_libraries;
+    // The new cell is the one the next New view adds to, whether or not
+    // any view of it opens.
+    cx.model.library_manager.select_cell(&library, &name);
     let receipt = seeded_veriloga.map(|(sources, receipt)| {
         cx.model.workspace.content.project_sources = sources;
         cx.model.workspace.content.project_sources_dirty = true;
