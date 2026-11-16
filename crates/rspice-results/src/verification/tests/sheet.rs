@@ -407,11 +407,14 @@ fn a_foreign_plans_run_gives_values_and_no_verdict() {
         SimulationPlanId::new(),
         &specifications,
         &policy,
-        vec![measured(
-            AnalysisType::Ac,
-            Some(at("TT", 1.8, 27.0, true)),
-            &[("gain", 39.0)],
-        )],
+        vec![
+            measured(
+                AnalysisType::Ac,
+                Some(at("TT", 1.8, 27.0, true)),
+                &[("gain", 39.0)],
+            ),
+            monte_carlo(None, 7, &[("gain", &[Some(41.0), Some(38.0)])]),
+        ],
     );
     let sheet = build(
         &specifications,
@@ -426,6 +429,9 @@ fn a_foreign_plans_run_gives_values_and_no_verdict() {
     let row = &sheet.rows[0];
     assert_eq!(row.cells[0].value, Some(39.0));
     assert_eq!(row.cells[0].status, CellStatus::Pass, "no limit judges it");
+    let statistics = row.statistics.as_ref().expect("the trials are shown");
+    assert_eq!(statistics.samples(), [41.0, 38.0]);
+    assert_eq!(statistics.yield_count, None);
     assert_eq!(sheet.summary.counts, StatusCounts::default());
     assert_eq!(sheet.summary.limits, LimitsSinceRun::NotSealed);
 }

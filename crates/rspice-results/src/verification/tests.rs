@@ -1,6 +1,7 @@
 //! The sheet and the checks, held to the judges they restate.
 
 mod sheet;
+mod statistics;
 
 use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
@@ -78,6 +79,41 @@ fn member(id: FamilyMemberId, values: &[(&str, Option<f64>)]) -> FamilyMemberMea
             })
             .collect(),
     )
+}
+
+/// A Monte Carlo analysis solved at `point`: each output has one value per
+/// trial, and trial `index` carries seed `seed + index`.
+fn monte_carlo(
+    point: Option<AnalysisResultPvtPoint>,
+    seed: u64,
+    outputs: &[(&str, &[Option<f64>])],
+) -> AnalysisResult {
+    let trials = outputs.first().map_or(0, |(_, values)| values.len());
+    let members = (0..trials)
+        .map(|index| {
+            member(
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: seed + index as u64,
+                },
+                &outputs
+                    .iter()
+                    .map(|(name, values)| (*name, values[index]))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    AnalysisResult::new(1, AnalysisType::MonteCarlo, "Monte Carlo", 0.0)
+        .with_family_metadata(AnalysisResultFamilyMetadata::MonteCarlo {
+            seed,
+            runs_requested: trials,
+            runs_completed: trials,
+            failures: 0,
+            all_converged: true,
+            variables: Vec::new(),
+            member_measurements: members,
+        })
+        .with_provenance(provenance(point))
 }
 
 /// The corners of the corner fixture: process, supply, temperature.

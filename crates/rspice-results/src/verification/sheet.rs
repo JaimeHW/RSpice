@@ -3,6 +3,7 @@
 use rspice_vocabulary::product::{AnalysisInstanceId, SimulationPlanId, SpecificationId};
 
 use super::points::{Point, PointAxis, RunPoints};
+use super::statistics::{JointYield, Statistics};
 use crate::analysis_result::AnalysisResult;
 use crate::family_measurements::FamilyMemberId;
 use crate::run::{EvidenceDomain, SimulationRun};
@@ -103,6 +104,8 @@ pub struct Row {
     pub status: Option<RowStatus>,
     /// The sealed judge's verdict, which `status` restates.
     pub verdict: Option<SpecificationVerdict>,
+    /// The Monte Carlo trials that answered it, when any did.
+    pub statistics: Option<Statistics>,
 }
 
 /// How many rows say each thing.
@@ -179,6 +182,9 @@ pub struct Sheet {
     /// One row per specification, in plan order.
     pub rows: Vec<Row>,
     pub summary: Summary,
+    /// Trials that passed every specification with a yield; `None` when no
+    /// specification has one.
+    pub joint_yield: Option<JointYield>,
 }
 
 impl Sheet {
@@ -252,6 +258,7 @@ impl Sheet {
             }
             _ => LimitsSinceRun::NotSealed,
         };
+        let joint_yield = super::statistics::joint_yield(&rows);
         Self {
             axes: points.varying_axes(),
             points: points.points,
@@ -262,6 +269,7 @@ impl Sheet {
                 acceptance,
                 limits,
             },
+            joint_yield,
         }
     }
 
@@ -360,6 +368,13 @@ fn row<W: AsRef<RetainedWaveform>>(
             base => base,
         }
     });
+    let statistics = super::statistics::row_statistics(
+        &entry.measurement,
+        (judged && limited).then_some((entry.min, entry.max)),
+        &candidates,
+        points,
+    );
+
     Row {
         specification_id: definition.map(|definition| definition.id),
         name: definition
@@ -395,6 +410,7 @@ fn row<W: AsRef<RetainedWaveform>>(
         cells,
         status,
         verdict: judged.then_some(verdict),
+        statistics,
     }
 }
 
