@@ -201,6 +201,59 @@ fn xyce_bug_1284_job_writes_20ns_checkpoint_and_file_resumes_to_50ns() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An `.OPTIONS RESTART FILE` run that writes the output its JOB run wrote appends to the JOB
+/// run's store from the checkpoint on: resumed from a checkpoint inside the run, it takes the
+/// JOB run's steps, so its rawfile, its measures and its store are the JOB run's.
+#[test]
+fn a_restart_file_run_into_the_job_runs_output_appends_to_its_store() {
+    let dir = test_dir("restart_store_append");
+    let line = "* lossless line\nVIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)\nRIN 1 2 50\n\
+                TLINE 2 0 3 0 Z0=50 TD=10N\nRL 3 0 50\n.TRAN 0.25N 20N\n\
+                .meas tran v3max MAX V(3)\n.meas tran v2avg AVG V(2)\n";
+    let (job, file) = (dir.join("job.cir"), dir.join("file.cir"));
+    std::fs::write(
+        &job,
+        format!("{line}.options restart job=state initial_interval=5n\n.end\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        &file,
+        format!("{line}.options restart file=state1e-08\n.end\n"),
+    )
+    .unwrap();
+    let summary = dir.join("summary.json");
+    let run = |deck: &std::path::Path, output: &std::path::Path| {
+        let result = run_rspice(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        common::read_json(&summary)
+    };
+    let (whole, out) = (dir.join("whole.raw"), dir.join("out.raw"));
+    let job_run = run(&job, &whole);
+    run(&job, &out);
+    let restarted = run(&file, &out);
+    assert_eq!(std::fs::read(&out).unwrap(), std::fs::read(&whole).unwrap());
+    assert_eq!(
+        restarted["runs"][0]["measurements"],
+        job_run["runs"][0]["measurements"]
+    );
+    for field in ["rows", "digest"] {
+        assert_eq!(restarted["stores"][0][field], job_run["stores"][0][field]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `--compress` decimates only the published waveform. An authored
 /// `.OPTIONS RESTART` writes its checkpoints from the accepted trajectory, so
 /// the two compose: every restart file stays byte-identical and only the
@@ -799,7 +852,7 @@ fn a_checkpoint_inside_the_decks_window_resumes_onto_the_uninterrupted_steps() {
 
 /// A run checkpointed inside its window and resumed into the same output appends to the results
 /// store beside it, so the resumed output, its measures and its store are the uninterrupted run's.
-/// A store that does not end at the checkpoint is replaced by the resumed run's own, with a note.
+/// A store no checkpointed run of the deck wrote is replaced by the resumed run's own, with a note.
 #[test]
 fn a_resume_into_the_same_output_appends_to_its_store_and_publishes_the_whole_run() {
     let dir = test_dir("ckpt_store_append");
@@ -873,18 +926,31 @@ fn a_resume_into_the_same_output_appends_to_its_store_and_publishes_the_whole_ru
         dir.join("out.rsr").to_str()
     );
 
-    // Resumed again, the store ends past the checkpoint: the run writes a store of its own.
-    let (again, stderr) = run(&[
+    // Resumed again from the same checkpoint, the run replaces the rows after it, which the
+    // first resume wrote, with the same rows.
+    let (again, _) = run(&[
+        "--resume",
+        state.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(std::fs::read(&out).unwrap(), std::fs::read(&whole).unwrap());
+    assert_eq!(store(&again), store(&uninterrupted));
+
+    // A store that no checkpointed run of this deck wrote is replaced by the resumed run's own,
+    // which starts at the checkpoint.
+    run(&["-o", out.to_str().unwrap()]);
+    let (own, stderr) = run(&[
         "--resume",
         state.to_str().unwrap(),
         "-o",
         out.to_str().unwrap(),
     ]);
     assert!(
-        stderr.contains("does not end at the checkpoint's time"),
+        stderr.contains("is not the store of the run the checkpoint continues"),
         "{stderr}"
     );
-    assert!(store(&again).0.as_u64().unwrap() < 221);
+    assert!(store(&own).0.as_u64().unwrap() < 221);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

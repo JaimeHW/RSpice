@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core::engine::{
-    SinkTransient, TransientCheckpoint, TransientEnd, TransientResult, TransientStartupMode,
+    ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint, TransientEnd,
+    TransientResult, TransientStartupMode, TransientState,
 };
 use rspice_core::netlist::OutputDirectiveKind;
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
@@ -90,6 +91,8 @@ struct RunStore {
     /// The store beside the output that a resumed run appended to where it was: it is never
     /// moved, and never deleted, since it held the earlier segments' rows before the run began.
     in_place: bool,
+    /// The netlist fingerprint of the checkpoints the store's run wrote, which its manifest names.
+    fingerprint: Option<u64>,
 }
 
 /// One segment of a checkpointed transient.
@@ -128,17 +131,30 @@ pub(super) fn run(
     startup_mode: TransientStartupMode,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<StoredTransient, CliError> {
-    run_into_store(ctx, (tstop, tstep, max_step), None, startup_mode, abort)
-        .map(|(stored, _)| stored)
+    let span = StoreSpan {
+        start: 0.0,
+        tstop,
+        tstep,
+        max_step,
+    };
+    run_with(ctx, span, None, |sink| {
+        ctx.engine
+            .run_tran_into_sink_with_startup_mode_and_abort(
+                ctx.netlist,
+                tstop,
+                max_step,
+                startup_mode,
+                abort,
+                sink,
+            )
+            .map(|run| (run, ()))
+    })
+    .map(|(stored, ())| stored)
 }
 
 /// Run one segment of a checkpointed transient into a store, as [`run`] does, and return the
-/// checkpoint it ends with.
-///
-/// A resumed segment appends to the store beside its output when that store holds the run its
-/// checkpoint continues, which is the one whose last row is the checkpoint's: the segment's
-/// outputs then cover the whole run from its start, and its store is the uninterrupted run's. With
-/// `--no-store`, or beside no such store, it writes a store of its own from the checkpoint on.
+/// checkpoint it ends with. A resumed segment appends to the store of the run it continues, as
+/// [`run_with`] says.
 pub(super) fn run_segment(
     ctx: &RunContext<'_>,
     segment: Segment<'_>,
@@ -146,100 +162,134 @@ pub(super) fn run_segment(
     startup_mode: TransientStartupMode,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<(StoredTransient, TransientEnd), CliError> {
-    let (stored, end) = run_into_store(
-        ctx,
-        (tstop, tstep, max_step),
-        Some(segment),
-        startup_mode,
-        abort,
-    )?;
-    let end = end.ok_or_else(|| CliError::InternalError {
-        message: "a checkpointed transient ended without its checkpoint".to_owned(),
-    })?;
-    Ok((stored, end))
+    let (netlist, engine) = (ctx.netlist, ctx.engine);
+    let span = |start, max_step| StoreSpan {
+        start,
+        tstop,
+        tstep,
+        max_step,
+    };
+    match segment {
+        Segment::Whole => run_with(ctx, span(0.0, max_step), None, |sink| {
+            engine.run_tran_checkpointed_into_sink_with_startup_mode_and_abort(
+                netlist,
+                (tstop, max_step),
+                startup_mode,
+                abort,
+                sink,
+            )
+        }),
+        Segment::Interrupted {
+            tstop: deck_stop,
+            max_step,
+        } => run_with(ctx, span(0.0, max_step), None, |sink| {
+            engine.run_tran_checkpointed_at_into_sink_with_startup_mode_and_abort(
+                netlist,
+                (deck_stop, max_step),
+                tstop,
+                startup_mode,
+                abort,
+                sink,
+            )
+        }),
+        Segment::Resumed(checkpoint) => run_with(
+            ctx,
+            span(checkpoint.time, max_step),
+            Some(checkpoint),
+            |sink| {
+                engine.run_tran_resume_into_sink_with_abort(
+                    netlist,
+                    checkpoint,
+                    (tstop, max_step),
+                    abort,
+                    sink,
+                )
+            },
+        ),
+    }
 }
 
-fn run_into_store(
-    ctx: &RunContext<'_>,
-    (tstop, tstep, max_step): (f64, f64, f64),
-    segment: Option<Segment<'_>>,
-    startup_mode: TransientStartupMode,
-    abort: &dyn rspice_core::AbortSignal,
-) -> Result<(StoredTransient, Option<TransientEnd>), CliError> {
-    let (start, step_cap) = match segment {
-        Some(Segment::Resumed(checkpoint)) => (checkpoint.time, max_step),
-        Some(Segment::Interrupted { max_step, .. }) => (0.0, max_step),
-        Some(Segment::Whole) | None => (0.0, max_step),
-    };
-    let appended = match segment {
-        Some(Segment::Resumed(checkpoint)) if !ctx.args.no_store => {
-            reopen_beside_output(ctx, checkpoint.time)
+/// What a run writes to its store, for the disk preflight: rows from `start` to `tstop`, none
+/// further apart than `max_step` and most no further apart than `tstep`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct StoreSpan {
+    pub(super) start: f64,
+    pub(super) tstop: f64,
+    pub(super) tstep: f64,
+    pub(super) max_step: f64,
+}
+
+/// What a run into a store returns besides its rows: the checkpoints it wrote name the run, so
+/// that a run resumed from one of them can find its store.
+pub(super) trait StoreRunEnd {
+    /// The netlist fingerprint of the checkpoints the run wrote, if it wrote any.
+    fn checkpoint_fingerprint(&self) -> Option<u64>;
+}
+
+impl StoreRunEnd for () {
+    fn checkpoint_fingerprint(&self) -> Option<u64> {
+        None
+    }
+}
+
+impl StoreRunEnd for TransientEnd {
+    fn checkpoint_fingerprint(&self) -> Option<u64> {
+        match self {
+            TransientEnd::Checkpoint(checkpoint) => Some(checkpoint.netlist_fingerprint),
+            TransientEnd::Finished(_) => None,
         }
+    }
+}
+
+impl StoreRunEnd for Vec<ScheduledTransientCheckpoint> {
+    fn checkpoint_fingerprint(&self) -> Option<u64> {
+        self.first()
+            .map(|scheduled| scheduled.checkpoint.netlist_fingerprint)
+    }
+}
+
+impl StoreRunEnd for Vec<TransientState> {
+    fn checkpoint_fingerprint(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Run a transient into a store through `run`, which hands the engine the store's sink.
+///
+/// A run resumed from `resume` appends to the store beside its output when that store holds the
+/// run the checkpoint continues: its manifest names the checkpoint's netlist fingerprint and its
+/// segment has a row at the checkpoint's time. The rows after that row came from a run that went
+/// on past it, and are dropped. The store then holds the whole run from its start, and so do the
+/// run's outputs. With `--no-store`, beside no such store, or beside another (a note says why), a
+/// resumed run writes a store of its own from the checkpoint on.
+pub(super) fn run_with<T: StoreRunEnd>(
+    ctx: &RunContext<'_>,
+    span: StoreSpan,
+    resume: Option<&TransientCheckpoint>,
+    run: impl FnOnce(
+        &mut dyn rspice_core::result_sink::ResultSink,
+    ) -> Result<(SinkTransient, T), rspice_core::SimulationError>,
+) -> Result<(StoredTransient, T), CliError> {
+    let appended = match resume {
+        Some(checkpoint) if !ctx.args.no_store => reopen_beside_output(ctx, checkpoint),
         _ => None,
     };
     let OpenStore {
-        store,
-        segment: segment_path,
+        mut store,
+        segment,
         sink: inner,
         free,
     } = match appended {
         Some(open) => open,
         None => create_store(ctx)?,
     };
+    let rows = span.tstop - span.start;
     let mut sink = WatchedSink {
         inner,
         free,
-        rows_needed: (tstop - start) / step_cap,
-        rows_likely: (tstop - start) / step_cap.min(tstep),
+        rows_needed: rows / span.max_step,
+        rows_likely: rows / span.max_step.min(span.tstep),
         refused: None,
-    };
-    let (netlist, sink_ref) = (ctx.netlist, &mut sink);
-    let run = match segment {
-        None => ctx
-            .engine
-            .run_tran_into_sink_with_startup_mode_and_abort(
-                netlist,
-                tstop,
-                max_step,
-                startup_mode,
-                abort,
-                sink_ref,
-            )
-            .map(|run| (run, None)),
-        Some(Segment::Whole) => ctx
-            .engine
-            .run_tran_checkpointed_into_sink_with_startup_mode_and_abort(
-                netlist,
-                (tstop, max_step),
-                startup_mode,
-                abort,
-                sink_ref,
-            )
-            .map(|(run, end)| (run, Some(end))),
-        Some(Segment::Interrupted {
-            tstop: deck_stop,
-            max_step: deck_max_step,
-        }) => ctx
-            .engine
-            .run_tran_checkpointed_at_into_sink_with_startup_mode_and_abort(
-                netlist,
-                (deck_stop, deck_max_step),
-                tstop,
-                startup_mode,
-                abort,
-                sink_ref,
-            )
-            .map(|(run, end)| (run, Some(end))),
-        Some(Segment::Resumed(checkpoint)) => ctx
-            .engine
-            .run_tran_resume_into_sink_with_abort(
-                netlist,
-                checkpoint,
-                (tstop, max_step),
-                abort,
-                sink_ref,
-            )
-            .map(|(run, end)| (run, Some(end))),
     };
     let (
         SinkTransient {
@@ -248,10 +298,13 @@ fn run_into_store(
             stopped,
         },
         end,
-    ) = match run {
+    ) = match run(&mut sink) {
         Ok(done) => done,
-        Err(source) => return Err(stopped_run(ctx, store, &segment_path, sink, source)),
+        Err(source) => return Err(stopped_run(ctx, store, &segment, sink, source)),
     };
+    if !store.in_place {
+        store.fingerprint = end.checkpoint_fingerprint();
+    }
     let opened = sink
         .inner
         .into_io()
@@ -332,14 +385,18 @@ fn create_store(ctx: &RunContext<'_>) -> Result<OpenStore, CliError> {
     })
 }
 
-/// The store beside a resumed run's output, reopened to take the run's rows after `through`, the
-/// checkpoint's time, when it holds the run the checkpoint continues: one whose last row is at
-/// `through`. Any other store there is left for the run's own store to replace, with a note.
-fn reopen_beside_output(ctx: &RunContext<'_>, through: f64) -> Option<OpenStore> {
+/// The store beside a resumed run's output, reopened to take the run's rows after the
+/// checkpoint's, when it holds the run `checkpoint` continues. Any other store there is left for
+/// the run's own store to replace, with a note.
+fn reopen_beside_output(
+    ctx: &RunContext<'_>,
+    checkpoint: &TransientCheckpoint,
+) -> Option<OpenStore> {
     let output = ctx.next_output_path("tran")?;
     let dir = store_path_beside(&output);
     let segment = dir.join(StoreDir::segment_name(0));
-    if !dir.join(StoreDir::MANIFEST).is_file() || !segment.is_file() {
+    let manifest = StoreDir::new(&dir).load_manifest();
+    if matches!(manifest, Ok(None)) || !segment.is_file() {
         return None;
     }
     let note = |why: &dyn std::fmt::Display| {
@@ -353,17 +410,14 @@ fn reopen_beside_output(ctx: &RunContext<'_>, through: f64) -> Option<OpenStore>
             ),
         );
     };
-    let last = FileIo::open(&segment)
-        .map_err(StoreError::from)
-        .and_then(SegmentReader::open)
-        .and_then(|mut reader| match reader.rows().checked_sub(1) {
-            Some(last) => reader.read_x(last, 1).map(|x| x.first().copied()),
-            None => Ok(None),
-        });
-    match last {
-        Ok(Some(x)) if x.to_bits() == through.to_bits() => {}
+    let fingerprint = Some(checkpoint.netlist_fingerprint);
+    match manifest {
+        Ok(Some(manifest))
+            if manifest.members().iter().any(|member| {
+                member.index == 0 && member.checkpoint_fingerprint == fingerprint
+            }) => {}
         Ok(_) => {
-            note(&"does not end at the checkpoint's time");
+            note(&"is not the store of the run the checkpoint continues");
             return None;
         }
         Err(error) => {
@@ -381,7 +435,7 @@ fn reopen_beside_output(ctx: &RunContext<'_>, through: f64) -> Option<OpenStore>
                     free: free.clone(),
                     full: false,
                 },
-                through,
+                checkpoint.time,
             )
         });
     match reopened {
@@ -389,11 +443,16 @@ fn reopen_beside_output(ctx: &RunContext<'_>, through: f64) -> Option<OpenStore>
             store: RunStore {
                 dir,
                 in_place: true,
+                fingerprint,
             },
             segment,
             sink,
             free,
         }),
+        Err(StoreError::NoRowAt { .. }) => {
+            note(&"has no row at the checkpoint's time");
+            None
+        }
         Err(error) => {
             note(&format_args!("cannot be reopened: {error}"));
             None
@@ -1275,6 +1334,7 @@ impl RunStore {
         Ok(Self {
             dir,
             in_place: false,
+            fingerprint: None,
         })
     }
 
@@ -1290,6 +1350,7 @@ impl RunStore {
             analysis: reader.run_meta().analysis.clone(),
             status,
             digest,
+            checkpoint_fingerprint: self.fingerprint,
             ..Member::default()
         });
         StoreDir::new(&self.dir).save_manifest(&manifest)

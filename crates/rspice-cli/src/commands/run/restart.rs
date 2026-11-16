@@ -23,14 +23,16 @@ pub(super) fn protect_input(path: &Path, renewal: Option<&Path>) -> Result<(), C
     Ok(())
 }
 
+/// Run an authored restart into a results store: a JOB run writes its checkpoints as it goes,
+/// and a FILE run resumes one, appending to the store of the run that wrote it when that store
+/// is beside its output.
 pub(super) fn run_authored_restart(
     ctx: &RunContext<'_>,
     restart: &rspice_core::netlist::XyceRestartOptions,
-    tstop: f64,
-    max_step: f64,
+    (tstop, tstep, max_step): (f64, f64, f64),
     startup_mode: rspice_core::engine::TransientStartupMode,
     progress: &indicatif::ProgressBar,
-) -> Result<rspice_core::engine::TransientResult, CliError> {
+) -> Result<super::stored_transient::StoredTransient, CliError> {
     validate_supported_restart_options(restart)?;
     let abort = crate::abort::ProgressAbort::new(progress);
 
@@ -59,52 +61,32 @@ pub(super) fn run_authored_restart(
                 checkpoint_limit,
             )
             .map_err(|error| restart_cli_error(error.to_string()))?;
-            let (result, checkpoints) = ctx
-                .engine
-                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
-                    ctx.netlist,
-                    tstop,
-                    max_step,
-                    startup_mode,
-                    plan.nominal_times(),
-                    &abort,
-                )
-                .map_err(|error| map_restart_simulation_error(ctx, error))?;
-            let mut previous_nominal = None;
-            for scheduled in &checkpoints {
-                let nominal_time = scheduled.nominal_time;
-                if plan
-                    .nominal_times()
-                    .binary_search_by(|time| time.total_cmp(&nominal_time))
-                    .is_err()
-                    || previous_nominal.is_some_and(|previous| nominal_time <= previous)
-                {
-                    return Err(CliError::InternalError {
-                        message: format!(
-                            "transient restart scheduler returned unexpected nominal time {nominal_time:.17e}s"
-                        ),
-                    });
-                }
-                previous_nominal = Some(nominal_time);
-                let name = plan.logical_name(nominal_time).ok_or_else(|| {
-                    CliError::InternalError {
-                        message: format!(
-                            "transient restart scheduler returned unnamed nominal time {nominal_time:.17e}s"
-                        ),
-                    }
+            let span = super::stored_transient::StoreSpan {
+                start: 0.0,
+                tstop,
+                tstep,
+                max_step,
+            };
+            let (stored, checkpoints) =
+                super::stored_transient::run_with(ctx, span, None, |sink| {
+                    ctx.engine
+                        .run_tran_checkpoint_schedule_into_sink_with_startup_mode_and_abort(
+                            ctx.netlist,
+                            (tstop, max_step),
+                            startup_mode,
+                            plan.nominal_times(),
+                            &abort,
+                            sink,
+                        )
                 })?;
-                let name = ctx.restart_logical_name(&name)?;
-                let path = safe_restart_write_path(&parent, &name)?;
-                publish_checkpoint(ctx, &scheduled.checkpoint, &path, plan.encoding(), &abort)?;
-                if !ctx.quiet {
-                    crate::console::line(format_args!(
-                        "  Restart checkpoint saved (nominal t={nominal_time:.6e}s, accepted t={:.6e}s): {}",
-                        scheduled.checkpoint.time,
-                        path.display()
-                    ))?;
+            match publish_restart_checkpoints(ctx, &plan, &parent, &checkpoints, &abort) {
+                Ok(()) => Ok(stored),
+                Err(error) => {
+                    // The run's store goes with the run it could not finish publishing.
+                    let _ = stored.rows.publish(None, false);
+                    Err(error)
                 }
             }
-            Ok(result)
         }
         (None, Some(file)) => {
             if restart.initial_interval.is_some() || !restart.intervals.is_empty() {
@@ -130,21 +112,72 @@ pub(super) fn run_authored_restart(
                     path.display()
                 )),
             })?;
-            ctx.engine
-                .run_tran_restart_resume_with_abort(
+            let span = super::stored_transient::StoreSpan {
+                start: checkpoint.time,
+                tstop,
+                tstep,
+                max_step,
+            };
+            super::stored_transient::run_with(ctx, span, Some(&checkpoint), |sink| {
+                ctx.engine.run_tran_restart_resume_into_sink_with_abort(
                     ctx.netlist,
                     &checkpoint,
-                    tstop,
-                    max_step,
+                    (tstop, max_step),
                     &abort,
+                    sink,
                 )
-                .map(|(result, _)| result)
-                .map_err(|error| map_restart_simulation_error(ctx, error))
+            })
+            .map(|(stored, _)| stored)
         }
         (None, None) => Err(restart_cli_error(
             ".OPTIONS RESTART requires either JOB for checkpoint output or FILE for restart input",
         )),
     }
+}
+
+/// Write each checkpoint a JOB run took under the logical name its nominal time gives it.
+fn publish_restart_checkpoints(
+    ctx: &RunContext<'_>,
+    plan: &rspice_core::engine::XyceRestartJobPlan,
+    parent: &Path,
+    checkpoints: &[rspice_core::engine::ScheduledTransientCheckpoint],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(), CliError> {
+    let mut previous_nominal = None;
+    for scheduled in checkpoints {
+        let nominal_time = scheduled.nominal_time;
+        if plan
+            .nominal_times()
+            .binary_search_by(|time| time.total_cmp(&nominal_time))
+            .is_err()
+            || previous_nominal.is_some_and(|previous| nominal_time <= previous)
+        {
+            return Err(CliError::InternalError {
+                message: format!(
+                    "transient restart scheduler returned unexpected nominal time {nominal_time:.17e}s"
+                ),
+            });
+        }
+        previous_nominal = Some(nominal_time);
+        let name = plan
+            .logical_name(nominal_time)
+            .ok_or_else(|| CliError::InternalError {
+                message: format!(
+                    "transient restart scheduler returned unnamed nominal time {nominal_time:.17e}s"
+                ),
+            })?;
+        let name = ctx.restart_logical_name(&name)?;
+        let path = safe_restart_write_path(parent, &name)?;
+        publish_checkpoint(ctx, &scheduled.checkpoint, &path, plan.encoding(), abort)?;
+        if !ctx.quiet {
+            crate::console::line(format_args!(
+                "  Restart checkpoint saved (nominal t={nominal_time:.6e}s, accepted t={:.6e}s): {}",
+                scheduled.checkpoint.time,
+                path.display()
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_supported_restart_options(

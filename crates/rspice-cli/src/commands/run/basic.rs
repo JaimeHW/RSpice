@@ -22,7 +22,7 @@ use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5, write_hdf
 use std::path::Path;
 
 use super::fft_document::{validate_fft_result_count, write_transient_fft_output_pair};
-use super::restart::{map_restart_simulation_error, restart_cli_error, run_authored_restart};
+use super::restart::{restart_cli_error, run_authored_restart};
 
 pub(super) fn map_output_projection_error(
     ctx: &RunContext<'_>,
@@ -832,45 +832,30 @@ pub(super) fn run_transient(
         rel_tol: ctx.compress_tol,
         maximum_retained_interval: resolved_static_solver_ceiling,
     };
-    // Every compressed entry point returns the typed `.FFT`/`.FOUR`/`.MEASURE`
-    // products the core evaluated on the exact accepted trajectory, before
-    // decimation. They are carried out of this block so the publication path
-    // consumes them instead of recomputing from the decimated expansion, which
-    // is what made a compressed run report different numbers.
-    let mut post_results: Option<rspice_core::engine::TransientPostResults> = None;
-    let mut compression_report: Option<rspice_core::engine::TransientCompressionReport> = None;
-    let result = if let Some(restart) = authored_restart {
-        let restart_run =
-            run_authored_restart(ctx, restart, tstop, internal_max_step, startup_mode, &pb);
+    let compression = ctx.compress.then(compression_config);
+    // Every transient writes its rows to a results store as it goes. Compression decides what
+    // the published waveform keeps, not where the rows live while the run goes: the compressed
+    // output is written from the trajectory read back from the store once the run is over, and
+    // its post-processing products are the ones evaluated on that whole trajectory.
+    let progress_abort = crate::abort::ProgressAbort::new(&pb);
+    let stored = if let Some(restart) = authored_restart {
+        // The restart schedule writes its checkpoints from the accepted trajectory, so
+        // compressing the published waveform afterwards leaves every authored restart file
+        // byte-identical.
+        let run = run_authored_restart(
+            ctx,
+            restart,
+            (tstop, tstep, internal_max_step),
+            startup_mode,
+            &pb,
+        );
         pb.finish_and_clear();
-        let accepted = restart_run?;
-        if ctx.compress {
-            // The restart schedule writes its checkpoints from the accepted
-            // trajectory, so compressing the published waveform afterwards
-            // leaves every authored restart file byte-identical. This is the
-            // composition point the core documents for exactly this case.
-            let compressed = ctx
-                .engine
-                .compress_transient_result_with_abort(
-                    ctx.netlist,
-                    &accepted,
-                    &compression_config(),
-                    &crate::abort::ProcessAbort,
-                )
-                .map_err(|error| map_restart_simulation_error(ctx, error))?;
-            report_compression(ctx, &compressed, "Transient complete (compressed)")?;
-            compression_report = Some(compressed.compression_report.clone());
-            post_results = Some(compressed.post_results.clone());
-            Ok(expand_compressed(compressed, "restart segment")?)
-        } else {
-            Ok(accepted)
-        }
+        run?
     } else if checkpointing {
         // Segmented integration: restore the saved state (when resuming), run this segment into
         // a results store, and persist the new state (when checkpointing). The core validates
         // the netlist fingerprint, so a checkpoint can never silently continue a different
         // circuit.
-        let progress_abort = crate::abort::ProgressAbort::new(&pb);
         let resumed = match resume_path.as_deref() {
             Some(resume_path) => Some(load_resume_checkpoint(
                 ctx,
@@ -892,7 +877,7 @@ pub(super) fn run_transient(
             },
             None => super::stored_transient::Segment::Whole,
         };
-        let stored = super::stored_transient::run_segment(
+        let run = super::stored_transient::run_segment(
             ctx,
             segment,
             (tstop, tstep, internal_max_step),
@@ -900,83 +885,51 @@ pub(super) fn run_transient(
             &progress_abort,
         );
         pb.finish_and_clear();
-        let (stored, end) = stored?;
-        publish_segment_end(ctx, &end, checkpoint_path.as_deref(), &progress_abort)?;
-        let compression = ctx.compress.then(compression_config);
-        return finish_stored_transient(ctx, stored, (tstart, tstop), store, compression.as_ref());
-    } else if ctx.compress {
-        // Compression decides what the published waveform keeps, not where the rows live while
-        // the run goes: they go to the store like any other run's, and the compressed output is
-        // written from the trajectory read back from it once the run is over.
-        let stored = super::stored_transient::run(
-            ctx,
-            tstop,
-            tstep,
-            internal_max_step,
-            startup_mode,
-            &crate::abort::ProgressAbort::new(&pb),
-        );
-        pb.finish_and_clear();
-        return finish_stored_transient(
-            ctx,
-            stored?,
-            (tstart, tstop),
-            store,
-            Some(&compression_config()),
-        );
+        let (stored, end) = run?;
+        if let Err(error) =
+            publish_segment_end(ctx, &end, checkpoint_path.as_deref(), &progress_abort)
+        {
+            // The run's store goes with the run it could not finish publishing.
+            let _ = stored.rows.publish(None, false);
+            return Err(error);
+        }
+        stored
     } else if !state_times.is_empty() {
         // The `ACTIMES=` cards that share this run: it lands on their times,
         // captures each state there for them, and runs on to its stop.
-        let result = ctx.engine.run_tran_capturing_states_to_stop(
-            ctx.netlist,
+        let span = super::stored_transient::StoreSpan {
+            start: 0.0,
             tstop,
-            internal_max_step,
-            startup_mode,
-            state_times,
-            &crate::abort::ProgressAbort::new(&pb),
-        );
+            tstep,
+            max_step: internal_max_step,
+        };
+        let run = super::stored_transient::run_with(ctx, span, None, |sink| {
+            ctx.engine.run_tran_capturing_states_to_stop_into_sink(
+                ctx.netlist,
+                (tstop, internal_max_step),
+                startup_mode,
+                state_times,
+                &progress_abort,
+                sink,
+            )
+        });
         pb.finish_and_clear();
-        result.map(|(result, states)| {
-            ctx.hold_shared_transient_states(state_times, states);
-            result
-        })
+        let (stored, states) = run?;
+        ctx.hold_shared_transient_states(state_times, states);
+        stored
     } else {
-        let stored = super::stored_transient::run(
+        let run = super::stored_transient::run(
             ctx,
             tstop,
             tstep,
             internal_max_step,
             startup_mode,
-            &crate::abort::ProgressAbort::new(&pb),
+            &progress_abort,
         );
         pb.finish_and_clear();
-        return finish_stored_transient(ctx, stored?, (tstart, tstop), store, None);
+        run?
     };
-
-    match result {
-        Ok(result) => {
-            finish_transient_result(
-                ctx,
-                &result,
-                tstart,
-                tstop,
-                post_results.as_ref(),
-                compression_report.as_ref(),
-            )?;
-            Ok(TransientOutcome {
-                result,
-                post_results,
-            })
-        }
-        // Carry the engine's typed failure rather than its text. Stringifying
-        // here re-decided every transient failure as the simulation category,
-        // so a refused capability and a singular matrix left this process with
-        // the same status.
-        Err(source) => Err(CliError::CoreSimulationError {
-            source,
-            analysis: Some("Transient".to_string()),
-        }),
-    }
+    finish_stored_transient(ctx, stored, (tstart, tstop), store, compression.as_ref())
 }
 
 /// What a transient's caller reads of the result once its outputs are written. Every transient
