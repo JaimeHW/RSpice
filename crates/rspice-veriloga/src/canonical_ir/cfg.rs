@@ -57,6 +57,7 @@
 //! coefficients was never what made the state shape static, which is why the
 //! two contracts can differ without the layout having to care.
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -3265,13 +3266,13 @@ pub struct SsaBuilder {
     blocks: Vec<CfgBlock>,
     values: Vec<CfgValue>,
     /// Latest definition of a variable within a block.
-    definitions: HashMap<(CfgVariable, BlockId), ValueId>,
+    definitions: FxHashMap<(CfgVariable, BlockId), ValueId>,
     /// Parameters created for a variable in a block that was not yet sealed.
     incomplete: Vec<(BlockId, CfgVariable, ValueId)>,
-    sealed: HashSet<BlockId>,
+    sealed: FxHashSet<BlockId>,
     /// Predecessors recorded as edges are added, because a block under
     /// construction cannot be scanned for them.
-    predecessors: HashMap<BlockId, Vec<BlockId>>,
+    predecessors: FxHashMap<BlockId, Vec<BlockId>>,
     /// Values the caller needs after construction.
     ///
     /// They have to be held here rather than by the caller because finishing
@@ -3318,10 +3319,10 @@ impl SsaBuilder {
         Self {
             blocks: Vec::new(),
             values: Vec::new(),
-            definitions: HashMap::new(),
+            definitions: FxHashMap::default(),
             incomplete: Vec::new(),
-            sealed: HashSet::new(),
-            predecessors: HashMap::new(),
+            sealed: FxHashSet::default(),
+            predecessors: FxHashMap::default(),
             variable_types: HashMap::new(),
             resume_targets: HashSet::new(),
             outputs: Vec::new(),
@@ -3587,19 +3588,19 @@ impl SsaBuilder {
                     self.write_variable(variable, target, value);
                     break Some(value);
                 }
-                let predecessors = self.predecessors.get(&target).cloned().unwrap_or_default();
-                match predecessors.as_slice() {
+                match self.predecessors.get(&target).map(Vec::as_slice) {
                     // Unreachable or the entry block: the variable has no
                     // definition on this path, which the caller reports as a
                     // use before assignment.
-                    [] => break None,
+                    None | Some([]) => break None,
                     // One predecessor needs no merge — this is what keeps the
                     // form minimal without a separate cleanup pass.
-                    &[single] => {
+                    Some(&[single]) => {
                         waiting.push(Waiting::Single(target));
                         target = single;
                     }
-                    _ => {
+                    Some(predecessors) => {
+                        let predecessors = predecessors.to_vec();
                         let value_type = self.variable_type(variable);
                         let parameter = self.new_value(value_type, CfgValueKind::BlockParameter);
                         self.blocks[usize::from(target)].params.push(parameter);

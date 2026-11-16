@@ -6259,6 +6259,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "rspice-veriloga-runtime",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "smol_str 0.3.6",

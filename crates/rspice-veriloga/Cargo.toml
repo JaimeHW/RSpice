@@ -35,6 +35,8 @@ num-traits = "0.2.19"
 
 # Data structures
 smol_str = { version = "0.3", features = ["serde"] }
+# A fast hash for SSA construction's per-read lookups; already used by rspice-core.
+rustc-hash.workspace = true
 
 # Native JIT executable memory support.
 
