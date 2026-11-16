@@ -278,6 +278,45 @@ impl Clone for HdlEffects {
 }
 
 impl HdlEffects {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    ///
+    /// What the effects only write out — the output journal, the dump, the
+    /// severity counts — is never read back inside the step, so it is left
+    /// out; everything a system task reads again is compared.
+    pub(crate) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            config: _,
+            journal: _,
+            random_seed,
+            urandom,
+            time_format: _,
+            monitor,
+            queue,
+            monitor_queued,
+            finish,
+            severities: _,
+            design_precision: _,
+            files,
+            file_monitors,
+            next_monitor_serial,
+            evaluating,
+            dump: _,
+            traced: _,
+        } = self;
+        finish.is_none()
+            && saved.finish.is_none()
+            && *random_seed == saved.random_seed
+            && *urandom == saved.urandom
+            && *monitor == saved.monitor
+            && *queue == saved.queue
+            && *monitor_queued == saved.monitor_queued
+            && *file_monitors == saved.file_monitors
+            && *next_monitor_serial == saved.next_monitor_serial
+            && *evaluating == saved.evaluating
+            && files.same_step_state(&saved.files)
+    }
+
     pub(crate) fn new(plan: &CanonicalDigitalPlan) -> Self {
         Self::with_config(plan, Arc::new(HdlEffectsConfig::default()))
     }

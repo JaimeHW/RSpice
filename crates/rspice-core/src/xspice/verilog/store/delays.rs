@@ -48,6 +48,13 @@ pub(crate) enum DelayRequest {
 }
 
 impl StoreDelays {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(super) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self { tables, requests } = self;
+        Arc::ptr_eq(tables, &saved.tables) && *requests == saved.requests
+    }
+
     /// The plan's delays at its own precision. A delay that precision cannot
     /// count is past any run's end, and is treated as one.
     pub(super) fn new(plan: &CanonicalDigitalPlan, spans: &[DriverSpan]) -> Self {

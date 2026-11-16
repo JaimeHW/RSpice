@@ -186,6 +186,24 @@ pub(super) struct ChargeState {
 }
 
 impl ChargeState {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(super) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            holding,
+            changes,
+            bridged_free,
+            decaying,
+            refused,
+        } = self;
+        refused.is_none()
+            && saved.refused.is_none()
+            && *holding == saved.holding
+            && *changes == saved.changes
+            && *bridged_free == saved.bridged_free
+            && *decaying == saved.decaying
+    }
+
     /// Every `trireg` starts at `x` (section 4.2.1), and every bit of one that
     /// decays starts holding: no driver has run.
     pub(super) fn new(

@@ -852,10 +852,9 @@ fn start_runaway(source: &str) -> Result<(), DigitalRunError> {
 
 /// `always #0 x = ~x;` can only ever wait on `#0`, which resumes in the same
 /// time step: time can never advance. The graph says so, so the host refuses
-/// at its first check, naming the process by its line, rather than at the
-/// per-tick ceiling seconds later (17 s at the production ceiling).
+/// at its first check, naming the process by its line.
 #[test]
-fn a_loop_of_zero_delays_is_refused_by_its_line_before_the_ceiling() {
+fn a_loop_of_zero_delays_is_refused_by_its_line() {
     let error =
         start_runaway("module spin;\n  reg x;\n  initial x = 0;\n  always #0 x = ~x;\nendmodule\n")
             .expect_err("time can never advance");
@@ -868,7 +867,8 @@ fn a_loop_of_zero_delays_is_refused_by_its_line_before_the_ceiling() {
         panic!("expected the zero-delay refusal, got {error:?}: {error}");
     };
     assert_eq!(process, "always#1 (always, <input>:4)");
-    assert_eq!((*tick, *resumptions), (0, 1 << 16));
+    assert_eq!(*tick, 0);
+    assert!((1..=1 << 16).contains(resumptions), "{resumptions}");
     assert!(
         error.to_string().contains("never advance past tick 0"),
         "{error}"
@@ -2162,8 +2162,9 @@ fn a_unit_without_a_module_reports_its_front_end_errors() {
 }
 
 /// Two processes that wake each other with no `#0` between them never settle
-/// (Icarus 13 runs the same source forever); the run reports the oscillation
-/// at the ten-thousandth delta cycle, not at the per-tick ceiling.
+/// (Icarus 13 runs the same source forever). Once the step has run 2^16 delta
+/// cycles the host finds it back in a state it was in, which proves it never
+/// settles, and refuses it naming the loop.
 #[test]
 fn processes_waking_each_other_report_an_oscillation_promptly() {
     let error = run_digital_testbench(
@@ -2184,17 +2185,27 @@ endmodule
     let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &error else {
         panic!("expected an oscillation, got {error:?}");
     };
-    assert_eq!(diagnostic.cause, OscillationCause::DeltaCycleLimit);
-    assert_eq!(diagnostic.delta_cycle_limit, 10_000);
+    let OscillationCause::RepeatedState { period } = diagnostic.cause else {
+        panic!("expected a repeated state, got {:?}", diagnostic.cause);
+    };
+    // Proven within twice the delta cycles the search waits for.
     assert!(
-        error.to_string().contains("within 10000 delta cycles"),
+        (1 << 16..1 << 17).contains(&diagnostic.delta_cycles),
+        "{}",
+        diagnostic.delta_cycles
+    );
+    assert!(
+        error.to_string().contains(&format!(
+            "after {} delta cycles its state repeats every {period}",
+            diagnostic.delta_cycles
+        )),
         "{error}"
     );
     // Both processes are named by kind, file and line with the variable each
     // writes, and the loop between them is closed through what each waits on.
     let text = error.to_string();
     for expected in [
-        "at tick 1 (1e-9 s) within",
+        "at tick 1 (1e-9 s): after",
         "always#0 (always, tb.v:3) driving b fired",
         "always#1 (always, tb.v:4) driving a fired",
         "initial#2 (initial, tb.v:5) driving a fired 1 time",
@@ -2202,4 +2213,87 @@ endmodule
     ] {
         assert!(text.contains(expected), "missing `{expected}`: {text}");
     }
+}
+
+/// The smallest combinational loop, `assign a = ~a`, gated so that it starts
+/// from a known value, is proven to repeat and named.
+#[test]
+fn a_continuous_assignment_feeding_itself_is_proven_never_to_settle() {
+    let error = run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module tb;
+  reg go = 0;
+  wire a;
+  assign a = go ? ~a : 1'b0;
+  initial #1 go = 1;
+endmodule
+"
+            .into(),
+        )],
+        &HdlTestbenchOptions::default(),
+    )
+    .expect_err("the assignment never settles");
+    let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &error else {
+        panic!("expected an oscillation, got {error:?}");
+    };
+    assert!(
+        matches!(diagnostic.cause, OscillationCause::RepeatedState { .. }),
+        "{error}"
+    );
+    assert!(diagnostic.delta_cycles < 1 << 17, "{error}");
+    let text = error.to_string();
+    for expected in [
+        "event network did not settle at tick 1 (1e-9 s): after",
+        "assign#1 (continuous assign, tb.v:4) driving a fired",
+        "zero-delay loop: a -> a",
+    ] {
+        assert!(text.contains(expected), "missing `{expected}`: {text}");
+    }
+}
+
+/// A count through 200,000 delta cycles at one time step never returns to a
+/// state it was in, so it is not refused: it runs to its end, as in Icarus.
+#[test]
+fn a_long_zero_time_count_that_settles_is_not_refused() {
+    let report = bench(
+        "module tb;
+  reg [31:0] c = 0;
+  always @(c) if (c < 200000) c <= c + 1;
+  initial begin #1 c = 1; #1 $display(\"%0d\", c); end
+endmodule
+",
+        &[],
+    );
+    assert_eq!(stdout(&report), "200000\n");
+}
+
+/// A step that never settles and never repeats — a 64-bit count that would
+/// take centuries to wrap — runs until the run is stopped, and ends as an
+/// abort rather than a refusal.
+#[test]
+fn a_step_that_never_repeats_ends_at_the_runs_stop() {
+    let polls = std::sync::atomic::AtomicU32::new(0);
+    let stop = || polls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3;
+    let error = rspice_veriloga_runtime::loop_abort::with_hook(&stop, || {
+        run_digital_testbench(
+            &[(
+                "tb.v".into(),
+                "module tb;
+  reg [63:0] c = 0;
+  always @(c) c <= c + 1;
+  initial #1 c = 1;
+endmodule
+"
+                .into(),
+            )],
+            &HdlTestbenchOptions::default(),
+        )
+    })
+    .expect_err("the count never ends");
+    assert!(
+        matches!(error, DigitalRunError::Scheduler(SchedulerError::Aborted)),
+        "{error:?}"
+    );
+    assert_eq!(polls.load(std::sync::atomic::Ordering::Relaxed), 4);
 }

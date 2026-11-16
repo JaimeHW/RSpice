@@ -1362,6 +1362,12 @@ struct CircuitAnalogParticipant<'a, 'p> {
 }
 
 impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
+    fn holds_hidden_step_state(&self) -> bool {
+        self.external
+            .as_ref()
+            .is_some_and(|external| external.holds_hidden_step_state())
+    }
+
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,

@@ -216,6 +216,12 @@ impl AnalogModelParticipant<'_> {
 }
 
 impl DigitalActiveParticipant for AnalogModelParticipant<'_> {
+    /// Its Active wave does nothing, and what it samples is the candidate's
+    /// fixed solution read through the host's own state.
+    fn holds_hidden_step_state(&self) -> bool {
+        false
+    }
+
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,

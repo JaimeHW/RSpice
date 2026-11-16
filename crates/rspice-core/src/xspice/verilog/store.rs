@@ -98,6 +98,7 @@ pub use strength::BitDrive;
 #[cfg(test)]
 mod real_alias_tests;
 mod real_bindings;
+mod repetition;
 #[doc(hidden)]
 pub use real_bindings::{ExternalNetChange, ExternalRealDriverId};
 use real_bindings::{ExternalReals, RealConnections};

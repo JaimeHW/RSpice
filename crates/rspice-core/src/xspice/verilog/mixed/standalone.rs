@@ -20,6 +20,12 @@ struct StandaloneInputs {
 }
 
 impl DigitalActiveParticipant for StandaloneInputs {
+    /// Stimulus banks still to be forced can change the step; once they are
+    /// all in, nothing here can.
+    fn holds_hidden_step_state(&self) -> bool {
+        !self.banks.is_empty()
+    }
+
     fn next_event_time(&self) -> Option<f64> {
         (!self.banks.is_empty()).then_some(self.time)
     }

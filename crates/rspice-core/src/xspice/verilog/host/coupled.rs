@@ -16,6 +16,17 @@ pub trait DigitalActiveParticipant {
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError>;
 
+    /// Whether the participant keeps state that an HDL time step can change
+    /// without the participant reporting work.
+    ///
+    /// A repeated HDL state proves a step can never settle only when nothing
+    /// outside the host could break the cycle, so the host searches a step for
+    /// one only beside a participant that answers `false`. The default is the
+    /// answer that is always safe.
+    fn holds_hidden_step_state(&self) -> bool {
+        true
+    }
+
     /// Prepare input-only endpoint sampling before an interpolated event interval.
     /// Model evaluation remains ordered by the shared physical timeline.
     fn prepare_interpolated_execution(
@@ -265,6 +276,10 @@ impl DigitalActiveExchange<'_> {
 
 pub(super) struct NoActiveParticipant;
 impl DigitalActiveParticipant for NoActiveParticipant {
+    fn holds_hidden_step_state(&self) -> bool {
+        false
+    }
+
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,

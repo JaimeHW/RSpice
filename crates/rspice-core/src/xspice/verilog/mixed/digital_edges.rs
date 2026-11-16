@@ -55,6 +55,13 @@ pub(crate) struct AnalogEdgeLatch {
 }
 
 impl AnalogEdgeLatch {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(crate) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self { watched, seen } = self;
+        *watched == saved.watched && *seen == saved.seen
+    }
+
     /// Install the watch list, indexed by this store's signal ids.
     pub(crate) fn watch(&mut self, watched: Vec<u8>) {
         self.watched = if watched.iter().any(|edges| *edges != 0) {

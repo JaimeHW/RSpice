@@ -505,6 +505,31 @@ pub(crate) struct OpenFile {
 }
 
 impl OpenFile {
+    fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            name,
+            path,
+            mode,
+            content,
+            position,
+            length,
+            pushback,
+            eof,
+            error,
+        } = self;
+        *name == saved.name
+            && *path == saved.path
+            && *mode == saved.mode
+            && *content == saved.content
+            && *position == saved.position
+            && *length == saved.length
+            && *pushback == saved.pushback
+            && *eof == saved.eof
+            && *error == saved.error
+    }
+}
+
+impl OpenFile {
     fn new(name: &str, path: PathBuf, mode: OpenMode, content: Option<Vec<u8>>) -> Self {
         let length = content.as_ref().map_or(0, |content| content.len() as u64);
         Self {
@@ -679,6 +704,31 @@ pub(crate) struct HdlFiles {
 }
 
 impl HdlFiles {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    ///
+    /// A write waiting for release is never read back inside the step, but
+    /// one more of them is still a different state, so a step that keeps
+    /// writing is never called repeating.
+    pub(crate) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            descriptors,
+            channels,
+            pending,
+        } = self;
+        let same = |now: &[Option<OpenFile>], then: &[Option<OpenFile>]| {
+            now.len() == then.len()
+                && now.iter().zip(then).all(|pair| match pair {
+                    (None, None) => true,
+                    (Some(now), Some(then)) => now.same_step_state(then),
+                    _ => false,
+                })
+        };
+        same(descriptors, &saved.descriptors)
+            && same(channels, &saved.channels)
+            && *pending == saved.pending
+    }
+
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }

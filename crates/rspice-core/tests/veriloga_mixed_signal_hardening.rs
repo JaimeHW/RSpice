@@ -2992,7 +2992,7 @@ fn a_zero_delay_loop_names_every_member_and_the_loop_they_close() {
     let error = error_for(&ring_deck(&model), 100.0e-9, 1.0e-9);
     let file = model.file_name();
     for expected in [
-        "event network did not settle at tick 10000 (1e-8 s) within 10000 delta cycles".to_owned(),
+        "event network did not settle at tick 10000 (1e-8 s): after".to_owned(),
         format!("xr.assign#1 (continuous assign, {file}:13) driving xr.a fired"),
         format!("xr.assign#2 (continuous assign, {file}:14) driving xr.b fired"),
         format!("xr.assign#3 (continuous assign, {file}:15) driving port xr.o fired"),

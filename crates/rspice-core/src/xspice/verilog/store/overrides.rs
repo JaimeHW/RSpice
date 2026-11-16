@@ -146,6 +146,25 @@ impl Clone for Overrides {
 }
 
 impl Overrides {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(super) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            signals,
+            inputs,
+            active,
+            pending,
+            error,
+            scratch: _,
+        } = self;
+        error.is_none()
+            && saved.error.is_none()
+            && *signals == saved.signals
+            && *inputs == saved.inputs
+            && *active == saved.active
+            && *pending == saved.pending
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.signals.is_empty() && self.active.is_empty()
     }

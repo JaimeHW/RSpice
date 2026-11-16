@@ -780,6 +780,10 @@ fn xspice_event_settling_message(
             format!("{} delta cycles", diagnostic.delta_cycle_limit)
         }
         OscillationCause::EventLimit => format!("{} events", diagnostic.event_limit),
+        OscillationCause::RepeatedState { period } => format!(
+            "{} delta cycles (its state repeats every {period})",
+            diagnostic.delta_cycles
+        ),
     };
     let drivers: Vec<String> = diagnostic
         .entities

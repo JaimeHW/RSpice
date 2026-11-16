@@ -153,6 +153,16 @@ impl Clone for ExternalReals {
     }
 }
 impl ExternalReals {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(super) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            topology: _,
+            values,
+        } = self;
+        *values == saved.values
+    }
+
     pub(super) fn checkpoint(&self) -> Result<RealCheckpoint, String> {
         Ok(RealCheckpoint {
             topology: super::checkpoint::fingerprint(self.topology.as_ref())?,

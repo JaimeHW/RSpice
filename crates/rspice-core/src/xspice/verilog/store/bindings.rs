@@ -110,6 +110,24 @@ impl Clone for ConnectedBits {
 }
 
 impl ConnectedBits {
+    /// Whether this is, for the rest of the time step being settled, the
+    /// state `saved` was; see `DigitalHost::repeats`.
+    pub(super) fn same_step_state(&self, saved: &Self) -> bool {
+        let Self {
+            topology: _,
+            resolved,
+            external_values,
+            other_driver_values,
+            pending,
+            touched,
+        } = self;
+        *resolved == saved.resolved
+            && *external_values == saved.external_values
+            && *other_driver_values == saved.other_driver_values
+            && *pending == saved.pending
+            && *touched == saved.touched
+    }
+
     pub(super) fn checkpoint(&self) -> Result<BitCheckpoint, String> {
         if !self.touched.is_empty() || self.pending.iter().any(Option::is_some) {
             return Err("bit publication is not drained".into());

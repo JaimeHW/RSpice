@@ -303,6 +303,15 @@ impl XspiceDigitalBindings {
     /// receiving half. They carry the analog side back onto the net, so a
     /// converter reading the net's drive leaves them out, its own receiving
     /// half among them.
+    /// Whether an XSPICE output other than an inserted connect converter
+    /// drives an HDL net or real. A converter's A/D half reads the candidate's
+    /// analog solution, which a digital time step cannot move, so only such an
+    /// output can answer an HDL change inside the step.
+    pub(crate) fn drives_from_code_models(&self) -> bool {
+        !self.real_drivers.is_empty()
+            || self.drivers.len() > self.converter_drivers.values().map(Vec::len).sum::<usize>()
+    }
+
     pub(crate) fn converter_drivers(&self, node: NodeId) -> &[ExternalBitDriverId] {
         self.converter_drivers.get(&node).map_or(&[], Vec::as_slice)
     }
@@ -491,6 +500,12 @@ impl<'a> XspiceDigitalParticipant<'a> {
 }
 
 impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
+    /// A code model's state can change with what the HDL drives it and come
+    /// back into the step later; a connect converter's cannot.
+    fn holds_hidden_step_state(&self) -> bool {
+        self.bindings.drives_from_code_models()
+    }
+
     fn prepare_interpolated_execution(
         &mut self,
         endpoint_window: f64,

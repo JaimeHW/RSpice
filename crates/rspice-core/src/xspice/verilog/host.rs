@@ -28,13 +28,15 @@
 //! this tick, run each one, subscribe or reschedule whatever it suspended on,
 //! and look again. When nothing is left it promotes the earliest non-empty
 //! later region and looks again. Each repetition is marked with
-//! [`EventScheduler::note_delta_cycle`], which is what converts a combinational
-//! loop — `assign a = ~a;` is the smallest — from a hang into
-//! [`SchedulerError::Oscillation`] naming the process that kept firing.
+//! [`EventScheduler::note_delta_cycle`]: one call per settle iteration, so the
+//! count measures how deep the settling is rather than how many processes the
+//! design has.
 //!
-//! That is the reading the kernel's own documentation asks for: one call per
-//! settle iteration, so the ceiling measures how deep the settling is rather
-//! than how many processes the design has.
+//! The settling is unbounded, as IEEE 1364-2005 has it. A combinational loop —
+//! `assign a = ~a;` is the smallest — is refused as
+//! [`SchedulerError::Oscillation`] naming the processes that kept firing once
+//! the step is proven to repeat a state (`host/repetition.rs`); any other step
+//! that never settles is ended by the run's Stop or time limit.
 //!
 //! # Time
 //!
@@ -67,11 +69,13 @@ mod delays;
 mod image;
 mod oscillation;
 mod paths;
+mod repetition;
 mod threads;
 use coupled::NoActiveParticipant;
 #[doc(hidden)]
 pub use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
 pub(crate) use oscillation::{process_label, process_reads, process_writes};
+use repetition::{REPETITION_SUSPICION, RepetitionSearch};
 
 use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use std::{
@@ -104,7 +108,7 @@ use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalProcessId,
 /// The question has an exact answer, so this only decides when to ask: late
 /// enough that a legal step stepping through `#0` waits never pays for it, and
 /// early enough that a loop of nothing but `#0` waits is refused in a fraction
-/// of a second rather than at the per-tick ceiling.
+/// of a second.
 const ZERO_DELAY_SUSPICION: u32 = 1 << 16;
 
 use super::effects::{CallOrigin, HdlEffects, HdlEffectsConfig};
@@ -1406,6 +1410,7 @@ impl DigitalHost {
     ) -> Result<(), DigitalRunError> {
         let bound = self.instant_of(tick)?;
         let resolution = self.resolution;
+        let mut search = RepetitionSearch::default();
         loop {
             fired.clear();
             if let Some(ready) = self.analog_ready.as_mut() {
@@ -1516,11 +1521,24 @@ impl DigitalHost {
             }
 
             // One call per settle iteration, which is the reading
-            // `note_delta_cycle` documents: the ceiling measures the depth of
+            // `note_delta_cycle` documents: the count measures the depth of
             // the settling, not the size of the design.
             self.scheduler
                 .note_delta_cycle(bound)
                 .map_err(|error| name_oscillating_tick(resolution, error))?;
+            // A participant that keeps state of its own could break a cycle
+            // the host's state alone repeats: while it does, the search
+            // starts over.
+            if self.scheduler.slot_delta_cycles() >= REPETITION_SUSPICION
+                && !search.reset_if(participant.holds_hidden_step_state())
+                && let Some(period) = search.observe(self, bound)
+            {
+                // A thread that can only ever wait on `#0` again is the more
+                // exact reason, when it is the one.
+                self.refuse_zero_delay_loop(tick, self.scheduler.slot_zero_delays())?;
+                let error = self.scheduler.repeated_state(bound, period);
+                return Err(name_oscillating_tick(resolution, error).into());
+            }
         }
     }
 
@@ -2241,9 +2259,8 @@ impl DigitalHost {
     }
 
     /// Refuse the step if a thread about to resume from `#0` can only ever
-    /// wait on `#0` again: it holds the time step open forever, and the
-    /// per-tick ceiling, sized for legal programs, would take seconds to say
-    /// so. The graph says it as soon as the step looks suspicious.
+    /// wait on `#0` again: it holds the time step open forever. The graph
+    /// says so as soon as the step looks suspicious.
     fn refuse_zero_delay_loop(&self, tick: u64, resumptions: u32) -> Result<(), DigitalRunError> {
         for &index in &self.inactive {
             let Some(slot) = self.slots.get(index) else {

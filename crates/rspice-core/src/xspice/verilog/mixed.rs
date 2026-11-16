@@ -911,7 +911,12 @@ impl std::error::Error for MixedSignalError {}
 
 impl From<DigitalRunError> for MixedSignalError {
     fn from(error: DigitalRunError) -> Self {
-        Self::Digital(error)
+        match error {
+            // A Stop or time limit that reached a settling time step is the
+            // run's abort, not a failure of the design.
+            DigitalRunError::Scheduler(SchedulerError::Aborted) => Self::Aborted,
+            error => Self::Digital(error),
+        }
     }
 }
 

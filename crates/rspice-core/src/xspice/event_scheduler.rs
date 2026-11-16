@@ -66,6 +66,7 @@
 //! event first. That is not reproducible, and this kernel does not inherit it.
 
 use super::EventValue;
+use rspice_veriloga_runtime::loop_abort;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -753,6 +754,13 @@ pub enum OscillationCause {
     /// The active region kept refilling itself, so no promotion ever happened.
     /// A zero-delay loop inside one delta cycle looks like this.
     EventLimit,
+    /// A delta cycle returned the whole design to a state it had already
+    /// been in at this instant, `period` delta cycles before: the instant
+    /// can never settle. Proven by the host that owns the state, not counted.
+    RepeatedState {
+        /// Delta cycles between two visits of the repeated state.
+        period: u32,
+    },
 }
 
 /// Why a tick failed to settle, and which drivers were responsible.
@@ -839,6 +847,8 @@ pub enum SchedulerError {
     },
     /// An instant did not settle within its limits.
     Oscillation(OscillationDiagnostic),
+    /// The run's abort hook answered while an instant was settling.
+    Aborted,
 }
 
 impl fmt::Display for SchedulerError {
@@ -861,14 +871,19 @@ impl fmt::Display for SchedulerError {
                 f,
                 "event scheduled at {requested} s, but the scheduler has reached {reached} s"
             ),
+            SchedulerError::Aborted => write!(f, "stopped while an event time step was settling"),
             SchedulerError::Oscillation(diagnostic) => {
                 let cause = match diagnostic.cause {
                     OscillationCause::DeltaCycleLimit => {
-                        format!("{} delta cycles", diagnostic.delta_cycle_limit)
+                        format!(" within {} delta cycles", diagnostic.delta_cycle_limit)
                     }
                     OscillationCause::EventLimit => {
-                        format!("{} events", diagnostic.event_limit)
+                        format!(" within {} events", diagnostic.event_limit)
                     }
+                    OscillationCause::RepeatedState { period } => format!(
+                        ": after {} delta cycles its state repeats every {period}",
+                        diagnostic.delta_cycles
+                    ),
                 };
                 // A design's author names a time by its tick, so the tick is
                 // what this prints when the reporting caller named a grid to
@@ -879,12 +894,12 @@ impl fmt::Display for SchedulerError {
                 match diagnostic.tick {
                     Some(tick) => write!(
                         f,
-                        "event network did not settle at tick {tick} ({:e} s) within {cause}",
+                        "event network did not settle at tick {tick} ({:e} s){cause}",
                         diagnostic.at.seconds()
                     )?,
                     None => write!(
                         f,
-                        "event network did not settle at {} s within {cause}",
+                        "event network did not settle at {} s{cause}",
                         diagnostic.at
                     )?,
                 }
@@ -946,34 +961,34 @@ impl Default for SchedulerLimits {
 }
 
 impl SchedulerLimits {
-    /// The ceilings for an HDL design, alone or inside a circuit.
+    /// The limits for an HDL design, alone or inside a circuit: none.
     ///
-    /// They detect hangs, so they must not stop a legal program. The most any
-    /// ivtest needs at one tick is about 2.0 million delta cycles and 1.3
-    /// million events (`pow_ca_signed`: one `initial` steps through a `#0`
-    /// per power it checks); these are ten times that and more. A loop with no
-    /// `#0` in it is caught long before, at
-    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`].
+    /// IEEE 1364-2005 section 11.4 leaves the settling of one time step
+    /// unbounded, and Icarus Verilog bounds none, so no count may stop a legal
+    /// program. A step that cannot settle is proven by its host, which refuses
+    /// a delta cycle that returns the design to a state it was already in
+    /// ([`OscillationCause::RepeatedState`]); any other runaway is ended by the
+    /// run's Stop or time limit, which the kernel polls inside the step
+    /// ([`SchedulerError::Aborted`]).
     #[cfg(feature = "veriloga")]
     #[doc(hidden)]
     pub const HDL: Self = Self {
-        max_delta_cycles_per_tick: 20_000_000,
-        max_events_per_tick: 16_000_000,
+        max_delta_cycles_per_tick: u32::MAX,
+        max_events_per_tick: u64::MAX,
         max_reported_oscillating_entities: 16,
     };
 }
 
-/// Delta cycles allowed in a row at one tick with no zero-delay (`#0`)
-/// resumption between them (see [`EventScheduler::note_zero_delay`]), when the
-/// per-tick ceiling is larger.
-///
-/// The per-tick ceiling has to admit a legal program that steps through
-/// millions of `#0` waits at one tick. Events that wake each other with no
-/// such wait between them — a combinational loop, two processes triggering
-/// each other — never settle, and are caught here in well under a second.
-/// The longest such run a legal design needs is far shorter: 12 delta cycles
-/// in the ivtest selection and 76 in the mixed-signal corpus.
-const MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY: u32 = 10_000;
+/// One event due in an open slot, as [`EventScheduler::due_events_into`]
+/// reports it: everything but its sequence number.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DueEvent {
+    at: Instant,
+    region: SchedulerRegion,
+    target: TargetId,
+    value: EventValue,
+}
 
 /// What one settled instant did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1594,9 +1609,6 @@ pub struct EventScheduler {
     /// uses this; [`Self::run_time_slot`] settles an instant inside one call
     /// and counts in a local.
     slot_delta_cycles: u32,
-    /// Of those, the delta cycles since the slot's last zero-delay
-    /// resumption (see [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`]).
-    slot_delta_chain: u32,
     /// Zero-delay resumptions of the open due slot ([`Self::note_zero_delay`]).
     slot_zero_delays: u32,
     /// Events executed against the open due slot, for the same reason.
@@ -1614,7 +1626,6 @@ impl Clone for EventScheduler {
             current,
             started,
             slot_delta_cycles,
-            slot_delta_chain,
             slot_zero_delays,
             slot_events_executed,
             failed_slot,
@@ -1625,7 +1636,6 @@ impl Clone for EventScheduler {
             current: *current,
             started: *started,
             slot_delta_cycles: *slot_delta_cycles,
-            slot_delta_chain: *slot_delta_chain,
             slot_zero_delays: *slot_zero_delays,
             slot_events_executed: *slot_events_executed,
             failed_slot: *failed_slot,
@@ -1639,7 +1649,6 @@ impl Clone for EventScheduler {
             current,
             started,
             slot_delta_cycles,
-            slot_delta_chain,
             slot_zero_delays,
             slot_events_executed,
             failed_slot,
@@ -1650,7 +1659,6 @@ impl Clone for EventScheduler {
             current: source_current,
             started: source_started,
             slot_delta_cycles: source_slot_delta_cycles,
-            slot_delta_chain: source_slot_delta_chain,
             slot_zero_delays: source_slot_zero_delays,
             slot_events_executed: source_slot_events_executed,
             failed_slot: source_failed_slot,
@@ -1660,7 +1668,6 @@ impl Clone for EventScheduler {
         *current = *source_current;
         *started = *source_started;
         *slot_delta_cycles = *source_slot_delta_cycles;
-        *slot_delta_chain = *source_slot_delta_chain;
         *slot_zero_delays = *source_slot_zero_delays;
         *slot_events_executed = *source_slot_events_executed;
         *failed_slot = *source_failed_slot;
@@ -1676,7 +1683,6 @@ impl EventScheduler {
             current: Instant::ZERO,
             started: false,
             slot_delta_cycles: 0,
-            slot_delta_chain: 0,
             slot_zero_delays: 0,
             slot_events_executed: 0,
             failed_slot: false,
@@ -1980,6 +1986,7 @@ impl EventScheduler {
         self.queues
             .note_activation(target)
             .inspect_err(|_| self.failed_slot = true)?;
+        self.poll_abort(self.slot_events_executed)?;
         if self.slot_events_executed > self.limits.max_events_per_tick {
             return Err(self.oscillation(
                 at,
@@ -2034,6 +2041,7 @@ impl EventScheduler {
                 .slot_events_executed
                 .checked_add(1)
                 .ok_or_else(|| self.accounting_failure())?;
+            self.poll_abort(self.slot_events_executed)?;
             if self.slot_events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
                     bound,
@@ -2074,44 +2082,104 @@ impl EventScheduler {
     }
 
     /// Record that the open slot resumed work deferred by a zero delay
-    /// (`#0`): the delta cycles after it are a new run as far as
-    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`] is concerned. Returns how many
-    /// such resumptions the slot has had, this one included.
+    /// (`#0`). Returns how many such resumptions the slot has had, this one
+    /// included.
     #[cfg(feature = "veriloga")]
     pub(crate) fn note_zero_delay(&mut self) -> u32 {
-        self.slot_delta_chain = 0;
         self.slot_zero_delays = self.slot_zero_delays.saturating_add(1);
         self.slot_zero_delays
     }
 
-    /// Count one delta cycle of the open slot against both of its ceilings.
+    /// Delta cycles the open due slot has counted.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn slot_delta_cycles(&self) -> u32 {
+        self.slot_delta_cycles
+    }
+
+    /// Zero-delay resumptions the open due slot has counted.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn slot_zero_delays(&self) -> u32 {
+        self.slot_zero_delays
+    }
+
+    /// Refuse the open due slot at `bound` as proven never to settle: its
+    /// host found the design back in a state it was in `period` delta cycles
+    /// before. The report names the slot's busiest drivers, as a ceiling's
+    /// does.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn repeated_state(&mut self, bound: Instant, period: u32) -> SchedulerError {
+        self.oscillation(
+            bound,
+            OscillationCause::RepeatedState { period },
+            self.slot_delta_cycles,
+            self.slot_events_executed,
+        )
+    }
+
+    /// The events due at or before `bound`, in the order they will run, each
+    /// without its sequence number, written over `into`.
+    ///
+    /// Sequence numbers only grow, so two states of one slot never share
+    /// them; what decides how the slot goes on is which events wait and in
+    /// what order, and every event scheduled later runs after all of these.
+    /// That is what a host compares to prove the slot repeats.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn due_events_into(&self, bound: Instant, into: &mut Vec<DueEvent>) {
+        into.clear();
+        let due = |event: &PendingEvent| DueEvent {
+            at: event.at,
+            region: event.region,
+            target: event.target,
+            value: event.value,
+        };
+        for region in &self.queues.slot {
+            into.extend(region.iter().map(due));
+        }
+        // An event back-dated below the bound waits in the future tier, whose
+        // slice is in heap order: sorted by the total order, it is in running
+        // order. Collecting none allocates nothing.
+        let mut back_dated: Vec<&PendingEvent> = self
+            .queues
+            .future
+            .iter()
+            .map(|Reverse(queued)| &queued.0)
+            .filter(|event| event.at <= bound && !self.queues.cancelled.contains(&event.sequence))
+            .collect();
+        back_dated.sort_by_key(|event| (event.at, event.region, event.sequence));
+        into.extend(back_dated.into_iter().map(due));
+    }
+
+    /// Count one delta cycle of the open slot against its ceiling.
     fn count_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
         self.slot_delta_cycles = self
             .slot_delta_cycles
             .checked_add(1)
             .ok_or_else(|| self.accounting_failure())?;
-        self.slot_delta_chain = self.slot_delta_chain.saturating_add(1);
-        let chain_limit = self
-            .limits
-            .max_delta_cycles_per_tick
-            .min(MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY);
-        let limit = if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
-            self.limits.max_delta_cycles_per_tick
-        } else if self.slot_delta_chain > chain_limit {
-            chain_limit
-        } else {
-            return Ok(());
-        };
-        let mut error = self.oscillation(
-            bound,
-            OscillationCause::DeltaCycleLimit,
-            self.slot_delta_cycles,
-            self.slot_events_executed,
-        );
-        if let SchedulerError::Oscillation(diagnostic) = &mut error {
-            diagnostic.delta_cycle_limit = limit;
+        self.poll_abort(u64::from(self.slot_delta_cycles))?;
+        if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
+            return Err(self.oscillation(
+                bound,
+                OscillationCause::DeltaCycleLimit,
+                self.slot_delta_cycles,
+                self.slot_events_executed,
+            ));
         }
-        Err(error)
+        Ok(())
+    }
+
+    /// Ask the run's abort hook whether to stop, once every
+    /// [`loop_abort::POLL_INTERVAL`] events or delta cycles of one slot.
+    ///
+    /// A time step that never settles holds the run inside one call, out of
+    /// reach of the engine's polls between steps, as a Verilog-A loop holds a
+    /// device evaluation; the same hook ends both. Between polls a slot pays
+    /// one mask test per event.
+    fn poll_abort(&mut self, count: u64) -> Result<(), SchedulerError> {
+        if count & (u64::from(loop_abort::POLL_INTERVAL) - 1) == 0 && loop_abort::aborted() {
+            self.failed_slot = true;
+            return Err(SchedulerError::Aborted);
+        }
+        Ok(())
     }
 
     /// Open the due slot at `bound`, resetting per-slot accounting when
@@ -2123,7 +2191,6 @@ impl EventScheduler {
         self.current = bound;
         self.started = true;
         self.slot_delta_cycles = 0;
-        self.slot_delta_chain = 0;
         self.slot_zero_delays = 0;
         self.slot_events_executed = 0;
         self.queues.clear_activations();
@@ -2157,7 +2224,6 @@ impl EventScheduler {
         // per-slot fields are cleared so that a scheduler driven both ways
         // does not carry one mode's accounting into the other's.
         self.slot_delta_cycles = 0;
-        self.slot_delta_chain = 0;
         self.slot_zero_delays = 0;
         self.slot_events_executed = 0;
         let mut delta_cycles: u32 = 0;
@@ -2172,6 +2238,7 @@ impl EventScheduler {
                 delta_cycles = delta_cycles
                     .checked_add(1)
                     .ok_or_else(|| self.accounting_failure())?;
+                self.poll_abort(u64::from(delta_cycles))?;
                 if delta_cycles > self.limits.max_delta_cycles_per_tick {
                     return Err(self.oscillation(
                         at,
@@ -2186,6 +2253,7 @@ impl EventScheduler {
             events_executed = events_executed
                 .checked_add(1)
                 .ok_or_else(|| self.accounting_failure())?;
+            self.poll_abort(events_executed)?;
             if events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
                     at,
