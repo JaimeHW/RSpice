@@ -451,6 +451,52 @@ impl FourierAnalysis {
         self.analyze_observation(time, values, &merged, abort)
     }
 
+    /// The window `(start, stop]` [`Self::analyze_transient_record_with_abort`] reads of a
+    /// record with these facts; the rows it reads are those from the last sample before
+    /// `start` through the first one after `stop`.
+    pub fn record_window(&self, record: &FourierRecord) -> Result<(Value, Value), FourierError> {
+        self.validate_configuration()?;
+        // As [`Self::analyze_transient_output_with_abort`] reads it: the window over the
+        // record's time, and then the record's samples.
+        let bounds = if record.count == 0 {
+            self.window_bounds(&[])
+        } else {
+            self.window_between(record.first, record.last)
+        }?;
+        record.check()?;
+        Ok(bounds)
+    }
+
+    /// [`Self::analyze_transient_output_with_abort`] of a record the caller holds only part
+    /// of: `record` gives what the transform reads of the whole one (its validity and its
+    /// first and last time), and `window` and `values` hold its rows from the last sample
+    /// before [`Self::record_window`]'s start through the first one after its stop, or all of
+    /// them. The result is the one the whole record gives. `window` carries no impulses.
+    pub fn analyze_transient_record_with_abort(
+        &self,
+        record: &FourierRecord,
+        window: &super::transient::TransientResult,
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
+        let bounds = self.record_window(record)?;
+        if window.time.len() != values.len() {
+            return Err(FourierError::LengthMismatch {
+                time_points: window.time.len(),
+                values: values.len(),
+            });
+        }
+        if window.voltage_impulses.is_some() || window.current_impulses.is_some() {
+            return Err(FourierError::CurrentObservation {
+                detail: "a window of a record is read without its impulses".into(),
+            });
+        }
+        self.transform(&window.time, values, &[], bounds, abort)
+    }
+
     fn analyze_observation(
         &self,
         time: &[Value],
@@ -464,8 +510,20 @@ impl FourierAnalysis {
         self.validate_configuration()?;
         validate_waveform(time, values, abort)?;
 
-        let (t_start, t_stop) = self.window_bounds(time)?;
+        let bounds = self.window_bounds(time)?;
+        self.transform(time, values, impulses, bounds, abort)
+    }
 
+    /// The spectrum over `(t_start, t_stop]` of a record whose rows around that window are
+    /// `time` and `values`.
+    fn transform(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        impulses: &[ImpulseContribution<'_>],
+        (t_start, t_stop): (Value, Value),
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
         // Retain an exact-period window. When either edge lies between
         // samples, interpolate the boundary instead of silently lengthening
         // or shortening the integration interval and biasing every
@@ -611,6 +669,21 @@ impl FourierAnalysis {
         }
         let first = time.first().copied().ok_or(FourierError::EmptyWaveform)?;
         let record_end = time.last().copied().ok_or(FourierError::EmptyWaveform)?;
+        self.window_between(first, record_end)
+    }
+
+    /// [`Self::window_bounds`] of a record from `first` to `record_end`.
+    fn window_between(
+        &self,
+        first: Value,
+        record_end: Value,
+    ) -> Result<(Value, Value), FourierError> {
+        let window_duration = self.config.window_duration();
+        if !window_duration.is_finite() || window_duration <= 0.0 {
+            return Err(FourierError::InvalidWindowDuration {
+                duration: window_duration,
+            });
+        }
         let t_end = match self.config.window_stop {
             None => record_end,
             Some(stop) => {
@@ -1155,6 +1228,77 @@ pub(crate) fn natural_spline_grid(
         });
     }
     Some(grid)
+}
+
+/// What `.FOUR` reads of a whole record besides the rows of its window, gathered over its
+/// samples in order: [`validate_waveform`]'s verdict, and its first and last time.
+#[derive(Debug, Clone)]
+pub struct FourierRecord {
+    count: usize,
+    first: Value,
+    last: Value,
+    error: Option<FourierError>,
+}
+
+impl Default for FourierRecord {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FourierRecord {
+    /// A record of no samples yet.
+    pub fn new() -> Self {
+        Self {
+            count: 0,
+            first: Value::NAN,
+            last: Value::NAN,
+            error: None,
+        }
+    }
+
+    /// The record's next samples.
+    pub fn push(&mut self, time: &[Value], values: &[Value]) {
+        for (&sample_time, &sample_value) in time.iter().zip(values) {
+            let index = self.count;
+            self.count += 1;
+            let previous = std::mem::replace(&mut self.last, sample_time);
+            if index == 0 {
+                self.first = sample_time;
+            }
+            if self.error.is_some() {
+                continue;
+            }
+            // [`validate_waveform`]'s checks, in its order at each sample.
+            if !sample_time.is_finite() {
+                self.error = Some(FourierError::NonFiniteTime {
+                    index,
+                    value: sample_time,
+                });
+            } else if !sample_value.is_finite() {
+                self.error = Some(FourierError::NonFiniteValue {
+                    index,
+                    value: sample_value,
+                });
+            } else if index > 0 && sample_time <= previous {
+                self.error = Some(FourierError::NonIncreasingTime {
+                    index,
+                    previous,
+                    current: sample_time,
+                });
+            }
+        }
+    }
+
+    /// [`validate_waveform`]'s verdict on the whole record.
+    fn check(&self) -> Result<(), FourierError> {
+        match (&self.error, self.count) {
+            (_, 0) => Err(FourierError::EmptyWaveform),
+            (_, 1) => Err(FourierError::InsufficientSamples { samples: 1 }),
+            (Some(error), _) => Err(error.clone()),
+            (None, _) => Ok(()),
+        }
+    }
 }
 
 fn validate_waveform(

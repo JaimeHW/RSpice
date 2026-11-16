@@ -116,7 +116,7 @@ pub use {
         DistortionAnalysisResult, DistortionPointResult, DistortionProduct, DistortionProductResult,
     },
     fourier::{
-        FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierResult,
+        FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierRecord, FourierResult,
         HarmonicComponent,
     },
     harmonic_balance::{
@@ -158,7 +158,7 @@ pub use {
         evaluate_tran_equation_measurements, evaluate_tran_four_output_requests_with_abort,
         evaluate_tran_measurements, evaluate_tran_measurements_with_abort,
         evaluate_tran_output_requests_with_abort, evaluate_tran_remeasurements,
-        transient_signal_map, unevaluated_measurements,
+        tran_four_operands_read_other_rows, transient_signal_map, unevaluated_measurements,
     },
 };
 

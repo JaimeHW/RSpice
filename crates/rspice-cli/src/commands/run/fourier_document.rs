@@ -105,30 +105,55 @@ pub(super) fn run_fourier(
             .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;
 
             let fourier = FourierAnalysis::new(config);
+            // A run that kept only the rows around the windows carries what each operand
+            // reads of the rest.
+            let records = match &retained.fourier {
+                None => None,
+                Some(cards) => Some(
+                    cards
+                        .iter()
+                        .find(|(index, _)| *index == four_index)
+                        .map(|(_, records)| records)
+                        .filter(|records| records.len() == columns.len())
+                        .ok_or_else(|| CliError::InternalError {
+                            message: format!(
+                                "the transient kept no record of .FOUR card {}'s operands",
+                                four_index + 1
+                            ),
+                        })?,
+                ),
+            };
 
             let mut analyzed = Vec::new();
             analyzed.try_reserve_exact(columns.len()).map_err(|_| {
                 CliError::simulation_error_in("cannot allocate Fourier results", "Fourier")
             })?;
-            for (output, physical_type, waveform) in columns {
-                let result = fourier
-                    .analyze_transient_output_with_abort(
+            for (operand, (output, physical_type, waveform)) in columns.into_iter().enumerate() {
+                let result = match records {
+                    Some(records) => fourier.analyze_transient_record_with_abort(
+                        &records[operand],
+                        &retained.result,
+                        &waveform,
+                        &crate::abort::ProcessAbort,
+                    ),
+                    None => fourier.analyze_transient_output_with_abort(
                         Some(ctx.netlist),
                         &retained.result,
                         &output,
                         &waveform,
                         &crate::abort::ProcessAbort,
-                    )
-                    .map_err(|error| {
-                        if matches!(error, rspice_core::analysis::FourierError::Aborted) {
-                            super::cancellation_cli_error(ctx.args.timeout)
-                        } else {
-                            CliError::simulation_error_in(
-                                format!("Fourier output `{output}` could not be analyzed: {error}"),
-                                "Fourier",
-                            )
-                        }
-                    })?;
+                    ),
+                }
+                .map_err(|error| {
+                    if matches!(error, rspice_core::analysis::FourierError::Aborted) {
+                        super::cancellation_cli_error(ctx.args.timeout)
+                    } else {
+                        CliError::simulation_error_in(
+                            format!("Fourier output `{output}` could not be analyzed: {error}"),
+                            "Fourier",
+                        )
+                    }
+                })?;
                 analyzed.push((output, physical_type, result));
             }
             analyzed

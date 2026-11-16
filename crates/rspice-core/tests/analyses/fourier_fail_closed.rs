@@ -5,7 +5,7 @@ use std::f64::consts::PI;
 use rspice_core::Netlist;
 use rspice_core::abort_signal::{CountingAbort, NoAbort};
 use rspice_core::analysis::fourier::{
-    FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierResult,
+    FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierRecord, FourierResult,
 };
 use rspice_core::netlist::OutputSymbolKind::{Device, Node};
 use rspice_core::netlist::{
@@ -895,4 +895,115 @@ fn a_window_end_outside_the_record_is_refused_by_name() {
     FourierAnalysis::new(config)
         .analyze(&time, &values)
         .expect("TO at the record's own end is the record's end");
+}
+
+/// What the whole-record and record-plus-window paths give for one waveform: the window rows run
+/// from the last sample before the record's window through the first one after it, and the
+/// record is gathered over the samples in uneven spans, as a store's chunks give them.
+fn whole_and_windowed(
+    config: &FourierConfig,
+    result: &rspice_core::engine::TransientResult,
+    values: &[f64],
+) -> (
+    Result<FourierResult, FourierError>,
+    Result<FourierResult, FourierError>,
+) {
+    let analysis = FourierAnalysis::new(config.clone());
+    let whole =
+        analysis.analyze_transient_output_with_abort(None, result, "v(out)", values, &NoAbort);
+    let mut record = FourierRecord::new();
+    let mut first = 0;
+    for span in [1, 7, 300].into_iter().cycle() {
+        let end = (first + span).min(values.len());
+        record.push(&result.time[first..end], &values[first..end]);
+        first = end;
+        if first == values.len() {
+            break;
+        }
+    }
+    let rows = match analysis.record_window(&record) {
+        Ok((start, stop)) => {
+            let low = result
+                .time
+                .partition_point(|&t| t < start)
+                .saturating_sub(1);
+            let high = result
+                .time
+                .partition_point(|&t| t <= stop)
+                .min(result.time.len() - 1);
+            low..high + 1
+        }
+        Err(_) => 0..result.time.len().min(2),
+    };
+    let mut window = result.clone();
+    window.time = result.time[rows.clone()].to_vec();
+    for column in &mut window.voltages {
+        *column = column[rows.clone()].to_vec();
+    }
+    let windowed =
+        analysis.analyze_transient_record_with_abort(&record, &window, &values[rows], &NoAbort);
+    (whole, windowed)
+}
+
+/// A store holds a run in chunks and `.FOUR` reads it in two passes: one over every row gathers
+/// what the transform reads of the whole record (its first and last time and whether every
+/// sample is finite and increasing), and the rows around the window follow. The spectrum, and
+/// the refusal when there is none, are the ones the whole record gives, refusals in the same
+/// order: the window's before the samples'.
+#[test]
+fn a_record_and_the_rows_around_its_window_give_the_whole_record_s_spectrum() {
+    let netlist = Netlist::parse(
+        "rc\nv1 in 0 sin(0 1 1k)\nr1 in out 1k\nc1 out 0 100n\n.tran 10u 5m\n.end\n",
+    )
+    .expect("the deck parses");
+    let result = rspice_core::Engine::default()
+        .run_tran(&netlist, 5e-3, 1e-5)
+        .expect("the RC runs");
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("v(out)");
+    let values = result.voltages[out].clone();
+    let last = *result.time.last().expect("rows");
+
+    let mut configs = Vec::new();
+    for method in [
+        FourierMethod::Interpolant,
+        FourierMethod::LinearGrid,
+        FourierMethod::SplineGrid,
+    ] {
+        configs.push(windowed(1_000.0, 9, 2).with_method(method));
+        let mut ending = windowed(1_000.0, 5, 1).with_method(method);
+        ending.window_stop = Some(3.3e-3);
+        configs.push(ending);
+    }
+    for config in &configs {
+        let (whole, windowed) = whole_and_windowed(config, &result, &values);
+        let whole = whole.expect("the whole record has a spectrum");
+        assert_eq!(windowed.as_ref(), Ok(&whole), "{config:?}");
+    }
+
+    // Refusals: a window past the record's end, before a non-finite sample; a non-finite
+    // sample; a record shorter than the window; a time that does not increase.
+    let mut past_end = windowed(1_000.0, 5, 1);
+    past_end.window_stop = Some(2.0 * last);
+    let mut nan = values.clone();
+    nan[17] = f64::NAN;
+    let long = windowed(1_000.0, 5, 50);
+    let mut stalled = result.clone();
+    stalled.time[40] = stalled.time[39];
+    for (config, result, values, expected) in [
+        (&past_end, &result, &nan, "WindowStopOutsideRecord"),
+        (&configs[0], &result, &nan, "NonFiniteValue"),
+        (&long, &result, &values, "InsufficientDuration"),
+        (&configs[0], &stalled, &values, "NonIncreasingTime"),
+    ] {
+        let (whole, windowed) = whole_and_windowed(config, result, values);
+        let whole = whole.expect_err("the whole record is refused");
+        assert!(format!("{whole:?}").starts_with(expected), "{whole:?}");
+        // By its rendering: a NaN sample's refusal carries the NaN, which equals nothing.
+        let windowed = windowed.expect_err("the windowed record is refused");
+        assert_eq!(format!("{windowed:?}"), format!("{whole:?}"));
+    }
 }

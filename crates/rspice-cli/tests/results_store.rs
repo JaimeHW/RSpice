@@ -40,6 +40,17 @@ const RC_MEASURES: &str = ".meas tran vavg avg v(out)
 .meas tran both param='vavg+vmax'
 ";
 
+/// `.FOUR` cards over a sine's response: the store's own columns, a voltage between two nodes
+/// and an expression of them, and a card whose window ends before the run does.
+const RC_FOUR: &str = "rc sine
+v1 in 0 sin(0 1 1k)
+r1 in out 1k
+c1 out 0 100n
+.tran 10u 5m
+.four 1k v(out) v(in,out) {2*v(out)-v(in)}
+.four 1k v(out) periods=2 to=3.3m
+";
+
 fn run(args: &[&str]) {
     let output = run_rspice(args);
     assert!(
@@ -122,6 +133,54 @@ fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
                 "{field}: {measurement} {twin}"
             );
         }
+    }
+}
+
+#[test]
+fn fourier_spectra_read_around_their_windows_equal_the_run_read_back_whole() {
+    let dir = test_dir("results-store-fourier");
+    // A measurement of another one's running result reads the run back whole.
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    // The second deck ends with a card whose window is longer than the run.
+    for (tag, card) in [("spectra", ""), ("refused", ".four 1k v(out) periods=50\n")] {
+        let mut twins = Vec::new();
+        for (twin, extra) in [("windowed", ""), ("read-back", read_back)] {
+            let deck = dir.join(format!("{tag}-{twin}.cir"));
+            std::fs::write(&deck, format!("{RC_FOUR}{card}{extra}.end\n")).unwrap();
+            let out = dir.join(format!("{tag}-{twin}"));
+            let output = run_rspice(&[
+                "run",
+                deck.to_str().unwrap(),
+                "-f",
+                "csv",
+                "-o",
+                out.join("out.csv").to_str().unwrap(),
+            ]);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let frames = stdout
+                .lines()
+                .filter(|line| line.starts_with(['│', '┌', '├', '└']) || line.contains("Fourier"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let refusal = String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .filter(|line| line.contains("could not be analyzed"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let mut spectra = std::fs::read_dir(&out)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.to_string_lossy().contains(".four-"))
+                .map(|path| std::fs::read(path).unwrap())
+                .collect::<Vec<_>>();
+            spectra.sort();
+            twins.push((output.status.code(), frames, refusal, spectra));
+        }
+        let (code, frames, refusal, spectra) = &twins[0];
+        assert_eq!(spectra.len(), 4, "{tag}: one spectrum per operand");
+        assert!(frames.len() > 60, "{tag}: {frames:?}");
+        assert_eq!(*code == Some(0), refusal.is_empty(), "{tag}: {refusal:?}");
+        assert_eq!(twins[0], twins[1], "{tag}");
     }
 }
 

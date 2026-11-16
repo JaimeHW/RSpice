@@ -194,6 +194,9 @@ pub(super) struct RetainedTransient {
     /// trajectory. Present only for a compressed run, whose retained waveform
     /// is decimated and therefore cannot reproduce them.
     pub(super) post_results: Option<rspice_core::engine::TransientPostResults>,
+    /// What each `.FOUR` card reads of the run besides the rows around its
+    /// window, when `result` holds only those rows.
+    pub(super) fourier: Option<super::stored_transient::FourierRecords>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,6 +254,7 @@ impl<'a> RunContext<'a> {
                 analysis_id: analysis.tag(),
                 result: outcome.result,
                 post_results: outcome.post_results,
+                fourier: outcome.fourier,
             });
         for (index, card) in self
             .netlist
@@ -932,6 +936,24 @@ impl<'a> RunContext<'a> {
         })
     }
 
+    /// The indices, among the deck's `.FOUR` cards, of those the plan binds to the transient
+    /// running now, in source order.
+    pub(super) fn fourier_cards_for_current_transient(&self) -> Result<Vec<usize>, CliError> {
+        let transient = self.current_transient_instance()?;
+        let mut cards = self
+            .planned_post_processes
+            .iter()
+            .filter(|post| post.parent() == transient)
+            .filter_map(|post| match post.source() {
+                PostProcessSource::FourierOperand { card_index, .. } => Some(*card_index),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        cards.sort_unstable();
+        cards.dedup();
+        Ok(cards)
+    }
+
     /// Whether any planned `.FOUR` operand post-processes this transient.
     fn plans_fourier_for(&self, transient: AnalysisInstanceId) -> bool {
         self.planned_post_processes.iter().any(|post| {
@@ -1059,10 +1081,10 @@ impl<'a> RunContext<'a> {
                     })?;
                 self.next_transient_ordinal.set(next);
                 let state_times = frequency::shared_state_times(self, analysis);
-                // A transient a `.FOUR` card reads is read back from its
-                // results store whole; every other one streams from it.
+                // A transient a `.FOUR` card reads keeps the rows around
+                // the card's window; every other one streams from its store.
                 let store = if self.plans_fourier_for(self.current_transient_instance()?) {
-                    basic::TransientStore::ReadBack
+                    basic::TransientStore::Fourier
                 } else {
                     basic::TransientStore::Streamed
                 };
@@ -1089,6 +1111,7 @@ impl<'a> RunContext<'a> {
                             analysis,
                             result: outcome.result,
                             post_results: outcome.post_results,
+                            fourier: outcome.fourier,
                         });
                 }
             }

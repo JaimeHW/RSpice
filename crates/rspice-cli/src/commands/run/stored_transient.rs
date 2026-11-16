@@ -14,12 +14,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core::AbortSignal;
-use rspice_core::analysis::{MeasureResult, TranMeasureStream};
+use rspice_core::analysis::{
+    FourierAnalysis, FourierConfig, FourierMethod, FourierRecord, MeasureResult, TranMeasureStream,
+};
 use rspice_core::engine::{
     ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint, TransientEnd,
     TransientResult, TransientStartupMode, TransientState,
 };
-use rspice_core::netlist::OutputDirectiveKind;
+use rspice_core::netlist::{AnalysisCommand, OutputDirectiveKind};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_results::stored_transient::{
     SlotTarget, clear_rows, fill_events, fill_rows, fill_span, first_non_finite,
@@ -424,6 +426,11 @@ fn reopen_beside_output(
     }
 }
 
+/// What each `.FOUR` card on a transient reads of its whole run besides the rows of its window:
+/// the card's index among the deck's `.FOUR` cards, and a record per operand in the order the
+/// operands resolve.
+pub(super) type FourierRecords = Vec<(usize, Vec<FourierRecord>)>;
+
 impl StoredTransient {
     /// Read every row back into the result and complete the outputs that read whole waveforms
     /// (`.FFT`, lead power), after which it equals the in-memory run's.
@@ -616,6 +623,118 @@ impl StoredTransient {
         stream
             .finish(ctx.netlist, &self.shell, abort)
             .map_err(failed)
+    }
+
+    /// Leave in the shell only the rows this transient's `.FOUR` cards read, the ones around the
+    /// union of their windows, and return what their operands read of the rest. One pass over
+    /// the store evaluates every operand chunk by chunk into its record; a second fills the
+    /// rows. With no record that has a window, the shell holds the first two rows, enough for
+    /// each card to report its refusal as the whole run would.
+    ///
+    /// Reads every row back instead, as [`Self::read_back`] does, and returns `None`, when an
+    /// operand's chunk is not its share of the whole run: the run has impulses a spectrum counts,
+    /// an operand reads other rows (`sdt`), or a chunk's evaluation fails, which the whole run
+    /// then reports.
+    pub(super) fn fourier_window(
+        &mut self,
+        ctx: &RunContext<'_>,
+        tstop: f64,
+    ) -> Result<Option<FourierRecords>, CliError> {
+        let netlist = ctx.netlist;
+        let abort = &crate::abort::ProcessAbort;
+        let indices = ctx.fourier_cards_for_current_transient()?;
+        let mut whole = self.shell.voltage_impulses.is_some()
+            || self.shell.current_impulses.is_some()
+            || indices.iter().any(|&index| {
+                rspice_core::analysis::tran_four_operands_read_other_rows(netlist, index)
+            });
+        let mut cards: FourierRecords = indices
+            .into_iter()
+            .map(|index| (index, Vec::new()))
+            .collect();
+        let spans = self.rows.reader.chunk_spans().collect::<Vec<_>>();
+        'chunks: for &(first, count) in spans.iter().take_while(|_| !whole) {
+            self.rows.fill(&mut self.shell, first, count as u64)?;
+            for (index, records) in &mut cards {
+                let columns =
+                    match rspice_core::analysis::evaluate_tran_four_output_requests_with_abort(
+                        netlist,
+                        &self.shell,
+                        *index,
+                        ctx.transient_limits(),
+                        abort,
+                    ) {
+                        Ok(columns) => columns,
+                        Err(rspice_core::SimulationError::Aborted) => {
+                            return Err(super::cancellation_cli_error(ctx.args.timeout));
+                        }
+                        Err(_) => {
+                            whole = true;
+                            break 'chunks;
+                        }
+                    };
+                if records.is_empty() {
+                    records.resize_with(columns.len(), FourierRecord::new);
+                }
+                if records.len() != columns.len() {
+                    whole = true;
+                    break 'chunks;
+                }
+                for (record, (_, _, values)) in records.iter_mut().zip(&columns) {
+                    record.push(&self.shell.time, values);
+                }
+            }
+        }
+        if whole {
+            self.read_back(ctx, tstop)?;
+            return Ok(None);
+        }
+        let method = FourierMethod::for_dialect(netlist.parse_dialect());
+        let fourier_cards = netlist
+            .analyses
+            .iter()
+            .filter(|card| matches!(card, AnalysisCommand::Four { .. }))
+            .collect::<Vec<_>>();
+        let mut window: Option<(f64, f64)> = None;
+        for (index, records) in &cards {
+            let Some(config) = fourier_cards
+                .get(*index)
+                .and_then(|card| FourierConfig::try_from(*card).ok())
+            else {
+                continue;
+            };
+            let analysis = FourierAnalysis::new(config.with_method(method));
+            for record in records {
+                if let Ok((start, stop)) = analysis.record_window(record) {
+                    window = Some(window.map_or((start, stop), |(low, high)| {
+                        (low.min(start), high.max(stop))
+                    }));
+                }
+            }
+        }
+        let rows = self.rows.rows();
+        let (first, count) = match window {
+            // A record with a window has finite, increasing times, so each chunk's share of
+            // the rows before the window's start, and through its stop, adds up to the run's.
+            Some((start, stop)) => {
+                let (mut before, mut through) = (0_u64, 0_u64);
+                let mut x = Vec::new();
+                for chunk in 0..spans.len() {
+                    self.rows
+                        .reader
+                        .read_chunk_x(chunk, &mut x)
+                        .map_err(|error| store_error(&self.rows.store.dir, error))?;
+                    before += x.partition_point(|&time| time < start) as u64;
+                    through += x.partition_point(|&time| time <= stop) as u64;
+                }
+                let first = before.saturating_sub(1);
+                let last = through.min(rows.saturating_sub(1));
+                (first, last.saturating_sub(first) + 1)
+            }
+            None => (0, rows.min(2)),
+        };
+        self.rows.fill(&mut self.shell, first, count)?;
+        Ok(Some(cards))
     }
 }
 

@@ -2097,6 +2097,49 @@ pub fn evaluate_tran_four_output_requests_with_abort(
     .map_err(frontend_output_error)
 }
 
+/// Whether a row of one source-authored `.FOUR` card's operands reads rows
+/// other than its own: a time integral (`sdt`), written in an operand or in a
+/// user function one calls, carries its sum from row to row, so
+/// [`evaluate_tran_four_output_requests_with_abort`] over a span of a run's
+/// rows gives other values there than over the whole run. An operand whose
+/// user functions cannot be expanded counts as reading other rows.
+pub fn tran_four_operands_read_other_rows(netlist: &Netlist, four_index: usize) -> bool {
+    let Some(request) = netlist
+        .output_requests
+        .iter()
+        .filter(|request| request.directive == OutputDirectiveKind::Four)
+        .nth(four_index)
+    else {
+        return true;
+    };
+    request.operand_kinds().iter().any(|kind| match kind {
+        OutputOperandKind::Expression { body } => {
+            expression_reads_other_rows(body, &netlist.params)
+        }
+        _ => false,
+    })
+}
+
+/// Whether an output expression, its user functions expanded as
+/// [`evaluate_output_operand`] expands them, reads rows other than the one it
+/// is evaluated at.
+fn expression_reads_other_rows(body: &str, params: &crate::netlist::ParamContext) -> bool {
+    let protected_identifiers = params
+        .all_params()
+        .into_iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    crate::netlist::expr::expand_output_user_functions_with_abort(
+        body,
+        params,
+        &protected_identifiers,
+        &NoAbort,
+    )
+    .map_or(true, |expanded| {
+        super::measure::stream::reads_other_rows(&expanded)
+    })
+}
+
 /// Resolve and evaluate one typed `.FFT` operand over the accepted transient
 /// history. The source request is used rather than reparsing the probe so
 /// hierarchy aliases, lead-current accessors, expressions, user functions,

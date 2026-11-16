@@ -104,7 +104,7 @@ pub(super) fn read_chunk(reads: &Mutex<ChunkReads>, index: usize, data: MeasureD
 
 /// Whether `name`, a value a chunk derives, reads rows other than its own: a time integral
 /// (`sdt`) carries its sum from row to row, so a chunk cannot give it alone.
-fn reads_other_rows(name: &str) -> bool {
+pub(crate) fn reads_other_rows(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let bytes = name.as_bytes();
     name.match_indices("sdt").any(|(at, _)| {

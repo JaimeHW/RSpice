@@ -730,6 +730,9 @@ fn expand_compressed(
 pub(super) struct TransientOutcome {
     pub(super) result: rspice_core::engine::TransientResult,
     pub(super) post_results: Option<rspice_core::engine::TransientPostResults>,
+    /// With [`TransientStore::Fourier`], what its `.FOUR` cards read of the run besides the rows
+    /// around their windows, which are all `result` holds; `None` when `result` holds every row.
+    pub(super) fourier: Option<super::stored_transient::FourierRecords>,
 }
 
 pub(super) fn run_transient(
@@ -939,22 +942,13 @@ pub(super) fn run_transient(
 pub(super) enum TransientStore {
     /// The caller reads nothing of the waveforms.
     Streamed,
-    /// The caller reads the whole trajectory: a `.FOUR` card or a control script.
+    /// The caller's `.FOUR` cards read the rows around their windows and what their operands
+    /// read of the rest.
+    Fourier,
+    /// The caller reads the whole trajectory: a control script.
     ReadBack,
 }
 
-/// Publish a transient whose rows are in a store, streaming them from it when the outputs allow
-/// and reading them back otherwise, then leave the store beside the output or delete it.
-///
-/// A run its storage stopped publishes what it kept, as a run that ended at its last kept row,
-/// and then ends as stopped; an output that cannot be written for the shortened run is a
-/// warning, since the stop is what the run reports. When writing the outputs fills the disk, the
-/// store keeps the rows the outputs could not take and the run ends as stopped the same way.
-///
-/// With `compression`, the outputs are the compressed waveform of the trajectory read back from
-/// the store, and its post-processing products are the ones evaluated on that whole trajectory.
-/// A run its storage stopped publishes what it kept uncompressed, since the stop is what it
-/// reports.
 /// Load the checkpoint `--resume` names, refusing one whose startup mode is not the deck's.
 fn load_resume_checkpoint(
     ctx: &RunContext<'_>,
@@ -1029,6 +1023,18 @@ fn publish_segment_end(
     Ok(())
 }
 
+/// Publish a transient whose rows are in a store, streaming them from it when the outputs allow
+/// and reading them back otherwise, then leave the store beside the output or delete it.
+///
+/// A run its storage stopped publishes what it kept, as a run that ended at its last kept row,
+/// and then ends as stopped; an output that cannot be written for the shortened run is a
+/// warning, since the stop is what the run reports. When writing the outputs fills the disk, the
+/// store keeps the rows the outputs could not take and the run ends as stopped the same way.
+///
+/// With `compression`, the outputs are the compressed waveform of the trajectory read back from
+/// the store, and its post-processing products are the ones evaluated on that whole trajectory.
+/// A run its storage stopped publishes what it kept uncompressed, since the stop is what it
+/// reports.
 fn finish_stored_transient(
     ctx: &RunContext<'_>,
     mut stored: super::stored_transient::StoredTransient,
@@ -1053,7 +1059,6 @@ fn finish_stored_transient(
     } else {
         publish_stored_transient(ctx, &mut stored, tstart, tstop, store)
     };
-    let super::stored_transient::StoredTransient { shell, rows } = stored;
     let mut keep = !ctx.args.no_store;
     match written {
         Ok(()) => {}
@@ -1067,21 +1072,39 @@ fn finish_stored_transient(
             keep = true;
             if !stopped {
                 return Err(super::stored_transient::output_filled(
-                    rows,
+                    stored.rows,
                     published.as_deref(),
                     &error,
                 ));
             }
         }
         Err(error) => {
-            let _ = rows.publish(None, false);
+            let _ = stored.rows.publish(None, false);
             return Err(error);
         }
     }
+    // Outputs that streamed left the shell without rows; the `.FOUR` cards read theirs now.
+    let fourier = if store == TransientStore::Fourier
+        && compressed.is_none()
+        && stored.rows.rows() > 0
+        && stored.shell.time.is_empty()
+    {
+        match stored.fourier_window(ctx, tstop) {
+            Ok(fourier) => fourier,
+            Err(error) => {
+                let _ = stored.rows.publish(None, false);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+    let super::stored_transient::StoredTransient { shell, rows } = stored;
     super::stored_transient::record_store(rows, published.as_deref(), keep)?;
     Ok(compressed.unwrap_or(TransientOutcome {
         result: shell,
         post_results: None,
+        fourier,
     }))
 }
 
@@ -1142,6 +1165,7 @@ fn publish_compressed_transient(
         written.map(|()| TransientOutcome {
             result,
             post_results: Some(post_results),
+            fourier: None,
         }),
     )
 }
@@ -1156,7 +1180,7 @@ fn publish_stored_transient(
     store: TransientStore,
 ) -> (Option<std::path::PathBuf>, Result<(), CliError>) {
     let plan = match store {
-        TransientStore::Streamed => stored.stream_plan(ctx, tstart),
+        TransientStore::Streamed | TransientStore::Fourier => stored.stream_plan(ctx, tstart),
         TransientStore::ReadBack => Ok(None),
     };
     let plan = match plan {
