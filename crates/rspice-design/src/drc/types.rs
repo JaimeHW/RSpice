@@ -407,7 +407,7 @@ impl DrcViolationType {
             Self::MixedBusTap => "Separate scalar wires from vector bus connectivity",
             Self::DuplicateBusMemberDriver => "Leave only one output driver on this bus member",
             Self::VectorWidthMismatch => {
-                "Declare the same range on both ends, or tap an explicit slice of the bus"
+                "Declare as many bits on both ends, or tap an explicit slice of the bus"
             }
             Self::OffSheetConnectorWithoutPartner => {
                 "Place the matching connector on the other sheet, or make this an ordinary net label"

@@ -218,8 +218,9 @@ pub struct VectorNet {
     /// Bus vertices and vector terminals that resolve to this net. A point is
     /// listed once, and every point of one net carries the same declaration.
     pub attachments: Vec<Point>,
-    /// The vector terminals among them: the points where a placed or
-    /// interface terminal meets a bus of its own declaration.
+    /// The vector terminals among them: the points where an interface port
+    /// meets a bus of its own declaration, or a placed terminal meets a bus
+    /// of its own width.
     pub terminals: Vec<Point>,
 }
 
@@ -261,9 +262,14 @@ pub struct VectorConnectivity {
 /// Declared buses are the seeds. Two buses are one vector net when their
 /// geometry touches AND their declarations are identical — a touching pair
 /// that disagrees is a range conflict, reported by the bus-tap projection
-/// rather than silently fused here. A vector terminal joins the net of the bus
-/// under it when the two declarations agree, and is reported as a width
-/// mismatch when they do not.
+/// rather than silently fused here.
+///
+/// A placed instance's vector terminal joins the bus under it when the two
+/// are as wide, bit for bit in the order each declares, whatever the bus is
+/// called: a terminal is a place on the instance, and the net wired to it is
+/// its net, as Virtuoso connects an instance terminal. An interface port is
+/// the net it names, so it joins only a bus of its own declaration. Any
+/// other attachment is reported as a width mismatch.
 ///
 /// `terminals_of` supplies each component's terminal names and positions, so a
 /// caller that can resolve authored symbol geometry uses it and one that
@@ -322,17 +328,23 @@ pub fn vector_connectivity(
 
     let mut mismatches = Vec::new();
     for component in components {
-        for (owner, declaration, point) in vector_terminals(component, &mut terminals_of) {
+        for (owner, declaration, point, by_width) in vector_terminals(component, &mut terminals_of)
+        {
             let candidates: Vec<usize> = (0..declared.len())
                 .filter(|index| declared[*index].0.contains_point(point))
                 .collect();
             if candidates.is_empty() {
                 continue;
             }
+            let joins = |index: &usize| {
+                let bus = declared[*index].1;
+                *bus == declaration || (by_width && bus.width() == declaration.width())
+            };
             let matching = candidates
                 .iter()
                 .copied()
-                .find(|index| *declared[*index].1 == declaration);
+                .find(|index| *declared[*index].1 == declaration)
+                .or_else(|| candidates.iter().copied().find(joins));
             match matching {
                 Some(index) => {
                     let root = find(&mut parents, index);
@@ -371,16 +383,17 @@ pub fn vector_connectivity(
 }
 
 /// The vector-declaring terminals of one component, named as the drawing names
-/// them.
+/// them, each with whether it joins a bus by width alone.
 ///
-/// An interface port declares through the name it carries as a net. A placed
-/// instance declares through its bound interface: the frozen terminal order is
-/// what holds the port names, because the generic terminal labels a placement
-/// falls back to when no authored symbol resolves would declare nothing at all.
+/// An interface port declares through the name it carries as a net, so it
+/// joins only a bus of that name. A placed instance declares through its bound
+/// interface: the frozen terminal order is what holds the port names, because
+/// the generic terminal labels a placement falls back to when no authored
+/// symbol resolves would declare nothing at all. Its terminals join by width.
 fn vector_terminals(
     component: &Component,
     terminals_of: &mut impl FnMut(&Component) -> Vec<(String, Point)>,
-) -> Vec<(String, BusDeclaration, Point)> {
+) -> Vec<(String, BusDeclaration, Point, bool)> {
     if component.kind == ComponentType::Port {
         let Some(spec) = component.port_spec() else {
             return Vec::new();
@@ -391,7 +404,14 @@ fn vector_terminals(
         return terminals_of(component)
             .into_iter()
             .next()
-            .map(|(_, point)| vec![(format!("Interface port {}", spec.name), declaration, point)])
+            .map(|(_, point)| {
+                vec![(
+                    format!("Interface port {}", spec.name),
+                    declaration,
+                    point,
+                    false,
+                )]
+            })
             .unwrap_or_default();
     }
     let drawn = terminals_of(component);
@@ -410,6 +430,7 @@ fn vector_terminals(
                 format!("Terminal {name} of {}", component.spice_instance_name()),
                 declaration,
                 *point,
+                true,
             ))
         })
         .collect()

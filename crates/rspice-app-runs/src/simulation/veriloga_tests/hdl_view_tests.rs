@@ -314,6 +314,12 @@ fn design() -> RunTestHost {
 /// bus `mode[1:0]` drawn between their bus pins; `moded` loads `p`, fed from
 /// 1 V through 1 kΩ. A 25 ns transient.
 fn bus_design() -> RunTestHost {
+    bus_design_declared("mode[1:0]")
+}
+
+/// [`bus_design`] with the bus between the two pins declared as
+/// `declaration`.
+fn bus_design_declared(declaration: &str) -> RunTestHost {
     let mut state = RunTestHost::default();
     let count = add_source_cell(&mut state, "count", ViewType::Verilog, "count.v", COUNT);
     let moded = add_source_cell(
@@ -353,7 +359,7 @@ fn bus_design() -> RunTestHost {
             1_000,
             route,
             Some(
-                rspice_design_model::bus::BusDeclaration::parse("mode[1:0]")
+                rspice_design_model::bus::BusDeclaration::parse(declaration)
                     .expect("a declaration"),
             ),
         )
@@ -504,10 +510,13 @@ fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f6
 
     let designed = run_generated_batch(state, SimulationRunLifecycle::Completed);
 
+    // One directory per twin: tests of one process run at once.
+    static TWINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let directory = std::env::temp_dir().join(format!(
-        "rspice-hdl-view-twin-{}-{}",
+        "rspice-hdl-view-twin-{}-{}-{}",
         std::process::id(),
-        modules[0].0
+        modules[0].0,
+        TWINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&directory).expect("a scratch directory");
     let deck = manual_twin(&executable, &directory, modules);
@@ -697,6 +706,108 @@ fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
         [("MODE", 1, 0, vec!["MODE#1".to_owned(), "MODE#0".to_owned()])],
         "one bus over both bits, most significant first"
     );
+}
+
+/// A bus joins the vector pins it is drawn to by width, bit for bit in the
+/// order each declares, whatever the bus is called, as Virtuoso joins an
+/// instance terminal to whatever net is wired to it. `m[1:0]` between two
+/// `mode[1:0]` pins carries the counter's bits to the load most significant
+/// first; `m[0:1]` carries them too, its first-declared bit `m[0]` on the
+/// pins' most significant bit.
+#[test]
+fn a_bus_joins_the_vector_pins_it_meets_by_width_whatever_its_name() {
+    for (declaration, expected, msb, lsb) in [
+        (
+            "m[1:0]",
+            ["XC m#1 m#0 count", "XM p 0 m#1 m#0 moded"],
+            "M#1",
+            "M#0",
+        ),
+        (
+            "m[0:1]",
+            ["XC m#0 m#1 count", "XM p 0 m#0 m#1 moded"],
+            "M#0",
+            "M#1",
+        ),
+    ] {
+        let Twin {
+            traces,
+            events,
+            deck,
+            ..
+        } = run_against_twin(
+            bus_design_declared(declaration),
+            &[("count", "count.v", COUNT), ("moded", "moded.vams", MODED)],
+            25e-9,
+        );
+        let cards = deck
+            .lines()
+            .filter(|line| line.starts_with("XC ") || line.starts_with("XM "))
+            .collect::<Vec<_>>();
+        assert_eq!(cards, expected, "{declaration}:\n{deck}");
+        // The load sees the counter's value: a bit order swapped on one pin
+        // would read 3 mS at mode 1.
+        let p = traces.iter().find(|trace| trace.node == "P").expect("V(P)");
+        for (seconds, mode) in [(3e-9, 0.0), (8e-9, 1.0), (13e-9, 2.0), (18e-9, 3.0)] {
+            let expected = 1.0 / (2.0 + mode);
+            assert!(
+                (p.at(seconds) - expected).abs() < 1e-6,
+                "{declaration} at {seconds}: {} against {expected}",
+                p.at(seconds)
+            );
+        }
+        // The bus bit on the pins' most significant bit toggles every 10 ns,
+        // the one on their least significant bit every 5 ns.
+        let toggles = |name: &str| {
+            events
+                .iter()
+                .find(|(node, _)| node == name)
+                .unwrap_or_else(|| panic!("{declaration}: no D({name}) in {events:?}"))
+                .1
+                .iter()
+                .filter(|point| point.time_s > 0.0)
+                .map(|point| point.time_s)
+                .collect::<Vec<_>>()
+        };
+        let edges = |times: Vec<f64>, period: f64| {
+            times.len() == (25e-9 / period) as usize
+                && times
+                    .iter()
+                    .enumerate()
+                    .all(|(k, time)| (time - (k + 1) as f64 * period).abs() < 1e-15)
+        };
+        assert!(
+            edges(toggles(msb), 10e-9),
+            "{declaration}: {msb} {:?}",
+            toggles(msb)
+        );
+        assert!(
+            edges(toggles(lsb), 5e-9),
+            "{declaration}: {lsb} {:?}",
+            toggles(lsb)
+        );
+    }
+}
+
+/// A bus of another width than the vector pins it meets is refused before
+/// anything runs, with both widths named, as the design check words it.
+#[test]
+fn a_bus_of_another_width_than_its_pins_is_refused_with_both_widths() {
+    let state = bus_design_declared("m[2:0]");
+    let mut controller = SimulationController::new();
+    let error = controller
+        .prepare_run_set_for_preflight(&state)
+        .expect_err("a three-bit bus on two-bit pins cannot be wired");
+    let message = error.message();
+    for pin in ["XC", "XM"] {
+        assert!(
+            message.contains(&format!(
+                "Terminal mode[1:0] of {pin} declares mode[1:0] (2 bits) but the bus it meets \
+                 declares m[2:0] (3 bits)"
+            )),
+            "{error}"
+        );
+    }
 }
 
 /// Each net's kind as the rail and the net inspector read it: from the

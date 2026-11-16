@@ -36,5 +36,6 @@ impl<'a> NetlistGenerator<'a> {
         self.nets = extracted.nets;
         self.point_to_net = extracted.point_to_net;
         self.ground_net = extracted.ground_net;
+        self.vector_nets = extracted.vector_nets;
     }
 }

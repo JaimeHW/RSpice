@@ -242,11 +242,11 @@ impl DrcViolationType {
             Self::VectorWidthMismatch => &DrcRule {
                 code: "DRC-VECTOR-WIDTH-MISMATCH",
                 title: "Vector width mismatch",
-                explanation: "A vector port, pin or instance terminal meets a bus that declares a \
-                    different set of conductors. Emitting the join would mean inventing or \
-                    dropping conductors the drawing never named, so the netlister refuses it \
-                    under either width policy. Declare the same range on both ends, or tap an \
-                    explicit slice of the bus.",
+                explanation: "A vector port meets a bus that declares a different set of \
+                    conductors, or a vector pin or instance terminal meets a bus of another \
+                    width. Emitting the join would mean inventing or dropping conductors the \
+                    drawing never named, so the netlister refuses it under either width policy. \
+                    Declare as many bits on both ends, or tap an explicit slice of the bus.",
                 default_severity: DrcSeverity::Error,
                 floor: ENGINE_REFUSES,
                 max_severity: DrcSeverity::Critical,

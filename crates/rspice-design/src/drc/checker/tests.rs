@@ -1237,6 +1237,31 @@ fn a_width_mismatch_blocks_under_either_policy() {
     }
 }
 
+/// An interface port is the net it names, so it joins only a bus of its own
+/// declaration: a bus as wide but called something else is a mismatch, where
+/// a placed instance's terminal of that width would join it.
+#[test]
+fn a_port_joins_only_a_bus_of_its_own_declaration() {
+    use crate::connectivity_contract::BundleWidthMismatchPolicy;
+
+    let renamed = width_mismatch_schematic("M[3:0]", "DATA[3:0]");
+    let findings = width_findings(&renamed, BundleWidthMismatchPolicy::BlockConnection);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(
+        findings[0].violation_type,
+        DrcViolationType::VectorWidthMismatch
+    );
+    assert!(
+        findings[0].message.contains("declares M[3:0] (4 bits)"),
+        "{}",
+        findings[0].message
+    );
+
+    let same = width_mismatch_schematic("DATA[3:0]", "DATA[3:0]");
+    let findings = width_findings(&same, BundleWidthMismatchPolicy::BlockConnection);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
 fn off_sheet_findings(schematic: &SchematicDocument) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
     append_off_sheet_connector_violations(schematic, &mut result, &BTreeMap::new());

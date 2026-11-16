@@ -303,6 +303,10 @@ pub struct NetlistGenerator<'a> {
     /// Ground net ID (if found)
     ground_net: Option<usize>,
 
+    /// The vector nets the connectivity extraction found, and which bus
+    /// each vector terminal joined.
+    vector_nets: rspice_design::schematic::bus::VectorConnectivity,
+
     /// Generated netlist lines
     lines: Vec<String>,
 
@@ -345,6 +349,7 @@ impl<'a> NetlistGenerator<'a> {
             nets: Vec::new(),
             point_to_net: HashMap::new(),
             ground_net: None,
+            vector_nets: Default::default(),
             lines: Vec::new(),
             models: BTreeMap::new(),
             subcircuits: Vec::new(),
@@ -433,6 +438,7 @@ impl<'a> NetlistGenerator<'a> {
         self.nets.clear();
         self.point_to_net.clear();
         self.ground_net = None;
+        self.vector_nets = Default::default();
         self.lines.clear();
         self.models.clear();
         self.subcircuits.clear();
