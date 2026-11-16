@@ -165,7 +165,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 20;
 /// Version 60 preserves table derivative payloads through slope division.
 /// Version 61 shares a value entry's locals across disjoint live ranges and
 /// spills to mutable globals past the engines' locals limit.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 61;
+/// Version 62 drops the loop trip counters: a loop runs until its condition
+/// clears, and one that never does ends on Stop, which terminates the worker.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 62;
 
 /// The largest module the browsers compile: the WebAssembly JavaScript API's
 /// implementation limit (<https://webassembly.github.io/spec/js-api/#limits>),

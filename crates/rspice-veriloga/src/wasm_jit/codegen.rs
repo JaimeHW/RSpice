@@ -45,7 +45,6 @@ pub(crate) const WASM_JIT_POST_ASSIGNMENT_EXPORT: &str = "rspice_wasm_jit_post_a
 pub(crate) const WASM_JIT_EVALUATION_KERNEL_EXPORT: &str = "rspice_wasm_jit_eval_kernel";
 /// Driver evaluating every stamp value and Jacobian entry in one call.
 pub(crate) const WASM_JIT_STAMP_KERNEL_EXPORT: &str = "rspice_wasm_jit_stamp_kernel";
-const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
 
 const ENTRY_TYPE_INDEX: u32 = 0;
 const HELPER_TYPE_INDEX: u32 = 1;
@@ -488,12 +487,7 @@ fn encode_value_body_within(
     };
     let local_count = u32::try_from(ssa.value_count() + scratch)
         .map_err(|_| WasmJitError::Encoding("SSA local count exceeds u32".into()))?;
-    // The runtime loop-iteration counters follow the f64 band, one `i32` per
-    // natural loop. A loop-free program declares none, so its body is the
-    // body it encoded before this guard existed.
-    let loop_count = u32::try_from(loops.len())
-        .map_err(|_| WasmJitError::Encoding("SSA loop count exceeds u32".into()))?;
-    let mut body = WasmBody::new([(local_count, ValType::F64), (loop_count, ValType::I32)]);
+    let mut body = WasmBody::new([(local_count, ValType::F64)]);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
     let mut labels = Vec::new();
@@ -505,54 +499,18 @@ fn encode_value_body_within(
         &loops,
         &mut labels,
         ssa.value_count(),
-        local_count,
     )?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
     body.instruction(&WasmInstruction::End);
     Ok(body.into_allocated_function(limit, globals))
 }
 
-/// The `i32` local counting trips of the loop at `index`.
+/// Whether the range list names a loop headed by `header`.
 ///
-/// Declared after the whole `f64` band, whose last index is `local_count`
-/// (locals are numbered from one because local zero is the frame parameter).
-fn loop_counter_local(local_count: u32, index: usize) -> WasmJitResult<u32> {
-    u32::try_from(index)
-        .ok()
-        .and_then(|index| local_count.checked_add(1)?.checked_add(index))
-        .ok_or_else(|| WasmJitError::Encoding("SSA loop counter local exceeds u32".into()))
-}
-
-/// Which counter local guards the loop headed by `header`, if any.
-///
-/// One local per loop *header*, which is also how the structurizer picks the
-/// `loop` it opens for a header: `natural_loops` discovers one range per back
-/// edge, so two edges closing on the same header are two ranges and one
-/// WebAssembly `loop`, and they share the count.
-fn loop_counter_index(
-    loops: &[crate::jit::ssa::LoopRange],
-    header: crate::jit::ssa::BlockId,
-) -> Option<usize> {
-    loops.iter().position(|range| range.header() == header)
-}
-
-/// Count one back-edge traversal and refuse the limit-th.
-///
-/// The same limit and the same failure as the assignment pass's loop guard in
-/// [`emit_assignments`]: the status the caller reads becomes
-/// [`WASM_JIT_STATUS_RUNTIME_ERROR`], which is the whole diagnostic this
-/// backend's runtime carries — it has no host context to record a message in,
-/// and the assignment guard builds nothing more specific either.
-fn emit_back_edge_guard(body: &mut WasmBody, counter: u32) {
-    body.instruction(&WasmInstruction::LocalGet(counter));
-    body.instruction(&WasmInstruction::I32Const(1));
-    body.instruction(&WasmInstruction::I32Add);
-    body.instruction(&WasmInstruction::LocalTee(counter));
-    body.instruction(&WasmInstruction::I32Const(MAX_RUNTIME_LOOP_ITERATIONS));
-    body.instruction(&WasmInstruction::I32GeU);
-    body.instruction(&WasmInstruction::If(BlockType::Empty));
-    emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
-    body.instruction(&WasmInstruction::End);
+/// `natural_loops` discovers one range per back edge, so two edges closing on
+/// the same header are two ranges and one WebAssembly `loop`.
+fn heads_a_loop(loops: &[crate::jit::ssa::LoopRange], header: crate::jit::ssa::BlockId) -> bool {
+    loops.iter().any(|range| range.header() == header)
 }
 
 /// One entry of the WebAssembly label stack, innermost last.
@@ -596,14 +554,10 @@ enum WasmLabel {
 /// the loop occupies one contiguous layout range with a single entry, so the
 /// body region is exactly the blocks between the header and the latch.
 ///
-/// The `br` that closes a loop is its back edge, and it carries the runtime
-/// iteration guard: [`emit_back_edge_guard`] counts the traversal and returns
-/// [`WASM_JIT_STATUS_RUNTIME_ERROR`] on the
-/// [`MAX_RUNTIME_LOOP_ITERATIONS`]th, so a Verilog-A `while` whose condition
-/// never falsifies fails the evaluation instead of spinning. The counter is
-/// zeroed where the `loop` opens, in [`emit_loop`], which is the only way in:
-/// a nested loop is re-entered on every trip of its enclosing one, and the
-/// limit is per entry.
+/// The `br` that closes a loop is its back edge. It carries no trip count: a
+/// loop runs until its condition clears, as on the native routes. One that
+/// never clears is ended the way a desktop run is, by the user's Stop, which
+/// terminates the worker running the module.
 #[allow(clippy::too_many_arguments)]
 fn emit_block_region(
     body: &mut WasmBody,
@@ -613,7 +567,6 @@ fn emit_block_region(
     loops: &[crate::jit::ssa::LoopRange],
     labels: &mut Vec<WasmLabel>,
     scratch_base: usize,
-    local_count: u32,
 ) -> WasmJitResult<()> {
     let verifier = |error: crate::jit::JitError| WasmJitError::Encoding(error.to_string());
     let mut current = start;
@@ -623,13 +576,12 @@ fn emit_block_region(
         }
         // A jump to a header whose `loop` is still open is the back edge.
         if let Some(depth) = branch_depth(labels, current) {
-            let index = loop_counter_index(loops, current).ok_or_else(|| {
-                WasmJitError::Encoding(format!(
+            if !heads_a_loop(loops, current) {
+                return Err(WasmJitError::Encoding(format!(
                     "SSA block {} closes a loop the range list does not head",
                     current.index()
-                ))
-            })?;
-            emit_back_edge_guard(body, loop_counter_local(local_count, index)?);
+                )));
+            }
             body.instruction(&WasmInstruction::Br(depth));
             return Ok(());
         }
@@ -639,16 +591,7 @@ fn emit_block_region(
             .find(|range| range.header() == current)
             .copied();
         if let Some(range) = header_of {
-            emit_loop(
-                body,
-                ssa,
-                block,
-                range,
-                loops,
-                labels,
-                scratch_base,
-                local_count,
-            )?;
+            emit_loop(body, ssa, block, range, loops, labels, scratch_base)?;
             let Terminator::Branch {
                 then_edge,
                 else_edge,
@@ -709,7 +652,6 @@ fn emit_block_region(
                     loops,
                     labels,
                     scratch_base,
-                    local_count,
                 )?;
                 body.instruction(&WasmInstruction::Else);
                 emit_edge_arguments(body, ssa, else_edge, scratch_base)?;
@@ -721,7 +663,6 @@ fn emit_block_region(
                     loops,
                     labels,
                     scratch_base,
-                    local_count,
                 )?;
                 body.instruction(&WasmInstruction::End);
                 labels.pop();
@@ -733,9 +674,8 @@ fn emit_block_region(
 
 /// Emit one natural loop's `loop ... end`, leaving the exit edge to the caller.
 ///
-/// The iteration counter is zeroed here, before the `loop` opens, which is
-/// every entry into the loop from outside it: control reaches this point once
-/// per entry and repeats through the back edge's `br`, never through here.
+/// Control reaches this point once per entry into the loop from outside it
+/// and repeats through the back edge's `br`, never through here.
 #[allow(clippy::too_many_arguments)]
 fn emit_loop(
     body: &mut WasmBody,
@@ -745,7 +685,6 @@ fn emit_loop(
     loops: &[crate::jit::ssa::LoopRange],
     labels: &mut Vec<WasmLabel>,
     scratch_base: usize,
-    local_count: u32,
 ) -> WasmJitResult<()> {
     let Terminator::Branch {
         condition,
@@ -769,17 +708,12 @@ fn emit_loop(
         )));
     };
 
-    let index = loop_counter_index(loops, header.id()).ok_or_else(|| {
-        WasmJitError::Encoding(format!(
+    if !heads_a_loop(loops, header.id()) {
+        return Err(WasmJitError::Encoding(format!(
             "SSA block {} heads a loop the range list does not name",
             header.id().index()
-        ))
-    })?;
-    body.instruction(&WasmInstruction::I32Const(0));
-    body.instruction(&WasmInstruction::LocalSet(loop_counter_local(
-        local_count,
-        index,
-    )?));
+        )));
+    }
     body.instruction(&WasmInstruction::Loop(BlockType::Empty));
     labels.push(WasmLabel::Loop(header.id()));
     for instruction in &ssa.instructions()[header.instruction_start()..header.instruction_end()] {
@@ -806,7 +740,6 @@ fn emit_loop(
         loops,
         labels,
         scratch_base,
-        local_count,
     )?;
     body.instruction(&WasmInstruction::End);
     labels.pop();
@@ -881,15 +814,9 @@ fn encode_assignment_kernel(
     kernel: &WasmAssignmentKernel,
     scalar_count: u32,
 ) -> WasmJitResult<Function> {
-    let loop_depth = assignment_loop_depth(&kernel.assignments)?;
-    let loop_depth_u32 = u32::try_from(loop_depth)
-        .map_err(|_| WasmJitError::Encoding("assignment loop depth exceeds wasm32".into()))?;
-    let i32_locals = loop_depth_u32
-        .checked_add(2)
-        .ok_or_else(|| WasmJitError::Encoding("assignment local count overflow".into()))?;
-    let scratch_f64_local = 1_u32
-        .checked_add(i32_locals)
-        .ok_or_else(|| WasmJitError::Encoding("assignment local index overflow".into()))?;
+    // The status and slot locals, then one f64 scratch.
+    let i32_locals = 2;
+    let scratch_f64_local = 1 + i32_locals;
     let mut body = WasmBody::new([(i32_locals, ValType::I32), (1, ValType::F64)]);
     emit_frame_guard(&mut body);
     emit_clear_error_status(&mut body);
@@ -897,7 +824,6 @@ fn encode_assignment_kernel(
         &mut body,
         &kernel.assignments,
         scalar_count,
-        0,
         scratch_f64_local,
     )?;
     body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_OK));
@@ -1124,21 +1050,6 @@ fn emit_f64_array_store(
     body.instruction(&WasmInstruction::F64Store(f64_mem(0)));
 }
 
-fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize> {
-    assignments.iter().try_fold(0_usize, |maximum, assignment| {
-        let depth = match assignment {
-            WasmAssignment::Direct { .. }
-            | WasmAssignment::Indexed { .. }
-            | WasmAssignment::Finish { .. }
-            | WasmAssignment::Output { .. } => 0,
-            WasmAssignment::Loop { body, .. } => assignment_loop_depth(body)?
-                .checked_add(1)
-                .ok_or_else(|| WasmJitError::Encoding("assignment loop depth overflow".into()))?,
-        };
-        Ok(maximum.max(depth))
-    })
-}
-
 /// The common helper ABI carries a site and at most one scalar operand for
 /// control tasks. Keep the returned value out of the error branch's stack.
 fn emit_task_helper(body: &mut WasmBody, opcode: i32, site: u32, operand: bool, scratch: u32) {
@@ -1166,7 +1077,6 @@ fn emit_assignments(
     body: &mut WasmBody,
     assignments: &[WasmAssignment],
     scalar_count: u32,
-    loop_depth: u32,
     scratch_f64_local: u32,
 ) -> WasmJitResult<()> {
     for assignment in assignments {
@@ -1262,13 +1172,6 @@ fn emit_assignments(
                 condition_entry,
                 body: loop_body,
             } => {
-                let counter_local = ASSIGNMENT_LOOP_COUNTER_BASE_LOCAL
-                    .checked_add(loop_depth)
-                    .ok_or_else(|| {
-                        WasmJitError::Encoding("assignment loop local overflow".into())
-                    })?;
-                body.instruction(&WasmInstruction::I32Const(0));
-                body.instruction(&WasmInstruction::LocalSet(counter_local));
                 body.instruction(&WasmInstruction::Block(BlockType::Empty));
                 body.instruction(&WasmInstruction::Loop(BlockType::Empty));
                 emit_value_entry_call(body, *condition_entry, scalar_count)?;
@@ -1277,24 +1180,7 @@ fn emit_assignments(
                 body.instruction(&WasmInstruction::F64Const(0.0.into()));
                 body.instruction(&WasmInstruction::F64Eq);
                 body.instruction(&WasmInstruction::BrIf(1));
-                emit_assignments(
-                    body,
-                    loop_body,
-                    scalar_count,
-                    loop_depth.checked_add(1).ok_or_else(|| {
-                        WasmJitError::Encoding("assignment loop depth overflow".into())
-                    })?,
-                    scratch_f64_local,
-                )?;
-                body.instruction(&WasmInstruction::LocalGet(counter_local));
-                body.instruction(&WasmInstruction::I32Const(1));
-                body.instruction(&WasmInstruction::I32Add);
-                body.instruction(&WasmInstruction::LocalTee(counter_local));
-                body.instruction(&WasmInstruction::I32Const(MAX_RUNTIME_LOOP_ITERATIONS));
-                body.instruction(&WasmInstruction::I32GeU);
-                body.instruction(&WasmInstruction::If(BlockType::Empty));
-                emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
-                body.instruction(&WasmInstruction::End);
+                emit_assignments(body, loop_body, scalar_count, scratch_f64_local)?;
                 body.instruction(&WasmInstruction::Br(0));
                 body.instruction(&WasmInstruction::End);
                 body.instruction(&WasmInstruction::End);
@@ -1306,7 +1192,6 @@ fn emit_assignments(
 
 const ASSIGNMENT_STATUS_LOCAL: u32 = 1;
 const ASSIGNMENT_SLOT_LOCAL: u32 = 2;
-const ASSIGNMENT_LOOP_COUNTER_BASE_LOCAL: u32 = 3;
 
 fn emit_value_entry_call(body: &mut WasmBody, entry: u32, scalar_count: u32) -> WasmJitResult<()> {
     if entry >= scalar_count {
@@ -4682,51 +4567,32 @@ endmodule
         bytes
     }
 
-    /// A structurized back edge is counted, and the hundred-thousandth trip is
-    /// refused.
+    /// A structurized back edge runs its loop to the end, however many trips.
     ///
-    /// The fixture terminates on its own after `trips` iterations, so a module
-    /// emitted without the guard answers rather than hanging the host and this
-    /// reads as a wrong status instead of a timeout. 99,999 trips is the last
-    /// one that passes and 100,000 the first that fails, the same reading of
-    /// [`MAX_RUNTIME_LOOP_ITERATIONS`] that the assignment kernel's loop guard
-    /// takes.
+    /// The module used to refuse the hundred-thousandth trip. A loop now ends
+    /// when its condition clears, as on the native routes; one that never
+    /// clears ends on the user's Stop, which terminates the worker.
     #[test]
-    fn a_structurized_back_edge_hard_fails_the_runtime_iteration_limit() {
+    fn a_structurized_back_edge_runs_its_loop_to_the_end() {
         let engine = Engine::default();
-        for trips in [100_000.0_f64, 150_000.0] {
+        for (trips, value) in [(100_000.0_f64, 0.5_f64), (3_000_000.0, -1.25)] {
             let ssa =
-                Program::empty_block_loop_fixture_for_test(trips).expect("build the runaway loop");
+                Program::empty_block_loop_fixture_for_test(trips).expect("build the long loop");
             let bytes = loop_module(&ssa);
             let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
-            let (status, _) = call_value_entry_status(&mut store, &memory, &instance, &[1.0]);
+            let (status, result) =
+                call_value_entry_status(&mut store, &memory, &instance, &[value]);
+            assert_eq!(status, WASM_JIT_STATUS_OK, "{trips} trips");
             assert_eq!(
-                status, WASM_JIT_STATUS_RUNTIME_ERROR,
-                "{trips} trips must refuse the evaluation"
+                result.to_bits(),
+                Program::empty_block_loop_fixture_expectation(trips, value).to_bits(),
+                "{trips} trips"
             );
         }
     }
 
-    /// The last trip count the guard admits, and the value it still computes.
-    #[test]
-    fn a_structurized_back_edge_admits_the_trip_below_the_limit() {
-        let engine = Engine::default();
-        let (trips, value) = (99_999.0_f64, 0.5_f64);
-        let ssa = Program::empty_block_loop_fixture_for_test(trips).expect("build the long loop");
-        let bytes = loop_module(&ssa);
-        let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
-        assert_eq!(
-            call_value_entry(&mut store, &memory, &instance, &[value]).to_bits(),
-            Program::empty_block_loop_fixture_expectation(trips, value).to_bits(),
-        );
-    }
-
-    /// Nested loops are counted per entry, not cumulatively.
-    ///
-    /// Ten entries into an inner loop of twenty thousand trips is two hundred
-    /// thousand back-edge traversals in one evaluation, twice the limit. The
-    /// counter is zeroed where the inner `loop` opens, which control reaches
-    /// once per entry, so no single loop ever reaches the limit.
+    /// Nested loops: ten entries into an inner loop of twenty thousand trips,
+    /// two hundred thousand back-edge traversals in one evaluation.
     #[test]
     fn nested_structurized_loops_count_each_entry_from_zero() {
         let engine = Engine::default();
