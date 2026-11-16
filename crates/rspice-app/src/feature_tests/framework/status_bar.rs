@@ -300,14 +300,15 @@ fn only_a_warning_raises_the_warning_mark() {
 /// The coordinate and selection segments sit side by side. They answer
 /// different questions, so neither may borrow the other's sentence — with
 /// no dataset open the bar used to print "No result dataset selected"
-/// twice in a row.
+/// twice in a row. In Results the selection segment has nothing of its own
+/// to say: the run segment at the bar's right states the run.
 #[test]
 fn adjacent_result_segments_never_print_the_same_sentence() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Results);
     app.state.open_project_session();
 
-    let coordinates = results_view_summary(&app.state.model.simulation, None);
+    let coordinates = results_view_summary(None);
     let selection = selection_summary(
         &app.state.model,
         &app.state.workbench,
@@ -319,7 +320,7 @@ fn adjacent_result_segments_never_print_the_same_sentence() {
         "two segments cannot report the same fact in the same words"
     );
     assert_eq!(coordinates, "No plotted interval");
-    assert_eq!(selection, "No result dataset selected");
+    assert_eq!(selection, "");
 }
 
 /// In a symbol view the bar reads the symbol editor: what it has selected

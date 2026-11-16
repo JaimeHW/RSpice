@@ -210,6 +210,15 @@ fn a_run_whose_results_are_on_screen_raises_no_notice() {
         segment.ends_with(&format!("Run 1 complete \u{b7} 1 warning \u{b7} {elapsed}")),
         "{segment}"
     );
+    // The bar states the run once: no other segment names it again.
+    assert!(
+        !user
+            .named
+            .iter()
+            .any(|(name, _)| name.contains("Run 1 \u{b7}")),
+        "{:?}",
+        user.named.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
     let kept = user.app.state.workbench.toasts.activity();
     assert_eq!(
         kept[0].title(),

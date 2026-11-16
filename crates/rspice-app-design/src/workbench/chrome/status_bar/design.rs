@@ -70,6 +70,8 @@ pub fn design_engineering_context(
     )
 }
 
+/// What the status bar's selection segment says; empty where it has nothing
+/// of its own to say.
 pub fn selection_summary(
     model: &Model,
     wb: &WorkbenchSession,
@@ -80,26 +82,9 @@ pub fn selection_summary(
         return "No engineering object selected".to_owned();
     }
     if wb.workspace == Workspace::Results {
-        return model
-            .simulation
-            .view
-            .active_run_idx
-            .and_then(|index| model.simulation.retained.runs.get(index))
-            .map_or_else(
-                || "No result dataset selected".to_owned(),
-                |run| {
-                    let analysis_count = run.analyses.len();
-                    format!(
-                        "Run {} · {analysis_count} {}",
-                        run.id,
-                        if analysis_count == 1 {
-                            "analysis"
-                        } else {
-                            "analyses"
-                        }
-                    )
-                },
-            );
+        // The run segment at the bar's right states the run; saying it here
+        // again would print it twice.
+        return String::new();
     }
     if wb.workspace != Workspace::Design {
         return wb.workspace.label().to_owned();

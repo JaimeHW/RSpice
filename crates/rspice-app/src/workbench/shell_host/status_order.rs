@@ -246,23 +246,20 @@ fn design_context_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Sta
     (!context.is_empty()).then(|| StatusText::label(context))
 }
 
-fn results_context_cell<'a>(
-    app: &RSpiceApp,
-    readings: &'a StatusReadings,
-) -> Option<StatusText<'a>> {
+fn results_context_cell<'a>(_: &RSpiceApp, readings: &'a StatusReadings) -> Option<StatusText<'a>> {
     Some(StatusText::label(results_view_summary(
-        &app.state.model.simulation,
         readings.results_view.as_ref(),
     )))
 }
 
 fn selection_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    Some(StatusText::label(selection_summary(
+    let summary = selection_summary(
         &app.state.model,
         &app.state.workbench,
         &app.state.platform,
         &app.state.design.symbol,
-    )))
+    );
+    (!summary.is_empty()).then(|| StatusText::label(summary))
 }
 
 /// A symbol edited in place says where it stands, in the page's slot: the
@@ -407,7 +404,8 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
 struct RunOutcome {
     /// The run's sequence number.
     run: u64,
-    /// `Run 1 complete · 2 warnings · 1.76 s`.
+    /// `Run 1 complete · 2 warnings · 1.76 s`, or `Run 2 complete ·
+    /// 3 analyses · 0.52 s` for a plan of several analyses.
     text: String,
     mark: StatusMark,
 }
@@ -456,7 +454,11 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
         Lifecycle::Aborted => ("stopped", None, StatusMark::None),
         _ => return None,
     };
+    // A plan of several analyses says how many the run held; one analysis
+    // goes without saying.
+    let analyses = (run.analyses.len() > 1).then(|| format!("{} analyses", run.analyses.len()));
     let text = std::iter::once(format!("Run {} {verdict}", run.id))
+        .chain(analyses)
         .chain(raised)
         .chain(std::iter::once(rspice_app_state::quantity::format_elapsed(
             run.elapsed_time,
@@ -559,6 +561,52 @@ mod tests {
                 (1, StatusKey::Engine),
                 (2, StatusKey::Platform),
             ]
+        );
+    }
+
+    /// Results states the run once, in the run segment at the bar's right,
+    /// which counts a plan's analyses when the run held several.
+    #[test]
+    fn results_state_the_run_once() {
+        use rspice_app_state::state::{
+            AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle,
+        };
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        run.add_analysis(AnalysisResult::new(2, AnalysisType::Ac, "AC"));
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.elapsed_time = 0.52;
+        let (run_id, elapsed) = (run.run_id, run.elapsed_time);
+        app.state.model.simulation.retained.runs = vec![run].into();
+        assert!(app.state.model.simulation.select_run(0));
+        app.state.runs.run_watch.last_ended = Some(run_id);
+        app.state.workbench.activate(Workspace::Results);
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+
+        let readings = status_readings(&mut app.state, EngineAvailability::Ready, &ctx);
+
+        let mut placed = std::collections::BTreeSet::new();
+        let said = STATUS_ORDER
+            .iter()
+            .filter(|cell| {
+                cell.workspace
+                    .is_none_or(|workspace| workspace == Workspace::Results)
+            })
+            .filter_map(|cell| {
+                let text = (cell.content)(&app, &readings)?;
+                placed
+                    .insert((cell.zone == StatusZone::Leading, cell.order))
+                    .then(|| text.text.into_owned())
+            })
+            .filter(|text| text.contains("Run 1"))
+            .collect::<Vec<_>>();
+        let elapsed = rspice_app_state::quantity::format_elapsed(elapsed);
+        assert_eq!(
+            said,
+            [format!("Run 1 complete \u{b7} 2 analyses \u{b7} {elapsed}")]
         );
     }
 
