@@ -93,9 +93,21 @@ pub(super) fn flow_row(
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
+    // A row with nothing to say under its name keeps its siblings' height and
+    // centres the name in it, rather than leaving the space under it blank.
+    let label_galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+    );
+    let label_top = if detail_lines == 0 && status.is_empty() {
+        ((row_height - label_galley.size().y) / 2.0).round()
+    } else {
+        FLOW_LABEL_TOP
+    };
     // The leading slot holds the view's problem, in its own mark and colour,
     // and nothing when it has none. There is no tinted disc behind it.
-    let lead = egui::pos2(rect.left() + 17.5, rect.top() + FLOW_LABEL_TOP + 6.5);
+    let lead = egui::pos2(rect.left() + 17.5, rect.top() + label_top + 6.5);
     if let Some(problem) = problem {
         paint_problem_mark(
             ui.painter(),
@@ -107,11 +119,9 @@ pub(super) fn flow_row(
     let text_right = rect.right() - 9.0;
     let clip = egui::Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
     let painter = ui.painter().with_clip_rect(clip);
-    painter.text(
-        egui::pos2(text_left, rect.top() + FLOW_LABEL_TOP),
-        egui::Align2::LEFT_TOP,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
+    painter.galley(
+        egui::pos2(text_left, rect.top() + label_top),
+        label_galley,
         t.color.text,
     );
     if detail_lines > 0 {

@@ -23,7 +23,7 @@ use rspice_simulation_contract::run_set::RunSetDimensionKind;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
     Problem, property_row, property_row_combo, property_row_input_with_hint, property_row_problem,
-    section_header,
+    property_row_wrapped, section_header,
 };
 
 use crate::io::file_exchange::{self, FileKind};
@@ -430,24 +430,26 @@ fn verdict(ui: &mut Ui, model: &Model, measurement: &str) {
     if let Some(statistics) = &row.statistics {
         let _ = property_row(ui, "Trials", &statistics.trials.len().to_string());
     }
+    // The status above already says whether the limit held; what the verdict
+    // adds is how many of the values it judged were in bound, or, with none,
+    // why there were none.
     if let Some(verdict) = &row.verdict {
-        let words = match verdict.status() {
-            SpecificationVerdictStatus::Pass => "Inside its limit",
-            SpecificationVerdictStatus::BoundFailure => "Outside its limit",
-            SpecificationVerdictStatus::MeasurementFailure => "The measurement failed",
-            SpecificationVerdictStatus::MissingEvidence => "No value answered it",
-        };
         let count = verdict.evidence_count();
-        let words = if count == 0 {
-            words.to_owned()
+        if count > 0 {
+            let _ = property_row(
+                ui,
+                "In bound",
+                &format!("{} of {count}", verdict.passing_evidence_count()),
+            );
         } else {
-            format!(
-                "{words} \u{b7} {count} value{}, {} in bound",
-                if count == 1 { "" } else { "s" },
-                verdict.passing_evidence_count()
-            )
-        };
-        let _ = property_row(ui, "Verdict", &words);
+            let words = match verdict.status() {
+                SpecificationVerdictStatus::Pass => "Inside its limit",
+                SpecificationVerdictStatus::BoundFailure => "Outside its limit",
+                SpecificationVerdictStatus::MeasurementFailure => "The measurement failed",
+                SpecificationVerdictStatus::MissingEvidence => "No value answered it",
+            };
+            let _ = property_row_wrapped(ui, "Verdict", words);
+        }
     }
 }
 

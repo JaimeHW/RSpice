@@ -10,7 +10,9 @@
 use egui::Ui;
 use rspice_results::verification::LimitsSinceRun;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
-use rspice_ui_kit::panels::{property_row, property_row_combo, section_header};
+use rspice_ui_kit::panels::{
+    property_row, property_row_combo, property_row_wrapped, section_header,
+};
 
 use crate::state::{
     MissingMeasurementPolicy, MonteCarloSpecificationGate, NominalFailurePolicy,
@@ -170,7 +172,7 @@ fn evidence(ui: &mut Ui, model: &Model) {
         | SimulationRunLifecycle::Cancelling => "Running".to_owned(),
         SimulationRunLifecycle::LegacyUnknown => "Not recorded".to_owned(),
     };
-    property_row(ui, "Finished", &finished);
+    property_row_wrapped(ui, "Finished", &finished);
     let limits = match model
         .simulation
         .verification_sheet()
@@ -180,7 +182,7 @@ fn evidence(ui: &mut Ui, model: &Model) {
         Some(LimitsSinceRun::Unchanged) => "As this run was judged",
         Some(LimitsSinceRun::NotSealed) | None => "Not sealed with this run",
     };
-    property_row(ui, "Limits", limits);
+    property_row_wrapped(ui, "Limits", limits);
     let project = run
         .prepared_receipt()
         .map_or("Not recorded with this run", |receipt| {
@@ -190,5 +192,5 @@ fn evidence(ui: &mut Ui, model: &Model) {
                 "Changed since this run"
             }
         });
-    property_row(ui, "Plan and design", project);
+    property_row_wrapped(ui, "Plan and design", project);
 }
