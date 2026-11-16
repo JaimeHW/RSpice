@@ -9,10 +9,7 @@ use super::super::simulate::simulate_nav_meta;
 use super::super::verify::{
     verification_coverage, verification_flow_presentation, verification_navigator_requires_scroll,
 };
-use super::{
-    FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, active_mc_sample_trail,
-    flow_row_geometry,
-};
+use super::{FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, flow_row_geometry};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{
@@ -206,6 +203,18 @@ fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
     assert!(verification_navigator_requires_scroll(330.0));
     assert!(!verification_navigator_requires_scroll(560.0));
     assert!(!verification_navigator_requires_scroll(700.0));
+}
+
+/// The longest Monte Carlo sample trail the active dataset's yield evidence
+/// holds, or none when the evidence is another dataset's.
+fn active_mc_sample_trail(simulation: &SimulationState) -> usize {
+    simulation
+        .yield_results_for_active_dataset()
+        .unwrap_or(&[])
+        .iter()
+        .map(|result| result.trail.len())
+        .max()
+        .unwrap_or(0)
 }
 
 #[test]

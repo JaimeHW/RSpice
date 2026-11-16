@@ -1,4 +1,5 @@
-//! Verification-flow summaries and status rendering for the navigator footer.
+//! The Verify navigator's flow rows: one view a row, its name, what it holds
+//! and its state, led by its problem mark when it has one.
 
 use super::verify::VerificationFlowPresentation;
 use super::*;
@@ -7,17 +8,6 @@ use egui::Ui;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::paint_problem_mark;
-
-#[cfg(test)]
-pub(super) fn active_mc_sample_trail(simulation: &crate::state::SimulationState) -> usize {
-    simulation
-        .yield_results_for_active_dataset()
-        .unwrap_or(&[])
-        .iter()
-        .map(|result| result.trail.len())
-        .max()
-        .unwrap_or(0)
-}
 
 /// A flow row's height, and where its status line sits, for `detail_lines`
 /// wrapped lines of detail and a status line or none.

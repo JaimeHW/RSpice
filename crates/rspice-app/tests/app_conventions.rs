@@ -1721,7 +1721,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "surfaces"),
             ("lib.rs", "toolbar"),
             ("lib.rs", "tools"),
-            ("lib.rs", "verification_footer"),
             ("lib.rs", "verify"),
             ("lib.rs", "workbench"),
             ("lib.rs", "workflow_drafts"),

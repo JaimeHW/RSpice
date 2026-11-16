@@ -114,8 +114,8 @@ pub mod workbench {
         pub mod navigator {
             pub use rspice_app_workbench::workbench::docks::navigator::*;
 
+            mod flow_row;
             pub mod simulate;
-            pub mod verification_footer;
             pub mod verify;
         }
     }
