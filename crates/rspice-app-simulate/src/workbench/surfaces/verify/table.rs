@@ -932,9 +932,14 @@ impl<'a> DataTable<'a> {
         }
         if geometry.frozen() > 0 {
             let edge = viewport_left + geometry.freeze_edge();
+            // The edge stops under the last row: below the rows there are no
+            // columns for it to divide.
+            let rows_bottom = (output.inner_rect.top() + output.content_size.y
+                - output.state.offset.y)
+                .min(output.inner_rect.bottom());
             ui.painter().vline(
                 edge,
-                head_block.top()..=output.inner_rect.bottom(),
+                head_block.top()..=rows_bottom,
                 egui::Stroke::new(1.0, t.color.border_strong),
             );
         }

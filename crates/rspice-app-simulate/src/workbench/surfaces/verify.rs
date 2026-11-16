@@ -401,10 +401,37 @@ fn limit_cell(spec: &SpecEntry) -> table::Cell {
     }
 }
 
+/// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
+/// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
+fn takes_si_prefix(unit: &str) -> bool {
+    !(unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
+}
+
 /// A measured value in engineering notation with its unit: four significant
-/// digits, an SI prefix, never a bare exponent.
+/// digits, an SI prefix where the unit takes one, never a bare exponent.
 fn format_value(value: f64, unit: &str) -> String {
-    rspice_results::number_format::fmt_si_significant(value, unit, 4)
+    if takes_si_prefix(unit) {
+        rspice_results::number_format::fmt_si_significant(value, unit, 4)
+    } else {
+        rspice_results::number_format::fmt_significant(value, 4, &format!(" {unit}"))
+    }
+}
+
+/// One bound of a limit in the notation of the values held against it,
+/// without the zeros nobody wrote it with: `40 dB`, `1.2 mA`.
+fn format_bound(value: f64, unit: &str) -> String {
+    if takes_si_prefix(unit) {
+        return rspice_results::number_format::fmt_si_bound(value, unit);
+    }
+    let text = rspice_results::number_format::fmt_significant(value, 4, "");
+    // Scientific notation carries its own exponent, and trimming its mantissa
+    // would change the number.
+    let number = if text.contains('.') && !text.contains(['e', 'E']) {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        text.as_str()
+    };
+    format!("{number} {unit}")
 }
 
 fn format_scalar(value: f64) -> String {

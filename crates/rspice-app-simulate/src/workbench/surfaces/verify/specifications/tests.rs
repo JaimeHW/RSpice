@@ -211,13 +211,12 @@ fn the_table_the_toolbar_and_the_navigator_state_the_sheet() {
         [
             Col::Specification,
             Col::Limit,
-            Col::Nominal,
             Col::Worst,
             Col::At,
             Col::Margin,
             Col::Status
         ],
-        "seven points name where the worst was; no trials, no yield"
+        "seven points name where the worst was; no trials, no yield, and no point the run marks nominal"
     );
     let cell = |measurement: &str, col: Col| {
         let row = view
@@ -270,6 +269,22 @@ fn the_table_the_toolbar_and_the_navigator_state_the_sheet() {
     );
 }
 
+/// The shell's filter field narrows the table to the rows it matches, and
+/// cleared shows them all again.
+#[test]
+fn the_shell_filter_narrows_the_rows() {
+    let mut harness = SimulateTestHost::harness();
+    seed_corner(&mut harness.model);
+    refresh(&mut harness);
+    harness.wb.activate(Workspace::Verify);
+    harness.wb.set_navigator_filter("idd");
+    let (_, geometry) = draw(&mut harness);
+    assert_eq!(geometry.all("table.row").len(), 1);
+    harness.wb.set_navigator_filter("");
+    let (_, geometry) = draw(&mut harness);
+    assert_eq!(geometry.all("table.row").len(), 4);
+}
+
 /// A plan with no run keeps its rows, with dashes where a verdict would be,
 /// and the summary says why nothing is judged.
 #[test]
@@ -279,7 +294,7 @@ fn without_a_run_the_rows_stay_and_the_summary_says_why() {
         &mut harness.model,
         vec![limit("gain", Some(40.0), None, "dB")],
     );
-    harness.model.simulation.view.active_run_idx = None;
+    harness.model.simulation.clear_runs();
     refresh(&mut harness);
     let view = sheet_view(&harness.model, None);
     assert_eq!(view.rows.len(), 1);
@@ -287,7 +302,7 @@ fn without_a_run_the_rows_stay_and_the_summary_says_why() {
     assert_eq!(view.rows[0].cells[status].text, "\u{2014}");
     let summary = view.summary.expect("a summary").text;
     assert!(
-        summary.starts_with("1 specification \u{b7} not judged: "),
+        summary == "1 specification \u{b7} not judged until the plan runs",
         "{summary}"
     );
 }
@@ -419,6 +434,26 @@ fn every_way_of_writing_a_limit_reads_as_written() {
             "{spelled}"
         );
     }
+    let half_a_decibel = SpecificationComparison::Minimum { limit: 0.5 };
+    let spelled = limit_spelling(&half_a_decibel, "dB", policy, locale);
+    assert_eq!(spelled, "\u{2265} 0.5 dB");
+    assert_eq!(
+        parse_limit(&spelled, "dB", &tracked, policy, locale),
+        Ok(half_a_decibel)
+    );
+}
+
+/// A level in decibels, a percentage and an angle take no SI prefix: a
+/// margin of six tenths of a decibel is `-0.6000 dB`, never `-600.0 mdB`.
+#[test]
+fn a_level_or_an_angle_takes_no_si_prefix() {
+    assert_eq!(format_value(-0.6, "dB"), "-0.6000 dB");
+    assert_eq!(format_value(2.0, "deg"), "2.000 deg");
+    assert_eq!(format_value(40.0e-6, "A"), "40.00 \u{b5}A");
+    assert_eq!(
+        limit_text(&SpecificationComparison::Maximum { limit: 1.2e-3 }, "A").as_deref(),
+        Some("\u{2264} 1.2 mA")
+    );
 }
 
 #[test]
@@ -570,10 +605,7 @@ fn the_csv_is_the_sheet_as_shown() {
     let view = sheet_view(&harness.model, None);
     let text = sheet_csv(&view, "");
     let lines = text.lines().collect::<Vec<_>>();
-    assert_eq!(
-        lines[0],
-        "Specification,Limit,Nominal,Worst,At,Margin,Status"
-    );
+    assert_eq!(lines[0], "Specification,Limit,Worst,At,Margin,Status");
     assert_eq!(lines.len(), 5);
     assert!(lines[1].starts_with("gain,\u{2265} 40 dB,"), "{}", lines[1]);
     assert!(lines[1].ends_with(",Fail"), "{}", lines[1]);

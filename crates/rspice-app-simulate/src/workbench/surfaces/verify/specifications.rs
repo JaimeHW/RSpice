@@ -15,7 +15,6 @@
 
 use egui::{Key, Modifiers, Ui};
 use rspice_results::family_measurements::FamilyMemberId;
-use rspice_results::number_format::fmt_si_bound;
 use rspice_results::specification::SpecificationComparison;
 use rspice_results::verification::{LimitsSinceRun, PointSource, Row, RowStatus, Sheet, Worst};
 
@@ -41,7 +40,7 @@ use super::table::{
     Verdict,
 };
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
-use super::{format_value, record_action, verification_plan_id};
+use super::{format_bound, format_value, record_action, verification_plan_id};
 
 const TABLE_ID: &str = "verify.specifications";
 const MENU_W: f32 = 240.0;
@@ -926,9 +925,19 @@ pub fn counts_problem(sheet: &Sheet) -> Option<Problem> {
 
 /// The toolbar's summary: the roll-up, whether acceptance is blocked, and
 /// whether the limits changed since the run, or why nothing is judged.
-fn summary_line(sheet: &Sheet, run: Option<u64>) -> String {
+fn summary_line(sheet: &Sheet, run: Option<u64>, runs_held: bool) -> String {
     let mut parts = vec![counts_line(sheet)];
     match sheet.refusal() {
+        // With no run selected, what is missing is a run, and the way to one
+        // is the plan's own Run: Verify has none of its own.
+        Some(_) if run.is_none() => parts.push(
+            if runs_held {
+                "not judged: no run is selected"
+            } else {
+                "not judged until the plan runs"
+            }
+            .to_owned(),
+        ),
         Some(refusal) => parts.push(format!("not judged: {refusal}")),
         None => {
             if sheet
@@ -1024,7 +1033,13 @@ fn sheet_view(model: &Model, selected: Option<&str>) -> SheetView {
         })
     });
     let statistics = sheet.rows.iter().any(|row| row.statistics.is_some());
-    let mut columns = vec![Col::Specification, Col::Limit, Col::Nominal, Col::Worst];
+    // A run that marks no point nominal has no nominal value to state, and a
+    // column of dashes on every row would say only that.
+    let mut columns = vec![Col::Specification, Col::Limit];
+    if sheet.points.iter().any(|point| point.nominal) {
+        columns.push(Col::Nominal);
+    }
+    columns.push(Col::Worst);
     if sheet.points.len() > 1 || trials {
         columns.push(Col::At);
     }
@@ -1064,7 +1079,13 @@ fn sheet_view(model: &Model, selected: Option<&str>) -> SheetView {
         rows,
         keys,
         groups,
-        summary: (!sheet.rows.is_empty()).then(|| Summary::plain(summary_line(sheet, run))),
+        summary: (!sheet.rows.is_empty()).then(|| {
+            Summary::plain(summary_line(
+                sheet,
+                run,
+                !model.simulation.retained.runs.is_empty(),
+            ))
+        }),
     }
 }
 
@@ -1138,7 +1159,7 @@ fn cell(sheet: &Sheet, row: &Row, col: Col, open: bool) -> Cell {
                 .map_or_else(Cell::absent, Cell::number)
                 .sort_by(SortKey::Text(String::new()));
             let cell = if row.guard_band > 0.0 {
-                cell.hint(format!("Guard band {}", fmt_si_bound(row.guard_band, unit)))
+                cell.hint(format!("Guard band {}", format_bound(row.guard_band, unit)))
             } else {
                 cell
             };

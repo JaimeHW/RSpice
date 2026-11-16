@@ -9,7 +9,6 @@
 //! after a run changes the verdict without running again.
 
 use rspice_project::ProjectWorkspace;
-use rspice_results::number_format::fmt_si_bound;
 use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
@@ -189,7 +188,7 @@ pub fn definition_index(
 /// A limit as the table states it: `≥ 40 dB`, `≤ 1.2 mA`, `10 MHz … 20 MHz`,
 /// `50 Ω ± 1 Ω`; `None` for a tracked specification, which bounds nothing.
 pub fn limit_text(comparison: &SpecificationComparison, unit: &str) -> Option<String> {
-    let bound = |value: f64| fmt_si_bound(value, unit);
+    let bound = |value: f64| super::format_bound(value, unit);
     match *comparison {
         SpecificationComparison::Tracked => None,
         SpecificationComparison::Minimum { limit } => Some(format!("\u{2265} {}", bound(limit))),
