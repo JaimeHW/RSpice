@@ -219,6 +219,25 @@ fn exit_run(stop: f64) {
     }
 }
 
+/// The gate drive's supply net, vdrv, stands only on its source, and the
+/// d2a converters the Connect rules page supplies from it read it: the
+/// design's check finds it connected, as it finds every other node.
+#[test]
+fn c6_drive_supply_the_connect_rules_read_is_connected() {
+    let mut state = project("1u");
+    state.sync_active_schematic_to_workspace();
+    let checks = state.run_active_design_checks().expect("check the design");
+    let floating = checks
+        .violations()
+        .iter()
+        .filter(|finding| {
+            finding.violation_type == rspice_design::drc::DrcViolationType::FloatingNode
+        })
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(floating.is_empty(), "{floating:?}");
+}
+
 /// C6 drawn in the app drives its gates from the sagging supply as the
 /// corpus deck does, through the connect rules set on the Connect rules
 /// page: each gate's edges, and the regulated output; and saved and

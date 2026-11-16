@@ -1684,6 +1684,58 @@ fn a_global_touched_once_in_the_design_is_floating() {
     );
 }
 
+/// A net the deck reads by name at its top, as a connect rule reads the
+/// supply it converts against, is a connection no terminal represents: a
+/// source standing alone on a gate drive's supply net is not floating. The
+/// name is in the deck's top scope, so a cell's own node of that name is
+/// still one connection.
+#[test]
+fn a_net_the_deck_reads_is_connected_only_at_the_top() {
+    let resistor = |nodes: [&str; 2]| {
+        labelled(vec![(
+            part(1, ComponentType::Resistor, "R1"),
+            vec![("+", nodes[0]), ("-", nodes[1])],
+        )])
+    };
+    let libraries = LibraryCatalog::default();
+    let contract = crate::connectivity_contract::ConnectivityContract::default();
+    let read = DrcConfig {
+        deck_reads: ["VDRV".to_owned()].into(),
+        ..DrcConfig::default()
+    };
+    let on_vdrv = |result: &DrcResult| {
+        of_type(result, DrcViolationType::FloatingNode)
+            .into_iter()
+            .filter(|finding| finding.message.contains("'vdrv'"))
+            .count()
+    };
+
+    let views = buffers([("top", resistor(["vdrv", "0"]))]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let top = &views["work/top/schematic"];
+    let result = run_check_with_hierarchy(top, &hierarchy, read.clone());
+    assert_eq!(on_vdrv(&result), 0, "{:?}", result.violations());
+    let result = run_check_with_hierarchy(top, &hierarchy, DrcConfig::default());
+    assert_eq!(on_vdrv(&result), 1, "{:?}", result.violations());
+
+    let views = buffers([("a", resistor(["vdrv", "0"]))]);
+    let hierarchy =
+        HierarchySource::from_workspace(&libraries, &views).with_connectivity(&contract);
+    let top = SchematicDocument {
+        components: vec![instance(1, "XA", "a")],
+        ..SchematicDocument::default()
+    };
+    let result = run_check_with_hierarchy(&top, &hierarchy, read);
+    assert_eq!(on_vdrv(&result), 1, "{:?}", result.violations());
+    assert_eq!(
+        placed(&result, DrcViolationType::FloatingNode),
+        vec![("/XA".to_owned(), Some("work/a/schematic".to_owned()))],
+        "{:?}",
+        result.violations()
+    );
+}
+
 /// The instance whose one leg a floating stub's finding stands on.
 fn stands_on_stub(finding: &DrcViolation) -> &str {
     match finding.related.as_slice() {

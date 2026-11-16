@@ -238,7 +238,8 @@ impl Model {
 /// The digest of what a live check of `subject` reads: its drawing as the
 /// configured design projects it, the cellview every instance in it names —
 /// whose interface decides what its pins are — the deck's global nodes, the
-/// library, the connectivity contract and the rule deck.
+/// library, the connectivity contract, the rule deck and the nets the deck
+/// reads by name.
 ///
 /// Narrower than a check of the cellview's, which reads the whole walk below
 /// it: an edit two levels down changes nothing a live finding says.
@@ -304,6 +305,7 @@ pub(in crate::workbench) fn live_check_digest(
         model.library_manager.revision(),
         projection.connectivity(),
         overrides,
+        super::deck_reads(model, subject),
     ))
     .map_err(|error| format!("could not encode live-check inputs: {error}"))?;
     let mut digest = Sha256::new();

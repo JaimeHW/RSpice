@@ -123,6 +123,17 @@ impl RunConnectRules {
         lines.join("\n")
     }
 
+    /// The deck nets the block's converters track as their supply, as
+    /// `connect d2a #(.vsup(vdrv))` reads `vdrv`, in statement order.
+    pub fn supply_nets(&self) -> impl Iterator<Item = &str> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match &statement.supply {
+                Some(RunConnectSupply::Net(net)) => Some(net.as_str()),
+                Some(RunConnectSupply::Volts(_)) | None => None,
+            })
+    }
+
     /// What is wrong with the block, one sentence each.
     #[must_use]
     pub fn problems(&self) -> Vec<String> {

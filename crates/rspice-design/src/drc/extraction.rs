@@ -475,6 +475,12 @@ fn check_subject(
     // is held back until the whole walk has been extracted.
     let mut view_config = config.clone();
     view_config.check_missing_ground = false;
+    // What the deck reads by name is in its top scope, which only the
+    // subject's own nodes are.
+    let below_config = (!view_config.deck_reads.is_empty()).then(|| DrcConfig {
+        deck_reads: std::collections::BTreeSet::new(),
+        ..view_config.clone()
+    });
 
     // A cellview below the subject is read only where something here asks
     // about it: a hierarchy report states its findings, and the ground rule
@@ -506,8 +512,11 @@ fn check_subject(
         let (components, connectivity) = extract_view(view.document, hierarchy, &context);
         design_reaches_ground |= reaches_ground(&components);
         if index == SUBJECT || reach == CheckReach::Hierarchy {
-            let mut report =
-                check_one_view(view.document, &view_config, &components, &connectivity);
+            let config_here = match &below_config {
+                Some(below) if index != SUBJECT => below,
+                _ => &view_config,
+            };
+            let mut report = check_one_view(view.document, config_here, &components, &connectivity);
             // A ground mark the deck does not write as node 0 is a fact of the
             // cellview that draws it, unlike whether the design reaches node 0
             // at all, so it is stated with that cellview's findings — whoever

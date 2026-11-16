@@ -370,6 +370,15 @@ impl SimulationOptions {
         })
     }
 
+    /// The run's own connect-rule block while the selection names it, which
+    /// is when the deck writes it and the engine converts with it.
+    #[must_use]
+    pub fn written_connect_rule_block(&self) -> Option<&super::RunConnectRules> {
+        self.connect_rule_block
+            .as_ref()
+            .filter(|block| self.connect_rules.as_deref() == Some(block.name.as_str()))
+    }
+
     /// The active preset's name, or `Custom` when the options match none.
     #[must_use]
     pub fn preset_label(&self) -> String {
@@ -731,9 +740,7 @@ impl SimulationOptions {
 
         // The run's own block, while the selection names it: the deck then
         // carries every value it converts with.
-        if let Some(block) = &self.connect_rule_block
-            && self.connect_rules.as_deref() == Some(block.name.as_str())
-        {
+        if let Some(block) = self.written_connect_rule_block() {
             if lines.len() == 1 && lines[0] == ".OPTIONS" {
                 lines.clear();
             }

@@ -1065,9 +1065,23 @@ impl Model {
             severity_overrides: self.workspace.content.design_rules.severity_overrides(),
             connectivity: self.workspace.content.connectivity.policy.clone(),
             waivers: self.check_waivers(subject),
+            deck_reads: deck_reads(self, subject),
             ..DrcConfig::default()
         }
     }
+}
+
+/// The nets the run's deck reads by name at its top, which a check of the
+/// design the deck is written from is about: the supplies the run's connect
+/// rules track. Another cellview's nodes are its own, whatever their names.
+fn deck_reads(model: &Model, subject: &CellViewRef) -> std::collections::BTreeSet<String> {
+    let Some(block) = model.sim_setup.options.written_connect_rule_block() else {
+        return std::collections::BTreeSet::new();
+    };
+    if owner_key(subject) != owner_key(&model.workspace.content.simulation_root_reference()) {
+        return std::collections::BTreeSet::new();
+    }
+    block.supply_nets().map(str::to_owned).collect()
 }
 
 /// Whether `subject` is a design of its own, which must reach a reference.
@@ -1231,6 +1245,7 @@ fn design_check_input_digest(
         config.check_shorted_outputs,
         config.min_connections,
         overrides,
+        &config.deck_reads,
     );
     // Each cellview is digested as projected, not as stored: a page
     // assignment or a variant changes what was checked without touching a

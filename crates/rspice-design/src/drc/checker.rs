@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
@@ -92,6 +92,17 @@ pub struct DrcConfig {
     /// contract is the only authority that may set it.
     #[serde(skip_deserializing)]
     pub connectivity: crate::connectivity_contract::ConnectivityPolicy,
+    /// Nets the deck reads by name at its top, outside any drawn instance:
+    /// the supply a connect rule tracks, as `connect d2a #(.vsup(vdrv))`
+    /// reads `vdrv`. Each reads its node as surely as a terminal on it
+    /// would, so a node one of them names counts that as a connection.
+    ///
+    /// They are names in the deck's top scope, so only the check's subject
+    /// reads them, and its caller sets them only where the subject is the
+    /// design the deck is written from. A cell's own node of the same name
+    /// is another node.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub deck_reads: BTreeSet<String>,
     /// The waivers the check states on the findings they cover, from the
     /// documents of the subject and of every cellview it instantiates.
     ///
@@ -115,6 +126,7 @@ impl Default for DrcConfig {
             min_connections: 2,
             severity_overrides: BTreeMap::new(),
             connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
+            deck_reads: BTreeSet::new(),
             waivers: super::CheckWaivers::default(),
         }
     }
@@ -769,7 +781,11 @@ impl DrcChecker {
     /// A node a behavioral source's expression reads by name is read there
     /// as surely as through a terminal, so each such reader counts as one
     /// connection: a register bit wired only to the register's pin and read
-    /// by `V = v(b7)*...` is not dangling.
+    /// by `V = v(b7)*...` is not dangling. So is a node the deck reads by
+    /// name, as a connect rule reads the supply it converts against: a gate
+    /// drive's supply net that only its source stands on feeds every
+    /// converter that tracks it. A node only a probe or a measurement reads
+    /// is still reported, as Spectre reports it.
     ///
     /// A node that continues outside the cellview — through an interface port,
     /// or as a global the deck declares — is connected to something no
@@ -799,8 +815,15 @@ impl DrcChecker {
             {
                 continue;
             }
-            let connections =
-                net.connection_count + usize::from(net.continues_outside) + net.expression_readers;
+            let read_by_deck = self
+                .config
+                .deck_reads
+                .iter()
+                .any(|read| read.eq_ignore_ascii_case(name));
+            let connections = net.connection_count
+                + usize::from(net.continues_outside)
+                + net.expression_readers
+                + usize::from(read_by_deck);
             if connections < self.config.min_connections && !net.is_ground {
                 let id = self.next_id();
                 self.add_violation(
