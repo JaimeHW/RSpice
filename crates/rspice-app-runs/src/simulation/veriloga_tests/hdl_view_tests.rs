@@ -621,7 +621,8 @@ fn verilog_and_verilog_ams_views_run_as_their_hdl_deck_twin() {
 /// to a conductance's `mode[1:0]` runs bit for bit as the deck that names
 /// `mode#1` and `mode#0` on both instance cards, and the conductance reads
 /// each bit at its own weight. Each bit publishes its `D()` history on both
-/// routes, and the two ports meeting on those bits declare them as one bus.
+/// routes, and the two ports meeting on those bits declare them as one bus,
+/// named by its net.
 #[test]
 fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
     let Twin {
@@ -687,12 +688,13 @@ fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
             assert_eq!(code, want_code, "{name}: {history:?}");
         }
     }
+    // The bus is the net the two ports meet on, named as the net is.
     assert_eq!(
         buses
             .iter()
-            .map(|bus| (bus.msb, bus.lsb, bus.members.clone()))
+            .map(|bus| (bus.name.as_str(), bus.msb, bus.lsb, bus.members.clone()))
             .collect::<Vec<_>>(),
-        [(1, 0, vec!["MODE#1".to_owned(), "MODE#0".to_owned()])],
+        [("MODE", 1, 0, vec!["MODE#1".to_owned(), "MODE#0".to_owned()])],
         "one bus over both bits, most significant first"
     );
 }

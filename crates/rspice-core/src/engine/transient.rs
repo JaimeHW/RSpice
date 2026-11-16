@@ -1501,23 +1501,48 @@ fn mixed_module_bus_declarations(
                 })?;
             members.push(name.clone());
         }
+        let (name, msb, lsb) =
+            vector_net_bits(&members).unwrap_or_else(|| (bus.name.clone(), bus.msb, bus.lsb));
         declarations.push(
-            DigitalBusDeclaration::new(
-                bus.name.clone(),
-                bus.msb,
-                bus.lsb,
-                members,
-                super::DigitalBusSource::Engine,
-            )
-            .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "mixed boundary bus '{}' is not a well-formed declaration: {error}",
-                    bus.name
-                ))
-            })?,
+            DigitalBusDeclaration::new(name, msb, lsb, members, super::DigitalBusSource::Engine)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "mixed boundary bus '{}' is not a well-formed declaration: {error}",
+                        bus.name
+                    ))
+                })?,
         );
     }
     Ok(declarations)
+}
+
+/// The vector net whose bits a bus's members are, when the deck names them
+/// as one: `MODE#1 MODE#0`, the deck spelling of bits 1 and 0 of the net
+/// `MODE` (the one a drawn bus gets from the design's netlister), is the net
+/// `MODE` from 1 to 0. A bus is a net, so it is labelled by that net rather
+/// than by the instance and port that declared it. Members that are not the
+/// consecutive bits of one net keep the port's own name and range.
+#[cfg(feature = "veriloga")]
+fn vector_net_bits(members: &[String]) -> Option<(String, i64, i64)> {
+    let mut base = None;
+    let mut indices = Vec::with_capacity(members.len());
+    for member in members {
+        let (stem, index) = member.rsplit_once('#')?;
+        if stem.is_empty() || index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        if *base.get_or_insert(stem) != stem {
+            return None;
+        }
+        indices.push(index.parse::<i64>().ok()?);
+    }
+    let (&first, &last) = (indices.first()?, indices.last()?);
+    let step = if last >= first { 1 } else { -1 };
+    let consecutive = indices.windows(2).all(|pair| pair[1] - pair[0] == step);
+    if indices.len() < 2 || !consecutive {
+        return None;
+    }
+    Some((base?.to_owned(), first, last))
 }
 
 /// The same answer for a build with no Verilog-A route compiled in.
