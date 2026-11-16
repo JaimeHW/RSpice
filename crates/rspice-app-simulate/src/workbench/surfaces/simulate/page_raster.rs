@@ -37,7 +37,7 @@ pub const STUDIO_BASELINES: [StudioBaseline; 10] = [
     StudioBaseline {
         name: "studio-specifications",
         page: SimulationPage::Specifications,
-        fingerprint: "6b5c7511be459de36fe19331209a7bef37b33e1b2878d376bb6324f41fba74f5",
+        fingerprint: "6d029f2622c2de613a0724f2cf6f03007c8337e9a736bc9a1692583fb4f94220",
     },
     StudioBaseline {
         name: "studio-run-set",
