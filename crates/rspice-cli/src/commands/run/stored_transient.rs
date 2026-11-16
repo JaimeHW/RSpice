@@ -192,6 +192,33 @@ pub(super) struct StoreSpan {
     pub(super) max_step: f64,
 }
 
+impl StoreSpan {
+    /// The fewest rows the run writes, none further apart than `max_step`, and the rows it likely
+    /// writes. A print step shortens the likely step only when the deck names one: `.TRAN 0 1`
+    /// names none, and leaves `max_step` the only estimate.
+    fn rows(&self) -> (f64, f64) {
+        let rows = self.tstop - self.start;
+        let likely_step = if self.tstep > 0.0 {
+            self.max_step.min(self.tstep)
+        } else {
+            self.max_step
+        };
+        (rows / self.max_step, rows / likely_step)
+    }
+}
+
+/// The warning for a run that likely writes `likely` bytes to a volume with `free` bytes free.
+/// [`WatchedSink::bytes`] saturates at `u64::MAX` past any size it can count, and a count it
+/// could not make is no estimate: the run then says nothing.
+fn space_warning(likely: u64, free: u64) -> Option<String> {
+    (likely < u64::MAX).then(|| {
+        format!(
+            "Warning: this transient likely writes about {likely} bytes of results and their \
+             volume has {free} bytes free; it stops, keeping what it wrote, if the volume fills"
+        )
+    })
+}
+
 /// What a run into a store returns besides its rows: the checkpoints it wrote name the run, so
 /// that a run resumed from one of them can find its store.
 pub(super) trait StoreRunEnd {
@@ -256,24 +283,14 @@ pub(super) fn run_with<T: StoreRunEnd>(
         Some(open) => open,
         None => create_store(ctx)?,
     };
-    let rows = span.tstop - span.start;
-    let mut sink = WatchedSink::new(
-        inner,
-        free,
-        rows / span.max_step,
-        rows / span.max_step.min(span.tstep),
-    )
-    .with_space_warning(Box::new(|likely, free| {
-        crate::observability::diagnostic(
-            "results_store_space",
-            None,
-            format_args!(
-                "Warning: this transient likely writes about {likely} bytes of results and \
-                 their volume has {free} bytes free; it stops, keeping what it wrote, if the \
-                 volume fills"
-            ),
-        );
-    }));
+    let (rows_needed, rows_likely) = span.rows();
+    let mut sink = WatchedSink::new(inner, free, rows_needed, rows_likely).with_space_warning(
+        Box::new(|likely, free| {
+            if let Some(warning) = space_warning(likely, free) {
+                crate::observability::diagnostic("results_store_space", None, warning);
+            }
+        }),
+    );
     let (
         SinkTransient {
             result: shell,

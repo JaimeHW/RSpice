@@ -395,3 +395,24 @@ fn a_read_back_the_host_cannot_hold_is_the_typed_allocation_failure() {
     assert_eq!(details.category, "resource_limit", "{error}");
     assert!(error.to_string().contains("8000000000 bytes"), "{error}");
 }
+
+/// A `.TRAN 0 1` names no print step: the run likely writes the rows its maximum step writes, a
+/// count the preflight can make, and not the `u64::MAX` bytes a zero step gave. A count past
+/// what the preflight can make is no estimate, and warns of nothing.
+#[test]
+fn a_transient_without_a_print_step_estimates_its_store_from_its_maximum_step() {
+    let span = |tstep| super::StoreSpan {
+        start: 0.0,
+        tstop: 1.0,
+        tstep,
+        max_step: 1.0 / 1024.0,
+    };
+    assert_eq!(span(0.0).rows(), (1024.0, 1024.0));
+    assert_eq!(span(1.0e-4).rows(), (1024.0, 10_000.0));
+    assert_eq!(span(1.0).rows(), (1024.0, 1024.0));
+    let likely = rspice_results_store::WatchedSink::<FileIo>::bytes(span(0.0).rows().1, 3);
+    assert_eq!(likely, 33_915);
+    let warning = super::space_warning(likely, 1_000).expect("a run that likely overfills warns");
+    assert!(warning.contains("about 33915 bytes"), "{warning}");
+    assert_eq!(super::space_warning(u64::MAX, 1_000), None);
+}
