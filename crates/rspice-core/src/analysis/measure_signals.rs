@@ -6518,7 +6518,7 @@ fn evaluate_statements_with_equation_traces(
     )
 }
 
-fn statement_live_dependencies(
+pub(crate) fn statement_live_dependencies(
     statement: &MeasureStatement,
     params: &crate::netlist::ParamContext,
 ) -> HashSet<String> {

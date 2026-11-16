@@ -57,15 +57,62 @@ fn run(points: usize) -> TransientResult {
     }
 }
 
+/// The rows `rows` of `run`.
+fn slice(run: &TransientResult, rows: std::ops::Range<usize>) -> TransientResult {
+    let mut slice = run.clone();
+    let keep = |values: &mut Vec<Value>| *values = values[rows.clone()].to_vec();
+    keep(&mut slice.time);
+    keep(&mut slice.step_sizes);
+    for column in slice.voltages.iter_mut().chain(&mut slice.branch_currents) {
+        keep(column);
+    }
+    slice
+}
+
 /// The first `rows` rows of `run`.
 fn probe(run: &TransientResult, rows: usize) -> TransientResult {
-    let mut probe = run.clone();
-    probe.time.truncate(rows);
-    probe.step_sizes.truncate(rows);
-    for column in probe.voltages.iter_mut().chain(&mut probe.branch_currents) {
-        column.truncate(rows);
+    slice(run, 0..rows.min(run.time.len()))
+}
+
+/// The first and last rows of `run`.
+fn span(run: &TransientResult) -> TransientResult {
+    let mut span = run.clone();
+    let last = run.time.len() - 1;
+    let ends = |values: &mut Vec<Value>| *values = vec![values[0], values[last]];
+    ends(&mut span.time);
+    ends(&mut span.step_sizes);
+    for column in span.voltages.iter_mut().chain(&mut span.branch_currents) {
+        ends(column);
     }
-    probe
+    span
+}
+
+/// `run` with a digital trace at `q` that rises and falls on the triangle at `in`.
+fn with_events(mut run: TransientResult) -> TransientResult {
+    use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
+    let mut points = Vec::new();
+    let mut high = None;
+    for (&time, &input) in run.time.iter().zip(&run.voltages[1]) {
+        if high != Some(input > 0.5) {
+            high = Some(input > 0.5);
+            let state = if input > 0.5 {
+                DigitalState::One
+            } else {
+                DigitalState::Zero
+            };
+            points.push(crate::analysis::transient::DigitalTracePoint {
+                time,
+                value: DigitalValue::new(state, DigitalStrength::Strong),
+            });
+        }
+    }
+    run.digital_traces
+        .push(crate::analysis::transient::DigitalTrace {
+            node_name: "q".into(),
+            points,
+            hdl_time_precision: None,
+        });
+    run
 }
 
 fn deck(cards: &str) -> Netlist {
@@ -94,16 +141,28 @@ fn streamed(netlist: &Netlist, run: &TransientResult, chunk: usize) -> Option<Ve
     for x in run.time.chunks(chunk) {
         stream.axis(x);
     }
-    for (index, x) in run.time.chunks(chunk).enumerate() {
-        let rows = index * chunk..index * chunk + x.len();
-        let columns = stream
-            .columns()
-            .iter()
-            .map(|&column| &full[column][rows.clone()])
-            .collect::<Vec<_>>();
-        stream.rows(x, &columns);
+    loop {
+        for (index, x) in run.time.chunks(chunk).enumerate() {
+            let rows = index * chunk..index * chunk + x.len();
+            if stream.derives()
+                && !stream
+                    .derive(netlist, &slice(run, rows.clone()), &NoAbort)
+                    .unwrap()
+            {
+                return None;
+            }
+            let columns = stream
+                .columns()
+                .iter()
+                .map(|&column| &full[column][rows.clone()])
+                .collect::<Vec<_>>();
+            stream.rows(x, &columns);
+        }
+        if !stream.next_pass() {
+            break;
+        }
     }
-    stream.finish(netlist, &probe, &NoAbort).unwrap()
+    stream.finish(netlist, &span(run), &NoAbort).unwrap()
 }
 
 fn bits(value: Option<Value>) -> Option<u64> {
@@ -143,6 +202,10 @@ const STATEMENTS: &str = "\
 .meas tran m4 MAX V(in) FROM=2 TO=3
 .meas tran m5 MIN V(in) FROM=0.31 TO=0.31
 .meas tran p1 PP V(out) FROM=0.1 TO=0.9
+.meas tran x1 MAX V(in) RISE=2
+.meas tran x2 MIN V(out) FALL=LAST
+.meas tran x3 PP V(out) CROSS=1 RFC_LEVEL=0.5
+.meas tran x4 MAX V(in) RISE=40
 .meas tran f1 FIND V(out) AT=0.4321
 .meas tran f2 FIND V(out) WHEN V(in)=0.5 RISE=2
 .meas tran f3 FIND V(out) WHEN V(in)=0.5 FALL=LAST
@@ -162,6 +225,8 @@ const STATEMENTS: &str = "\
 .meas tran t4 TRIG V(in) VAL=0.5 RISE=40 TARG V(out) VAL=0.2 RISE=1
 .meas tran t5 TRIG AT=0.2 TARG AT=0.9
 .meas tran pm PARAM='a1*2+m1'
+.meas tran fw FIND V(in) AT=w1
+.meas tran dw DERIV V(out) AT=t5
 ";
 
 /// The deck of the statements `dialect` reads, and how many of them it reads.
@@ -210,12 +275,39 @@ fn every_streamed_statement_measures_what_the_run_in_memory_measures_to_the_bit(
 }
 
 #[test]
+fn expressions_and_differential_voltages_are_derived_from_each_chunk() {
+    let run = run(1_200);
+    let netlist = deck(
+        ".meas tran a1 AVG V(out)
+.meas tran e1 AVG par('V(out)*2+V(in)')
+.meas tran e2 MAX {V(in)-V(out)} FROM=0.2 TO=0.7
+.meas tran e3 FIND par('V(out)*V(in)') WHEN V(in,out)=0.1 CROSS=2
+.meas tran e4 TRIG V(out,in) VAL=0 RISE=1 TARG {V(in)*0.5} VAL=0.2 FALL=2
+.meas tran e5 INTEG V(in,out)
+.meas tran e6 RMS V(out,0)
+.meas tran e7 WHEN par('abs(V(out))')=0.5 CROSS=LAST",
+    );
+    let in_memory = evaluate_tran_measurements_with_abort(&netlist, &run, &NoAbort).unwrap();
+    assert!(
+        in_memory.iter().all(|result| result.error.is_none()),
+        "{in_memory:#?}"
+    );
+    for chunk in [1, 7, 300, 1_200] {
+        let streamed = streamed(&netlist, &run, chunk).expect("every statement streams");
+        assert_same(&streamed, &in_memory);
+    }
+}
+
+#[test]
 fn a_statement_the_rows_cannot_supply_is_measured_in_memory() {
     let run = run(300);
-    // An expression is a waveform of its own, not a column of the rows.
-    let expression = deck(".meas tran a1 AVG V(out)\n.meas tran e AVG par('V(out)*2')");
-    assert!(streamed(&expression, &run, 50).is_none());
-    // So is a column the caller cannot read from its rows.
+    // A time integral carries its sum from row to row, which a chunk alone does not have.
+    let integral = deck(".meas tran a1 AVG V(out)\n.meas tran e AVG par('sdt(V(out))')");
+    assert!(streamed(&integral, &run, 50).is_none());
+    // So does an expression that reads another statement's running result.
+    let running = deck(".meas tran a1 AVG V(out)\n.meas tran e AVG par('V(out)*a1')");
+    assert!(streamed(&running, &run, 50).is_none());
+    // A column the caller cannot read from its rows is derived from each chunk instead.
     let netlist = deck(".meas tran a1 AVG V(out)\n.meas tran c AVG I(V1)");
     let probe = probe(&run, 50);
     let columns = [
@@ -223,12 +315,59 @@ fn a_statement_the_rows_cannot_supply_is_measured_in_memory() {
         Some(&probe.voltages[1]),
         None,
     ];
-    assert!(
-        TranMeasureStream::plan(&netlist, &probe, &columns, &NoAbort)
-            .unwrap()
-            .is_none()
+    let stream = TranMeasureStream::plan(&netlist, &probe, &columns, &NoAbort)
+        .unwrap()
+        .expect("the column is derived");
+    assert_eq!(stream.columns(), [0]);
+    assert!(stream.derives());
+}
+
+#[test]
+fn a_legacy_trig_targ_measures_its_target_in_a_second_pass_after_the_trigger() {
+    let run = run(1_500);
+    let netlist = deck(
+        ".options measure use_lttm=1
+.meas tran l1 TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.2 RISE=1
+.meas tran l2 TRIG V(in) VAL=0.5 RISE=2 TARG V(in) VAL=0.5 FALL=LAST
+.meas tran l3 TRIG AT=0.2 TARG V(out) VAL=0.3 CROSS=1 TD=0.4
+.meas tran l4 TRIG V(in) VAL=0.5 RISE=LAST TARG V(out) VAL=0.2 RISE=1
+.meas tran l5 TRIG V(in) VAL=7 RISE=1 TARG V(out) VAL=0.2 RISE=1
+.meas tran l6 TRIG AT=0.1 TARG AT=0.5
+.meas tran l7 TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.2 FALL=1 FROM=0.3 TO=0.8
+.meas tran f1 FIND V(out) WHEN V(in)=0.5 RISE=3",
     );
-    // And a FIND placed at an earlier result, which only the finished pass knows.
-    let earlier = deck(".meas tran w WHEN V(out)=0.2\n.meas tran f FIND V(in) WHEN V(out)=w");
-    assert!(streamed(&earlier, &run, 50).is_none());
+    let in_memory = evaluate_tran_measurements_with_abort(&netlist, &run, &NoAbort).unwrap();
+    assert!(
+        in_memory
+            .iter()
+            .filter(|result| result.error.is_none())
+            .count()
+            >= 4,
+        "{in_memory:#?}"
+    );
+    for chunk in [1, 64, 1_500] {
+        let streamed = streamed(&netlist, &run, chunk).expect("every statement streams");
+        assert_same(&streamed, &in_memory);
+    }
+}
+
+#[test]
+fn a_statement_of_event_operands_alone_is_measured_on_the_run_s_span() {
+    let run = with_events(run(800));
+    let netlist = deck(
+        ".meas tran a1 AVG V(out)
+.meas tran e1 AVG D(q)
+.meas tran e2 WHEN D(q)=0.5 RISE=2
+.meas tran e3 TRIG D(q) VAL=0.5 RISE=1 TARG D(q) VAL=0.5 FALL=1
+.meas tran e4 MAX D(q) FROM=0.2 TO=0.9",
+    );
+    let in_memory = evaluate_tran_measurements_with_abort(&netlist, &run, &NoAbort).unwrap();
+    assert!(
+        in_memory.iter().all(|result| result.error.is_none()),
+        "{in_memory:#?}"
+    );
+    for chunk in [1, 100, 800] {
+        let streamed = streamed(&netlist, &run, chunk).expect("every statement streams");
+        assert_same(&streamed, &in_memory);
+    }
 }

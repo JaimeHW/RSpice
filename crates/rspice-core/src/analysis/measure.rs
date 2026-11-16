@@ -174,6 +174,12 @@ impl RiseFallCrossTracker {
         if !window.is_empty() {
             return Ok(window);
         }
+        Err(self.absent())
+    }
+
+    /// Why a window holds no step: as Xyce reports it, what the signal did in the time window
+    /// instead.
+    pub(crate) fn absent(&self) -> String {
         let edge = match self.occurrence.edge {
             EdgeType::Rise => "RISE",
             EdgeType::Fall => "FALL",
@@ -183,10 +189,10 @@ impl RiseFallCrossTracker {
             number if number < 0 => edge.to_string(),
             number => format!("{edge}={number}"),
         };
-        Err(format!(
+        format!(
             "no {requested} in the window, which has {} rises, {} falls and {} crossings",
             self.rises, self.falls, self.crosses
-        ))
+        )
     }
 }
 
@@ -1089,28 +1095,38 @@ impl MeasureEngine {
                         signals,
                         segment_starts,
                     };
-                    match with_earlier_results(m, &results) {
-                        Ok(statement) => match self.streamed.as_deref() {
-                            Some(stream::StreamedStatements::Plan(planned)) => {
-                                let spec = stream::plan(self, &statement, data);
-                                if let Some(slot) = planned
-                                    .lock()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                    .get_mut(index)
-                                {
-                                    *slot = spec;
-                                }
-                                MeasureResult::failed_for_statement(m, "planned for streaming")
+                    match self.streamed.as_deref() {
+                        Some(stream::StreamedStatements::Plan(planned)) => {
+                            // A FIND at an earlier result is planned as written; its pass reads
+                            // that result once the earlier statement's pass is over.
+                            let spec = stream::plan(self, m, data);
+                            if let Some(slot) = planned
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .get_mut(index)
+                            {
+                                *slot = spec;
                             }
-                            Some(stream::StreamedStatements::Results(streamed)) => {
-                                match streamed.get(index) {
-                                    Some(Some(result)) => result.clone().check_contract(&statement),
-                                    _ => self.evaluate_one(&statement, data),
+                            MeasureResult::failed_for_statement(m, "planned for streaming")
+                        }
+                        Some(stream::StreamedStatements::Chunk(reads)) => {
+                            stream::read_chunk(reads, index, data);
+                            MeasureResult::failed_for_statement(m, "read for streaming")
+                        }
+                        streamed => match with_earlier_results(m, &results) {
+                            Ok(statement) => match streamed {
+                                Some(stream::StreamedStatements::Results(streamed)) => {
+                                    match streamed.get(index) {
+                                        Some(Some(result)) => {
+                                            result.clone().check_contract(&statement)
+                                        }
+                                        _ => self.evaluate_one(&statement, data),
+                                    }
                                 }
-                            }
-                            None => self.evaluate_one(&statement, data),
+                                _ => self.evaluate_one(&statement, data),
+                            },
+                            Err(error) => MeasureResult::failed_for_statement(m, &error),
                         },
-                        Err(error) => MeasureResult::failed_for_statement(m, &error),
                     }
                 }
             };

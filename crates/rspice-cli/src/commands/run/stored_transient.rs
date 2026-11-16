@@ -823,9 +823,9 @@ impl StoredTransient {
         plan
     }
 
-    /// The deck's `.MEASURE TRAN` results, measured in one pass over the store's rows (after
-    /// one over their axis) with the first chunk's rows in the shell; `None` when a statement
-    /// needs the run in memory.
+    /// The deck's `.MEASURE TRAN` results, measured in passes over the store's rows (after one
+    /// over their axis), planned with the first chunk's rows in the shell; `None` when a
+    /// statement needs the run in memory.
     fn measure(&mut self, ctx: &RunContext<'_>) -> Result<Option<Vec<MeasureResult>>, CliError> {
         let failed = |source| CliError::CoreSimulationError {
             source,
@@ -844,8 +844,10 @@ impl StoredTransient {
             return Ok(None);
         };
         let rows = &mut self.rows;
-        let chunks = rows.reader.chunk_spans().len();
-        let read = |error| store_error(&rows.store.dir, error);
+        let spans = rows.reader.chunk_spans().collect::<Vec<_>>();
+        let chunks = spans.len();
+        let dir = rows.store.dir.clone();
+        let read = |error| store_error(&dir, error);
         let mut x = Vec::new();
         for chunk in 0..chunks {
             if abort.is_aborted() {
@@ -856,19 +858,36 @@ impl StoredTransient {
         }
         let slots = stream.columns().to_vec();
         let mut values = vec![Vec::new(); slots.len()];
-        for chunk in 0..chunks {
-            if abort.is_aborted() {
-                return Err(failed(rspice_core::SimulationError::Aborted));
+        loop {
+            for (chunk, &(first, count)) in spans.iter().enumerate() {
+                if abort.is_aborted() {
+                    return Err(failed(rspice_core::SimulationError::Aborted));
+                }
+                rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
+                for (&slot, values) in slots.iter().zip(&mut values) {
+                    rows.reader
+                        .read_chunk_slot(chunk, slot, values)
+                        .map_err(read)?;
+                }
+                // An expression, a differential voltage or an alias is derived from the
+                // chunk's rows of every column.
+                if stream.derives() {
+                    rows.fill(&mut self.shell, first, count as u64)?;
+                    if !stream
+                        .derive(ctx.netlist, &self.shell, abort)
+                        .map_err(failed)?
+                    {
+                        return Ok(None);
+                    }
+                }
+                let columns = values.iter().map(Vec::as_slice).collect::<Vec<_>>();
+                stream.rows(&x, &columns);
             }
-            rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
-            for (&slot, values) in slots.iter().zip(&mut values) {
-                rows.reader
-                    .read_chunk_slot(chunk, slot, values)
-                    .map_err(read)?;
+            if !stream.next_pass() {
+                break;
             }
-            let columns = values.iter().map(Vec::as_slice).collect::<Vec<_>>();
-            stream.rows(&x, &columns);
         }
+        self.rows.fill_span(&mut self.shell)?;
         stream
             .finish(ctx.netlist, &self.shell, abort)
             .map_err(failed)
@@ -1138,6 +1157,31 @@ impl StoredRows {
                 continue;
             };
             *column = self.reader.read_slot(slot, first, count).map_err(failed)?;
+        }
+        Ok(())
+    }
+
+    /// Move the first and last rows into `result`'s time and saved columns: what a statement
+    /// that reads only event operands reads of the run, and the row a PARAM reads.
+    fn fill_span(&mut self, result: &mut TransientResult) -> Result<(), CliError> {
+        let rows = self.rows();
+        let ends: &[u64] = if rows > 1 { &[0, rows - 1] } else { &[0] };
+        let dir = self.store.dir.clone();
+        let failed = |error| store_error(&dir, error);
+        result.time.clear();
+        for &row in ends {
+            result
+                .time
+                .extend(self.reader.read_x(row, 1).map_err(failed)?);
+        }
+        for (slot, &target) in self.targets.iter().enumerate() {
+            let Some(column) = target.column(result) else {
+                continue;
+            };
+            column.clear();
+            for &row in ends {
+                column.extend(self.reader.read_slot(slot, row, 1).map_err(failed)?);
+            }
         }
         Ok(())
     }

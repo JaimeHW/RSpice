@@ -619,6 +619,21 @@ pub(super) fn evaluate(
     evaluation.evaluate(legacy)
 }
 
+/// Whether every waveform `statement` reads is one of `events`' step functions, so that it
+/// reads of the sampled run only what its axis's ends and first step give.
+pub(super) fn reads_only_events(
+    statement: &MeasureStatement,
+    events: Option<&EventOperands>,
+) -> bool {
+    let operands = waveform_operands(statement);
+    events.is_some_and(|events| {
+        !operands.is_empty()
+            && operands
+                .iter()
+                .all(|text| matches!(events.get(text), Some(Ok(_))))
+    })
+}
+
 /// The window start of a Xyce `TD` on an event operand: `TD` itself, there
 /// being no analog steps to open the window on.
 fn delayed(from: Option<crate::Value>, td: Option<crate::Value>) -> Option<crate::Value> {
