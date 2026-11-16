@@ -79,8 +79,8 @@ pub(super) fn run(
         *max_step,
         *uic,
         &[],
-        // The script reads the whole trajectory back.
-        basic::TransientStore::InMemory,
+        // The script reads the whole trajectory, read back from its store.
+        basic::TransientStore::ReadBack,
     )?;
     let result = ctx.finish_control_transient(outcome)?;
     Ok(Completed {

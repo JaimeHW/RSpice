@@ -66,7 +66,6 @@ pub(crate) use external_models::{
 mod capacitive_islands;
 mod force_accept;
 mod introspection;
-pub(crate) use introspection::requested_instance_parameters;
 pub use introspection::{
     DcBranchVoltageLoop, DeviceOpEntry, DeviceOpReport, ModuleOpQuantity, ModuleOpReport,
 };

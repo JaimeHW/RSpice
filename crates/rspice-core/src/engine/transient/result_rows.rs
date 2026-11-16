@@ -26,6 +26,9 @@ pub(super) struct TransientRowLayout {
     /// Nodes and branch traces the result has, saved or not.
     num_nodes: usize,
     num_branches: usize,
+    /// Constant columns after the currents: `(device, parameter, value)` of each instance
+    /// parameter a sink keeps with the rows.
+    constants: Vec<(String, String, Value)>,
 }
 
 impl TransientRowLayout {
@@ -49,7 +52,14 @@ impl TransientRowLayout {
             current_branches: saved(branch_currents, num_branches),
             num_nodes,
             num_branches,
+            constants: Vec::new(),
         }
+    }
+
+    /// This layout with `constants` as constant columns after the currents.
+    pub(super) fn with_constants(mut self, constants: Vec<(String, String, Value)>) -> Self {
+        self.constants = constants;
+        self
     }
 
     pub(super) fn num_nodes(&self) -> usize {
@@ -70,7 +80,7 @@ impl TransientRowLayout {
 
     /// Value slots in a row.
     pub(super) fn width(&self) -> usize {
-        self.voltage_nodes.len() + self.current_branches.len()
+        self.voltage_nodes.len() + self.current_branches.len() + self.constants.len()
     }
 
     /// The schema a sink is begun with: x is time, then a real signal per slot.
@@ -101,6 +111,12 @@ impl TransientRowLayout {
                 ResultSignalKind::Real,
             );
             signal.quantity = "current".to_owned();
+            signals.push(signal);
+        }
+        for (device, parameter, _) in &self.constants {
+            let mut signal = ResultSignal::new(parameter.clone(), "", ResultSignalKind::Real);
+            signal.quantity = "instance_parameter".to_owned();
+            signal.path = device.clone();
             signals.push(signal);
         }
         ResultSchema {
@@ -149,11 +165,18 @@ impl<'s> TransientRows<'s> {
 
     fn with_target(layout: TransientRowLayout, target: Target<'s>) -> Self {
         let width = layout.width();
+        // The constant columns are written once into both buffers; gathering a row fills only
+        // the voltages and currents before them.
+        let mut row = vec![0.0; width];
+        let constants = width - layout.constants.len();
+        for (slot, (_, _, value)) in row[constants..].iter_mut().zip(&layout.constants) {
+            *slot = *value;
+        }
         Self {
             target,
             layout,
-            row: vec![0.0; width],
-            next: vec![0.0; width],
+            next: row.clone(),
+            row,
             time: 0.0,
             start: 0.0,
             points: 0,

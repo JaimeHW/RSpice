@@ -13,7 +13,6 @@ mod intrinsic_voltages;
 mod power;
 
 pub use dc_branch_loops::DcBranchVoltageLoop;
-pub(crate) use instance_parameters::requested_instance_parameters;
 
 /// One device's operating-point summary line.
 #[derive(Debug, Clone)]

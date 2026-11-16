@@ -1028,14 +1028,7 @@ pub(super) fn run_transient(
             ctx.hold_shared_transient_states(state_times, states);
             result
         })
-    } else if store == TransientStore::Allowed
-        && rspice_core::engine::transient_output_reading_waveforms(ctx.netlist)
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("Transient".to_string()),
-            })?
-            .is_none()
-    {
+    } else {
         let stored = super::stored_transient::run(
             ctx,
             tstop,
@@ -1044,17 +1037,7 @@ pub(super) fn run_transient(
             &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
-        return finish_stored_transient(ctx, stored?, tstart, tstop);
-    } else {
-        let result = ctx.engine.run_tran_with_startup_mode_and_abort(
-            ctx.netlist,
-            tstop,
-            internal_max_step,
-            startup_mode,
-            &crate::abort::ProgressAbort::new(&pb),
-        );
-        pb.finish_and_clear();
-        result
+        return finish_stored_transient(ctx, stored?, tstart, tstop, store);
     };
 
     match result {
@@ -1083,12 +1066,15 @@ pub(super) fn run_transient(
     }
 }
 
-/// Whether a transient may keep its rows in a results store rather than in its result: only a
-/// caller that reads nothing of the result's waveforms afterwards can take one.
+/// What a transient's caller reads of the result once its outputs are written. Every transient
+/// writes its rows to a results store; a caller that reads the waveforms back gets them in the
+/// result, and the outputs of one that does not may stream from the store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TransientStore {
-    Allowed,
-    InMemory,
+    /// The caller reads nothing of the waveforms.
+    Streamed,
+    /// The caller reads the whole trajectory: a `.FOUR` card or a control script.
+    ReadBack,
 }
 
 /// Publish a transient whose rows are in a store, streaming them from it when the outputs allow
@@ -1098,11 +1084,15 @@ fn finish_stored_transient(
     mut stored: super::stored_transient::StoredTransient,
     tstart: f64,
     tstop: f64,
+    store: TransientStore,
 ) -> Result<TransientOutcome, CliError> {
-    let plan = stored.stream_plan(ctx, tstart)?;
+    let plan = match store {
+        TransientStore::Streamed => stored.stream_plan(ctx, tstart)?,
+        TransientStore::ReadBack => None,
+    };
     let (result, mut rows) = match plan {
         Some(_) => (stored.shell, stored.rows),
-        None => stored.into_result()?,
+        None => stored.into_result(ctx, tstop)?,
     };
     let mut output = super::stored_transient::StoredOutput {
         rows: &mut rows,

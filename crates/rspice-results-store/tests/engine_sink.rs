@@ -134,14 +134,73 @@ fn a_transient_written_through_the_store_reads_back_as_the_in_memory_result() {
     }
 }
 
+/// The run read back from `reader` into `shell`, as a frontend reads it: each voltage and current
+/// column into its node's or branch's place, each instance-parameter column as a device trace.
+fn read_back(shell: &mut TransientResult, reader: &mut SegmentReader<MemoryIo>) {
+    let rows = reader.rows() as usize;
+    shell.time = reader.read_x(0, rows).unwrap();
+    let (mut next_node, mut next_branch) = (0, 0);
+    let signals = reader.schema().signals.clone();
+    for (slot, signal) in signals.iter().enumerate() {
+        let values = reader.read_slot(slot, 0, rows).unwrap();
+        match signal.quantity.as_str() {
+            "voltage" => {
+                next_node += shell.node_names[next_node..]
+                    .iter()
+                    .position(|name| *name == signal.name)
+                    .unwrap();
+                shell.voltages[next_node] = values;
+                next_node += 1;
+            }
+            "current" => {
+                next_branch += shell.branch_names[next_branch..]
+                    .iter()
+                    .position(|name| *name == signal.name)
+                    .unwrap();
+                shell.branch_currents[next_branch] = values;
+                next_branch += 1;
+            }
+            "instance_parameter" => {
+                shell.adopt_instance_parameter(&signal.path, &signal.name, values);
+            }
+            other => panic!("unexpected {other} column"),
+        }
+    }
+}
+
 #[test]
-fn a_deck_that_reads_whole_waveforms_after_the_run_is_refused_on_the_sink_route() {
+fn a_deck_whose_outputs_read_whole_waveforms_completes_them_from_the_rows_read_back() {
     let netlist = Netlist::parse(
-        "fft\nv1 in 0 sin(0 1 1meg)\nr1 in 0 1k\n.tran 1n 4u\n.fft v(in) np=1024\n.end\n",
+        "fft\nv1 in 0 sin(0 1 1meg)\nr1 in out 1k\nc1 out 0 10p\n.tran 1n 4u\n\
+         .fft v(out) np=1024\n.print tran v(out) p(r1) r1:r\n.end\n",
     )
     .unwrap();
+    let engine = Engine::default();
+    let expected = engine
+        .run_tran_with_startup_mode_and_abort(
+            &netlist,
+            4e-6,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(!expected.fft_results.is_empty());
+    let traces = |result: &TransientResult| {
+        result
+            .device_op_traces
+            .iter()
+            .map(|trace| format!("{}:{}", trace.device_name, trace.parameter))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        traces(&expected).iter().any(|name| name == "R1:r") && traces(&expected).len() >= 2,
+        "an instance parameter and a lead power: {:?}",
+        traces(&expected)
+    );
+
     let mut store = StoreSink::new(MemoryIo::new());
-    let error = Engine::default()
+    let (mut shell, _) = engine
         .run_tran_into_sink_with_startup_mode_and_abort(
             &netlist,
             4e-6,
@@ -150,12 +209,28 @@ fn a_deck_that_reads_whole_waveforms_after_the_run_is_refused_on_the_sink_route(
             &NoAbort,
             &mut store,
         )
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains(".FFT reads the transient waveforms"),
-        "{error}"
+        .unwrap();
+    assert!(shell.fft_results.is_empty() && shell.device_op_traces.is_empty());
+    let mut reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
+    read_back(&mut shell, &mut reader);
+    engine
+        .finish_transient_from_rows(&netlist, &mut shell, 4e-6, &NoAbort)
+        .unwrap();
+    assert_eq!(traces(&shell), traces(&expected));
+    for (actual, wanted) in shell
+        .device_op_traces
+        .iter()
+        .zip(&expected.device_op_traces)
+    {
+        assert_eq!(
+            bits(&actual.values),
+            bits(&wanted.values),
+            "{}",
+            wanted.parameter
+        );
+    }
+    assert_eq!(
+        format!("{:?}", shell.fft_results),
+        format!("{:?}", expected.fft_results)
     );
-    assert!(store.into_io().unwrap().bytes().is_empty());
 }

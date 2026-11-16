@@ -49,7 +49,6 @@ use crate::numerics::integration::{
 use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
 pub use post_results::{evaluate_transient_fourier_results, evaluate_transient_post_results};
-pub use sink_route::transient_output_reading_waveforms;
 use std::collections::{HashMap, HashSet};
 
 use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};
@@ -3590,9 +3589,12 @@ impl Engine {
     /// run returns, value for value. The returned result carries everything
     /// else and leaves its time and waveform columns empty. The run calls
     /// `begin`, `row` and `amend_open_row`; this function then calls `end`
-    /// with how the run ended. A deck with `.FFT` cards, lead-power outputs
-    /// or instance-parameter outputs, which read the whole waveforms once
-    /// the run ends, is refused before it solves.
+    /// with how the run ended. Each instance parameter the deck outputs is a
+    /// constant column after the currents, named by its parameter with the
+    /// device as its path. The `.FFT` spectra and lead-power outputs, which
+    /// read the whole waveforms once the run ends, are left to the caller:
+    /// [`Engine::finish_transient_from_rows`] completes them once the rows are
+    /// read back.
     pub fn run_tran_into_sink_with_startup_mode_and_abort(
         &self,
         netlist: &Netlist,
@@ -4776,23 +4778,11 @@ impl Engine {
         // once from the circuit as built rather than recorded at every step.
         let instance_parameters = circuit.requested_static_instance_parameters(netlist);
         let lead_power = lead_power::requested_lead_power(netlist)?;
-        if plan.result_sink.is_some() {
-            let reads_waveforms = if !netlist.fft_analyses.is_empty() {
-                Some(".FFT")
-            } else if !lead_power.is_empty() {
-                Some("a lead-power output")
-            } else if !instance_parameters.is_empty() {
-                Some("an instance-parameter output")
-            } else {
-                None
-            };
-            if let Some(output) = reads_waveforms {
-                return Err(SimulationError::Circuit(format!(
-                    "{output} reads the transient waveforms once the run ends, which a run \
-                     writing its rows to a result sink does not keep"
-                )));
-            }
-        }
+        // A run writing to a result sink writes its instance parameters as
+        // constant columns of its rows; its `.FFT` spectra and lead power read
+        // the whole waveforms, which its caller completes once it has read
+        // the rows back (`Engine::finish_transient_from_rows`).
+        let writes_to_sink = plan.result_sink.is_some();
         let (mut result, end, checkpoints) = self.run_tran_prepared(
             netlist,
             checkpoint_netlist,
@@ -4805,8 +4795,10 @@ impl Engine {
                 resume_continuation,
             },
         )?;
-        result.record_static_instance_parameters(&instance_parameters);
-        lead_power::record_lead_power(&lead_power, &mut result);
+        if !writes_to_sink {
+            result.record_static_instance_parameters(&instance_parameters);
+            lead_power::record_lead_power(&lead_power, &mut result);
+        }
         Ok((result, end, checkpoints))
     }
 
@@ -5091,7 +5083,9 @@ impl Engine {
             } else {
                 None
             };
-            result.fft_results = fft::evaluate(self, netlist, &result, tstop, abort)?;
+            if result_sink.is_none() {
+                result.fft_results = fft::evaluate(self, netlist, &result, tstop, abort)?;
+            }
             self.ensure_result_values(
                 Self::transient_result_value_count(&result)
                     .saturating_add(retained_scheduled_checkpoint_values)
@@ -6273,7 +6267,12 @@ impl Engine {
                 branch_currents.len(),
             );
             match external_sink.as_deref_mut() {
-                Some(sink) => TransientRows::to_sink(layout, sink),
+                // An instance parameter cannot move during the run: a sink
+                // keeps it as a constant column of every row.
+                Some(sink) => TransientRows::to_sink(
+                    layout.with_constants(circuit.requested_static_instance_parameters(netlist)),
+                    sink,
+                ),
                 None => TransientRows::in_memory(layout, trace_capacity),
             }
         };
@@ -13836,7 +13835,9 @@ impl Engine {
             hdl_variables.mark_precision(&mut result, circuit.hdl_trace_precision());
             hdl_variables.record_sources(&mut result, &circuit);
         }
-        result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
+        if rows.keeps_rows() {
+            result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
+        }
         retained_result_values =
             Self::transient_result_value_count(&result).saturating_add(rows.unfilled_values());
         self.ensure_result_values(

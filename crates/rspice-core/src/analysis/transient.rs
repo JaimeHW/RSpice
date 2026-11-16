@@ -1669,6 +1669,23 @@ impl TransientResult {
         }
     }
 
+    /// Take back an instance parameter a result sink kept as a constant column of the run's
+    /// rows, as [`Self::record_static_instance_parameters`] records it for a run kept in memory:
+    /// as a device trace, unless the device already reported it at every sample.
+    pub fn adopt_instance_parameter(&mut self, device: &str, parameter: &str, values: Vec<Value>) {
+        if self
+            .try_device_op_waveform_named(device, parameter)
+            .is_some()
+        {
+            return;
+        }
+        self.device_op_traces.push(TransientDeviceOpTrace {
+            device_name: device.to_owned(),
+            parameter: parameter.to_owned(),
+            values,
+        });
+    }
+
     /// Append committed XSPICE digital values at an accepted transient time.
     pub(crate) fn record_digital_snapshot(
         &mut self,

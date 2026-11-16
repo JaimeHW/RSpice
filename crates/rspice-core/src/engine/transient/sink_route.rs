@@ -1,24 +1,27 @@
-//! Which transient outputs read the whole waveforms once the run ends.
+//! What a transient written to a result sink leaves to its caller.
 
-use crate::{Netlist, SimulationError};
+use super::{fft, lead_power};
+use crate::analysis::transient::TransientResult;
+use crate::{AbortSignal, Engine, Netlist, SimulationError, Value};
 
-/// The first output of `netlist` that reads a transient's whole waveforms once the run ends: an
-/// `.FFT` card, a lead-power output or an instance-parameter output.
-///
-/// A run that writes its rows to a result sink does not keep them, and refuses such a deck before
-/// it solves. This answers from the deck alone, before anything is built, and answers for every
-/// request the deck makes, including one no device would answer.
-pub fn transient_output_reading_waveforms(
-    netlist: &Netlist,
-) -> Result<Option<&'static str>, SimulationError> {
-    if !netlist.fft_analyses.is_empty() {
-        return Ok(Some(".FFT"));
+impl Engine {
+    /// Complete the outputs of a transient whose rows a result sink kept, once the caller has
+    /// read them back into `result`: the `.FFT` spectra and the lead-power outputs, which read
+    /// the whole waveforms after the run. `tstop` is the stop time the run was given.
+    ///
+    /// The run itself wrote its instance parameters as constant columns of its rows, which
+    /// [`TransientResult::adopt_instance_parameter`] takes back.
+    pub fn finish_transient_from_rows(
+        &self,
+        netlist: &Netlist,
+        result: &mut TransientResult,
+        tstop: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        result.fft_results = fft::evaluate(&engine, netlist, result, tstop, abort)?;
+        let requests = lead_power::requested_lead_power(netlist)?;
+        lead_power::record_lead_power(&requests, result);
+        Ok(())
     }
-    if !super::lead_power::requested_lead_power(netlist)?.is_empty() {
-        return Ok(Some("a lead-power output"));
-    }
-    if !crate::circuit::requested_instance_parameters(netlist).is_empty() {
-        return Ok(Some("an instance-parameter output"));
-    }
-    Ok(None)
 }

@@ -32,6 +32,9 @@ static NEXT_STORE: AtomicU64 = AtomicU64::new(0);
 enum SlotTarget {
     Voltage(usize),
     Current(usize),
+    /// An instance parameter the run kept as a constant column: its index in
+    /// [`StoredRows::parameters`].
+    Parameter(usize),
 }
 
 /// A transient whose rows are in a store: the result holds everything else.
@@ -46,6 +49,8 @@ pub(super) struct StoredRows {
     store: RunStore,
     reader: SegmentReader<FileIo>,
     targets: Vec<SlotTarget>,
+    /// `(device, parameter)` of each instance-parameter column.
+    parameters: Vec<(String, String)>,
     receipt: SinkReceipt,
 }
 
@@ -119,6 +124,13 @@ pub(super) fn run(
     Ok(StoredTransient {
         shell,
         rows: StoredRows {
+            parameters: reader
+                .schema()
+                .signals
+                .iter()
+                .filter(|signal| signal.quantity == "instance_parameter")
+                .map(|signal| (signal.path.clone(), signal.name.clone()))
+                .collect(),
             store,
             reader,
             targets,
@@ -133,9 +145,14 @@ fn slot_targets(
     reader: &SegmentReader<FileIo>,
     shell: &TransientResult,
 ) -> Result<Vec<SlotTarget>, String> {
-    let (mut next_node, mut next_branch) = (0usize, 0usize);
+    let (mut next_node, mut next_branch, mut parameters) = (0usize, 0usize, 0usize);
     let mut targets = Vec::with_capacity(reader.slots());
     for signal in &reader.schema().signals {
+        if signal.quantity == "instance_parameter" {
+            targets.push(SlotTarget::Parameter(parameters));
+            parameters += 1;
+            continue;
+        }
         let (names, next, voltage) = match signal.quantity.as_str() {
             "voltage" => (&shell.node_names, &mut next_node, true),
             "current" => (&shell.branch_names, &mut next_branch, false),
@@ -167,10 +184,47 @@ fn slot_targets(
 }
 
 impl StoredTransient {
-    /// Read every row back into the result, which then equals the in-memory run's.
-    pub(super) fn into_result(mut self) -> Result<(TransientResult, StoredRows), CliError> {
+    /// Read every row back into the result and complete the outputs that read whole waveforms
+    /// (`.FFT`, lead power), after which it equals the in-memory run's.
+    pub(super) fn into_result(
+        mut self,
+        ctx: &RunContext<'_>,
+        tstop: f64,
+    ) -> Result<(TransientResult, StoredRows), CliError> {
         let rows = self.rows.rows();
         self.rows.fill(&mut self.shell, 0, rows)?;
+        let parameters = std::mem::take(&mut self.rows.parameters);
+        for (slot, &target) in self.rows.targets.iter().enumerate() {
+            let SlotTarget::Parameter(index) = target else {
+                continue;
+            };
+            let values = usize::try_from(rows)
+                .map_err(|_| CliError::InternalError {
+                    message: "a transient store holds more rows than this host can address"
+                        .to_owned(),
+                })
+                .and_then(|count| {
+                    self.rows
+                        .reader
+                        .read_slot(slot, 0, count)
+                        .map_err(|error| store_error(&self.rows.store.dir, error))
+                })?;
+            let (device, parameter) = &parameters[index];
+            self.shell
+                .adopt_instance_parameter(device, parameter, values);
+        }
+        self.rows.parameters = parameters;
+        ctx.engine
+            .finish_transient_from_rows(
+                ctx.netlist,
+                &mut self.shell,
+                tstop,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|source| CliError::CoreSimulationError {
+                source,
+                analysis: Some("Transient".to_string()),
+            })?;
         Ok((self.shell, self.rows))
     }
 
@@ -205,7 +259,10 @@ impl StoredTransient {
         let every_step = netlist.options.output_time_points.is_empty()
             && netlist.options.output_interval_schedule.is_none();
         let rows = self.rows.rows();
+        let parameters = !self.rows.parameters.is_empty();
         if !format_streams
+            || parameters
+            || !netlist.fft_analyses.is_empty()
             || prints
             || !every_step
             || !netlist.measurements.is_empty()
@@ -302,6 +359,7 @@ fn probe_plan(
     let column = |target: SlotTarget| match target {
         SlotTarget::Voltage(node) => shell.voltages.get(node),
         SlotTarget::Current(branch) => shell.branch_currents.get(branch),
+        SlotTarget::Parameter(_) => None,
     };
     let inventory = match rspice_core::execution::transient_projection_signals(shell) {
         Ok(inventory) => inventory,
@@ -385,11 +443,12 @@ impl StoredRows {
         let failed = |error| store_error(&dir, error);
         result.time = self.reader.read_x(first, count).map_err(failed)?;
         for (slot, &target) in self.targets.iter().enumerate() {
-            let values = self.reader.read_slot(slot, first, count).map_err(failed)?;
             let column = match target {
                 SlotTarget::Voltage(node) => result.voltages.get_mut(node),
                 SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
+                SlotTarget::Parameter(_) => continue,
             };
+            let values = self.reader.read_slot(slot, first, count).map_err(failed)?;
             if let Some(column) = column {
                 *column = values;
             }
@@ -403,6 +462,7 @@ impl StoredRows {
             let column = match target {
                 SlotTarget::Voltage(node) => result.voltages.get_mut(node),
                 SlotTarget::Current(branch) => result.branch_currents.get_mut(branch),
+                SlotTarget::Parameter(_) => None,
             };
             if let Some(column) = column {
                 *column = Vec::new();
@@ -451,6 +511,10 @@ impl StoredRows {
                 .branch_names
                 .get(branch)
                 .map_or("branch", String::as_str),
+            SlotTarget::Parameter(index) => self
+                .parameters
+                .get(index)
+                .map_or("parameter", |(_, parameter)| parameter.as_str()),
         };
         Err(super::shared::non_finite_error(
             "Transient",

@@ -206,7 +206,7 @@ pub use transient::{
     XyceRestartJobPlan, XyceRestartPlanError, evaluate_transient_fourier_results,
     evaluate_transient_post_results, netlist_fingerprint,
     transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain_with_alpha,
-    transient_output_reading_waveforms, xyce_restart_schedule_is_due,
+    xyce_restart_schedule_is_due,
 };
 pub use waveform::{
     CompressionConfig, TRANSIENT_COMPRESSION_REPORT_VERSION, TransientAnalysisIdentity,
