@@ -812,6 +812,43 @@ impl GenerateConstruct {
         }
     }
 
+    /// Every block the construct writes, those of the constructs nested in
+    /// them included, in source order: each branch of a conditional or a
+    /// case, and a loop's body once, as the source holds them before any is
+    /// chosen or unrolled.
+    pub fn written_blocks(&self) -> Vec<&GenerateBlock> {
+        let mut blocks = Vec::new();
+        self.collect_blocks(&mut blocks);
+        blocks
+    }
+
+    fn collect_blocks<'a>(&'a self, blocks: &mut Vec<&'a GenerateBlock>) {
+        let mut visit = |block: &'a GenerateBlock| {
+            blocks.push(block);
+            for nested in &block.nested {
+                nested.collect_blocks(blocks);
+            }
+        };
+        match self {
+            Self::Loop(loop_) => visit(&loop_.body),
+            Self::Conditional(conditional) => {
+                visit(&conditional.then_block);
+                if let Some(block) = &conditional.else_block {
+                    visit(block);
+                }
+            }
+            Self::Case(case) => {
+                for item in &case.items {
+                    visit(&item.block);
+                }
+                if let Some(block) = &case.default {
+                    visit(block);
+                }
+            }
+            Self::Block(block) => visit(block),
+        }
+    }
+
     /// The keyword that opened it, for a diagnostic that has to name it.
     pub const fn keyword(&self) -> &'static str {
         match self {

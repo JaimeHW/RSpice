@@ -128,6 +128,9 @@ pub struct Parser<'a> {
     /// The language of the text at the cursor, which the lexer's
     /// [`TokenKind::KeywordSet`] tokens set between design elements.
     language: SourceLanguage,
+    /// Whether a module's generate regions and instance arrays are unrolled
+    /// as it is read; see [`Self::reading_syntax_only`].
+    elaborates: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -165,7 +168,19 @@ impl<'a> Parser<'a> {
             unconnected_drive: None,
             delay_select: Default::default(),
             language: SourceLanguage::VerilogAms,
+            elaborates: true,
         }
+    }
+
+    /// Read the source as it is written: a generate region stays in
+    /// [`Module::generates`] and an array of instances stays one instance,
+    /// so no constant expression is evaluated and no constant function runs.
+    /// A reader that wants names and places, not the elaborated design (an
+    /// editor's outline, its symbols), reads this way and cannot be held by a
+    /// constant function that does not end.
+    pub fn reading_syntax_only(mut self) -> Self {
+        self.elaborates = false;
+        self
     }
 
     /// Keep `select`'s value of each `min : typ : max` expression (IEEE
@@ -779,6 +794,10 @@ impl<'a> Parser<'a> {
         // reads the module the author would have had to write by hand, and
         // needs no arm for a construct that contributes no run-time behaviour
         // of its own.
+        if !self.elaborates {
+            scope_rules::reject_block_name_collisions(&module)?;
+            return Ok(module);
+        }
         let template = (!module.generates.is_empty()
             || !module.hierarchical_names.is_empty()
             || generate::declares_instance_arrays(&module))
@@ -4663,6 +4682,44 @@ mod tests {
             }
         }
         panic!("no module in source");
+    }
+
+    /// A source read as written runs no constant function: a generate loop
+    /// bounded by one that never returns is the loop the author wrote. Read
+    /// to elaborate, the same source runs the function, which the thread's
+    /// abort hook ends.
+    #[test]
+    fn a_syntax_only_read_leaves_generates_as_written_and_runs_no_constant_function() {
+        let source = "module m;\n\
+                      \x20 function integer spin(input integer n);\n\
+                      \x20   begin spin = n; while (spin > 0) spin = spin + 0; end\n\
+                      \x20 endfunction\n\
+                      \x20 localparam integer N = spin(1);\n\
+                      \x20 genvar i;\n\
+                      \x20 generate for (i = 0; i < N; i = i + 1) begin : g\n\
+                      \x20   wire w;\n\
+                      \x20 end endgenerate\n\
+                      endmodule\n";
+        let tokens = Lexer::new(source, SourceId::new(0))
+            .collect_tokens()
+            .expect("lex failed");
+        let file = Parser::new(&tokens)
+            .reading_syntax_only()
+            .parse()
+            .expect("the source reads as written");
+        let Some(Item::Module(module)) = file.items.first() else {
+            panic!("one module: {:?}", file.items);
+        };
+        assert_eq!(module.generates.len(), 1);
+        assert!(module.generate_template.is_none());
+
+        let elaborated = rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || {
+            Parser::new(&tokens).parse()
+        });
+        assert!(
+            elaborated.is_err(),
+            "the loop's bound is no constant once its function is stopped"
+        );
     }
 
     fn parse_error(source: &str) -> ParseError {
