@@ -10,6 +10,7 @@ mod foundation_defaults;
 mod importable;
 pub mod lib_parser;
 mod manager;
+mod model_defaults;
 mod parser;
 mod spice_packs;
 
@@ -23,6 +24,9 @@ pub use lib_parser::{
     ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,
 };
 pub use manager::ModelType;
+pub use model_defaults::{
+    DEVICE_MODEL_DEFAULTS, DeviceModelDefaults, ModelParameterDefault, device_model_defaults,
+};
 // The Spectre model-library adapter is source text in, canonical SPICE source
 // text out — a dialect front-end, so it lives in the parsing layer beside the
 // include expander that also runs it. It keeps its published path here because

@@ -49,6 +49,8 @@ mod ground_reference;
 mod igbt;
 mod lead_current_meters;
 mod machine;
+#[cfg(test)]
+mod model_defaults_drift;
 mod model_resolution;
 mod model_safety;
 mod resistor_currents;
