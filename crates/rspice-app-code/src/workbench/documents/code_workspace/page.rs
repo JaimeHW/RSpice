@@ -242,6 +242,9 @@ pub struct VerilogALiveCheck {
 pub struct RunningVerilogACheck {
     pub token: VerilogASourceOperationToken,
     pub receiver: Arc<Mutex<mpsc::Receiver<Vec<super::CodeEditorDiagnostic>>>>,
+    /// Stops the check; dropped with the last clone of this check (the
+    /// project closed, or the evidence voided), it stops the check too.
+    pub cancellation: CompileCancellation,
 }
 
 impl VerilogAWorkbenchState {

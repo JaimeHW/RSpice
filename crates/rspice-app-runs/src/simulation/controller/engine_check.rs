@@ -119,36 +119,41 @@ impl SimulationController {
         #[cfg(any(test, feature = "test-support"))]
         let hooks = self.preflight_test_hooks.take_for_worker();
         spawn_or_inline(move || {
-            #[cfg(any(test, feature = "test-support"))]
-            hooks.enter("preparing");
-            let prepared = frozen.prepare(&cancel, &|progress| {
-                set_stage(&stage, PreflightStage::Preparing(progress));
-            });
-            if cancel.load(Ordering::Relaxed) {
-                return;
-            }
-            let verdict = match prepared {
-                Err(error) => WorkerVerdict::NotPrepared(error),
-                Ok((snapshot, source_files)) => {
-                    set_stage(
-                        &stage,
-                        PreflightStage::EngineChecking(DeckBuildProgress::default()),
-                    );
-                    #[cfg(any(test, feature = "test-support"))]
-                    hooks.enter("engine checking");
-                    let check = snapshot.engine_check_reporting(&cancel, &|progress| {
-                        set_stage(&stage, PreflightStage::EngineChecking(progress));
-                    });
-                    WorkerVerdict::Checked {
-                        snapshot: Box::new(snapshot),
-                        check,
-                        source_files,
-                    }
+            // A constant function or a loop the preparation evaluates (a
+            // generate bound, a parameter) polls the same flag, so a cancel
+            // ends it too.
+            rspice_core::engine::with_loop_abort(&cancel, || {
+                #[cfg(any(test, feature = "test-support"))]
+                hooks.enter("preparing");
+                let prepared = frozen.prepare(&cancel, &|progress| {
+                    set_stage(&stage, PreflightStage::Preparing(progress));
+                });
+                if cancel.load(Ordering::Relaxed) {
+                    return;
                 }
-            };
-            if !cancel.load(Ordering::Relaxed) {
-                let _ = sender.send(verdict);
-            }
+                let verdict = match prepared {
+                    Err(error) => WorkerVerdict::NotPrepared(error),
+                    Ok((snapshot, source_files)) => {
+                        set_stage(
+                            &stage,
+                            PreflightStage::EngineChecking(DeckBuildProgress::default()),
+                        );
+                        #[cfg(any(test, feature = "test-support"))]
+                        hooks.enter("engine checking");
+                        let check = snapshot.engine_check_reporting(&cancel, &|progress| {
+                            set_stage(&stage, PreflightStage::EngineChecking(progress));
+                        });
+                        WorkerVerdict::Checked {
+                            snapshot: Box::new(snapshot),
+                            check,
+                            source_files,
+                        }
+                    }
+                };
+                if !cancel.load(Ordering::Relaxed) {
+                    let _ = sender.send(verdict);
+                }
+            });
         });
         self.preflight = Some(pending);
         Ok(())

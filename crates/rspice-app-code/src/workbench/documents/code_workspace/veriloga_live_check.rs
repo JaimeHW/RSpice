@@ -51,6 +51,16 @@ pub(crate) fn drive_veriloga_live_check(
         }
     }
     let token = selected.token(project_id);
+    // A check of a source that has moved on is stopped: what it finds is of
+    // another text, and a constant function it is stuck in must not hold
+    // the next check up.
+    if let Some(running) = state
+        .live_check
+        .running
+        .take_if(|running| running.token != token)
+    {
+        running.cancellation.cancel();
+    }
     if state.pending.is_some()
         || super::veriloga_current_diagnostics(state, project_id, selected).is_some()
     {
@@ -71,22 +81,25 @@ pub(crate) fn drive_veriloga_live_check(
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(pause - (now - since)));
         return;
     }
-    // One check at a time: a check of an earlier text answers first, and
-    // its answer wakes the next frame.
+    // One check at a time: a check of this text answers first, and its
+    // answer wakes the next frame.
     if live.running.is_some() {
         return;
     }
     let (sender, receiver) = mpsc::channel();
     let wake = ctx.clone();
+    let cancellation = super::page::CompileCancellation::default();
     rspice_simulation::project_veriloga::live_check::start_check(
         selected.bundle().clone(),
         selected.selected_module().map(str::to_owned),
+        cancellation.clone(),
         sender,
         move || wake.request_repaint(),
     );
     live.running = Some(RunningVerilogACheck {
         token,
         receiver: Arc::new(Mutex::new(receiver)),
+        cancellation,
     });
 }
 

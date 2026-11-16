@@ -8,7 +8,7 @@ use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, PipelineControl, RuntimeCompileReport};
 use rspice_vocabulary::diagnostics::{DiagnosticSeverity, SourceDiagnostic};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Weak, mpsc};
 
 #[cfg(any(target_arch = "wasm32", test))]
 mod worker;
@@ -22,21 +22,68 @@ pub enum VerilogACompileOutcome {
 }
 
 /// Stops one compile running off the editor's thread: a native compile at the
-/// compiler's next step, the browser's by ending its worker.
+/// compiler's next step, or inside a constant function or loop it is
+/// evaluating, the browser's by ending its worker.
+///
+/// The requester keeps it (and its clones) for as long as it wants the
+/// result. A native compile whose requester has dropped every clone (the
+/// project was closed, or the compile was let go) stops as if cancelled:
+/// nothing is left to read what it would find.
 #[derive(Debug, Clone, Default)]
-pub struct CompileCancellation(Arc<AtomicBool>);
+pub struct CompileCancellation {
+    stopped: Arc<AtomicBool>,
+    requester: Arc<()>,
+}
 
 impl CompileCancellation {
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.stopped.store(true, Ordering::Relaxed);
         #[cfg(target_arch = "wasm32")]
         worker::cancel();
+    }
+
+    /// What the compile itself holds: the cancellation, without keeping the
+    /// requester's interest in the result alive.
+    pub fn job(&self) -> CompileJob {
+        CompileJob {
+            stopped: Arc::clone(&self.stopped),
+            requester: Arc::downgrade(&self.requester),
+        }
     }
 }
 
 impl PipelineControl for CompileCancellation {
     fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.stopped.load(Ordering::Relaxed)
+    }
+}
+
+/// A compile's own hold on its [`CompileCancellation`]: cancelled once the
+/// requester cancels or keeps no clone of it.
+#[derive(Debug)]
+pub struct CompileJob {
+    stopped: Arc<AtomicBool>,
+    requester: Weak<()>,
+}
+
+impl CompileJob {
+    /// Run `body`, the job's work, with this job as the thread's loop-abort
+    /// hook, so a constant function or loop it evaluates (a generate bound, a
+    /// parameter's value) stops with the job instead of holding the thread.
+    pub fn run<R>(&self, body: impl FnOnce() -> R) -> R {
+        rspice_core::engine::with_loop_abort(self, body)
+    }
+}
+
+impl PipelineControl for CompileJob {
+    fn is_cancelled(&self) -> bool {
+        self.stopped.load(Ordering::Relaxed) || self.requester.strong_count() == 0
+    }
+}
+
+impl rspice_core::abort_signal::AbortSignal for CompileJob {
+    fn is_aborted(&self) -> bool {
+        PipelineControl::is_cancelled(self)
     }
 }
 
@@ -101,17 +148,21 @@ pub fn start_compile(
 ) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let job = cancellation.job();
+        drop(cancellation);
         std::thread::spawn(move || {
-            let outcome = project_compile_outcome(
-                &bundle,
-                super::compile_project_bundle_source_with_control(
+            let outcome = job.run(|| {
+                project_compile_outcome(
                     &bundle,
-                    selected_module.as_deref(),
-                    cells.as_deref(),
-                    delay_select,
-                    &cancellation,
-                ),
-            );
+                    super::compile_project_bundle_source_with_control(
+                        &bundle,
+                        selected_module.as_deref(),
+                        cells.as_deref(),
+                        delay_select,
+                        &job,
+                    ),
+                )
+            });
             let _ = sender.send(outcome);
             wake();
         });
@@ -138,22 +189,48 @@ mod tests {
     use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
     use rspice_design_model::cell_view::CellViewRef;
 
-    fn module() -> ProjectSourceBundle {
+    fn bundle(source: &str) -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(CellViewRef::new("lib", "cell", "veriloga")),
             ProjectSourceLanguage::VerilogA,
             "m.va",
-            "`include \"disciplines.vams\"\nmodule m(a); inout a; electrical a;\nanalog V(a) <+ 1.0;\nendmodule\n",
+            source,
             [],
             [],
         )
         .expect("the bundle is valid")
     }
 
-    fn compiled(cancellation: CompileCancellation) -> VerilogACompileOutcome {
+    fn module() -> ProjectSourceBundle {
+        bundle(
+            "`include \"disciplines.vams\"\nmodule m(a); inout a; electrical a;\nanalog V(a) <+ 1.0;\nendmodule\n",
+        )
+    }
+
+    /// A module whose generate loop is bounded by a constant function that
+    /// never returns: its compile runs until it is stopped.
+    fn spinning_module() -> ProjectSourceBundle {
+        bundle(
+            "`include \"disciplines.vams\"\n\
+             module m(a); inout a; electrical a;\n\
+             \x20 function integer spin(input integer n);\n\
+             \x20   begin spin = n; while (spin > 0) spin = spin + 0; end\n\
+             \x20 endfunction\n\
+             \x20 localparam integer N = spin(1);\n\
+             \x20 genvar i;\n\
+             \x20 generate for (i = 0; i < N; i = i + 1) begin : g end endgenerate\n\
+             \x20 analog V(a) <+ 1.0;\n\
+             endmodule\n",
+        )
+    }
+
+    fn start(
+        bundle: ProjectSourceBundle,
+        cancellation: CompileCancellation,
+    ) -> mpsc::Receiver<VerilogACompileOutcome> {
         let (sender, receiver) = mpsc::channel();
         start_compile(
-            module(),
+            bundle,
             Some("m".to_owned()),
             None,
             DigitalDelaySelect::default(),
@@ -163,8 +240,17 @@ mod tests {
         )
         .expect("a native compile always starts");
         receiver
+    }
+
+    fn answer(receiver: &mpsc::Receiver<VerilogACompileOutcome>) -> VerilogACompileOutcome {
+        receiver
             .recv_timeout(std::time::Duration::from_secs(120))
             .expect("the compile answers")
+    }
+
+    /// The compile's answer, its requester keeping `cancellation` meanwhile.
+    fn compiled(cancellation: CompileCancellation) -> VerilogACompileOutcome {
+        answer(&start(module(), cancellation.clone()))
     }
 
     #[test]
@@ -172,6 +258,31 @@ mod tests {
         assert!(matches!(
             compiled(CompileCancellation::default()),
             VerilogACompileOutcome::Success(_)
+        ));
+    }
+
+    /// A compile held in a constant function stops when it is cancelled, and
+    /// when its requester lets go of it, as when the project closes.
+    #[test]
+    fn a_compile_held_in_a_constant_function_stops_with_its_job() {
+        let cancellation = CompileCancellation::default();
+        let cancelled = start(spinning_module(), cancellation.clone());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(matches!(
+            cancelled.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        cancellation.cancel();
+        assert!(matches!(
+            answer(&cancelled),
+            VerilogACompileOutcome::Failure(_)
+        ));
+
+        let abandoned = start(spinning_module(), CompileCancellation::default());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(matches!(
+            answer(&abandoned),
+            VerilogACompileOutcome::Failure(_)
         ));
     }
 

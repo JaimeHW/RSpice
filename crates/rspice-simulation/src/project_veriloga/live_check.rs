@@ -7,10 +7,14 @@
 use std::sync::Arc;
 
 use rspice_design::project_sources::ProjectSourceBundle;
-use rspice_veriloga::{CompileDiagnosticSeverity, VerilogACompiler};
+use rspice_veriloga::{
+    CompileDiagnosticSeverity, NoPipelineControl, PipelineControl, VerilogACompiler,
+};
 use rspice_vocabulary::diagnostics::SourceDiagnostic;
 
 use super::ProjectVerilogACompileError;
+#[cfg(not(target_arch = "wasm32"))]
+use super::compile_service::CompileCancellation;
 use super::diagnostics::{ProjectCompileDiagnostic, ProjectDiagnosticSeverity};
 
 /// What reading `bundle` through semantic analysis finds: the errors that
@@ -21,7 +25,17 @@ pub fn check_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> Vec<SourceDiagnostic> {
-    let findings = match read_source(bundle, selected_module) {
+    check_source_with_control(bundle, selected_module, &NoPipelineControl)
+}
+
+/// [`check_source`], stopped between its phases once `control` is
+/// cancelled.
+fn check_source_with_control(
+    bundle: &ProjectSourceBundle,
+    selected_module: Option<&str>,
+    control: &dyn PipelineControl,
+) -> Vec<SourceDiagnostic> {
+    let findings = match read_source(bundle, selected_module, control) {
         Ok(warnings) => warnings,
         Err(error) => super::diagnostics::project_compile_outcome(bundle, Err(error))
             .err()
@@ -33,6 +47,7 @@ pub fn check_source(
 fn read_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
+    control: &dyn PipelineControl,
 ) -> Result<Vec<ProjectCompileDiagnostic>, ProjectVerilogACompileError> {
     let resolved = super::build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(ProjectVerilogACompileError::BuildProfile)?;
@@ -50,7 +65,11 @@ fn read_source(
         super::build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
             .map_err(ProjectVerilogACompileError::SourceClosure)?;
     let prepared = VerilogACompiler::new(resolved.profile.compiler_options())
-        .prepare_virtual_runtime_source(&sources, super::project_virtual_compile_limits())
+        .prepare_virtual_runtime_source_with_control(
+            &sources,
+            super::project_virtual_compile_limits(),
+            control,
+        )
         .map_err(|failure| ProjectVerilogACompileError::Virtual(Box::new(failure)))?;
     Ok(prepared
         .diagnostics()
@@ -77,16 +96,22 @@ fn read_source(
 }
 
 /// Run [`check_source`] on a thread of its own, send what it finds, and
-/// call `wake` so the editor shows it.
+/// call `wake` so the editor shows it. The check stops, a constant function
+/// it is evaluating included, once `cancellation` is cancelled or its
+/// requester keeps no clone of it (see [`CompileCancellation`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_check(
     bundle: ProjectSourceBundle,
     selected_module: Option<String>,
+    cancellation: CompileCancellation,
     sender: std::sync::mpsc::Sender<Vec<SourceDiagnostic>>,
     wake: impl Fn() + Send + 'static,
 ) {
+    let job = cancellation.job();
+    drop(cancellation);
     std::thread::spawn(move || {
-        let findings = check_source(&bundle, selected_module.as_deref());
+        let findings =
+            job.run(|| check_source_with_control(&bundle, selected_module.as_deref(), &job));
         let _ = sender.send(findings);
         wake();
     });
@@ -110,6 +135,36 @@ mod tests {
             [],
         )
         .expect("a valid bundle")
+    }
+
+    /// A check held in a constant function that never returns stops once
+    /// the editor lets go of it: a later edit, or the project closing.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_check_held_in_a_constant_function_stops_once_its_requester_lets_go() {
+        use std::sync::mpsc;
+        let spinning = PROBE.replace(
+            "  real g;\n",
+            "  function integer spin(input integer n);\n    begin spin = n; while (spin > 0) spin = spin + 0; end\n  endfunction\n  localparam integer N = spin(1);\n  genvar i;\n  generate for (i = 0; i < N; i = i + 1) begin : s end endgenerate\n  real g;\n",
+        );
+        let (sender, receiver) = mpsc::channel();
+        let cancellation = CompileCancellation::default();
+        start_check(
+            bundle(&spinning),
+            Some("probe".to_owned()),
+            cancellation.clone(),
+            sender,
+            || {},
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        drop(cancellation);
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(120))
+            .expect("the stopped check answers");
     }
 
     #[test]

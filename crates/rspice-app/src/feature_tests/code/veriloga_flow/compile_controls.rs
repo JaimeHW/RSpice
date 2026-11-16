@@ -2,7 +2,7 @@
 //! frames: its keys, its Cancel, its count and what it says about a result it
 //! could not use.
 
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use egui::Key;
@@ -209,4 +209,69 @@ fn a_finished_compile_says_how_long_it_took_until_the_source_changes() {
     super::super::veriloga_interface_tests::edit_source(&mut user.app, &format!("{text}// x\n"));
     user.settle();
     assert_ne!(strip(&user).as_deref(), Some("Compiled · 1.5 s"));
+}
+
+/// A compile the editor starts that is held in a constant function that
+/// never returns (the op-amp with a generate loop bounded by one) ends when
+/// Cancel stops it, when an edit voids it and when the project closes: its
+/// thread answers instead of spinning on.
+#[test]
+fn a_compile_held_in_a_constant_function_ends_on_cancel_an_edit_or_closing() {
+    const SPIN: &str = "  function integer spin(input integer n);\n    begin spin = n; while (spin > 0) spin = spin + 0; end\n  endfunction\n  localparam integer N = spin(1);\n  genvar i;\n  generate for (i = 0; i < N; i = i + 1) begin : g end endgenerate\n";
+    const DECLARED: &str = "  real vin, vslew, vtarget, tau;\n";
+    for stop in ["cancel", "edit", "close"] {
+        let mut user = op_amp();
+        let text = source(&user).replace(DECLARED, &format!("{DECLARED}{SPIN}"));
+        assert!(text.contains(SPIN), "the source spins");
+        super::super::veriloga_interface_tests::edit_source(&mut user.app, &text);
+        user.settle();
+        user.click(EDITOR);
+        user.key(Key::F7, NONE);
+        user.wait_for("the compile to start", |app| {
+            app.state.code.code_workspace.veriloga.pending.is_some()
+        });
+        let receiver = Arc::clone(
+            &user
+                .app
+                .state
+                .code
+                .code_workspace
+                .veriloga
+                .pending
+                .as_ref()
+                .expect("the compile is running")
+                .receiver,
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            matches!(
+                receiver.lock().expect("the channel").try_recv(),
+                Err(mpsc::TryRecvError::Empty)
+            ),
+            "{stop}: the compile is held in the function"
+        );
+
+        match stop {
+            "cancel" => user.click(CANCEL),
+            "edit" => {
+                super::super::veriloga_interface_tests::edit_source(
+                    &mut user.app,
+                    &format!("{text}// x\n"),
+                );
+                user.settle();
+            }
+            _ => {
+                assert!(user.app.state.close_project_discard(
+                    rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+                ));
+                user.settle();
+            }
+        }
+
+        let answered = receiver
+            .lock()
+            .expect("the channel")
+            .recv_timeout(Duration::from_secs(120));
+        assert!(answered.is_ok(), "{stop}: the stopped compile answers");
+    }
 }
