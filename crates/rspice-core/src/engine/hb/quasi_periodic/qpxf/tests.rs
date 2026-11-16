@@ -81,6 +81,46 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
             );
         }
     }
+    // A solve that names `Direct` is dense at any size: past the 512 unknowns
+    // at which `Auto` takes Krylov it gives the same transfers.
+    let direct = || {
+        let mut direct = request();
+        direct.linear.method = QuasiPeriodicLinearMethod::Direct;
+        direct
+    };
+    let dense = engine
+        .run_qpxf_from_qpss_with_abort(&netlist, direct(), &point, &NoAbort)
+        .unwrap();
+    assert_eq!(dense.transfers.len(), result.transfers.len());
+    for (dense, krylov) in dense.transfers.iter().zip(&result.transfers) {
+        for (d, k) in dense.values.iter().zip(&krylov.values) {
+            assert!((*d - *k).norm() < 1e-10, "{d:?} != {k:?}");
+        }
+    }
+    // Its complex matrix is budgeted like any workspace: a value budget that
+    // holds the Krylov blocks refuses it before any row exists. The budget
+    // left to the transfer solve is what the operating point does not hold.
+    let mut limited = crate::config::SimulationConfig::default();
+    limited.resource_limits.max_result_values = 2_000_000;
+    let limited = Engine::new(limited);
+    let size = point.spectra().len() * 125;
+    let refusal = limited
+        .run_qpxf_from_qpss_with_abort(&netlist, direct(), &point, &NoAbort)
+        .err();
+    assert!(
+        matches!(
+            refusal,
+            Some(SimulationError::ResourceLimit(crate::ResourceLimitError {
+                resource: crate::ResourceKind::ResultValues,
+                requested,
+                ..
+            })) if requested >= size * size * 2
+        ),
+        "{refusal:?}"
+    );
+    limited
+        .run_qpxf_from_qpss_with_abort(&netlist, request(), &point, &NoAbort)
+        .unwrap();
     // A different observable consumes the same immutable operating point.
     let mut voltage = request();
     voltage.output = QpxfOutput::Voltage {
@@ -104,13 +144,6 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
             .all(|v| matches!(v, QpxfGroupDelay::Finite(_)))
     );
     assert_eq!(point.retained_identity(), identity);
-    let mut direct = request();
-    direct.linear.method = QuasiPeriodicLinearMethod::Direct;
-    assert!(
-        engine
-            .run_qpxf_from_qpss_with_abort(&netlist, direct, &point, &NoAbort)
-            .is_err()
-    );
     assert!(
         engine
             .run_qpxf_from_qpss_with_abort(

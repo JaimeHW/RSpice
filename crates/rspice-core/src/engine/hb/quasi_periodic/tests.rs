@@ -294,6 +294,7 @@ fn qpss_engine_checks_resources_cancellation_and_nonstationary_sources_before_pu
 #[test]
 fn qpss_krylov_large_two_tone_rc_crosses_direct_limit_with_analytic_spectrum() {
     use crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    use crate::{ResourceKind, ResourceLimitError};
     let deck = Netlist::parse("large QPSS\nV1 input 0 AC .2\nR1 input out 1k\nC1 out 0 1u\n.end\n")
         .unwrap();
     let engine = Engine::new(SimulationConfig::default());
@@ -321,12 +322,33 @@ fn qpss_krylov_large_two_tone_rc_crosses_direct_limit_with_analytic_spectrum() {
     engine
         .validate_qpss_operating_point_with_abort(&deck, &point, &NoAbort)
         .unwrap();
-    config.solver.linear.method = QuasiPeriodicLinearMethod::Direct;
+    // A solve that names `Direct` is dense at any size: past the 512 unknowns
+    // at which `Auto` takes Krylov it gives the same spectrum.
+    let mut direct = config.clone();
+    direct.solver.linear.method = QuasiPeriodicLinearMethod::Direct;
+    let dense = engine.run_qpss(&deck, direct.clone()).unwrap();
+    for tuple in [[1, 0], [0, 1]] {
+        close(
+            coefficient(&dense, "out", &tuple),
+            coefficient(&point, "out", &tuple),
+            1e-10,
+        );
+    }
+    // Its 675 x 675 complex matrix is budgeted like any workspace: a value
+    // budget that holds the Krylov blocks refuses it before any row exists.
+    let mut limited = SimulationConfig::default();
+    limited.resource_limits.max_result_values = 2_000_000;
+    let limited = Engine::new(limited);
     assert!(matches!(
-        engine.run_qpss(&deck, config.clone()),
-        Err(SimulationError::ResourceLimit(_))
+        limited.run_qpss(&deck, direct),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested,
+            limit: 2_000_000,
+        })) if requested >= 675 * 675 * 2
     ));
     config.solver.linear.method = QuasiPeriodicLinearMethod::Krylov;
+    limited.run_qpss(&deck, config.clone()).unwrap();
     let mut limited = SimulationConfig::default();
     limited.resource_limits.max_result_values = 10000;
     assert!(matches!(
