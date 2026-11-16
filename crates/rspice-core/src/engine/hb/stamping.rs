@@ -52,7 +52,7 @@ impl Engine {
         };
         solver
             .set_periodic_capacitors(&circuit.capacitors, autonomous, quasi_periodic, retained)
-            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            .map_err(super::hb_kernel_error)?;
         match basis {
             BehavioralBasis::Periodic {
                 autonomous,
@@ -69,27 +69,24 @@ impl Engine {
                 solver.set_quasi_periodic_behavioral_sources(&circuit.behavioral_sources, grid)
             }
         }
-        .map_err(|error| match error {
-            crate::analysis::HbError::Aborted => SimulationError::Aborted,
-            error => SimulationError::Circuit(error.to_string()),
-        })?;
+        .map_err(super::hb_kernel_error)?;
 
         for bjt in &circuit.bjts.devices {
             solver
                 .add_native_bjt(bjt.clone())
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
 
         for device in &circuit.bsim3v3.devices {
             solver
                 .add_native_bsim3(device.clone())
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
 
         for device in &circuit.bsim4v8.devices {
             solver
                 .add_native_bsim4(device.clone())
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
 
         for diode in &circuit.diodes.devices {
@@ -116,7 +113,7 @@ impl Engine {
         for mos in &circuit.mosfets.devices {
             solver
                 .add_native_mos(mos.clone())
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
 
         for jfet in &circuit.jfets {
@@ -195,7 +192,7 @@ impl Engine {
         for device in circuit.veriloga_devices().iter() {
             solver
                 .try_add_veriloga_device(device.clone())
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
         #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
@@ -204,7 +201,7 @@ impl Engine {
                     device.clone(),
                     circuit.generated_simulation_parameters,
                 )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
         Ok(())
     }
@@ -848,7 +845,7 @@ impl Engine {
                             branch_ordinal,
                             name,
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                     if circuit.capacitors.value_expressions[index].is_none() {
                         solver
                             .try_add_exact_periodic_network(ExactPeriodicNetwork::Capacitor {
@@ -858,7 +855,7 @@ impl Engine {
                                 branch: circuit.num_nodes() + slot_index,
                                 capacitance: circuit.capacitors.capacitances[index],
                             })
-                            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                            .map_err(super::hb_kernel_error)?;
                     }
                 }
                 PeriodicMnaRegistration::BjtBase(index) => {
@@ -870,7 +867,7 @@ impl Engine {
                             branch_ordinal,
                             &canonical_branch_names[slot_index],
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
                 #[cfg(feature = "veriloga-builtins-base")]
                 PeriodicMnaRegistration::GeneratedVerilogA => {
@@ -879,7 +876,7 @@ impl Engine {
                             branch_ordinal,
                             &canonical_branch_names[slot_index],
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
                 PeriodicMnaRegistration::BehavioralVoltage(source_index) => {
                     let source = &circuit.behavioral_sources.voltage_sources[source_index];
@@ -890,13 +887,13 @@ impl Engine {
                             branch_ordinal,
                             &source.name,
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                     let row = circuit.num_nodes() + branch_ordinal - 1;
                     for (node, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
                         if node > 0 {
                             solver
                                 .try_add_exact_mna_static_entry(row, node - 1, sign, &source.name)
-                                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                                .map_err(super::hb_kernel_error)?;
                         }
                     }
                 }
@@ -964,7 +961,7 @@ impl Engine {
                             branch_ordinal,
                             &canonical_branch_names[slot_index],
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
                 PeriodicMnaRegistration::CplPort(line_index, near_end, conductor) => {
                     let line = &circuit.coupled_tlines[line_index];
@@ -980,7 +977,7 @@ impl Engine {
                             branch_ordinal,
                             &canonical_branch_names[slot_index],
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
                 PeriodicMnaRegistration::Resistor(resistor_index) => {
                     let name = &circuit.resistor_branches.names[resistor_index];
@@ -1047,7 +1044,7 @@ impl Engine {
                     branch1,
                     &format!("{}#port1", line.name),
                 )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
             let branch2 = solver.exact_mna_branches().len() + 1;
             solver
                 .try_add_periodic_constitutive_port_branch(
@@ -1056,7 +1053,7 @@ impl Engine {
                     branch2,
                     &format!("{}#port2", line.name),
                 )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
             tline_branches[line_index] = Some((branch1, branch2));
         }
         for (line_index, line) in circuit.coupled_tlines.iter().enumerate() {
@@ -1074,7 +1071,7 @@ impl Engine {
                         ordinal,
                         &format!("{}#near[{}]", line.name, conductor + 1),
                     )
-                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    .map_err(super::hb_kernel_error)?;
                 near.push(ordinal);
             }
             for conductor in 0..line.conductors() {
@@ -1086,7 +1083,7 @@ impl Engine {
                         ordinal,
                         &format!("{}#far[{}]", line.name, conductor + 1),
                     )
-                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    .map_err(super::hb_kernel_error)?;
                 far.push(ordinal);
             }
             cpl_branches[line_index] = Some((near, far));
@@ -1179,7 +1176,7 @@ impl Engine {
             };
             solver
                 .try_add_exact_periodic_network(network)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
         for (line_index, line) in circuit.coupled_tlines.iter().enumerate() {
             let data = line.lossless_frequency_data().ok_or_else(|| {
@@ -1208,7 +1205,7 @@ impl Engine {
                     modal_impedances: data.modal_impedances,
                     modal_delays: data.modal_delays,
                 })
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
         self.hb_stamp_controlled_sources(circuit, solver, branch_count)?;
         self.hb_stamp_mutual_inductances(circuit, solver, branch_count)?;
@@ -1380,7 +1377,7 @@ impl Engine {
                         device.m,
                         &device.name,
                     )
-                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    .map_err(super::hb_kernel_error)?;
             }
         }
 
@@ -1430,7 +1427,7 @@ impl Engine {
                                 mutual,
                                 &device.name,
                             )
-                            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                            .map_err(super::hb_kernel_error)?;
                     }
                 }
             }
@@ -1514,7 +1511,7 @@ impl Engine {
                             coefficient,
                             name,
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
             }
         }
@@ -1548,7 +1545,7 @@ impl Engine {
                             coefficient,
                             name,
                         )
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(super::hb_kernel_error)?;
                 }
             }
         }
@@ -1570,7 +1567,7 @@ impl Engine {
                     -rm,
                     name,
                 )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                .map_err(super::hb_kernel_error)?;
         }
         Ok(())
     }

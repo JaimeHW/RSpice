@@ -140,9 +140,15 @@ impl HbSolver {
                 .map_err(HbError::InvalidCircuit)?;
         }
         let mut spectra: Vec<Option<PrescribedIntegral>> = Vec::new();
-        spectra.try_reserve_exact(plans.len()).map_err(|e| {
-            HbError::InvalidCircuit(format!("prescribed integral basis allocation failed: {e}"))
-        })?;
+        spectra
+            .try_reserve_exact(plans.len())
+            .map_err(|source| HbError::Allocation {
+                object: "prescribed integral basis",
+                bytes: plans
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Option<PrescribedIntegral>>()),
+                source,
+            })?;
         let samples = self.fft.size();
         let frequency = self.config.fundamental_freq;
         let n = self.num_nodes + self.exact_mna_branches().len();

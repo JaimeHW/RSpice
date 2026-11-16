@@ -1142,11 +1142,23 @@ impl std::error::Error for HbError {}
 /// failure in `context`.
 pub(super) fn hb_kernel_failure(context: &str, error: crate::analysis::HbError) -> SimulationError {
     match error {
+        error @ (crate::analysis::HbError::Aborted
+        | crate::analysis::HbError::Allocation { .. }) => hb_kernel_error(error),
+        other => SimulationError::Circuit(format!("{context}: {other}")),
+    }
+}
+
+/// A harmonic-balance kernel failure that carries its own context, such as a
+/// device or source the solver could not take. Cancellation and an allocator
+/// refusal keep their own types; anything else is a circuit failure in the
+/// kernel's words.
+pub(super) fn hb_kernel_error(error: crate::analysis::HbError) -> SimulationError {
+    match error {
         crate::analysis::HbError::Aborted => SimulationError::Aborted,
         crate::analysis::HbError::Allocation { object, source, .. } => {
             SimulationError::Allocation { object, source }
         }
-        other => SimulationError::Circuit(format!("{context}: {other}")),
+        other => SimulationError::Circuit(other.to_string()),
     }
 }
 
@@ -2933,6 +2945,39 @@ mod tests {
             .expect("input spectrum is retained");
         assert!(input.coefficients[2].norm() > 0.1);
         assert!(input.coefficients.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn a_kernel_failure_with_its_own_context_keeps_its_type() {
+        let source = Vec::<u8>::new()
+            .try_reserve(usize::MAX)
+            .expect_err("no allocator backs usize::MAX bytes");
+        let refused = super::hb_kernel_error(crate::analysis::HbError::Allocation {
+            object: "prescribed integral basis",
+            bytes: 64,
+            source,
+        });
+        assert!(
+            matches!(
+                refused,
+                SimulationError::Allocation {
+                    object: "prescribed integral basis",
+                    ..
+                }
+            ),
+            "{refused}"
+        );
+        assert!(matches!(
+            super::hb_kernel_error(crate::analysis::HbError::Aborted),
+            SimulationError::Aborted
+        ));
+        let invalid = super::hb_kernel_error(crate::analysis::HbError::InvalidCircuit(
+            "behavioral source 'B1' is not certified periodic".to_owned(),
+        ));
+        assert_eq!(
+            invalid.to_string(),
+            "Circuit error: Invalid circuit: behavioral source 'B1' is not certified periodic"
+        );
     }
 
     #[test]
