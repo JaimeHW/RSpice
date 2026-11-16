@@ -808,6 +808,14 @@ pub(super) fn run_transient(
     }
 
     let checkpointing = checkpoint_path.is_some() || resume_path.is_some();
+    // A checkpoint before the deck's own stop interrupts the deck's run, which takes the deck's
+    // steps: its maximum step is the deck's, and so is every ceiling derived from it.
+    let interrupted = checkpoint_path.is_some() && resume_path.is_none() && tstop < deck_stop;
+    let internal_max_step = if interrupted {
+        maximum_step(deck_stop)?
+    } else {
+        internal_max_step
+    };
     let startup_mode = rspice_core::engine::TransientStartupMode::from_uic(uic);
     let resolved_static_solver_ceiling = [
         Some(internal_max_step),
@@ -918,7 +926,7 @@ pub(super) fn run_transient(
                     )
                     .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
             }
-        } else if tstop < deck_stop {
+        } else if interrupted {
             // A stop before the deck's own interrupts the deck's run there, as a checkpoint
             // taken mid-run does: the run keeps the deck's window, so a resume to the deck's
             // stop takes every step the run takes with a breakpoint at the interruption.
@@ -926,7 +934,7 @@ pub(super) fn run_transient(
                 .engine
                 .run_tran_checkpointed_at_with_startup_mode_and_abort(
                     ctx.netlist,
-                    (deck_stop, maximum_step(deck_stop)?),
+                    (deck_stop, internal_max_step),
                     tstop,
                     startup_mode,
                     &progress_abort,
