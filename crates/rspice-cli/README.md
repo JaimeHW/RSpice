@@ -320,8 +320,8 @@ Transient state:
 | Flag | Effect |
 | :--- | :--- |
 | `--tran-stop TIME` | Override the `.TRAN` stop time without editing the deck |
-| `--checkpoint FILE` | Save the transient integrator state when the run completes |
-| `--resume FILE` | Continue a transient from a checkpoint; the deck must be byte-identical to the one that wrote it |
+| `--checkpoint FILE` | Save the transient integrator state when the run completes, or where `--tran-stop` interrupts it |
+| `--resume FILE` | Continue a transient from a checkpoint; the deck must be byte-identical to the one that wrote it. The resumed run takes the steps the uninterrupted run takes; one that goes past the deck's stop continues from the checkpoint but takes its own steps |
 
 The analysis-mode, corner and HDL flags are described above. Command-line
 values override the deck's `.OPTIONS`, which override the configuration file;

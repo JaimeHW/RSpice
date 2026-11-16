@@ -409,7 +409,8 @@ pub struct RunArgs {
     pub timeout: Option<f64>,
 
     /// Override the .TRAN stop time without editing the deck (checkpoint
-    /// segments must keep identical source text)
+    /// segments must keep identical source text). With --checkpoint, a time
+    /// before the deck's own stop interrupts the deck's run there
     #[arg(long, value_name = "TIME", value_parser = spice_value)]
     pub tran_stop: Option<f64>,
 
@@ -419,12 +420,14 @@ pub struct RunArgs {
     pub expand_buses: bool,
 
     /// Save the transient integrator state to FILE when the run completes,
-    /// for later --resume
+    /// or where --tran-stop interrupts it, for later --resume
     #[arg(long, value_name = "FILE")]
     pub checkpoint: Option<PathBuf>,
 
     /// Resume a transient from a checkpoint written by --checkpoint; the
-    /// deck must be byte-identical to the one that wrote it
+    /// deck must be byte-identical to the one that wrote it. The resumed run
+    /// takes the steps the uninterrupted run takes; one that goes past the
+    /// deck's stop continues from the checkpoint but takes its own steps
     #[arg(long, value_name = "FILE")]
     pub resume: Option<PathBuf>,
 

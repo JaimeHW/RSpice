@@ -1025,6 +1025,7 @@ mod sink_events;
 // Exact source-root ownership is prepared separately from the ordinary
 // controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
+mod checkpoint_stop;
 mod checkpoint_stream;
 pub(in crate::engine) mod control_stop;
 pub use checkpoint_stream::{

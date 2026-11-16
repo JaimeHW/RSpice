@@ -719,6 +719,84 @@ fn checkpoint_resume_matches_uninterrupted_run() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `--tran-stop` before the deck's own stop interrupts the deck's run there,
+/// as a checkpoint taken mid-run does: the run keeps the deck's window, lands on
+/// the interruption as on a breakpoint, and the checkpoint holds the step it
+/// proposed after it. With a source corner at the interruption, the run
+/// uninterrupted lands there too, and checkpointed and resumed it is that run,
+/// row for row and to the bit. The second corner, 20 ns later, is inside the
+/// restart step the first would take: only a run that knows its own breakpoints
+/// past the interruption cuts that step to it.
+#[test]
+fn a_checkpoint_inside_the_decks_window_resumes_onto_the_uninterrupted_steps() {
+    let dir = test_dir("ckpt_window");
+    let deck = dir.join("rc.sp");
+    std::fs::write(
+        &deck,
+        "* RC through two close corners\n\
+         V1 in 0 PWL(0 0 10u 1 10.02u 0.5 20u 0)\n\
+         R1 in out 1k\n\
+         C1 out 0 1n\n\
+         .tran 10n 20u 0 100n\n\
+         .end\n",
+    )
+    .expect("write deck");
+    let rows = |path: &std::path::Path| -> Vec<String> {
+        common::delimited_data_text(&std::fs::read_to_string(path).expect("read csv"), b',')
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    };
+    let run = |args: &[&str]| {
+        let mut all = vec![
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-f",
+            "csv",
+            "--no-store",
+        ];
+        all.extend_from_slice(args);
+        let output = run_rspice(&all);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let (full, first, resumed) = (
+        dir.join("full.csv"),
+        dir.join("first.csv"),
+        dir.join("resumed.csv"),
+    );
+    let state = dir.join("state.ckpt");
+    run(&["-o", full.to_str().unwrap()]);
+    run(&[
+        "--tran-stop",
+        "10u",
+        "--checkpoint",
+        state.to_str().unwrap(),
+        "-o",
+        first.to_str().unwrap(),
+    ]);
+    run(&[
+        "--resume",
+        state.to_str().unwrap(),
+        "-o",
+        resumed.to_str().unwrap(),
+    ]);
+    let (full, first, resumed) = (rows(&full), rows(&first), rows(&resumed));
+    assert_eq!(
+        resumed[1],
+        *first.last().unwrap(),
+        "the resumed run starts at the checkpoint's row"
+    );
+    let joined: Vec<&String> = first.iter().chain(&resumed[2..]).collect();
+    assert_eq!(full.len(), 222, "the header and 221 accepted points");
+    assert_eq!(joined, full.iter().collect::<Vec<_>>());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn compression_uses_static_solver_ceiling_across_widened_checkpoint_resume() {
     let dir = test_dir("compression_interval_ceiling");

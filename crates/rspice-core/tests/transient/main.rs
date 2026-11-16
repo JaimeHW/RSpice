@@ -5,6 +5,7 @@ mod abort_reader;
 mod activity_bound_edges;
 mod advanced_abort;
 mod behavioral_checkpoint;
+mod checkpoint_continuation;
 mod checkpoint_encoding;
 mod differential_startup;
 mod dynamic_state_topology;

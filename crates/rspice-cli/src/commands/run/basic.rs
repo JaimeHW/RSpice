@@ -744,21 +744,25 @@ pub(super) fn run_transient(
 ) -> Result<TransientOutcome, CliError> {
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
+    let deck_stop = tstop;
     let tstop = ctx.args.tran_stop.unwrap_or(tstop);
-    let internal_max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
-        ctx.engine.config().spice_dialect,
-        tstep,
-        tstop,
-        Some(tstart),
-        max_step,
-    )
-    .map_err(|error| CliError::InvalidArgument {
-        message: error.to_string(),
-        suggestion: Some(
-            "use finite TSTEP/TMAX values with 0 <= TSTART < TSTOP in the .TRAN directive"
-                .to_owned(),
-        ),
-    })?;
+    let maximum_step = |tstop| {
+        rspice_core::execution::resolve_dialect_transient_maximum_step(
+            ctx.engine.config().spice_dialect,
+            tstep,
+            tstop,
+            Some(tstart),
+            max_step,
+        )
+        .map_err(|error| CliError::InvalidArgument {
+            message: error.to_string(),
+            suggestion: Some(
+                "use finite TSTEP/TMAX values with 0 <= TSTART < TSTOP in the .TRAN directive"
+                    .to_owned(),
+            ),
+        })
+    };
+    let internal_max_step = maximum_step(tstop)?;
 
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
@@ -913,6 +917,32 @@ pub(super) fn run_transient(
                         &progress_abort,
                     )
                     .map(|(result, checkpoint)| (SegmentResult::Full(Box::new(result)), checkpoint))
+            }
+        } else if tstop < deck_stop {
+            // A stop before the deck's own interrupts the deck's run there, as a checkpoint
+            // taken mid-run does: the run keeps the deck's window, so a resume to the deck's
+            // stop takes every step the run takes with a breakpoint at the interruption.
+            let run = ctx
+                .engine
+                .run_tran_checkpointed_at_with_startup_mode_and_abort(
+                    ctx.netlist,
+                    (deck_stop, maximum_step(deck_stop)?),
+                    tstop,
+                    startup_mode,
+                    &progress_abort,
+                );
+            match run {
+                Ok((result, end)) if ctx.compress => ctx
+                    .engine
+                    .compress_transient_result_with_abort(
+                        ctx.netlist,
+                        &result,
+                        &compression_config(),
+                        &progress_abort,
+                    )
+                    .map(|compressed| (SegmentResult::Compressed(Box::new(compressed)), end)),
+                Ok((result, end)) => Ok((SegmentResult::Full(Box::new(result)), end)),
+                Err(error) => Err(error),
             }
         } else if ctx.compress {
             ctx.engine
