@@ -884,21 +884,32 @@ impl CodeModel for ConnectAdc {
     /// inside than the endpoint window and a landing can still be made.
     fn candidate_event_time(&self, ctx: &CmContext) -> Option<Value> {
         let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking).ok()?;
-        let supply = self.tracking.then(|| tracked_supply(ctx));
-        let start = ctx.time_prev;
-        let first = first_landing_after(start, ctx.coincidence);
-        (0..width)
-            .filter_map(|index| {
-                let (sample, low, high) = law.terms(
-                    analog_vector_input_value(ctx, ADC_SLOTS.input, index),
-                    supply,
-                );
-                let crossing = chord_crossing(ctx, law.band, ADC_SLOTS, index, sample, low, high)?;
-                let landing = crossing.time.max(start).next_up().max(first);
-                (crossing.land && landing < ctx.time).then_some(landing)
-            })
-            .reduce(Value::min)
+        adc_candidate_event_time(ctx, law, self.tracking, ADC_SLOTS, width)
     }
+}
+
+/// The landing one representable instant past the earliest crossing an A/D
+/// half's [`chord_crossing`] located inside the step, where it lies further
+/// inside than the endpoint window and a landing can still be made.
+fn adc_candidate_event_time(
+    ctx: &CmContext,
+    law: AdcLaw,
+    tracking: bool,
+    slots: AdcSlots,
+    width: usize,
+) -> Option<Value> {
+    let supply = tracking.then(|| tracked_supply(ctx));
+    let start = ctx.time_prev;
+    let first = first_landing_after(start, ctx.coincidence);
+    (0..width)
+        .filter_map(|index| {
+            let (sample, low, high) =
+                law.terms(analog_vector_input_value(ctx, slots.input, index), supply);
+            let crossing = chord_crossing(ctx, law.band, slots, index, sample, low, high)?;
+            let landing = crossing.time.max(start).next_up().max(first);
+            (crossing.land && landing < ctx.time).then_some(landing)
+        })
+        .reduce(Value::min)
 }
 
 //=============================================================================
@@ -1564,9 +1575,10 @@ fn bidi_adc_slots(width: usize) -> AdcSlots {
         input: "sense",
         output: "d",
         state: width * DAC_STATE_STRIDE,
-        // Its probe drives the D/A half, so the stepper does not ask it for
-        // a landing: with no coupled root its A/D half is sample-dated.
-        locates_crossings: false,
+        // Its probe writes only the D/A half's `out` and the A/D half
+        // publishes nothing from a probe, so the stepper asks it for a
+        // landing as it asks the one-way A/D.
+        locates_crossings: true,
     }
 }
 
@@ -1734,6 +1746,25 @@ impl CodeModel for ConnectBidi {
 
     fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
         port.eq_ignore_ascii_case("out")
+    }
+
+    /// A probe writes the D/A half's `out` and nothing else: the D/A half
+    /// stores its change and asks for its breakpoints only when it commits,
+    /// and the A/D half publishes, stores and schedules nothing from a probe.
+    /// Neither reads an output the converter wrote: the D/A half reads the
+    /// port's other drivers and the sensed node.
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
+    }
+
+    /// The A/D half's landing, as the one-way A/D asks for it
+    /// ([`ConnectAdc::candidate_event_time`]). The D/A half drives `out`
+    /// from the port's other drivers whichever instant the stepper lands on.
+    fn candidate_event_time(&self, ctx: &CmContext) -> Option<Value> {
+        let reading = BidiReading::of(ctx, self.name(), self.tracking).ok()?;
+        let width = reading.width;
+        let law = reading.adc(ctx, self.name(), self.tracking).ok()?;
+        adc_candidate_event_time(ctx, law, self.tracking, bidi_adc_slots(width), width)
     }
 
     fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {

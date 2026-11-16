@@ -974,3 +974,60 @@ fn a_bidirectional_port_drives_and_reads_its_own_node() {
     assert!(tracking.output_vector_input_partials(&ctx, "out", 0).len() <= 1);
     assert_eq!(tracking.analog_threshold_input(&ctx, "sup", 0, 2.0), 2.0);
 }
+
+/// A released bidirectional converter's receiving half is the one-way A/D
+/// with no coupled root: a probe past the crossing asks the stepper to land
+/// one representable instant past it, and the edge is dated at the crossing
+/// there and on a candidate the stepper could not cut
+/// (`an_uncoupled_connect_adc_dates_its_edge_at_the_crossing`). The probe
+/// publishes nothing, and the driving half stays released throughout.
+#[test]
+fn an_uncoupled_connect_bidir_dates_its_edge_at_the_crossing() {
+    let slope = 3.3 / 100.0e-9;
+    let ramp = |t: Value| slope * t;
+    let crossing = 1.2 / slope;
+    let (start, candidate) = (36.0e-9, 36.5e-9);
+    let delay = 1.0e-9;
+    let model = ConnectBidi { tracking: false };
+    let mut ctx = context(
+        &model,
+        1,
+        &[("vtlo", 1.2), ("vthi", 1.2), ("tdrise", delay)],
+    );
+    ctx.set_input("d", InputValue::DigitalVector(vec![DigitalValue::high_z()]));
+    ctx.set_other_digital_drivers("d", 0, DigitalValue::high_z(), 0.0);
+    for time in [0.0, start] {
+        assert!(adc_step(&model, &mut ctx, "sense", time, &[ramp(time)], None).len() <= 1);
+    }
+    let accepted = ctx.clone();
+
+    ctx.time = candidate;
+    ctx.set_input("sense", analog(&[ramp(candidate)]));
+    ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
+    model.evaluate(&mut ctx).expect("the probe evaluates");
+    assert!(
+        ctx.take_pending_events().is_empty(),
+        "a probe publishes nothing"
+    );
+    assert_eq!(ctx.partial_vector_value("out", 0), 0.0, "released");
+    let landing = model
+        .candidate_event_time(&ctx)
+        .expect("a crossing inside the step asks for a landing");
+    assert!(
+        landing > crossing && landing - crossing <= 4.0 * f64::EPSILON * crossing,
+        "lands one representable instant past the crossing: {landing:e} vs {crossing:e}"
+    );
+
+    for time in [landing, candidate] {
+        let mut ctx = accepted.clone();
+        let published = adc_step(&model, &mut ctx, "sense", time, &[ramp(time)], None);
+        assert_eq!(published.len(), 1, "{published:?}");
+        assert_eq!(published[0].1, DigitalValue::one());
+        let at = published[0].2;
+        assert!(
+            (at - (crossing + delay)).abs() <= 4.0 * f64::EPSILON * at,
+            "accepted at {time:e}: the edge is dated at the crossing plus its delay, {at:e}"
+        );
+        assert_eq!(ctx.partial_vector_value("out", 0), 0.0, "released");
+    }
+}
