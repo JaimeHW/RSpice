@@ -593,12 +593,12 @@ impl Program {
     /// return s;
     /// ```
     ///
-    /// The shape the back edge's own failure path has to survive. The guard
-    /// hands the evaluation context to `rspice_native_loop_limit_error`, and
-    /// the context arrives in a volatile register that the body's helper has
-    /// already been free to clobber by the time the next trip reaches the
-    /// guard — which a scan of the instruction list in *layout* order cannot
-    /// see, because around a back edge layout order is not execution order.
+    /// The shape the back edge's abort poll has to survive. The poll hands
+    /// the evaluation context to `rspice_native_loop_poll`, and the context
+    /// arrives in a volatile register that the body's helper has already been
+    /// free to clobber by the time the next trip reaches the poll — which a
+    /// scan of the instruction list in *layout* order cannot see, because
+    /// around a back edge layout order is not execution order.
     #[cfg(test)]
     pub(crate) fn helper_calling_loop_fixture_for_test(trips: f64) -> JitResult<Self> {
         let mut builder = ProgramBuilder::new(&[

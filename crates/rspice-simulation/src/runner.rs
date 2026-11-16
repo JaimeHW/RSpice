@@ -1172,49 +1172,53 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     let transient_checkpoint_observer = (transient_checkpoint.is_some()
         || transient_checkpoint_observer.is_some())
     .then_some(&publish_transient_checkpoint as &crate::transient_checkpoint::BorrowedObserver<'_>);
-    let result = match request {
-        SimulationRequest::Config(config) => {
-            input
-                .dependencies
-                .validate_for_config()
-                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
-            // Run simulation via engine bridge with abort support
-            log::info!("Running simulation via engine bridge: {:?}", config);
-            match bridge.run_with_abort_and_source_path_and_environment(
-                &config,
-                &input.netlist,
-                input.source_path.as_deref(),
-                input.environment,
-                &signal,
-            ) {
-                Ok(r) => {
-                    log::info!("Engine bridge returned successfully");
-                    r
-                }
-                Err(e) => {
-                    log::error!("Engine bridge error: {:?}", e);
-                    return Err(e);
+    // A Verilog-A loop running inside one evaluation polls the same signal,
+    // so Stop ends it too.
+    let result = rspice_core::engine::with_loop_abort(&signal, || {
+        Ok::<_, SimulationError>(match request {
+            SimulationRequest::Config(config) => {
+                input
+                    .dependencies
+                    .validate_for_config()
+                    .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+                // Run simulation via engine bridge with abort support
+                log::info!("Running simulation via engine bridge: {:?}", config);
+                match bridge.run_with_abort_and_source_path_and_environment(
+                    &config,
+                    &input.netlist,
+                    input.source_path.as_deref(),
+                    input.environment,
+                    &signal,
+                ) {
+                    Ok(r) => {
+                        log::info!("Engine bridge returned successfully");
+                        r
+                    }
+                    Err(e) => {
+                        log::error!("Engine bridge error: {:?}", e);
+                        return Err(e);
+                    }
                 }
             }
-        }
-        SimulationRequest::Spec { spec, options } => {
-            log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            spec::run_spec_request_in_context(
-                &bridge,
-                *spec,
-                *options,
-                spec::SpecExecutionContext {
-                    netlist: &input.netlist,
-                    source_path: input.source_path.as_deref(),
-                    dependencies: &input.dependencies,
-                    environment: input.environment,
-                    abort_flag: &signal,
-                    checkpoint_observer,
-                    transient_checkpoint_observer,
-                },
-            )?
-        }
-    };
+            SimulationRequest::Spec { spec, options } => {
+                log::info!("Running simulation via spec path: {:?}", spec.run_type());
+                spec::run_spec_request_in_context(
+                    &bridge,
+                    *spec,
+                    *options,
+                    spec::SpecExecutionContext {
+                        netlist: &input.netlist,
+                        source_path: input.source_path.as_deref(),
+                        dependencies: &input.dependencies,
+                        environment: input.environment,
+                        abort_flag: &signal,
+                        checkpoint_observer,
+                        transient_checkpoint_observer,
+                    },
+                )?
+            }
+        })
+    })?;
 
     // Mark complete
     {

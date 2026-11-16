@@ -224,3 +224,19 @@ pub(crate) use source_values::extract_dc_value_with_limits;
 /// them. Frontends showing a source's operating value need the engine's own
 /// interpretation rather than a second parse of the same spec.
 pub use source_values::{extract_ac_value, extract_dc_value};
+
+/// Run `body` with `abort` as the hook every Verilog-A loop evaluated on this
+/// thread polls.
+///
+/// A loop in an analog block runs inside one device evaluation, out of reach
+/// of the engine's own polls, so the run's signal is handed to the runtime
+/// directly: a loop that never ends is stopped by the same Stop or time limit
+/// that stops the run, and every loop that ends runs to completion. The surface
+/// that owns a run's signal wraps the run in this; the engine wraps each worker
+/// thread it hands part of a run to.
+pub fn with_loop_abort<R>(
+    abort: &dyn crate::abort_signal::AbortSignal,
+    body: impl FnOnce() -> R,
+) -> R {
+    rspice_veriloga_runtime::loop_abort::with_hook(&|| abort.is_aborted(), body)
+}

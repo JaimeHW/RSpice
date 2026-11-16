@@ -7060,7 +7060,10 @@ pub(super) type AnalogRefusal = fn(&rspice_veriloga::vm::VmError) -> MixedSignal
 /// Nothing here is speculative: the solver has settled on this solution, so a
 /// refusal is the run's however numeric it looks.
 pub(super) fn analog_accepted_error(error: &rspice_veriloga::vm::VmError) -> MixedSignalError {
-    analog_error(error)
+    match error {
+        rspice_veriloga::vm::VmError::Aborted => MixedSignalError::Aborted,
+        other => analog_error(other),
+    }
 }
 
 /// Classify the analog half's refusal at a Newton TRIAL evaluation.
@@ -7073,6 +7076,7 @@ pub(super) fn analog_accepted_error(error: &rspice_veriloga::vm::VmError) -> Mix
 /// (`analog_accepted_error` above), still ends the run where it happens.
 pub(super) fn analog_trial_error(error: &rspice_veriloga::vm::VmError) -> MixedSignalError {
     match error {
+        rspice_veriloga::vm::VmError::Aborted => MixedSignalError::Aborted,
         rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => {
             MixedSignalError::AnalogNonFinite {
                 detail: detail.clone(),

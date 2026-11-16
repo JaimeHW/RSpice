@@ -4913,26 +4913,18 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
     );
 }
 
-/// The device-level pin of the block program's back-edge iteration guard.
+/// The device-level pin of the block program's back-edge abort poll.
 ///
-/// The `while` here used to be caught twice over. It is an
-/// `AssignmentStep::Loop` in the flat statement stream, which the assignment
-/// pass has always counted against `MAX_RUNTIME_LOOP_ITERATIONS`, and it is a
-/// back edge in the block program the CFG prelude lowers, which counted
-/// nothing. The assignment pass ran first, so its refusal is what this test
-/// saw, and the prelude's unbounded loop was never reached.
-///
-/// It is not caught twice now. `i` is read by no entry of a CFG plan — the
-/// residual reads a prelude slot — so the assignment pass no longer computes
-/// it, and the only loop left in this module's image is the block program's.
-/// The guard under test is therefore the one W-F14b gave `emit_terminator`,
-/// and this is the only place it is exercised through a device rather than
-/// through a hand-built program.
+/// `i` is read by no entry of a CFG plan — the residual reads a prelude slot —
+/// so the assignment pass does not compute it, and the only loop in this
+/// module's image is the block program's. The poll under test is therefore the
+/// one `emit_terminator` puts on a back edge, and this is the only place it is
+/// exercised through a device rather than through a hand-built program.
 /// With `native-bytecode-contract-tests`, the helper deliberately constructs the
-/// postfix planner instead; that configuration pins its assignment-loop guard.
+/// postfix planner instead; that configuration pins its assignment-loop poll.
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
+fn native_runtime_endless_loop_stops_on_the_run_abort() {
     let model = runtime_loop_limit_model();
     assert!(
         model
@@ -4951,23 +4943,20 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
          route must exercise its single assignment-step loop"
     );
     device.update_voltages(&[1.0]);
-    let err = device
-        .try_evaluate()
-        .expect_err("native runtime loop limit must hard-fail");
-    let msg = err.to_string();
+    let err = rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || device.try_evaluate())
+        .expect_err("an endless native loop must stop on the abort hook");
 
-    assert_native_hard_fail_message(&msg);
     assert!(
-        msg.contains("runtime loop iteration limit exceeded"),
-        "error must preserve runtime loop limit diagnostic, got: {msg}"
+        matches!(err, rspice_veriloga::vm::VmError::Aborted),
+        "the stop must arrive as its own error, got: {err}"
     );
 }
 
-/// The other half of that pin: the guarded loop must still *exit* on its own.
+/// The other half of that pin: the polled loop must still *exit* on its own.
 ///
-/// A counter that refused a loop it should have admitted would pass the limit
+/// A poll that stopped a loop it should have let finish would pass the abort
 /// test above and break every module that iterates. These conditions are the
-/// exact-zero cases — `-0.0`, `+0.0` and `NaN` — and like the limit test they
+/// exact-zero cases — `-0.0`, `+0.0` and `NaN` — and like the abort test they
 /// now run in the block program the CFG prelude lowers rather than in an
 /// assignment-step loop, because nothing an entry reads keeps the assignment
 /// pass's copy alive.
@@ -5031,15 +5020,12 @@ endmodule
     let mut nan = native_contract_try_new("LOOPTRUTH3", nan_model, &[1, 0])
         .expect("loop truthiness model uses native JIT");
     nan.update_voltages(&[1.0]);
-    let err = nan
-        .try_evaluate()
-        .expect_err("NaN loop condition must stay active until the native loop limit");
-    let msg = err.to_string();
+    let err = rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || nan.try_evaluate())
+        .expect_err("a NaN loop condition must stay active until the abort hook stops it");
 
-    assert_native_hard_fail_message(&msg);
     assert!(
-        msg.contains("runtime loop iteration limit exceeded"),
-        "error must preserve runtime loop limit diagnostic, got: {msg}"
+        matches!(err, rspice_veriloga::vm::VmError::Aborted),
+        "the stop must arrive as its own error, got: {err}"
     );
 }
 

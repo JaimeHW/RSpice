@@ -1153,6 +1153,7 @@ impl From<crate::device::StampError> for SimulationError {
         match error {
             crate::device::StampError::NonFiniteTrial(trial) => Self::NonFiniteTrial(trial),
             crate::device::StampError::Structural(message) => Self::Circuit(message),
+            crate::device::StampError::Aborted => Self::Aborted,
         }
     }
 }

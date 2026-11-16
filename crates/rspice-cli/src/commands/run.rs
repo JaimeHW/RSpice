@@ -380,8 +380,12 @@ fn execute_with_destinations(
                     // The outer pool owns the process worker budget.
                     let mut child_args = args.clone();
                     child_args.jobs = 1;
+                    // A Verilog-A loop on this worker polls the process's
+                    // interrupt and timeout too.
                     let outcome =
-                        prepared.run(&child_args, config, false, true, deck.label.as_deref())?;
+                        rspice_core::engine::with_loop_abort(&crate::abort::ProcessAbort, || {
+                            prepared.run(&child_args, config, false, true, deck.label.as_deref())
+                        })?;
                     report_budget.admit_reports(&outcome.reports)?;
                     Ok(outcome)
                 })

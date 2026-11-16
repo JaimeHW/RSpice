@@ -27,7 +27,7 @@ use crate::native::abi::{
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
-    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
+    rspice_native_loop_poll, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
     rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_lookup_native,
@@ -58,7 +58,8 @@ const STACK_PROBE_INTERVAL_BYTES: usize = 4080;
 const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
 const MAX_SEGMENT_INSTRUCTIONS: usize = 1024;
 use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
-const MAX_RUNTIME_LOOP_ITERATIONS: u64 = 100_000;
+/// Trips of one loop between two polls of the run's abort hook.
+const LOOP_POLL_INTERVAL: u64 = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL as u64;
 const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
 /// D0-D7 and D16-D22, every one of them volatile: the host convention keeps
 /// the nonvolatile D8-D15 out of the bank entirely, so a value live across a
@@ -116,8 +117,8 @@ pub(crate) fn compile_value_function_from_ssa(ssa: &Program) -> JitResult<Vec<u8
     let loops = ssa.loop_ranges()?;
     let counters = BlockLoopCounters::new(allocation.spill_slot_count(), loops.len())?;
     let frame_bytes = aligned_frame_bytes(counters.frame_slots())?;
-    // A back edge branches to the loop-limit helper, so a loop-carrying
-    // program is never a leaf even when its arithmetic needs no helper at all,
+    // A back edge calls the abort-poll helper, so a loop-carrying program is
+    // never a leaf even when its arithmetic needs no helper at all,
     // and the link register has to be saved before it can. A loop-free program
     // asks for exactly the frame it asked for before.
     let calls_out = ssa.requires_call_frame() || !loops.is_empty();
@@ -395,17 +396,21 @@ pub(crate) fn compile_loop_dispatch_function(
     compiler.stack_load_x(XReg::X9, counter_offset)?;
     compiler.encoder.add_x_imm(XReg::X9, XReg::X9, 1)?;
     compiler.stack_store_x(XReg::X9, counter_offset)?;
-    compiler
-        .encoder
-        .mov_u64(XReg::X10, MAX_RUNTIME_LOOP_ITERATIONS)?;
+    compiler.encoder.mov_u64(XReg::X10, LOOP_POLL_INTERVAL)?;
     compiler.encoder.cmp_x(XReg::X9, XReg::X10)?;
-    let limit_reached = compiler.encoder.b_cond_placeholder(Condition::CarrySet);
+    let poll_due = compiler.encoder.b_cond_placeholder(Condition::CarrySet);
     let repeat = compiler.encoder.b_placeholder();
     compiler.encoder.patch_branch(repeat, loop_start)?;
 
-    let limit_target = compiler.encoder.position();
-    compiler.encoder.patch_branch(limit_reached, limit_target)?;
-    compiler.emit_void_error_early_return(rspice_native_loop_limit_error as *const () as usize)?;
+    let poll_target = compiler.encoder.position();
+    compiler.encoder.patch_branch(poll_due, poll_target)?;
+    compiler.encoder.mov_u64(XReg::X9, 0)?;
+    compiler.stack_store_x(XReg::X9, counter_offset)?;
+    compiler.emit_loop_poll()?;
+    let repeat_after_poll = compiler.encoder.b_placeholder();
+    compiler
+        .encoder
+        .patch_branch(repeat_after_poll, loop_start)?;
 
     let exit_target = compiler.encoder.position();
     compiler.encoder.patch_branch(loop_exit, exit_target)?;
@@ -922,13 +927,13 @@ impl FunctionCompiler {
     ///
     /// Each outgoing edge is one of three things, and `loops` is what tells
     /// them apart. A **back edge** — one whose target does not follow it in
-    /// layout — is a loop's latch, and it carries the runtime iteration guard:
-    /// [`Self::emit_block_loop_back_edge_guard`] counts the traversal and
-    /// refuses the [`MAX_RUNTIME_LOOP_ITERATIONS`]th. A forward edge whose
-    /// target is a loop *header* is an entry into that loop from outside its
-    /// range, and it zeroes the loop's counter, so the limit is per entry and
-    /// an inner loop is not charged for the trips of its outer one. Every other
-    /// edge is a plain branch.
+    /// layout — is a loop's latch, and it carries the abort poll:
+    /// [`Self::emit_block_loop_back_edge_guard`] counts the traversal and polls
+    /// the run's abort hook every [`LOOP_POLL_INTERVAL`]th. A forward edge
+    /// whose target is a loop *header* is an entry into that loop from outside
+    /// its range, and it zeroes the loop's counter, so the count is per entry
+    /// and an inner loop is not charged for the trips of its outer one. Every
+    /// other edge is a plain branch.
     fn emit_terminator(
         &mut self,
         allocation: &RegisterAllocation,
@@ -1025,13 +1030,14 @@ impl FunctionCompiler {
         self.stack_store_x(XReg::X9, counter_offset)
     }
 
-    /// Count one back-edge traversal and refuse the limit-th.
+    /// Count one back-edge traversal and poll the run's abort hook on every
+    /// [`LOOP_POLL_INTERVAL`]th.
     ///
-    /// The same sequence, the same limit and the same failure as
-    /// [`Self::emit_loop_assignment`]: increment, compare against
-    /// [`MAX_RUNTIME_LOOP_ITERATIONS`], and on reaching it call
-    /// `rspice_native_loop_limit_error` and return early, so the device sees
-    /// the recorded diagnostic instead of a hang.
+    /// The same sequence as [`Self::emit_loop_assignment`]: increment, compare
+    /// against [`LOOP_POLL_INTERVAL`], and on reaching it zero the counter and
+    /// [`Self::emit_loop_poll`], which returns early with the stop recorded
+    /// when the run has been told to stop and otherwise falls through to the
+    /// back edge with every value where it was.
     fn emit_block_loop_back_edge_guard(
         &mut self,
         counters: BlockLoopCounters,
@@ -1041,15 +1047,52 @@ impl FunctionCompiler {
         self.stack_load_x(XReg::X9, counter_offset)?;
         self.encoder.add_x_imm(XReg::X9, XReg::X9, 1)?;
         self.stack_store_x(XReg::X9, counter_offset)?;
-        self.encoder
-            .mov_u64(XReg::X10, MAX_RUNTIME_LOOP_ITERATIONS)?;
+        self.encoder.mov_u64(XReg::X10, LOOP_POLL_INTERVAL)?;
         self.encoder.cmp_x(XReg::X9, XReg::X10)?;
         // CarryClear is the unsigned "lower than", the inverse of the
-        // CarrySet the assignment guard branches on when the limit is reached.
-        let under_limit = self.encoder.b_cond_placeholder(Condition::CarryClear);
-        self.emit_void_error_early_return(rspice_native_loop_limit_error as *const () as usize)?;
-        let under_limit_target = self.encoder.position();
-        self.encoder.patch_branch(under_limit, under_limit_target)
+        // CarrySet the assignment guard branches on when a poll is due.
+        let not_due = self.encoder.b_cond_placeholder(Condition::CarryClear);
+        self.encoder.mov_u64(XReg::X9, 0)?;
+        self.stack_store_x(XReg::X9, counter_offset)?;
+        self.emit_loop_poll()?;
+        let not_due_target = self.encoder.position();
+        self.encoder.patch_branch(not_due, not_due_target)
+    }
+
+    /// Poll the run's abort hook from a loop's back edge.
+    ///
+    /// It runs once every [`LOOP_POLL_INTERVAL`] trips, so it can afford to be
+    /// general: every register of the value bank is saved around the call,
+    /// whatever is live in it, and the loop resumes exactly as it was. When the
+    /// run has been told to stop, `rspice_native_loop_poll` has recorded the
+    /// stop on the context and the function returns early.
+    fn emit_loop_poll(&mut self) -> JitResult<()> {
+        let save_bytes =
+            (A64_ALLOCATABLE_VALUE_REGISTERS * WORD_BYTES).next_multiple_of(STACK_ALIGNMENT);
+        let save_immediate = u16::try_from(save_bytes)
+            .map_err(|_| encoding_error("AArch64 loop-poll save area exceeds imm12"))?;
+        self.encoder.sub_x_imm(XReg::Sp, XReg::Sp, save_immediate)?;
+        for index in 0..A64_ALLOCATABLE_VALUE_REGISTERS {
+            self.encoder
+                .str_d_unsigned(logical_register(index)?, XReg::Sp, index * WORD_BYTES)?;
+        }
+        self.encoder.mov_x(XReg::X0, self.context_register())?;
+        self.encoder.mov_u64(
+            HOST_ABI.indirect_call_scratch,
+            rspice_native_loop_poll as *const () as usize as u64,
+        )?;
+        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.encoder.mov_x(XReg::X9, XReg::X0)?;
+        for index in 0..A64_ALLOCATABLE_VALUE_REGISTERS {
+            self.encoder
+                .ldr_d_unsigned(logical_register(index)?, XReg::Sp, index * WORD_BYTES)?;
+        }
+        self.encoder.add_x_imm(XReg::Sp, XReg::Sp, save_immediate)?;
+        let resume = self.encoder.cbz_placeholder(XReg::X9)?;
+        self.emit_literal(DReg::D0, 0.0)?;
+        self.early_returns.push(self.encoder.b_placeholder());
+        let resume_target = self.encoder.position();
+        self.encoder.patch_branch(resume, resume_target)
     }
 
     fn emit_edge_moves(
@@ -1382,16 +1425,19 @@ impl FunctionCompiler {
         self.stack_load_x(XReg::X9, counter_offset)?;
         self.encoder.add_x_imm(XReg::X9, XReg::X9, 1)?;
         self.stack_store_x(XReg::X9, counter_offset)?;
-        self.encoder
-            .mov_u64(XReg::X10, MAX_RUNTIME_LOOP_ITERATIONS)?;
+        self.encoder.mov_u64(XReg::X10, LOOP_POLL_INTERVAL)?;
         self.encoder.cmp_x(XReg::X9, XReg::X10)?;
-        let limit_reached = self.encoder.b_cond_placeholder(Condition::CarrySet);
+        let poll_due = self.encoder.b_cond_placeholder(Condition::CarrySet);
         let repeat = self.encoder.b_placeholder();
         self.encoder.patch_branch(repeat, loop_start)?;
 
-        let limit_target = self.encoder.position();
-        self.encoder.patch_branch(limit_reached, limit_target)?;
-        self.emit_void_error_early_return(rspice_native_loop_limit_error as *const () as usize)?;
+        let poll_target = self.encoder.position();
+        self.encoder.patch_branch(poll_due, poll_target)?;
+        self.encoder.mov_u64(XReg::X9, 0)?;
+        self.stack_store_x(XReg::X9, counter_offset)?;
+        self.emit_loop_poll()?;
+        let repeat_after_poll = self.encoder.b_placeholder();
+        self.encoder.patch_branch(repeat_after_poll, loop_start)?;
 
         let exit_target = self.encoder.position();
         self.encoder.patch_branch(loop_exit, exit_target)
@@ -4028,16 +4074,13 @@ mod cross_target_contract_tests {
             .expect("the independent A64 decoder accepts the loop form");
     }
 
-    /// The runtime iteration guard, encoded.
+    /// The abort poll, encoded.
     ///
-    /// The host running this is x86-64, so the guard is read off the image
-    /// rather than executed: the counter's increment and the call to
-    /// `rspice_native_loop_limit_error` both have to precede the backward
-    /// branch, because a guard emitted after it would never run. What the
-    /// guard *computes* — 99,999 admitted, 100,000 refused, an inner loop
-    /// counted from zero on each entry — is pinned where it can be run, in
-    /// the x64 and WebAssembly backends' own tests, over the same fixtures.
-    /// Nothing here has been executed on an AArch64 host.
+    /// Read off the image so it holds on any host: the counter's increment
+    /// and the call to `rspice_native_loop_poll` both have to precede the
+    /// backward branch, because a poll emitted after it would never run. What
+    /// the poll *does* is pinned by the executed tests below, on AArch64
+    /// hosts.
     #[test]
     fn a_block_loop_counts_its_back_edge_before_taking_it() {
         let ssa = Program::empty_block_loop_fixture_for_test(4.0).expect("build the loop program");
@@ -4075,7 +4118,7 @@ mod cross_target_contract_tests {
         );
         assert!(
             word_index(call) < backward_index,
-            "the limit helper is reached before the back edge is taken"
+            "the abort poll is reached before the back edge is taken"
         );
         verify_exact_function(&bytes, "guarded loop-form scalar value function")
             .expect("the independent A64 decoder accepts the guarded loop form");
@@ -5104,20 +5147,19 @@ mod tests {
         entry(context, std::ptr::null())
     }
 
-    /// A block program's back edge is counted, and the hundred-thousandth
-    /// trip is refused.
+    /// A block program's back edge polls the run's abort hook, and a stop
+    /// ends the loop at the first poll.
     ///
     /// The fixture terminates on its own after `trips` iterations, so a build
-    /// without the guard answers rather than hanging and this reads as a wrong
-    /// answer instead of a timeout. 99,999 trips is the last one that passes
-    /// and 100,000 is the first that fails, which is
-    /// `MAX_RUNTIME_LOOP_ITERATIONS` read exactly as
-    /// `FunctionCompiler::emit_block_loop_back_edge_guard` reads it, and
-    /// 150,000 is a runaway a customer's Verilog-A would produce.
+    /// without the poll answers rather than hanging and this reads as a wrong
+    /// answer instead of a timeout. Both trip counts reach a poll.
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn a_block_program_back_edge_hard_fails_the_runtime_iteration_limit() {
-        for trips in [100_000.0_f64, 150_000.0] {
+    fn a_block_program_back_edge_stops_when_the_run_is_aborted() {
+        for trips in [
+            f64::from(rspice_veriloga_runtime::loop_abort::POLL_INTERVAL),
+            150_000.0,
+        ] {
             let ssa =
                 Program::empty_block_loop_fixture_for_test(trips).expect("build the runaway loop");
             let bytes = compile_value_function_from_ssa(&ssa).expect("compile the runaway loop");
@@ -5125,32 +5167,31 @@ mod tests {
             let context = context_with_params(&params);
             context.clear_runtime_error();
 
-            let returned = run_published_value_entry(&bytes, &context);
+            let returned = rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || {
+                run_published_value_entry(&bytes, &context)
+            });
 
             let error = context
-                .take_runtime_error()
-                .unwrap_or_else(|| panic!("{trips} trips must hard-fail the iteration limit"));
-            assert!(
-                error.contains("native runtime loop iteration limit exceeded"),
-                "error must carry the loop-limit diagnostic, got: {error}"
-            );
-            assert!(
-                error.contains("no interpreter fallback"),
-                "error must carry the native hard-fail contract, got: {error}"
-            );
+                .take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{trips} trips must stop on the abort hook"));
+            assert!(matches!(
+                error.kind,
+                crate::native::NativeRuntimeErrorKind::Aborted
+            ));
             assert_eq!(
                 returned.to_bits(),
                 0.0_f64.to_bits(),
-                "a refused evaluation returns a defined zero, not whatever the helper left"
+                "a stopped evaluation returns a defined zero, not whatever the helper left"
             );
         }
     }
 
-    /// The last trip count the guard admits, and the value it still computes.
+    /// A loop with no abort runs to completion through its polls, and every
+    /// value the poll's call could clobber is where it was.
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn a_block_program_back_edge_admits_the_trip_below_the_limit() {
-        let trips = 99_999.0_f64;
+    fn a_block_program_back_edge_runs_through_its_polls() {
+        let trips = 3.0 * f64::from(rspice_veriloga_runtime::loop_abort::POLL_INTERVAL) + 7.0;
         let value = 0.5_f64;
         let ssa =
             Program::empty_block_loop_fixture_for_test(trips).expect("build the long-running loop");
@@ -5159,11 +5200,13 @@ mod tests {
         let context = context_with_params(&params);
         context.clear_runtime_error();
 
-        let returned = run_published_value_entry(&bytes, &context);
+        let returned = rspice_veriloga_runtime::loop_abort::with_hook(&|| false, || {
+            run_published_value_entry(&bytes, &context)
+        });
 
         assert!(
             context.take_runtime_error().is_none(),
-            "99,999 trips is one below the limit and must not fail"
+            "a loop the run has not stopped must not fail"
         );
         assert_eq!(
             returned.to_bits(),
@@ -5171,27 +5214,26 @@ mod tests {
         );
     }
 
-    /// Nested loops are counted per entry, not cumulatively.
-    ///
-    /// Ten entries into an inner loop of twenty thousand trips is two hundred
-    /// thousand back-edge traversals in one evaluation, twice the limit; a
-    /// counter that was not zeroed on each entry to the inner loop would
-    /// refuse this program, and one shared between the two loops would refuse
-    /// it sooner still.
+    /// Nested loops run to completion when each inner entry crosses a poll.
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn nested_block_loops_count_each_entry_from_zero() {
-        let (outer, inner) = (10.0_f64, 20_000.0_f64);
+    fn nested_block_loops_run_through_their_polls() {
+        let (outer, inner) = (
+            3.0_f64,
+            f64::from(rspice_veriloga_runtime::loop_abort::POLL_INTERVAL) + 11.0,
+        );
         let ssa = Program::nested_loop_fixture_for_test(outer, inner).expect("build nested loops");
         let bytes = compile_value_function_from_ssa(&ssa).expect("compile the nested loops");
         let context = EvalContext::empty_for_test();
         context.clear_runtime_error();
 
-        let returned = run_published_value_entry(&bytes, &context);
+        let returned = rspice_veriloga_runtime::loop_abort::with_hook(&|| false, || {
+            run_published_value_entry(&bytes, &context)
+        });
 
         assert!(
             context.take_runtime_error().is_none(),
-            "no single loop reaches the limit, so the evaluation must succeed"
+            "no loop is stopped, so the evaluation must succeed"
         );
         assert_eq!(
             returned.to_bits(),
@@ -5199,22 +5241,21 @@ mod tests {
         );
     }
 
-    /// The guard's failure path reaches the evaluation context even after the
-    /// loop body has called a helper.
+    /// The poll reaches the evaluation context even after the loop body has
+    /// called a helper.
     ///
-    /// The context arrives in X0, and the diagnostic is recorded by handing
-    /// that pointer to `rspice_native_loop_limit_error`. A helper called in
-    /// the body is free to clobber X0, and the scan that decides whether to
-    /// keep the context in a callee-saved register reads the instruction list
-    /// in layout order, where the body's call comes *after* everything the
-    /// next trip re-executes — which is why a loop-carrying program on this
-    /// backend saves its entry arguments whenever it calls out at all. Both
-    /// halves are asserted: the prologue keeps the context in X19/X20, and
-    /// the recorded message is the real one rather than whatever a stale
-    /// pointer addressed.
+    /// The context arrives in X0, and the stop is recorded by handing that
+    /// pointer to `rspice_native_loop_poll`. A helper called in the body is
+    /// free to clobber X0, and the scan that decides whether to keep the
+    /// context in a callee-saved register reads the instruction list in
+    /// layout order, where the body's call comes *after* everything the next
+    /// trip re-executes — which is why a loop-carrying program on this backend
+    /// saves its entry arguments whenever it calls out at all. Both halves are
+    /// asserted: the prologue keeps the context in X19/X20, and the stop is
+    /// recorded on the context the entry was called with.
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn a_loop_calling_a_helper_keeps_the_context_for_its_own_failure_path() {
+    fn a_loop_calling_a_helper_keeps_the_context_for_its_poll() {
         let ssa = Program::helper_calling_loop_fixture_for_test(150_000.0)
             .expect("build the helper-calling loop");
         assert!(
@@ -5241,14 +5282,16 @@ mod tests {
         let context = EvalContext::empty_for_test();
         context.clear_runtime_error();
 
-        run_published_value_entry(&bytes, &context);
+        rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || {
+            run_published_value_entry(&bytes, &context)
+        });
 
         let error = context
-            .take_runtime_error()
-            .expect("the runaway loop must hard-fail");
+            .take_native_runtime_error()
+            .expect("the runaway loop must stop on the abort hook");
         assert!(
-            error.contains("native runtime loop iteration limit exceeded"),
-            "the diagnostic must reach the context the entry was called with, got: {error}"
+            matches!(error.kind, crate::native::NativeRuntimeErrorKind::Aborted),
+            "the stop must reach the context the entry was called with"
         );
     }
 

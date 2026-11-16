@@ -4094,28 +4094,31 @@ impl Engine {
                         work.into_par_iter()
                             .map(|(mut worker_circuit, chunk_start, chunk)| {
                                 let _log_scope = crate::log_scope::enter(log_scope.clone());
-                                let mut worker_matrix =
-                                    rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
-                                let mut worker_rhs = vec![Complex64::new(0.0, 0.0); size];
-                                let mut worker_ac_solution = Vec::with_capacity(size);
-                                let mut worker_transfer_solution = Vec::with_capacity(size);
-                                chunk
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(chunk_offset, &frequency)| {
-                                        let final_step =
-                                            chunk_start + chunk_offset + 1 == frequencies.len();
-                                        solve_at_frequency(
-                                            &mut worker_circuit,
-                                            &mut worker_matrix,
-                                            &mut worker_rhs,
-                                            &mut worker_ac_solution,
-                                            &mut worker_transfer_solution,
-                                            frequency,
-                                            final_step,
-                                        )
-                                    })
-                                    .collect()
+                                // The run's Stop reaches a Verilog-A loop on this thread too.
+                                super::with_loop_abort(abort, || {
+                                    let mut worker_matrix =
+                                        rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+                                    let mut worker_rhs = vec![Complex64::new(0.0, 0.0); size];
+                                    let mut worker_ac_solution = Vec::with_capacity(size);
+                                    let mut worker_transfer_solution = Vec::with_capacity(size);
+                                    chunk
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(chunk_offset, &frequency)| {
+                                            let final_step =
+                                                chunk_start + chunk_offset + 1 == frequencies.len();
+                                            solve_at_frequency(
+                                                &mut worker_circuit,
+                                                &mut worker_matrix,
+                                                &mut worker_rhs,
+                                                &mut worker_ac_solution,
+                                                &mut worker_transfer_solution,
+                                                frequency,
+                                                final_step,
+                                            )
+                                        })
+                                        .collect()
+                                })
                             })
                             .collect()
                     })?;

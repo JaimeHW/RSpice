@@ -33,8 +33,7 @@
 //! edge arguments, a branch that reads Verilog-A truthiness exactly as
 //! [`x64::codegen`](crate::native::x64)'s `emit_terminator` does — the sign bit
 //! cleared and the payload tested, so every NaN is taken — and a `Return`. A
-//! walk that does not reach one inside its block budget is refused by name
-//! rather than spun on.
+//! walk the run's abort hook stops before it reaches one is refused by name.
 //!
 //! # Where the semantics come from
 //!
@@ -83,9 +82,6 @@ use crate::jit::ssa::{self, Terminator};
 /// The backend's own thermal-voltage coefficient, `k/q`.
 use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 
-/// The runtime loop bound both native backends encode.
-const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
-
 /// Why a program produced no value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PostfixRefusal {
@@ -94,13 +90,14 @@ pub(super) enum PostfixRefusal {
     Operation(&'static str),
     /// The program is not the shape its form promises: a stream that did not
     /// leave exactly one value on the stack, an operation that found fewer
-    /// operands than it needs, an edge whose arity is not its target's, a use
-    /// ahead of its definition, or a block walk that never reached a `Return`.
-    /// A finding about the plan rather than about this walker.
+    /// operands than it needs, an edge whose arity is not its target's, or a
+    /// use ahead of its definition. A finding about the plan rather than about
+    /// this walker.
     Malformed(&'static str),
-    /// A load addressed storage the operating point does not have, or an
-    /// integer conversion the runtime refuses. The compiled route reports a
-    /// runtime error at the same point and the census discards the comparison.
+    /// A load addressed storage the operating point does not have, an
+    /// integer conversion the runtime refuses, or a loop the run's abort hook
+    /// stopped. The compiled route reports a runtime error at the same point
+    /// and the census discards the comparison.
     RuntimeError(&'static str),
 }
 
@@ -242,15 +239,21 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                 }
             }
             NativeAssignment::Loop { condition, body } => {
-                let mut iterations = 0_usize;
+                let mut until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                 while let Ok(active) = self.run(condition) {
-                    if active.real() == 0.0 || iterations >= MAX_RUNTIME_LOOP_ITERATIONS {
+                    if active.real() == 0.0 {
                         break;
                     }
                     for statement in body {
                         self.run_assignment(statement);
                     }
-                    iterations += 1;
+                    until_poll -= 1;
+                    if until_poll == 0 {
+                        if rspice_veriloga_runtime::loop_abort::aborted() {
+                            break;
+                        }
+                        until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
+                    }
                 }
             }
         }
@@ -295,17 +298,24 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
     /// any parameter is written, so a back edge that permutes them does not
     /// read a value it has already overwritten.
     ///
-    /// The budget is not a timeout dressed up: a value program has one
-    /// `Return`, and a walk that has entered more blocks than the program has
-    /// plus the runtime's own loop bound is not going to reach it. Refusing by
-    /// name leaves the entry without a reference and says so, which is the same
-    /// answer every other refusal here gives.
+    /// A walk follows the program as long as the machine code would: a loop
+    /// that never reaches the `Return` is ended by the run's abort hook, as
+    /// the compiled loop is, and refused by name. That leaves the entry
+    /// without a reference and says so, which is the same answer every other
+    /// refusal here gives.
     pub(super) fn run_blocks(&mut self, program: &ssa::Program) -> Result<S, PostfixRefusal> {
         let mut values: Vec<Option<S>> = vec![None; program.value_count()];
         let mut block = program.entry();
         let mut arguments: Vec<S> = Vec::new();
-        let budget = program.blocks().len() + MAX_RUNTIME_LOOP_ITERATIONS;
-        for _ in 0..budget {
+        let mut until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
+        loop {
+            until_poll -= 1;
+            if until_poll == 0 {
+                if rspice_veriloga_runtime::loop_abort::aborted() {
+                    return Err(self.refuse(PostfixRefusal::RuntimeError("aborted")));
+                }
+                until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
+            }
             let current = program
                 .block(block)
                 .map_err(|_| self.refuse(PostfixRefusal::Malformed("block-target")))?;
@@ -370,7 +380,6 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             }
             block = edge.target();
         }
-        Err(self.refuse(PostfixRefusal::Malformed("block-budget")))
     }
 
     /// One SSA value's result, or the refusal a use before its definition is.

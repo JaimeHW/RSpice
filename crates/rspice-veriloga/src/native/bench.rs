@@ -16,7 +16,6 @@ use web_time::Instant;
 
 const DEFAULT_ITERATIONS: usize = 200_000;
 const DEFAULT_SAMPLES: usize = 7;
-const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 const DEVICE_NODE_MAPPING: &[usize] = &[1, 0, 2];
 const DEVICE_CIRCUIT_VOLTAGES: &[f64] = &[0.8, 0.2];
 const DEVICE_MATRIX_DIMENSION: usize = 2;
@@ -1139,14 +1138,15 @@ fn execute_assignment_steps(vm: &mut Vm<'_>, steps: &[AssignmentStep]) -> Result
                 vm.context.variables[slot] = value;
             }
             AssignmentStep::Loop { condition, body } => {
-                let mut iterations = 0usize;
+                let mut until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                 while vm.execute(condition)? != 0.0 {
                     execute_assignment_steps(vm, body)?;
-                    iterations += 1;
-                    if iterations >= MAX_RUNTIME_LOOP_ITERATIONS {
-                        return Err(VmError::InvalidInstruction(
-                            "runtime loop iteration limit exceeded",
-                        ));
+                    until_poll -= 1;
+                    if until_poll == 0 {
+                        if rspice_veriloga_runtime::loop_abort::aborted() {
+                            return Err(VmError::Aborted);
+                        }
+                        until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                     }
                 }
             }

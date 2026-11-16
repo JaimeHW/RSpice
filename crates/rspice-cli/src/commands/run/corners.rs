@@ -214,7 +214,13 @@ pub(super) fn run(
             .install(|| {
                 prepared
                     .par_iter()
-                    .map(job)
+                    .map(|corner| {
+                        // A Verilog-A loop on this worker polls the process's
+                        // interrupt and timeout too.
+                        rspice_core::engine::with_loop_abort(&crate::abort::ProcessAbort, || {
+                            job(corner)
+                        })
+                    })
                     .collect::<Result<Vec<_>, CliError>>()
             })?
     } else {

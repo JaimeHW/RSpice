@@ -506,6 +506,8 @@ fn integer_operation_from_code(code: usize) -> Option<IntegerBinaryOperation> {
 pub(crate) enum NativeRuntimeErrorKind {
     NativeJit,
     InvalidNumericResult,
+    /// The run's abort hook stopped a loop.
+    Aborted,
 }
 
 pub(crate) struct NativeRuntimeError {
@@ -1148,12 +1150,23 @@ fn set_native_context_classified_ptr(
     }
 }
 
-#[unsafe(export_name = "rspice_native_loop_limit_error")]
-pub extern "C" fn rspice_native_loop_limit_error(ctx: *const EvalContext) {
-    set_native_context_error_ptr(
-        ctx,
-        "native runtime loop iteration limit exceeded; no interpreter fallback",
-    );
+/// A loop's poll of the run's abort hook, once every
+/// [`POLL_INTERVAL`](rspice_veriloga_runtime::loop_abort::POLL_INTERVAL)
+/// trips: nonzero, with the stop recorded on the context, when the run has
+/// been told to stop, and compiled code then returns early; zero otherwise,
+/// and the loop carries on.
+#[unsafe(export_name = "rspice_native_loop_poll")]
+pub extern "C" fn rspice_native_loop_poll(ctx: *const EvalContext) -> u64 {
+    if !rspice_veriloga_runtime::loop_abort::aborted() {
+        return 0;
+    }
+    // SAFETY: A non-null pointer comes from the active native entry point.
+    if let Some(ctx) = unsafe { ctx.as_ref() } {
+        ctx.invalidate_task_candidate();
+        ctx.runtime_status
+            .record(NativeRuntimeErrorKind::Aborted, "analog loop stopped");
+    }
+    1
 }
 
 #[unsafe(export_name = "rspice_native_non_finite_contribution_error")]
@@ -3782,7 +3795,7 @@ call_helpers!(
     record_analog_counter_native,
     rspice_finish_native,
     rspice_task_guard_native,
-    rspice_native_loop_limit_error,
+    rspice_native_loop_poll,
     rspice_native_non_finite_contribution_error,
     rspice_native_limit_state_values_error,
     rspice_native_limit_state_values_bounds_error,

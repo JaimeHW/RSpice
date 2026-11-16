@@ -3856,13 +3856,16 @@ impl Engine {
                     work.into_par_iter()
                         .map(|(mut worker_circuit, chunk)| {
                             let _log_scope = crate::log_scope::enter(log_scope.clone());
-                            let matrix = self.build_matrix(&worker_circuit)?;
-                            worker_circuit.link_indices(&matrix);
-                            let mut worker_matrix = matrix;
-                            chunk
-                                .into_iter()
-                                .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
-                                .collect()
+                            // The run's Stop reaches a Verilog-A loop on this thread too.
+                            super::with_loop_abort(abort, || {
+                                let matrix = self.build_matrix(&worker_circuit)?;
+                                worker_circuit.link_indices(&matrix);
+                                let mut worker_matrix = matrix;
+                                chunk
+                                    .into_iter()
+                                    .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
+                                    .collect()
+                            })
                         })
                         .collect()
                 })?;

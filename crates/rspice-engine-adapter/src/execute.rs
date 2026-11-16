@@ -157,7 +157,11 @@ pub fn execute_with_abort(
     solve_budget: Duration,
 ) -> Execution {
     let abort = RunAbort::new(cancel, solve_budget);
-    let execution = execute_bounded(analysis, content, engine_build, &abort);
+    // A Verilog-A loop running inside one evaluation polls the same signal,
+    // so the budget and a cancellation end it too.
+    let execution = rspice_core::engine::with_loop_abort(&abort, || {
+        execute_bounded(analysis, content, engine_build, &abort)
+    });
     let execution = finalize_execution(execution, &abort);
     label_stop_cause(execution, abort.stop_cause())
 }

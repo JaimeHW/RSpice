@@ -60,6 +60,9 @@ pub enum StampError {
     NonFiniteTrial(Box<NonFiniteTrialError>),
     /// Every other point fails the same way, so this ends the run here.
     Structural(String),
+    /// The run's abort hook stopped the device mid-evaluation: the run was
+    /// told to stop while a Verilog-A loop was running.
+    Aborted,
 }
 
 impl StampError {
@@ -78,6 +81,7 @@ impl fmt::Display for StampError {
         match self {
             Self::NonFiniteTrial(error) => error.fmt(formatter),
             Self::Structural(message) => formatter.write_str(message),
+            Self::Aborted => formatter.write_str("device evaluation stopped: the run was aborted"),
         }
     }
 }

@@ -3841,3 +3841,108 @@ fn noise_injection_range_is_preserved_until_multiplicity_scaling() {
         );
     }
 }
+
+/// A `while` whose condition never clears: `keep_running` is a parameter, so
+/// no route can fold the loop away, and `x` saturates instead of overflowing.
+const ENDLESS_LOOP: &str = r#"
+`include "disciplines.vams"
+module endless_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer keep_running = 1;
+    real x;
+    analog begin
+        x = 0;
+        while (keep_running)
+            x = x + 1;
+        I(p, n) <+ x * V(p, n);
+    end
+endmodule
+"#;
+
+/// An endless analog loop ends on the run's abort hook, on whichever route
+/// this build evaluates, with the stop as its own error.
+#[test]
+fn an_endless_analog_loop_stops_when_the_run_is_aborted() {
+    let fixture = compile(ENDLESS_LOOP);
+    let mut device = fixture.device("SPIN1", &[1, 0]);
+    #[cfg(feature = "native")]
+    assert!(device.is_using_native());
+    device.update_voltages(&[1.0]);
+
+    let error = rspice_veriloga_runtime::loop_abort::with_hook(&|| true, || device.try_evaluate())
+        .expect_err("an endless loop must stop on the abort hook");
+
+    assert!(
+        matches!(error, rspice_veriloga::vm::VmError::Aborted),
+        "{error}"
+    );
+}
+
+/// A Stop raised from another thread while the loop runs ends it promptly.
+#[test]
+fn an_endless_analog_loop_stops_on_a_stop_from_another_thread() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let fixture = compile(ENDLESS_LOOP);
+    let mut device = fixture.device("SPIN2", &[1, 0]);
+    device.update_voltages(&[1.0]);
+    let stop = AtomicBool::new(false);
+
+    let started = std::time::Instant::now();
+    let error = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            stop.store(true, Ordering::SeqCst);
+        });
+        rspice_veriloga_runtime::loop_abort::with_hook(&|| stop.load(Ordering::SeqCst), || {
+            device.try_evaluate()
+        })
+    })
+    .expect_err("an endless loop must stop when the run is stopped");
+
+    assert!(
+        matches!(error, rspice_veriloga::vm::VmError::Aborted),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the stop took {:?}",
+        started.elapsed()
+    );
+}
+
+/// A loop that ends runs every trip, past the hundred thousand the runtime
+/// once refused and across several abort polls, and computes its closed form.
+#[test]
+fn a_long_analog_loop_runs_every_trip() {
+    let trips = 3 * rspice_veriloga_runtime::loop_abort::POLL_INTERVAL + 7;
+    let fixture = compile(&format!(
+        r#"
+`include "disciplines.vams"
+module long_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer trips = {trips};
+    integer i;
+    real x;
+    analog begin
+        x = 0;
+        i = 0;
+        while (i < trips) begin
+            x = x + 1;
+            i = i + 1;
+        end
+        I(p, n) <+ x * V(p, n);
+    end
+endmodule
+"#
+    ));
+    let mut device = fixture.device("LONG1", &[1, 0]);
+    device.update_voltages(&[0.5]);
+
+    let currents =
+        rspice_veriloga_runtime::loop_abort::with_hook(&|| false, || device.try_evaluate())
+            .expect("a loop that ends must run to completion");
+
+    assert_eq!(currents, vec![0.5 * f64::from(trips)]);
+}

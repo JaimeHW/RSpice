@@ -80,6 +80,7 @@ fn stamp_failure(
     error: &rspice_veriloga::vm::VmError,
 ) -> StampError {
     match error {
+        rspice_veriloga::vm::VmError::Aborted => StampError::Aborted,
         rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => StampError::nonfinite_trial(
             device.name.clone(),
             format!(

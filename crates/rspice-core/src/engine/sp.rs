@@ -351,21 +351,24 @@ impl Engine {
                     work.into_par_iter()
                         .map(|(mut circuit, mut workspace, mut noise, start, chunk)| {
                             let _log_scope = crate::log_scope::enter(log_scope.clone());
-                            chunk
-                                .iter()
-                                .enumerate()
-                                .map(|(offset, &frequency)| {
-                                    solve_point(
-                                        &mut circuit,
-                                        &mut workspace,
-                                        noise
-                                            .as_mut()
-                                            .map(|(circuit, workspace)| (circuit, workspace)),
-                                        frequency,
-                                        start + offset + 1 == frequencies.len(),
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, SimulationError>>()
+                            // The run's Stop reaches a Verilog-A loop on this thread too.
+                            super::with_loop_abort(abort, || {
+                                chunk
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(offset, &frequency)| {
+                                        solve_point(
+                                            &mut circuit,
+                                            &mut workspace,
+                                            noise
+                                                .as_mut()
+                                                .map(|(circuit, workspace)| (circuit, workspace)),
+                                            frequency,
+                                            start + offset + 1 == frequencies.len(),
+                                        )
+                                    })
+                                    .collect::<Result<Vec<_>, SimulationError>>()
+                            })
                         })
                         .collect::<Result<Vec<_>, SimulationError>>()
                 })??;

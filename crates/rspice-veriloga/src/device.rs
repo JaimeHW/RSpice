@@ -3133,6 +3133,7 @@ impl VerilogADevice {
             crate::native::NativeRuntimeErrorKind::InvalidNumericResult => {
                 VmError::InvalidNumericResult(error.message)
             }
+            crate::native::NativeRuntimeErrorKind::Aborted => VmError::Aborted,
         }
     }
 
@@ -7802,10 +7803,6 @@ impl VerilogADevice {
         }
     }
 
-    /// Safety cap on runtime-loop iterations per evaluation (a model bug
-    /// must not hang the Newton loop)
-    const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
-
     /// Execute a sequence of evaluation steps (assignments and runtime
     /// loops), recursively.
     ///
@@ -7866,7 +7863,10 @@ impl VerilogADevice {
                     vm.context.variables[slot] = value;
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {
-                    let mut iterations = 0usize;
+                    // A loop runs as long as its condition holds. One that
+                    // never clears is ended by the run's abort hook, polled
+                    // every `POLL_INTERVAL` trips.
+                    let mut until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                     loop {
                         if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
                             frame.set_column(None);
@@ -7876,11 +7876,12 @@ impl VerilogADevice {
                             break;
                         }
                         Self::execute_assignment_steps(vm, body)?;
-                        iterations += 1;
-                        if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
-                            return Err(VmError::InvalidInstruction(
-                                "runtime loop iteration limit exceeded",
-                            ));
+                        until_poll -= 1;
+                        if until_poll == 0 {
+                            if rspice_veriloga_runtime::loop_abort::aborted() {
+                                return Err(VmError::Aborted);
+                            }
+                            until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                         }
                     }
                 }

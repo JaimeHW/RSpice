@@ -3350,21 +3350,24 @@ impl Engine {
                         work.into_par_iter()
                             .map(|(mut worker_circuit, chunk_start, chunk)| {
                                 let _log_scope = crate::log_scope::enter(log_scope.clone());
-                                let mut workspace = ComplexMatrix::from_real_structure(&matrix);
-                                chunk
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(chunk_offset, &freq)| {
-                                        let final_step =
-                                            chunk_start + chunk_offset + 1 == frequencies.len();
-                                        solve_at_freq(
-                                            &mut worker_circuit,
-                                            &mut workspace,
-                                            freq,
-                                            final_step,
-                                        )
-                                    })
-                                    .collect()
+                                // The run's Stop reaches a Verilog-A loop on this thread too.
+                                super::with_loop_abort(abort, || {
+                                    let mut workspace = ComplexMatrix::from_real_structure(&matrix);
+                                    chunk
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(chunk_offset, &freq)| {
+                                            let final_step =
+                                                chunk_start + chunk_offset + 1 == frequencies.len();
+                                            solve_at_freq(
+                                                &mut worker_circuit,
+                                                &mut workspace,
+                                                freq,
+                                                final_step,
+                                            )
+                                        })
+                                        .collect()
+                                })
                             })
                             .collect()
                     })?;

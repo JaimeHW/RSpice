@@ -692,33 +692,36 @@ impl Engine {
                 for _ in 0..workers {
                     scope.spawn(|| {
                         let _log_scope = crate::log_scope::enter(log_scope.clone());
-                        #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
-                        let mut engine = Self::new(worker_config.clone());
-                        // A sample's compiler findings are the run's, reported
-                        // once across every worker.
-                        #[cfg(feature = "veriloga")]
-                        {
-                            engine.compiler_diagnostics =
-                                std::sync::Arc::clone(&self.compiler_diagnostics);
-                            engine.compiler_diagnostic_handler =
-                                self.compiler_diagnostic_handler.clone();
-                        }
-                        loop {
-                            if stopped.load(Ordering::Acquire) || abort.is_aborted() {
-                                break;
+                        // The run's Stop reaches a Verilog-A loop on this thread too.
+                        super::with_loop_abort(abort, || {
+                            #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
+                            let mut engine = Self::new(worker_config.clone());
+                            // A sample's compiler findings are the run's, reported
+                            // once across every worker.
+                            #[cfg(feature = "veriloga")]
+                            {
+                                engine.compiler_diagnostics =
+                                    std::sync::Arc::clone(&self.compiler_diagnostics);
+                                engine.compiler_diagnostic_handler =
+                                    self.compiler_diagnostic_handler.clone();
                             }
-                            let index = next.fetch_add(1, Ordering::SeqCst);
-                            if index >= num_runs {
-                                break;
+                            loop {
+                                if stopped.load(Ordering::Acquire) || abort.is_aborted() {
+                                    break;
+                                }
+                                let index = next.fetch_add(1, Ordering::SeqCst);
+                                if index >= num_runs {
+                                    break;
+                                }
+                                let outcome = evaluate_run(&engine, index);
+                                let fatal = outcome.is_err();
+                                *slots[index].lock().expect("mc slot") = Some(outcome);
+                                if fatal {
+                                    stopped.store(true, Ordering::Release);
+                                    break;
+                                }
                             }
-                            let outcome = evaluate_run(&engine, index);
-                            let fatal = outcome.is_err();
-                            *slots[index].lock().expect("mc slot") = Some(outcome);
-                            if fatal {
-                                stopped.store(true, Ordering::Release);
-                                break;
-                            }
-                        }
+                        })
                     });
                 }
             });

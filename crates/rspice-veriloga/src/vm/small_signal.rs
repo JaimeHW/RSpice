@@ -23,8 +23,6 @@ use num_complex::Complex64;
 use rspice_veriloga_runtime::arithmetic::IdtModOrigin;
 use std::collections::BTreeMap;
 
-const MAX_RUNTIME_LOOP_ITERATIONS: usize = 1_000_000;
-
 /// Allocations one evaluation borrows from the previous one on this thread.
 pub(super) struct SmallSignalScratch<V> {
     variables: Vec<V>,
@@ -760,7 +758,9 @@ impl<'a, V: DynamicOperators> SmallSignalEngine<'a, V> {
                     *target = value;
                 }
                 AssignmentStep::Loop { condition, body } => {
-                    let mut iterations = 0usize;
+                    // The same guard as the large-signal interpreter: the
+                    // run's abort hook, polled every `POLL_INTERVAL` trips.
+                    let mut until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                     loop {
                         V::begin_assignment(self, None);
                         let condition_value = self.execute_value(condition)?;
@@ -769,11 +769,12 @@ impl<'a, V: DynamicOperators> SmallSignalEngine<'a, V> {
                             break;
                         }
                         self.execute_assignment_steps(body, live)?;
-                        iterations += 1;
-                        if iterations >= MAX_RUNTIME_LOOP_ITERATIONS {
-                            return Err(VmError::InvalidInstruction(
-                                "small-signal runtime loop iteration limit exceeded",
-                            ));
+                        until_poll -= 1;
+                        if until_poll == 0 {
+                            if rspice_veriloga_runtime::loop_abort::aborted() {
+                                return Err(VmError::Aborted);
+                            }
+                            until_poll = rspice_veriloga_runtime::loop_abort::POLL_INTERVAL;
                         }
                     }
                 }

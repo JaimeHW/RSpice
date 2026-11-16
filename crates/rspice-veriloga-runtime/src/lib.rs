@@ -31,6 +31,7 @@ mod integration;
 mod integration_state;
 mod lanes;
 mod limexp;
+pub mod loop_abort;
 mod noise_frequency;
 mod periodic;
 pub mod polynomial;
