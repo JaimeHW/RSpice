@@ -350,6 +350,9 @@ pub struct TableResponse {
     pub context_menu: Option<ContextRequest>,
     /// The selection in the table's state changed this frame.
     pub selection_changed: bool,
+    /// The table has the keyboard: a key the page gives a meaning to, such
+    /// as Delete on the selected row, is the page's to read.
+    pub focused: bool,
 }
 
 /// One table: its columns, its rows, and where it may grow.
@@ -693,6 +696,7 @@ impl<'a> DataTable<'a> {
             .then(|| state.as_deref().and_then(TableState::selected_row))
             .flatten();
         let focused = state.is_some() && ui.memory(|memory| memory.has_focus(table_id));
+        response.focused = focused;
         let mut keyed_menu = false;
         if let Some(state) = state.as_deref_mut()
             && focused

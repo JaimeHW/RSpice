@@ -241,6 +241,30 @@ pub struct VerificationSessionState {
     /// the run's points; `None` states every point's trials together.
     #[serde(skip)]
     pub monte_carlo_point: Option<usize>,
+    /// The Checks view's table: its selection, sort and sideways scroll.
+    #[serde(skip)]
+    pub checks_table: crate::workbench::surfaces::verify::table::TableState,
+    /// The Checks view leaves out the checks that passed or only informed.
+    #[serde(skip)]
+    pub checks_violations_only: bool,
+    /// The Checks view's rows in the order it shows them.
+    #[serde(skip)]
+    pub checks_rows: CheckRowOrder,
+}
+
+/// The Checks view's rows in the order it shows them: worst first, and only
+/// the violations when the reader asked for them. Built again only when the
+/// run's checks are rebuilt or the filter changes, so an idle frame orders
+/// nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CheckRowOrder {
+    /// The checks' revision and the filter the order was built for.
+    pub basis: Option<(u64, bool)>,
+    /// Each shown row's position in the run's checks.
+    pub rows: Vec<usize>,
+    /// Each shown row's key: what the check is, so a selection outlives the
+    /// run's checks being read again.
+    pub keys: Vec<crate::workbench::surfaces::verify::table::RowKey>,
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses

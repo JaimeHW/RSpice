@@ -671,7 +671,9 @@ pub(super) fn set_limits(model: &mut Model, specs: Vec<SpecEntry>) {
 }
 
 /// An SOA run of five checks on four devices: two violations, one check near
-/// its limit, two clean. The run is the model's one run.
+/// its limit, two clean. Its transient checked two `.ASSERT` cards, one broken
+/// twice, and reported an HDL `$warning`. The run is the model's one run, and
+/// its checks are read as the frame reads them.
 pub fn seed_soa(model: &mut Model) {
     use crate::state::{
         SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
@@ -758,7 +760,7 @@ pub fn seed_soa(model: &mut Model) {
             unit: unit.to_owned(),
             description: format!(
                 "{device} {}",
-                super::safety::soa_parameter_display(parameter)
+                super::checks::soa_parameter_display(parameter)
             ),
             verdict,
         });
@@ -790,6 +792,68 @@ pub fn seed_soa(model: &mut Model) {
                 violations,
             }),
     );
+    model.simulation.retained.runs[0].add_analysis(attributed(checked_transient()));
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+}
+
+/// The SOA fixture's transient: an `.ASSERT` at error level that `V(out)`
+/// broke twice, one that held, and an HDL `$warning`.
+fn checked_transient() -> AnalysisResult {
+    use rspice_core::analysis::{AssertViolation, AssertionReport};
+    use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
+    use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
+
+    let report = |name: &str, line, violations| AssertionReport {
+        name: name.to_owned(),
+        analysis: AssertAnalysis::Tran,
+        target: "V(out)".to_owned(),
+        instance: None,
+        level: AssertLevel::Error,
+        message: Some("out left its band".to_owned()),
+        origin: NetlistSourceLocation::in_memory(line),
+        violations,
+        unknown_stretches: 0,
+        error: None,
+        after_stop: None,
+    };
+    let stretch = |start: f64, end: f64, extreme: f64| AssertViolation {
+        start: Some(start),
+        end: Some(end),
+        extreme: Some(extreme),
+        at: Some((start + end) / 2.0),
+    };
+    let time = (0..64)
+        .map(|index| f64::from(index) * 1.0e-8)
+        .collect::<Vec<_>>();
+    let out = time
+        .iter()
+        .map(|time| 1.2 + 0.7 * (time * 2.0e7).sin())
+        .collect::<Vec<_>>();
+    let mut analysis =
+        AnalysisResult::new(2, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time, out, "#00aaff").with_unit("V"),
+        ]);
+    analysis.checks.assertions = vec![
+        report(
+            "out_band",
+            12,
+            vec![stretch(1.2e-7, 1.5e-7, 1.9), stretch(3.4e-7, 3.55e-7, 1.86)],
+        ),
+        report("out_floor", 13, Vec::new()),
+    ];
+    analysis.checks.hdl = vec![rspice_results::analysis_result::HdlDiagnostic {
+        severity: HdlSeverity::Warning,
+        text: "bias settled late\n".to_owned(),
+        point: HdlPoint::Transient { time: 2.5e-7 },
+        origin: HdlOrigin {
+            scope: "xtb.ubias".to_owned(),
+            file: "tb.v".to_owned(),
+            line: 41,
+        },
+    }];
+    analysis
 }
 
 /// The optimization fixture's seeding: its run is the model's one run.

@@ -210,42 +210,6 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
 }
 
 #[test]
-fn soa_cross_probe_selects_the_exact_schematic_device() {
-    let mut harness = SimulateTestHost::harness();
-    harness
-        .model
-        .schematic
-        .document_mut_for_test()
-        .components
-        .push(
-            crate::state::Component::new(
-                42,
-                crate::state::ComponentType::Nmos,
-                crate::state::Point::new(10, 20),
-            )
-            .with_name_value("M1", "NMOS"),
-        );
-
-    cross_probe_soa_device(&mut harness.cx(), "m1")
-        .expect("device identity cross-probes case-insensitively");
-
-    assert!(
-        harness
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .has_component(42)
-    );
-    assert_eq!(
-        harness.wb.workspace,
-        super::super::super::state::Workspace::Design
-    );
-    assert!(cross_probe_soa_device(&mut harness.cx(), "M404").is_err());
-}
-
-#[test]
 fn verification_requires_an_explicit_active_run_selection() {
     let mut harness = SimulateTestHost::harness();
     harness

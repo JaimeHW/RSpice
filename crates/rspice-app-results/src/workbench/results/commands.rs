@@ -406,7 +406,7 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
         ResultViewer::Scatter => CommandKey::new("result-scatter"),
         ResultViewer::BoxViolin => CommandKey::new("result-distribution"),
         ResultViewer::Events => CommandKey::new("result-events"),
-        ResultViewer::Soa => CommandKey::new("result-safe-operating-area"),
+        ResultViewer::Soa => ids::RESULT_SAFE_OPERATING_AREA,
         ResultViewer::Optimization => CommandKey::new("result-optimization"),
     }
 }

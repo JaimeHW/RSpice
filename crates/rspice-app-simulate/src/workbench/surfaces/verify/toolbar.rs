@@ -143,8 +143,24 @@ impl<'a> ToolbarAction<'a> {
     }
 }
 
-/// The runs a page could read, and the one it reads; or, named otherwise,
-/// another one thing the page reads, such as the point it states.
+/// What a toolbar's run selector chooses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum RunRole {
+    /// The run the page reads, offered only when there is a choice to make.
+    #[default]
+    Read,
+}
+
+impl RunRole {
+    /// The selector's name, and what it says with nothing chosen.
+    const fn words(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Read => ("Run", "No run selected"),
+        }
+    }
+}
+
+/// The runs a page could read, and the one it reads.
 #[derive(Debug, Clone, Default)]
 pub(super) struct RunChoice {
     /// What the select picks, as assistive technology announces it.
@@ -152,13 +168,17 @@ pub(super) struct RunChoice {
     /// Each candidate's index in the retained run list, and its label.
     pub(super) candidates: Vec<(usize, String)>,
     pub(super) selected: Option<usize>,
+    pub(super) role: RunRole,
 }
 
 impl RunChoice {
-    /// Whether the toolbar shows a selector at all: only when there is a
-    /// choice to make.
+    /// Whether the toolbar shows a selector at all: for the run a page
+    /// reads, only when there is a choice to make; for its reference,
+    /// whenever there is a run to choose.
     pub(super) fn offers_choice(&self) -> bool {
-        self.candidates.len() > 1
+        match self.role {
+            RunRole::Read => self.candidates.len() > 1,
+        }
     }
 }
 
@@ -333,6 +353,7 @@ impl PageToolbar<'_> {
             lead_right = select_rect.right();
             #[cfg(any(test, feature = "test-support"))]
             super::raster::probe(ui, "toolbar.run", select_rect);
+            let (name, nothing_chosen) = self.runs.role.words();
             let options = self
                 .runs
                 .candidates
@@ -344,7 +365,7 @@ impl PageToolbar<'_> {
                 .candidates
                 .iter()
                 .find(|(index, _)| Some(*index) == self.runs.selected)
-                .map_or("No run selected", |(_, label)| label.as_str());
+                .map_or(nothing_chosen, |(_, label)| label.as_str());
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(select_rect)
@@ -353,7 +374,7 @@ impl PageToolbar<'_> {
             if let Some(picked) = select(
                 &mut child,
                 "verify.toolbar.run",
-                self.runs.name,
+                name,
                 shown,
                 &options,
                 RUN_SELECT_W,
@@ -456,6 +477,49 @@ impl PageToolbar<'_> {
             });
         taken
     }
+}
+
+/// A menu of `actions` at `position`, drawn as the More menu is: a table
+/// row's context menu. `open` opens it; it stays open, in memory under `id`,
+/// until an action is taken or the reader clicks elsewhere. Returns the
+/// index of the action taken.
+pub(super) fn action_menu(
+    ctx: &egui::Context,
+    id: egui::Id,
+    position: egui::Pos2,
+    open: bool,
+    actions: &[ToolbarAction<'_>],
+) -> Option<usize> {
+    let metrics = Tokens::get(ctx).metrics;
+    let height = if metrics.is_touch() {
+        metrics.touch_target()
+    } else {
+        OVERFLOW_ROW_H
+    };
+    let mut taken = None;
+    egui::Popup::new(
+        id,
+        ctx.clone(),
+        egui::PopupAnchor::Position(position),
+        egui::LayerId::new(egui::Order::Foreground, id),
+    )
+    .kind(egui::PopupKind::Menu)
+    .open_memory(open.then_some(egui::SetOpenCommand::Bool(true)))
+    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+    .width(OVERFLOW_MENU_W)
+    .show(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        for (index, action) in actions.iter().enumerate() {
+            let row = overflow_row(ui, action, height);
+            #[cfg(any(test, feature = "test-support"))]
+            super::raster::probe(ui, &format!("menu.{index}"), row.rect);
+            if action.enabled && row.clicked() {
+                taken = Some(index);
+                ui.close();
+            }
+        }
+    });
+    taken
 }
 
 fn more_button() -> Button<'static> {

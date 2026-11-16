@@ -690,6 +690,7 @@ pub mod ids {
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
         RESULT_OPERATING_POINT = "result-operating-point";
+        RESULT_SAFE_OPERATING_AREA = "result-safe-operating-area";
         RESULT_SPECIFICATIONS = "result-specifications";
         RESULT_WAVEFORMS = "waveforms";
         RUN_SIMULATION = "start-run";

@@ -7,12 +7,12 @@
 //! one line saying what produces data, with the action that produces it.
 
 mod axes;
+pub(crate) mod checks;
 mod corners;
 mod histogram;
 mod monte_carlo;
 mod regression_contract;
 mod regression_panel;
-pub mod safety;
 pub(crate) mod specification_edit;
 pub(crate) mod specifications;
 pub mod table;
@@ -27,18 +27,17 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use crate::workbench::slots::SimulateState;
 
 use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
 
+use checks::*;
 use corners::*;
 use monte_carlo::*;
 use regression_contract::*;
 use regression_panel::*;
-use safety::*;
 use specifications::specifications;
 
 pub(crate) use corners::{FactSection, point_facts};
@@ -67,7 +66,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             VerificationPage::Specifications => specifications(ui, cx),
             VerificationPage::Corners => corners(ui, cx),
             VerificationPage::MonteCarlo => monte_carlo(ui, cx),
-            VerificationPage::Checks => device_safety(ui, cx),
+            VerificationPage::Checks => checks_view(ui, cx),
             VerificationPage::Reference => regression(ui, cx),
         }
     });
@@ -93,6 +92,7 @@ fn run_choice(
             .map(|(index, run)| (index, run.label.clone()))
             .collect(),
         selected,
+        role: toolbar::RunRole::Read,
     }
 }
 
@@ -349,24 +349,6 @@ fn latest_analysis(
 
 fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {
     analysis.success && analysis.provenance.is_some()
-}
-
-/// The same analysis, kept only when its retained evidence validates.
-///
-/// The validator walks every retained sample of every waveform. Asked inside
-/// a per-frame filter it re-walked the complete dataset on every frame, for a
-/// verdict that is a property of an immutable dataset and so cannot change
-/// until the datasets do. The Results workspace owns the memoized answer,
-/// keyed by data version and analysis; this asks that owner rather than
-/// keeping a second verdict of its own.
-pub fn latest_validated_analysis<'m>(
-    model: &'m Model,
-    results: &dyn ResultsPort,
-    analysis_type: crate::state::AnalysisType,
-) -> Option<&'m crate::state::AnalysisResult> {
-    let dataset_id = model.simulation.active_run()?.dataset_id;
-    latest_analysis(model, analysis_type)
-        .filter(|analysis| results.analysis_evidence_is_valid(model, dataset_id, analysis))
 }
 
 fn open_analysis_configuration(

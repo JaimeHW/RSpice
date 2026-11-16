@@ -226,7 +226,7 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
             "surfaces/verify/monte_carlo.rs",
             "surfaces/verify/regression_contract.rs",
             "surfaces/verify/regression_panel.rs",
-            "surfaces/verify/safety.rs",
+            "surfaces/verify/checks.rs",
             "surfaces/verify/table.rs",
             "surfaces/verify/table/body.rs",
             "surfaces/verify/table/geometry.rs",
