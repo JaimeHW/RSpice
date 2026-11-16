@@ -347,7 +347,7 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
         PreflightRemediation::SimulationPlan {
             analysis: Some(analysis),
         } => format!("simulation-plan:{analysis}"),
-        PreflightRemediation::SolverOptions => "solver-options".to_owned(),
+        PreflightRemediation::ConnectRules => "connect-rules".to_owned(),
         PreflightRemediation::ProjectTechnology => "project-technology".to_owned(),
         PreflightRemediation::Models {
             page,
@@ -433,7 +433,7 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
         PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
         // The engine's refusal, whose remedy is one of the plan's options.
-        PreflightRemediation::Drawing { .. } | PreflightRemediation::SolverOptions => {
+        PreflightRemediation::Drawing { .. } | PreflightRemediation::ConnectRules => {
             (ENGINE_PRODUCER, "ENGINE")
         }
         PreflightRemediation::DesignChecks
@@ -448,7 +448,7 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
     match remediation {
         PreflightRemediation::DesignChecks => "Design checks".to_owned(),
         PreflightRemediation::SimulationPlan { .. } => "Simulation plan".to_owned(),
-        PreflightRemediation::SolverOptions => "Solver & convergence".to_owned(),
+        PreflightRemediation::ConnectRules => "Connect rules".to_owned(),
         PreflightRemediation::ProjectTechnology => "Project technology".to_owned(),
         PreflightRemediation::Models {
             library: Some(library),

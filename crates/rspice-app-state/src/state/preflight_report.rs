@@ -59,10 +59,11 @@ pub enum PreflightRemediation {
         /// the reader left it.
         analysis: Option<crate::product::AnalysisInstanceId>,
     },
-    /// The Solver & convergence page, where the plan's engine options are
-    /// set: a finding whose remedy is one of them and that no drawn object
-    /// owns, such as a design's connect rules with no block named.
-    SolverOptions,
+    /// The Connect rules page, where the run selects the connectrules block
+    /// that converts its analog/digital boundaries: a finding whose remedy is
+    /// that selection and that no drawn object owns, such as a design that
+    /// declares several blocks and names none.
+    ConnectRules,
     ProjectTechnology,
     /// One page of the Models workspace, and the object it opens on. A
     /// model-binding finding is repaired where the bindings live — Corners &

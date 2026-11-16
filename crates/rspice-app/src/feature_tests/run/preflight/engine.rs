@@ -360,7 +360,7 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
     );
     assert!(
         crossing.required.contains("Connect rules · CONNECTRULES")
-            && crossing.required.contains("Solver & convergence"),
+            && crossing.required.contains("Connect rules page"),
         "{crossing:?}"
     );
     let remediation = crossing.remediation.clone();
@@ -401,7 +401,8 @@ const TWO_RULE_BLOCKS: &str = "connectrules Low; connect a2d #(.vsup(1.0)); endc
 
 /// A design whose libraries declare two connect-rule blocks has no block until
 /// the run names one, so every crossing is refused. Nothing drawn owns that
-/// choice: the finding opens the Solver page, where the block is named.
+/// choice: the finding opens the Connect rules page, where the block is
+/// named.
 #[test]
 fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
     let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
@@ -427,19 +428,20 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
         unnamed.required.contains("Connect rules · CONNECTRULES"),
         "{unnamed:?}"
     );
-    assert_eq!(unnamed.remediation, PreflightRemediation::SolverOptions);
+    assert_eq!(unnamed.remediation, PreflightRemediation::ConnectRules);
 
     apply_remediation(&mut app, unnamed.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
-        rspice_app_state::state::SimulationPage::Solver,
+        rspice_app_state::state::SimulationPage::ConnectRules,
         "the finding opens the page where the block is named"
     );
 }
 
-/// Naming one of the two blocks where the solver options are set puts it on
-/// the deck's options card, and the same design is then authorized.
+/// Naming one of the two blocks where the run's connect rules are selected
+/// puts it on the deck's options card, and the same design is then
+/// authorized.
 #[test]
 fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusal() {
     let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);

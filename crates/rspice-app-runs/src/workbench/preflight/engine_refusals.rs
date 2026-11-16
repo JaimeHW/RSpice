@@ -175,18 +175,18 @@ fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIs
                 Some(instance) => (
                     format!(
                         "A connect rule that converts across this boundary, in the block named \
-                         in {} on the Solver & convergence page",
+                         in {} on the Connect rules page",
                         SimulationOptions::CONNECT_RULES_LABEL
                     ),
                     drawing.element(instance).1,
                 ),
                 None => (
                     format!(
-                        "One connectrules block the design declares, named in {} on the Solver \
-                         & convergence page when it declares more than one",
+                        "One connectrules block the design declares, named in {} on the \
+                         Connect rules page when it declares more than one",
                         SimulationOptions::CONNECT_RULES_LABEL
                     ),
-                    PreflightRemediation::SolverOptions,
+                    PreflightRemediation::ConnectRules,
                 ),
             };
             vec![PreflightIssue {

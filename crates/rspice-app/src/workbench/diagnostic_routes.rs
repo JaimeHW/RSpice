@@ -212,8 +212,8 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
             }
             app.execute_command_key(SimulateCommand::Page(SimulationPage::Analyses).key());
         }
-        PreflightRemediation::SolverOptions => {
-            app.execute_command_key(SimulateCommand::Page(SimulationPage::Solver).key());
+        PreflightRemediation::ConnectRules => {
+            app.execute_command_key(SimulateCommand::Page(SimulationPage::ConnectRules).key());
         }
         PreflightRemediation::ProjectTechnology => {
             app.execute_command_key(ProjectCommand::Page(ProjectPage::Dependencies).key());
