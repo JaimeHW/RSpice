@@ -47,16 +47,15 @@ fn a_published_design_letters_the_part_labels_the_canvas_shows() {
 
     let mut state = AppState::default();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     let reference = state.model.workspace.content.active_view.clone();
-    state
-        .workbench
-        .documents
-        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+    state.workbench.documents.activate(
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(
             reference,
-        ));
+        ),
+    );
     let part = state.model.schematic.document().components[0].clone();
     let letters = |state: &AppState| -> Vec<String> {
         let snapshot = snapshot_source(state)

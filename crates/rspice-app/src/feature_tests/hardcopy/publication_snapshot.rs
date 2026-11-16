@@ -197,13 +197,13 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
 
 #[test]
 fn a_published_sheet_lies_on_the_paper_it_prints_on() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
     use rspice_publication_contract::{Paint, PathSegment, Point, Primitive};
 
     let mut state = AppState::default();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     let reference = state.model.workspace.content.active_view.clone();
     state
