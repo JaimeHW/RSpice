@@ -24,6 +24,7 @@ use rspice_app_results::workbench::documents::result_document::{
     SharedXStatus, active_shared_x_status,
 };
 use rspice_app_results::workbench::results::ResultsFeature;
+use rspice_app_runs::simulation::controller::PreflightStage;
 use rspice_app_runs::simulation::status::{
     EngineAvailability, preflight_status, simulation_engine_status,
 };
@@ -31,12 +32,16 @@ use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_sum
 use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::Tokens;
+use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::chrome::status_bar::{
     check_problem, check_summary, current_prompt, engine_status_mark,
 };
 use rspice_app_workbench::workbench::framework::host::{
     StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
 };
+use rspice_results::verification::{RowStatus, Sheet};
+
+use crate::workbench::diagnostic_routes::open_specification;
 
 /// What the cells read in common on a frame, worked out before any of them.
 pub struct StatusReadings {
@@ -182,6 +187,8 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
                         format!("Engine startup could not be retried: {error}"),
                     );
                 }
+            } else if let Some(rollup) = shown_rollup(app, &readings.availability) {
+                open_specification(app, rollup.first_failing);
             } else if let Some(outcome) = run_outcome(app, &readings.availability) {
                 rspice_app_results::workbench::docks::inspector::run_details::open(
                     &mut app.state.results.run_details,
@@ -338,17 +345,23 @@ fn canvas_zoom_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Status
 /// bar shows no chip then.
 fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<StatusText<'a>> {
     let availability = &readings.availability;
-    let checking = app
-        .state
-        .runs
-        .preflight
-        .checking
-        .as_ref()
-        .and(app.simulation_controller.preflight_stage());
-    let text = match checking {
-        Some(stage) => Some(preflight_status(stage)),
-        None => simulation_engine_status(&app.state.model.simulation, availability),
-    };
+    if let Some(rollup) = shown_rollup(app, availability) {
+        return Some(StatusText {
+            text: Cow::Owned(rollup.text),
+            mark: if rollup.failing {
+                StatusMark::Problem(Problem::Failure)
+            } else {
+                StatusMark::None
+            },
+            control: StatusControl::Button,
+            hover: Some(Cow::Owned(format!(
+                "Open Run {}'s specifications in Verify",
+                rollup.run
+            ))),
+        });
+    }
+    let checking = preflight_checking(app);
+    let text = engine_words(app, availability);
     let outcome = run_outcome(app, availability);
     let (text, mark) = match (text, &outcome) {
         (Some(text), _) => (
@@ -416,7 +429,6 @@ struct RunOutcome {
 fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<RunOutcome> {
     use rspice_app_state::diagnostics::LogSeverity;
     use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
-    use rspice_app_workbench::ui::widgets::Problem;
 
     let simulation = &app.state.model.simulation;
     if app.state.runs.preflight.checking.is_some()
@@ -470,6 +482,101 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
         text,
         mark,
     })
+}
+
+/// Whether a preflight check is building its decks, and how far it is.
+fn preflight_checking(app: &RSpiceApp) -> Option<PreflightStage> {
+    app.state
+        .runs
+        .preflight
+        .checking
+        .as_ref()
+        .and(app.simulation_controller.preflight_stage())
+}
+
+/// What the engine is doing, when that is worth a word: a check, a run, a
+/// start or a failure. An idle, ready engine says nothing.
+fn engine_words(app: &RSpiceApp, availability: &EngineAvailability) -> Option<String> {
+    match preflight_checking(app) {
+        Some(stage) => Some(preflight_status(stage)),
+        None => simulation_engine_status(&app.state.model.simulation, availability),
+    }
+}
+
+/// The active run's specifications as the verification sheet judged them,
+/// which the run segment states while the plan has any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SpecificationRollup {
+    /// The judged run's sequence number.
+    run: u64,
+    text: String,
+    /// Some specification fails or errs.
+    failing: bool,
+    /// The first specification that fails or errs, which pressing the
+    /// segment selects.
+    first_failing: Option<String>,
+}
+
+/// The run segment's roll-up, when the engine has nothing to say and the
+/// sheet judges the active run against specifications. A run that ended
+/// since, while another is the one judged, keeps its own words.
+fn shown_rollup(app: &RSpiceApp, availability: &EngineAvailability) -> Option<SpecificationRollup> {
+    if engine_words(app, availability).is_some() {
+        return None;
+    }
+    let simulation = &app.state.model.simulation;
+    let run = simulation.active_run()?;
+    if app
+        .state
+        .runs
+        .run_watch
+        .last_ended
+        .is_some_and(|last| last != run.run_id)
+    {
+        return None;
+    }
+    let sheet = simulation.verification_sheet()?;
+    let words = specification_rollup(sheet)?;
+    let counts = sheet.summary.counts;
+    Some(SpecificationRollup {
+        run: run.id,
+        text: format!("Run {} \u{b7} {words}", run.id),
+        failing: counts.fail + counts.error > 0,
+        first_failing: sheet
+            .rows
+            .iter()
+            .find(|row| matches!(row.status, Some(RowStatus::Fail | RowStatus::Error)))
+            .map(|row| row.measurement.clone()),
+    })
+}
+
+/// "3 of 4 specifications pass · 1 fails": the sheet's own counts, with the
+/// near ones passing; `None` when it judges no specification.
+fn specification_rollup(sheet: &Sheet) -> Option<String> {
+    if !sheet.is_judged() || sheet.rows.is_empty() {
+        return None;
+    }
+    let counts = sheet.summary.counts;
+    let passing = counts.pass + counts.near;
+    let mut parts = vec![match sheet.rows.len() {
+        1 => format!("{passing} of 1 specification passes"),
+        total => format!("{passing} of {total} specifications pass"),
+    }];
+    if counts.fail > 0 {
+        parts.push(format!(
+            "{} {}",
+            counts.fail,
+            if counts.fail == 1 { "fails" } else { "fail" }
+        ));
+    }
+    if counts.error > 0 {
+        parts.push(format!(
+            "{} error{}",
+            counts.error,
+            if counts.error == 1 { "" } else { "s" }
+        ));
+    }
+    Some(parts.join(" \u{b7} "))
 }
 
 impl RSpiceApp {
@@ -651,6 +758,80 @@ mod tests {
         assert!(
             !said.iter().any(|text| text.contains("revision")),
             "{said:?}"
+        );
+    }
+
+    /// The engine segment as the bar would show it, with a ready, idle
+    /// engine.
+    fn run_segment(app: &mut RSpiceApp) -> Option<(String, StatusMark)> {
+        let ctx = egui::Context::default();
+        let readings = status_readings(&mut app.state, EngineAvailability::Ready, &ctx);
+        engine_cell(app, &readings).map(|status| (status.text.into_owned(), status.mark))
+    }
+
+    /// After a run of a plan with specifications, the run segment states the
+    /// sheet's roll-up: neutral while every specification passes, marked
+    /// failing when one fails. With no specifications it says nothing.
+    #[test]
+    fn the_run_segment_states_the_specifications_roll_up() {
+        use rspice_app_simulate::workbench::surfaces::verify::raster::{seed_corner, seed_run_set};
+
+        let mut app = RSpiceApp::test_instance();
+        assert_eq!(run_segment(&mut app), None);
+
+        seed_corner(&mut app.state.model);
+        let run = app.state.model.simulation.active_run().map(|run| run.id);
+        let run = run.expect("the corner run is active");
+        assert_eq!(
+            run_segment(&mut app),
+            Some((
+                format!("Run {run} \u{b7} 3 of 4 specifications pass \u{b7} 1 fails"),
+                StatusMark::Problem(Problem::Failure)
+            ))
+        );
+
+        let mut app = RSpiceApp::test_instance();
+        seed_run_set(&mut app.state.model, &["TT"], &[1.8], &[27.0]);
+        let run = app.state.model.simulation.active_run().map(|run| run.id);
+        assert_eq!(
+            run_segment(&mut app),
+            Some((
+                format!(
+                    "Run {} \u{b7} 2 of 2 specifications pass",
+                    run.expect("the sweep is active")
+                ),
+                StatusMark::None
+            ))
+        );
+    }
+
+    /// Pressing the roll-up opens Verify on Specifications with the failing
+    /// specification selected.
+    #[test]
+    fn pressing_the_roll_up_opens_the_failing_specification() {
+        use rspice_app_simulate::workbench::surfaces::verify::raster::seed_corner;
+        use rspice_app_state::state::VerificationPage;
+
+        let mut app = RSpiceApp::test_instance();
+        seed_corner(&mut app.state.model);
+        app.state.workbench.activate(Workspace::Results);
+        let ctx = egui::Context::default();
+        let readings = status_readings(&mut app.state, EngineAvailability::Ready, &ctx);
+        let engine = STATUS_ORDER
+            .iter()
+            .find(|cell| cell.key == StatusKey::Engine)
+            .and_then(|cell| cell.activate)
+            .expect("the engine segment answers a press");
+        engine(&mut app, &readings);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Verify);
+        assert_eq!(
+            app.state.simulate.verification_page,
+            VerificationPage::Specifications
+        );
+        assert_eq!(
+            app.state.simulate.selected_specification.as_deref(),
+            Some("gain")
         );
     }
 }

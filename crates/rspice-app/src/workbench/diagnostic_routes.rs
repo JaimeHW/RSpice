@@ -324,5 +324,19 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
     }
 }
 
+/// Open Verify's Specifications view with the specification measured as
+/// `measurement` selected, or as the reader left it when there is none.
+/// Every route that leaves for one specification comes through here: the
+/// status bar's run segment, a preflight finding and a result's requirement
+/// line.
+pub(crate) fn open_specification(app: &mut RSpiceApp, measurement: Option<String>) {
+    if measurement.is_some() {
+        app.state.simulate.selected_specification = measurement;
+    }
+    app.execute_command_key(
+        SimulateCommand::Verify(rspice_app_state::state::VerificationPage::Specifications).key(),
+    );
+}
+
 #[cfg(test)]
 pub(crate) mod tests;
