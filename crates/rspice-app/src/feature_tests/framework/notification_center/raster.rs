@@ -93,7 +93,7 @@ const FINGERPRINTS: [&str; 7] = [
     "5419d00d0c65660b0afd914d3a0763af642d7796116910375620120eada424f1",
     "e524a5319595fede5b0f975b3d99b5e39779715364b95f1f01d35cf55e8c5526",
     "76f9230b6f57b350232c2ddded0a88f9b12dd1985d3d75203973fbd54d659060",
-    "078314a1f02992f41cb0bb73e17e06d93dc2fd1802c43a71843f124e46e73d3b",
+    "b5ce777e60c62ae8e5923500b79206ce325893ee21137dcd83d3164eaedab0af",
 ];
 
 /// Where the first row sits under the desktop bell: inside the panel's list,
@@ -125,13 +125,11 @@ fn raster(case: &Case) -> Canvas {
         super::show(ui.ctx(), &mut app, layout.title_bar_height);
         if scene == Scene::Toasts {
             let large = super::large_targets(ui.ctx(), &app.state.workbench);
-            let _ = app.state.workbench.toasts.show(
-                ui.ctx(),
-                layout.title_bar_height,
-                layout.toolbar_height,
-                0.0,
-                large,
-            );
+            let _ = app
+                .state
+                .workbench
+                .toasts
+                .show(ui.ctx(), layout.status_bar_height, large);
         }
     };
     let theme = rspice_app_workbench::ui::Theme {

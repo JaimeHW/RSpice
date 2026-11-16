@@ -2428,7 +2428,6 @@ pub fn request_netlist_manual_deck_run_in(
     workbench: &mut crate::workbench::state::WorkbenchSession,
 ) {
     workbench.run_press_route = Some(workbench.current_route());
-    runs.run_watch.finished_run = None;
     model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
     if model.simulation.execution.has_active_execution() {
         runs.manual_run.rerun_queued = true;

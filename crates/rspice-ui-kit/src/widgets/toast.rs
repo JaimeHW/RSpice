@@ -134,6 +134,9 @@ pub struct Toast {
     /// the pointer is being read, and its clock starts over when the pointer
     /// moves away; and because a held clock pushes it back.
     expires: Option<f64>,
+    /// How long it shows once its clock starts, or `None` for a notice that
+    /// stays until it is answered.
+    lifetime: Option<f64>,
     /// Whether one of its controls had the keyboard on the last pass. A
     /// reader tabbing to "Show in Console" is reading the notice, and it must
     /// not leave from under the focus.
@@ -144,7 +147,7 @@ impl Toast {
     /// How much of its lifetime is left, from one down to zero. `None` for a
     /// notice with no deadline, which has no clock to draw.
     fn remaining(&self, now: f64) -> Option<f32> {
-        let lifetime = toast_lifetime(self.kind)?;
+        let lifetime = self.lifetime?;
         let expires = self.expires?;
         Some(((expires - now) / lifetime).clamp(0.0, 1.0) as f32)
     }
@@ -242,38 +245,34 @@ const TOAST_COLUMN_GAP: f32 = 10.0;
 /// panel's rows hold two; a toast arrives alone and can say a little more.
 const TOAST_MESSAGE_MAX_ROWS: usize = 4;
 
+/// Where the stack stands: the window's bottom-right corner, its margins
+/// fixed, stacked up from the chrome along the window's bottom edge (the
+/// status bar, or a phone's navigation bar). Every notice lands in that one
+/// place, whatever the page shows; it may cover a dock there, and never the
+/// middle of the window, where a page draws its data.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ToastLayout {
-    top: f32,
+    bottom: f32,
     right: f32,
     width: f32,
 }
 
 impl ToastLayout {
-    fn resolve(
-        viewport_width: f32,
-        title_bar_height: f32,
-        toolbar_height: f32,
-        right_dock_width: f32,
-    ) -> Self {
-        if viewport_width <= TOAST_PHONE_BREAKPOINT {
-            Self {
-                // The final mobile mockup rule deliberately omits the title
-                // bar from the toast offset.
-                top: toolbar_height + 8.0,
-                right: TOAST_PHONE_INSET,
-                width: (viewport_width - TOAST_PHONE_INSET * 2.0).max(0.0),
-            }
+    fn resolve(viewport_width: f32, bottom_chrome_height: f32) -> Self {
+        let inset = if viewport_width <= TOAST_PHONE_BREAKPOINT {
+            TOAST_PHONE_INSET
         } else {
-            Self {
-                top: title_bar_height + toolbar_height + 12.0,
-                // Clear of the dock on the right. A notice is hit before what
-                // lies under it, and the dock's first section is where a
-                // finished run's own link sits.
-                right: TOAST_DESKTOP_INSET + right_dock_width,
-                width: TOAST_DESKTOP_WIDTH
-                    .min((viewport_width - TOAST_DESKTOP_INSET * 2.0).max(0.0)),
-            }
+            TOAST_DESKTOP_INSET
+        };
+        let room = (viewport_width - inset * 2.0).max(0.0);
+        Self {
+            bottom: bottom_chrome_height + inset,
+            right: inset,
+            width: if viewport_width <= TOAST_PHONE_BREAKPOINT {
+                room
+            } else {
+                TOAST_DESKTOP_WIDTH.min(room)
+            },
         }
     }
 }
@@ -394,6 +393,27 @@ impl Toasts {
         self.enqueue(ctx, category, kind, title, message, Some(action), true);
     }
 
+    /// Queue the outcome of a piece of work the reader is not watching: a
+    /// clean finish leaves after a few seconds, and a warning or a failure
+    /// stays until the reader dismisses it or takes its offer.
+    pub fn notify_outcome(
+        &mut self,
+        ctx: &Context,
+        category: NotificationCategory,
+        kind: ToastKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        action: Option<NotificationAction>,
+    ) {
+        self.enqueue(ctx, category, kind, title, message, action, true);
+        if kind != ToastKind::Success
+            && let Some(toast) = self.queue.last_mut()
+        {
+            toast.lifetime = None;
+            toast.expires = None;
+        }
+    }
+
     // Retain the existing notification contract: content, routing, tone and
     // visible deduplication are independent inputs.
     #[expect(clippy::too_many_arguments)]
@@ -430,6 +450,7 @@ impl Toasts {
             action,
             created,
             expires: toast_lifetime(kind).map(|lifetime| created + lifetime),
+            lifetime: toast_lifetime(kind),
             focus_held: false,
         });
         // Past the visible three, the oldest notice that is not an error makes
@@ -612,12 +633,13 @@ impl Toasts {
     /// Returns the navigation offer the reader took, if any. Taking one also
     /// dismisses its toast: the notice has been answered, and leaving it on
     /// screen would invite a second click that lands on the same place.
+    ///
+    /// `bottom_chrome_height` is the height of the chrome along the window's
+    /// bottom edge, which the stack stands on.
     pub fn show(
         &mut self,
         ctx: &Context,
-        title_bar_height: f32,
-        toolbar_height: f32,
-        right_dock_width: f32,
+        bottom_chrome_height: f32,
         large_targets: bool,
     ) -> Option<NotificationAction> {
         let now = ctx.input(|i| i.time);
@@ -651,12 +673,7 @@ impl Toasts {
         let t = Tokens::get(ctx);
         let c = t.color;
         let viewport_width = ctx.content_rect().width();
-        let layout = ToastLayout::resolve(
-            viewport_width,
-            title_bar_height,
-            toolbar_height,
-            right_dock_width,
-        );
+        let layout = ToastLayout::resolve(viewport_width, bottom_chrome_height);
         if layout.width <= 0.0 {
             return None;
         }
@@ -667,7 +684,7 @@ impl Toasts {
 
         Area::new(Id::new("rspice.toasts"))
             .order(Order::Foreground)
-            .anchor(Align2::RIGHT_TOP, vec2(-layout.right, layout.top))
+            .anchor(Align2::RIGHT_BOTTOM, vec2(-layout.right, -layout.bottom))
             .default_width(layout.width)
             .interactable(true)
             .show(ctx, |ui| {
@@ -753,7 +770,7 @@ impl Toasts {
         // the time to it.
         for toast in &mut self.queue {
             if hovered.contains(&toast.id) {
-                toast.expires = toast_lifetime(toast.kind).map(|lifetime| now + lifetime);
+                toast.expires = toast.lifetime.map(|lifetime| now + lifetime);
             }
             toast.focus_held = focused.contains(&toast.id);
         }
@@ -1291,33 +1308,65 @@ mod tests {
         assert_eq!(toasts.activity()[0].action(), None);
     }
 
+    /// Every notice stands in one place: the window's bottom-right corner,
+    /// fixed margins from its edge and from the chrome along its bottom. It
+    /// was hung under the toolbar beside the right dock, the corner of an
+    /// inner pane, where it covered the top of a waveform's lanes.
     #[test]
-    fn placement_matches_final_desktop_and_phone_mockup_rules() {
+    fn notices_stand_in_the_windows_bottom_right_corner() {
         assert_eq!(
-            ToastLayout::resolve(1440.0, 35.0, 45.0, 0.0),
+            ToastLayout::resolve(1440.0, 24.0),
             ToastLayout {
-                top: 92.0,
+                bottom: 38.0,
                 right: 14.0,
                 width: 350.0,
             }
         );
         assert_eq!(
-            ToastLayout::resolve(1440.0, 35.0, 45.0, 278.0),
+            ToastLayout::resolve(390.0, 56.0),
             ToastLayout {
-                top: 92.0,
-                right: 292.0,
-                width: 350.0,
-            },
-            "a dock on the right keeps its own controls"
-        );
-        assert_eq!(
-            ToastLayout::resolve(390.0, 40.0, 46.0, 0.0),
-            ToastLayout {
-                top: 54.0,
+                bottom: 64.0,
                 right: 8.0,
                 width: 374.0,
-            }
+            },
+            "a phone's stand on its navigation bar, the width of the screen"
         );
+    }
+
+    /// An outcome the reader was not watching stays until it is answered
+    /// when it warns or fails, under the pointer or not; a clean finish
+    /// leaves on its clock.
+    #[test]
+    fn a_warning_or_failed_outcome_stays_until_dismissed() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        for (kind, title) in [
+            (ToastKind::Success, "Run 1 complete"),
+            (ToastKind::Warn, "Run 2 complete with 2 warnings"),
+            (ToastKind::Error, "Run 3 failed"),
+        ] {
+            toasts.notify_outcome(
+                &ctx,
+                NotificationCategory::Job,
+                kind,
+                title,
+                "1 analysis saved",
+                None,
+            );
+        }
+        let focused = egui::ViewportInfo {
+            focused: Some(true),
+            ..Default::default()
+        };
+        frame_in(&ctx, &mut toasts, 0.0, focused.clone(), Vec::new());
+        frame_in(&ctx, &mut toasts, 600.0, focused, Vec::new());
+        let left: Vec<&str> = toasts
+            .queue
+            .iter()
+            .map(|toast| toast.title.as_str())
+            .collect();
+        assert_eq!(left, ["Run 2 complete with 2 warnings", "Run 3 failed"]);
     }
 
     /// A warning lifted from the Console offers the way back to it, and two
@@ -1512,7 +1561,7 @@ mod tests {
         };
         input.viewports.insert(egui::ViewportId::ROOT, viewport);
         ctx.run_ui(input, |ui| {
-            let _ = toasts.show(ui.ctx(), 35.0, 45.0, 0.0, false);
+            let _ = toasts.show(ui.ctx(), 24.0, false);
         })
     }
 

@@ -51,6 +51,15 @@ fn active_run(user: &User) -> Option<u64> {
 }
 
 /// Press Run as the toolbar does and frame until the run has ended.
+/// The status bar's run segment, by the name it is spoken by.
+fn run_segment(user: &User) -> Option<String> {
+    user.named
+        .iter()
+        .map(|(name, _)| name)
+        .find(|name| name.contains("Run 1 complete \u{b7}"))
+        .cloned()
+}
+
 fn run_to_its_end(user: &mut User) {
     let before = user.app.state.model.simulation.retained.runs.len();
     assert!(user.app.command_key_enabled(SimulateCommand::Run.key()));
@@ -134,10 +143,11 @@ fn a_finished_run_opens_in_results_on_waves_from_any_page() {
     }
 }
 
-/// A reader who went elsewhere while the run ran is left there, with the
-/// finished run one click away on the status bar.
+/// A reader who went elsewhere while the run ran is left there. The run's
+/// end is announced in the window's corner with the way to its results, and
+/// the status bar's run segment states it and opens its details.
 #[test]
-fn a_run_that_ends_after_the_reader_moved_on_waits_on_the_status_bar() {
+fn a_run_that_ends_after_the_reader_moved_on_is_announced_in_the_corner() {
     let mut user = example_project();
     user.app.execute_command_key(SimulateCommand::Run.key());
     user.frame(Vec::new());
@@ -146,19 +156,67 @@ fn a_run_that_ends_after_the_reader_moved_on_waits_on_the_status_bar() {
     user.settle();
     assert_eq!(user.app.state.workbench.workspace, Workspace::Project);
 
-    user.click("Run 1 complete");
+    let segment = run_segment(&user).expect("the run segment states the outcome");
+    user.click(&segment);
+    assert_eq!(
+        user.app
+            .state
+            .results
+            .run_details
+            .as_ref()
+            .map(|details| details.run_id),
+        Some(1),
+        "the run segment opens Run 1's details"
+    );
+    user.app.state.results.run_details = None;
+    user.settle();
 
+    let offer = user
+        .named
+        .iter()
+        .find(|(name, _)| name.starts_with("Open in Results"))
+        .map(|(name, _)| name.clone())
+        .expect("the corner notice offers the run's results");
+    user.click(&offer);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
         user.app.state.results.results.session.viewer,
         ResultViewer::Waves
     );
     assert_eq!(active_run(&user), Some(1));
-    assert_eq!(
-        user.find("Run 1 complete"),
-        None,
-        "the offer has been taken"
+}
+
+/// A reader who stayed on the page they pressed Run on is taken to the
+/// results, and nothing floats over them: the run segment states the
+/// outcome, and Open in Results is not offered where the results are.
+#[test]
+fn a_run_whose_results_are_on_screen_raises_no_notice() {
+    let mut user = example_project();
+    run_to_its_end(&mut user);
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    assert!(
+        !user
+            .named
+            .iter()
+            .any(|(name, _)| name.starts_with("Open in Results")),
+        "{:?}",
+        user.named.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
+    let segment = run_segment(&user).expect("the run segment states the outcome");
+    let elapsed = rspice_app_state::quantity::format_elapsed(
+        user.app.state.model.simulation.retained.runs[0].elapsed_time,
+    );
+    assert!(
+        segment.ends_with(&format!("Run 1 complete \u{b7} 1 warning \u{b7} {elapsed}")),
+        "{segment}"
+    );
+    let kept = user.app.state.workbench.toasts.activity();
+    assert_eq!(
+        kept[0].title(),
+        "Run 1 complete with 1 warning",
+        "the bell keeps it"
+    );
+    assert_eq!(kept[0].action(), None);
 }
 
 /// A run the checks refuse says why where it can be read, and the reader
@@ -235,7 +293,13 @@ fn a_failed_run_shows_its_problem_and_changes_no_page() {
             .is_some_and(|selection| selection.contains(line)),
         "the Console opens on the line that says what happened"
     );
-    assert_eq!(user.app.state.runs.run_watch.finished_run, None);
+    assert!(
+        !user
+            .named
+            .iter()
+            .any(|(name, _)| name.starts_with("Open in Results")),
+        "nothing is offered to open"
+    );
 }
 
 /// A run with no curve to draw opens where its result can be read.

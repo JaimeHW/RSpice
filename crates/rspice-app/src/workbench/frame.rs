@@ -213,7 +213,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     app.state
         .design
         .follow_workspace(app.state.workbench.workspace);
-    if let Some(action) = show_toasts(ctx, &mut app.state, layout, document.response.rect) {
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
         ResultsFeature::perform_notification_action(&mut features::cx(app), action);
         app.after_contribution();
     }
@@ -232,7 +232,6 @@ fn show_toasts(
     ctx: &Context,
     state: &mut AppState,
     layout: LayoutSpec,
-    document: egui::Rect,
 ) -> Option<rspice_app_workbench::ui::widgets::NotificationAction> {
     state.drain_notices(ctx);
     if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
@@ -241,28 +240,23 @@ fn show_toasts(
         return None;
     }
     let large_targets = tools::notification_center::large_targets(ctx, &state.workbench);
-    // A notice is hit before what lies under it, so it sits over the page's
-    // content and over none of its controls: below the toolbar row each page
-    // draws at the top of its document area, which carries the page's own
-    // Run, and clear of the right dock, whose first section carries a
-    // finished run's Open results link. Hung from the shell's toolbar alone,
-    // a failed run's notice covered the Netlist & Script Editor's Run deck.
-    let below_page_toolbar =
-        (document.top() + PAGE_TOOLBAR_ROW - layout.title_bar_height).max(layout.toolbar_height);
-    let right_of_document = (ctx.content_rect().right() - document.right()).max(0.0);
-    state.workbench.toasts.show(
-        ctx,
-        layout.title_bar_height,
-        below_page_toolbar,
-        right_of_document,
-        large_targets,
-    )
+    // Every notice stands in the window's bottom-right corner, on the chrome
+    // along its bottom edge, as ADE's and ADS's status areas do: never over
+    // the middle of the window, where a page draws its data. Hung under the
+    // toolbar beside the right dock, a run's notice covered the top of the
+    // waveform's lanes.
+    let bottom_chrome = if layout.show_phone_navigation {
+        layout.phone_navigation_height
+    } else if layout.show_status_bar {
+        layout.status_bar_height
+    } else {
+        0.0
+    };
+    state
+        .workbench
+        .toasts
+        .show(ctx, bottom_chrome, large_targets)
 }
-
-/// The tallest toolbar row a page draws at the top of its document area: the
-/// Netlist & Script Editor's and the code editors' rows are 33 px, the netlist
-/// preview's and the project tables' 34 px.
-const PAGE_TOOLBAR_ROW: f32 = 34.0;
 
 fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
     &mut app.state.workbench.outbox
@@ -376,21 +370,23 @@ fn note_run_press(app: &mut RSpiceApp) {
         || app.state.runs.preflight.run_awaits_check()
     {
         app.state.workbench.run_press_route = Some(app.state.workbench.current_route());
-        app.state.runs.run_watch.finished_run = None;
     }
 }
 
 /// Answer the end of the run a press of Run asked for. One that completed
-/// opens in Results if the reader is still on the page they pressed from, and
-/// waits one click away on the status bar if they have moved on. One that
-/// failed brings its own account up in the Console. Only the first of these
-/// changes the page, and only for a reader who stayed.
-fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::RunId]) {
+/// opens in Results if the reader is still on the page they pressed from; a
+/// reader who moved on is told in the window's corner. One that failed brings
+/// its own account up in the Console. Only the first of these changes the
+/// page, and only for a reader who stayed.
+///
+/// Returns whether the reader stayed on the page Run was pressed on, where
+/// the run's end is already in front of them.
+fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::RunId]) -> bool {
     use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
     use rspice_app_workbench::ui::widgets::NotificationAction;
 
     let Some(route) = app.state.workbench.run_press_route else {
-        return;
+        return false;
     };
     let simulation = &app.state.model.simulation;
     let pressed = ended
@@ -414,19 +410,13 @@ fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::R
         {
             app.state.workbench.run_press_route = None;
         }
-        return;
+        return false;
     };
-    let (run_id, sequence, lifecycle, has_results) =
-        (run.run_id, run.id, run.lifecycle, !run.analyses.is_empty());
+    let (sequence, lifecycle, has_results) = (run.id, run.lifecycle, !run.analyses.is_empty());
     app.state.workbench.run_press_route = None;
+    let stayed = app.state.workbench.current_route() == route;
     match lifecycle {
-        Lifecycle::Completed if has_results => {
-            if app.state.workbench.current_route() == route {
-                app.open_finished_run(sequence);
-            } else {
-                app.state.runs.run_watch.finished_run = Some(run_id);
-            }
-        }
+        Lifecycle::Completed if has_results && stayed => app.open_finished_run(sequence),
         Lifecycle::Failed => {
             if let Some(log_id) = run_end_line(&app.state, sequence) {
                 ResultsFeature::perform_notification_action(
@@ -438,6 +428,7 @@ fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::R
         }
         _ => {}
     }
+    stayed
 }
 
 /// The line the run wrote in the session's log as it ended.
@@ -464,7 +455,15 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .iter()
         .map(|run| (run.run_id, run.lifecycle));
     let ended = app.state.runs.run_watch.observe(runs);
-    follow_pressed_run(app, &ended);
+    let stayed = follow_pressed_run(app, &ended);
+    // A reader in Results, or still on the page they pressed Run on, has the
+    // run's end in front of them: the status bar's run segment states it and
+    // the Problems count beside it holds what it raised, as ADE and ADS keep
+    // run status in the window's status and log areas. Nothing floats over
+    // the data; the outcome is kept in the bell.
+    let watched = stayed
+        || app.state.workbench.workspace
+            == rspice_app_state::workbench::workspace::Workspace::Results;
     let campaigns = app.state.runs.run_watch.take_campaign_outcomes();
     if ended.is_empty() && campaigns.is_empty() {
         return;
@@ -508,30 +507,38 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         };
         let category = rspice_app_workbench::ui::widgets::NotificationCategory::Job;
         let toasts = &mut app.state.workbench.toasts;
-        if !attention.retains(notice.is_failure()) {
+        if watched || !attention.retains(notice.is_failure()) {
+            // Open in Results is offered only to a reader who is not there.
+            let action =
+                notice.action.filter(|action| {
+                    !watched
+                        || !matches!(
+                        action,
+                        rspice_app_workbench::ui::widgets::NotificationAction::OpenRunInResults {
+                            ..
+                        }
+                    )
+                });
             toasts.record_quietly(
                 ctx,
                 category,
                 notice.kind,
                 notice.title,
                 notice.detail,
-                notice.action,
+                action,
             );
             continue;
         }
-        match notice.action {
-            Some(action) => toasts.notify_with_action(
-                ctx,
-                category,
-                notice.kind,
-                notice.title,
-                notice.detail,
-                action,
-            ),
-            None => {
-                toasts.notify_with_title(ctx, category, notice.kind, notice.title, notice.detail)
-            }
-        }
+        // A clean finish leaves on its own; a warning or a failure waits
+        // in the corner until the reader answers it.
+        toasts.notify_outcome(
+            ctx,
+            category,
+            notice.kind,
+            notice.title,
+            notice.detail,
+            notice.action,
+        );
     }
     // Once a frame, as urgently as the most serious outcome asks. The window
     // is marked in the taskbar or dock; it never takes focus. A browser has
@@ -857,12 +864,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
     // A detached window with the keyboard draws the toasts instead.
     if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
         let large_targets = tools::notification_center::large_targets(ctx, &app.state.workbench);
-        if let Some(action) = app
-            .state
-            .workbench
-            .toasts
-            .show(ctx, 0.0, 0.0, 0.0, large_targets)
-        {
+        if let Some(action) = app.state.workbench.toasts.show(ctx, 0.0, large_targets) {
             ResultsFeature::perform_notification_action(&mut features::cx(app), action);
             app.after_contribution();
         }
@@ -926,7 +928,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
-    let document = CentralPanel::default()
+    CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
@@ -937,7 +939,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     }
     app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
-    if let Some(action) = show_toasts(ctx, &mut app.state, layout, document.response.rect) {
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
         ResultsFeature::perform_notification_action(&mut features::cx(app), action);
         app.after_contribution();
     }
@@ -2030,7 +2032,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                toasts.show(ctx, 32.0, 40.0, 0.0, false);
+                toasts.show(ctx, 24.0, false);
             },
         );
         output

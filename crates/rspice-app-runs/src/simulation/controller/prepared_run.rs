@@ -366,9 +366,9 @@ pub struct RunWatch {
     /// Campaign outcomes the controller reported that the shell has not
     /// announced yet, oldest first.
     campaign_outcomes: Vec<CampaignOutcome>,
-    /// The finished run offered on the status bar, for a reader who had moved
-    /// to another page while it ran.
-    pub finished_run: Option<crate::product::RunId>,
+    /// The run seen running that ended last, whose outcome the status bar's
+    /// run segment states until another ends.
+    pub last_ended: Option<crate::product::RunId>,
 }
 
 impl RunWatch {
@@ -403,6 +403,9 @@ impl RunWatch {
         // is not kept waiting for an end it can no longer reach.
         self.running = running;
         ended.reverse();
+        if let Some(last) = ended.last() {
+            self.last_ended = Some(*last);
+        }
         ended
     }
 

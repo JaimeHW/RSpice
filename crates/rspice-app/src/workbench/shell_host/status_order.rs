@@ -182,8 +182,12 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
                         format!("Engine startup could not be retried: {error}"),
                     );
                 }
-            } else if let Some(run) = finished_run(app).map(|run| run.id) {
-                app.open_finished_run(run);
+            } else if let Some(outcome) = run_outcome(app, &readings.availability) {
+                rspice_app_results::workbench::docks::inspector::run_details::open(
+                    &mut app.state.results.run_details,
+                    &app.state.model.simulation,
+                    outcome.run,
+                );
             } else if can_open {
                 app.open_newest_retained_run();
             }
@@ -348,12 +352,18 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
         Some(stage) => Some(preflight_status(stage)),
         None => simulation_engine_status(&app.state.model.simulation, availability),
     };
-    let finished = finished_run(app).map(|run| run.id);
-    let text = text.or_else(|| finished.map(|run| format!("Run {run} complete")))?;
-    let mark = engine_status_mark(
-        availability,
-        app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
-    );
+    let outcome = run_outcome(app, availability);
+    let (text, mark) = match (text, &outcome) {
+        (Some(text), _) => (
+            text,
+            engine_status_mark(
+                availability,
+                app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
+            ),
+        ),
+        (None, Some(outcome)) => (outcome.text.clone(), outcome.mark),
+        (None, None) => return None,
+    };
     let EnginePress {
         can_retry,
         can_open,
@@ -367,8 +377,8 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 ))
             },
         )
-    } else if let Some(run) = finished {
-        Cow::Owned(format!("Open Run {run} in Results"))
+    } else if let Some(outcome) = &outcome {
+        Cow::Owned(format!("Show Run {}'s details", outcome.run))
     } else if can_open {
         Cow::Borrowed("Open the newest retained result dataset in Results")
     } else {
@@ -386,30 +396,84 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
         text: Cow::Owned(text),
         mark,
         control: StatusControl::Guarded {
-            enabled: can_open || can_retry || finished.is_some(),
+            enabled: can_open || can_retry || outcome.is_some(),
         },
         hover: Some(hover),
     })
 }
 
-/// The finished run the status bar offers: one that ended while the reader
-/// was on another page, until they have reached it by any path.
-fn finished_run(app: &RSpiceApp) -> Option<&rspice_app_state::state::SimulationRun> {
-    let run_id = app.state.runs.run_watch.finished_run?;
+/// How the last run that ended went, as the run segment states it once the
+/// engine has nothing of its own to say.
+struct RunOutcome {
+    /// The run's sequence number.
+    run: u64,
+    /// `Run 1 complete · 2 warnings · 1.76 s`.
+    text: String,
+    mark: StatusMark,
+}
+
+/// The outcome of the run seen running that ended last, while the engine is
+/// idle and ready and no check is preparing another; `None` before any run
+/// has ended in this session, or once that run has left the history.
+fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<RunOutcome> {
+    use rspice_app_state::diagnostics::LogSeverity;
+    use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
+    use rspice_app_workbench::ui::widgets::Problem;
+
     let simulation = &app.state.model.simulation;
-    let run = simulation.retained.run_by_stable_id(run_id)?;
-    let reached = app.state.workbench.workspace == Workspace::Results
-        && simulation
-            .active_run()
-            .is_some_and(|active| active.run_id == run_id);
-    (!reached).then_some(run)
+    if app.state.runs.preflight.checking.is_some()
+        || simulation_engine_status(simulation, availability).is_some()
+    {
+        return None;
+    }
+    let run = simulation
+        .retained
+        .run_by_stable_id(app.state.runs.run_watch.last_ended?)?;
+    let count = |severity, one: &str, many: &str| match run.log.count(severity) {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        count => Some(format!("{count} {many}")),
+    };
+    let warnings = count(LogSeverity::Warning, "warning", "warnings");
+    let errors = count(LogSeverity::Error, "error", "errors");
+    let (verdict, raised, mark) = match run.lifecycle {
+        Lifecycle::Completed => (
+            "complete",
+            warnings.clone(),
+            if warnings.is_some() {
+                StatusMark::Problem(Problem::Warning)
+            } else {
+                StatusMark::None
+            },
+        ),
+        Lifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => (
+            "completed with errors",
+            errors,
+            StatusMark::Problem(Problem::Failure),
+        ),
+        Lifecycle::Failed => ("failed", errors, StatusMark::Problem(Problem::Failure)),
+        Lifecycle::Interrupted => ("interrupted", None, StatusMark::Problem(Problem::Warning)),
+        Lifecycle::Aborted => ("stopped", None, StatusMark::None),
+        _ => return None,
+    };
+    let text = std::iter::once(format!("Run {} {verdict}", run.id))
+        .chain(raised)
+        .chain(std::iter::once(rspice_app_state::quantity::format_elapsed(
+            run.elapsed_time,
+        )))
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ");
+    Some(RunOutcome {
+        run: run.id,
+        text,
+        mark,
+    })
 }
 
 impl RSpiceApp {
     /// Open Results on a run a press of Run finished, in the results feature's
     /// context, then answer what it raised.
     pub(crate) fn open_finished_run(&mut self, run_sequence: u64) {
-        self.state.runs.run_watch.finished_run = None;
         ResultsFeature::open_finished_run(&mut features::cx(self), run_sequence);
         self.after_contribution();
     }
