@@ -868,6 +868,10 @@ fn new_model(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, mut device: usize,
         })
         .flatten();
     let choice = Dialog::new("New model", "Create")
+        .description(
+            "A project model card of the chosen device type, opened in the Model Editor and \
+             attached to the active plan.",
+        )
         .size(DialogSize::CommandForm)
         .overlay_scrollbar()
         .initial_focus(DialogInitialFocus::BodyControl)
@@ -906,7 +910,7 @@ fn new_model(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, mut device: usize,
                     ui.end_row();
                     if let Some(problem) = &problem {
                         ui.label("");
-                        ui.colored_label(Tokens::get(ui.ctx()).color.err, problem);
+                        problem_line(ui, Problem::Failure, problem);
                         ui.end_row();
                     }
                     Some(field.id)
