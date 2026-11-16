@@ -131,7 +131,7 @@ mod tests {
         )
     }
     use crate::state::{
-        Component, ComponentType, SchematicProbe, SheetDefinition, SheetPortPolicy, SheetTemplate,
+        Component, ComponentType, SchematicProbe, SheetDefinition, SheetPortPolicy,
     };
 
     fn selected_components(positions: &[(u64, i32, i32)]) -> DesignTestHost {
@@ -444,7 +444,6 @@ mod tests {
                         .create_sheet(
                             SheetDefinition {
                                 name: "Sheet 2".to_owned(),
-                                template: SheetTemplate::AnalogSchematic,
                                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                                 explicit_page_number: Some(2),
                             },
@@ -618,7 +617,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

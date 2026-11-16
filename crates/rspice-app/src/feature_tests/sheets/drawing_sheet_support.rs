@@ -5,7 +5,7 @@ use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support::*;
 use rspice_app_state::state::{
     DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetTransactionKind, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
-    SheetPortPolicy, SheetTemplate,
+    SheetPortPolicy,
 };
 
 /// [`open_sheet_format_manager`] on the application's own parts.
@@ -228,7 +228,6 @@ fn manager_partially_applies_and_names_organization_managed_skips() {
             .create_sheet(
                 SheetDefinition {
                     name: "Managed".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },
@@ -239,7 +238,6 @@ fn manager_partially_applies_and_names_organization_managed_skips() {
             .create_sheet(
                 SheetDefinition {
                     name: "Ordinary".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(3),
                 },

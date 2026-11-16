@@ -11,7 +11,6 @@ use crate::workbench::design::test_host::DesignTestHost;
 fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     use crate::state::{
         CrossSheetPortDirection, NetLabel, NetLabelKind, SheetDefinition, SheetPortPolicy,
-        SheetTemplate,
     };
 
     let mut state = DesignTestHost::default();
@@ -77,7 +76,6 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         .create_sheet(
             SheetDefinition {
                 name: "Output".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

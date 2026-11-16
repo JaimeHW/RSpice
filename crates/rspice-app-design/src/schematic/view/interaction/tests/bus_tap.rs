@@ -153,7 +153,6 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
                     .create_sheet(
                         SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },

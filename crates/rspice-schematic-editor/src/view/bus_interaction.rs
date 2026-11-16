@@ -372,9 +372,7 @@ fn direction_accepts(source: Point, candidate: Point, orientation: BusTapOrienta
 mod tests {
     use super::*;
     use rspice_design::schematic::{document::SchematicDocument, wire::Wire};
-    use rspice_design_model::design_management::{
-        SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate,
-    };
+    use rspice_design_model::design_management::{SheetCatalog, SheetDefinition, SheetPortPolicy};
 
     fn view(document: &SchematicDocument) -> DesignView<'_> {
         DesignView {
@@ -440,7 +438,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },

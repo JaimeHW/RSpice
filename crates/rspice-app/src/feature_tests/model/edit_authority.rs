@@ -10,9 +10,7 @@ use rspice_app_state::state::{ComponentType, Point};
 
 #[test]
 fn authority_rejects_another_occurrence_or_sheet_of_the_same_master() {
-    use rspice_app_state::state::{
-        CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
-    };
+    use rspice_app_state::state::{CellViewRef, SheetDefinition, SheetPortPolicy, ViewType};
     for occurrence_change in [true, false] {
         let mut state = AppState::default();
         let parent = state.model.workspace.content.active_view.clone();
@@ -43,7 +41,6 @@ fn authority_rejects_another_occurrence_or_sheet_of_the_same_master() {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

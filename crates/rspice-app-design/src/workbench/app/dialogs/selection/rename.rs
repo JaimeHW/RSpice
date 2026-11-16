@@ -716,9 +716,7 @@ pub mod tests {
         state: &mut DesignTestHost,
         destination: bool,
     ) -> (u64, u64, u64) {
-        use crate::state::{
-            BusSlice, BusTapOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
-        };
+        use crate::state::{BusSlice, BusTapOrientation, SheetDefinition, SheetPortPolicy};
         let schematic = &mut state.model.schematic;
         let source = schematic
             .add_bus(
@@ -773,7 +771,6 @@ pub mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

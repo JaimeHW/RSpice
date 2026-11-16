@@ -499,7 +499,6 @@ fn state_with_two_coincident_sheets() -> AppState {
         .create_sheet(
             rspice_app_state::state::SheetDefinition {
                 name: "Page 2".to_owned(),
-                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
                 port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

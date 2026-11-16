@@ -211,9 +211,7 @@ pub mod tests {
 
     #[test]
     fn stale_and_read_only_drafts_fail_closed() {
-        use crate::state::{
-            CellViewRef, Point, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
-        };
+        use crate::state::{CellViewRef, Point, SheetDefinition, SheetPortPolicy, ViewType};
         for change in [
             "document",
             "occurrence",
@@ -262,7 +260,6 @@ pub mod tests {
                         .create_sheet(
                             SheetDefinition {
                                 name: "Sheet 2".to_owned(),
-                                template: SheetTemplate::AnalogSchematic,
                                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                                 explicit_page_number: Some(2),
                             },

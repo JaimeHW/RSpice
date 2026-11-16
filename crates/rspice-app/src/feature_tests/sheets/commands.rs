@@ -7,7 +7,7 @@ use crate::workbench::app_state::AppState;
 use rspice_app_design::workbench::app::dialogs::selection::commands::select_all_schematic_objects;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_sheets::workbench::sheets::*;
-use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 use rspice_app_workbench::workbench::framework::feature::harness::FeatureHarness;
@@ -61,7 +61,6 @@ fn sheets_on_a_drawing_of(count: usize) -> FeatureHarness<SheetsFeature> {
             .create_sheet(
                 SheetDefinition {
                     name: format!("Sheet {ordinal}"),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(ordinal as u32),
                 },

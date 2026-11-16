@@ -12,7 +12,7 @@ use rspice_app_sheets::workbench::docks::inspector::design::sheet::*;
 use rspice_app_state::state::{
     DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
-    SheetPortPolicy, SheetTemplate,
+    SheetPortPolicy,
 };
 
 /// The sheet's section over `state`'s parts, as the sheets feature hands
@@ -675,7 +675,6 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

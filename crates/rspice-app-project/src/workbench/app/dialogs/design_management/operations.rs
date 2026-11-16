@@ -108,7 +108,6 @@ pub(super) fn commit_design_management_subflow(
                 .create_sheet_with_page_format(
                     SheetDefinition {
                         name: inputs.sheet_name.trim().to_owned(),
-                        template: inputs.sheet_template,
                         port_policy: inputs.sheet_port_policy,
                         explicit_page_number: Some(explicit_page_number),
                     },

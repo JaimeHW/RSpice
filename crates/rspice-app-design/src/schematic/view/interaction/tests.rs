@@ -14,7 +14,7 @@ use crate::state::{
     PendingDocumentationShapePlacement, PendingPortSequence, PlacementAuthority, PortDirection,
     PortDiscipline, PortSignalType, RetainedTrace, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
-    SheetDefinition, SheetPortPolicy, SheetTemplate, Tool, Wire,
+    SheetDefinition, SheetPortPolicy, Tool, Wire,
 };
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
@@ -163,7 +163,6 @@ fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit(
                     .create_sheet(
                         SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
@@ -940,7 +939,6 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
                         .create_sheet(
                             SheetDefinition {
                                 name: "Sheet 2".to_owned(),
-                                template: SheetTemplate::AnalogSchematic,
                                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                                 explicit_page_number: Some(2),
                             },
@@ -1215,7 +1213,6 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
                     .create_sheet(
                         SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
@@ -1401,7 +1398,6 @@ fn a_changed_document_ends_the_sequence_without_placing() {
                     .create_sheet(
                         SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
@@ -1646,7 +1642,6 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },
@@ -1707,7 +1702,6 @@ fn inactive_sheet_probe_cannot_block_active_probe_hit() {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

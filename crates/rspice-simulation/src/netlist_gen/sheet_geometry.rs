@@ -99,7 +99,7 @@ pub fn net_geometry_by_sheet(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy};
 
     fn two_sheets() -> (SheetCatalog, SheetId, SheetId) {
         let mut catalog = SheetCatalog::default();
@@ -110,7 +110,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },

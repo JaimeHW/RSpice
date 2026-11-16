@@ -358,7 +358,7 @@ const X1: Point = Point::new(100, 100);
 fn ota_placed_in_open_parent(hidden_vertex: bool) -> DesignTestHost {
     use crate::state::{
         Component, ComponentType, LibraryCellInstance, PortSpec, SchematicState, SheetDefinition,
-        SheetPortPolicy, SheetTemplate, Wire,
+        SheetPortPolicy, Wire,
     };
     let mut state = open_symbol();
     let document = SymbolDocument {
@@ -419,7 +419,6 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> DesignTestHost {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

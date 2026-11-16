@@ -172,7 +172,7 @@ pub fn design_note_visible(note: &DesignNote, visibility: SchematicReviewMarkerV
 mod tests {
     use super::*;
     use rspice_design::schematic::wire::Wire;
-    use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy};
 
     fn view(document: &SchematicDocument) -> DesignView<'_> {
         DesignView {
@@ -210,7 +210,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },
@@ -269,7 +268,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },

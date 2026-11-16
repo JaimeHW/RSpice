@@ -16,7 +16,7 @@ use rspice_design_model::design_management::DesignManagementError;
 use crate::state::{
     DrawingSheetInheritance, DrawingSheetNewSheetPolicy, MoveSelectionRequest,
     ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition, SheetDeleteBehavior,
-    SheetDeleteResolution, SheetId, SheetPortPolicy, SheetTemplate,
+    SheetDeleteResolution, SheetId, SheetPortPolicy,
 };
 use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
 use crate::workbench::app_state::Model;
@@ -456,7 +456,6 @@ fn second_sheet(
         .create_sheet_with_page_format(
             SheetDefinition {
                 name: name.clone(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(page_number),
             },
@@ -492,7 +491,6 @@ fn create(model: &mut Model, insert_after: Option<SheetId>) -> Result<(SheetId, 
             .create_sheet_with_page_format(
                 SheetDefinition {
                     name: created,
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(page_number),
                 },

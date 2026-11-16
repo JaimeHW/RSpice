@@ -729,7 +729,6 @@ fn add_sheet(state: &mut ServicesHost, reference: &CellViewRef, name: &str) {
         .create_sheet(
             crate::state::SheetDefinition {
                 name: name.to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
                 port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: None,
             },

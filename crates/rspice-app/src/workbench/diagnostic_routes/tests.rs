@@ -440,9 +440,7 @@ fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
 /// stopped at the sheet in view.
 #[test]
 fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
-    use rspice_app_state::state::{
-        ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
-    };
+    use rspice_app_state::state::{ComponentType, Point, SheetDefinition, SheetPortPolicy};
     use rspice_design::drc::DrcViolationType;
 
     let mut app = RSpiceApp::test_instance();
@@ -492,7 +490,6 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
         .create_sheet(
             SheetDefinition {
                 name: "Page 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

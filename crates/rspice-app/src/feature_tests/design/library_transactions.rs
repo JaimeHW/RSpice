@@ -336,7 +336,6 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .create_sheet(
             rspice_app_state::state::SheetDefinition {
                 name: "Auxiliary".to_owned(),
-                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
                 port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

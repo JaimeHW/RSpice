@@ -133,7 +133,6 @@ mod tests {
         ComponentType, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
         CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
         MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition, SheetPortPolicy,
-        SheetTemplate,
     };
 
     /// Closes the reload defect: a crossing anchored to a component terminal
@@ -173,7 +172,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Auxiliary".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },
@@ -254,7 +252,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Auxiliary".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

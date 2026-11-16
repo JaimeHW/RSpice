@@ -92,20 +92,6 @@ pub(super) fn subflow_fields(
             );
             field_combo(
                 ui,
-                "Template",
-                &[
-                    (SheetTemplate::AnalogSchematic, "Analog schematic"),
-                    (
-                        SheetTemplate::MixedSignalSchematic,
-                        "Mixed-signal schematic",
-                    ),
-                    (SheetTemplate::BlankGovernedSheet, "Blank governed sheet"),
-                ],
-                &mut dialog.inputs.sheet_template,
-                write_allowed,
-            );
-            field_combo(
-                ui,
                 "Port policy",
                 &[
                     (SheetPortPolicy::TypedOffSheetPorts, "Typed off-sheet ports"),

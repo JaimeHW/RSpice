@@ -525,7 +525,7 @@ fn backend_startup_and_failure_do_not_advertise_running_progress() {
 /// position.
 #[test]
 fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -559,7 +559,6 @@ fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
             .create_sheet(
                 SheetDefinition {
                     name: name.to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(page),
                 },

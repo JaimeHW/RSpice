@@ -4,7 +4,7 @@ use rspice_design::schematic::{
     component::LibraryCellInstance, document::SchematicDocument, wire::Wire,
 };
 use rspice_design::symbol::SymbolPin;
-use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy};
 use rspice_design_model::port::PortDirection;
 use rspice_hardcopy_contract::sources::HardcopyPublicationIdentity;
 use std::collections::HashMap;
@@ -22,7 +22,6 @@ fn identity(key: &str) -> HardcopySourceIdentity {
 fn sheet_definition(name: &str) -> SheetDefinition {
     SheetDefinition {
         name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
         port_policy: SheetPortPolicy::TypedOffSheetPorts,
         explicit_page_number: None,
     }

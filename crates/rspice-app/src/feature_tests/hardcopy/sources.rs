@@ -58,7 +58,6 @@ use rspice_app_state::state::Point;
 use rspice_app_state::state::RetainedTrace;
 use rspice_app_state::state::SheetDefinition;
 use rspice_app_state::state::SheetPortPolicy;
-use rspice_app_state::state::SheetTemplate;
 use rspice_app_state::state::SimulationRun;
 use rspice_app_state::state::SimulationRunLifecycle;
 use rspice_app_state::state::Wire;
@@ -969,7 +968,6 @@ fn opaque_rgb8_png(width: u32, height: u32) -> Vec<u8> {
 fn sheet_definition(name: &str) -> SheetDefinition {
     SheetDefinition {
         name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
         port_policy: SheetPortPolicy::TypedOffSheetPorts,
         explicit_page_number: None,
     }

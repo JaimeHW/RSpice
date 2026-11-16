@@ -8,7 +8,7 @@ use rspice_app_state::state::{
     DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTransactionKind,
     DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition, SheetId,
-    SheetPortPolicy, SheetTemplate,
+    SheetPortPolicy,
 };
 
 fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
@@ -25,7 +25,6 @@ fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
             .create_sheet(
                 SheetDefinition {
                     name: format!("Sheet {}", index + 1),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some((index + 1) as u32),
                 },

@@ -1006,7 +1006,6 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
         .create_sheet(
             rspice_app_state::state::SheetDefinition {
                 name: "Characterization".to_owned(),
-                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
                 port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

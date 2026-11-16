@@ -1294,7 +1294,6 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         .create_sheet(
             crate::state::SheetDefinition {
                 name: "Page 2".to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
                 port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

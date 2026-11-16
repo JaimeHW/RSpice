@@ -364,7 +364,7 @@ mod tests {
     /// draw different nets at the same coordinates.
     #[test]
     fn a_drawn_point_resolves_only_on_its_own_sheet() {
-        use crate::state::{SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate};
+        use crate::state::{SheetCatalog, SheetDefinition, SheetPortPolicy};
 
         let mut catalog = SheetCatalog::default();
         let mut sheets = Vec::new();
@@ -374,7 +374,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },

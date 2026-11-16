@@ -1104,7 +1104,6 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
         CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
         MoveBoundaryResolution, MoveSelectionRequest, SheetDefinition, SheetPortPolicy,
-        SheetTemplate,
     };
 
     let mut workspace = ProjectWorkspace::default();
@@ -1151,7 +1150,6 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         .create_sheet(
             SheetDefinition {
                 name: "Output".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

@@ -17,8 +17,7 @@ use crate::state::{
     MissingReplacementPolicy, ModelEquivalencePolicy, MoveSelectionRequest,
     ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SchematicObjectKey,
     SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
-    SheetPortPolicy, SheetTemplate, VariantInheritance, VariantMatrixEdit,
-    VariantQualificationPlan,
+    SheetPortPolicy, VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -185,7 +184,6 @@ enum ProtectedBoundaryChecks {
 pub struct SubflowInputs {
     pub sheet_name: String,
     sheet_insert_after: Option<SheetId>,
-    sheet_template: SheetTemplate,
     sheet_port_policy: SheetPortPolicy,
     sheet_page_format: SchematicSheetFormat,
     move_destination: Option<SheetId>,
@@ -217,7 +215,6 @@ impl Default for SubflowInputs {
         Self {
             sheet_name: "Power and references".to_owned(),
             sheet_insert_after: None,
-            sheet_template: SheetTemplate::AnalogSchematic,
             sheet_port_policy: SheetPortPolicy::TypedOffSheetPorts,
             sheet_page_format: SchematicSheetFormat::default(),
             move_destination: None,

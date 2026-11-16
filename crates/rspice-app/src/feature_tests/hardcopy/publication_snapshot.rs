@@ -139,7 +139,7 @@ fn empty_projects_report_nothing_to_publish() {
 
 #[test]
 fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, Wire};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, Wire};
     use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut state = AppState::default();
@@ -172,7 +172,6 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
         .create_sheet(
             SheetDefinition {
                 name: "Second".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: None,
             },

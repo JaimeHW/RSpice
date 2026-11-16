@@ -534,7 +534,7 @@ fn project_records_are_stamped_and_restamped_as_they_cross_the_stacks() {
 /// on whichever sheet happens to be active would redraw the design.
 #[test]
 fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 
     let mut state = AppState::default();
     state.open_project_session();
@@ -566,7 +566,6 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

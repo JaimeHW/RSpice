@@ -225,7 +225,6 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
                     .create_sheet(
                         rspice_app_state::state::SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
                             port_policy:
                                 rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),

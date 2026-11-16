@@ -10,7 +10,7 @@ use rspice_app_state::state::{
     CellViewRef, ComponentType, CrossSheetDiscipline, CrossSheetPortAnchor,
     CrossSheetPortDefinition, CrossSheetPortDirection, CrossSheetPortEndpoint,
     CrossSheetSignalType, MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition,
-    SheetId, SheetPortPolicy, SheetTemplate,
+    SheetId, SheetPortPolicy,
 };
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
@@ -75,7 +75,6 @@ fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
         .create_sheet(
             SheetDefinition {
                 name: "Auxiliary".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

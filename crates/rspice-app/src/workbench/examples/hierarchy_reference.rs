@@ -34,7 +34,7 @@ use rspice_app_state::state::{
     MoveBoundaryResolution, MoveSelectionRequest, PendingPortPlacement, Point, PortDirectionType,
     PortDiscipline, PortSpec, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicState, SheetDefinition,
-    SheetId, SheetPortPolicy, SheetTemplate, SymbolDocument, SymbolEditorMetadata, SymbolShape,
+    SheetId, SheetPortPolicy, SymbolDocument, SymbolEditorMetadata, SymbolShape,
     UnresolvedBindingPolicy, View, ViewType,
 };
 use rspice_design::symbol::{SymbolTextAlign, SymbolTextSize};
@@ -339,7 +339,6 @@ fn split_amp_across_sheets(
         .create_sheet(
             SheetDefinition {
                 name: AMP_SHEET_NAMES[1].to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

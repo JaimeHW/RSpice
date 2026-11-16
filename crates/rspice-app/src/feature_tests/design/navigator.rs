@@ -49,7 +49,7 @@ pub(super) fn recursive_design() -> RSpiceApp {
 /// on the sheet the session is on, `VBIAS` on the one it is not.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn two_sheet_named_signals() -> RSpiceApp {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -79,7 +79,6 @@ pub(super) fn two_sheet_named_signals() -> RSpiceApp {
         .create_sheet(
             SheetDefinition {
                 name: "Output stage".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

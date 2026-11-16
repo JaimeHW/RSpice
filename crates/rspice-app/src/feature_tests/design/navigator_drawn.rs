@@ -428,7 +428,6 @@ fn sheet_nodes_appear_only_above_one_sheet() {
         .create_sheet(
             rspice_app_state::state::SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
                 port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

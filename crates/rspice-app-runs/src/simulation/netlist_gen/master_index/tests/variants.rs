@@ -640,7 +640,6 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
 fn replacement_connectivity_follows_the_projected_sheet_translation() {
     use crate::state::{
         MoveBoundaryResolution, MoveSelectionRequest, SheetDefinition, SheetPortPolicy,
-        SheetTemplate,
     };
     let (mut workspace, libraries, mut top) = fixture(true);
     connect_testbench(&mut top, &workspace, &libraries);
@@ -666,7 +665,6 @@ fn replacement_connectivity_follows_the_projected_sheet_translation() {
         .create_sheet(
             SheetDefinition {
                 name: "Second".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

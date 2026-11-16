@@ -14,9 +14,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::actions::sheets as sheet_actions;
 use rspice_app_sheets::workbench::chrome::sheet_strip::*;
-use rspice_app_state::state::{
-    Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
-};
+use rspice_app_state::state::{Component, ComponentType, Point, SheetDefinition, SheetPortPolicy};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
 
@@ -59,7 +57,6 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
             .create_sheet(
                 SheetDefinition {
                     name: format!("Sheet {ordinal}"),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(ordinal as u32),
                 },

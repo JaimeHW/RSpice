@@ -453,7 +453,6 @@ impl DesignManagementCatalog {
         let id = catalog.create_sheet_with_page_format(
             SheetDefinition {
                 name: sheet_name.into(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(1),
             },

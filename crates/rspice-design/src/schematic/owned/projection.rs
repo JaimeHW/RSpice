@@ -409,7 +409,7 @@ mod tests {
     use rspice_design_model::design_management::{
         CrossSheetDiscipline, CrossSheetPortDefinition, CrossSheetPortDirection,
         CrossSheetSignalType, MoveBoundaryResolution, MoveSelectionRequest, SheetDefinition,
-        SheetPortPolicy, SheetTemplate,
+        SheetPortPolicy,
     };
 
     const KEY: &str = "work/top/schematic";
@@ -441,7 +441,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Output".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },
@@ -525,7 +524,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Output".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

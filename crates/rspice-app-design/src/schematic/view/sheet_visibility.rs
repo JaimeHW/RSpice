@@ -508,7 +508,7 @@ pub fn two_sheet_host(
 /// seeded alike.
 #[cfg(any(test, feature = "test-support"))]
 pub fn seed_two_sheets(model: &mut Model, active_ids: &[u64], hidden_ids: &[u64]) {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use crate::state::{SheetDefinition, SheetPortPolicy};
 
     let key = model.workspace.content.active_schematic_reference().key();
     let all_ids = active_ids
@@ -532,7 +532,6 @@ pub fn seed_two_sheets(model: &mut Model, active_ids: &[u64], hidden_ids: &[u64]
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

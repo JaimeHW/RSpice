@@ -10,7 +10,7 @@ use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
-use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
 const SHEET_COMMANDS: [SheetsCommand; 4] = [
@@ -83,7 +83,6 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
             .create_sheet(
                 SheetDefinition {
                     name: format!("Sheet {ordinal}"),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(ordinal as u32),
                 },

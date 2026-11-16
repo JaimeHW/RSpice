@@ -21,8 +21,8 @@ use rspice_app_design::workbench::app::{
 };
 use rspice_app_state::state::{
     BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, ComponentType, Library,
-    MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy,
-    SheetTemplate, View, ViewType,
+    MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy, View,
+    ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -105,7 +105,6 @@ impl Bench {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

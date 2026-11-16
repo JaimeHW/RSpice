@@ -592,7 +592,6 @@ mod tests {
             CellViewRef, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition,
             CrossSheetPortDirection, CrossSheetPortEndpoint, CrossSheetSignalType,
             MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition, SheetPortPolicy,
-            SheetTemplate,
         };
 
         let mut workspace = ProjectWorkspace::default();
@@ -619,7 +618,6 @@ mod tests {
             .create_sheet(
                 SheetDefinition {
                     name: "Output".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

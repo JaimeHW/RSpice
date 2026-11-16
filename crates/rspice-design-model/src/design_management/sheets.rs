@@ -4,15 +4,6 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum SheetTemplate {
-    #[default]
-    AnalogSchematic,
-    MixedSignalSchematic,
-    BlankGovernedSheet,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum SheetPortPolicy {
     #[default]
     TypedOffSheetPorts,
@@ -92,7 +83,6 @@ pub struct SheetCatalogSettings {
 #[serde(deny_unknown_fields)]
 pub struct SheetDefinition {
     pub name: String,
-    pub template: SheetTemplate,
     pub port_policy: SheetPortPolicy,
     pub explicit_page_number: Option<u32>,
 }

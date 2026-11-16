@@ -3,9 +3,7 @@ use rspice_design::drc::DrcViolationType;
 use rspice_design::schematic::{
     component::Component, component_type::ComponentType, document::SchematicDocument, wire::Wire,
 };
-use rspice_design_model::design_management::{
-    SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate,
-};
+use rspice_design_model::design_management::{SheetCatalog, SheetDefinition, SheetPortPolicy};
 
 fn catalog_with_hidden_object(hidden_id: u64) -> SheetCatalog {
     let mut catalog = SheetCatalog::default();
@@ -15,7 +13,6 @@ fn catalog_with_hidden_object(hidden_id: u64) -> SheetCatalog {
             .create_sheet(
                 SheetDefinition {
                     name: format!("Sheet {page}"),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(page),
                 },

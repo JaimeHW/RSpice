@@ -13,9 +13,7 @@ use rspice_app_state::state::{
 /// a format of its own keeps it, and the dialog names both.
 #[test]
 fn a_new_project_default_redraws_the_sheets_that_follow_it() {
-    use rspice_app_state::state::{
-        DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate,
-    };
+    use rspice_app_state::state::{DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy};
 
     let mut app = RSpiceApp::test_instance();
     assert_eq!(DefaultReach::of(&app.state.model), None);
@@ -30,7 +28,6 @@ fn a_new_project_default_redraws_the_sheets_that_follow_it() {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

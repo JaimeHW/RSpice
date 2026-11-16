@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn an_instance_on_another_sheet_is_never_picked() {
         use rspice_design_model::design_management::{
-            SheetCatalog, SheetDefinition, SheetPortPolicy, SheetTemplate,
+            SheetCatalog, SheetDefinition, SheetPortPolicy,
         };
 
         let document = SchematicDocument {
@@ -697,7 +697,6 @@ mod tests {
                     .create_sheet(
                         SheetDefinition {
                             name: format!("Sheet {page}"),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(page),
                         },

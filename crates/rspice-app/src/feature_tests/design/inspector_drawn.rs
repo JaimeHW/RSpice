@@ -14,7 +14,7 @@ use rspice_app_state::state::{Point, SchematicProbe};
 /// sheets. With two, the probe is assigned to the second one.
 #[cfg(not(target_arch = "wasm32"))]
 fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 
     const PROBE: u64 = 77;
     let mut app = RSpiceApp::test_instance();
@@ -62,7 +62,6 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
             .create_sheet(
                 SheetDefinition {
                     name: "Output stage".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },

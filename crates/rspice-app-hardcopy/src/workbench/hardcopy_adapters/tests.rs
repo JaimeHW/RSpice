@@ -31,7 +31,7 @@ use crate::product::ObjectRevision;
 #[cfg(test)]
 use crate::state::{
     DrawingSheetTitleFieldId, SchematicState, SheetCatalog, SheetDefinition, SheetPageNumbering,
-    SheetPortPolicy, SheetTemplate,
+    SheetPortPolicy,
 };
 #[cfg(test)]
 use rspice_hardcopy_contract::sources::{HardcopySourceIdentity, HardcopySourceSet};
@@ -44,7 +44,6 @@ use rspice_hardcopy_contract::{
 fn named_print_set_projects_per_set_sheet_numbers_without_mutating_child_authority() {
     let sheet = |name: &str| SheetDefinition {
         name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
         port_policy: SheetPortPolicy::TypedOffSheetPorts,
         explicit_page_number: None,
     };

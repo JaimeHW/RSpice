@@ -410,7 +410,7 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
 
 #[test]
 fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, ViewType};
     for occurrence_change in [false, true] {
         let mut fixture = Fixture::new(false);
         let master = fixture.enter_reused_master();
@@ -437,7 +437,6 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
             .create_sheet(
                 SheetDefinition {
                     name: "Sheet 2".into(),
-                    template: SheetTemplate::AnalogSchematic,
                     port_policy: SheetPortPolicy::TypedOffSheetPorts,
                     explicit_page_number: Some(2),
                 },
@@ -482,7 +481,7 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
 /// before the press, and nothing is left to undo.
 #[test]
 fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag() {
-    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
     let mut fixture = Fixture::new(false);
     let key = fixture
         .app
@@ -502,7 +501,6 @@ fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag()
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".into(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

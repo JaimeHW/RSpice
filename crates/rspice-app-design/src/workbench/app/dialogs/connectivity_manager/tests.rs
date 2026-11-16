@@ -531,7 +531,7 @@ fn every_pane_reads_one_projection_of_the_design() {
 /// `ADDR[7:0]` down from (100, 0), a T at the same coordinates, and
 /// `DATA<7:0>` well clear of both.
 fn buses_on_two_sheets() -> DesignTestHost {
-    use crate::state::{Bus, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use crate::state::{Bus, SheetDefinition, SheetPortPolicy};
     let declared = |text| Some(BusDeclaration::parse(text).unwrap());
     let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().buses = vec![
@@ -573,7 +573,6 @@ fn buses_on_two_sheets() -> DesignTestHost {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

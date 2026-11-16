@@ -4,7 +4,7 @@ use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::actions::sheets::*;
 use rspice_app_state::state::{
     Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition,
-    SheetDeleteBehavior, SheetId, SheetPortPolicy, SheetTemplate,
+    SheetDeleteBehavior, SheetId, SheetPortPolicy,
 };
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_workbench::workbench::framework::feature::CanvasGesturePort;
@@ -53,7 +53,6 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
         .create_sheet(
             SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: SheetTemplate::AnalogSchematic,
                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },

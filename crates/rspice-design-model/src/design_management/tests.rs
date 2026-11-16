@@ -14,7 +14,6 @@ mod title_layout;
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
         name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
         port_policy: SheetPortPolicy::TypedOffSheetPorts,
         explicit_page_number: Some(page),
     }

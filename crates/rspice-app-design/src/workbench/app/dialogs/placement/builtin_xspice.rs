@@ -185,8 +185,7 @@ mod tests {
     #[test]
     fn retained_configuration_rejects_changed_context_before_arming() {
         use crate::state::{
-            CellViewRef, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
-            ViewType,
+            CellViewRef, ComponentType, Point, SheetDefinition, SheetPortPolicy, ViewType,
         };
         for change in [
             "design",
@@ -250,7 +249,6 @@ mod tests {
                         .create_sheet(
                             SheetDefinition {
                                 name: "Sheet 2".to_owned(),
-                                template: SheetTemplate::AnalogSchematic,
                                 port_policy: SheetPortPolicy::TypedOffSheetPorts,
                                 explicit_page_number: Some(2),
                             },

@@ -270,9 +270,7 @@ fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
 
 #[test]
 fn a_blocked_form_never_arms_on_enter() {
-    use rspice_app_state::state::{
-        CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
-    };
+    use rspice_app_state::state::{CellViewRef, SheetDefinition, SheetPortPolicy, ViewType};
 
     for change in [
         "document",
@@ -326,7 +324,6 @@ fn a_blocked_form_never_arms_on_enter() {
                     .create_sheet(
                         SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: SheetTemplate::AnalogSchematic,
                             port_policy: SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
