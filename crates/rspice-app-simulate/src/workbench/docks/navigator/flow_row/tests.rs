@@ -149,9 +149,107 @@ fn the_checks_flow_counts_the_checks_the_run_holds() {
 
     let flow =
         verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
-    assert_eq!(flow.detail, "1 check");
+    assert_eq!(flow.detail, "1 warning \u{b7} 1 check");
     assert_eq!(flow.status, "");
     assert_eq!(flow.problem, Some(crate::ui::widgets::Problem::Warning));
+}
+
+/// The Checks line counts a failed check and one that could not be evaluated
+/// as violations and a warning apart from both, leaves out a part with
+/// nothing to count, and says nothing for a run that evaluated no check.
+#[test]
+fn the_checks_line_counts_violations_and_warnings_apart() {
+    use crate::ui::widgets::Problem;
+    use crate::workbench::docks::navigator::verify::checks_line;
+    use rspice_results::verification::{CheckStatus, Checks};
+
+    let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
+    crate::workbench::surfaces::verify::raster::seed_soa(&mut model);
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+    let row = model
+        .simulation
+        .verification_checks()
+        .rows
+        .first()
+        .cloned()
+        .expect("the SOA fixture evaluates checks");
+    let checks = |statuses: &[CheckStatus]| Checks {
+        points: Vec::new(),
+        rows: statuses
+            .iter()
+            .map(|status| rspice_results::verification::CheckRow {
+                status: *status,
+                ..row.clone()
+            })
+            .collect(),
+    };
+    use CheckStatus::{Error, Fail, Info, Pass, Warning};
+    assert_eq!(
+        checks_line(&checks(&[
+            Fail, Fail, Fail, Error, Warning, Warning, Pass, Pass, Info
+        ])),
+        (
+            "4 violations \u{b7} 2 warnings \u{b7} 9 checks".to_owned(),
+            Some(Problem::Failure)
+        )
+    );
+    assert_eq!(
+        checks_line(&checks(&[Error, Pass])),
+        (
+            "1 violation \u{b7} 2 checks".to_owned(),
+            Some(Problem::Failure)
+        )
+    );
+    assert_eq!(
+        checks_line(&checks(&[Warning, Warning])),
+        (
+            "2 warnings \u{b7} 2 checks".to_owned(),
+            Some(Problem::Warning)
+        )
+    );
+    assert_eq!(
+        checks_line(&checks(&[Pass, Info, Pass])),
+        ("3 checks".to_owned(), None)
+    );
+    assert_eq!(checks_line(&Checks::default()), (String::new(), None));
+}
+
+/// On the seeded SOA run the navigator's Checks line states exactly the
+/// counts of the checks the view lists.
+#[test]
+fn the_checks_line_states_the_soa_fixture_as_the_view_lists_it() {
+    use rspice_results::verification::CheckStatus;
+
+    let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
+    crate::workbench::surfaces::verify::raster::seed_soa(&mut model);
+    model
+        .simulation
+        .refresh_verification(&model.sim_setup, &model.workspace.content);
+    let rows = &model.simulation.verification_checks().rows;
+    let count = |statuses: &[CheckStatus]| {
+        rows.iter()
+            .filter(|row| statuses.contains(&row.status))
+            .count()
+    };
+    let violations = count(&[CheckStatus::Fail, CheckStatus::Error]);
+    let warnings = count(&[CheckStatus::Warning]);
+    assert!(violations > 0, "the fixture holds a violation");
+    let mut expected = vec![format!(
+        "{violations} violation{}",
+        if violations == 1 { "" } else { "s" }
+    )];
+    if warnings > 0 {
+        expected.push(format!(
+            "{warnings} warning{}",
+            if warnings == 1 { "" } else { "s" }
+        ));
+    }
+    expected.push(format!("{} checks", rows.len()));
+    let flow =
+        verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
+    assert_eq!(flow.detail, expected.join(" \u{b7} "));
 }
 
 #[test]

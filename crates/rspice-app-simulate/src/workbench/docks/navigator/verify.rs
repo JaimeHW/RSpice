@@ -10,7 +10,7 @@
 use egui::Ui;
 
 use crate::product::RunId;
-use rspice_results::verification::{CellStatus, CheckStatus, JointYield, RowStatus};
+use rspice_results::verification::{CellStatus, CheckStatus, Checks, JointYield, RowStatus};
 
 use crate::state::SimulationRunLifecycle;
 use crate::ui::tokens::Tokens;
@@ -197,7 +197,7 @@ pub(in crate::workbench) fn verification_flow_presentation(
             }),
         VerificationPage::Corners => corners_line(model),
         VerificationPage::MonteCarlo => monte_carlo_line(model),
-        VerificationPage::Checks => checks_line(model),
+        VerificationPage::Checks => checks_line(model.simulation.verification_checks()),
         VerificationPage::Reference => reference_line(model, simulate),
     };
     VerificationFlowPresentation {
@@ -272,31 +272,46 @@ fn monte_carlo_line(model: &Model) -> (String, Option<Problem>) {
     }
 }
 
-/// "2 violations · 14 checks": how many of the run's checks fail, of how many.
-fn checks_line(model: &Model) -> (String, Option<Problem>) {
-    let checks = model.simulation.verification_checks();
+/// "4 violations · 2 warnings · 9 checks": the run's checks counted as the
+/// Checks view counts them, a part with nothing to count left out, and no
+/// line at all for a run that evaluated no check.
+pub(in crate::workbench) fn checks_line(checks: &Checks) -> (String, Option<Problem>) {
     let total = checks.rows.len();
     if total == 0 {
         return (String::new(), None);
     }
-    let violations = checks
+    let (violations, warnings) = check_counts(checks);
+    let counted =
+        |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
+    let mut parts = Vec::new();
+    if violations > 0 {
+        parts.push(counted(violations, "violation"));
+    }
+    if warnings > 0 {
+        parts.push(counted(warnings, "warning"));
+    }
+    parts.push(counted(total, "check"));
+    let problem = if violations > 0 {
+        Some(Problem::Failure)
+    } else if warnings > 0 {
+        Some(Problem::Warning)
+    } else {
+        None
+    };
+    (parts.join(" \u{b7} "), problem)
+}
+
+/// How many of the run's checks are violations, because they fail or could
+/// not be evaluated, and how many warn.
+fn check_counts(checks: &Checks) -> (usize, usize) {
+    checks
         .rows
         .iter()
-        .filter(|row| row.status == CheckStatus::Fail)
-        .count();
-    let line = match violations {
-        0 => format!("{total} check{}", if total == 1 { "" } else { "s" }),
-        _ => format!(
-            "{violations} violation{} \u{b7} {total} checks",
-            if violations == 1 { "" } else { "s" }
-        ),
-    };
-    let problem = match checks.worst() {
-        CheckStatus::Fail => Some(Problem::Failure),
-        CheckStatus::Warning | CheckStatus::Error => Some(Problem::Warning),
-        CheckStatus::Pass | CheckStatus::Info => None,
-    };
-    (line, problem)
+        .fold((0, 0), |(violations, warnings), row| match row.status {
+            CheckStatus::Fail | CheckStatus::Error => (violations + 1, warnings),
+            CheckStatus::Warning => (violations, warnings + 1),
+            CheckStatus::Pass | CheckStatus::Info => (violations, warnings),
+        })
 }
 
 /// "1 changed · Run 9": how many checks moved against the reference run in
