@@ -14,17 +14,19 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     )
 }
 
-pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
+/// Draw the distribution; the measurement whose specification the reader
+/// followed a requirement line to, if they did.
+pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
     let plan = population::plan(context);
-    if let Some(response) = view::show(
+    let drawn = view::show(
         ui,
         plan.as_deref().map(|plan| &**plan),
         &context.results.session.box_violin,
         context.results.session.show_spec_limits,
         &mut context.results.session.cache,
-    ) {
-        super::record_drawn_axes(context.results, super::ResultViewer::BoxViolin, &response);
-    }
+    )?;
+    super::record_drawn_axes(context.results, super::ResultViewer::BoxViolin, &drawn.plot);
+    drawn.open_specification
 }
 
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {

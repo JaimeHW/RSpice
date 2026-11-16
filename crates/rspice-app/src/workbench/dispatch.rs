@@ -24,6 +24,7 @@ use crate::workbench::commands::{
     carry_out_code_hand_off, file_action, open_connectivity_source_map, run_project_file_action,
     select_probed_trace, source_editor_redirect,
 };
+use crate::workbench::diagnostic_routes::open_in_verify;
 use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
 use rspice_app_code::workbench::code::CodeFeature;
@@ -52,8 +53,8 @@ use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
 use rspice_app_workbench::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
     CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
-    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
+    OpenInDesign, OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring,
+    PrintActiveView, ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
     ShowWaveforms, VoidVerilogAEvidence,
 };
@@ -371,6 +372,15 @@ impl RSpiceApp {
             |app, SelectAnalysisInstance(instance)| {
                 SimulateFeature::select_analysis_instance(&mut features::cx(app), instance);
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app,
+             OpenInVerify {
+                 page,
+                 specification,
+             }| open_in_verify(app, page, specification),
         );
         requests::drain(
             self,

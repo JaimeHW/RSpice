@@ -17,6 +17,7 @@ use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select, select_with_disabled};
 
 use crate::presentation::well_hint;
+use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
 use crate::strip::{self, LegendChip};
 use rspice_results::population::{
     self, BoxStatistics, ColumnKind, PopulationColumn, PopulationData, PopulationLimit,
@@ -405,7 +406,7 @@ pub fn show(
     state: &BoxViolinSheetState,
     show_limits: bool,
     cache: &mut plot::DecimationCache,
-) -> Option<plot::PlotResponse> {
+) -> Option<PlotWithRequirements> {
     let Some(plan) = population else {
         well_hint(ui, ABSENT_STATE);
         return None;
@@ -494,6 +495,26 @@ pub fn show(
         .accessible_detail(&accessible);
     spec.left_margin = 68.0;
 
+    // The bounds drawn across each column's slot, by the measurement they
+    // bound: the same ones `PaintedColumns::draw_bounds` paints.
+    let lines = columns
+        .iter()
+        .enumerate()
+        .filter(|(_, column)| show_limits || column.normalized)
+        .flat_map(|(slot, column)| {
+            column.bounds().into_iter().map(move |(y, _)| {
+                (
+                    RequirementLine::Horizontal {
+                        y,
+                        from: slot as f64,
+                        to: slot as f64 + 1.0,
+                    },
+                    column.name.clone(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
     let painted = PaintedColumns {
         columns,
         status: plan.status.clone(),
@@ -521,7 +542,16 @@ pub fn show(
     // ordinate the one the register is quoting.
     plot::set_interaction_mode(ui.ctx(), InteractionMode::Select);
     let response = plot::show(ui, &spec, cache, None, None);
-    Some(response)
+    let actions = lines
+        .iter()
+        .map(|(line, name)| (*line, requirement_lines::specification_action(name)))
+        .collect::<Vec<_>>();
+    let open_specification = requirement_lines::follow(ui, &response, XScale::Linear, &actions)
+        .map(|index| lines[index].1.clone());
+    Some(PlotWithRequirements {
+        plot: response,
+        open_specification,
+    })
 }
 
 const fn whisker_note(whiskers: Whiskers) -> &'static str {

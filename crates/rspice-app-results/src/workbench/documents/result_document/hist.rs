@@ -610,6 +610,13 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
+    if out.open_specification {
+        super::open_in_verify(
+            state,
+            crate::state::VerificationPage::Specifications,
+            name.clone(),
+        );
+    }
     if let Some(response) = out.plot {
         super::record_drawn_axes(state.results, super::ResultViewer::Hist, &response);
         if response.view.any() {

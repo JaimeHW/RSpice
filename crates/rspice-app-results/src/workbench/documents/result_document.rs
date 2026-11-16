@@ -615,6 +615,23 @@ impl<'a> SheetContext<'a> {
     }
 }
 
+/// Leave for Verify from a requirement line a result draws: on `page`, with
+/// the specification measured as `specification` selected when the line
+/// states one.
+pub(super) fn open_in_verify(
+    state: &mut ResultsParts<'_>,
+    page: crate::state::VerificationPage,
+    specification: Option<String>,
+) {
+    state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::requests::OpenInVerify {
+            page,
+            specification,
+        });
+}
+
 /// What the results workspace's predicates read: its viewer state and the
 /// specialized viewers' state, the model whose retained runs they judge, and
 /// the session whose active document they stand on.
@@ -2256,8 +2273,26 @@ fn show_viewer_well(
         ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(state)),
         ResultViewer::NetworkMatrix => network_matrix::show(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::show(ui, state),
-        ResultViewer::Scatter => scatter::show(ui, &mut SheetContext::of(state)),
-        ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(state)),
+        ResultViewer::Scatter => {
+            let followed = scatter::show(ui, &mut SheetContext::of(state));
+            if followed.is_some() {
+                open_in_verify(
+                    state,
+                    crate::state::VerificationPage::Specifications,
+                    followed,
+                );
+            }
+        }
+        ResultViewer::BoxViolin => {
+            let followed = box_violin::show(ui, &mut SheetContext::of(state));
+            if followed.is_some() {
+                open_in_verify(
+                    state,
+                    crate::state::VerificationPage::Specifications,
+                    followed,
+                );
+            }
+        }
         ResultViewer::Events => events::show(ui, state),
         ResultViewer::Soa => soa::show(ui, state),
         ResultViewer::Optimization => optimization::show(ui, state),

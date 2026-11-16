@@ -28,8 +28,8 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
-use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{DrawnObject, PreflightRemediation};
+use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -334,16 +334,45 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
 
 /// Open Verify's Specifications view with the specification measured as
 /// `measurement` selected, or as the reader left it when there is none.
-/// Every route that leaves for one specification comes through here: the
-/// status bar's run segment, a preflight finding and a result's requirement
-/// line.
 pub(crate) fn open_specification(app: &mut RSpiceApp, measurement: Option<String>) {
-    if measurement.is_some() {
-        app.state.simulate.selected_specification = measurement;
+    open_in_verify(app, VerificationPage::Specifications, measurement);
+}
+
+/// Open Verify on `page` with the specification measured as `measurement`
+/// selected, or as the reader left it when there is none. Every route that
+/// leaves for one specification comes through here: the status bar's run
+/// segment, a preflight finding and a result's requirement line.
+///
+/// A result spells a measurement as its producer did, so it is matched to
+/// the sheet's row without regard to case; one the sheet holds no row for is
+/// said rather than selected.
+pub(crate) fn open_in_verify(
+    app: &mut RSpiceApp,
+    page: VerificationPage,
+    measurement: Option<String>,
+) {
+    if let Some(measurement) = measurement {
+        let row = app
+            .state
+            .model
+            .simulation
+            .verification_sheet()
+            .map(|sheet| {
+                sheet
+                    .rows
+                    .iter()
+                    .find(|row| row.measurement.eq_ignore_ascii_case(&measurement))
+                    .map(|row| row.measurement.clone())
+            });
+        match row {
+            Some(None) => app.state.prompt(format!(
+                "No specification in the plan measures {measurement}."
+            )),
+            Some(Some(row)) => app.state.simulate.selected_specification = Some(row),
+            None => app.state.simulate.selected_specification = Some(measurement),
+        }
     }
-    app.execute_command_key(
-        SimulateCommand::Verify(rspice_app_state::state::VerificationPage::Specifications).key(),
-    );
+    app.execute_command_key(SimulateCommand::Verify(page).key());
 }
 
 #[cfg(test)]

@@ -506,6 +506,13 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "7.1",
+        &[
+            "|app, OpenInVerify { page, specification, }|",
+            "open_in_verify(app, page, specification)",
+        ],
+    ),
+    (
         "8",
         &[
             "|app, RevealExecutedDeck { seq, close_manager_on_success, }|",
@@ -1592,8 +1599,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        33,
-        "`after_contribution` answers exactly the thirty-three requests it lists"
+        34,
+        "`after_contribution` answers exactly the thirty-four requests it lists"
     );
 }
 

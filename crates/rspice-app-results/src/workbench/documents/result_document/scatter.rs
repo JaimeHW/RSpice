@@ -14,23 +14,25 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     )
 }
 
-pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
+/// Draw the correlation; the measurement whose specification the reader
+/// followed a requirement line to, if they did.
+pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
     let plan = population::plan(context);
     let session = &mut context.results.session;
     let mut scratch = Vec::new();
     let members = plan
         .as_deref()
         .map_or(&mut scratch, |plan| session.members.on(plan.analysis()));
-    if let Some(response) = view::show(
+    let drawn = view::show(
         ui,
         plan.as_deref().map(|plan| &**plan),
         &mut session.scatter,
         members,
         session.show_spec_limits,
         &mut session.cache,
-    ) {
-        super::record_drawn_axes(context.results, super::ResultViewer::Scatter, &response);
-    }
+    )?;
+    super::record_drawn_axes(context.results, super::ResultViewer::Scatter, &drawn.plot);
+    drawn.open_specification
 }
 
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
@@ -211,7 +213,9 @@ mod tests {
         let mut results = ResultsState::default();
         let mut ctx = context(&simulation, &workspace, &mut results);
         assert!(population::plan(&mut ctx).is_none());
-        let text = rendered_text(&mut ctx, show);
+        let text = rendered_text(&mut ctx, |ui, context| {
+            show(ui, context);
+        });
         assert!(
             text.iter()
                 .any(|text| text

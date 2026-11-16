@@ -16,6 +16,7 @@ use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
 
 use crate::presentation::well_hint;
+use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
 use crate::strip::{self, LegendChip};
 use rspice_results::population::{
     self, ColumnKind, PopulationColumn, PopulationData, TrialStatus, UNPAIRED_REASON,
@@ -274,7 +275,7 @@ pub fn show(
     members: &mut Vec<usize>,
     show_limits: bool,
     cache: &mut plot::DecimationCache,
-) -> Option<plot::PlotResponse> {
+) -> Option<PlotWithRequirements> {
     let Some(plan) = population else {
         well_hint(ui, ABSENT_STATE);
         return None;
@@ -406,7 +407,30 @@ pub fn show(
 
     apply_input(ui, state, members, &points, &response, ((x0, x1), (y0, y1)));
     paint_hover_card(ui, plan, &points, &response, ((x0, x1), (y0, y1)));
-    Some(response)
+    let mut lines = Vec::new();
+    if show_limits {
+        let bounds = |column: &PopulationColumn| {
+            column.limit.as_ref().map_or_else(Vec::new, |limit| {
+                [limit.min(), limit.max()].into_iter().flatten().collect()
+            })
+        };
+        for x in bounds(x_column) {
+            lines.push((RequirementLine::Vertical { x }, &x_column.name));
+        }
+        for y in bounds(y_column) {
+            lines.push((RequirementLine::across(y), &y_column.name));
+        }
+    }
+    let actions = lines
+        .iter()
+        .map(|(line, name)| (*line, requirement_lines::specification_action(name)))
+        .collect::<Vec<_>>();
+    let open_specification = requirement_lines::follow(ui, &response, XScale::Linear, &actions)
+        .map(|index| lines[index].1.clone());
+    Some(PlotWithRequirements {
+        plot: response,
+        open_specification,
+    })
 }
 
 #[derive(Clone, Copy)]

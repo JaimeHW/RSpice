@@ -241,6 +241,19 @@ impl Request for SelectAnalysisInstance {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Open Verify on `page`, with the specification measured as `specification`
+/// selected when it names one. Raised by a requirement line on a result, and
+/// taken straight after the call that raised it.
+#[derive(Clone, Debug)]
+pub struct OpenInVerify {
+    pub page: crate::state::VerificationPage,
+    pub specification: Option<String>,
+}
+
+impl Request for OpenInVerify {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Open the source the engine executed for the run of sequence `seq`, or
 /// say why it cannot be; and once it is open, leave the run history when
 /// `close_manager_on_success` says the history asked. Raised by the

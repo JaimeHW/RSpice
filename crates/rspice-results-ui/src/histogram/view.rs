@@ -2,6 +2,7 @@
 
 use super::HistogramState;
 use crate::presentation::{PlotView, well_hint};
+use crate::requirement_lines::{self, RequirementLine};
 use crate::strip::{self, LegendChip};
 use egui::Ui;
 use rspice_results::histogram::display::{HistogramDisplay, hist_axis};
@@ -68,6 +69,8 @@ pub struct HistogramViewResponse {
     pub plot: Option<plot::PlotResponse>,
     pub fit_requested: bool,
     pub picked: Option<HistogramPick>,
+    /// The reader followed a spec limit to the specification it states.
+    pub open_specification: bool,
 }
 
 /// The share of the frame the single bar of a degenerate distribution covers.
@@ -489,6 +492,17 @@ pub fn show(
     };
 
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    if let Some((lsl, usl)) = spec_limits {
+        let action = requirement_lines::specification_action(&histogram.name);
+        let lines = [lsl, usl]
+            .into_iter()
+            .flatten()
+            .filter(|x| *x > x0 && *x < x1)
+            .map(|x| (RequirementLine::Vertical { x }, action.clone()))
+            .collect::<Vec<_>>();
+        out.open_specification =
+            requirement_lines::follow(ui, &response, XScale::Linear, &lines).is_some();
+    }
     // A click on a bar picks the members it counts; a click beside the
     // bars, or Escape, picks none. A cumulative curve has no bars to pick.
     if display.cdf.is_none() {
@@ -824,6 +838,7 @@ mod tests {
 
     /// A click on a bar picks the bin it stands in; a click beside the
     /// bars picks no member; the picked members are counted in the legend.
+    /// A click on a spec limit follows it to its specification instead.
     #[test]
     fn a_click_on_a_bar_picks_its_bin() {
         use rspice_results::histogram::HistogramBuilder;
@@ -837,12 +852,13 @@ mod tests {
             HistogramDisplay::new(&histogram, &samples, HistogramDisplayMode::Count).unwrap();
         let source = SourceRevision::default();
         let selected = [3.0, 3.0, 4.0];
-        let pick_at = |value: Option<f64>| {
+        let pick_at = |value: Option<f64>, spec_limits: Option<(Option<f64>, Option<f64>)>| {
             let ctx = egui::Context::default();
             rspice_ui_kit::Theme::default().apply(&ctx);
             let mut cache = plot::DecimationCache::default();
             let mut target = None;
             let mut picked = None;
+            let mut opened = false;
             let mut text = String::new();
             for frame in 0..4 {
                 let mut input = rspice_ui_kit::raster::display_input(egui::vec2(900.0, 500.0), 1.0);
@@ -865,13 +881,14 @@ mod tests {
                                 histogram: &histogram,
                                 display: Ok(&display),
                                 moments: None,
-                                spec_limits: None,
+                                spec_limits,
                                 source: &source,
                                 selected: &selected,
                             }),
                             PlotView::default(),
                             &mut cache,
                         );
+                        opened |= out.open_specification;
                         let plot = out.plot.expect("the histogram is drawn");
                         if frame == 0 {
                             let ((x0, x1), _) = plot.axes;
@@ -898,13 +915,22 @@ mod tests {
                     }
                 }
             }
-            (picked, text)
+            (picked, text, opened)
         };
-        let (picked, text) = pick_at(Some(7.0));
+        let (picked, text, _) = pick_at(Some(7.0), None);
         assert_eq!(picked, Some(HistogramPick::Bin(7)));
         assert!(text.contains("3 picked"), "{text}");
-        let (beside, _) = pick_at(Some(f64::INFINITY));
+        let (beside, ..) = pick_at(Some(f64::INFINITY), None);
         assert_eq!(beside, Some(HistogramPick::Clear));
-        assert_eq!(pick_at(None).0, None);
+        assert_eq!(pick_at(None, None).0, None);
+
+        // A spec limit is the way to its specification, not a bar.
+        let limits = Some((Some(2.5), Some(7.5)));
+        let (picked, _, opened) = pick_at(Some(7.5), limits);
+        assert!(opened);
+        assert_eq!(picked, None, "the limit took the click");
+        let (picked, _, opened) = pick_at(Some(5.0), limits);
+        assert!(!opened);
+        assert_eq!(picked, Some(HistogramPick::Bin(5)));
     }
 }

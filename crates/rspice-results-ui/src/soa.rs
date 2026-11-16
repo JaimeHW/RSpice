@@ -24,6 +24,8 @@ use rspice_ui_kit::{
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
+
+use crate::requirement_lines::{self, RequirementLine};
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 
 /// The reader's notation for every number the SOA sheet states: engineering
@@ -291,6 +293,8 @@ pub struct SoaResponse {
     pub cross_probe: Option<SoaRuleSelection>,
     pub fit_clicked: bool,
     pub stress_view_change: Option<plot::ViewChange>,
+    /// The reader followed the rule's limit line to where Verify judges it.
+    pub open_check: bool,
 }
 
 struct StressPlot<'a> {
@@ -352,6 +356,7 @@ pub fn show(
         numbers: controls.numbers,
     };
     let mut stress_view_change = None;
+    let mut open_check = false;
     let numbers = controls.numbers;
     let selected = controls.selected;
     let initial_filter = controls.filter;
@@ -437,7 +442,7 @@ pub fn show(
                 .and_then(|index| evidence_trace(analysis, index))
                 .map(|waveform| (facts, waveform))
         }) {
-            stress_view_change = stress_trace_card(
+            (stress_view_change, open_check) = stress_trace_card(
                 ui,
                 &mut plot,
                 waveform,
@@ -613,6 +618,7 @@ pub fn show(
         cross_probe,
         fit_clicked: header.fit_clicked,
         stress_view_change,
+        open_check,
     }
 }
 
@@ -993,7 +999,7 @@ fn stress_trace_card(
     facts: &SoaRuleFacts,
     limits: Option<SoaTrace<'_>>,
     temperatures: Option<SoaTrace<'_>>,
-) -> Option<plot::ViewChange> {
+) -> (Option<plot::ViewChange>, bool) {
     let unit = evaluation.unit.as_str();
     let numbers = plot.numbers;
     let t = Tokens::get(ui.ctx());
@@ -1113,7 +1119,22 @@ fn stress_trace_card(
                     )
                 })
                 .inner;
-            response.view.any().then_some(response.view)
+            // A constant limit is the rule's own line, and Verify judges the
+            // rule as one of the run's checks.
+            let action = format!(
+                "Open the {} {} check in Verify",
+                evaluation.device_id,
+                parameter_label(evaluation.parameter)
+            );
+            let open_check = limits.is_none()
+                && requirement_lines::follow(
+                    ui,
+                    &response,
+                    XScale::Linear,
+                    &[(RequirementLine::across(evaluation.limit_value), action)],
+                )
+                .is_some();
+            (response.view.any().then_some(response.view), open_check)
         }).inner
 }
 

@@ -29,6 +29,7 @@ pub mod pole_zero;
 pub mod presentation;
 pub mod qpnoise;
 pub mod report;
+pub mod requirement_lines;
 pub mod scatter;
 pub mod selection;
 pub mod sensitivity;

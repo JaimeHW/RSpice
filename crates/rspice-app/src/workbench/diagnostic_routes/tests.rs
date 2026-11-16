@@ -622,3 +622,53 @@ fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
         "{route:?}"
     );
 }
+
+/// A requirement line on a result leaves for Verify through the shell: the
+/// request a viewer raised opens the page it names, selecting the row the
+/// sheet holds for its measurement however the result spelled it. One the
+/// sheet holds no row for is said, and the selection stays.
+#[test]
+fn a_requirement_line_opens_its_row_in_verify() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::seed_corner;
+    use rspice_app_state::state::VerificationPage;
+    use rspice_app_workbench::workbench::framework::requests::OpenInVerify;
+
+    let mut app = RSpiceApp::test_instance();
+    seed_corner(&mut app.state.model);
+    app.state
+        .workbench
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
+    let follow = |app: &mut RSpiceApp, page, specification: Option<&str>| {
+        app.state.workbench.outbox.push(OpenInVerify {
+            page,
+            specification: specification.map(str::to_owned),
+        });
+        app.after_contribution();
+        assert_eq!(
+            app.state.workbench.workspace,
+            rspice_app_state::workbench::workspace::Workspace::Verify
+        );
+        assert_eq!(app.state.simulate.verification_page, page);
+    };
+
+    follow(&mut app, VerificationPage::Specifications, Some("GAIN"));
+    assert_eq!(
+        app.state.simulate.selected_specification.as_deref(),
+        Some("gain")
+    );
+
+    follow(&mut app, VerificationPage::Specifications, Some("slew"));
+    assert_eq!(
+        app.state.simulate.selected_specification.as_deref(),
+        Some("gain"),
+        "a measurement with no specification selects nothing"
+    );
+    assert!(
+        app.state
+            .prompt_text()
+            .is_some_and(|text| text.contains("slew")),
+        "and is said"
+    );
+
+    follow(&mut app, VerificationPage::Checks, None);
+}

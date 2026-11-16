@@ -204,6 +204,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .apply(&change);
     }
     state.results.session.soa_rule_filter = response.filter;
+    if response.open_check {
+        super::open_in_verify(state, crate::state::VerificationPage::Checks, None);
+    }
     state.results.session.soa_stress_trace_open = response.trace_open;
     if response.selection != state.results.session.selected_soa_rule {
         if response.selection.is_some() && response.trace_open {
