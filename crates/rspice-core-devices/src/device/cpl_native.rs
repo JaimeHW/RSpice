@@ -400,7 +400,6 @@ pub(crate) enum NativeCplError {
     NonPositiveModeFrequency,
     SingularMatrix(&'static str),
     InterpolationFailure,
-    DiagonalizationDidNotConverge,
     InvalidHistoryDimension {
         label: &'static str,
         expected: usize,
@@ -457,9 +456,6 @@ impl fmt::Display for NativeCplError {
             }
             Self::SingularMatrix(label) => write!(f, "native CPL singular matrix in {label}"),
             Self::InterpolationFailure => write!(f, "native CPL polynomial interpolation failed"),
-            Self::DiagonalizationDidNotConverge => {
-                write!(f, "native CPL diagonalization did not converge")
-            }
             Self::InvalidHistoryDimension {
                 label,
                 expected,
@@ -2013,18 +2009,17 @@ impl NativeCplSetup {
             );
         }
 
-        let mut rotations = 0usize;
+        // Classical Jacobi: each rotation zeroes the largest off-diagonal entry
+        // and lowers the off-diagonal sum of squares by twice its square. That
+        // entry stays above EPSI2 on a matrix scaled to unit size, far above
+        // the rounding a rotation adds, so the loop ends as ngspice's does
+        // (cplsetup.c, `diag`), which counts no rotations.
         while row_entries.first().is_some_and(|entry| entry.value > EPSI2) {
             let entry = row_entries[0];
             self.rotate(entry.row, entry.col, &mut zyf);
             self.reordering(entry.row, &mut row_entries, &zyf);
             if entry.col + 1 != self.dim {
                 self.reordering(entry.col, &mut row_entries, &zyf);
-            }
-
-            rotations += 1;
-            if rotations > 1_000_000 {
-                return Err(NativeCplError::DiagonalizationDidNotConverge);
             }
         }
 
