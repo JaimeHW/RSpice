@@ -1022,6 +1022,7 @@ impl<'a> PreparedEventCircuit<'a> {
             ccvs_current_rows,
             current_structure: None,
             flux_structure: None,
+            incoming_source_clocks: Vec::new(),
         };
         if use_descriptor {
             prepared.linear = Some(linear::LinearDescriptor::prepare(

@@ -161,6 +161,46 @@ fn prepared_event_circuit_solves_rlc_jump_and_sided_source_rates() {
 }
 
 #[test]
+fn a_source_corner_landed_ulps_later_keeps_its_incoming_slope() {
+    // A triangle peaks at 3 s. A line arrival that rounds up lands the
+    // event a unit in the last place later, where the source already falls.
+    let circuit = build(
+        "landed corner\nV1 a 0 PULSE(0 2 0 3 3 0 6)\nI1 0 b PULSE(0 2 0 3 3 0 6)\nR1 a 0 1\nR2 b 0 1\n.end\n",
+    );
+    let options = options();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let landing = 3.0_f64.next_up();
+    let zeros = vec![0.0; circuit.matrix_size()];
+    let rates = |sampler: &mut PreparedEventCircuit<'_>, side| {
+        let topology = sampler.topology(landing, side, &options, &NoAbort).unwrap();
+        let state = topology
+            .solve(&zeros, &zeros, &options, &NoAbort, |state, abort| {
+                sampler.sample(landing, side, state, &[], &options, abort)
+            })
+            .unwrap();
+        ["a", "b"].map(|node| {
+            state.coordinate_rates[circuit.get_node_by_name(node).unwrap() - 1].unwrap()
+        })
+    };
+    let check = |rates: [Value; 2], slope: Value| {
+        for rate in rates {
+            close(rate, slope, 1e-12);
+        }
+    };
+    let (rise, fall) = (2.0 / 3.0, -2.0 / 3.0);
+    for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+        check(rates(&mut sampler, side), fall);
+    }
+    sampler.set_incoming_source_clocks(vec![
+        (PhysicalSourceOwner::Voltage(0), 3.0),
+        (PhysicalSourceOwner::Current(0), 3.0),
+    ]);
+    check(rates(&mut sampler, SourceTimeSide::LeftLimit), rise);
+    check(rates(&mut sampler, SourceTimeSide::RightLimit), fall);
+}
+
+#[test]
 fn prepared_event_circuit_owns_zero_resistor_current_once() {
     let circuit = build("zero resistor\nV1 a 0 PWL(0 0 1 0 1 2)\nR0 a b 0\nR1 b 0 100\n.end\n");
     assert_eq!(circuit.resistor_branches.len(), 1);

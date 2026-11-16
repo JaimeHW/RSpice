@@ -5,6 +5,7 @@ use super::*;
 use crate::circuit::SourceTimeSide;
 use crate::device::Bjt;
 use crate::engine::periodic_capability::PeriodicDeviceFamily;
+use crate::engine::transient::source_events::PhysicalSourceOwner;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayTimeSide};
 
 mod behavioral;
@@ -37,6 +38,9 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     ccvs_current_rows: Vec<ccvs::CurrentRow>,
     current_structure: Option<Arc<CurrentConservation>>,
     flux_structure: Option<Arc<FluxConservation>>,
+    /// The clocks of source events an event landed ulps after
+    /// ([`Self::set_incoming_source_clocks`]).
+    incoming_source_clocks: Vec<(PhysicalSourceOwner, Value)>,
 }
 
 fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
@@ -50,6 +54,33 @@ fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
 }
 
 impl PreparedEventCircuit<'_> {
+    /// Source events that land with a later clock: a line arrival rounds up
+    /// past a source corner it coincides with, and the event lands on the
+    /// arrival. A source's incoming slope is its slope before its own clock,
+    /// which at the landing's own clock is already past the corner.
+    pub(in crate::engine::transient) fn set_incoming_source_clocks(
+        &mut self,
+        clocks: Vec<(PhysicalSourceOwner, Value)>,
+    ) {
+        self.incoming_source_clocks = clocks;
+    }
+
+    /// The clock a source's slope is read at on `side` of an event at `time`.
+    fn source_slope_clock(
+        &self,
+        owner: PhysicalSourceOwner,
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Value {
+        if side != SourceTimeSide::LeftLimit {
+            return time;
+        }
+        self.incoming_source_clocks
+            .iter()
+            .find(|(source, _)| *source == owner)
+            .map_or(time, |&(_, clock)| clock)
+    }
+
     pub(in crate::engine::transient) fn linear_descriptor(
         &self,
     ) -> Option<&linear::LinearDescriptor> {
@@ -155,8 +186,10 @@ impl PreparedEventCircuit<'_> {
                 check_abort(abort)?;
             }
             let value = table.transient_value_at_on_side(index, time, source_side);
+            let clock =
+                self.source_slope_clock(PhysicalSourceOwner::Voltage(index), time, source_side);
             let slope = table
-                .time_derivative_at_on_side(index, time, 1, source_side)
+                .time_derivative_at_on_side(index, clock, 1, source_side)
                 .ok_or_else(|| {
                     error(format!(
                         "source '{}' has no regular slope on the requested side",

@@ -258,8 +258,10 @@ impl PreparedEventCircuit<'_> {
                 check_abort(abort)?;
             }
             let value = currents.value_at_time_on_side(index, time, source_side);
+            let clock =
+                self.source_slope_clock(PhysicalSourceOwner::Current(index), time, source_side);
             let slope = currents
-                .time_derivative_at_on_side(index, time, 1, source_side)
+                .time_derivative_at_on_side(index, clock, 1, source_side)
                 .ok_or_else(|| {
                     error(format!(
                         "source '{}' has no regular current slope",

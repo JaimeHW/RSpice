@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::circuit::SourceTimeSide;
+use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 pub(super) mod diodes;
 mod impulses;
@@ -223,6 +224,30 @@ fn phase_anchors(history: &BjtTransientHistory) -> Vec<Option<(usize, Value, Val
         .collect()
 }
 
+/// The source events in an event's incoming interval that land with it at a
+/// later clock (`orders::classify`), each owner's earliest.
+fn incoming_source_clocks(
+    sources: &PhysicalSourceEvents,
+    accepted_time: Value,
+    time: Value,
+    coincidence_floor: Value,
+) -> Result<Vec<(PhysicalSourceOwner, Value)>, SimulationError> {
+    let mut clocks: Vec<(PhysicalSourceOwner, Value)> = Vec::new();
+    let mut clock = accepted_time;
+    while let Some(next) = sources.next_after(clock, time)?
+        && next < time
+        && crate::numerics::integration::coincides_before(next, time, coincidence_floor)
+    {
+        for event in sources.at(next)? {
+            if !clocks.iter().any(|(owner, _)| *owner == event.owner) {
+                clocks.push((event.owner, next));
+            }
+        }
+        clock = next;
+    }
+    Ok(clocks)
+}
+
 fn failure(message: impl Into<String>) -> SimulationError {
     SimulationError::Circuit(format!("physical event acceptance: {}", message.into()))
 }
@@ -426,6 +451,19 @@ impl Engine {
         let mut sampler = PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?;
         if sampler.linear_descriptor().is_some() {
             return linear::prepare(circuit, history, &step, &sampler, options, abort);
+        }
+        if let PhysicalEventOrders::FromCauses {
+            sources,
+            accepted_time,
+            coincidence_floor,
+        } = &step.phase_events
+        {
+            sampler.set_incoming_source_clocks(incoming_source_clocks(
+                sources,
+                *accepted_time,
+                step.time,
+                *coincidence_floor,
+            )?);
         }
 
         let seed = if startup {
