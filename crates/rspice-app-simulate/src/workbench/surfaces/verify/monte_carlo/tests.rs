@@ -185,6 +185,18 @@ fn the_detail_fills_the_page_as_one_frame() {
     for seed in ["0x1A32", "0x1A3E", "0x1A4A"] {
         assert!(words.iter().any(|(words, _)| words == seed), "{seed}");
     }
+    // The value a trial failed with stands beside its number, the seed last,
+    // so a list scrolled on a narrow page still shows the value.
+    let left_of = |wanted: &str| {
+        shapes(&output)
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos.x),
+                _ => None,
+            })
+            .expect(wanted)
+    };
+    assert!(left_of("39.20 dB") < left_of("0x1A32"));
 
     // A failing trial is the inspector's subject once selected.
     let failing = population(

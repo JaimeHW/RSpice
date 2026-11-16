@@ -941,10 +941,13 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     list_ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+    // The value the trial failed with stands beside its number, so a narrow
+    // page that scrolls the list still shows it; the seed, kept to repeat
+    // the trial, comes last.
     let columns = [
         Column::number("Trial", 72.0),
-        Column::number("Seed", 112.0),
         Column::number("Value", 96.0),
+        Column::number("Seed", 112.0),
     ];
     let keys = failing
         .iter()
@@ -962,14 +965,14 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
                         .index()
                         .map_or(SortKey::Missing, |index| SortKey::Number(index as f64)),
                 ),
-                trial
-                    .seed()
-                    .map_or_else(Cell::absent, |seed| Cell::number(seed_text(seed))),
                 trial.value.map_or_else(Cell::absent, |value| {
                     Cell::number(format_value(value, &row.unit))
                         .judged(Verdict::Fail)
                         .sort_by(SortKey::Number(value))
                 }),
+                trial
+                    .seed()
+                    .map_or_else(Cell::absent, |seed| Cell::number(seed_text(seed))),
             ]
         });
     if failing.is_empty() {
