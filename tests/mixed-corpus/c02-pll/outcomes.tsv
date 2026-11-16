@@ -1,7 +1,7 @@
 # variant	analysis	route	outcome	detail
-xs	tran	interp	pass	fdiv (O6) [0] |a−e|=5.940e-13 allowed 5.000e-11 (a=9.999941e-8, e=1.000000e-7)
+xs	tran	interp	pass	fdiv (O6) [0] |a−e|=1.194e-12 allowed 5.000e-11 (a=9.999881e-8, e=1.000000e-7)
 xs	tran	native	pass	fdiv (O6) [0] |a−e|=5.940e-13 allowed 5.000e-11 (a=9.999941e-8, e=1.000000e-7)
-xs	tran	worker	pass	fdiv (O6) [0] |a−e|=8.145e-13 allowed 5.000e-11 (a=9.999919e-8, e=1.000000e-7)
+xs	tran	worker	pass	tlock (O1) [0] |a−e|=2.011e-9 allowed 5.661e-7 (a=5.659120e-6, e=5.661131e-6)
 mx	tran	interp	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540853e-6, e=5.703179e-6)
 mx	tran	native	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540853e-6, e=5.703179e-6)
 mx	tran	worker	pass	tlock (O2) [0] |a−e|=1.623e-7 allowed 2.852e-7 (a=5.540853e-6, e=5.703179e-6)
@@ -23,9 +23,9 @@ mx	ac	worker	pass	zlf (O6) [0] Δ=-5.005e-4 dB, 8.051e-2° allowed 5e-2 dB, 5e-1
 mx	ac@lock	interp	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
 mx	ac@lock	native	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
 mx	ac@lock	worker	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
-xs	mc-tran	interp	pass	fdiv (O6) trial 0: [0] |a−e|=1.876e-12 allowed 5.000e-11 (a=9.999812e-8, e=1.000000e-7)
+xs	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=2.721e-12 allowed 5.000e-11 (a=9.999728e-8, e=1.000000e-7)
 xs	mc-tran	native	pass	fdiv (O6) trial 0: [0] |a−e|=1.876e-12 allowed 5.000e-11 (a=9.999812e-8, e=1.000000e-7)
-xs	mc-tran	worker	pass	fdiv (O6) trial 1: [0] |a−e|=1.609e-12 allowed 5.000e-11 (a=9.999839e-8, e=1.000000e-7)
+xs	mc-tran	worker	pass	fdiv (O6) trial 3: [0] |a−e|=1.371e-12 allowed 5.000e-11 (a=1.000014e-7, e=1.000000e-7)
 mx	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=7.377e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	native	pass	fdiv (O6) trial 6: [0] |a−e|=7.377e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	worker	pass	fdiv (O6) trial 6: [0] |a−e|=7.377e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
