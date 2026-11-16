@@ -47,6 +47,7 @@ use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, Op
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select};
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
@@ -374,17 +375,11 @@ pub(super) fn commit_options_transaction(
     let receipt = candidate
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .map_err(|error| error.to_string())?;
-    let before = cx.model.sim_setup.options.clone();
+    let before = cx.model.setup_snapshot(SetupParts::OPTIONS);
     cx.model.sim_setup = candidate;
-    // One step on the project's history, named for the page that took it.
-    let step = if before.connect_rules == options.connect_rules
-        && before.connect_rule_block == options.connect_rule_block
-    {
-        "Solver options"
-    } else {
-        "Connect rules"
-    };
-    cx.model.record_simulation_options_change(step, before);
+    // One step of the setup's history, named for the page that took it.
+    cx.model
+        .record_setup_change(cx.state.simulation_page.label(), before);
     invalidate_preflight(cx);
     cx.model.record_plan_receipt(receipt.status_line());
     Ok(true)

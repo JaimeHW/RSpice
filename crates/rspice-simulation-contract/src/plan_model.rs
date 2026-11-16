@@ -826,6 +826,66 @@ impl SimulationPlan {
             .any(|instance| instance.lifecycle.is_executing())
     }
 
+    /// Make this plan's analyses the ones `snapshot` held again: the same
+    /// instances in the same order, each with its settings, name, enablement,
+    /// dependencies and participation, and the same removed set.
+    ///
+    /// The receipts and the revision stay this plan's. The configuration
+    /// change committed after this takes the next revision, and every
+    /// instance whose settings this changes is stamped with that revision and
+    /// left a draft, as an edit leaves it, so a revision never names two
+    /// different settings of one analysis.
+    /// Refused while this plan owns executing work.
+    pub fn restore_analyses(&mut self, snapshot: &Self) -> Result<(), AnalysisPlanError> {
+        if let Some(instance) = self
+            .instances
+            .iter()
+            .find(|instance| instance.lifecycle.is_executing())
+        {
+            return Err(AnalysisPlanError::InstanceExecuting(instance.id));
+        }
+        let committed = self.revision.next()?;
+        // What a user set, without the revision that stamped it or the state
+        // a run left it in.
+        let settings = |instance: &AnalysisInstance| {
+            let mut unstamped = instance.clone();
+            unstamped.modified_revision = ObjectRevision::INITIAL;
+            unstamped.lifecycle = AnalysisLifecycleState::Draft;
+            serde_json::to_value(unstamped).ok()
+        };
+        let instances = snapshot
+            .instances
+            .iter()
+            .map(|restored| {
+                match self
+                    .instances
+                    .iter()
+                    .find(|current| current.id == restored.id)
+                {
+                    Some(current)
+                        if settings(current)
+                            .is_some_and(|kept| Some(kept) == settings(restored)) =>
+                    {
+                        current.clone()
+                    }
+                    _ => {
+                        let mut stamped = restored.clone();
+                        stamped.modified_revision = committed;
+                        stamped.lifecycle = if stamped.enabled {
+                            AnalysisLifecycleState::Draft
+                        } else {
+                            AnalysisLifecycleState::Disabled
+                        };
+                        stamped
+                    }
+                }
+            })
+            .collect();
+        self.instances = instances;
+        self.tombstones.clone_from(&snapshot.tombstones);
+        Ok(())
+    }
+
     /// Commit a project-owned plan configuration change without fabricating
     /// an analysis-instance mutation.
     ///

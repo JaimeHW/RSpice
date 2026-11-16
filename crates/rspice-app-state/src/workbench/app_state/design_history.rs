@@ -26,11 +26,12 @@ mod component_rename;
 mod hierarchy_extraction;
 mod instance_removal;
 mod reference_preparation;
-mod simulation_options;
+mod simulation_setup;
 mod stimulus_readoption;
 mod veriloga_build;
 
 pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
+pub use simulation_setup::{SetupParts, SetupSnapshot};
 pub use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +54,10 @@ const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 pub struct ProjectDesignHistory {
     pub undo: Vec<ProjectDesignRecord>,
     pub redo: Vec<ProjectDesignRecord>,
+    /// The Simulate setup pages' own steps, taken by Undo and Redo on those
+    /// pages and nowhere else.
+    setup_undo: Vec<simulation_setup::SimulationSetupRecord>,
+    setup_redo: Vec<simulation_setup::SimulationSetupRecord>,
     /// Where the newest transaction committed here sits in the global order.
     /// Undo and redo only move records between the stacks, so they leave it.
     committed: Option<UndoSequence>,
@@ -97,7 +102,6 @@ pub enum ProjectDesignBody {
     ModelLibraries(Box<ModelLibrariesRecord>),
     ModelResolutions(Box<ModelResolutionRecordsRecord>),
     VerilogABuildSettings(Box<veriloga_build::VerilogABuildSettingsRecord>),
-    SimulationOptions(Box<simulation_options::SimulationOptionsRecord>),
 }
 
 /// Reference-changing history is prepared exactly once before navigation or a
@@ -1296,7 +1300,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => record.after_design_matches(state),
             Self::ModelResolutions(record) => record.after_design_matches(state),
             Self::VerilogABuildSettings(record) => record.after_design_matches(state),
-            Self::SimulationOptions(record) => record.after_design_matches(state),
         }
     }
 
@@ -1311,7 +1314,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => record.before_design_matches(state),
             Self::ModelResolutions(record) => record.before_design_matches(state),
             Self::VerilogABuildSettings(record) => record.before_design_matches(state),
-            Self::SimulationOptions(record) => record.before_design_matches(state),
         }
     }
 
@@ -1326,7 +1328,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => record.validate_mutation(state, operation),
             Self::ModelResolutions(record) => record.validate_mutation(state, operation),
             Self::VerilogABuildSettings(record) => record.validate_mutation(state, operation),
-            Self::SimulationOptions(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -1341,7 +1342,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => &record.description,
             Self::ModelResolutions(record) => &record.description,
             Self::VerilogABuildSettings(record) => &record.description,
-            Self::SimulationOptions(record) => &record.description,
         }
     }
 
@@ -1362,7 +1362,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => record.apply_before(state),
             Self::ModelResolutions(record) => record.apply_before(state),
             Self::VerilogABuildSettings(record) => record.apply_before(state, effects),
-            Self::SimulationOptions(record) => record.apply_before(state),
         }
     }
 
@@ -1383,7 +1382,6 @@ impl ProjectDesignBody {
             Self::ModelLibraries(record) => record.apply_after(state),
             Self::ModelResolutions(record) => record.apply_after(state),
             Self::VerilogABuildSettings(record) => record.apply_after(state, effects),
-            Self::SimulationOptions(record) => record.apply_after(state),
         }
     }
 }

@@ -509,12 +509,15 @@ fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
     cx.wb.outbox.push(FocusNavigatorSearch);
 }
 
-/// Whether Undo would take a step: never while the project is read-only or
-/// a schematic edit is under way; otherwise where the project's history,
+/// Whether Undo would take a step: on a Simulate page, where the setup's own
+/// history holds one; elsewhere never while the project is read-only or a
+/// schematic edit is under way, and otherwise where the project's history,
 /// the symbol editor's or an editable schematic's holds one.
 fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
-    if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
+    if reads.wb.workspace == Workspace::Simulate {
+        model.can_undo_simulation_setup()
+    } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
         false
     } else if model.can_undo_project_design() {
         true
@@ -532,7 +535,9 @@ fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
 /// Whether Redo would take a step, as [`can_undo`] answers for Undo.
 fn can_redo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
-    if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
+    if reads.wb.workspace == Workspace::Simulate {
+        model.can_redo_simulation_setup()
+    } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
         false
     } else if model.can_redo_project_design() {
         true

@@ -79,7 +79,7 @@ pub mod workbench {
     }
     pub mod app_state {
         pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
-        pub(crate) use rspice_app_state::workbench::app_state::{model, sim_setup};
+        pub(crate) use rspice_app_state::workbench::app_state::{design_history, model, sim_setup};
         pub(crate) use rspice_app_workbench::workbench::app_state::session;
         pub(crate) use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 

@@ -208,9 +208,9 @@ impl RunSetState {
         super::forecast_point_count(self)
     }
 
-    /// Capture the editable state for the undo stack.
+    /// Capture the editable state, as a step of the setup's history holds it.
     #[must_use]
-    pub(super) fn snapshot(&self) -> RunSetSnapshot {
+    pub fn snapshot(&self) -> RunSetSnapshot {
         RunSetSnapshot {
             revision: self.revision,
             sequence: self.sequence,
@@ -219,6 +219,17 @@ impl RunSetState {
             budgets: self.budgets,
             preview: self.preview,
         }
+    }
+
+    /// Make the editable state `snapshot` again as a new revision: the
+    /// receipt log is untouched, the revision moves on past both, so a
+    /// revision never names two different spaces, and the space is previewed
+    /// afresh, as after any edit.
+    pub fn restore_snapshot(&mut self, snapshot: RunSetSnapshot) {
+        let revision = self.revision.max(snapshot.revision).saturating_add(1);
+        self.restore(snapshot);
+        self.revision = revision;
+        self.preview = None;
     }
 
     /// Restore an editable snapshot, leaving the receipt log untouched.

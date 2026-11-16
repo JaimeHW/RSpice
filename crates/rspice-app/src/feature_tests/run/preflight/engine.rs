@@ -173,7 +173,7 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
 /// executes Verilog-A views. The design's connect rules are a model library
 /// bound to the plan: the shipped connect modules, and `rule_blocks`.
 /// Returns the app, the root and the device's id.
-fn app_with_a_moded_device(
+pub(super) fn app_with_a_moded_device(
     rule_blocks: &str,
 ) -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
     use rspice_app_state::state::{

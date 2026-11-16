@@ -224,6 +224,10 @@ fn take_step<H>(
         }
     }
     let mut parts = lend(host);
+    if parts.wb.workspace == Workspace::Simulate {
+        take_setup_history_step(&mut parts, direction);
+        return;
+    }
     if direction == HistoryDirection::Redo {
         // A step committed in either history since an undo replaces what
         // the other can redo, so only the steps no newer edit replaced are
@@ -269,6 +273,24 @@ fn document_sequence(
     match direction {
         HistoryDirection::Undo => model.schematic.history().undo_sequence(),
         HistoryDirection::Redo => model.schematic.history().redo_sequence(),
+    }
+}
+
+/// Take the Simulate setup's step `direction`. Its pages' edits are a
+/// history of their own: Undo there takes back the last setup edit and
+/// never reaches past it into the design, which is undone where it is drawn.
+fn take_setup_history_step(parts: &mut HistoryStepParts<'_>, direction: HistoryDirection) {
+    let stepped = match direction {
+        HistoryDirection::Undo => parts.model.undo_simulation_setup(),
+        HistoryDirection::Redo => parts.model.redo_simulation_setup(),
+    };
+    match stepped {
+        Some(Ok(_)) => rspice_app_runs::workbench::preflight::invalidate(
+            &mut parts.runs.preflight,
+            parts.run_controller,
+        ),
+        Some(Err(error)) => parts.wb.prompt(error),
+        None => {}
     }
 }
 

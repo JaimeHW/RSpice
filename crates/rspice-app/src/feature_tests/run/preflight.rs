@@ -21,6 +21,8 @@ use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 mod engine;
 mod pipeline;
 mod rule_deck;
+mod setup_history;
+mod setup_page;
 mod variants;
 mod waivers;
 
