@@ -30,6 +30,7 @@ use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use crate::workbench::slots::SimulateState;
 
 use super::super::state::VerificationSessionState;
+use super::super::state::workbench_session::WidthClass;
 use crate::state::VerificationPage;
 
 use checks::*;
@@ -54,6 +55,9 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     {
         cx.state.verification.action_problem = None;
         ui.ctx().data_mut(|data| data.insert_temp(shown_page, page));
+        if page == VerificationPage::Corners && phone_width(ui.ctx()) {
+            open_transposed(cx);
+        }
     }
     let t = Tokens::get(ui.ctx());
     let surface = ui.available_rect_before_wrap();
@@ -68,6 +72,12 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             VerificationPage::Reference => reference_view(ui, cx),
         }
     });
+}
+
+/// Whether the window is phone-width, the width the app's own layout turns
+/// to bottom navigation and drawers at.
+fn phone_width(ctx: &egui::Context) -> bool {
+    WidthClass::for_width(ctx.content_rect().width()) == WidthClass::Phone
 }
 
 /// The run the plan compares other runs against, by its identity.

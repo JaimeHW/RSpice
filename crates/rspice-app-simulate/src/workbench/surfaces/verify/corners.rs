@@ -425,6 +425,29 @@ fn turned_selection(sheet: &Sheet, selected: SelectedPoint, transposed: bool) ->
     }
 }
 
+/// Arrange Corners `transposed` or plain, the selected cell carried across;
+/// the sort and the sideways scroll belong to the arrangement left.
+fn arrange(cx: &mut Cx<'_, SimulateFeature>, transposed: bool) {
+    let turned = cx.model.simulation.verification_sheet().and_then(|sheet| {
+        let selected = selected_point(sheet, &cx.state.verification)?;
+        turned_selection(sheet, selected, transposed)
+    });
+    let session = &mut cx.state.verification;
+    session.corners_transposed = transposed;
+    session.corners_table.selection = turned;
+    session.corners_table.sort = None;
+    session.corners_table.scroll_x = 0.0;
+}
+
+/// Corners opens transposed on a phone-width window: a point a row and a
+/// specification a column, so a sweep's many points scroll down the screen
+/// and its few specifications across it.
+pub(super) fn open_transposed(cx: &mut Cx<'_, SimulateFeature>) {
+    if !cx.state.verification.corners_transposed {
+        arrange(cx, true);
+    }
+}
+
 /// Where in the run one cell's value came from: the analysis, and the member
 /// of its family when the point is one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -775,17 +798,7 @@ pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .and_then(|index| CORNER_ACTIONS.get(index))
         .copied();
     match action {
-        Some(CornerAction::Transpose) => {
-            let turned = sheet.and_then(|sheet| {
-                let selected = selected_point(sheet, &cx.state.verification)?;
-                turned_selection(sheet, selected, !transposed)
-            });
-            let session = &mut cx.state.verification;
-            session.corners_transposed = !transposed;
-            session.corners_table.selection = turned;
-            session.corners_table.sort = None;
-            session.corners_table.scroll_x = 0.0;
-        }
+        Some(CornerAction::Transpose) => arrange(cx, !transposed),
         Some(CornerAction::FailingOnly) => {
             cx.state.verification.corners_failing_only = !failing_only;
         }

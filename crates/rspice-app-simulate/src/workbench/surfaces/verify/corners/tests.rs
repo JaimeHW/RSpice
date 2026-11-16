@@ -406,6 +406,78 @@ fn sorting_a_transposed_column_keeps_the_selected_point() {
     );
 }
 
+/// A phone-width window opens Corners transposed, a point a row, with the
+/// selected cell carried across and only the first column held while the
+/// rest scroll. The reader may turn it back, and it stays turned back.
+#[test]
+fn a_phone_width_window_opens_corners_transposed() {
+    let mut harness = run_set_app(&["TT", "SS"], &[1.62, 1.8], &[27.0, 125.0]);
+    let point = sheet(&harness)
+        .points
+        .iter()
+        .position(|point| point.label == "SS 1.62 V 125 \u{00b0}C")
+        .expect("the slow corner");
+    harness.state.verification.corners_table.selection = Some(Selection {
+        row: 0,
+        key: Some(RowKey::Number(0)),
+        column: Some(LEADING + point),
+    });
+    let _ = settled(&context(), &mut harness);
+    assert!(
+        !harness.state.verification.corners_transposed,
+        "a desktop window opens Corners as the reader left it"
+    );
+
+    let ctx = context();
+    let phone = |harness: &mut FeatureHarness<SimulateFeature>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                Pos2::ZERO,
+                egui::vec2(390.0, 844.0),
+            )),
+            ..Default::default()
+        };
+        page_pass(&ctx, input, |ui| harness.draw(ui)).1
+    };
+    let _ = phone(&mut harness);
+    assert!(harness.state.verification.corners_transposed);
+    assert_eq!(
+        selected_point(sheet(&harness), &harness.state.verification),
+        Some(SelectedPoint {
+            point,
+            row: Some(0)
+        }),
+        "the same specification at the same point"
+    );
+    let before = phone(&mut harness);
+    assert_eq!(
+        before.all("table.row").len(),
+        sheet(&harness).points.len(),
+        "a point per row"
+    );
+    harness.state.verification.corners_table.scroll_x = 100.0;
+    let after = phone(&mut harness);
+    let cell = |geometry: &PageGeometry, column: usize| {
+        geometry
+            .one(&format!("table.cell.{column}"))
+            .unwrap_or_else(|| panic!("column {column} shows"))
+    };
+    assert_eq!(cell(&before, 0), cell(&after, 0), "the process stays put");
+    let status = sheet(&harness).axes.len();
+    assert_eq!(
+        cell(&after, status).left(),
+        cell(&before, status).left() - 100.0,
+        "the status scrolls with the values"
+    );
+
+    harness.state.verification.corners_transposed = false;
+    let _ = phone(&mut harness);
+    assert!(
+        !harness.state.verification.corners_transposed,
+        "turned back on the page, Corners stays as the reader turned it"
+    );
+}
+
 /// The view inks a cell by the sheet's status for it and nothing else: with
 /// a guard band on gain, values above the bare 40 dB floor fail, which only
 /// the sheet can know.

@@ -820,6 +820,35 @@ fn frozen_columns_keep_their_place_while_the_rest_scroll_under_them() {
     assert_eq!(cell(&after, 1).right(), 240.0);
 }
 
+/// A phone-width window holds the first column only, so the values keep room
+/// beside it.
+#[test]
+fn a_phone_width_window_holds_the_first_column_only() {
+    let ctx = context();
+    let columns = wide_columns(12, 120.0);
+    let mut state = TableState::default();
+    let draw = |state: &mut TableState| {
+        frame(&ctx, 390.0, Vec::new(), |ui| {
+            DataTable::new("frozen", &columns, 3)
+                .state(state)
+                .freeze(2)
+                .show(ui, wide_row(12))
+        })
+        .1
+    };
+    let before = draw(&mut state);
+    state.scroll_x = 100.0;
+    let after = draw(&mut state);
+    assert_eq!(state.scroll_x, 100.0);
+    assert_eq!(cell(&before, 0), cell(&after, 0), "the first column stays");
+    assert_eq!(head(&before, 0), head(&after, 0));
+    assert_eq!(
+        cell(&after, 1).left(),
+        cell(&before, 1).left() - 100.0,
+        "the second column, which a wider window holds, scrolls"
+    );
+}
+
 #[test]
 fn a_span_names_its_run_once_centred_and_keeps_to_its_columns_as_they_scroll() {
     let ctx = context();

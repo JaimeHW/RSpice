@@ -670,9 +670,16 @@ impl<'a> DataTable<'a> {
         let viewport_w = (available - bar).max(1.0);
         let least: f32 = self.columns.iter().map(|column| column.width).sum();
         let scrolls_x = least > viewport_w + 0.5;
+        // A phone-width window holds the first column only: a wider freeze
+        // leaves the values a sliver beside it, or none at all.
+        let frozen = if super::phone_width(ui.ctx()) {
+            self.frozen.min(1)
+        } else {
+            self.frozen
+        };
         let geometry = Columns::new(
             column_widths(self.columns, viewport_w.max(least)),
-            self.frozen,
+            frozen,
             viewport_w,
         );
 
