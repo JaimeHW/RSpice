@@ -231,10 +231,11 @@ impl StoredTransient {
     /// How the outputs can read this run straight from its store, or `None` when they need it in
     /// memory.
     ///
-    /// They can when the deck measures and asserts nothing, prints no table of its own, keeps
-    /// every accepted step, and asks for a rawfile, a delimited table, an event dump or nothing;
-    /// and when every output signal is one of the store's columns, value for value. That last is
-    /// checked by projecting the first chunk exactly as the whole run would be.
+    /// They can when the deck measures and asserts nothing, checks no `.VEC` file's expected
+    /// outputs, prints no table of its own, keeps every accepted step, and asks for a rawfile, a
+    /// delimited table, an event dump or nothing; and when every output signal is one of the
+    /// store's columns, value for value. That last is checked by projecting the first chunk
+    /// exactly as the whole run would be.
     pub(super) fn stream_plan(
         &mut self,
         ctx: &RunContext<'_>,
@@ -267,6 +268,7 @@ impl StoredTransient {
             || !every_step
             || !netlist.measurements.is_empty()
             || !netlist.assertions.is_empty()
+            || !netlist.vector_files.is_empty()
             || rows == 0
             || !(tstart.is_finite() && tstart >= 0.0)
         {
