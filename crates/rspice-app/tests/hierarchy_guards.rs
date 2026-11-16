@@ -16,6 +16,10 @@
 //! - [`persisted_policies_reach_a_projection`] — a policy the project stores,
 //!   the manager edits, and nothing downstream reads.
 //!
+//! A fifth, [`specifications_are_judged_by_the_judge`], holds the same kind of
+//! table over specification verdicts: one judge passes them, and Verify's
+//! sheet restates it.
+//!
 //! Each table entry carries the reason it exists, which is also the condition
 //! that retires it. An entry with no reason is an entry nobody will remove.
 
@@ -1467,6 +1471,131 @@ fn persisted_policies_reach_a_projection() {
             "\nINERT_POLICY_FIELDS entries for fields that no longer exist:\n{}\n\
              Delete them.\n",
             missing.join("\n")
+        ));
+    }
+    assert!(failures.is_empty(), "{failures}");
+}
+
+// =============================================================================
+// G5 — a specification verdict is the judge's
+// =============================================================================
+
+/// The spellings of a specification verdict reached without the judge.
+///
+/// `rspice_results::specification_verdict` is the judge: it reads every value
+/// that answers a specification and holds each against the guarded limit, and
+/// Verify's sheet (`rspice_results::verification`) restates what it says. A
+/// requirement's bare bounds held against one value skip its guard band, its
+/// comparison, its scope and its waiver. The first three patterns are that
+/// shortcut; the rest name the Results specification table's own judge and the
+/// export built on it, listed so they cannot come back.
+const SPECIFICATION_VERDICT_PATTERNS: &[&str] = &[
+    "spec.passes(",
+    "entry.passes(",
+    "specification.passes(",
+    "SpecResultRow",
+    "SpecResultStatus",
+    "result_rows(",
+    "summarize_rows(",
+    "verification_specs(",
+    "resolved_specifications(",
+    "encode_specification_csv(",
+];
+
+/// Files that still judge a specification by its bare bounds, each with the
+/// reason it has not yet moved onto the sheet.
+const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[
+    (
+        "workbench/docks/console.rs",
+        "the console's Measurements table states a project verdict and margin \
+         per measurement from the run's sealed bounds; it reads the sheet's \
+         cells once a measurement row knows its point",
+    ),
+    (
+        "workbench/hardcopy_adapters/publication_snapshot.rs",
+        "a published document's project verdict per measurement, beside the \
+         sealed bounds it prints",
+    ),
+    (
+        "workbench/hardcopy/report_authoring.rs",
+        "the report summary's passing count, which the sheet's counts replace",
+    ),
+    (
+        "workbench/documents/code_workspace/automation/evidence.rs",
+        "the automation page's run evidence, which goes with the page",
+    ),
+];
+
+#[test]
+fn specifications_are_judged_by_the_judge() {
+    let allowed: BTreeSet<&str> = SPECIFICATION_VERDICT_SITES
+        .iter()
+        .map(|(path, _)| *path)
+        .collect();
+    assert_eq!(
+        allowed.len(),
+        SPECIFICATION_VERDICT_SITES.len(),
+        "SPECIFICATION_VERDICT_SITES contains a duplicate path"
+    );
+
+    let crate_dir = |name: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(name);
+    let roots = app_src_dirs()
+        .into_iter()
+        .map(|root| (String::new(), root))
+        .chain(
+            [
+                "rspice-results",
+                "rspice-results-ui",
+                "rspice-hardcopy",
+                "rspice-formats",
+            ]
+            .map(|name| (format!("{name}/"), crate_dir(name).join("src"))),
+        );
+    let mut measured: BTreeMap<String, usize> = BTreeMap::new();
+    for (prefix, root) in roots {
+        for (path, file) in production_files(&root) {
+            // The judge and the sheet that restates it.
+            if prefix == "rspice-results/"
+                && (path == "specification_verdict.rs" || path.starts_with("verification/"))
+            {
+                continue;
+            }
+            let production = Source::read(&file).production;
+            let count: usize = SPECIFICATION_VERDICT_PATTERNS
+                .iter()
+                .map(|pattern| count_occurrences(&production, pattern))
+                .sum();
+            if count > 0 {
+                measured.insert(format!("{prefix}{path}"), count);
+            }
+        }
+    }
+
+    let mut failures = String::new();
+    let new_sites: Vec<String> = measured
+        .iter()
+        .filter(|(path, _)| !allowed.contains(path.as_str()))
+        .map(|(path, count)| format!("  {path}: {count}"))
+        .collect();
+    let retired: Vec<String> = allowed
+        .iter()
+        .filter(|path| !measured.contains_key(**path))
+        .map(|path| format!("  {path}"))
+        .collect();
+    if !new_sites.is_empty() {
+        failures.push_str(&format!(
+            "\nNew modules judging a specification themselves:\n{}\n\
+             Read the verdict from the sheet \
+             (`SimulationState::verification_sheet`) or the judge \
+             (`rspice_results::specification_verdict`) instead.\n",
+            new_sites.join("\n")
+        ));
+    }
+    if !retired.is_empty() {
+        failures.push_str(&format!(
+            "\nSPECIFICATION_VERDICT_SITES entries with nothing left to hold:\n{}\n\
+             Delete them.\n",
+            retired.join("\n")
         ));
     }
     assert!(failures.is_empty(), "{failures}");

@@ -199,8 +199,7 @@ fn matching_spec_limits(
     // the ones the workspace is authoring now. Drawn as overlays on a
     // completed run's waveforms, a limit edited after the run put a line the
     // run had never been measured against straight across its curve — beside
-    // the verdict the run had actually earned. This is the same resolver the
-    // specifications sheet reads.
+    // the verdict the run had actually earned.
     let specifications = state.model.active_run_specifications();
     let mut seen = HashSet::new();
     let mut limits = Vec::new();

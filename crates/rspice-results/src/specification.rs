@@ -2,8 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-pub mod report;
-
 mod prepared;
 pub use prepared::{PreparedSpecification, PreparedSpecificationPolicy};
 
@@ -720,13 +718,6 @@ impl SpecEntry {
     /// Spec verdict for one measured value.
     pub fn passes(&self, value: f64) -> bool {
         self.min.is_none_or(|min| value >= min) && self.max.is_none_or(|max| value <= max)
-    }
-
-    /// Violation magnitude (how far outside the bounds), 0 when passing.
-    pub fn violation(&self, value: f64) -> f64 {
-        let below = self.min.map_or(0.0, |min| (min - value).max(0.0));
-        let above = self.max.map_or(0.0, |max| (value - max).max(0.0));
-        below.max(above)
     }
 }
 

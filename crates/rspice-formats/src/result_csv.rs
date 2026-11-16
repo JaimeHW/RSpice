@@ -10,7 +10,6 @@ mod noise_report;
 mod operating_point_report;
 mod optimization;
 mod selection;
-mod specifications;
 mod typed;
 pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
 pub use correlation::{CorrelationCsvError, encode_correlation_csv};
@@ -22,7 +21,6 @@ pub use optimization::{EncodedOptimizationCsv, encode_optimization_csv};
 pub use selection::{
     encode_artifact_text, encode_exact_sample, encode_selection_text, encode_signal_tsv,
 };
-pub use specifications::{EncodedSpecificationCsv, encode_specification_csv};
 pub use typed::{EncodedTypedCsv, TypedCsvSummary, encode_typed_result_csv};
 
 use crate::table::escape_csv_field as csv_text;
