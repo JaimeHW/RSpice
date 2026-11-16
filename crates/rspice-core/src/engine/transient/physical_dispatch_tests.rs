@@ -7,13 +7,18 @@ mod cutoff;
 mod nonlinear;
 mod weil;
 
+/// A published sample's point count, node voltages and branch currents.
+type PublishedSample = (usize, Vec<Value>, Vec<Value>);
+
 struct Progress {
     physical_impulses: bool,
     began: std::time::Instant,
     next_report: AtomicU64,
     accepted_time: AtomicU64,
     points: AtomicUsize,
-    initial: std::sync::Mutex<Vec<(Vec<Value>, Vec<Value>)>>,
+    /// The first published sample: its point count, then every node voltage
+    /// and branch current of its row, NaN where the run saves none.
+    initial: std::sync::Mutex<Vec<PublishedSample>>,
     impulses: std::sync::Mutex<Vec<(crate::CurrentImpulseOwner, crate::CurrentImpulsePoint)>>,
 }
 
@@ -33,26 +38,22 @@ impl AbortSignal for Progress {
 
     fn observe_transient_sample(&self, sample: crate::abort_signal::TransientSample<'_>) {
         let mut initial = self.initial.lock().unwrap();
-        if sample.time.len() == 1
-            || (!self.physical_impulses && initial.is_empty() && !sample.time.is_empty())
-        {
-            // Ordinary legacy runs first publish a prefix containing startup
-            // and the first interval; physical events publish startup alone.
+        if sample.points == 1 || (!self.physical_impulses && initial.is_empty()) {
+            // Ordinary legacy runs first publish the first interval;
+            // physical events publish startup alone.
             initial.push((
-                sample
-                    .node_voltages
-                    .iter()
-                    .map(|v| v.first().copied().unwrap_or(Value::NAN))
+                sample.points,
+                (0..sample.node_names.len())
+                    .map(|node| sample.row.node_voltage(node).unwrap_or(Value::NAN))
                     .collect(),
-                sample
-                    .branch_currents
-                    .iter()
-                    .map(|v| v.first().copied().unwrap_or(Value::NAN))
+                (0..sample.branch_names.len())
+                    .map(|branch| sample.row.branch_current(branch).unwrap_or(Value::NAN))
                     .collect(),
             ));
         }
         drop(initial);
-        if let Some(&time) = sample.time.last() {
+        {
+            let time = sample.time;
             if self.physical_impulses {
                 assert!(sample.current_impulses.is_some());
             }
@@ -65,11 +66,9 @@ impl AbortSignal for Progress {
                 }
             }
         }
-        self.accepted_time.store(
-            sample.time.last().copied().unwrap_or(0.0).to_bits(),
-            Ordering::Relaxed,
-        );
-        self.points.store(sample.time.len(), Ordering::Relaxed);
+        self.accepted_time
+            .store(sample.time.to_bits(), Ordering::Relaxed);
+        self.points.store(sample.points, Ordering::Relaxed);
     }
 }
 
@@ -189,14 +188,15 @@ fn run_with_configuration(
         1,
         "one settled startup sample must be published"
     );
+    let sample = initial[0].0 - 1;
     for (recorded, observed) in [&result.voltages, &result.branch_currents]
         .into_iter()
-        .zip([&initial[0].0, &initial[0].1])
+        .zip([&initial[0].1, &initial[0].2])
     {
         assert_eq!(recorded.len(), observed.len());
         for (trace, &observed) in recorded.iter().zip(observed) {
             assert_eq!(
-                trace.first().copied().unwrap_or(Value::NAN).to_bits(),
+                trace.get(sample).copied().unwrap_or(Value::NAN).to_bits(),
                 observed.to_bits(),
                 "live startup differs from retained waveform"
             );

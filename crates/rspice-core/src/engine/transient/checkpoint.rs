@@ -56,7 +56,7 @@ mod solver_state;
 mod switch;
 mod vcd;
 use crate::device::behavioral::BehavioralAcceptedState;
-pub(in crate::engine::transient) use published_row::PublishedRow;
+pub(in crate::engine::transient) use published_row::{PublishedRow, PublishedSource};
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};

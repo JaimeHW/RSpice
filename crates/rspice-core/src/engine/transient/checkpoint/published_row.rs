@@ -18,27 +18,33 @@ pub(in crate::engine::transient) struct PublishedRow {
     device_values: Vec<(String, String, Value)>,
 }
 
+/// Where a published row is read from: the last row the run wrote to its
+/// result sink, and the result that holds the device operating-point traces.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct PublishedSource<'a> {
+    pub(in crate::engine::transient) result: &'a crate::analysis::transient::TransientResult,
+    pub(in crate::engine::transient) row: crate::abort_signal::TransientRow<'a>,
+    /// Accepted samples the run has written, this one included.
+    pub(in crate::engine::transient) points: usize,
+}
+
 impl PublishedRow {
-    /// The last row of `result`, in every trace that retains a value per
+    /// The last row the run wrote, in every trace that retains a value per
     /// sample.
     pub(in crate::engine::transient) fn last_of(
-        result: &crate::analysis::transient::TransientResult,
+        source: PublishedSource<'_>,
     ) -> Result<Self, String> {
-        let samples = result.time.len();
+        let PublishedSource {
+            result,
+            row,
+            points: samples,
+        } = source;
         if samples == 0 {
             return Err("a published checkpoint row needs a sample".into());
         }
-        let last = |traces: &[Vec<Value>]| {
-            traces
-                .iter()
-                .enumerate()
-                .filter(|(_, trace)| trace.len() == samples)
-                .map(|(index, trace)| (index, trace[samples - 1]))
-                .collect::<Vec<_>>()
-        };
         let row = Self {
-            voltages: last(&result.voltages),
-            branch_currents: last(&result.branch_currents),
+            voltages: row.node_voltages().collect(),
+            branch_currents: row.branch_currents().collect(),
             device_values: result
                 .device_op_traces
                 .iter()
@@ -56,30 +62,29 @@ impl PublishedRow {
         Ok(row)
     }
 
-    /// Overwrite the first row of a resumed run's result with this one.
+    /// Overwrite the first row of a resumed run with this one: the row its
+    /// sink holds open, and the device traces of its result.
     pub(in crate::engine::transient) fn publish_as_first_row(
         &self,
         result: &mut crate::analysis::transient::TransientResult,
-    ) -> Result<(), String> {
-        fn first<'a>(
-            traces: &'a mut [Vec<Value>],
-            index: usize,
-            kind: &str,
-        ) -> Result<Option<&'a mut Value>, String> {
-            traces
-                .get_mut(index)
-                .ok_or_else(|| format!("checkpoint published {kind} {index} is not in this run"))
-                .map(|trace| trace.first_mut())
-        }
+        rows: &mut super::super::result_rows::TransientRows<'_>,
+    ) -> Result<(), crate::SimulationError> {
+        let missing = |kind: &str, index: usize| {
+            crate::SimulationError::Circuit(format!(
+                "checkpoint published {kind} {index} is not in this run"
+            ))
+        };
         for &(index, value) in &self.voltages {
-            if let Some(first) = first(&mut result.voltages, index, "voltage")? {
-                *first = value;
+            if index >= rows.layout().num_nodes() {
+                return Err(missing("voltage", index));
             }
+            rows.amend_first_voltage(index, value)?;
         }
         for &(index, value) in &self.branch_currents {
-            if let Some(first) = first(&mut result.branch_currents, index, "branch current")? {
-                *first = value;
+            if index >= rows.layout().num_branches() {
+                return Err(missing("branch current", index));
             }
+            rows.amend_first_current(index, value)?;
         }
         for (device, parameter, value) in &self.device_values {
             if let Some(first) = result

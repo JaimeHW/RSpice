@@ -113,7 +113,7 @@ mod tests {
             self.values.lock().unwrap().push(fraction);
         }
         fn observe_transient_sample(&self, sample: TransientSample<'_>) {
-            assert_eq!(sample.time, &[0.5]);
+            assert_eq!(sample.time, 0.5);
             self.samples.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -130,11 +130,12 @@ mod tests {
         assert_eq!(stage.abort_reason(), AbortReason::TimeLimit);
         stage.observe_transient_sample(TransientSample {
             event_changes: None,
-            time: &[0.5],
+            time: 0.5,
+            start: 0.5,
+            points: 1,
             node_names: &[],
-            node_voltages: &[],
             branch_names: &[],
-            branch_currents: &[],
+            row: crate::abort_signal::TransientRow::default(),
             voltage_impulses: None,
             current_impulses: None,
             digital_values: &[],

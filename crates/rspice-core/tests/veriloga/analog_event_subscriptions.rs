@@ -15,7 +15,7 @@ impl rspice_core::abort_signal::AbortSignal for AcceptedEvents {
             .expect("engine provides accepted event history");
         let mut events = self.0.lock().unwrap();
         for &change in changes {
-            assert!(change.time <= *sample.time.last().unwrap());
+            assert!(change.time <= sample.time);
             events.push((sample.node_names[change.node - 1].clone(), change));
         }
     }

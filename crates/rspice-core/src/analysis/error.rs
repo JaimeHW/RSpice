@@ -1001,6 +1001,12 @@ pub enum SimulationError {
     #[error(transparent)]
     OutputCommitFailed(Box<OutputCommitError>),
 
+    /// The result sink the run wrote its accepted points through refused one:
+    /// its storage or memory ran out, or a write failed. The points it
+    /// accepted before stay where it wrote them.
+    #[error("Writing the results stopped: {0}")]
+    ResultSink(crate::result_sink::SinkStop),
+
     #[error("Convergence failed after {0} iterations")]
     ConvergenceFailed(usize),
 
@@ -1279,9 +1285,21 @@ impl SimulationError {
                 SimulationErrorCategory::Persistence,
                 false,
             ),
-            Self::OutputCommitFailed(_) => (
-                SimulationErrorCode::OutputCommitFailed,
-                SimulationErrorCategory::OutputCommit,
+            Self::OutputCommitFailed(_) | Self::ResultSink(crate::result_sink::SinkStop::Io(_)) => {
+                (
+                    SimulationErrorCode::OutputCommitFailed,
+                    SimulationErrorCategory::OutputCommit,
+                    false,
+                )
+            }
+            Self::ResultSink(crate::result_sink::SinkStop::DiskFull { .. }) => (
+                SimulationErrorCode::ResourceLimit,
+                SimulationErrorCategory::ResourceLimit,
+                false,
+            ),
+            Self::ResultSink(crate::result_sink::SinkStop::MemoryFull { .. }) => (
+                SimulationErrorCode::AllocationFailed,
+                SimulationErrorCategory::ResourceLimit,
                 false,
             ),
             Self::ConvergenceFailed(_)

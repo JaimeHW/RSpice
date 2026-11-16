@@ -306,6 +306,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
+                result_sink: None,
             },
         )?;
         let captured = capture.into_captured();
@@ -357,6 +358,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
+                result_sink: None,
             },
         )?;
         let captured = capture.into_captured();
@@ -461,6 +463,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
+                result_sink: None,
             },
         )?;
         let end = capture.into_captured().pop().ok_or_else(|| {
@@ -518,6 +521,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
+                result_sink: None,
             },
         )?;
         let captured = capture.into_captured().pop().ok_or_else(|| {

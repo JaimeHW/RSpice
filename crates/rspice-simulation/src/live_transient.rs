@@ -134,19 +134,9 @@ impl LiveTransientPublisher {
         if self.transient_samples.is_none() && self.transient_sample_observer.is_none() {
             return;
         }
-        let Some(&time) = sample.time.last() else {
-            return;
-        };
-        let mut waveforms = Vec::with_capacity(
-            sample
-                .node_voltages
-                .len()
-                .saturating_add(sample.branch_currents.len()),
-        );
-        for (index, values) in sample.node_voltages.iter().enumerate() {
-            let Some(&value) = values.last() else {
-                continue;
-            };
+        let time = sample.time;
+        let mut waveforms = Vec::with_capacity(sample.row.values.len());
+        for (index, value) in sample.row.node_voltages() {
             let name = sample
                 .node_names
                 .get(index)
@@ -158,10 +148,7 @@ impl LiveTransientPublisher {
                 y_unit: "V".to_owned(),
             });
         }
-        for (index, values) in sample.branch_currents.iter().enumerate() {
-            let Some(&value) = values.last() else {
-                continue;
-            };
+        for (index, value) in sample.row.branch_currents() {
             let branch = sample
                 .branch_names
                 .get(index)
@@ -267,9 +254,7 @@ impl LiveTransientPublisher {
         bool,
     ) {
         use rspice_core::abort_signal::{TransientEventChange, TransientEventValue};
-        let Some(&endpoint) = sample.time.last() else {
-            return (Vec::new(), Vec::new(), true);
-        };
+        let endpoint = sample.time;
         let mut published = match self.published_events.lock() {
             Ok(published) => published,
             Err(poisoned) => poisoned.into_inner(),
@@ -413,11 +398,12 @@ mod tests {
                 &signal,
                 rspice_core::abort_signal::TransientSample {
                     event_changes: None,
-                    time: &[0.0, index as f64],
+                    time: index as f64,
+                    start: 0.0,
+                    points: 2,
                     node_names: &[],
-                    node_voltages: &[],
                     branch_names: &[],
-                    branch_currents: &[],
+                    row: rspice_core::abort_signal::TransientRow::default(),
                     voltage_impulses: None,
                     current_impulses: Some(&traces),
                     digital_values: &[],
@@ -478,11 +464,18 @@ mod tests {
             &signal,
             rspice_core::abort_signal::TransientSample {
                 event_changes: None,
-                time: &result.time,
+                time: 2.5e-9,
+                start: 0.0,
+                points: 2,
                 node_names: &result.node_names,
-                node_voltages: &result.voltages,
                 branch_names: &result.branch_names,
-                branch_currents: &result.branch_currents,
+                // The row a run that saves `out` and `I(V1)` but not
+                // `discarded` writes at its second point.
+                row: rspice_core::abort_signal::TransientRow {
+                    values: &[1.25, -2.0e-3],
+                    voltage_nodes: &[0],
+                    current_branches: &[0],
+                },
                 voltage_impulses: result.voltage_impulses.as_deref(),
                 current_impulses: result.current_impulses.as_deref(),
                 digital_values: &[],
@@ -511,7 +504,6 @@ mod tests {
         let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         let signal = LiveTransientPublisher::new(Some(Arc::clone(&samples)), None);
         let node_names = vec!["clk".to_owned(), "d".to_owned(), "vsense".to_owned()];
-        let voltages = vec![vec![0.0, 0.0, 0.0], Vec::new(), Vec::new()];
         // Node 4 has no entry in the node table, so it cannot be named and is
         // never reported; nodes 1 and 2 are digital, node 3 is real-valued.
         let observe = |time: &[f64],
@@ -519,11 +511,17 @@ mod tests {
                        real: &[(rspice_core::NodeId, f64)]| {
             signal.observe(TransientSample {
                 event_changes: None,
-                time,
+                time: *time.last().unwrap(),
+                start: time[0],
+                points: time.len(),
                 node_names: &node_names,
-                node_voltages: &voltages,
                 branch_names: &[],
-                branch_currents: &[],
+                // `clk` is the one saved voltage.
+                row: rspice_core::abort_signal::TransientRow {
+                    values: &[0.0],
+                    voltage_nodes: &[0],
+                    current_branches: &[],
+                },
                 voltage_impulses: None,
                 current_impulses: None,
                 digital_values: digital,
@@ -619,11 +617,12 @@ mod tests {
             })
             .collect();
         publisher.observe(TransientSample {
-            time: &[1.0],
+            time: 1.0,
+            start: 1.0,
+            points: 1,
             node_names: &names,
-            node_voltages: &[],
             branch_names: &[],
-            branch_currents: &[],
+            row: rspice_core::abort_signal::TransientRow::default(),
             current_impulses: None,
             voltage_impulses: None,
             event_changes: Some(&changes),

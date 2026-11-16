@@ -162,6 +162,7 @@ impl Engine {
                     scheduled_checkpoint_times: stream.times,
                     checkpoint_observer: Some(&observe),
                     state_capture: None,
+                    result_sink: None,
                 },
             )
             .map(|(result, _, _)| result)

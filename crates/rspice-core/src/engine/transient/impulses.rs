@@ -32,8 +32,12 @@ pub(super) struct Plan {
     descriptor: Option<descriptor::Plan>,
 }
 
+/// `accepted_time` is the time of the run's one written row: the result's
+/// time column lives in the run's result sink while it runs.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn initialize(
     result: &mut TransientResult,
+    accepted_time: Value,
     circuit: &crate::CircuitData,
     derived: &[DerivedTransientBranchCurrent],
     options: &charge_event::EventOptions,
@@ -186,8 +190,8 @@ pub(super) fn initialize(
     }
     crate::transient_observation::validate_current_impulse_traces(
         Some(&traces),
-        result.time.first().copied(),
-        result.time.last().copied(),
+        Some(accepted_time),
+        Some(accepted_time),
         result.branch_names.iter().map(String::as_str),
     )
     .map_err(failure)?;
@@ -232,9 +236,12 @@ impl Plan {
             .ok_or_else(|| failure("impulse coordinate is not a solved branch"))
     }
 
+    /// `last_accepted` is the time of the last row the run wrote; an event
+    /// before it is refused.
     pub(super) fn prepare<'a>(
         &self,
         result: &'a mut TransientResult,
+        last_accepted: Value,
         event: &PreparedPhysicalEvent,
         retained_values: usize,
         limits: &crate::resource::ResourceLimits,
@@ -242,7 +249,7 @@ impl Plan {
     ) -> Result<Prepared<'a>, SimulationError> {
         if let Some(plan) = &self.descriptor {
             return plan
-                .prepare(result, event, retained_values, limits, abort)
+                .prepare(result, last_accepted, event, retained_values, limits, abort)
                 .map(Prepared::Descriptor);
         }
         let (capacitors, diodes, terminals): (&[Value], &[Value], &[[Value; 4]]) =
@@ -300,6 +307,7 @@ impl Plan {
             });
         prepare(
             result,
+            last_accepted,
             event.time(),
             sources.chain(capacitors).chain(diodes).chain(terminals),
             retained_values,
@@ -325,6 +333,7 @@ pub(super) struct CurrentPrepared<'a> {
 
 fn prepare<'a>(
     result: &'a mut TransientResult,
+    last_accepted: Value,
     time: Value,
     impulses: impl Iterator<Item = Result<(usize, Value), SimulationError>>,
     retained_values: usize,
@@ -334,8 +343,7 @@ fn prepare<'a>(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    if !time.is_finite() || time < 0.0 || result.time.last().is_none_or(|previous| time < *previous)
-    {
+    if !time.is_finite() || time < 0.0 || time < last_accepted {
         return Err(failure("invalid accepted event time"));
     }
     let target = result
@@ -458,8 +466,10 @@ mod tests {
         limits: &crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Prepared<'a>, SimulationError> {
+        let last_accepted = output.time.last().copied().unwrap_or(f64::INFINITY);
         prepare(
             output,
+            last_accepted,
             time,
             values.iter().copied().map(Ok),
             retained,

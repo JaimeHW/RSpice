@@ -800,8 +800,10 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
     result.voltage_impulses = None;
     let derived =
         Engine::derived_transient_branch_currents(&deck, &circuit, &circuit.branch_names_sorted());
+    let last = result.time.last().copied().unwrap_or(f64::INFINITY);
     let (plan, _) = crate::engine::transient::impulses::initialize(
         &mut result,
+        last,
         &circuit,
         &derived,
         &options(),
@@ -816,13 +818,13 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
     );
     let census = CountingAbort::new(usize::MAX);
     drop(
-        plan.prepare(&mut result, &point, 0, &options().limits, &census)
+        plan.prepare(&mut result, last, &point, 0, &options().limits, &census)
             .unwrap(),
     );
     for poll in 0..census.count() {
         let abort = CountingAbort::new(poll);
         assert!(matches!(
-            plan.prepare(&mut result, &point, 0, &options().limits, &abort),
+            plan.prepare(&mut result, last, &point, 0, &options().limits, &abort),
             Err(SimulationError::Aborted)
         ));
         assert_eq!(abort.polls_after_abort(), 0);
@@ -834,7 +836,7 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
     let tight =
         crate::resource::ResourceLimits::default().with(|limits| limits.max_result_values = 1);
     assert!(matches!(
-        plan.prepare(&mut result, &point, 0, &tight, &NoAbort),
+        plan.prepare(&mut result, last, &point, 0, &tight, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
     ));
     assert_eq!(
@@ -842,7 +844,7 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
         (&before.0, &before.1)
     );
     assert!(
-        plan.prepare(&mut result, &point, 0, &options().limits, &NoAbort)
+        plan.prepare(&mut result, last, &point, 0, &options().limits, &NoAbort)
             .unwrap()
             .commit()
             > 0
@@ -852,7 +854,7 @@ fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
         result.voltage_impulses.clone(),
     );
     assert!(
-        plan.prepare(&mut result, &point, 0, &options().limits, &NoAbort)
+        plan.prepare(&mut result, last, &point, 0, &options().limits, &NoAbort)
             .is_err()
     );
     assert_eq!(

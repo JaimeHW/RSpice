@@ -145,6 +145,7 @@ impl Plan {
     pub(super) fn prepare<'a>(
         &self,
         result: &'a mut TransientResult,
+        last_accepted: Value,
         event: &PreparedPhysicalEvent,
         retained: usize,
         limits: &crate::resource::ResourceLimits,
@@ -154,10 +155,7 @@ impl Plan {
             return Err(SimulationError::Aborted);
         }
         let time = event.time();
-        if !time.is_finite()
-            || time < 0.0
-            || result.time.last().is_none_or(|&previous| time < previous)
-        {
+        if !time.is_finite() || time < 0.0 || time < last_accepted {
             return Err(failure("invalid descriptor observation time"));
         }
         let impulses = event

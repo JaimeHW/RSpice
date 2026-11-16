@@ -398,7 +398,8 @@ impl From<rspice_core::SimulationError> for SimulationError {
             other @ (rspice_core::SimulationError::ParameterDomain(_)
             | rspice_core::SimulationError::MaterializationMismatch(_)
             | rspice_core::SimulationError::PersistenceIncompatible(_)
-            | rspice_core::SimulationError::OutputCommitFailed(_)) => {
+            | rspice_core::SimulationError::OutputCommitFailed(_)
+            | rspice_core::SimulationError::ResultSink(_)) => {
                 SimulationError::CircuitError(other.to_string())
             }
         }

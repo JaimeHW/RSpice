@@ -95,6 +95,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: None,
+                result_sink: None,
             },
         )?;
         let trace = trace.into_inner();

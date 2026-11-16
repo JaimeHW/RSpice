@@ -55,11 +55,12 @@ fn live_voltage_suffixes_preserve_exact_events_and_never_replay_points() {
     let publish = |source: &[VoltageImpulseTrace], time: &[f64]| {
         publisher.observe(rspice_core::abort_signal::TransientSample {
             event_changes: None,
-            time,
+            time: time[time.len() - 1],
+            start: time[0],
+            points: time.len(),
             node_names: &[],
-            node_voltages: &[],
             branch_names: &[],
-            branch_currents: &[],
+            row: rspice_core::abort_signal::TransientRow::default(),
             current_impulses: None,
             voltage_impulses: Some(source),
             digital_values: &[],

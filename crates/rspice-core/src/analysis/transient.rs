@@ -1366,6 +1366,16 @@ pub struct TransientResult {
     pub fft_results: Vec<TransientFftResult>,
 }
 
+/// The accepted point a transient run reports to its sample hook: its time,
+/// how many points the run has written, and the row it wrote.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObservedPoint<'a> {
+    pub(crate) time: Value,
+    pub(crate) start: Value,
+    pub(crate) points: usize,
+    pub(crate) row: crate::abort_signal::TransientRow<'a>,
+}
+
 impl TransientResult {
     /// Validate sparse impulse times, charges and named branch ownership.
     pub fn validate_current_impulses(&self) -> Result<(), String> {
@@ -1388,12 +1398,13 @@ impl TransientResult {
         )
     }
 
-    /// Borrow the columns an abort signal's sample hook is allowed to see.
+    /// Borrow what an abort signal's sample hook is allowed to see.
     ///
     /// The hook sits at the bottom of the crate and may name neither a driver
     /// result type nor an XSPICE one, so the driver narrows itself on the way
-    /// out: waveform columns, their names, the accepted times, and the
-    /// committed event state of the point being reported, and nothing else.
+    /// out: the row it just wrote to its result sink, the names, the accepted
+    /// time, and the committed event state of the point being reported, and
+    /// nothing else.
     /// The digital half of that state crosses as its event code, which is a
     /// `u8` the abort layer can own.
     ///
@@ -1501,6 +1512,7 @@ impl TransientResult {
 
     pub(crate) fn observable_sample<'a>(
         &'a self,
+        point: ObservedPoint<'a>,
         digital_values: &'a [(NodeId, crate::abort_signal::DigitalEventCode)],
         digital_buses: &'a [crate::abort_signal::TransientDigitalBus],
         real_values: &'a [(NodeId, Value)],
@@ -1508,11 +1520,12 @@ impl TransientResult {
     ) -> crate::abort_signal::TransientSample<'a> {
         crate::abort_signal::TransientSample {
             event_changes,
-            time: &self.time,
+            time: point.time,
+            start: point.start,
+            points: point.points,
             node_names: &self.node_names,
-            node_voltages: &self.voltages,
             branch_names: &self.branch_names,
-            branch_currents: &self.branch_currents,
+            row: point.row,
             voltage_impulses: self.voltage_impulses.as_deref(),
             current_impulses: self.current_impulses.as_deref(),
             digital_values,
@@ -1551,16 +1564,19 @@ impl TransientResult {
     /// `observed` holds observables the report cannot carry, as `(device,
     /// parameter, value)`. They are recorded after it, so one that names a
     /// reported parameter replaces the report's value.
+    ///
+    /// `points` is the accepted samples the run has written, this one
+    /// included: the run's time column lives in its result sink while it
+    /// runs, so the result cannot count them itself.
     pub(crate) fn record_device_op_sample(
         &mut self,
+        points: usize,
         report: crate::circuit::DeviceOpReport,
         observed: &[(String, String, Value)],
     ) -> usize {
-        if self.time.is_empty() {
+        let Some(sample_index) = points.checked_sub(1) else {
             return 0;
-        }
-
-        let sample_index = self.time.len() - 1;
+        };
         let mut seen = vec![false; self.device_op_traces.len()];
         let mut added_values = 0usize;
 

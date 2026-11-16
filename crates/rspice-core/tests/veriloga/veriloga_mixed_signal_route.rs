@@ -2033,7 +2033,7 @@ impl AbortSignal for BoundaryRecorder {
         self.samples
             .lock()
             .expect("boundary recorder")
-            .push((sample.time.last().copied().unwrap_or(f64::NAN), digital));
+            .push((sample.time, digital));
     }
 }
 
@@ -5444,14 +5444,17 @@ endmodule
         }
         fn observe_transient_sample(&self, sample: TransientSample<'_>) {
             *self.last.lock().unwrap() = (
-                sample.time.len(),
-                sample.time.last().copied().unwrap_or_default(),
+                sample.points,
+                sample.time,
                 sample
                     .node_names
                     .iter()
-                    .zip(sample.node_voltages)
-                    .map(|(name, values)| {
-                        (name.clone(), values.last().copied().unwrap_or_default())
+                    .enumerate()
+                    .map(|(node, name)| {
+                        (
+                            name.clone(),
+                            sample.row.node_voltage(node).unwrap_or_default(),
+                        )
                     })
                     .collect(),
             );
@@ -5586,10 +5589,7 @@ endmodule
             self.start.elapsed().as_secs() > 20 || self.last.lock().unwrap().0 > 20000
         }
         fn observe_transient_sample(&self, sample: TransientSample<'_>) {
-            *self.last.lock().unwrap() = (
-                sample.time.len(),
-                sample.time.last().copied().unwrap_or_default(),
-            );
+            *self.last.lock().unwrap() = (sample.points, sample.time);
         }
     }
     let limit = Limit {

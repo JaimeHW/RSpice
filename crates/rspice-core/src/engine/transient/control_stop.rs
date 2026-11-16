@@ -291,6 +291,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: Some(&capture),
+                result_sink: None,
             },
         )?;
         if stop.is_none() {

@@ -4042,11 +4042,11 @@ rload out 0 1k
 
 /// One call of `AbortSignal::observe_transient_sample`, recorded verbatim.
 struct LiveSample {
-    /// The accepted time the call reports: the last entry of the time column.
+    /// The accepted time the call reports.
     time: f64,
-    /// How many accepted points the result held when the call was made.
+    /// How many accepted points the run had written when the call was made.
     accepted_points: usize,
-    /// The last entry of every node-voltage column, `None` for a column output
+    /// Every node's voltage in the reported row, `None` for a node output
     /// projection did not retain.
     voltages: Vec<Option<f64>>,
     /// Committed digital event codes, node ids resolved through `node_names`.
@@ -4087,12 +4087,10 @@ impl AbortSignal for LiveSampleRecorder {
             .lock()
             .expect("live sample recorder")
             .push(LiveSample {
-                time: sample.time.last().copied().unwrap_or(f64::NAN),
-                accepted_points: sample.time.len(),
-                voltages: sample
-                    .node_voltages
-                    .iter()
-                    .map(|column| column.last().copied())
+                time: sample.time,
+                accepted_points: sample.points,
+                voltages: (0..sample.node_names.len())
+                    .map(|node| sample.row.node_voltage(node))
                     .collect(),
                 digital: sample
                     .digital_values

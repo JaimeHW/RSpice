@@ -208,7 +208,8 @@ impl std::error::Error for SinkStop {}
 /// The analysis calls [`begin`](Self::begin) once, then [`row`](Self::row) for every accepted
 /// point in order, with [`amend_open_row`](Self::amend_open_row) and [`events`](Self::events)
 /// between them. Whoever handed the sink to the run calls [`end`](Self::end) with how the run
-/// ended. A refusal stops the run; the rows already accepted stay.
+/// ended, which may come without `begin` when the run stopped before its first row. A refusal
+/// stops the run; the rows already accepted stay.
 ///
 /// `row` is in the solve loop: an implementation copies the values and returns, with no
 /// allocation beyond amortised growth and no lookup per value.
@@ -228,6 +229,30 @@ pub trait ResultSink {
 
     /// The run ended with `status`: close what was written and say what was kept.
     fn end(&mut self, status: RunStatus) -> Result<SinkReceipt, SinkStop>;
+}
+
+/// A borrowed sink is a sink: a run can write through a sink its caller keeps.
+impl<S: ResultSink + ?Sized> ResultSink for &mut S {
+    fn begin(&mut self, schema: &ResultSchema, meta: &RunMeta) -> Result<(), SinkStop> {
+        (**self).begin(schema, meta)
+    }
+
+    #[inline]
+    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), SinkStop> {
+        (**self).row(x, values)
+    }
+
+    fn amend_open_row(&mut self, row: u64, column: u32, value: f64) -> Result<(), SinkStop> {
+        (**self).amend_open_row(row, column, value)
+    }
+
+    fn events(&mut self, changes: &[EventChange]) -> Result<(), SinkStop> {
+        (**self).events(changes)
+    }
+
+    fn end(&mut self, status: RunStatus) -> Result<SinkReceipt, SinkStop> {
+        (**self).end(status)
+    }
 }
 
 /// A sink that keeps every row in memory, x and each value slot in its own column.

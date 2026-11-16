@@ -1015,6 +1015,8 @@ use step_control::{SourceActivityDeltas, StepBiasFloors};
 
 mod acceptance;
 mod breakpoints;
+mod result_rows;
+use result_rows::{TransientRowLayout, TransientRows};
 mod impulses;
 mod left_limit;
 // Exact source-root ownership is prepared separately from the ordinary
@@ -1318,9 +1320,9 @@ struct ScheduledCheckpointIdentity<'a> {
 #[derive(Clone, Copy)]
 struct ScheduledCheckpointState<'a> {
     solution: &'a [Value],
-    /// The result whose last row the run published from another solution
-    /// than `solution`, which a checkpoint taken here carries.
-    published: Option<&'a TransientResult>,
+    /// The last row the run published, from another solution than
+    /// `solution`, which a checkpoint taken here carries.
+    published: Option<checkpoint::PublishedSource<'a>>,
     circuit: &'a crate::circuit::CircuitData,
     matrix: &'a crate::solver::StaticMatrix,
     startup_mode: TransientStartupMode,
@@ -1384,6 +1386,9 @@ struct TransientResumePlan<'a> {
     /// Accepted states to capture live: each requested time is a hard
     /// breakpoint, and the run stops once the last one is captured.
     state_capture: Option<&'a state_capture::TransientStateCapture<'a>>,
+    /// The caller's sink for the run's rows. `None` keeps them in memory and
+    /// returns them as the result's time and waveform columns.
+    result_sink: Option<&'a std::cell::RefCell<dyn crate::result_sink::ResultSink + 'a>>,
 }
 
 /// Circuit construction and resume validation finish before the integration
@@ -2852,18 +2857,10 @@ impl Engine {
             .min(MAX_EAGER_TRACE_POINTS)
     }
 
-    fn seeded_transient_trace(value: Value, retain: bool, capacity: usize) -> Vec<Value> {
-        if !retain {
-            return Vec::new();
-        }
-        let mut trace = Vec::with_capacity(capacity.max(1));
-        trace.push(value);
-        trace
-    }
-
     fn record_transient_solution_sample(
         &self,
         result: &mut TransientResult,
+        rows: &mut TransientRows<'_>,
         circuit: &mut crate::circuit::CircuitData,
         sample: TransientSample<'_>,
         sources: TransientSampleSources<'_>,
@@ -2889,7 +2886,7 @@ impl Engine {
         } = sample;
         let integral_count =
             integral_trace.map_or(0, |_| circuit.behavioral_sources.integral_count());
-        let next_point_count = result.time.len().saturating_add(1);
+        let next_point_count = rows.points().saturating_add(1);
         self.ensure_result_shape(
             next_point_count,
             capture
@@ -2902,20 +2899,15 @@ impl Engine {
         if let Some(trace) = integral_trace {
             added_values = added_values.saturating_add(trace.borrow_mut().record(circuit)?);
         }
-        result.time.push(time);
         result.step_sizes.push(step_size);
-        for (i, (voltages, &retain)) in result
-            .voltages
-            .iter_mut()
-            .zip(&capture.voltages)
-            .take(num_nodes)
-            .enumerate()
-        {
-            if retain {
-                voltages.push(solution.get(i).copied().unwrap_or(0.0));
-                added_values = added_values.saturating_add(1);
-            }
+        // The saved values are gathered into the run's reused row buffer in
+        // slot order, voltages then currents, and written as one row.
+        let (layout, row) = rows.gather();
+        let saved_voltages = layout.voltage_nodes().len();
+        for (value, &node) in row.iter_mut().zip(layout.voltage_nodes()) {
+            *value = solution.get(node).copied().unwrap_or(0.0);
         }
+        added_values = added_values.saturating_add(saved_voltages);
         for (index, binding) in circuit.xyce_memristors.iter_mut().enumerate() {
             let trace = result.store_traces.get_mut(index).ok_or_else(|| {
                 SimulationError::Circuit(format!(
@@ -2931,41 +2923,41 @@ impl Engine {
             added_values = added_values.saturating_add(1);
         }
 
-        let solved_branch_count = circuit.num_branches();
-        for (i, (currents, &retain)) in result
-            .branch_currents
-            .iter_mut()
-            .zip(&capture.branch_currents)
-            .take(solved_branch_count)
-            .enumerate()
-        {
-            if retain {
-                currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
-                added_values = added_values.saturating_add(1);
-            }
-        }
         // Solved branch unknowns are recorded verbatim. In particular, a
         // Xyce IC capacitor's branch is now its physical terminal-KCL current,
-        // so post-solving reconstruction would only discard precision.
-        for ((branch, currents), &retain) in derived_branches
-            .iter()
-            .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
-            .zip(capture.branch_currents.iter().skip(solved_branch_count))
+        // so post-solving reconstruction would only discard precision. A
+        // derived branch follows the solved ones and is evaluated here, after
+        // the memristor stores above, as it always was.
+        let solved_branch_count = circuit.num_branches();
+        let (layout, row) = rows.gather();
+        for (value, &branch) in row[saved_voltages..]
+            .iter_mut()
+            .zip(layout.current_branches())
         {
-            if retain {
-                currents.push(Self::derived_transient_branch_current(
-                    circuit,
-                    solution,
-                    time,
-                    Some(diode_history),
-                    *branch,
-                )?);
-                added_values = added_values.saturating_add(1);
-            }
+            *value = match branch.checked_sub(solved_branch_count) {
+                None => solution.get(num_nodes + branch).copied().unwrap_or(0.0),
+                Some(derived) => {
+                    let branch = derived_branches.get(derived).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "transient branch trace {branch} has no derived current"
+                        ))
+                    })?;
+                    Self::derived_transient_branch_current(
+                        circuit,
+                        solution,
+                        time,
+                        Some(diode_history),
+                        *branch,
+                    )?
+                }
+            };
         }
+        added_values = added_values.saturating_add(layout.current_branches().len());
+        rows.push(time)?;
         if record_device_op_traces {
             added_values = added_values.saturating_add(
                 result.record_device_op_sample(
+                    rows.points(),
                     circuit
                         .transient_device_op_report(
                             solution,
@@ -3020,9 +3012,11 @@ impl Engine {
     /// hand every consumer the previous point's digital and real values on
     /// every step but the first. Two copies of that sequence are two chances
     /// to get it wrong.
+    #[allow(clippy::too_many_arguments)]
     fn commit_accepted_transient_point(
         &self,
         result: &mut TransientResult,
+        rows: &TransientRows<'_>,
         circuit: &mut crate::circuit::CircuitData,
         time: Value,
         events: TransientEventCapture<'_>,
@@ -3120,6 +3114,7 @@ impl Engine {
         }
         self.ensure_transient_result_limits(retained_result_values)?;
         abort.observe_transient_sample(result.observable_sample(
+            rows.observed(),
             digital_event_codes,
             sample_buses,
             real_snapshot,
@@ -3128,13 +3123,15 @@ impl Engine {
         Ok(retained_result_values)
     }
 
+    /// Row 0 of a capacitor with `IC=` reports the capacitor's current once
+    /// the first step is accepted; row 0 is still open in the sink then.
     fn backfill_initial_linear_capacitor_branch_currents(
-        result: &mut TransientResult,
+        rows: &mut TransientRows<'_>,
         circuit: &crate::circuit::CircuitData,
         derived_branches: &[DerivedTransientBranchCurrent],
-    ) {
-        if result.time.len() != 1 {
-            return;
+    ) -> Result<(), SimulationError> {
+        if rows.points() != 1 {
+            return Ok(());
         }
 
         let solved_branch_count = circuit.num_branches();
@@ -3146,15 +3143,12 @@ impl Engine {
             {
                 continue;
             }
-            let Some(initial_current) = result
-                .branch_currents
-                .get_mut(solved_branch_count + derived_index)
-                .and_then(|waveform| waveform.first_mut())
-            else {
-                continue;
-            };
-            *initial_current = circuit.capacitors.i_prev[branch.index];
+            rows.amend_first_current(
+                solved_branch_count + derived_index,
+                circuit.capacitors.i_prev[branch.index],
+            )?;
         }
+        Ok(())
     }
 
     fn apply_capacitor_element_initial_conditions(
@@ -3551,6 +3545,81 @@ impl Engine {
         engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
     }
 
+    /// Cancellable transient analysis that writes every accepted point to
+    /// `sink` instead of keeping its waveforms.
+    ///
+    /// Each row is x (time), then every saved node voltage in node order and
+    /// every saved branch current in branch order: the columns an in-memory
+    /// run returns, value for value. The returned result carries everything
+    /// else and leaves its time and waveform columns empty. The run calls
+    /// `begin`, `row` and `amend_open_row`; this function then calls `end`
+    /// with how the run ended. A deck with `.FFT` cards, lead-power outputs
+    /// or instance-parameter outputs, which read the whole waveforms once
+    /// the run ends, is refused before it solves.
+    pub fn run_tran_into_sink_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        abort: &dyn AbortSignal,
+        sink: &mut dyn crate::result_sink::ResultSink,
+    ) -> Result<(TransientResult, crate::result_sink::SinkReceipt), SimulationError> {
+        use crate::result_sink::{ResultSink, RunStatus, SinkStop, StopReason};
+        validate_transient_window(tstop, max_step)?;
+        self.reset_convergence_quality();
+        let engine = self.resolved_for_netlist(netlist);
+        let cell = std::cell::RefCell::new(sink);
+        let shared: &std::cell::RefCell<dyn ResultSink + '_> = &cell;
+        let outcome = engine
+            .run_tran_resolved_with_resume(
+                netlist,
+                netlist,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                    dc_seed: None,
+                    integral_trace: None,
+                },
+                abort,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: &[],
+                    checkpoint_observer: None,
+                    state_capture: None,
+                    result_sink: Some(shared),
+                },
+            )
+            .map(|(result, _, _)| result);
+        let sink = cell.into_inner();
+        match outcome {
+            Ok(result) => {
+                let receipt = sink
+                    .end(RunStatus::Completed)
+                    .map_err(SimulationError::ResultSink)?;
+                Ok((result, receipt))
+            }
+            Err(error) => {
+                let reason = match &error {
+                    SimulationError::Aborted => StopReason::Cancelled,
+                    SimulationError::TimeLimitExceeded => StopReason::Timeout,
+                    SimulationError::ResultSink(SinkStop::DiskFull { .. }) => StopReason::DiskFull,
+                    SimulationError::ResultSink(SinkStop::MemoryFull { .. }) => {
+                        StopReason::MemoryFull
+                    }
+                    other => StopReason::Failed(other.to_string()),
+                };
+                // The run's own error is the one to report; a sink that also
+                // fails to close has already stopped writing.
+                let _ = sink.end(RunStatus::Stopped(reason));
+                Err(error)
+            }
+        }
+    }
+
     fn inferred_transient_startup_mode(
         netlist: &Netlist,
     ) -> Result<TransientStartupMode, SimulationError> {
@@ -3652,6 +3721,7 @@ impl Engine {
                     scheduled_checkpoint_times: &[],
                     checkpoint_observer: None,
                     state_capture: None,
+                    result_sink: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -3723,6 +3793,7 @@ impl Engine {
                     scheduled_checkpoint_times: checkpoint_times,
                     checkpoint_observer: None,
                     state_capture: None,
+                    result_sink: None,
                 },
             )
             .map(|(result, _, checkpoints)| (result, checkpoints))
@@ -3838,6 +3909,7 @@ impl Engine {
                     scheduled_checkpoint_times: &[],
                     checkpoint_observer: None,
                     state_capture: None,
+                    result_sink: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -4003,6 +4075,7 @@ impl Engine {
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
                 state_capture: None,
+                result_sink: None,
             },
         )
         .map(|(result, _, _)| result)
@@ -4668,6 +4741,23 @@ impl Engine {
         // once from the circuit as built rather than recorded at every step.
         let instance_parameters = circuit.requested_static_instance_parameters(netlist);
         let lead_power = lead_power::requested_lead_power(netlist)?;
+        if plan.result_sink.is_some() {
+            let reads_waveforms = if !netlist.fft_analyses.is_empty() {
+                Some(".FFT")
+            } else if !lead_power.is_empty() {
+                Some("a lead-power output")
+            } else if !instance_parameters.is_empty() {
+                Some("an instance-parameter output")
+            } else {
+                None
+            };
+            if let Some(output) = reads_waveforms {
+                return Err(SimulationError::Circuit(format!(
+                    "{output} reads the transient waveforms once the run ends, which a run \
+                     writing its rows to a result sink does not keep"
+                )));
+            }
+        }
         let (mut result, end, checkpoints) = self.run_tran_prepared(
             netlist,
             checkpoint_netlist,
@@ -4766,6 +4856,7 @@ impl Engine {
             scheduled_checkpoint_times,
             checkpoint_observer,
             state_capture,
+            result_sink,
         } = plan;
         // A segment continues a live image the way a resume continues its
         // checkpoint: every startup step a resume skips, it skips too, and the
@@ -4853,6 +4944,15 @@ impl Engine {
                     "a topology-free transient cannot produce positive-time scheduled checkpoints"
                         .to_string(),
                 ));
+            }
+            if let Some(sink) = result_sink {
+                // Its one row, t = 0 with no saved value, goes to the sink.
+                let mut sink = sink.borrow_mut();
+                let mut rows = TransientRows::to_sink(TransientRowLayout::default(), &mut *sink);
+                let schema = rows.layout().schema(&[], &[], &[]);
+                rows.begin(&schema)?;
+                rows.push(0.0)?;
+                result.time.clear();
             }
             let final_checkpoint = if final_checkpoint_retention.is_retained()
                 || !scheduled_checkpoint_times.is_empty()
@@ -6019,11 +6119,9 @@ impl Engine {
                 .accept_transient_step(&solution, resume_time)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
-        let mut time = Vec::with_capacity(trace_capacity);
-        time.push(resume_time);
         let mut step_sizes = Vec::with_capacity(trace_capacity);
         step_sizes.push(0.0);
-        let mut branch_currents = Self::initial_transient_branch_currents(
+        let branch_currents = Self::initial_transient_branch_currents(
             &mut circuit,
             &solution,
             num_nodes,
@@ -6118,16 +6216,6 @@ impl Engine {
                 crate::ModelFinishPoint::Transient { time: 0.0 },
             )?;
         }
-        for (trace, &retain) in branch_currents
-            .iter_mut()
-            .zip(&capture_plan.branch_currents)
-        {
-            if retain {
-                trace.reserve(trace_capacity.saturating_sub(trace.len()));
-            } else {
-                trace.clear();
-            }
-        }
         let mut result = TransientResult {
             // Ground is not among `node_names`.
             instance_unknowns: circuit.instance_unknown_kinds().split_off(1),
@@ -6135,18 +6223,12 @@ impl Engine {
             event_only_nodes: event_only_nodes.clone(),
             voltage_impulses: None,
             current_impulses: None,
-            time,
+            // The time and waveform columns are the rows the run writes to
+            // its result sink; a run kept in memory moves them in at its end.
+            time: Vec::new(),
             step_sizes,
-            voltages: (0..num_nodes)
-                .map(|i| {
-                    Self::seeded_transient_trace(
-                        solution.get(i).copied().unwrap_or(0.0),
-                        capture_plan.voltages[i],
-                        trace_capacity,
-                    )
-                })
-                .collect(),
-            branch_currents,
+            voltages: (0..num_nodes).map(|_| Vec::new()).collect(),
+            branch_currents: (0..branch_currents.len()).map(|_| Vec::new()).collect(),
             num_nodes,
             node_names,
             branch_names,
@@ -6158,8 +6240,45 @@ impl Engine {
             store_traces,
             fft_results: Vec::new(),
         };
+        let mut external_sink = result_sink.map(std::cell::RefCell::borrow_mut);
+        let mut rows = {
+            let layout = TransientRowLayout::new(
+                &capture_plan.voltages,
+                &capture_plan.branch_currents,
+                num_nodes,
+                branch_currents.len(),
+            );
+            match external_sink.as_deref_mut() {
+                Some(sink) => TransientRows::to_sink(layout, sink),
+                None => TransientRows::in_memory(layout, trace_capacity),
+            }
+        };
+        {
+            let schema = rows.layout().schema(
+                &result.node_names,
+                &result.potential_units,
+                &result.branch_names,
+            );
+            rows.begin(&schema)?;
+            // Row 0: the operating point (or the UIC or checkpoint state) the
+            // integration leaves from, with each branch's initial current.
+            let (layout, row) = rows.gather();
+            let saved_voltages = layout.voltage_nodes().len();
+            for (value, &node) in row.iter_mut().zip(layout.voltage_nodes()) {
+                *value = solution.get(node).copied().unwrap_or(0.0);
+            }
+            for (value, &branch) in row[saved_voltages..]
+                .iter_mut()
+                .zip(layout.current_branches())
+            {
+                *value = branch_currents[branch][0];
+            }
+            rows.push(resume_time)?;
+        }
+        drop(branch_currents);
         if record_device_op_traces {
             result.record_device_op_sample(
+                rows.points(),
                 circuit
                     .initial_transient_device_op_report(&solution)
                     .map_err(SimulationError::Circuit)?,
@@ -6192,7 +6311,8 @@ impl Engine {
         let mut real_snapshot = Vec::new();
         let mut digital_trace_indices = rustc_hash::FxHashMap::default();
         let mut real_trace_indices = rustc_hash::FxHashMap::default();
-        let mut retained_result_values = Self::transient_result_value_count(&result);
+        let mut retained_result_values =
+            Self::transient_result_value_count(&result).saturating_add(rows.unfilled_values());
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.transient_voltage_lte_excluded_nodes();
@@ -6395,6 +6515,7 @@ impl Engine {
             // expose the DC-evaluated capacitance at t=0.
             retained_result_values = retained_result_values.saturating_add(
                 result.record_device_op_sample(
+                    rows.points(),
                     circuit
                         .initial_transient_device_op_report(&solution)
                         .map_err(SimulationError::Circuit)?,
@@ -6631,13 +6752,7 @@ impl Engine {
                     None,
                     branch,
                 )?;
-                if let Some(first) = result
-                    .branch_currents
-                    .get_mut(circuit.num_branches() + derived_index)
-                    .and_then(|waveform| waveform.first_mut())
-                {
-                    *first = current;
-                }
+                rows.amend_first_current(circuit.num_branches() + derived_index, current)?;
             }
             // The checkpointed companion history is authoritative for the
             // accepted capacitor lead current across an integration restart.
@@ -6651,13 +6766,7 @@ impl Engine {
                 let Some(branch_ordinal) = branch_ordinal else {
                     continue;
                 };
-                if let Some(current) = result
-                    .branch_currents
-                    .get_mut(branch_ordinal - 1)
-                    .and_then(|waveform| waveform.first_mut())
-                {
-                    *current = circuit.capacitors.i_prev[capacitor];
-                }
+                rows.amend_first_current(branch_ordinal - 1, circuit.capacitors.i_prev[capacitor])?;
             }
         }
 
@@ -6712,7 +6821,8 @@ impl Engine {
                 });
             }
         }
-        retained_result_values = Self::transient_result_value_count(&result);
+        retained_result_values =
+            Self::transient_result_value_count(&result).saturating_add(rows.unfilled_values());
         if let Some(trace) = integral_trace {
             let mut trace = trace.borrow_mut();
             trace.initialize(&circuit);
@@ -6727,6 +6837,7 @@ impl Engine {
             .any(|bjt| bjt.legacy_excess_phase_delay() != 0.0)
         {
             abort.observe_transient_sample(result.observable_sample(
+                rows.observed(),
                 &digital_event_codes,
                 &sample_buses,
                 &real_snapshot,
@@ -6855,6 +6966,7 @@ impl Engine {
         let physical_impulse_plan = if physical_sources.is_some() {
             let (plan, added_values) = impulses::initialize(
                 &mut result,
+                rows.time(),
                 &circuit,
                 &derived_branch_currents,
                 &physical_options,
@@ -6888,6 +7000,7 @@ impl Engine {
                 |point| {
                     plan.prepare(
                         &mut result,
+                        rows.time(),
                         point,
                         retained_result_values.saturating_add(retained_scheduled_checkpoint_values),
                         &self.config.resource_limits,
@@ -6915,18 +7028,17 @@ impl Engine {
             // the seam only after both state owners are authoritative so a
             // native diode includes its exact committed dQ/dt contribution.
             let solved_branch_count = circuit.num_branches();
-            for (branch, currents) in derived_branch_currents
-                .iter()
-                .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
-            {
-                if let Some(first) = currents.first_mut() {
-                    *first = Self::derived_transient_branch_current(
+            for (derived_index, branch) in derived_branch_currents.iter().enumerate() {
+                let branch_index = solved_branch_count + derived_index;
+                if rows.last_row().branch_current(branch_index).is_some() {
+                    let current = Self::derived_transient_branch_current(
                         &mut circuit,
                         &solution,
                         resume_time,
                         Some(&diode_history),
                         *branch,
                     )?;
+                    rows.amend_first_current(branch_index, current)?;
                 }
             }
         }
@@ -6938,6 +7050,7 @@ impl Engine {
             // restored diode/BJT caches and exact accepted BJT lead currents.
             retained_result_values = retained_result_values.saturating_add(
                 result.record_device_op_sample(
+                    rows.points(),
                     circuit
                         .transient_device_op_report(
                             &solution,
@@ -6961,12 +7074,12 @@ impl Engine {
         // state (a startup's operating point, an event's left limit) carries
         // that row, and the resumed run publishes it as its first.
         if let Some(row) = resume.and_then(TransientCheckpoint::published_row) {
-            row.publish_as_first_row(&mut result)
-                .map_err(SimulationError::Circuit)?;
+            row.publish_as_first_row(&mut result, &mut rows)?;
         }
 
         if physical_sources.is_some() {
             abort.observe_transient_sample(result.observable_sample(
+                rows.observed(),
                 &digital_event_codes,
                 &sample_buses,
                 &real_snapshot,
@@ -7276,7 +7389,7 @@ impl Engine {
             },
             ScheduledCheckpointState {
                 solution: &solution,
-                published: published_row_is_not_restart_state.then_some(&result),
+                published: published_row_is_not_restart_state.then(|| rows.published(&result)),
                 circuit: &circuit,
                 matrix: &matrix,
                 startup_mode,
@@ -8635,7 +8748,7 @@ impl Engine {
             // changing that interval's order. Its integration reinitialize
             // happens only after the landing point is accepted, so the first
             // interval *leaving* the breakpoint is the order-one step.
-            let is_first_resumed_interval = resume_is_restart_normalized && result.time.len() == 1;
+            let is_first_resumed_interval = resume_is_restart_normalized && rows.points() == 1;
             let step_trap_order = if physical_sources.is_some()
                 && native_predictor_local
                 && current_method == IntegrationMethod::Gear2
@@ -11968,6 +12081,7 @@ impl Engine {
                                 })?
                                 .prepare(
                                     &mut result,
+                                    rows.time(),
                                     event,
                                     retained_result_values
                                         .saturating_add(retained_scheduled_checkpoint_values)
@@ -12202,13 +12316,14 @@ impl Engine {
                     };
                     let output_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                     Self::backfill_initial_linear_capacitor_branch_currents(
-                        &mut result,
+                        &mut rows,
                         row_circuit,
                         &derived_branch_currents,
-                    );
+                    )?;
                     retained_result_values = retained_result_values.saturating_add(
                         self.record_transient_solution_sample(
                             &mut result,
+                            &mut rows,
                             row_circuit,
                             TransientSample {
                                 solution: row_solution,
@@ -12232,6 +12347,7 @@ impl Engine {
                     published_row_is_not_restart_state = left_limit.is_some();
                     retained_result_values = self.commit_accepted_transient_point(
                         &mut result,
+                        &rows,
                         &mut circuit,
                         t,
                         TransientEventCapture {
@@ -12277,7 +12393,7 @@ impl Engine {
                                 "transient point at t={t:e} accepted after exhausting LTE recovery; Newton converged, but waveform accuracy is not guaranteed at force-accepted points"
                             );
                         }
-                        quality.record_force_accept(result.time.len().saturating_sub(1))
+                        quality.record_force_accept(rows.points().saturating_sub(1))
                     });
                     // A force-accepted point arms the recovery budget; it does
                     // not spend it. Consecutive force-accepts re-arm it here,
@@ -12355,7 +12471,8 @@ impl Engine {
                         },
                         ScheduledCheckpointState {
                             solution: &solution,
-                            published: published_row_is_not_restart_state.then_some(&result),
+                            published: published_row_is_not_restart_state
+                                .then(|| rows.published(&result)),
                             circuit: &circuit,
                             matrix: &matrix,
                             startup_mode,
@@ -12719,6 +12836,7 @@ impl Engine {
                         })?
                         .prepare(
                             &mut result,
+                            rows.time(),
                             event,
                             retained_result_values
                                 .saturating_add(retained_scheduled_checkpoint_values)
@@ -12953,13 +13071,14 @@ impl Engine {
             };
             let output_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             Self::backfill_initial_linear_capacitor_branch_currents(
-                &mut result,
+                &mut rows,
                 row_circuit,
                 &derived_branch_currents,
-            );
+            )?;
             retained_result_values =
                 retained_result_values.saturating_add(self.record_transient_solution_sample(
                     &mut result,
+                    &mut rows,
                     row_circuit,
                     TransientSample {
                         solution: row_solution,
@@ -12982,6 +13101,7 @@ impl Engine {
             published_row_is_not_restart_state = left_limit.is_some();
             retained_result_values = self.commit_accepted_transient_point(
                 &mut result,
+                &rows,
                 &mut circuit,
                 t,
                 TransientEventCapture {
@@ -13356,7 +13476,7 @@ impl Engine {
                 },
                 ScheduledCheckpointState {
                     solution: &solution,
-                    published: published_row_is_not_restart_state.then_some(&result),
+                    published: published_row_is_not_restart_state.then(|| rows.published(&result)),
                     circuit: &circuit,
                     matrix: &matrix,
                     startup_mode,
@@ -13429,16 +13549,15 @@ impl Engine {
             return Err(SimulationError::ConvergenceFailed(total_step_attempts));
         }
 
-        log::info!(
-            "Transient complete: {} time points computed",
-            result.time.len()
-        );
+        // The rows a run kept in memory become its time and waveform columns.
+        rows.fill_result(&mut result);
+        log::info!("Transient complete: {} time points computed", rows.points());
         if let Some(runtime) = &transient_noise {
             log::info!(
                 "Transient noise complete: {} source(s) re-derived at {} of {} accepted points",
                 runtime.source_count(),
                 runtime.refresh_count(),
-                result.time.len()
+                rows.points()
             );
         }
         if let Some(message) = circuit.take_xspice_evaluation_error() {
@@ -13687,7 +13806,7 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?
                 .with_published_row(
                     published_row_is_not_restart_state
-                        .then(|| checkpoint::PublishedRow::last_of(&result))
+                        .then(|| checkpoint::PublishedRow::last_of(rows.published(&result)))
                         .transpose()
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -13705,7 +13824,8 @@ impl Engine {
             hdl_variables.record_sources(&mut result, &circuit);
         }
         result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
-        retained_result_values = Self::transient_result_value_count(&result);
+        retained_result_values =
+            Self::transient_result_value_count(&result).saturating_add(rows.unfilled_values());
         self.ensure_result_values(
             retained_result_values
                 .saturating_add(
@@ -17430,7 +17550,13 @@ D1 D 0 DMOD
         assert_eq!(compressed.current_impulses, result.current_impulses);
         let expanded = compressed.clone().try_into_transient().unwrap();
         assert_eq!(expanded.current_impulses, result.current_impulses);
-        let live = result.observable_sample(&[], &[], &[], None);
+        let point = crate::analysis::transient::ObservedPoint {
+            time: result.time[result.time.len() - 1],
+            start: result.time[0],
+            points: result.time.len(),
+            row: crate::abort_signal::TransientRow::default(),
+        };
+        let live = result.observable_sample(point, &[], &[], &[], None);
         assert_eq!(live.current_impulses, result.current_impulses.as_deref());
         let mut malformed = compressed.clone();
         malformed.current_impulses.as_mut().unwrap()[0].owner =

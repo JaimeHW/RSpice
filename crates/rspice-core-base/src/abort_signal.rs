@@ -112,12 +112,12 @@ pub enum TransientEventValue {
     Real(crate::Value),
 }
 
-/// One accepted transient sample, borrowed from the analysis result.
+/// One accepted transient sample, borrowed from the running analysis.
 ///
-/// A transient result is stored column-major: `time` gains one entry per
-/// accepted sample and every retained waveform column grows with it, so the
-/// sample being reported is the last entry of each column. A column that
-/// output projection deliberately did not retain stays empty.
+/// The analog half is the row the engine just wrote to its result sink: the
+/// saved node voltages and branch currents of this point, gathered into a
+/// buffer the engine reuses. A hook sees the point being accepted, never the
+/// whole waveform; a consumer that wants history keeps its own.
 ///
 /// This is a view, not a copy. The engine names it instead of handing over its
 /// own result type both because the abort layer sits below the analyses and
@@ -138,16 +138,19 @@ pub struct TransientSample<'a> {
     /// `None` denotes a legacy endpoint-only producer. Rejected trials never
     /// appear here. The first sample contains the retained initial values.
     pub event_changes: Option<&'a [TransientEventChange]>,
-    /// Accepted time points. The reported sample is the last entry.
-    pub time: &'a [crate::Value],
-    /// Node names, positionally aligned with `node_voltages`.
+    /// The accepted time of this sample.
+    pub time: crate::Value,
+    /// The time of this run segment's first accepted sample.
+    pub start: crate::Value,
+    /// Accepted samples this run segment has recorded, this one included.
+    pub points: usize,
+    /// The whole node table: `node_names[i]` is node index `i`, node `i + 1`.
     pub node_names: &'a [String],
-    /// Retained node-voltage columns, indexed `[node][sample]`.
-    pub node_voltages: &'a [Vec<crate::Value>],
-    /// Branch names, positionally aligned with `branch_currents`.
+    /// The whole branch table, indexed like [`TransientRow::current_branches`].
     pub branch_names: &'a [String],
-    /// Retained branch-current columns, indexed `[branch][sample]`.
-    pub branch_currents: &'a [Vec<crate::Value>],
+    /// This sample's saved analog values. A node or branch output retention
+    /// left out has no value here.
+    pub row: TransientRow<'a>,
     /// Cumulative accepted current-impulse histories for this run segment.
     /// Consumers can track per-owner suffixes to publish only new events.
     /// Charge values are in coulombs and never form part of `branch_currents`.
@@ -189,6 +192,54 @@ pub struct TransientSample<'a> {
     /// whole committed state, final for this time, unfiltered by retention,
     /// empty when the deck has no real event nodes or event tracing is off.
     pub real_values: &'a [(crate::NodeId, crate::Value)],
+}
+
+/// The saved analog values of one accepted transient sample: the row the
+/// engine writes to its result sink.
+///
+/// A row is the saved node voltages in node order, then the saved branch
+/// currents in branch order. `voltage_nodes` and `current_branches` say which
+/// node and branch each value belongs to; both are run-constant and ascending.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransientRow<'a> {
+    /// Saved voltages, then saved currents.
+    pub values: &'a [crate::Value],
+    /// The node index (`node_names` position) of each of the first
+    /// `voltage_nodes.len()` values.
+    pub voltage_nodes: &'a [usize],
+    /// The branch index (`branch_names` position) of each value after them.
+    pub current_branches: &'a [usize],
+}
+
+impl<'a> TransientRow<'a> {
+    /// Each saved node voltage, as (node index, volts), in node order.
+    pub fn node_voltages(&self) -> impl Iterator<Item = (usize, crate::Value)> + 'a {
+        self.voltage_nodes
+            .iter()
+            .copied()
+            .zip(self.values.iter().copied())
+    }
+
+    /// Each saved branch current, as (branch index, amperes), in branch order.
+    pub fn branch_currents(&self) -> impl Iterator<Item = (usize, crate::Value)> + 'a {
+        let currents = self.values.get(self.voltage_nodes.len()..).unwrap_or(&[]);
+        self.current_branches
+            .iter()
+            .copied()
+            .zip(currents.iter().copied())
+    }
+
+    /// The voltage of node index `node`, when the run saves it.
+    pub fn node_voltage(&self, node: usize) -> Option<crate::Value> {
+        let slot = self.voltage_nodes.binary_search(&node).ok()?;
+        self.values.get(slot).copied()
+    }
+
+    /// The current of branch index `branch`, when the run saves it.
+    pub fn branch_current(&self, branch: usize) -> Option<crate::Value> {
+        let slot = self.current_branches.binary_search(&branch).ok()?;
+        self.values.get(self.voltage_nodes.len() + slot).copied()
+    }
 }
 
 //=============================================================================

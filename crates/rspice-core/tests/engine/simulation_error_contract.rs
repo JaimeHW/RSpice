@@ -401,8 +401,15 @@ fn expected_descriptor(
         SimulationError::PersistenceIncompatible(_) => {
             (Code::PersistenceIncompatible, Category::Persistence, false)
         }
-        SimulationError::OutputCommitFailed(_) => {
+        SimulationError::OutputCommitFailed(_)
+        | SimulationError::ResultSink(rspice_core::result_sink::SinkStop::Io(_)) => {
             (Code::OutputCommitFailed, Category::OutputCommit, false)
+        }
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::DiskFull { .. }) => {
+            (Code::ResourceLimit, Category::ResourceLimit, false)
+        }
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::MemoryFull { .. }) => {
+            (Code::AllocationFailed, Category::ResourceLimit, false)
         }
         SimulationError::ConvergenceFailed(_)
         | SimulationError::ContinuationFailed(_)
@@ -503,6 +510,14 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             "out.csv",
             OutputCommitPhase::Prepare,
             "no such directory",
+        )),
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::DiskFull {
+            needed: Some(4096),
+            available: Some(512),
+        }),
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::MemoryFull { bytes: None }),
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::Io(
+            "the device was removed".to_owned(),
         )),
         SimulationError::ConvergenceFailed(5),
         SimulationError::from(ContinuationFailure {

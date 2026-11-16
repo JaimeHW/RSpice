@@ -131,12 +131,12 @@ impl<O: ImpulseOwner> PublishedImpulses<O> {
         &mut self,
         sample: &rspice_core::abort_signal::TransientSample<'_>,
     ) -> Option<ImpulseDelta<O>> {
-        let stop = *sample.time.last()?;
+        let stop = sample.time;
         let Some(source) = O::source(sample) else {
             self.lost |= self.start.is_some();
             return None;
         };
-        let start = *self.start.get_or_insert(*sample.time.first()?);
+        let start = *self.start.get_or_insert(sample.start);
         let sequence = self.sequence;
         if self.sequence < MAX_SEQUENCE {
             self.sequence += 1;
@@ -666,11 +666,12 @@ mod tests {
         }];
         let sample = rspice_core::abort_signal::TransientSample {
             event_changes: None,
-            time: &[0.0, MAX_CURRENT_POINTS as f64],
+            time: MAX_CURRENT_POINTS as f64,
+            start: 0.0,
+            points: 2,
             node_names: &[],
-            node_voltages: &[],
             branch_names: &[],
-            branch_currents: &[],
+            row: rspice_core::abort_signal::TransientRow::default(),
             voltage_impulses: None,
             current_impulses: Some(&source),
             digital_values: &[],
@@ -797,11 +798,12 @@ mod tests {
         let mut publisher = PublishedCurrentImpulses::default();
         let sample = rspice_core::abort_signal::TransientSample {
             event_changes: None,
-            time: &[0.0, MAX_CURRENT_POINTS as f64],
+            time: MAX_CURRENT_POINTS as f64,
+            start: 0.0,
+            points: 2,
             node_names: &[],
-            node_voltages: &[],
             branch_names: &[],
-            branch_currents: &[],
+            row: rspice_core::abort_signal::TransientRow::default(),
             voltage_impulses: None,
             current_impulses: Some(&source),
             digital_values: &[],
