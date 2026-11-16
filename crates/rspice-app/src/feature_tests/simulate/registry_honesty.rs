@@ -18,7 +18,6 @@ use super::page_contracts::render_with;
 use super::stage::show_on_stage;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
-use rspice_app_simulate::workbench::surfaces::simulate::page_specs;
 use rspice_app_state::state::SimulationPage;
 
 /// The routes that resolve a plan payload before drawing a registry, each with
@@ -29,17 +28,12 @@ use rspice_app_state::state::SimulationPage;
 /// The headings are the assertion that matters: a page that renders its refusal
 /// *and* its table has not fixed anything, because the table is still there to
 /// be read as the plan's contents.
-fn registries() -> [(SimulationPage, &'static str, [&'static str; 2]); 3] {
+fn registries() -> [(SimulationPage, &'static str, [&'static str; 2]); 2] {
     [
         (
             SimulationPage::Outputs,
             "it is a plan nothing can be saved to",
             ["Capture group", "Est. size"],
-        ),
-        (
-            SimulationPage::Specifications,
-            "it is a plan nothing can be authored against",
-            ["Definition", "Margin"],
         ),
         (
             SimulationPage::Save,
@@ -99,54 +93,6 @@ fn an_empty_registry_over_a_resolvable_plan_still_paints_its_table() {
             );
         }
     }
-}
-
-/// Specifications commits through `commit_plan_change` like every other
-/// registry. The commit lands in the plan's log, which the console reports;
-/// the page itself shows no receipts card, because a change that worked is the
-/// edited row, not a ledger of digests under it.
-#[test]
-fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
-    use rspice_app_state::state::{SpecEntry, SpecPointScope};
-
-    let mut last_receipt = None;
-    let rendered = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.model.workspace.content.replace_active_specs(
-            id,
-            vec![SpecEntry {
-                measurement: "gain".to_owned(),
-                expression: "meas ac gain max V(out)".to_owned(),
-                min: Some(10.0),
-                max: None,
-                unit: "dB".to_owned(),
-                scope: SpecPointScope::AllPoints,
-            }],
-        );
-        page_specs::commit_scope(
-            &mut crate::workbench::features::cx(app),
-            "gain",
-            SpecPointScope::Nominal,
-        );
-        last_receipt = app
-            .state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .ok()
-            .and_then(|plan| plan.configuration_receipts().last())
-            .map(|receipt| receipt.detail().to_owned());
-    });
-
-    assert_eq!(
-        last_receipt.as_deref(),
-        Some("Scoped specification gain to nominal only."),
-        "the change this route committed must be the plan log's newest entry"
-    );
-    assert!(
-        !rendered.contains("receipts") && !rendered.contains("Digest"),
-        "the Specifications route shows no receipts card:\n{rendered}"
-    );
 }
 
 /// One registry route, driven a frame at a time with real input events.

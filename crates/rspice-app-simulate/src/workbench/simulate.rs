@@ -32,8 +32,7 @@ impl Feature for SimulateFeature {
     type Handles = NoHandles;
     /// The run history's primary runs or stops what the dispatcher would:
     /// on the Netlist workspace the shell runs that page's deck in place
-    /// of the active plan. The Specifications page states why Results will
-    /// not open a limit's evidence, and the Analyses route's heading why the
+    /// of the active plan. The Analyses route's heading states why the
     /// split stage will not open, in the dispatcher's own words. The
     /// toolbar's run controls and plan chip offer Run or Stop, Preflight,
     /// Options and Manage plans as the dispatcher answers them, its guards
@@ -41,7 +40,6 @@ impl Feature for SimulateFeature {
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         SimulateCommand::Run.key(),
         SimulateCommand::Stop.key(),
-        ids::RESULT_SPECIFICATIONS,
         ids::TOGGLE_SPLIT_VIEW,
         SimulateCommand::Preflight.key(),
         SimulateCommand::Options.key(),

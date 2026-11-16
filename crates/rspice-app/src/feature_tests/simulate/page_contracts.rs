@@ -98,10 +98,6 @@ fn no_studio_page_paints_a_sentence_under_its_title() {
         (SimulationPage::Excitations, "See every source the design"),
         (SimulationPage::Variables, "Own the typed parameters"),
         (SimulationPage::Outputs, "Own the expressions the run saves"),
-        (
-            SimulationPage::Specifications,
-            "Own the limits a result is judged",
-        ),
         (SimulationPage::RunSet, "Compose the run space from process"),
         (SimulationPage::Models, "Own the ordered model closure"),
         (SimulationPage::Solver, "Own what counts as converged"),
@@ -377,62 +373,6 @@ fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
     );
 }
 
-/// Authoring belongs to the specification editor in Results, so this page's
-/// selection has to survive that list being edited underneath it. Keyed by row
-/// index it could not: removing one requirement re-points the selection at
-/// whichever one moved into its place, and reporting the wrong requirement's
-/// margin is the exact failure this page exists to prevent.
-#[test]
-fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
-    use rspice_app_state::state::SpecEntry;
-
-    fn spec(measurement: &str) -> SpecEntry {
-        SpecEntry {
-            measurement: measurement.to_owned(),
-            expression: format!("meas {measurement}"),
-            min: Some(0.0),
-            max: Some(1.0),
-            unit: "V".to_owned(),
-            scope: rspice_app_state::state::SpecPointScope::AllPoints,
-        }
-    }
-
-    // The selected requirement outlives the removal of an earlier row.
-    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.simulate.selected_specification = Some("bandwidth".to_owned());
-        app.state
-            .model
-            .workspace
-            .content
-            .replace_active_specs(id, vec![spec("bandwidth")]);
-    });
-    assert!(
-        rendered.contains("Selected specification · bandwidth"),
-        "the selection still names the requirement it was made on: {rendered}"
-    );
-
-    // The selected requirement is gone, so nothing is selected — the row that
-    // took its place must not inherit the selection.
-    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.simulate.selected_specification = Some("gain".to_owned());
-        app.state
-            .model
-            .workspace
-            .content
-            .replace_active_specs(id, vec![spec("bandwidth")]);
-    });
-    assert!(
-        !rendered.contains("Selected specification · bandwidth"),
-        "a removed requirement must never hand its selection to another row: {rendered}"
-    );
-    assert!(
-        rendered.contains("none selected"),
-        "the record card reports that nothing resolves: {rendered}"
-    );
-}
-
 /// The ledger's job is to say what a run resolves to, so an analysis that
 /// carries its own bound has to be reported at that bound and not at the plan's.
 /// Both values are shown side by side: the divergence is the fact, and one
@@ -486,105 +426,6 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
         rendered.matches("analysis override").count(),
         2,
         "exactly one row may be attributed to the analysis:\n{rendered}"
-    );
-}
-
-/// The scope control is only honest if its options come from the plan: an
-/// option list with a literal point count, or a corner the run set does not
-/// declare, would offer a scope no run can answer.
-#[test]
-fn the_applies_to_control_is_built_from_the_declared_run_set() {
-    use rspice_app_state::product::ProcessCorner;
-    use rspice_app_state::state::{SpecEntry, SpecPointScope};
-    use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
-    use rspice_simulation_contract::run_set::RunSetState;
-
-    fn spec(scope: SpecPointScope) -> SpecEntry {
-        SpecEntry {
-            measurement: "gain".to_owned(),
-            expression: "meas ac gain max V(out)".to_owned(),
-            min: Some(10.0),
-            max: None,
-            unit: "dB".to_owned(),
-            scope,
-        }
-    }
-
-    fn six_point_run_set() -> RunSetState {
-        rspice_app_runs::simulation::controller::test_execution::pvt::from_corner_config(
-            &CornerConfig {
-                process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
-                voltages: vec![1.0],
-                supply_source_names: Vec::new(),
-                temperatures: vec![-40.0, 27.0, 125.0],
-                full_matrix: true,
-                points: Vec::new(),
-                base_analysis: CornerBaseAnalysis::Op,
-            },
-        )
-    }
-
-    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.simulate.selected_specification = Some("gain".to_owned());
-        app.state
-            .model
-            .workspace
-            .content
-            .replace_active_specs(id, vec![spec(SpecPointScope::AllPoints)]);
-    });
-    assert!(
-        rendered.contains("Applies to"),
-        "the record carries the scope control: {rendered}"
-    );
-    assert!(
-        rendered.contains("All 6 PVT points"),
-        "the point count is the run set's own, not a literal: {rendered}"
-    );
-
-    // A scope the run set cannot reach is standing validation, recomputed
-    // every frame, so it belongs in the registry's own status line.
-    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.simulate.selected_specification = Some("gain".to_owned());
-        app.state.model.workspace.content.replace_active_specs(
-            id,
-            vec![spec(SpecPointScope::SelectedCorners {
-                corners: vec!["FF".to_owned()],
-            })],
-        );
-    });
-    assert!(
-        rendered.contains("1 scoped to corners the run set does not declare"),
-        "the registry reports the unreachable scope: {rendered}"
-    );
-    assert!(
-        rendered.contains("which the current run set does not declare"),
-        "the selected record says which corner is unreachable: {rendered}"
-    );
-
-    // A corner the run set does declare is reachable and reported as nothing
-    // more than a limit still awaiting evidence.
-    let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
-        let id = plan_id(&app.state.model);
-        app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.simulate.selected_specification = Some("gain".to_owned());
-        app.state.model.workspace.content.replace_active_specs(
-            id,
-            vec![spec(SpecPointScope::SelectedCorners {
-                corners: vec!["SS".to_owned()],
-            })],
-        );
-    });
-    assert!(
-        !rendered.contains("does not declare"),
-        "a declared corner raises nothing: {rendered}"
-    );
-    assert!(
-        rendered.contains("Corner SS only"),
-        "the control shows the scope it holds: {rendered}"
     );
 }
 
@@ -727,9 +568,8 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
     );
 }
 
-/// Two specifications: one the dataset measured and failed, one it never
-/// measured at all, so both the text filter and the evidence class have
-/// something to discriminate on.
+/// A retained dataset for the hand-offs that read one: a run that measured
+/// one of the plan's two specifications and not the other.
 fn seed_two_specifications(state: &mut AppState) {
     use rspice_app_state::state::{
         AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SpecEntry,
@@ -775,89 +615,6 @@ fn seed_two_specifications(state: &mut AppState) {
     );
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
-}
-
-/// The text filter matches over the cells the table paints, so a surviving row
-/// is always one whose reason for surviving is on screen.
-#[test]
-fn the_specification_filter_narrows_the_table_over_the_cells_it_paints() {
-    let filtered = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        seed_two_specifications(&mut app.state);
-        app.state.simulate.specification_filter = "bw(".to_owned();
-    });
-    assert!(
-        filtered.contains("bandwidth_3db"),
-        "the row whose definition matches has to survive:\n{filtered}"
-    );
-    assert!(
-        !filtered.contains("gain_dc"),
-        "the row that matches nothing must not be painted:\n{filtered}"
-    );
-    assert!(
-        filtered.contains("showing 1 of 2"),
-        "the head reports how much of the registry survived:\n{filtered}"
-    );
-}
-
-/// The class the head counts and the class the filter keeps are one
-/// classification. A row counted as failing and then hidden by "Failing only"
-/// would mean the page held two disagreeing opinions about the same evidence.
-#[test]
-fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
-    use rspice_app_simulate::workbench::state::simulate_session::SpecificationEvidenceFilter;
-
-    let unfiltered = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        seed_two_specifications(&mut app.state);
-    });
-    assert!(
-        unfiltered.contains(SpecificationEvidenceFilter::All.label()),
-        "the class control paints the class the registry is currently showing:\n{unfiltered}"
-    );
-
-    let failing = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        seed_two_specifications(&mut app.state);
-        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::Failing;
-    });
-    assert!(
-        failing.contains(SpecificationEvidenceFilter::Failing.label()),
-        "and it paints the narrowed class once one is picked:\n{failing}"
-    );
-    assert!(
-        failing.contains("1 fail · 1 without results"),
-        "the head counts one of each over the whole registry:\n{failing}"
-    );
-    assert!(
-        failing.contains("gain_dc"),
-        "the measured-and-failed row is the one `Failing only` keeps:\n{failing}"
-    );
-    assert!(
-        !failing.contains("bandwidth_3db"),
-        "a limit no measurement answers is not a failure:\n{failing}"
-    );
-
-    let unmapped = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        seed_two_specifications(&mut app.state);
-        app.state.simulate.specification_evidence_filter =
-            SpecificationEvidenceFilter::WithoutEvidence;
-    });
-    assert!(
-        unmapped.contains("bandwidth_3db") && !unmapped.contains("gain_dc"),
-        "`Without evidence` keeps exactly the limit the dataset never answered:\n{unmapped}"
-    );
-
-    let partial = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        seed_two_specifications(&mut app.state);
-        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::Partial;
-    });
-    assert!(
-        partial.contains("No specification matches the filter"),
-        "no limit here was judged on several points, and the table has to say so rather than \
-         read as a plan with no requirements:\n{partial}"
-    );
-    assert!(
-        !partial.contains("nothing judges this plan's results"),
-        "the requirements are still there:\n{partial}"
-    );
 }
 
 /// Each hand-off has to land on the surface its label names. A button that

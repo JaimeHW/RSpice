@@ -11,10 +11,6 @@ use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::test_host::SimulateTestHost;
 
-fn attributed(analysis: AnalysisResult) -> AnalysisResult {
-    attributed_with_id(analysis, AnalysisInstanceId::new())
-}
-
 fn attributed_with_id(
     analysis: AnalysisResult,
     source_instance_id: AnalysisInstanceId,
@@ -872,64 +868,6 @@ fn tolerance_digest_is_order_independent_and_receipts_fail_on_contract_mismatch(
         &baseline,
         &candidate,
     ));
-}
-
-/// A limit is answered by the worst of every attributed measurement of its
-/// name, not the first one found. On a dataset holding several — a corner set,
-/// or a family whose members measured — the first would report a
-/// specification passing while a retained point fails it.
-#[test]
-fn the_worst_retained_point_answers_a_limit() {
-    use crate::state::{
-        AnalysisResultFamilyMetadata, FamilyMeasurementEvidence, FamilyMemberId,
-        FamilyMemberMeasurements,
-    };
-
-    let spec = crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: "param=gain".to_owned(),
-        min: Some(10.0),
-        max: None,
-        unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    };
-
-    let members = [(0, 25.0, 12.0), (1, 75.0, 7.25), (2, 125.0, 11.0)]
-        .into_iter()
-        .map(|(index, coordinate, value)| {
-            FamilyMemberMeasurements::new(
-                FamilyMemberId::SweepPoint {
-                    index,
-                    value: coordinate,
-                },
-                vec![FamilyMeasurementEvidence {
-                    unit: None,
-                    name: "gain".to_owned(),
-                    value: Some(value),
-                    passed: true,
-                    error: None,
-                }],
-            )
-        })
-        .collect();
-
-    let mut run = SimulationRun::new(7);
-    run.add_analysis(attributed(
-        AnalysisResult::new(1, AnalysisType::Parametric, "sweep").with_family_metadata(
-            AnalysisResultFamilyMetadata::Parametric {
-                target: "TEMP".to_owned(),
-                sweep_values: vec![25.0, 75.0, 125.0],
-                failed_points: 0,
-                member_measurements: members,
-            },
-        ),
-    ));
-
-    assert_eq!(
-        crate::workbench::surfaces::simulate::measurement_in_output_dataset_for_test(&run, &spec),
-        Some(7.25),
-        "the worst retained point answers the limit, not the first"
-    );
 }
 
 /// Verify must not judge a dataset the studio refuses.

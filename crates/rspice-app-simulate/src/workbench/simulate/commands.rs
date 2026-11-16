@@ -93,7 +93,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 21] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -105,7 +105,6 @@ impl SimulateCommand {
         Self::Page(SimulationPage::Excitations),
         Self::Page(SimulationPage::Variables),
         Self::Page(SimulationPage::Outputs),
-        Self::Page(SimulationPage::Specifications),
         Self::Page(SimulationPage::RunSet),
         Self::Page(SimulationPage::Models),
         Self::Page(SimulationPage::ConnectRules),
@@ -135,9 +134,6 @@ impl SimulateCommand {
             Self::Page(SimulationPage::Excitations) => ids::SIMULATION_EXCITATIONS,
             Self::Page(SimulationPage::Variables) => CommandKey::new("simulation-variables"),
             Self::Page(SimulationPage::Outputs) => CommandKey::new("simulation-outputs"),
-            Self::Page(SimulationPage::Specifications) => {
-                CommandKey::new("simulation-specifications")
-            }
             Self::Page(SimulationPage::RunSet) => CommandKey::new("simulation-run-set"),
             Self::Page(SimulationPage::Models) => CommandKey::new("simulation-models"),
             Self::Page(SimulationPage::ConnectRules) => CommandKey::new("simulation-connect-rules"),
@@ -266,7 +262,6 @@ const fn simulation_page_label(page: SimulationPage) -> &'static str {
         SimulationPage::Excitations => "Excitations",
         SimulationPage::Variables => "Design variables",
         SimulationPage::Outputs => "Outputs & expressions",
-        SimulationPage::Specifications => "Requirements & specifications",
         SimulationPage::RunSet => "PVT, sweeps & variation",
         SimulationPage::Models => "Models & sections",
         SimulationPage::ConnectRules => "Connect rules",

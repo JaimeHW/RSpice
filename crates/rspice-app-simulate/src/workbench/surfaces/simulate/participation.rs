@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::state::{SimulationPage, SpecPointScope};
+use crate::state::SimulationPage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
@@ -67,11 +67,6 @@ pub struct PlanParticipation {
     pub point_keys: Vec<String>,
     /// The reference point's identity, when the declared space contains one.
     pub nominal_key: Option<String>,
-    /// Each point paired with the process corner it solves, so a scope written
-    /// in corner names can be resolved to identities. A space with no process
-    /// axis puts every point on the run's reference corner, which is what it
-    /// actually solves.
-    pub(super) corner_keys: Vec<(String, String)>,
     pub instances: Vec<InstanceParticipation>,
     /// Whether the run set declares any axis at all. With none, every analysis
     /// runs once and participation is not a question the page can ask.
@@ -102,22 +97,6 @@ impl PlanParticipation {
         let has_axes = state.enabled_dimensions().next().is_some();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
         let nominal_key = run_set::nominal_point_key(points, reference);
-        let corner_keys: Vec<(String, String)> = points
-            .iter()
-            .map(|point| {
-                let corner = point
-                    .coordinates
-                    .iter()
-                    .find(|(dimension, _)| {
-                        dimension.kind == run_set::RunSetDimensionKind::ProcessSection
-                    })
-                    .map_or_else(
-                        || reference.process.short_name().to_owned(),
-                        |(_, value)| value.lexical.trim().to_owned(),
-                    );
-                (point.point_key(), corner)
-            })
-            .collect();
         let instances = model
             .sim_setup
             .enabled_analysis_instances()
@@ -149,7 +128,6 @@ impl PlanParticipation {
         Self {
             point_keys,
             nominal_key,
-            corner_keys,
             instances,
             has_axes,
         }
@@ -226,59 +204,6 @@ impl PlanParticipation {
             .filter(|entry| entry.refusal.is_none() && !entry.keys.iter().any(|held| held == key))
             .map(|entry| entry.display_name.as_str())
             .collect()
-    }
-
-    /// How many of `demanded` points can actually be judged.
-    ///
-    /// A specification names the analysis that produces its measurement, and it
-    /// is that analysis's participation that bounds the coverage: a bound
-    /// scoped to a point its producer does not run at can never be judged
-    /// there, however the run goes. A specification that names no producer — a
-    /// legacy entry, or one whose producer has been removed — is bounded by the
-    /// union instead, which is the weakest claim the plan supports and never
-    /// reports a shortfall the plan does not have.
-    pub(super) fn covered_by(
-        &self,
-        producer: Option<AnalysisInstanceId>,
-        demanded: &[String],
-    ) -> usize {
-        let visited: HashSet<&str> = match producer.and_then(|id| self.for_instance(id)) {
-            Some(entry) if entry.refusal.is_none() => {
-                entry.keys.iter().map(String::as_str).collect()
-            }
-            _ => self
-                .instances
-                .iter()
-                .filter(|entry| entry.refusal.is_none())
-                .flat_map(|entry| entry.keys.iter().map(String::as_str))
-                .collect(),
-        };
-        demanded
-            .iter()
-            .filter(|key| visited.contains(key.as_str()))
-            .count()
-    }
-
-    /// The points a specification's scope is a claim about.
-    ///
-    /// Resolved against the declared space rather than against a retained run,
-    /// because the advisory is about what this plan *can* produce: a scope and
-    /// a participation can be known to disagree before anything is dispatched.
-    pub(super) fn scope_demands(&self, scope: &SpecPointScope) -> Vec<String> {
-        match scope {
-            SpecPointScope::AllPoints => self.point_keys.clone(),
-            SpecPointScope::Nominal => self.nominal_key.iter().cloned().collect(),
-            SpecPointScope::SelectedCorners { corners } => self
-                .corner_keys
-                .iter()
-                .filter(|(_, corner)| {
-                    corners
-                        .iter()
-                        .any(|named| named.eq_ignore_ascii_case(corner))
-                })
-                .map(|(key, _)| key.clone())
-                .collect(),
-        }
     }
 }
 

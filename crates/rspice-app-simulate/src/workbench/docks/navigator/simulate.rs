@@ -214,7 +214,6 @@ const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
         SimulationPage::Excitations => WorkbenchIcon::ArrowRight,
         SimulationPage::Variables => WorkbenchIcon::Sliders,
         SimulationPage::Outputs => WorkbenchIcon::Probe,
-        SimulationPage::Specifications => WorkbenchIcon::Target,
         SimulationPage::RunSet => WorkbenchIcon::Grid,
         SimulationPage::Models => WorkbenchIcon::Models,
         SimulationPage::ConnectRules => WorkbenchIcon::Compare,
@@ -255,7 +254,6 @@ pub(super) fn simulate_nav_meta(
         // The same saved-output count the Outputs row states; one number is
         // printed once.
         SimulationPage::Save => None,
-        SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
         SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
         SimulationPage::Models => count(model.sim_setup.model_bindings.len()),
         // The rule set the run selects, as CONNECTRULES names it; nothing

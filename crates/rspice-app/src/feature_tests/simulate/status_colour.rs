@@ -242,10 +242,7 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
 
 /// No surface states a status in a colour of its own.
 ///
-/// In the studio `Tone::Fail` is banned too, except on the Specifications
-/// page: its Result column paints a failing measurement in the error
-/// colour with no mark, a verdict rather than a status, because a column
-/// of marks beside a column of numbers reads as two verdicts.
+/// In the studio `Tone::Fail` is banned too.
 #[test]
 fn no_surface_paints_a_status_in_colour() {
     /// Whether `line` names `token` rather than sitting inside a longer
@@ -316,13 +313,8 @@ fn no_surface_paints_a_status_in_colour() {
         studio.len()
     );
     for (path, source) in &studio {
-        let also: &[&str] = if path.ends_with("page_specs.rs") {
-            &[]
-        } else {
-            &["Tone::Fail"]
-        };
         let name = path.strip_prefix(&workbench).unwrap_or(path).display();
-        scan(&name.to_string(), source, also, &mut sites);
+        scan(&name.to_string(), source, &["Tone::Fail"], &mut sites);
     }
     assert!(
         sites.is_empty(),

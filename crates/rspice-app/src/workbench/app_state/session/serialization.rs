@@ -647,6 +647,31 @@ mod tests {
         );
     }
 
+    /// A session left on a Simulate page this build no longer has restores
+    /// whole, on the plan's first page.
+    #[test]
+    fn a_session_left_on_a_page_this_build_lacks_restores_on_the_first_page() {
+        use rspice_app_state::state::{SimulationPage, VerificationPage};
+
+        let mut state = AppState::default();
+        state.simulate.simulation_page = SimulationPage::Outputs;
+        state.simulate.verification_page = VerificationPage::Reference;
+        let session = saved_session(&mut state);
+        let stored = "\"simulation_page\":\"Outputs\"";
+        assert!(session.contains(stored), "the session names its page");
+
+        let restored = relaunch(session.replace(stored, "\"simulation_page\":\"Specifications\""));
+        assert_eq!(
+            restored.simulate.simulation_page,
+            SimulationPage::NAVIGATION[0]
+        );
+        assert_eq!(
+            restored.simulate.verification_page,
+            VerificationPage::Reference,
+            "the rest of the session is kept"
+        );
+    }
+
     #[test]
     fn the_session_records_whether_a_project_is_open() {
         let mut closed = AppState::default();

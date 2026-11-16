@@ -118,6 +118,17 @@ fn default_true() -> bool {
     true
 }
 
+/// A page or viewer this build does not have reads as the default one, so a
+/// session left on one keeps everything else it holds.
+fn known_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(T::deserialize(value).unwrap_or_default())
+}
+
 impl Default for UiSessionWire {
     /// What a session without this part reads as: a fresh session, every
     /// owner at its default.
@@ -335,7 +346,7 @@ pub(crate) struct WorkbenchWire {
     library_cellview_page: LibraryCellviewPage,
     #[serde(default)]
     verification_page: VerificationPage,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "known_or_default")]
     simulation_page: SimulationPage,
     #[serde(default)]
     verification: VerificationSessionState,

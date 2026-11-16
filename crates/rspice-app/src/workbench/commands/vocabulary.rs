@@ -395,7 +395,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::Page(SimulationPage::Excitations).key(),
     SimulateCommand::Page(SimulationPage::Variables).key(),
     SimulateCommand::Page(SimulationPage::Outputs).key(),
-    SimulateCommand::Page(SimulationPage::Specifications).key(),
     SimulateCommand::Page(SimulationPage::RunSet).key(),
     SimulateCommand::Page(SimulationPage::Models).key(),
     SimulateCommand::Page(SimulationPage::ConnectRules).key(),

@@ -229,8 +229,8 @@ impl Host for RSpiceApp {
                         let page = app.state.simulate.simulation_page;
                         simulate::show(
                             ui,
-                            &mut features::cx_with_foreign_answers(app, |app| {
-                                simulate::reads_foreign_answers(&app.state.model, page)
+                            &mut features::cx_with_foreign_answers(app, |_| {
+                                simulate::reads_foreign_answers(page)
                             }),
                         );
                     }

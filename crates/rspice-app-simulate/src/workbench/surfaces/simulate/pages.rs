@@ -27,17 +27,9 @@ const CHIP_GAP: f32 = 8.0;
 const CHIP_HEIGHT: f32 = 22.0;
 
 /// Whether the surface reads the dispatcher's answers this frame on `page`:
-/// the Analyses route's heading states why the split stage will not open,
-/// and the Specifications page Results' reason for not opening a limit's
-/// evidence, which it reads only once the plan's dataset exists.
-pub fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
-    match page {
-        SimulationPage::Analyses => true,
-        SimulationPage::Specifications => {
-            super::output_evidence::selected_plan_dataset(model).is_some()
-        }
-        _ => false,
-    }
+/// the Analyses route's heading states why the split stage will not open.
+pub fn reads_foreign_answers(page: SimulationPage) -> bool {
+    page == SimulationPage::Analyses
 }
 
 /// Render the selected setup page. The analyses route is handled by the
@@ -58,7 +50,6 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, page: Simulati
         }
         SimulationPage::Variables => super::page_variables::show(ui, cx),
         SimulationPage::Outputs => super::page_outputs::show(ui, cx),
-        SimulationPage::Specifications => super::page_specs::show(ui, cx),
         SimulationPage::RunSet => super::page_runset::show(ui, cx),
         SimulationPage::Models => super::page_models::show(ui, cx),
         SimulationPage::ConnectRules => super::page_connect_rules::show(ui, cx),
@@ -393,7 +384,6 @@ fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
         // from a page that cannot show the drawing.
         SimulationPage::Analyses
         | SimulationPage::Excitations
-        | SimulationPage::Specifications
         | SimulationPage::RunSet
         | SimulationPage::Models
         | SimulationPage::ConnectRules

@@ -56,7 +56,6 @@ pub enum SimulationPage {
     Excitations,
     Variables,
     Outputs,
-    Specifications,
     RunSet,
     Models,
     ConnectRules,
@@ -67,15 +66,14 @@ pub enum SimulationPage {
 impl SimulationPage {
     /// Navigation order, matching the order a plan is authored in: the
     /// analyses first, then what they are parameterized by, what they produce,
-    /// what judges them, what they are swept over, what they are bound
-    /// against, what converts at their analog/digital boundaries, how they are
-    /// solved, and what is kept.
-    pub const NAVIGATION: [Self; 10] = [
+    /// what they are swept over, what they are bound against, what converts at
+    /// their analog/digital boundaries, how they are solved, and what is kept.
+    /// What judges them is Verify's.
+    pub const NAVIGATION: [Self; 9] = [
         Self::Analyses,
         Self::Excitations,
         Self::Variables,
         Self::Outputs,
-        Self::Specifications,
         Self::RunSet,
         Self::Models,
         Self::ConnectRules,
@@ -89,7 +87,6 @@ impl SimulationPage {
             Self::Excitations => "Excitations",
             Self::Variables => "Design variables",
             Self::Outputs => "Outputs & expressions",
-            Self::Specifications => "Requirements & specs",
             Self::RunSet => "PVT, sweeps & variation",
             Self::Models => "Models & sections",
             Self::ConnectRules => "Connect rules",
@@ -106,7 +103,6 @@ impl SimulationPage {
             Self::Excitations => "Excitations & the analyses that read them",
             Self::Variables => "Design variables",
             Self::Outputs => "Outputs & expressions",
-            Self::Specifications => "Requirements & specifications",
             Self::RunSet => "PVT, sweeps & variation",
             Self::Models => "Models & sections",
             Self::ConnectRules => "Connect rules & inserted converters",

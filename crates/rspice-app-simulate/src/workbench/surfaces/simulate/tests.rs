@@ -1,13 +1,11 @@
-//! Tests for the simulate surface's form and output contracts.
+//! Tests for the simulate surface's form contracts, and for what the sealed
+//! judge answers of a plan's specifications over the datasets its runs keep.
 //!
-//! Output specifications must name an explicit dataset and retain their
-//! measurement-contract failures rather than hiding them, and the form
-//! viewport anchor must survive structure changes without following user
-//! scroll.
+//! A specification is judged against one explicit dataset, retains its
+//! measurement-contract failures rather than hiding them, and is answered at
+//! the points the executor attributed; the form viewport anchor survives
+//! structure changes without following user scroll.
 
-use super::output_evidence::{
-    OutputMeasurementEvidence, measurement_in_output_dataset, selected_output_dataset,
-};
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
@@ -1380,6 +1378,42 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     );
 }
 
+/// What the sealed judge answers of one specification over a run: the worst
+/// value, whether that value's measurement completed, and how many values
+/// answered it. `None` when no value answered.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Judged {
+    value: f64,
+    measurement_passed: bool,
+    retained_measurements: usize,
+}
+
+impl Judged {
+    /// Whether the value is the only one that answered.
+    fn is_complete_coverage(&self) -> bool {
+        self.retained_measurements <= 1
+    }
+}
+
+fn judged(run: &SimulationRun, spec: &crate::state::SpecEntry) -> Option<Judged> {
+    use rspice_results::specification::PreparedSpecification;
+    use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
+
+    let prepared = PreparedSpecification::new(spec.clone()).expect("a valid specification");
+    let verdict = SpecificationVerdict::evaluate(
+        std::slice::from_ref(&prepared),
+        run.analyses.iter().map(AsRef::as_ref),
+    )
+    .pop()
+    .expect("one verdict per specification");
+    Some(Judged {
+        value: verdict.worst_value()?,
+        measurement_passed: verdict.status() != SpecificationVerdictStatus::MeasurementFailure,
+        retained_measurements: usize::try_from(verdict.evidence_count())
+            .expect("an evidence count fits"),
+    })
+}
+
 #[test]
 fn output_specifications_never_mix_measurements_across_retained_datasets() {
     let mut older = SimulationRun::new(1);
@@ -1398,20 +1432,17 @@ fn output_specifications_never_mix_measurements_across_retained_datasets() {
     simulation.retained.runs = vec![older, selected].into();
     simulation.view.active_run_idx = Some(1);
 
-    let run = selected_output_dataset(&simulation).expect("selected dataset");
+    let run = simulation.active_run().expect("selected dataset");
     assert_eq!(run.dataset_id, selected_dataset);
     assert_eq!(
-        measurement_in_output_dataset(run, &spec("bandwidth", Some(0.0), None)),
-        Some(OutputMeasurementEvidence {
+        judged(run, &spec("bandwidth", Some(0.0), None)),
+        Some(Judged {
             value: 42.0,
             measurement_passed: true,
             retained_measurements: 1,
         })
     );
-    assert_eq!(
-        measurement_in_output_dataset(run, &spec("gain", Some(0.0), None)),
-        None
-    );
+    assert_eq!(judged(run, &spec("gain", Some(0.0), None)), None);
 }
 
 #[test]
@@ -1424,8 +1455,7 @@ fn swept_evidence_reports_how_many_points_the_value_was_chosen_from() {
         ));
     }
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(10.0), None))
-        .expect("evidence resolves");
+    let evidence = judged(&run, &spec("gain", Some(10.0), None)).expect("evidence resolves");
 
     assert_eq!(
         evidence.retained_measurements, 3,
@@ -1454,7 +1484,7 @@ fn a_specification_cannot_pass_while_a_retained_point_fails_it() {
     }
     let bound = spec("gain", Some(10.0), None);
 
-    let evidence = measurement_in_output_dataset(&run, &bound).expect("evidence resolves");
+    let evidence = judged(&run, &bound).expect("evidence resolves");
 
     assert_eq!(evidence.value, 4.0);
     assert!(!bound.passes(evidence.value));
@@ -1470,8 +1500,7 @@ fn the_worst_point_of_a_two_sided_bound_is_the_one_nearest_a_violation() {
         ));
     }
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), Some(10.0)))
-        .expect("evidence resolves");
+    let evidence = judged(&run, &spec("gain", Some(0.0), Some(10.0))).expect("evidence resolves");
 
     assert_eq!(
         evidence.value, 9.6,
@@ -1504,29 +1533,10 @@ fn a_measurement_the_engine_could_not_complete_outranks_every_margin() {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 10.001)]),
     ));
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(10.0), None))
-        .expect("evidence resolves");
+    let evidence = judged(&run, &spec("gain", Some(10.0), None)).expect("evidence resolves");
 
     assert!(!evidence.measurement_passed);
     assert_eq!(evidence.value, 50.0);
-}
-
-/// A specification with no scalar bound has no ordering to offer.
-#[test]
-fn an_unbounded_specification_reports_its_latest_point() {
-    let mut run = SimulationRun::new(1);
-    for (id, value) in [(1u64, 3.0), (2, 7.0)] {
-        run.add_analysis(attributed(
-            AnalysisResult::new(id, AnalysisType::Ac, "corner")
-                .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)]),
-        ));
-    }
-
-    let evidence =
-        measurement_in_output_dataset(&run, &spec("gain", None, None)).expect("evidence resolves");
-
-    assert_eq!(evidence.value, 7.0);
-    assert_eq!(evidence.retained_measurements, 2);
 }
 
 #[test]
@@ -1537,52 +1547,15 @@ fn a_lone_measurement_is_reported_as_complete_coverage() {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
     ));
 
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None))
-        .expect("evidence resolves");
+    let evidence = judged(&run, &spec("gain", Some(0.0), None)).expect("evidence resolves");
 
     assert!(evidence.is_complete_coverage());
 }
 
+/// Unattributed evidence answers nothing; a failed analysis's value and a
+/// non-finite one are both failed measurements, never dropped.
 #[test]
-fn coverage_counts_only_attributed_finite_measurements() {
-    let mut run = SimulationRun::new(1);
-    run.add_analysis(attributed(
-        AnalysisResult::new(1, AnalysisType::Ac, "kept")
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
-    ));
-    // Unattributed: cannot be traced to a configuration, so it is not a point.
-    run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Ac, "legacy")
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 13.0)]),
-    );
-    // Attributed but non-finite: not a value, so not a point either.
-    run.add_analysis(attributed(
-        AnalysisResult::new(3, AnalysisType::Ac, "non-finite").with_measurements(vec![
-            rspice_core::MeasureResult {
-                name: "gain".to_owned(),
-                value: Some(f64::INFINITY),
-                raw_value: Some(f64::INFINITY),
-                error: None,
-                passed: true,
-                expected: None,
-                tolerance: None,
-                failure_limit: None,
-                failure_limit_exceeded: false,
-                event_axis: None,
-                units: None,
-            },
-        ]),
-    ));
-
-    let evidence = measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None))
-        .expect("evidence resolves");
-
-    assert_eq!(evidence.retained_measurements, 1);
-    assert!(evidence.is_complete_coverage());
-}
-
-#[test]
-fn output_specifications_reject_unattributed_and_non_finite_but_retain_failed_analysis_evidence() {
+fn unattributed_evidence_is_refused_and_failed_or_non_finite_values_count_as_failures() {
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "legacy")
@@ -1611,11 +1584,11 @@ fn output_specifications_reject_unattributed_and_non_finite_but_retain_failed_an
     ));
 
     assert_eq!(
-        measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)),
-        Some(OutputMeasurementEvidence {
+        judged(&run, &spec("gain", Some(0.0), None)),
+        Some(Judged {
             value: 2.0,
             measurement_passed: false,
-            retained_measurements: 1,
+            retained_measurements: 2,
         })
     );
 }
@@ -1642,8 +1615,8 @@ fn output_specifications_retain_finite_measurement_contract_failures() {
     ));
 
     assert_eq!(
-        measurement_in_output_dataset(&run, &spec("gain", Some(0.0), None)),
-        Some(OutputMeasurementEvidence {
+        judged(&run, &spec("gain", Some(0.0), None)),
+        Some(Judged {
             value: 9.0,
             measurement_passed: false,
             retained_measurements: 1,
@@ -1661,7 +1634,7 @@ fn output_specifications_require_an_explicit_active_dataset() {
     let mut simulation = SimulationState::default();
     simulation.retained.runs.push(run);
 
-    assert!(selected_output_dataset(&simulation).is_none());
+    assert!(simulation.active_run().is_none());
 }
 
 #[test]
@@ -1754,7 +1727,7 @@ fn a_specification_scoped_to_nominal_ignores_a_failing_off_nominal_point() {
     ));
 
     let nominal = scoped("gain", Some(10.0), crate::state::SpecPointScope::Nominal);
-    let evidence = measurement_in_output_dataset(&run, &nominal).expect("nominal evidence");
+    let evidence = judged(&run, &nominal).expect("nominal evidence");
     assert_eq!(evidence.value, 12.0);
     assert!(nominal.passes(evidence.value));
     assert!(
@@ -1763,7 +1736,7 @@ fn a_specification_scoped_to_nominal_ignores_a_failing_off_nominal_point() {
     );
 
     let everywhere = scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints);
-    let evidence = measurement_in_output_dataset(&run, &everywhere).expect("run-set evidence");
+    let evidence = judged(&run, &everywhere).expect("run-set evidence");
     assert_eq!(evidence.value, 4.0);
     assert!(!everywhere.passes(evidence.value));
 
@@ -1774,15 +1747,15 @@ fn a_specification_scoped_to_nominal_ignores_a_failing_off_nominal_point() {
             corners: vec!["ss".to_owned()],
         },
     );
-    let evidence = measurement_in_output_dataset(&run, &slow).expect("corner evidence");
+    let evidence = judged(&run, &slow).expect("corner evidence");
     assert_eq!(
         evidence.value, 4.0,
         "the corner scope is matched case-insensitively against the attributed process"
     );
 }
 
-/// Coverage is what the page prints beside the value, so counting points the
-/// specification was never judged against would overstate the verdict.
+/// The evidence count is stated beside the verdict, so counting points the
+/// specification was never judged against would overstate it.
 #[test]
 fn coverage_counts_only_the_points_inside_the_specification_scope() {
     let mut run = SimulationRun::new(1);
@@ -1801,14 +1774,14 @@ fn coverage_counts_only_the_points_inside_the_specification_scope() {
         ));
     }
 
-    let all = measurement_in_output_dataset(
+    let all = judged(
         &run,
         &scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints),
     )
     .expect("evidence");
     assert_eq!(all.retained_measurements, 4);
 
-    let slow = measurement_in_output_dataset(
+    let slow = judged(
         &run,
         &scoped(
             "gain",
@@ -1838,7 +1811,7 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
     ));
 
     assert_eq!(
-        measurement_in_output_dataset(
+        judged(
             &run,
             &scoped("gain", Some(10.0), crate::state::SpecPointScope::Nominal),
         ),
@@ -1846,7 +1819,7 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
         "an unattributed result must not be read as the nominal point"
     );
     assert_eq!(
-        measurement_in_output_dataset(
+        judged(
             &run,
             &scoped(
                 "gain",
@@ -1859,7 +1832,7 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
         None
     );
     assert!(
-        measurement_in_output_dataset(
+        judged(
             &run,
             &scoped("gain", Some(10.0), crate::state::SpecPointScope::AllPoints),
         )
@@ -1962,7 +1935,7 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
         "each declared point produced its own attributed result"
     );
 
-    let nominal = measurement_in_output_dataset(
+    let nominal = judged(
         &run,
         &scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal),
     )
@@ -1974,7 +1947,7 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
     );
     assert!(nominal.is_complete_coverage());
 
-    let everywhere = measurement_in_output_dataset(
+    let everywhere = judged(
         &run,
         &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
     )
@@ -1986,7 +1959,7 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
     );
     assert_eq!(everywhere.retained_measurements, 2);
 
-    let slow = measurement_in_output_dataset(
+    let slow = judged(
         &run,
         &scoped(
             "vout",
@@ -2073,7 +2046,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
         "a failed point says why it failed"
     );
     assert_eq!(
-        measurement_in_output_dataset(
+        judged(
             &run,
             &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
         ),
@@ -2146,7 +2119,7 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
         measured[1].1
     );
 
-    let nominal = measurement_in_output_dataset(
+    let nominal = judged(
         &run,
         &scoped("vout", Some(0.85), crate::state::SpecPointScope::Nominal),
     )
@@ -2154,7 +2127,7 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
     assert!((nominal.value - measured[0].1).abs() < 1.0e-12);
     assert!(nominal.is_complete_coverage());
 
-    let everywhere = measurement_in_output_dataset(
+    let everywhere = judged(
         &run,
         &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
     )
@@ -2172,7 +2145,7 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
     // A temperature step declares no process axis, so every one of its points
     // solved the run's reference models and a corner-scoped limit is answered
     // by all of them rather than by a subset.
-    let reference_process = measurement_in_output_dataset(
+    let reference_process = judged(
         &run,
         &scoped(
             "vout",
@@ -2249,14 +2222,14 @@ fn a_temperature_crossed_with_a_parameter_answers_no_point_scoped_specification(
         },
     ] {
         assert_eq!(
-            measurement_in_output_dataset(&run, &scoped("vout", Some(0.85), scope.clone())),
+            judged(&run, &scoped("vout", Some(0.85), scope.clone())),
             None,
             "{scope:?} reads no member: none of them is attributed to a point"
         );
     }
 
     // The hottest point with the larger upper leg: 1.8 V across 3.96 k over 1 k.
-    let everywhere = measurement_in_output_dataset(
+    let everywhere = judged(
         &run,
         &scoped("vout", Some(0.85), crate::state::SpecPointScope::AllPoints),
     )

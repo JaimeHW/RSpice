@@ -91,11 +91,6 @@ pub struct SimulateState {
     /// plan holds. Restoring it would reopen the project on someone's partial
     /// reading of the registry and make the missing rows look deleted.
     pub saved_output_filter: String,
-    /// Filter over the specification registry, runtime-only for the same
-    /// reason as the saved-output filter.
-    pub specification_filter: String,
-    /// Which evidence classes the specification registry shows.
-    pub specification_evidence_filter: crate::workbench::state::SpecificationEvidenceFilter,
     /// Runtime-only Jobs manager review context. Job and run records live in
     /// `SimulationState`; this state owns presentation only.
     pub jobs_manager: crate::workbench::state::JobsManagerState,
@@ -129,8 +124,6 @@ impl Default for SimulateState {
             saved_output_name_draft: None,
             saved_output_expression_draft: None,
             saved_output_filter: String::new(),
-            specification_filter: String::new(),
-            specification_evidence_filter: Default::default(),
             jobs_manager: Default::default(),
         }
     }

@@ -17,7 +17,7 @@ use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace,
-    SavedOutput, SavedOutputMaterializationStatus, SavedOutputReceipt, SpecEntry, SpecPointScope,
+    SavedOutput, SavedOutputMaterializationStatus, SavedOutputReceipt,
 };
 
 const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
@@ -183,40 +183,6 @@ fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
     assert!(
         retained.contains("Open Run 1"),
         "the control names the run it found:\n{retained}"
-    );
-}
-
-/// A limit's detail card names the analysis that produces it and the evidence
-/// that answers it. Both are routes, and both refuse in their own words.
-#[test]
-fn the_selected_limit_offers_its_evidence_and_its_producer() {
-    let without = render_with(SimulationPage::Specifications, 1400.0, |state| {
-        let plan_id = state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("stable plan")
-            .id();
-        state.model.workspace.content.replace_active_specs(
-            plan_id,
-            vec![SpecEntry {
-                measurement: "gain_dc".to_owned(),
-                expression: "db20(V(out))".to_owned(),
-                min: Some(40.0),
-                max: None,
-                unit: "dB".to_owned(),
-                scope: SpecPointScope::AllPoints,
-            }],
-        );
-        state.simulate.selected_specification = Some("gain_dc".to_owned());
-    });
-    assert!(
-        without.contains("Open in Results"),
-        "the evidence route is drawn even with no dataset, disabled:\n{without}"
-    );
-    assert!(
-        without.contains("Producing analysis"),
-        "and the producer is still identified:\n{without}"
     );
 }
 

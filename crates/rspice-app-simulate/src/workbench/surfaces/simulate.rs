@@ -14,7 +14,6 @@ pub mod page_outputs;
 pub mod page_runset;
 pub mod page_save;
 mod page_solver;
-pub mod page_specs;
 mod page_variables;
 pub mod pages;
 pub mod participation;
@@ -2425,22 +2424,6 @@ pub(super) fn paint_control_row_label(ui: &mut Ui, label: &str, row_width: f32) 
             theme::sans(tokens::FS_0, FontWeight::Regular),
             Tokens::get(ui.ctx()).color.text_dim,
         );
-}
-
-/// The studio's own specification join, reachable from the sibling surface that
-/// reads the same limits.
-///
-/// Exposed for one reason: Verify answers the same limits against the same
-/// dataset, and the two agreeing has to be a test rather than a convention. A
-/// difference here is not cosmetic — it is one surface reporting a
-/// specification passing while the other reports the retained point that broke
-/// it.
-#[cfg(test)]
-pub(crate) fn measurement_in_output_dataset_for_test(
-    run: &crate::state::SimulationRun,
-    spec: &crate::state::SpecEntry,
-) -> Option<f64> {
-    output_evidence::measurement_in_output_dataset(run, spec).map(|evidence| evidence.value)
 }
 
 #[cfg(any(test, feature = "test-support"))]

@@ -251,3 +251,81 @@ fn nothing_selected_states_acceptance_and_evidence() {
         );
     }
 }
+
+/// The points a specification may apply to are the plan's: every point, the
+/// nominal one, and each process corner the run set declares. A scope the
+/// run set no longer declares stays listed, so the choice shows what the
+/// specification holds.
+#[test]
+fn the_scope_choices_are_the_corners_the_run_set_declares() {
+    use crate::product::ProcessCorner;
+    use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
+
+    let mut harness = harness_with_gain();
+    harness.model.sim_setup.run_set =
+        crate::simulation::controller::test_execution::pvt::from_corner_config(&CornerConfig {
+            process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
+            voltages: vec![1.0],
+            supply_source_names: Vec::new(),
+            temperatures: vec![-40.0, 27.0, 125.0],
+            full_matrix: true,
+            points: Vec::new(),
+            base_analysis: CornerBaseAnalysis::Op,
+        });
+    let labels = |current: &SpecPointScope| {
+        scope_options(&harness.model, current)
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        labels(&SpecPointScope::AllPoints),
+        ["Every point", "The nominal point", "Corner TT", "Corner SS"]
+    );
+    assert_eq!(
+        labels(&SpecPointScope::SelectedCorners {
+            corners: vec!["FF".to_owned()],
+        }),
+        [
+            "Every point",
+            "The nominal point",
+            "Corner TT",
+            "Corner SS",
+            "Corners FF"
+        ]
+    );
+}
+
+/// The selection names a specification by its measurement, so removing one
+/// never hands the selection to the specification that took its place.
+#[test]
+fn a_removed_specification_hands_its_selection_to_no_other() {
+    let mut harness = harness_with_gain();
+    let plan_id = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the harness plan is stable")
+        .id();
+    harness.model.workspace.content.replace_active_specs(
+        plan_id,
+        vec![SpecEntry {
+            measurement: "bandwidth".to_owned(),
+            expression: String::new(),
+            min: Some(1.0e6),
+            max: None,
+            unit: "Hz".to_owned(),
+            scope: SpecPointScope::AllPoints,
+        }],
+    );
+    harness.state.selected_specification = Some("gain".to_owned());
+    let words = inspector_words(&mut harness);
+    assert!(
+        words.iter().any(|word| word == "Acceptance"),
+        "nothing resolves, so the inspector edits the plan's acceptance: {words:?}"
+    );
+    assert!(
+        !words.iter().any(|word| word.contains("bandwidth")),
+        "{words:?}"
+    );
+}

@@ -22,45 +22,6 @@ pub struct RunSetBudgetDrafts {
     pub bytes_per_point: String,
 }
 
-/// Which specifications the specification registry lists.
-///
-/// The classes name evidence, not release policy. A specification carries no
-/// severity, so a "blocking only" view would be a control with nothing behind
-/// it; what the page does resolve for every row is whether the active dataset
-/// answered the limit, and how completely. The registry owns that
-/// classification — this only says which of its outcomes to show.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SpecificationEvidenceFilter {
-    #[default]
-    All,
-    /// Limits the dataset answered with a failure, including a measurement
-    /// that ran and did not succeed.
-    Failing,
-    /// Limits no measurement in the dataset answers at all.
-    WithoutEvidence,
-    /// Limits judged on the worst of several retained measurements, so the
-    /// verdict speaks for the points the dataset kept and no others.
-    Partial,
-}
-
-impl SpecificationEvidenceFilter {
-    pub const ALL: [Self; 4] = [
-        Self::All,
-        Self::Failing,
-        Self::WithoutEvidence,
-        Self::Partial,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::All => "All requirements",
-            Self::Failing => "Failing only",
-            Self::WithoutEvidence => "Without results",
-            Self::Partial => "Measured at several points",
-        }
-    }
-}
-
 pub const fn default_analysis_index() -> usize {
     rspice_simulation_contract::analysis_kind::AnalysisKind::Transient.singleton_index()
 }

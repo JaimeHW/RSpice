@@ -416,7 +416,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Excitations | simulation-excitations |  | on",
             "  Design variables | simulation-variables |  | on",
             "  Outputs & expressions | simulation-outputs |  | on",
-            "  Requirements & specifications | simulation-specifications |  | on",
             "  PVT, sweeps & variation | simulation-run-set |  | on",
             "  Models & sections | simulation-models |  | on",
             "  Connect rules | simulation-connect-rules |  | on",

@@ -26,7 +26,6 @@ fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_ident
         (SimulationPage::Excitations, "simulation-excitations"),
         (SimulationPage::Variables, "simulation-variables"),
         (SimulationPage::Outputs, "simulation-outputs"),
-        (SimulationPage::Specifications, "simulation-specifications"),
         (SimulationPage::RunSet, "simulation-run-set"),
         (SimulationPage::Models, "simulation-models"),
         (SimulationPage::ConnectRules, "simulation-connect-rules"),
