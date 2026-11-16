@@ -10,7 +10,9 @@ use crate::library::metadata::{
 };
 use crate::schematic::component::{BuiltinXspicePortType, Component, LibraryCellInstance};
 use crate::schematic::document::SchematicDocument;
-use rspice_core_base::event_net::{NetDomain, NetEndpoints, PortCarrier};
+/// What a net carries at run, and which event side a converted net has.
+pub use rspice_core_base::event_net::{EventOnlyNetKind, NetDomain};
+use rspice_core_base::event_net::{NetEndpoints, PortCarrier};
 use rspice_design_model::port::PortDirection;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};

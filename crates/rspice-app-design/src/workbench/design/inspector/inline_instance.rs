@@ -850,28 +850,39 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
         }
     }
 
-    let plottable = class != NetClass::Ground;
+    // What a run publishes for this net, by its kind: a logic net has no
+    // voltage to plot, and a net with a converter on it has both sides.
+    let probes = if class == NetClass::Ground {
+        &[][..]
+    } else {
+        domain.probe_accessors()
+    };
     let connected: Vec<u64> = terminals
         .iter()
         .map(|terminal| terminal.component_id)
         .collect();
-    if plottable || !connected.is_empty() {
+    if !probes.is_empty() || !connected.is_empty() {
         action_stack(ui, |ui| {
-            if plottable {
-                let display = format!("V({net_name})");
+            for &quantity in probes {
+                let display = format!("{quantity}({net_name})");
                 let label = format!("Plot {display}");
-                if Button::new(&label).icon(Icon::Results).show(ui).clicked() {
-                    let configuration_changed = crate::schematic::view::toggle_probe_with_feedback(
-                        &mut crate::schematic::view::canvas_parts_in(cx),
-                        &net_name,
-                        &display,
+                if !Button::new(&label).icon(Icon::Results).show(ui).clicked() {
+                    continue;
+                }
+                if quantity != 'V' {
+                    plot_event_net(cx, &net_name, quantity);
+                    continue;
+                }
+                let configuration_changed = crate::schematic::view::toggle_probe_with_feedback(
+                    &mut crate::schematic::view::canvas_parts_in(cx),
+                    &net_name,
+                    &display,
+                );
+                if configuration_changed {
+                    rspice_app_runs::workbench::preflight::invalidate(
+                        &mut cx.runs.preflight,
+                        &mut *cx.handles.run_controller,
                     );
-                    if configuration_changed {
-                        rspice_app_runs::workbench::preflight::invalidate(
-                            &mut cx.runs.preflight,
-                            &mut *cx.handles.run_controller,
-                        );
-                    }
                 }
             }
             if !connected.is_empty()
@@ -893,6 +904,97 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
             }
         });
     }
+}
+
+/// Put the event trace `quantity` (`D` or `E`) of net `name` on the waveform
+/// viewer, from the active run. An event net needs no saved output: a
+/// transient run records the history of every one, so the only net it can
+/// lack is one no transient has reached yet.
+pub fn plot_event_net(cx: &mut Cx<'_, DesignFeature>, name: &str, quantity: char) {
+    use crate::workbench::framework::requests::ShowWaveforms;
+    use rspice_results::result_presentation::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
+    let display = format!("{quantity}({name})");
+    let Some(engine) = net_engine_name(cx.model, name) else {
+        cx.wb.prompt(format!(
+            "{display} has no name the engine can be asked for."
+        ));
+        return;
+    };
+    let found = cx.model.simulation.active_run().and_then(|run| {
+        run.analyses
+            .iter()
+            .enumerate()
+            .find_map(|(index, analysis)| {
+                let recorded = recorded_event_net(analysis, quantity, &engine)?;
+                let shown = analysis
+                    .waveforms
+                    .iter()
+                    .find(|waveform| waveform.name == recorded)
+                    .is_some_and(|waveform| waveform.visible);
+                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+                Some((
+                    index,
+                    SourceWaveformPresentationKey::new(key, recorded),
+                    shown,
+                ))
+            })
+    });
+    let Some((index, key, shown)) = found else {
+        cx.wb.prompt(format!(
+            "{display} has no history in the active run; a transient run records it."
+        ));
+        return;
+    };
+    if !cx.model.simulation.select_analysis(index) {
+        return;
+    }
+    // Raised before the viewer's command and taken after it, as every
+    // hand-off into the waveform viewer is.
+    cx.wb.outbox.push(ShowWaveforms {
+        visibility: vec![(key, shown)],
+        selected: None,
+    });
+    cx.execute(ids::RESULT_WAVEFORMS);
+}
+
+/// The name `analysis` keeps the event trace `quantity` of node `engine`
+/// under: its column's when it has one, else its event history's, spelled as
+/// the run spelled the node.
+fn recorded_event_net(
+    analysis: &crate::state::AnalysisResult,
+    quantity: char,
+    engine: &str,
+) -> Option<String> {
+    let wrapped = format!("{quantity}({engine})");
+    if let Some(column) = analysis
+        .waveforms
+        .iter()
+        .find(|waveform| waveform.name.eq_ignore_ascii_case(&wrapped))
+    {
+        return Some(column.name.clone());
+    }
+    let Some(AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+        ..
+    }) = analysis.result_payload.as_ref()
+    else {
+        return None;
+    };
+    let node = if quantity == 'D' {
+        digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .find(|node| node.eq_ignore_ascii_case(engine))
+    } else {
+        real_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .find(|node| node.eq_ignore_ascii_case(engine))
+    }?;
+    Some(format!("{quantity}({node})"))
 }
 
 pub(super) struct NetAnnotation {

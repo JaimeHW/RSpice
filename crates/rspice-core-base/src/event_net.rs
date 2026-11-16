@@ -65,9 +65,15 @@ impl EventOnlyNetKind {
     /// plot's spelling, which the workbench event sheet reads back. Neither
     /// depends on which result object was asked.
     fn column_label(self, name: &str) -> String {
+        format!("{}({name})", self.accessor())
+    }
+
+    /// The letter this net's event trace is read through: `D` for digital,
+    /// `E` for real, as [`Self::column_label`] wraps a net in it.
+    pub const fn accessor(self) -> char {
         match self {
-            Self::Digital => format!("D({name})"),
-            Self::Real => format!("E({name})"),
+            Self::Digital => 'D',
+            Self::Real => 'E',
         }
     }
 
@@ -216,7 +222,11 @@ impl NetEndpoints {
             analog
         };
         if converts {
-            NetDomain::Mixed
+            NetDomain::Mixed(if self.logic > 0 {
+                EventOnlyNetKind::Digital
+            } else {
+                EventOnlyNetKind::Real
+            })
         } else if self.logic > 0 && self.real > 0 {
             NetDomain::LogicAndReal
         } else if self.logic > 0 {
@@ -238,8 +248,9 @@ pub enum NetDomain {
     /// A real value resolved on the event kernel.
     Real,
     /// Event endpoints meet the analog solver through a converter the engine
-    /// inserts when the run is prepared.
-    Mixed,
+    /// inserts when the run is prepared; the kind is the converter's event
+    /// side.
+    Mixed(EventOnlyNetKind),
     /// Logic and real ports on one event net, which the engine refuses: the
     /// two meet only through an explicit conversion.
     LogicAndReal,
@@ -252,15 +263,30 @@ impl NetDomain {
             Self::Electrical => "electrical",
             Self::Logic => "logic",
             Self::Real => "real",
-            Self::Mixed => "mixed (converter at run)",
+            Self::Mixed(_) => "mixed (converter at run)",
             Self::LogicAndReal => "logic and real (refused at run)",
+        }
+    }
+
+    /// The letters a run publishes this net's values through, each wrapping
+    /// the net's name: `V` for its node voltage, `D` or `E` for its event
+    /// trace, and both sides of a converted net. A net the run refuses
+    /// publishes nothing.
+    pub const fn probe_accessors(self) -> &'static [char] {
+        match self {
+            Self::Electrical => &['V'],
+            Self::Logic => &['D'],
+            Self::Real => &['E'],
+            Self::Mixed(EventOnlyNetKind::Digital) => &['V', 'D'],
+            Self::Mixed(EventOnlyNetKind::Real) => &['V', 'E'],
+            Self::LogicAndReal => &[],
         }
     }
 }
 
 #[cfg(test)]
 mod net_domain_tests {
-    use super::{NetDomain, NetEndpoints, PortCarrier};
+    use super::{EventOnlyNetKind, NetDomain, NetEndpoints, PortCarrier};
 
     fn net(ground: bool, carriers: &[(PortCarrier, bool)]) -> NetDomain {
         let mut endpoints = NetEndpoints {
@@ -287,12 +313,22 @@ mod net_domain_tests {
         assert_eq!(net(false, &[(Real, true), (Real, false)]), NetDomain::Real);
         assert_eq!(
             net(false, &[(Logic, true), (Electrical, false)]),
-            NetDomain::Mixed
+            NetDomain::Mixed(EventOnlyNetKind::Digital)
         );
-        assert_eq!(net(true, &[(Logic, true), (Logic, true)]), NetDomain::Mixed);
+        assert_eq!(
+            net(false, &[(Real, true), (Electrical, false)]),
+            NetDomain::Mixed(EventOnlyNetKind::Real)
+        );
+        assert_eq!(
+            net(true, &[(Logic, true), (Logic, true)]),
+            NetDomain::Mixed(EventOnlyNetKind::Digital)
+        );
         // One module port alone is an analog node its connect module drives;
         // one code-model port alone is an event net.
-        assert_eq!(net(false, &[(Logic, true)]), NetDomain::Mixed);
+        assert_eq!(
+            net(false, &[(Logic, true)]),
+            NetDomain::Mixed(EventOnlyNetKind::Digital)
+        );
         assert_eq!(net(false, &[(Logic, false)]), NetDomain::Logic);
         assert_eq!(
             net(false, &[(Logic, true), (Real, true)]),
@@ -301,5 +337,34 @@ mod net_domain_tests {
         for carrier in [Electrical, Logic, Real] {
             assert_eq!(PortCarrier::from_label(carrier.label()), Some(carrier));
         }
+    }
+
+    /// A net is probed through what the run publishes for it: a logic net
+    /// has no voltage to plot, and a converted net has both sides.
+    #[test]
+    fn a_net_is_probed_through_what_the_run_publishes() {
+        use PortCarrier::{Electrical, Logic, Real};
+        assert_eq!(net(false, &[(Electrical, false)]).probe_accessors(), ['V']);
+        assert_eq!(
+            net(false, &[(Logic, true), (Logic, true)]).probe_accessors(),
+            ['D']
+        );
+        assert_eq!(
+            net(false, &[(Real, true), (Real, true)]).probe_accessors(),
+            ['E']
+        );
+        assert_eq!(
+            net(false, &[(Logic, true), (Electrical, false)]).probe_accessors(),
+            ['V', 'D']
+        );
+        assert_eq!(
+            net(false, &[(Real, true), (Electrical, false)]).probe_accessors(),
+            ['V', 'E']
+        );
+        assert!(
+            net(false, &[(Logic, true), (Real, true)])
+                .probe_accessors()
+                .is_empty()
+        );
     }
 }

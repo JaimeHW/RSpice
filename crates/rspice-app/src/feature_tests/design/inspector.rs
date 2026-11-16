@@ -116,6 +116,113 @@ fn the_net_panel_states_scope_and_pins_only() {
 
 /// The Terminals header counts only open pins, since the rows count
 /// themselves, and an instance without terminals has no section at all.
+/// A net offers the probe a run publishes for it, as Virtuoso ADE probes a
+/// net by what it carries: `D()` on a logic net, `E()` on a real one, `V()`
+/// on an electrical one, and both sides of a net the run converts. A logic
+/// net has no voltage to plot, and a net the run refuses has nothing.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_net_offers_the_probe_its_kind_publishes() {
+    use rspice_design::connectivity::summary::{DesignNet, EventOnlyNetKind, NetClass, NetDomain};
+    let mut app = RSpiceApp::test_instance();
+    let all = ["Plot V(en)", "Plot D(en)", "Plot E(en)"];
+    for (domain, offered) in [
+        (NetDomain::Electrical, &["Plot V(en)"][..]),
+        (NetDomain::Logic, &["Plot D(en)"]),
+        (NetDomain::Real, &["Plot E(en)"]),
+        (
+            NetDomain::Mixed(EventOnlyNetKind::Digital),
+            &["Plot V(en)", "Plot D(en)"],
+        ),
+        (
+            NetDomain::Mixed(EventOnlyNetKind::Real),
+            &["Plot V(en)", "Plot E(en)"],
+        ),
+        (NetDomain::LogicAndReal, &[]),
+    ] {
+        let nets = vec![DesignNet {
+            name: "en".to_owned(),
+            authored_name: true,
+            class: NetClass::Signal,
+            terminals: Vec::new(),
+            port: None,
+            wire_ids: Vec::new(),
+            domain,
+        }];
+        let painted = painted_panel(|ui| net_panel(ui, &mut app.design_cx(), "en", &nets));
+        for probe in all {
+            assert_eq!(
+                painted.contains(probe),
+                offered.contains(&probe),
+                "{domain:?} {probe}: {painted}"
+            );
+        }
+    }
+}
+
+/// `D()` on a logic net puts the net's lane on the waveform viewer from the
+/// active run's event history: the net needs no saved output, because a
+/// transient run records every event net.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn plotting_a_logic_net_shows_its_lane_from_the_active_run() {
+    use rspice_app_design::workbench::design::inspector::inline_instance::plot_event_net;
+    use rspice_results::result_presentation::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
+    let scratch = std::env::temp_dir().join(format!("rspice-plot-logic-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).expect("a scratch directory");
+    let deck = "logic net\nV1 a 0 PULSE(0 5 0 1n 1n 4n 10n)\nabr [a] [en] adc\n\
+                .model adc adc_bridge(in_low=1 in_high=2)\nainv en q inv\n\
+                .model inv d_inverter\n.tran 0.1n 20n\n.end\n";
+    let path = scratch.join("logic.cir");
+    std::fs::write(&path, deck).expect("write the deck");
+    let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch_at(
+        deck,
+        &path,
+        rspice_results::run::SimulationRunLifecycle::Completed,
+    );
+    let _ = std::fs::remove_dir_all(&scratch);
+    let Some(rspice_app_state::state::AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        ..
+    }) = run.analyses[0].result_payload.as_ref()
+    else {
+        panic!("the run keeps its event history");
+    };
+    let recorded = digital_traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case("en"))
+        .map(|trace| format!("D({})", trace.node_name))
+        .expect("en has a history");
+    let key = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+        recorded,
+    );
+    let mut app = RSpiceApp::test_instance();
+    app.state.model.simulation.retained.runs.push(run);
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    assert!(
+        !app.state
+            .results
+            .results
+            .session
+            .waveform_visibility(&key, false)
+    );
+
+    plot_event_net(&mut app.design_cx(), "en", 'D');
+    let ctx = crate::workbench::app::veriloga_design_tests::themed_context();
+    crate::workbench::app::veriloga_design_tests::frame(&ctx, &mut app, egui::vec2(1440.0, 900.0));
+    assert!(
+        app.state
+            .results
+            .results
+            .session
+            .waveform_visibility(&key, false),
+        "D(en) is on the plot"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn terminals_head_only_open_pins_and_vanish_without_terminals() {
