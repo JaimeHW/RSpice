@@ -13,8 +13,8 @@ use crate::simulation::controller::test_execution::{
 use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
-    Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, SimulationRun, View, ViewType,
+    Cell, CellViewRef, ComponentType, Library, Point, ProjectSourceBundle, ProjectSourceLanguage,
+    ProjectSourceOwner, SimulationRun, View, ViewType,
 };
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, compile_project_bundle_receipt,
@@ -23,6 +23,7 @@ use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::run::SimulationRunLifecycle;
 
 mod c04;
+mod c12;
 
 /// A corpus file, by its path under `tests/mixed-corpus`.
 fn corpus(relative: &str) -> PathBuf {
@@ -172,33 +173,29 @@ impl Drawing {
         self.part(ComponentType::Ground, "GND", "", "", &["0"]);
     }
 
-    /// An instance `name` of the view `reference`, each port on the net
-    /// `nets` gives it, in a row of its own below the devices.
+    /// An instance `name` of the view `reference`, placed as the library
+    /// browser places it, each pin on the net `nets` gives it, in a row of
+    /// its own below the devices.
     fn instance(&mut self, reference: &CellViewRef, name: &str, row: i32, nets: &[(&str, &str)]) {
-        let ports = rspice_design::library::metadata::metadata_ports(
-            &self
-                .state
-                .model
-                .library_manager
-                .get_library(&reference.library)
-                .and_then(|library| library.get_cell(&reference.cell))
-                .and_then(|cell| cell.get_view(&reference.view))
-                .expect("the view")
-                .metadata,
+        let model = &self.state.model;
+        let candidate = crate::state::library_cell_placement_candidates(
+            &model.library_manager,
+            &model.workspace,
         )
-        .expect("the view states its ports");
-        let mut binding =
-            LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
-        binding.bind_interface(&ports);
+        .into_iter()
+        .find(|candidate| {
+            candidate.library == reference.library
+                && candidate.cell == reference.cell
+                && candidate.view == reference.view
+        })
+        .unwrap_or_else(|| panic!("the browser offers {}", reference.display_path()));
+        assert!(candidate.ready, "{name}: {}", candidate.unavailable_reason);
         let origin = Point::new(row * 1200, -1600);
-        let id = self
-            .state
-            .model
+        let model = &mut self.state.model;
+        let id = model
             .schematic
-            .add_library_cell_component(origin, binding);
-        let component = self
-            .state
-            .model
+            .add_library_cell_component(origin, candidate.binding);
+        let component = model
             .schematic
             .document_mut_for_test()
             .components
@@ -206,25 +203,136 @@ impl Drawing {
             .find(|component| component.id == id)
             .expect("the instance");
         component.name = name.to_owned();
-        let order = component
+        let component = component.clone();
+        let order = &component
             .library_cell
             .as_ref()
             .expect("a cell instance")
-            .terminal_order
-            .clone();
-        let terminals = order
+            .terminal_order;
+        // Where the pins stand on the symbol the sheet draws for the cell.
+        let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
+            model.library_manager.catalog(),
+            &model.workspace.content.schematic_buffers,
+        );
+        let net_of = |pin: &str| {
+            nets.iter()
+                .find(|(port, _)| port.eq_ignore_ascii_case(pin))
+                .map(|(_, net)| *net)
+        };
+        let terminals = rspice_design::connectivity::terminal_positions(&component, &|binding| {
+            resolver.resolve_binding(binding)
+        })
+        .into_iter()
+        .enumerate()
+        .map(|(index, (pin, at))| {
+            let net = net_of(&pin)
+                .or_else(|| order.get(index).and_then(|port| net_of(port)))
+                .unwrap_or_else(|| panic!("{name}: no net for {pin}"));
+            (at, net)
+        })
+        .collect::<Vec<_>>();
+        // A pin on a side edge of the symbol is wired out sideways, away from
+        // the body, and one on its top or bottom edge out vertically: pins
+        // stand 20 apart along an edge, so a stub along the edge would land
+        // on the next pin.
+        for (at, net) in terminals {
+            let (dx, dy) = if at.x == origin.x {
+                (0, (at.y - origin.y).signum())
+            } else {
+                ((at.x - origin.x).signum(), 0)
+            };
+            let out = Point::new(at.x + dx * 20, at.y + dy * 20);
+            let schematic = &mut self.state.model.schematic;
+            schematic.add_wire(vec![at, out]).expect("the stub commits");
+            schematic.add_net_label(out, net.to_owned());
+        }
+    }
+
+    /// An interface port `name` of the sheet being drawn, on the net of
+    /// the same name.
+    fn port(&mut self, name: &str, direction: crate::state::PortDirectionType) {
+        let origin = self.next_origin();
+        let schematic = &mut self.state.model.schematic;
+        let pending = crate::state::PendingPortPlacement::new(
+            name,
+            direction,
+            crate::state::PortDiscipline::Electrical,
+            schematic.topology_version(),
+            schematic.next_interface_order(),
+        );
+        let id = schematic
+            .place_pending_port(origin, pending)
+            .unwrap_or_else(|error| panic!("port {name}: {error}"));
+        let port = schematic
+            .document()
+            .components
             .iter()
-            .zip(component.terminal_positions())
-            .map(|(port, (_, at))| {
-                let net = nets
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(port))
-                    .unwrap_or_else(|| panic!("{}: no net for {port}", component.name))
-                    .1;
-                (at, net)
-            })
-            .collect();
-        self.label(terminals);
+            .find(|component| component.id == id)
+            .expect("the port");
+        let terminals = rspice_design::schematic::component_edit::legacy_terminal_points(port);
+        self.label(terminals.into_iter().map(|at| (at, name)).collect());
+    }
+
+    /// Make the sheet drawn so far the schematic of the cell `cell`, draw
+    /// its symbol from its ports as Generate symbol does, and start the
+    /// next sheet.
+    fn master(&mut self, cell: &str) -> CellViewRef {
+        let reference = CellViewRef::new(self.library, cell, "schematic");
+        let mut library_cell = Cell::new(cell);
+        library_cell.add_view(View::new("schematic", ViewType::Schematic));
+        library_cell.add_view(View::new("symbol", ViewType::Symbol));
+        let model = &mut self.state.model;
+        model
+            .library_manager
+            .get_library_mut(self.library)
+            .expect("the library")
+            .add_cell(library_cell);
+        let master = std::mem::take(&mut model.schematic);
+        let ports = master.document().interface_ports();
+        model
+            .workspace
+            .insert_schematic_editor(reference.key(), master);
+        let symbol = CellViewRef::new(self.library, cell, "symbol");
+        let document = model.generated_symbol_document(&symbol, &ports);
+        model
+            .library_manager
+            .edit_library(self.library)
+            .and_then(|mut library| library.store_symbol_document(cell, "symbol", &document))
+            .expect("the symbol view")
+            .expect("the symbol stores");
+        self.slot = 0;
+        reference
+    }
+
+    /// Import the model file `file` as Models > Add library does, and
+    /// attach it to the plan as the Simulate page's model libraries do.
+    fn model_library(&mut self, file: &str) {
+        let model = &mut self.state.model;
+        let library = model
+            .model_library_manager
+            .load_library_file(corpus(file), None)
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        self.attach_model_library(&library);
+    }
+
+    /// Attach the model library `library` to the plan, as the Simulate
+    /// page's model libraries do.
+    fn attach_model_library(&mut self, library: &str) {
+        let model = &mut self.state.model;
+        let binding = model
+            .model_library_manager
+            .simulation_plan_binding(library)
+            .expect("an imported library binds to a plan");
+        let mut candidate = model.sim_setup.clone();
+        candidate.model_bindings.push(binding);
+        model
+            .model_library_manager
+            .validate_simulation_plan_bindings(&candidate.model_bindings)
+            .expect("the binding validates");
+        candidate
+            .commit_active_plan_configuration_change(format!("Attached model library {library}"))
+            .expect("the plan takes the binding");
+        model.sim_setup = candidate;
     }
 
     /// A design variable the netlist states as `.param name=value`.
