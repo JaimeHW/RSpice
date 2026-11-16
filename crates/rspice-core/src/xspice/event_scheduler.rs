@@ -2032,7 +2032,8 @@ impl EventScheduler {
             self.check_sequence_state()?;
             let Some(event) = self.queues.pop_active() else {
                 if self.queues.promote() {
-                    self.count_delta_cycle(bound, self.limits.max_delta_cycles_per_tick)?;
+                    let limit = self.limits.max_delta_cycles_per_tick;
+                    self.count_delta_cycle(bound, limit, limit)?;
                     continue;
                 }
                 // The current instant has gone quiet in every region, so the
@@ -2086,14 +2087,19 @@ impl EventScheduler {
     pub fn note_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
         self.check_sequence_state()?;
         self.open_due_slot(bound);
-        self.count_delta_cycle(bound, self.limits.max_delta_cycles_per_tick)
+        let limit = self.limits.max_delta_cycles_per_tick;
+        self.count_delta_cycle(bound, limit, limit)
     }
 
-    /// Count one pass of a code-model settle at `bound`, refusing the settle
-    /// once more than `passes` of them have left outputs changing.
+    /// Count one pass of a code-model settle at `bound` that left outputs
+    /// changing, refusing the settle once `passes` of them have.
     ///
     /// This is ngspice's `max_event_passes` (xspice/evt/evtiter.c), and it
-    /// is counted as ngspice counts it: per settle, which `first` opens, not
+    /// is counted as ngspice counts it. EVTiter runs `passes < max` and
+    /// returns at the first pass that leaves no output changing, so of its
+    /// `max` passes the last has to be quiet: a settle whose `max`-th pass
+    /// still changed outputs is refused (evtiter.c:146-294). It is counted
+    /// per settle, which `first` opens, not
     /// per instant, since one instant is settled again by every Newton
     /// iteration and every retried step that lands on it. What fired is
     /// counted again from the end of the settle's first pass, so a refusal
@@ -2116,7 +2122,7 @@ impl EventScheduler {
             self.slot_events_executed = 0;
             self.queues.clear_activations();
         }
-        self.count_delta_cycle(bound, passes)
+        self.count_delta_cycle(bound, passes.saturating_sub(1), passes)
     }
 
     /// Record that the open slot resumed work deferred by a zero delay
@@ -2197,7 +2203,14 @@ impl EventScheduler {
     }
 
     /// Count one delta cycle of the open slot against its ceiling.
-    fn count_delta_cycle(&mut self, bound: Instant, limit: u32) -> Result<(), SchedulerError> {
+    /// Count one delta cycle of the open slot, refusing it past `limit` and
+    /// naming `named` as the bound that tripped.
+    fn count_delta_cycle(
+        &mut self,
+        bound: Instant,
+        limit: u32,
+        named: u32,
+    ) -> Result<(), SchedulerError> {
         self.slot_delta_cycles = self
             .slot_delta_cycles
             .checked_add(1)
@@ -2211,7 +2224,7 @@ impl EventScheduler {
                 self.slot_events_executed,
             );
             if let SchedulerError::Oscillation(diagnostic) = &mut error {
-                diagnostic.delta_cycle_limit = limit;
+                diagnostic.delta_cycle_limit = named;
             }
             return Err(error);
         }

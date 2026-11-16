@@ -6652,6 +6652,7 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
+        circuit.scheduler.xspice_max_event_passes = netlist.options.max_event_passes;
         circuit.inductors.ic_mode = match self.config.spice_dialect {
             SpiceDialect::Ngspice => crate::circuit::InductorIcMode::UicOnly,
             SpiceDialect::Xyce => crate::circuit::InductorIcMode::AllOperatingPoints,

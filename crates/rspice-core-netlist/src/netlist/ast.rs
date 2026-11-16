@@ -5275,6 +5275,11 @@ pub struct SimulationOptions {
     pub transient_new_bp_stepping: Option<bool>,
     /// Transient source/code-model ramping time in seconds (default: disabled)
     pub ramptime: Option<Value>,
+    /// ngspice's `maxevtiter` (spicelib/analysis/cktsopt.c:214): the passes
+    /// one XSPICE event settle may take with outputs still changing before
+    /// it is refused. Unset, it is the circuit's event outputs and one more
+    /// (xspice/evt/evtinit.c:359).
+    pub max_event_passes: Option<u32>,
     /// LTspice's `.TRAN ... STARTUP`: the time over which every independent
     /// source whose value is DC alone rises linearly from zero at the
     /// transient's operating point to its value. A source with a waveform

@@ -1188,8 +1188,8 @@ mod tests {
         assert_eq!(diagnostic.entities[0].0.instance, "an_oscillator");
         assert_eq!(diagnostic.delta_cycle_limit, 2);
         assert_eq!(
-            diagnostic.delta_cycles, 3,
-            "the third changing pass is refused"
+            diagnostic.delta_cycles, 2,
+            "the second changing pass leaves neither of the two passes quiet"
         );
     }
 
@@ -1214,8 +1214,8 @@ mod tests {
         for _settle in 0..100 {
             for pass in 0..2 {
                 scheduler
-                    .note_settle_pass(1.0e-9, pass == 0, 2)
-                    .expect("two passes are within the bound");
+                    .note_settle_pass(1.0e-9, pass == 0, 3)
+                    .expect("two changing passes and a quiet one are within the bound");
             }
         }
     }

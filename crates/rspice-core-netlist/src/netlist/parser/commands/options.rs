@@ -1064,6 +1064,26 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     options.ramptime =
                         Some(parse_non_negative_real_option("RAMPTIME", value, line_num)?);
                 }
+                (_, "MAXEVTITER") => {
+                    let value = expect_value(stream, line_num, params)?;
+                    let passes = parse_usize_option("MAXEVTITER", value, line_num)?;
+                    // ngspice's EVTiter runs `passes < max_event_passes`
+                    // (xspice/evt/evtiter.c:146), so under 0 it runs no pass
+                    // and refuses every settle as too many passes.
+                    options.max_event_passes = Some(
+                        u32::try_from(passes)
+                            .ok()
+                            .filter(|passes| *passes >= 1)
+                            .ok_or_else(|| ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "MAXEVTITER must be from 1 to {}, found {passes}: it is \
+                                     the passes an event settle may take",
+                                    u32::MAX
+                                ),
+                            })?,
+                    );
+                }
                 (Some("XSPICE"), "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "DIGITAL_DELAY")
                 | (None, "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "XSPICE_DIGITAL_DELAY_TYPE") =>
                 {

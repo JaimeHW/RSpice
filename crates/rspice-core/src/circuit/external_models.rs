@@ -596,7 +596,9 @@ fn apply_xspice_event_slot(
         // Named by the instant whose events would not settle: `bound` reaches
         // past the timepoint by the window its models count as now.
         .map_err(|error| {
-            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(time, &error))
+            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(
+                time, &error, false,
+            ))
         })?;
     if touched_digital_nodes.len() > 1 {
         touched_digital_nodes.sort_unstable();
@@ -782,9 +784,13 @@ fn project_voltage_pair(
 /// when it gave up. The scheduler counts activations per driver, so what comes
 /// out names the instances and ports that would not quiet, busiest first,
 /// which is what identifies a zero-delay loop.
+///
+/// `optioned` says the pass bound is `.options maxevtiter`'s rather than the
+/// circuit's own.
 fn xspice_event_settling_message(
     time: Value,
     error: &crate::xspice::event_scheduler::SchedulerError,
+    optioned: bool,
 ) -> String {
     use crate::xspice::event_scheduler::{OscillationCause, SchedulerError};
 
@@ -793,6 +799,10 @@ fn xspice_event_settling_message(
     };
     let ceiling = match diagnostic.cause {
         // ngspice's `max_event_passes`.
+        OscillationCause::DeltaCycleLimit if optioned => format!(
+            "{} (.options maxevtiter)",
+            counted(u64::from(diagnostic.delta_cycle_limit), "pass", "passes")
+        ),
         OscillationCause::DeltaCycleLimit => format!(
             "{} passes (its event outputs and one more, which a network \
              without a loop settles within)",
@@ -821,9 +831,15 @@ fn xspice_event_settling_message(
     };
     format!(
         "XSPICE event network did not settle at time {time:e} within {ceiling} \
-         after {} passes and {} events ({busiest})",
-        diagnostic.delta_cycles, diagnostic.events_executed
+         after {} and {} ({busiest})",
+        counted(u64::from(diagnostic.delta_cycles), "pass", "passes"),
+        counted(diagnostic.events_executed, "event", "events"),
     )
+}
+
+/// `count` and the noun for it.
+fn counted(count: u64, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// How a code model's reactive contribution is turned into a companion stamp:
@@ -1783,7 +1799,10 @@ impl CircuitData {
             .xspice_event_dispatch
             .as_ref()
             .expect("prepared event wave");
-        let max_event_passes = dispatch.max_event_passes();
+        let max_event_passes = self
+            .scheduler
+            .xspice_max_event_passes
+            .unwrap_or_else(|| dispatch.max_event_passes());
         // Non-transient evaluations run every model body, as before. Only
         // transient event-only models can use dirty-input dispatch.
         let dirty_dispatch_applies = analysis == crate::xspice::AnalysisType::Transient;
@@ -2101,7 +2120,11 @@ impl CircuitData {
             opens_settle || moved_on,
             max_event_passes,
         ) {
-            let message = xspice_event_settling_message(time, &error);
+            let message = xspice_event_settling_message(
+                time,
+                &error,
+                self.scheduler.xspice_max_event_passes.is_some(),
+            );
             if self.xspice_evaluation_error.is_none() {
                 self.xspice_evaluation_error = Some(message.clone());
             }
@@ -6763,7 +6786,54 @@ endmodule"#;
     /// change one gate on.
     #[test]
     fn a_zero_delay_chain_through_every_output_settles_within_the_passes() {
-        const GATES: usize = 8;
+        let mut circuit = zero_delay_chain();
+        circuit
+            .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
+            .expect("a chain without a loop settles");
+        assert_eq!(
+            circuit
+                .scheduler
+                .xspice_event_values
+                .digital_values
+                .get(&(CHAIN_GATES + 1)),
+            Some(&DigitalValue::zero()),
+            "the change reached the end of the chain"
+        );
+    }
+
+    /// `.options maxevtiter` is the bound instead, and the refusal says so:
+    /// the chain's eight changing passes and the quiet one after them settle
+    /// under nine, and are refused under eight, as ngspice refuses them.
+    #[test]
+    fn maxevtiter_bounds_a_settle_in_place_of_the_circuits_outputs() {
+        let mut circuit = zero_delay_chain();
+        circuit.scheduler.xspice_max_event_passes = Some(9);
+        circuit
+            .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
+            .expect("nine passes are within maxevtiter=9");
+
+        let mut circuit = zero_delay_chain();
+        circuit.scheduler.xspice_max_event_passes = Some(8);
+        assert!(
+            circuit
+                .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
+                .is_err()
+        );
+        let err = circuit
+            .take_xspice_evaluation_error()
+            .expect("the refusal is reported");
+        assert!(
+            err.contains("within 8 passes (.options maxevtiter) after 8 passes"),
+            "{err}"
+        );
+    }
+
+    const CHAIN_GATES: usize = 8;
+
+    /// Eight zero-delay inverters registered from the far end, so each pass
+    /// moves a change one gate on, with a change due at the chain's input.
+    fn zero_delay_chain() -> CircuitData {
+        const GATES: usize = CHAIN_GATES;
         let mut circuit = CircuitData::new();
         for node in 0..=GATES {
             circuit.get_or_create_node(&format!("n{node}"));
@@ -6794,17 +6864,6 @@ endmodule"#;
             EventValue::Digital(DigitalValue::zero()),
         );
         circuit
-            .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
-            .expect("a chain without a loop settles");
-        assert_eq!(
-            circuit
-                .scheduler
-                .xspice_event_values
-                .digital_values
-                .get(&(GATES + 1)),
-            Some(&DigitalValue::zero()),
-            "the change reached the end of the chain"
-        );
     }
 
     #[test]

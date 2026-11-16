@@ -7874,6 +7874,29 @@ mod tests {
         assert_eq!(netlist.options.ramptime, Some(10.0e-9));
     }
 
+    /// ngspice's `maxevtiter` sets the passes an event settle may take; 0,
+    /// under which ngspice refuses every settle, is refused here by name.
+    #[test]
+    fn options_parse_maxevtiter() {
+        let netlist = Netlist::parse(&deck_with_options(".options maxevtiter=5"))
+            .expect("maxevtiter option parses");
+        assert_eq!(netlist.options.max_event_passes, Some(5));
+        assert_eq!(
+            Netlist::parse(&deck_with_options(".options rshunt=1e12"))
+                .expect("a deck without it parses")
+                .options
+                .max_event_passes,
+            None
+        );
+        for refused in ["0", "1.5", "-1", "5e9"] {
+            let error = Netlist::parse(&deck_with_options(&format!(
+                ".options maxevtiter={refused}"
+            )))
+            .expect_err("a settle needs at least one pass, and a whole count");
+            assert!(error.to_string().contains("MAXEVTITER"), "{error}");
+        }
+    }
+
     #[test]
     fn options_accept_xyce_output_initial_interval_schedule() {
         let netlist = Netlist::parse(&deck_with_options(

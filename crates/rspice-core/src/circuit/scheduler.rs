@@ -184,6 +184,10 @@ pub(crate) struct CircuitScheduler {
     /// Derived from port directions and connections, so it is not part of any
     /// rollback snapshot.
     pub(crate) xspice_event_dispatch: Option<super::xspice_dispatch::XspiceEventDispatch>,
+    /// `.options maxevtiter`: the passes one event settle may take, in place
+    /// of the dispatch's own bound (see
+    /// [`super::xspice_dispatch::XspiceEventDispatch::max_event_passes`]).
+    pub(crate) xspice_max_event_passes: Option<u32>,
     /// One process, driver and event-queue authority for every mixed HDL
     /// instance.
     #[cfg(feature = "veriloga")]
@@ -236,6 +240,7 @@ impl CircuitScheduler {
             xspice_event_values: crate::xspice::SharedXspiceEventValues::default(),
             xspice_event_queue: crate::xspice::SharedXspiceEventQueue::new(),
             xspice_event_dispatch: None,
+            xspice_max_event_passes: None,
             #[cfg(feature = "veriloga")]
             mixed_digital_coordinator: None,
             #[cfg(feature = "veriloga")]
