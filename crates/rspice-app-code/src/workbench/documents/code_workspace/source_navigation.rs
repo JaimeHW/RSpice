@@ -292,6 +292,25 @@ fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceO
         push(SourceOutlineGroup::Ports, &port.name, words.join(" "), span);
     }
 
+    // A generate block's declarations are rows as the block writes them:
+    // once, by the names written, whatever its condition or loop makes of it.
+    let blocks = module
+        .generates
+        .iter()
+        .flat_map(|construct| construct.written_blocks())
+        .map(|block| block.items.as_ref());
+    for items in std::iter::once(module).chain(blocks) {
+        declaration_rows(items, &is_port, text, &mut push);
+    }
+}
+
+/// The rows of what `module` declares besides its ports, through `push`.
+fn declaration_rows(
+    module: &Module,
+    is_port: &dyn Fn(&str) -> bool,
+    text: &SourceText<'_>,
+    push: &mut dyn FnMut(SourceOutlineGroup, &str, String, Span),
+) {
     let mut parameters = module
         .parameters
         .iter()

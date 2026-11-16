@@ -289,7 +289,11 @@ fn declared_modules(
     let tokens = rspice_veriloga::Lexer::new(preprocessed, source_id)
         .collect_tokens()
         .map_err(|error| error.to_string())?;
+    // Names, ports and instances are all a survey reads, and it runs on the
+    // editor's thread: the source is read as written, so no constant
+    // function runs (see `Parser::reading_syntax_only`).
     let file = rspice_veriloga::Parser::new(&tokens)
+        .reading_syntax_only()
         .parse()
         .map_err(|error| error.to_string())?;
     let modules = file
@@ -305,7 +309,19 @@ fn declared_modules(
     }
     let instantiated = modules
         .iter()
-        .flat_map(|module| module.instances.iter())
+        .copied()
+        .flat_map(|module| {
+            // An instance a generate block writes instantiates its module
+            // whichever branch or count the block elaborates to.
+            let blocks = module
+                .generates
+                .iter()
+                .flat_map(|construct| construct.written_blocks());
+            module
+                .instances
+                .iter()
+                .chain(blocks.flat_map(|block| block.items.instances.iter()))
+        })
         .map(|instance| instance.module.to_ascii_lowercase())
         .collect::<std::collections::BTreeSet<_>>();
     let root_order = root_file_module_order(root_source);

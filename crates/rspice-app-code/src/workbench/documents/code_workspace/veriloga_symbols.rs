@@ -262,14 +262,20 @@ impl VerilogASymbols {
     }
 }
 
-/// The byte where the parser stopped, and why, when it could not read
-/// `text`.
+/// `text` as the parser reads it written, or the byte where the parser
+/// stopped, and why, when it could not read it.
+///
+/// This runs on the editor's thread, so it reads syntax only: a generate
+/// region is left as written and no constant function runs, so none that
+/// fails to end can hold the editor (see
+/// [`rspice_veriloga::Parser::reading_syntax_only`]).
 pub(super) fn parse(text: &str) -> Result<rspice_veriloga::SourceFile, (usize, String)> {
     let source_id = rspice_veriloga::SourceMap::new().add_source("symbols", String::new());
     let tokens = rspice_veriloga::Lexer::new(text, source_id)
         .collect_tokens()
         .map_err(|error| (error.span.start as usize, error.to_string()))?;
     rspice_veriloga::Parser::new(&tokens)
+        .reading_syntax_only()
         .parse()
         .map_err(|error| (error.span.start as usize, error.kind.to_string()))
 }
@@ -506,6 +512,20 @@ impl Reader<'_> {
                 );
             }
         }
+        self.items(scope, module);
+        // Read as written, a generate block's declarations are its own scope's,
+        // each once, whatever its condition or loop would make of it.
+        for construct in &module.generates {
+            for block in construct.written_blocks() {
+                let inner = self.scope(span(block.span), false);
+                self.items(inner, &block.items);
+            }
+        }
+    }
+
+    /// Declare what `module` declares besides its ports in `scope`, and read
+    /// its functions and analog blocks.
+    fn items(&mut self, scope: usize, module: &Module) {
         for net in &module.nets {
             let detail = net.discipline.as_ref().map_or_else(
                 || if net.is_ground { "ground" } else { "net" }.to_owned(),

@@ -105,6 +105,26 @@ fn a_variable_port_states_its_type() {
     assert_eq!(row(&outline, "r").detail, "output reg [3:0]");
 }
 
+/// The outline is read on the editor's thread, from the source as written: a
+/// generate block's declarations are rows once, by the names written, and a
+/// constant function that never returns (here the loop's bound) is never run,
+/// so it cannot hold the editor.
+#[test]
+fn a_generate_block_is_outlined_as_written_and_no_constant_function_runs() {
+    let source = "module tap(p);\n  inout p;\n  electrical p;\n  function integer spin(input integer n);\n    begin spin = n; while (spin > 0) spin = spin + 0; end\n  endfunction\n  localparam integer N = spin(1);\n  genvar i;\n  generate for (i = 0; i < N; i = i + 1) begin : g\n    electrical node;\n  end endgenerate\nendmodule\n";
+    let bundle = bundle("models/tap.va", source, &[]);
+    let outline = navigation(&bundle, "models/tap.va").outline;
+
+    let node = row(&outline, "node");
+    assert_eq!((node.line, node.detail.as_str()), (10, "electrical"));
+    assert_eq!(row(&outline, "N").detail, "localparam integer = spin(1)");
+    assert_eq!(
+        outline.iter().filter(|row| row.name == "node").count(),
+        1,
+        "{outline:#?}"
+    );
+}
+
 /// The parser reads the file unexpanded, so a macro is quoted as written and
 /// a directive inside the module, or a definition continued over lines,
 /// moves no row off its line.
