@@ -26,7 +26,8 @@ use crate::jit::expr::{
 };
 use crate::jit::value_cache::{native_op_hash, native_ops_are_codegen_identical};
 use crate::jit::{JitError, JitResult};
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
@@ -3244,13 +3245,80 @@ pub(crate) struct RegisterAllocation {
 
 fn expire_owners(
     register_owners: &mut [Option<ValueId>],
-    spill_owners: &mut [Option<ValueId>],
+    spill_slots: &mut SpillSlots<'_>,
     last_use_position: &[usize],
     position: usize,
 ) {
-    for owner in register_owners.iter_mut().chain(spill_owners.iter_mut()) {
+    for owner in register_owners.iter_mut() {
         if owner.is_some_and(|value: ValueId| last_use_position[value.index()] < position) {
             *owner = None;
+        }
+    }
+    spill_slots.expire(position);
+}
+
+/// The spill slots of one function and the values that hold them.
+///
+/// A large function holds thousands of slots, and the scan visits every
+/// instruction, so neither expiring the values whose last use has passed nor
+/// finding the lowest free slot may walk them all: the first is a queue of
+/// owners by last use, the second a queue of free slots. Both give exactly
+/// what a walk of every slot would.
+struct SpillSlots<'a> {
+    last_use_position: &'a [usize],
+    owners: Vec<Option<ValueId>>,
+    /// Every free slot below `owners.len()`, lowest first.
+    free: BinaryHeap<Reverse<usize>>,
+    /// `(last use, slot, value)` for every value given a slot. An entry
+    /// whose slot has since been released, or given to another value, is
+    /// skipped when it surfaces.
+    expiry: BinaryHeap<Reverse<(usize, usize, ValueId)>>,
+}
+
+impl<'a> SpillSlots<'a> {
+    fn new(last_use_position: &'a [usize]) -> Self {
+        Self {
+            last_use_position,
+            owners: Vec::new(),
+            free: BinaryHeap::new(),
+            expiry: BinaryHeap::new(),
+        }
+    }
+
+    /// Give `value` the lowest free slot, or a new one.
+    fn allocate(&mut self, value: ValueId) -> usize {
+        let slot = match self.free.pop() {
+            Some(Reverse(slot)) => slot,
+            None => {
+                self.owners.push(None);
+                self.owners.len() - 1
+            }
+        };
+        self.owners[slot] = Some(value);
+        self.expiry.push(Reverse((
+            self.last_use_position[value.index()],
+            slot,
+            value,
+        )));
+        slot
+    }
+
+    fn release(&mut self, slot: usize) {
+        if self.owners[slot].take().is_some() {
+            self.free.push(Reverse(slot));
+        }
+    }
+
+    /// Free every slot whose value is last used before `position`.
+    fn expire(&mut self, position: usize) {
+        while let Some(&Reverse((last_use, slot, value))) = self.expiry.peek() {
+            if last_use >= position {
+                break;
+            }
+            self.expiry.pop();
+            if self.owners[slot] == Some(value) {
+                self.release(slot);
+            }
         }
     }
 }
@@ -3261,7 +3329,7 @@ fn select_location(
     crosses_call: bool,
     bank: RegisterBank,
     register_owners: &[Option<ValueId>],
-    spill_owners: &mut Vec<Option<ValueId>>,
+    spill_slots: &mut SpillSlots<'_>,
 ) -> ValueLocation {
     if crosses_call {
         // A caller-saved register does not survive the call this value is live
@@ -3279,7 +3347,7 @@ fn select_location(
                     .find_map(|(register, owner)| owner.is_none().then_some(register))
             })
             .map_or_else(
-                || ValueLocation::Spill(allocate_spill_slot(spill_owners, value)),
+                || ValueLocation::Spill(spill_slots.allocate(value)),
                 ValueLocation::Register,
             );
     }
@@ -3290,7 +3358,7 @@ fn select_location(
         .iter()
         .position(Option::is_none)
         .map_or_else(
-            || ValueLocation::Spill(allocate_spill_slot(spill_owners, value)),
+            || ValueLocation::Spill(spill_slots.allocate(value)),
             ValueLocation::Register,
         )
 }
@@ -3557,7 +3625,7 @@ impl RegisterAllocation {
 
         let mut locations = vec![None; value_count];
         let mut register_owners = vec![None; allocatable_register_count];
-        let mut spill_owners: Vec<Option<ValueId>> = Vec::new();
+        let mut spill_slots = SpillSlots::new(&last_use_position);
         let mut instructions = Vec::with_capacity(instruction_count);
         let mut used_register_count = 0;
         let mut move_plans: Vec<Vec<Vec<MoveStep>>> = Vec::with_capacity(program.blocks().len());
@@ -3565,7 +3633,7 @@ impl RegisterAllocation {
         for block in program.blocks() {
             expire_owners(
                 &mut register_owners,
-                &mut spill_owners,
+                &mut spill_slots,
                 &last_use_position,
                 block.instruction_start * 2,
             );
@@ -3578,7 +3646,7 @@ impl RegisterAllocation {
                 let instruction_position = instruction_index * 2;
                 expire_owners(
                     &mut register_owners,
-                    &mut spill_owners,
+                    &mut spill_slots,
                     &last_use_position,
                     instruction_position,
                 );
@@ -3620,7 +3688,7 @@ impl RegisterAllocation {
                     crosses_call(instruction.result),
                     bank,
                     &register_owners,
-                    &mut spill_owners,
+                    &mut spill_slots,
                 );
 
                 for (operand, location) in instruction
@@ -3639,7 +3707,7 @@ impl RegisterAllocation {
                             register_owners[register] = None;
                         }
                         ValueLocation::Spill(slot) if result != ValueLocation::Spill(slot) => {
-                            spill_owners[slot] = None;
+                            spill_slots.release(slot);
                         }
                         ValueLocation::Register(_) | ValueLocation::Spill(_) => {}
                     }
@@ -3650,7 +3718,9 @@ impl RegisterAllocation {
                         register_owners[register] = Some(instruction.result);
                         used_register_count = used_register_count.max(register + 1);
                     }
-                    ValueLocation::Spill(slot) => spill_owners[slot] = Some(instruction.result),
+                    ValueLocation::Spill(slot) => {
+                        debug_assert_eq!(spill_slots.owners[slot], Some(instruction.result));
+                    }
                 }
                 locations[instruction.result.0 as usize] = Some(result);
                 instructions.push(AllocatedInstruction {
@@ -3663,7 +3733,7 @@ impl RegisterAllocation {
             let terminator_position = block.instruction_end * 2;
             expire_owners(
                 &mut register_owners,
-                &mut spill_owners,
+                &mut spill_slots,
                 &last_use_position,
                 terminator_position,
             );
@@ -3681,14 +3751,16 @@ impl RegisterAllocation {
                         crosses_call(parameter.value),
                         bank,
                         &register_owners,
-                        &mut spill_owners,
+                        &mut spill_slots,
                     );
                     match location {
                         ValueLocation::Register(register) => {
                             register_owners[register] = Some(parameter.value);
                             used_register_count = used_register_count.max(register + 1);
                         }
-                        ValueLocation::Spill(slot) => spill_owners[slot] = Some(parameter.value),
+                        ValueLocation::Spill(slot) => {
+                            debug_assert_eq!(spill_slots.owners[slot], Some(parameter.value));
+                        }
                     }
                     locations[parameter.value.index()] = Some(location);
                 }
@@ -3732,8 +3804,8 @@ impl RegisterAllocation {
             .flatten()
             .any(|steps| needs_scratch(steps))
             .then(|| {
-                spill_owners.push(None);
-                spill_owners.len() - 1
+                spill_slots.owners.push(None);
+                spill_slots.owners.len() - 1
             });
         let edge_moves = move_plans
             .iter()
@@ -3770,7 +3842,7 @@ impl RegisterAllocation {
                     })
                 })
                 .collect::<JitResult<Vec<_>>>()?,
-            spill_slot_count: spill_owners.len(),
+            spill_slot_count: spill_slots.owners.len(),
             used_register_count,
             required_register_count,
             edge_moves,
@@ -3824,16 +3896,6 @@ impl RegisterAllocation {
 
     pub(crate) fn required_register_count(&self) -> usize {
         self.required_register_count
-    }
-}
-
-fn allocate_spill_slot(owners: &mut Vec<Option<ValueId>>, value: ValueId) -> usize {
-    if let Some(slot) = owners.iter().position(Option::is_none) {
-        owners[slot] = Some(value);
-        slot
-    } else {
-        owners.push(Some(value));
-        owners.len() - 1
     }
 }
 

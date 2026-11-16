@@ -774,6 +774,8 @@ struct FunctionCompiler {
     saves_kernel_io: bool,
     early_returns: Vec<BranchPatch>,
     literals: Vec<(LiteralPatch, u64)>,
+    /// The distinct constants among `literals`: the words the next pool holds.
+    literal_words: std::collections::HashSet<u64>,
     /// Byte offset of the oldest `LDR (literal)` still waiting for its
     /// constant. The reach that has to be respected is measured from here.
     literal_window_start: Option<usize>,
@@ -828,6 +830,7 @@ impl FunctionCompiler {
             saves_kernel_io,
             early_returns: Vec::new(),
             literals: Vec::new(),
+            literal_words: std::collections::HashSet::new(),
             literal_window_start: None,
             variable_window_enabled: !saves_entry_args,
             variable_window_base: None,
@@ -2861,6 +2864,7 @@ impl FunctionCompiler {
         self.literal_window_start
             .get_or_insert(patch.instruction_offset());
         self.literals.push((patch, value.to_bits()));
+        self.literal_words.insert(value.to_bits());
         Ok(())
     }
 
@@ -2886,11 +2890,7 @@ impl FunctionCompiler {
     }
 
     fn distinct_pending_literals(&self) -> usize {
-        let mut seen = std::collections::HashSet::<u64>::with_capacity(self.literals.len());
-        self.literals
-            .iter()
-            .filter(|(_, bits)| seen.insert(*bits))
-            .count()
+        self.literal_words.len()
     }
 
     /// Emit `B over; BRK words; <constants>` and resolve every pending patch
@@ -2932,6 +2932,7 @@ impl FunctionCompiler {
             offsets.insert(bits, offset);
             self.encoder.append_u64_data(bits);
         }
+        self.literal_words.clear();
         for (patch, bits) in std::mem::take(&mut self.literals) {
             let target = offsets
                 .get(&bits)
