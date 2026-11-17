@@ -83,7 +83,10 @@ pub(crate) enum CheckpointJobAnswer {
     Listed(
         Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointCatalog, String>,
     ),
-    Created(Result<crate::workbench::lifecycle::project_checkpoint::CheckpointCreated, String>),
+    /// Boxed: the creation's summary and catalog dwarf the other answers.
+    Created(
+        Box<Result<crate::workbench::lifecycle::project_checkpoint::CheckpointCreated, String>>,
+    ),
     Compared(Result<bool, String>),
 }
 

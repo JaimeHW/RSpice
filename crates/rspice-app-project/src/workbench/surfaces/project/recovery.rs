@@ -894,7 +894,7 @@ fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
                 ctx,
                 CheckpointJobKind::Create,
                 recovery,
-                move || CheckpointJobAnswer::Created(capture.publish()),
+                move || CheckpointJobAnswer::Created(Box::new(capture.publish())),
             ));
         }
         Err(error) => {
@@ -928,24 +928,27 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
     };
     match answer {
         CheckpointJobAnswer::Listed(listed) => install_catalog(recovery, listed),
-        CheckpointJobAnswer::Created(Ok(created)) => {
-            // Asked to list again while writing: the listing the creation
-            // made may predate what changed, so another follows.
-            let relist = !recovery.initialized;
-            install_catalog(recovery, created.catalog);
-            if relist {
-                recovery.initialized = false;
+        CheckpointJobAnswer::Created(created) => match *created {
+            Ok(created) => {
+                // Asked to list again while writing: the listing the
+                // creation made may predate what changed, so another
+                // follows.
+                let relist = !recovery.initialized;
+                install_catalog(recovery, created.catalog);
+                if relist {
+                    recovery.initialized = false;
+                }
+                record_manual_checkpoint(cx, &created.summary);
+                if let Some(warning) = created.retention_warning {
+                    cx.model
+                        .record(LogSeverity::Warning, LogSource::Studio, warning);
+                }
             }
-            record_manual_checkpoint(cx, &created.summary);
-            if let Some(warning) = created.retention_warning {
+            Err(error) => {
                 cx.model
-                    .record(LogSeverity::Warning, LogSource::Studio, warning);
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
-        }
-        CheckpointJobAnswer::Created(Err(error)) => {
-            cx.model
-                .record(LogSeverity::Error, LogSource::Studio, error);
-        }
+        },
         CheckpointJobAnswer::Compared(compared) => {
             if let CheckpointJobKind::Compare(checkpoint) = job.kind {
                 report_comparison(cx, &checkpoint, compared);
