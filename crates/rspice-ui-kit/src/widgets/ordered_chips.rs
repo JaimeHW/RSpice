@@ -185,15 +185,17 @@ fn chip(
         Some(true) => 3.0,
         Some(false) => 2.0,
     };
+    // A finger gets a target it can hit for each control, so a press meant
+    // for "later" never lands on the "remove" beside it.
+    let (control_w, height) = if t.metrics.is_touch() {
+        (t.metrics.touch_target(), t.metrics.touch_target())
+    } else {
+        (CONTROL_W, 22.0)
+    };
     let controls_width = if control_count > 0.0 {
-        control_count * CONTROL_W + 2.0
+        control_count * control_w + 2.0
     } else {
         0.0
-    };
-    let height = if t.metrics.is_touch() {
-        t.metrics.touch_target()
-    } else {
-        22.0
     };
     let size = vec2(galley.size().x + 2.0 * CHIP_PAD_X + controls_width, height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
@@ -223,7 +225,7 @@ fn chip(
         c.text,
     );
     let removable = controls?;
-    let mut left = rect.right() - CHIP_PAD_X * 0.5 - control_count * CONTROL_W;
+    let mut left = rect.right() - CHIP_PAD_X * 0.5 - control_count * control_w;
     let mut edit = None;
     let offered = [
         (
@@ -244,8 +246,8 @@ fn chip(
         .into_iter()
         .filter(|(_, verb, _, _)| removable || *verb != "remove")
     {
-        let control = Rect::from_min_size(pos2(left, rect.top()), vec2(CONTROL_W, rect.height()));
-        left += CONTROL_W;
+        let control = Rect::from_min_size(pos2(left, rect.top()), vec2(control_w, rect.height()));
+        left += control_w;
         let label = if verb == "remove" {
             format!("Remove {value} from {list}")
         } else {
@@ -341,6 +343,41 @@ mod tests {
                 nodes
                     .iter()
                     .any(|(_, node)| node.value() == Some("View list 2: spice"))
+            );
+        }
+    }
+
+    /// Under a finger each control of a chip is a touch target wide, so the
+    /// three of them side by side are three targets, not one.
+    #[test]
+    fn each_control_takes_the_touch_target_under_a_finger() {
+        let values = names(&["schematic", "spice"]);
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ordered_chips(ui, "views", "View list", "View", &values, &[], true);
+            });
+        });
+        let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+        let controls = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label().is_some_and(|label| {
+                        label.starts_with("Move ") || label.starts_with("Remove ")
+                    })
+            })
+            .filter_map(|(_, node)| node.bounds())
+            .collect::<Vec<_>>();
+        assert_eq!(controls.len(), 6, "three controls on each of two chips");
+        for bounds in controls {
+            assert!(
+                bounds.width() >= 48.0 - 0.5 && bounds.height() >= 48.0 - 0.5,
+                "a control is {} by {}",
+                bounds.width(),
+                bounds.height()
             );
         }
     }
