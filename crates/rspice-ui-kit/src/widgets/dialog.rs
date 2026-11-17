@@ -125,6 +125,12 @@ pub enum DialogSize {
     /// plan manager's split minimum, which stacks its records table over its
     /// aside, and stacked does not fit the 640 pt that shape has.
     CapabilityReview,
+    /// Record histories: every kept record listed over the one chosen,
+    /// sized as [`Self::CapabilityReview`] so a row's revision, time,
+    /// author, change and the records it touched read whole on a desktop,
+    /// and edge to edge at the shared 820 pt breakpoint. Its Close stays in
+    /// the footer.
+    RecordHistory,
     /// Execution queue, target, and retained-run manager: 1120 pt wide and
     /// content-height, capped at 680 pt, with the mockup's 12 pt desktop
     /// perimeter and 4 pt phone perimeter.
@@ -333,6 +339,7 @@ impl DialogSize {
                 radius: 4.0,
                 top_anchored: false,
             },
+            Self::RecordHistory => Self::CapabilityReview.spec(),
             Self::JobsManager => DialogSurfaceSpec {
                 width: 1_120.0,
                 max_height: 680.0,
