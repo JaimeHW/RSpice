@@ -104,6 +104,21 @@ def verify_age(browser, name, now_ms):
                 raise AssertionError(f"{name} did not report {expected!r} after a clock adjustment")
 
 
+def verify_revision_time(browser, record, note):
+    """The history states when a revision was made as a date and time that no
+    clock fault moves or hides, in the row that names the revision's note."""
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(record["created_unix_ms"] // 1000))
+    now_ms = time.time_ns() // 1_000_000
+    for value, suffix in ((now_ms - 86_400_000, "rollback"),
+                          (now_ms + 86_400_000, "forward"),
+                          ("nonfinite", "unavailable")):
+        with wall_clock(browser, value):
+            snapshot = browser.capture(f"revision-time-{suffix}")
+            if not any(f"Time: {stamp}" in control["label"] and f"Change: {note}" in control["label"]
+                       for control in controls(snapshot)):
+                raise AssertionError(f"The revision did not state {stamp!r} after a clock adjustment")
+
+
 def canonical_projects(browser):
     result = browser.call("POST", "/execute/async", {"args": [], "script": """
         const done = arguments[arguments.length - 1];
@@ -206,14 +221,14 @@ def validated_save_clock(browser, review_intervals):
         raise AssertionError("The canonical project retained a fabricated revision timestamp")
     (browser.output / "validated-project.rspiceproj").write_bytes(raw.encode("utf-8"))
     choose_command(browser, "Revision history")
-    verify_age(browser, "revision", finished_ms)
+    verify_revision_time(browser, saved[0], note)
     browser.click("Close", "button")
     browser.call("POST", "/refresh", {})
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
     choose_command(browser, "Revision history")
     reloaded = browser.capture("validated-history-reloaded")
-    if not any(control["value"] == note for control in controls(reloaded)):
+    if not any(f"Change: {note}" in control["label"] for control in controls(reloaded)):
         raise AssertionError("Reload did not restore the validated revision history")
     if canonical_projects(browser) != files:
         raise AssertionError("Reload changed the canonical project bytes")

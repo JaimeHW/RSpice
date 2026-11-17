@@ -44,6 +44,7 @@ mod recovery_comparison;
 mod recovery_frames;
 #[cfg(not(target_arch = "wasm32"))]
 mod results_save;
+mod revision_history;
 mod steps;
 mod subject_status;
 mod surface;
