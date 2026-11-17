@@ -241,7 +241,7 @@ fn focus_is_within_drawer(ctx: &Context, drawer_layer: egui::LayerId) -> bool {
 #[derive(Clone, Copy)]
 pub struct MobileNavigationAction {
     pub command: CommandKey,
-    icon: WorkbenchIcon,
+    pub icon: WorkbenchIcon,
     pub label: &'static str,
 }
 
@@ -297,6 +297,10 @@ pub const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// Notifications are here because a phone's title bar has no room for the
 /// bell: without this row the panel was reachable only from the palette, and
 /// the unread count from nowhere.
+///
+/// A tool wears the mark it wears in the menus and the palette, never a
+/// workspace's: the launcher is a folder, as Open is, and the account is a
+/// person, as the title bar's avatar is.
 pub const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
     MobileNavigationAction {
         command: ids::OPEN_CONSOLE,
@@ -310,7 +314,7 @@ pub const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
     },
     MobileNavigationAction {
         command: ids::PROJECT_LAUNCHER,
-        icon: WorkbenchIcon::Project,
+        icon: WorkbenchIcon::Folder,
         label: "Project launcher",
     },
     MobileNavigationAction {
@@ -320,7 +324,7 @@ pub const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
     },
     MobileNavigationAction {
         command: ids::ACCOUNT_ORGANIZATION,
-        icon: WorkbenchIcon::Verify,
+        icon: WorkbenchIcon::User,
         label: "Organization & licensing",
     },
 ];

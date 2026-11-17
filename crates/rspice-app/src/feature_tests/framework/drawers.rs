@@ -144,6 +144,26 @@ fn mobile_organization_entry_opens_the_canonical_account_manager() {
     assert_eq!(action.command, CloudCommand::AccountOrganization.key());
 }
 
+/// One mark for one thing: no two entries on the sheet wear the same icon,
+/// so a tool never reads as the workspace whose mark it borrowed.
+#[test]
+fn no_two_sheet_entries_wear_the_same_mark() {
+    let entries = MOBILE_NAV_GROUPS
+        .iter()
+        .flat_map(|(_, actions)| actions.iter())
+        .collect::<Vec<_>>();
+    for (index, entry) in entries.iter().enumerate() {
+        for other in &entries[index + 1..] {
+            assert!(
+                entry.icon != other.icon,
+                "{} and {} wear the same mark",
+                entry.label,
+                other.label
+            );
+        }
+    }
+}
+
 /// A phone's title bar draws no bell, so the sheet carries it: the panel
 /// one tap away, and the unread count beside it in the row's meta.
 #[test]
