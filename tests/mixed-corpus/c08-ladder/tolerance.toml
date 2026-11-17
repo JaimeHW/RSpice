@@ -16,6 +16,7 @@ oracle = "O6"
 expect = "c08::ovs"
 abs = 2e-3
 why = "0.6·(1 + e^−π) = 0.62593 V at ζ = 0.7071 (the biquad's own largest sample for wr and sv); bilinear warping and staircase input"
+insensitive_time = "the step response's overshoot depth, a minimum over [20, 150] µs: a stretch moves when the minimum falls (by under 1.5 µs), not how deep it is"
 
 [[q]]
 id = "ovs"
@@ -28,6 +29,7 @@ oracle = "O6"
 expect = "c08::ovs"
 abs = 6e-3
 why = "as va; the op-amp follower's finite gain and input gate leakage through R1 + R2"
+insensitive_time = "the step response's overshoot depth, a minimum over [20, 150] µs: a stretch moves when the minimum falls (by under 1.5 µs), not how deep it is"
 
 # --- codes -------------------------------------------------------------------
 
@@ -42,6 +44,7 @@ oracle = "O6"
 expect = "c08::codes"
 abs = 0.0
 why = "floor(16·v) of the rung's ideal output at the previous clock rise, exact; within 1/32 LSB of a threshold (1/8 LSB for the transistor rung) either neighbouring code"
+insensitive_time = "codes strobed by the deck's own clock, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "xab"
@@ -52,6 +55,7 @@ nets = ["q3", "q2", "q1", "q0"]
 strobe = "clk"
 oracle = "O7"
 why = "codes agree across the rungs: supporting evidence only (O7), evaluated structurally by the harness"
+insensitive_time = "codes strobed by the deck's own clock, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 # --- small-signal --------------------------------------------------------
 

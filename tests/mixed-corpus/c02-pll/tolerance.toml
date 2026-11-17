@@ -246,6 +246,7 @@ points = [4.0e4, 2.1e5]
 oracle = "O6"
 expect = "c02::phase_noise"
 why = "L(f) (analytic::c02::phase_noise), averaged over the record's bins k/35 us in the band: every rendered source is frequency noise at the VCO, S_f = [sf + Kv²·Σ 4kT/R·|Z_out,R|²]·sinc²(f·NT), with sf = 10 Hz²/Hz, |Kv| = 405.35 MHz/V at the 1.9439 V lock, R2's and R3's thermal noise through the filter to cont, and NT = 5 ns; the PFD samples the VCO phase once per 100 ns and the pump delivers K_q·Δ (K_q = 3.603 mA, oracle/mx.pump.ngspice.cir), so with G_c = K_q·Z·|Kv|/(N·s) and G_eff = Σ_m G_c(s + j·m·ω_ref), L(f) = Σ_k |T_k|²·S_f(f + k·f_ref)/(2·(f + k·f_ref)²), T_0 = 1 − G_c/(1 + G_eff) (the closed loop's high-pass), T_k = −G_c/(1 + G_eff) (sampling aliases). L = −108.56; the loop holds the VCO 15.7 dB under its free-running noise; 6 bins, nu = 5.4: chi-square [−16.08, +6.34] dB, K_q 0.22 dB, so [−125.16, −101.70]"
+insensitive_time = "phase-noise densities in dB against intervals tens of dB wide, set by the estimate's spread: a 1 % stretch scales the carrier and every offset by 1 %, which moves a density on a 20 dB/decade slope by 0.09 dB"
 
 [[q]]
 id = "pn.peak"
@@ -259,6 +260,7 @@ points = [2.1e5, 7.9e5]
 oracle = "O6"
 expect = "c02::phase_noise"
 why = "the loop's peaking, 6.6 dB over the free-running VCO (L(f) as pn.suppress); L = −98.72; 20 bins, nu = 10.1: chi-square [−9.27, +4.98] dB, K_q 0.00 dB, so [−108.28, −93.44]"
+insensitive_time = "phase-noise densities in dB against intervals tens of dB wide, set by the estimate's spread: a 1 % stretch scales the carrier and every offset by 1 %, which moves a density on a 20 dB/decade slope by 0.09 dB"
 
 [[q]]
 id = "pn.tail"
@@ -272,6 +274,7 @@ points = [7.9e5, 1.99e6]
 oracle = "O6"
 expect = "c02::phase_noise"
 why = "the loop's tail, 1.4 dB over the free-running VCO (L(f) as pn.suppress); L = −113.55; 42 bins, nu = 29.4: chi-square [−4.53, +3.20] dB, K_q 0.03 dB, so [−118.41, −110.01]"
+insensitive_time = "phase-noise densities in dB against intervals tens of dB wide, set by the estimate's spread: a 1 % stretch scales the carrier and every offset by 1 %, which moves a density on a 20 dB/decade slope by 0.09 dB"
 
 [[q]]
 id = "pn.vco"
@@ -285,6 +288,7 @@ points = [1.99e6, 9.47e6]
 oracle = "O6"
 expect = "c02::phase_noise"
 why = "the VCO's own sf/(2f²), the loop within 0.2 dB (L(f) as pn.suppress); L = −125.59; 262 bins, nu = 132.0 (L falls 13 dB over the band): chi-square [−1.91, +1.63] dB, so [−127.80, −123.65]"
+insensitive_time = "phase-noise densities in dB against intervals tens of dB wide, set by the estimate's spread: a 1 % stretch scales the carrier and every offset by 1 %, which moves a density on a 20 dB/decade slope by 0.09 dB"
 
 [[q]]
 id = "pn.alias"
@@ -298,6 +302,7 @@ points = [1.053e7, 1.947e7]
 oracle = "O6"
 expect = "c02::phase_noise"
 why = "above the reference: the VCO's noise as rendered, sinc²(f·NT) included, with the sampling's aliases (L(f) as pn.suppress); L = −136.19; 313 bins, nu = 284.4: chi-square [−1.27, +1.14] dB, so [−137.76, −134.75]; the band keeps clear of the 10 and 20 MHz reference lines"
+insensitive_time = "phase-noise densities in dB against intervals tens of dB wide, set by the estimate's spread: a 1 % stretch scales the carrier and every offset by 1 %, which moves a density on a 20 dB/decade slope by 0.09 dB"
 
 [[q]]
 id = "vlock"

@@ -471,6 +471,7 @@ oracle = "O6"
 expect = "c06::vss"
 abs = 6e-3
 why = "regulation does not depend on L or C"
+insensitive_time = "per-trial levels over many switching periods: the output's mean, its peak-to-peak ripple and the inductor's mean current; a stretch moves when they are read, not how large they are"
 
 [[q]]
 id = "ripple"
@@ -483,6 +484,7 @@ oracle = "O6"
 expect = "c06::ripple"
 rel = 0.035
 why = "as ripple with the trial's L: 0.11588·(22u/L) A peak-to-peak, rel 3.5 % (derivation at ripple)"
+insensitive_time = "per-trial levels over many switching periods: the output's mean, its peak-to-peak ripple and the inductor's mean current; a stretch moves when they are read, not how large they are"
 
 [[q]]
 id = "ilmean"
@@ -495,3 +497,4 @@ oracle = "O6"
 expect = "c06::ilmean"
 abs = 3e-3
 why = "charge balance does not depend on L or C"
+insensitive_time = "per-trial levels over many switching periods: the output's mean, its peak-to-peak ripple and the inductor's mean current; a stretch moves when they are read, not how large they are"

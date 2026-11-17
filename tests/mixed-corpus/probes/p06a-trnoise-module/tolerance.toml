@@ -29,6 +29,8 @@ of = { kind = "held_at", signal = "v(pv)", times = { start = 1e-7, step = 1e-9, 
 interval = [0.0214, 0.0233]
 oracle = "O6"
 why = "the analog-only twin: the same 22.36 mV"
+insensitive = "the same statistic as sigma.mixed, over the same 1901 samples: its own ±4.2 % spread at 99 % sets the interval, which a 1 % scaling stays inside"
+insensitive_time = "samples of white noise: a 1 % stretch reads the same distribution at other instants"
 
 [[q]]
 id = "sigma.resistor"
@@ -41,3 +43,5 @@ of = { kind = "held_at", signal = "v(pn)", times = { start = 1e-7, step = 1e-9, 
 interval = [8.72e-5, 9.48e-5]
 oracle = "O6"
 why = "control: √(4kT · 1 kΩ · 500 MHz) = 91.0 µV at 300.15 K"
+insensitive = "the same statistic as sigma.mixed, over the same 1901 samples: its own ±4.2 % spread at 99 % sets the interval, which a 1 % scaling stays inside"
+insensitive_time = "samples of white noise: a 1 % stretch reads the same distribution at other instants"

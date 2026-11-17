@@ -436,6 +436,7 @@ oracle = "O5-O1"
 ref = "ref/mx.tran.O5-O1.out"
 abs = 2e-3
 why = "load-step undershoot: same loop, same models, code 0 until 405 µs"
+insensitive_time = "a regulator's levels: the load step's undershoot minimum and means where the output is flat; a stretch moves the windows' ends by under 6 µs, not the levels inside them"
 
 [[q]]
 id = "step.mean"
@@ -448,6 +449,7 @@ oracle = "O5-O1"
 ref = "ref/mx.tran.O5-O1.out"
 abs = 1e-3
 why = "loaded regulation at code 0"
+insensitive_time = "a regulator's levels: the load step's undershoot minimum and means where the output is flat; a stretch moves the windows' ends by under 6 µs, not the levels inside them"
 
 [[q]]
 id = "trim"
@@ -460,3 +462,4 @@ oracle = "O5-O1"
 ref = "ref/c15.op.O5-O1.out"
 abs = 1e-3
 why = "settled ~50 µs after csn latches code 15; against the code-15 twin's operating point"
+insensitive_time = "a regulator's levels: the load step's undershoot minimum and means where the output is flat; a stretch moves the windows' ends by under 6 µs, not the levels inside them"

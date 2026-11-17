@@ -77,6 +77,7 @@ window = [0.0, 1.0e-9]
 oracle = "O1"
 ref = "ref/c432-xs.tran.O1.out"
 why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "po"
@@ -89,6 +90,7 @@ window = [0.0, 1.0e-9]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "vec"
@@ -150,6 +152,7 @@ window = [0.0, 1.0e-9]
 oracle = "O1"
 ref = "ref/c499-xs.tran.O1.out"
 why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "po"
@@ -162,6 +165,7 @@ window = [0.0, 1.0e-9]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "vec"
@@ -223,6 +227,7 @@ window = [0.0, 1.0e-9]
 oracle = "O1"
 ref = "ref/c880-xs.tran.O1.out"
 why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "po"
@@ -235,6 +240,7 @@ window = [0.0, 1.0e-9]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "vec"
@@ -296,6 +302,7 @@ window = [0.0, 1.0e-9]
 oracle = "O1"
 ref = "ref/c1355-xs.tran.O1.out"
 why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "po"
@@ -308,6 +315,7 @@ window = [0.0, 1.0e-9]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "vec"
@@ -369,6 +377,7 @@ window = [0.0, 1.0e-9]
 oracle = "O1"
 ref = "ref/c1908-xs.tran.O1.out"
 why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "po"
@@ -381,6 +390,7 @@ window = [0.0, 1.0e-9]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+insensitive_time = "logic values strobed by the deck's own d_stb events, which a stretch moves with the data: a uniform stretch keeps every edge on the same side of every strobe, so the codes cannot change"
 
 [[q]]
 id = "vec"

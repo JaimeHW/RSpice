@@ -44,6 +44,7 @@ oracle = "O6"
 expect = "c11::rec"
 abs = 5e-5
 why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; the deck steps at 2 ns as mx does, so mx's allowance and its reasons hold; the twin samples 0.556 ns after the fall edge, ≤ 7 uV at the input's slope"
+insensitive_time = "held outputs read 10 ns before each clock edge: a 1 % stretch moves each read back by under 0.2 µs, inside the same 1 µs hold, and a switched-capacitor filter's held sequence depends on its charge transfers, not on when they happen"
 
 # The design's transient FFT, on the deck's 300 us: the 10 kHz amplitude of
 # v(out) over [100 us, 300 us] (two input periods, coherent; the recursion's
