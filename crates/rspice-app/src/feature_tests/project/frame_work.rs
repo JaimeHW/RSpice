@@ -7,7 +7,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use egui::Context;
 
@@ -18,10 +18,12 @@ use rspice_app_services::workbench::lifecycle::project_checkpoint::{
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use rspice_app_services::workbench::lifecycle::recovery::{take_disk_reads, unique_temp_dir};
+use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride, InstancePath,
-    Library, Point, UnresolvedBindingPolicy, View, ViewType,
+    Library, Point, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
+    ProjectTechnologyChangeContext, UnresolvedBindingPolicy, View, ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -253,6 +255,11 @@ fn the_configuration_page_does_no_project_work_on_an_idle_frame() {
     );
 }
 
+#[test]
+fn the_dependencies_page_does_no_project_work_on_an_idle_frame() {
+    assert_eq!(idle_work(ProjectPage::Dependencies).1, FrameWork::default());
+}
+
 /// The checkpoints are listed on a background thread: the first frame says
 /// so, and neither it nor any frame after reads a checkpoint.
 #[test]
@@ -403,6 +410,110 @@ fn the_overview_counts_the_lines_of_the_deck_in_front() {
     show_overview(&mut app);
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
     assert!(next.contains("\u{b7} 5 lines \u{b7}"), "{next}");
+}
+
+/// The model library at `path`, imported from disk as the Models workspace
+/// imports it, attached with the test PDK package as the project's
+/// technology.
+fn attach_technology_from(app: &mut RSpiceApp, path: &Path) {
+    let model = &mut app.state.model;
+    let (archive, authority) = rspice_app_state::state::pdk_config::pdk_technology_test_fixture();
+    model
+        .pdk_config
+        .technology_registry
+        .install_archive_bytes(&archive, &authority, "Install the test technology")
+        .expect("the test PDK installs");
+    let package = model.pdk_config.technology_registry.validated_packages()[0].clone();
+    let name = model
+        .model_library_manager
+        .load_library_file(path, None)
+        .expect("the model file imports");
+    let library = model
+        .model_library_manager
+        .get_library(&name)
+        .expect("the imported library is in the catalogue");
+    let binding = ProjectTechnologyBinding::from_model_library(library)
+        .and_then(|binding| binding.with_pdk_package_metadata(package.metadata()))
+        .expect("the library and the package form one binding");
+    let context = ProjectTechnologyChangeContext::new(
+        ProjectTechnologyChangeAuthority::new(
+            "frames@rspice.invalid",
+            "test:frame-work",
+            "Attach a technology read from disk",
+        )
+        .expect("the authority is well formed"),
+        uuid::Uuid::new_v4(),
+        model.workspace.content.project.revision(),
+        1,
+        ContentDigest::from_bytes([0x7a; 32]),
+        1,
+    )
+    .expect("the evidence is well formed");
+    model
+        .workspace
+        .content
+        .project
+        .attach_technology_audited(binding, context)
+        .expect("the technology attaches");
+    model
+        .validate_project_technology_contract()
+        .expect("the attached technology resolves");
+}
+
+/// Dependencies keeps the technology verdict until what it was proven
+/// against changes, so a refresh has to reach it: the attached model file
+/// edited on disk and refreshed into the catalogue is stale on the next
+/// frame.
+#[test]
+fn dependencies_states_a_stale_technology_once_its_model_file_is_refreshed() {
+    let folder = unique_temp_dir("frame-work-drift");
+    let model_file = folder.join("demo180.lib");
+    std::fs::write(&model_file, ".model nmos_drift nmos level=1 vto=0.55\n")
+        .expect("the model file writes");
+    let mut app = RSpiceApp::test_instance();
+    attach_technology_from(&mut app, &model_file);
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    let ctx = offscreen();
+    let stale = "Attached technology contract is stale";
+
+    let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    assert!(first.contains("demo180"), "{first}");
+    assert!(!first.contains(stale), "{first}");
+
+    std::fs::write(&model_file, ".model nmos_drift nmos level=1 vto=0.60\n")
+        .expect("the model file rewrites");
+    app.state
+        .model
+        .model_library_manager
+        .load_library_file(&model_file, None)
+        .expect("the refresh reads the edited file");
+    let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    assert!(next.contains(stale), "{next}");
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// The dependency ledger and the rail beside it keep their rows until a
+/// catalogue changes: a library added since the last frame is a row of both
+/// on the next.
+#[test]
+fn a_library_added_since_the_last_frame_is_a_dependency() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    let ctx = offscreen();
+    let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    assert!(!first.contains("aa-late"), "{first}");
+
+    app.state
+        .model
+        .library_manager
+        .add_library(Library::new("aa-late"));
+    let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    assert!(
+        next.matches("aa-late").count() >= 2,
+        "the rail and the ledger both list it: {next}"
+    );
 }
 
 /// How long an idle Overview frame takes on an empty project and on the

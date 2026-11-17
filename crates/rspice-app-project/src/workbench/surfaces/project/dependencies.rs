@@ -4,9 +4,16 @@
 //! authority, and the exact technology binding accepted by the project. This
 //! module does not maintain a second lock model: export serializes the same
 //! derived view shown on screen.
+//!
+//! The rows are built when a catalogue changes, the filter is applied when
+//! it or the rows change, and only the rows in view are laid out, so a site
+//! install with hundreds of model libraries costs a frame what ten do.
+
+use std::sync::Arc;
 
 use serde::Serialize;
 
+use super::derived::derived;
 use super::*;
 use crate::state::model_library::ModelSourceAuthority;
 use crate::workbench::design_system::property_row_toned;
@@ -70,16 +77,67 @@ struct DependencyRow {
     status: String,
 }
 
+/// The ledger's rows, and how many of them resolved against live authority.
+#[derive(Debug, Default)]
+struct DependencyLedger {
+    rows: Vec<DependencyRow>,
+    resolved: usize,
+}
+
+/// The ledger as the strip and the table read it: its rows, built when a
+/// catalogue changes, and the rows the filter lets through, by index, chosen
+/// when the filter or the rows change.
+#[derive(Debug, Clone)]
+struct LedgerView {
+    ledger: Arc<DependencyLedger>,
+    visible: Arc<[usize]>,
+    filter: String,
+}
+
+fn ledger_view(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> LedgerView {
+    // The design-library catalogue and the model catalogue: the rows read
+    // nothing else.
+    let catalogs = (
+        cx.model.library_manager.catalog().stamp(),
+        cx.model.model_library_manager.catalog_stamp(),
+    );
+    let ledger = derived(ctx, "dependencies.ledger", catalogs, || {
+        let rows = dependency_rows(cx);
+        let resolved = rows.iter().filter(|row| row_is_resolved(row)).count();
+        Arc::new(DependencyLedger { rows, resolved })
+    });
+    let filter = dependency_filter(cx);
+    let visible = derived(
+        ctx,
+        "dependencies.visible",
+        (catalogs, filter.clone()),
+        || {
+            ledger
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row_matches(row, &filter))
+                .map(|(index, _)| index)
+                .collect::<Arc<[usize]>>()
+        },
+    );
+    LedgerView {
+        ledger,
+        visible,
+        filter,
+    }
+}
+
 pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    // One projection of live authority per frame, read by the strip, the
-    // ledger and the exported manifest alike.
-    let rows = dependency_rows(cx);
-    dependency_context_strip(ui, cx, &rows);
+    // One projection of live authority, read by the strip and the ledger
+    // alike; the exported manifest serializes the same rows.
+    let view = ledger_view(ui.ctx(), cx);
+    dependency_context_strip(ui, cx, &view);
     let width = visible_workspace_width(ui);
     if width < DEPENDENCY_SPLIT_BREAKPOINT {
         dependency_pane(ui, width, 0.0, |ui| {
             technology_binding_panel(ui, cx);
-            dependency_inventory(ui, cx, &rows, width, 0.0);
+            dependency_inventory(ui, cx, &view, width, 0.0);
         });
         return;
     }
@@ -92,7 +150,7 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             technology_binding_panel(ui, cx);
         });
         dependency_pane(ui, right_width, pane_height, |ui| {
-            dependency_inventory(ui, cx, &rows, right_width, pane_height);
+            dependency_inventory(ui, cx, &view, right_width, pane_height);
         });
     });
     ui.painter().vline(
@@ -117,12 +175,13 @@ fn dependency_pane(ui: &mut Ui, width: f32, height: f32, content: impl FnOnce(&m
     });
 }
 
-fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, rows: &[DependencyRow]) {
+fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, view: &LedgerView) {
     let t = Tokens::get(ui.ctx());
-    let filter = dependency_filter(cx);
-    let visible = rows.iter().filter(|row| row_matches(row, &filter)).count();
-    let resolved = rows.iter().filter(|row| row_is_resolved(row)).count();
-    let review = rows.len().saturating_sub(resolved);
+    let filter = view.filter.as_str();
+    let visible = view.visible.len();
+    let total = view.ledger.rows.len();
+    let resolved = view.ledger.resolved;
+    let review = total.saturating_sub(resolved);
     let band = (visible_workspace_width(ui) - 20.0).max(1.0);
     // No rule under this strip: the panel header below opens with one of its
     // own, and two hairlines a pixel apart read as one thick, uneven line.
@@ -140,7 +199,7 @@ fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, rows: 
                 // the facts under it, rather than breaking one mid-value.
                 dependency_filter_field(ui, cx, band);
                 ui.horizontal(|ui| {
-                    dependency_context_facts(ui, resolved, review, visible, rows.len(), &filter);
+                    dependency_context_facts(ui, resolved, review, visible, total, filter);
                 });
                 return;
             }
@@ -148,7 +207,7 @@ fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, rows: 
                 ui.spacing_mut().item_spacing.x = 10.0;
                 dependency_filter_field(ui, cx, (band * 0.38).clamp(180.0, 340.0));
                 ui.separator();
-                dependency_context_facts(ui, resolved, review, visible, rows.len(), &filter);
+                dependency_context_facts(ui, resolved, review, visible, total, filter);
             });
         });
 }
@@ -246,7 +305,8 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         .project
         .technology_binding()
         .cloned();
-    let contract = cx.model.validate_project_technology_contract();
+    // As last proven: proving it hashes the attached library's sources.
+    let contract = cx.model.project_technology_verdict();
     let contract_ok = binding.is_some() && contract.is_ok();
     // A pinned binding is the ordinary binding, so the header names only the
     // one that has to be looked at.
@@ -384,21 +444,16 @@ fn technology_contract_note(ui: &mut Ui, message: &str) {
 fn dependency_inventory(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
-    rows: &[DependencyRow],
+    view: &LedgerView,
     pane_width: f32,
     pane_height: f32,
 ) {
     let top = ui.cursor().top();
     ui.spacing_mut().item_spacing.y = 0.0;
-    let filter = dependency_filter(cx);
-    let visible = rows
-        .iter()
-        .filter(|row| row_matches(row, &filter))
-        .collect::<Vec<_>>();
     workspace_table_panel_header(
         ui,
         "Resolved dependency ledger",
-        &format!("{} shown", visible.len()),
+        &format!("{} shown", view.visible.len()),
         None,
     );
     // The pane owns the column grid, not the unconstrained central panel: a
@@ -430,73 +485,39 @@ fn dependency_inventory(
             None,
         );
     }
-    if rows.is_empty() {
+    if view.ledger.rows.is_empty() {
         workspace_empty_table_row(
             ui,
             width,
             "No design or executable model dependencies are currently registered.",
         );
-    } else if visible.is_empty() {
+    } else if view.visible.is_empty() {
         workspace_empty_table_row(ui, width, "No dependency matches the current filter.");
     }
+    let row_height = workspace_table_row_height(ui);
+    let body_height = if pane_height > 0.0 {
+        // What the pane leaves above its action bar.
+        dependency_panel_free_height(ui, pane_height, top).max(row_height)
+    } else {
+        // Stacked under the technology panel, the ledger scrolls within one
+        // screen of the page rather than lengthening the page by every row.
+        ui.clip_rect().height().max(row_height * 4.0)
+    };
     let mut selected = None;
-    for row in &visible {
-        let kind = WorkspaceRowKind::body(
-            cx.state.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
-        );
-        let status = status_label(&row.status);
-        let problem = status_problem(&row.status);
-        let response = if compact {
-            let cells = [
-                row.identity.as_str(),
-                row.resource_type.as_str(),
-                row.version.as_str(),
-                row.source.as_str(),
-                status.as_str(),
-            ];
-            workspace_table_row(
-                ui,
-                width,
-                cells,
-                LEDGER_COMPACT_FRACTIONS,
-                kind,
-                &LEDGER_COMPACT_MONO_COLUMNS,
-                &unset_columns(&cells),
-                problem.map(|problem| (4, problem)),
-            )
-            .0
-        } else {
-            let cells = [
-                row.identity.as_str(),
-                row.resource_type.as_str(),
-                row.version.as_str(),
-                row.source.as_str(),
-                row.digest.as_str(),
-                status.as_str(),
-            ];
-            workspace_table_row(
-                ui,
-                width,
-                cells,
-                LEDGER_FRACTIONS,
-                kind,
-                &LEDGER_MONO_COLUMNS,
-                &unset_columns(&cells),
-                problem.map(|problem| (5, problem)),
-            )
-            .0
-        };
-        // Authority is the one field with no column of its own; the row still
-        // carries it rather than spending a column on a value that repeats.
-        if response
-            .on_hover_text(format!(
-                "{}\nAuthority: {}\nSource: {}",
-                row.identity, row.authority, row.source
-            ))
-            .clicked()
-        {
-            selected = Some(row.identity.clone());
-        }
+    if !view.visible.is_empty() {
+        ScrollArea::vertical()
+            .id_salt("workbench.project.dependencies.ledger")
+            .auto_shrink([false, true])
+            .max_height(body_height)
+            .show_rows(ui, row_height, view.visible.len(), |ui, range| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for &index in &view.visible[range] {
+                    let row = &view.ledger.rows[index];
+                    if ledger_row(ui, cx, row, width, compact) {
+                        selected = Some(row.identity.clone());
+                    }
+                }
+            });
     }
     if let Some(identity) = selected {
         cx.state.project_dependency_selection = Some(identity);
@@ -511,6 +532,69 @@ fn dependency_inventory(
             export_dependency_manifest(cx);
         }
     });
+}
+
+/// One ledger row, and whether the reader clicked it.
+fn ledger_row(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    row: &DependencyRow,
+    width: f32,
+    compact: bool,
+) -> bool {
+    let kind = WorkspaceRowKind::body(
+        cx.state.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
+    );
+    let status = status_label(&row.status);
+    let problem = status_problem(&row.status);
+    let response = if compact {
+        let cells = [
+            row.identity.as_str(),
+            row.resource_type.as_str(),
+            row.version.as_str(),
+            row.source.as_str(),
+            status.as_str(),
+        ];
+        workspace_table_row(
+            ui,
+            width,
+            cells,
+            LEDGER_COMPACT_FRACTIONS,
+            kind,
+            &LEDGER_COMPACT_MONO_COLUMNS,
+            &unset_columns(&cells),
+            problem.map(|problem| (4, problem)),
+        )
+        .0
+    } else {
+        let cells = [
+            row.identity.as_str(),
+            row.resource_type.as_str(),
+            row.version.as_str(),
+            row.source.as_str(),
+            row.digest.as_str(),
+            status.as_str(),
+        ];
+        workspace_table_row(
+            ui,
+            width,
+            cells,
+            LEDGER_FRACTIONS,
+            kind,
+            &LEDGER_MONO_COLUMNS,
+            &unset_columns(&cells),
+            problem.map(|problem| (5, problem)),
+        )
+        .0
+    };
+    // Authority is the one field with no column of its own; the row still
+    // carries it rather than spending a column on a value that repeats.
+    response
+        .on_hover_text(format!(
+            "{}\nAuthority: {}\nSource: {}",
+            row.identity, row.authority, row.source
+        ))
+        .clicked()
 }
 
 /// Carry the ledger's column rules down to the action bar.
