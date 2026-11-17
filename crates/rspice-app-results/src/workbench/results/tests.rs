@@ -241,6 +241,50 @@ fn the_cursor_commands_move_the_stepping_cursor_to_each_feature() {
     assert!(session.marker_edit.is_some(), "and its dialog opens on it");
 }
 
+/// The command palette is a route of its own, opened over Results. What it
+/// lists as available is what runs once it closes, on Results beneath it, so
+/// Add measurement is offered there. It read "open a result in Results" in
+/// the palette while a result was open in Results.
+#[test]
+fn the_palette_offers_add_measurement_over_results() {
+    use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
+    use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
+    use rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute;
+
+    let mut harness = harness_on(damped_run());
+    harness.wb.activate(Workspace::Results);
+    let measurement = ResultsCommand::MeasurementLibrary.key();
+    assert_eq!(
+        harness.availability(measurement),
+        CommandAvailability::Available
+    );
+    harness
+        .wb
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::CommandPalette),
+            RouteTransitionSource::User,
+        )
+        .expect("the palette opens over Results");
+    assert_eq!(
+        harness.availability(measurement),
+        CommandAvailability::Available,
+        "offered from the palette"
+    );
+    harness.wb.activate(Workspace::Design);
+    harness
+        .wb
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::CommandPalette),
+            RouteTransitionSource::User,
+        )
+        .expect("the palette opens over Design");
+    assert_eq!(
+        harness.availability(measurement),
+        CommandAvailability::Disabled("open a result in Results"),
+        "and still refused over another surface"
+    );
+}
+
 /// The commands refuse outside a waveform sheet, and say so.
 #[test]
 fn the_cursor_commands_need_a_waveform_sheet() {

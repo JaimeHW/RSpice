@@ -431,7 +431,7 @@ impl CommandSet for ResultsCommand {
         let (model, workbench) = (reads.model, reads.wb);
         let retained = &model.simulation.retained;
         let executing = model.simulation.execution.has_active_execution();
-        let on_results_surface = workbench.current_route().surface_id() == SurfaceId::Results;
+        let on_results_surface = workbench.working_route().surface_id() == SurfaceId::Results;
         match self {
             Self::ImportResultDataset => {
                 if executing {

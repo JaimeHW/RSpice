@@ -25,7 +25,7 @@ pub(crate) fn can_save_document(
     wb: &WorkbenchSession,
     platform: &PlatformState,
 ) -> bool {
-    wb.current_route().surface_id() == SurfaceId::ReportAuthoring
+    wb.working_route().surface_id() == SurfaceId::ReportAuthoring
         && mutation_allowed(model, platform)
         && active_document(editor, model).is_some()
         && model.workspace.content.report_documents_dirty
@@ -37,7 +37,7 @@ pub(crate) fn can_add_page(
     wb: &WorkbenchSession,
     platform: &PlatformState,
 ) -> bool {
-    wb.current_route().surface_id() == SurfaceId::ReportAuthoring
+    wb.working_route().surface_id() == SurfaceId::ReportAuthoring
         && mutation_allowed(model, platform)
         && active_document(editor, model).is_some()
 }
@@ -48,7 +48,7 @@ pub(crate) fn can_edit_page_properties(
     wb: &WorkbenchSession,
     platform: &PlatformState,
 ) -> bool {
-    if wb.current_route().surface_id() != SurfaceId::ReportAuthoring
+    if wb.working_route().surface_id() != SurfaceId::ReportAuthoring
         || !mutation_allowed(model, platform)
     {
         return false;

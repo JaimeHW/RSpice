@@ -861,6 +861,24 @@ impl WorkbenchSession {
             && self.supports_results_split()
     }
 
+    /// The route the reader is working on: the current one, or, while the
+    /// command palette is open over a surface, that surface.
+    ///
+    /// Command availability reads this. The palette is a route of its own,
+    /// and a command chosen from it runs once the palette has closed, on the
+    /// route beneath; asked against the palette's own route, every command
+    /// that needs Results or the report editor read as unavailable in the
+    /// one list that offers it.
+    #[must_use]
+    pub fn working_route(&self) -> SurfaceRoute {
+        let current = self.current_route();
+        if current.surface_id() != SurfaceId::CommandPalette {
+            return current;
+        }
+        self.previous_route()
+            .unwrap_or_else(|| SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace)))
+    }
+
     /// Immediate in-application return destination, if one exists. The
     /// mutable navigation stacks remain session-owned so surfaces cannot
     /// bypass route availability and reconciliation.
