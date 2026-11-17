@@ -57,6 +57,9 @@ fn the_readme_lists_what_the_capabilities_command_says_the_cli_does_not_offer() 
         let mut written = readme.clone();
         written.replace_range(begin..end, &expected);
         std::fs::write(README, written).expect("the CLI README is writable");
+        eprintln!(
+            "RSPICE_WRITE_SUPPORT_TABLE is set: rewrote the CLI README's capability gaps instead of checking them"
+        );
         return;
     }
     assert_eq!(
