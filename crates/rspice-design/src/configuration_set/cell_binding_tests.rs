@@ -130,11 +130,6 @@ fn every_invalid_cell_binding_is_refused_without_changing_the_catalog() {
     outside.stop_view = Some("spice".to_owned());
     let mut misnamed_stop = binding("user", "adc", &["schematic"]);
     misnamed_stop.stop_view = Some("spice tt".to_owned());
-    let too_many_views: Vec<String> = (0..=MAX_CONFIGURATION_VIEW_POLICY_ENTRIES)
-        .map(|index| format!("view_{index}"))
-        .collect();
-    let mut long_list = binding("user", "adc", &[]);
-    long_list.executable_views = too_many_views;
 
     let cases: Vec<(&str, Vec<ConfigurationCellBinding>, ConfigurationSetError)> = vec![
         (
@@ -169,21 +164,8 @@ fn every_invalid_cell_binding_is_refused_without_changing_the_catalog() {
         (
             "empty view list",
             vec![binding("user", "adc", &[])],
-            ConfigurationSetError::InvalidViewPolicyLength {
+            ConfigurationSetError::EmptyViewList {
                 field: "configuration.cell-binding.executable-views",
-                actual: 0,
-                maximum: MAX_CONFIGURATION_VIEW_POLICY_ENTRIES,
-                require_nonempty: true,
-            },
-        ),
-        (
-            "view list too long",
-            vec![long_list],
-            ConfigurationSetError::InvalidViewPolicyLength {
-                field: "configuration.cell-binding.executable-views",
-                actual: MAX_CONFIGURATION_VIEW_POLICY_ENTRIES + 1,
-                maximum: MAX_CONFIGURATION_VIEW_POLICY_ENTRIES,
-                require_nonempty: true,
             },
         ),
         (
@@ -220,16 +202,6 @@ fn every_invalid_cell_binding_is_refused_without_changing_the_catalog() {
                 view: "spice".to_owned(),
             },
         ),
-        (
-            "binding count",
-            (0..=MAX_CONFIGURATION_CELL_BINDINGS)
-                .map(|index| binding("user", &format!("cell_{index:05}"), &["spice"]))
-                .collect(),
-            ConfigurationSetError::CellBindingLimitExceeded {
-                actual: MAX_CONFIGURATION_CELL_BINDINGS + 1,
-                maximum: MAX_CONFIGURATION_CELL_BINDINGS,
-            },
-        ),
     ];
     for (case, bindings, expected) in cases {
         let mut definition = definition("Candidate");
@@ -242,11 +214,8 @@ fn every_invalid_cell_binding_is_refused_without_changing_the_catalog() {
     let id = catalog.configurations()[0].id();
     assert_eq!(
         catalog.update(id, 1, with_bindings(vec![binding("user", "adc", &[])])),
-        Err(ConfigurationSetError::InvalidViewPolicyLength {
+        Err(ConfigurationSetError::EmptyViewList {
             field: "configuration.cell-binding.executable-views",
-            actual: 0,
-            maximum: MAX_CONFIGURATION_VIEW_POLICY_ENTRIES,
-            require_nonempty: true,
         })
     );
     assert_eq!(catalog, before);

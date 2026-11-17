@@ -28,14 +28,6 @@ use rspice_vocabulary::hierarchy_path::{
 
 pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 2;
 
-pub const MAX_CONFIGURATION_SETS: usize = 256;
-pub const MAX_CONFIGURATION_NAME_BYTES: usize = 128;
-pub const MAX_CONFIGURATION_OWNER_BYTES: usize = 256;
-pub const MAX_CONFIGURATION_VIEW_POLICY_ENTRIES: usize = 32;
-pub const MAX_CONFIGURATION_OVERRIDES: usize = 4_096;
-pub const MAX_CONFIGURATION_CELL_BINDINGS: usize = 4_096;
-pub const MAX_CONFIGURATION_MODEL_SECTION_BYTES: usize = 256;
-
 // The hierarchy-audit receipts in `rspice-design-model` name this identity, so
 // it is defined there and re-exported from the module that owns configuration
 // sets.
@@ -590,12 +582,6 @@ impl ConfigurationSetCatalog {
                 self.schema_version,
             ));
         }
-        if self.configurations.len() > MAX_CONFIGURATION_SETS {
-            return Err(ConfigurationSetError::CatalogLimitExceeded {
-                actual: self.configurations.len(),
-                maximum: MAX_CONFIGURATION_SETS,
-            });
-        }
 
         let mut ids = HashSet::with_capacity(self.configurations.len());
         let mut names = HashSet::with_capacity(self.configurations.len());
@@ -630,12 +616,6 @@ impl ConfigurationSetCatalog {
         definition: ConfigurationSetDefinition,
     ) -> Result<ConfigurationSetId, ConfigurationSetError> {
         self.validate()?;
-        if self.configurations.len() >= MAX_CONFIGURATION_SETS {
-            return Err(ConfigurationSetError::CatalogLimitExceeded {
-                actual: self.configurations.len().saturating_add(1),
-                maximum: MAX_CONFIGURATION_SETS,
-            });
-        }
         let definition = normalize_definition(definition);
         validate_definition(&definition)?;
         self.require_unique_name(&definition.name, None)?;
@@ -694,12 +674,6 @@ impl ConfigurationSetCatalog {
         destination_defaults: ConfigurationSetDefinition,
     ) -> Result<ConfigurationSetId, ConfigurationSetError> {
         self.validate()?;
-        if self.configurations.len() >= MAX_CONFIGURATION_SETS {
-            return Err(ConfigurationSetError::CatalogLimitExceeded {
-                actual: self.configurations.len().saturating_add(1),
-                maximum: MAX_CONFIGURATION_SETS,
-            });
-        }
         let source = self
             .find(source_id)
             .ok_or(ConfigurationSetError::NotFound(source_id))?;
@@ -981,11 +955,7 @@ fn remap_cell_bindings(
 fn validate_definition(
     definition: &ConfigurationSetDefinition,
 ) -> Result<(), ConfigurationSetError> {
-    validate_text(
-        "configuration.name",
-        &definition.name,
-        MAX_CONFIGURATION_NAME_BYTES,
-    )?;
+    validate_text("configuration.name", &definition.name)?;
     definition
         .root
         .validate_name_segments()
@@ -1002,17 +972,7 @@ fn validate_definition(
         &definition.stop_views,
         &definition.executable_view_policy,
     )?;
-    validate_text(
-        "configuration.owner",
-        &definition.owner,
-        MAX_CONFIGURATION_OWNER_BYTES,
-    )?;
-    if definition.overrides.len() > MAX_CONFIGURATION_OVERRIDES {
-        return Err(ConfigurationSetError::OverrideLimitExceeded {
-            actual: definition.overrides.len(),
-            maximum: MAX_CONFIGURATION_OVERRIDES,
-        });
-    }
+    validate_text("configuration.owner", &definition.owner)?;
 
     if definition.overrides.windows(2).any(|pair| {
         override_fold_key(&pair[0].instance_path) > override_fold_key(&pair[1].instance_path)
@@ -1031,10 +991,12 @@ fn validate_definition(
             ));
         }
         patterns.push(pattern);
+        // An override that names no views leaves them to what it would
+        // otherwise inherit; its model section and platforms still apply.
         validate_view_policy(
             "configuration.override.executable-views",
             &scoped.executable_views,
-            true,
+            false,
         )?;
         if let Some(stop_view) = scoped.stop_view.as_deref() {
             validate_executable_view("configuration.override.stop-view", stop_view)?;
@@ -1045,11 +1007,7 @@ fn validate_definition(
             )?;
         }
         if let Some(model_section) = scoped.model_section.as_deref() {
-            validate_text(
-                "configuration.override.model-section",
-                model_section,
-                MAX_CONFIGURATION_MODEL_SECTION_BYTES,
-            )?;
+            validate_text("configuration.override.model-section", model_section)?;
             validate_model_section_identifier(model_section)?;
         }
         if scoped.eligible_platforms.is_empty() {
@@ -1071,20 +1029,14 @@ fn validate_definition(
     validate_cell_bindings(&definition.cell_bindings)
 }
 
-/// A cell binding is refused on the same terms as an override: bounded,
-/// stored in canonical order, unique per cell, and naming a non-empty ordered
-/// view list whose stop view is one of its own views. Whether the cell exists
-/// is not asked; a binding for a cell the hierarchy never reaches binds
-/// nothing.
+/// A cell binding is refused on the same terms as an override: stored in
+/// canonical order, unique per cell, and naming a non-empty ordered view list
+/// whose stop view is one of its own views; a cell binding is its view list,
+/// so one that names none is no binding. Whether the cell exists is not
+/// asked; a binding for a cell the hierarchy never reaches binds nothing.
 fn validate_cell_bindings(
     bindings: &[ConfigurationCellBinding],
 ) -> Result<(), ConfigurationSetError> {
-    if bindings.len() > MAX_CONFIGURATION_CELL_BINDINGS {
-        return Err(ConfigurationSetError::CellBindingLimitExceeded {
-            actual: bindings.len(),
-            maximum: MAX_CONFIGURATION_CELL_BINDINGS,
-        });
-    }
     if bindings.windows(2).any(|pair| {
         cell_binding_key(&pair[0].library, &pair[0].cell)
             > cell_binding_key(&pair[1].library, &pair[1].cell)
@@ -1131,20 +1083,9 @@ fn validate_cell_binding_name(
     })
 }
 
-fn validate_text(
-    field: &'static str,
-    value: &str,
-    maximum_bytes: usize,
-) -> Result<(), ConfigurationSetError> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > maximum_bytes
-        || value.chars().any(char::is_control)
-    {
-        return Err(ConfigurationSetError::InvalidText {
-            field,
-            maximum_bytes,
-        });
+fn validate_text(field: &'static str, value: &str) -> Result<(), ConfigurationSetError> {
+    if value.is_empty() || value.trim() != value || value.chars().any(char::is_control) {
+        return Err(ConfigurationSetError::InvalidText { field });
     }
     Ok(())
 }
@@ -1296,14 +1237,8 @@ fn validate_view_policy(
     views: &[String],
     require_nonempty: bool,
 ) -> Result<(), ConfigurationSetError> {
-    if (require_nonempty && views.is_empty()) || views.len() > MAX_CONFIGURATION_VIEW_POLICY_ENTRIES
-    {
-        return Err(ConfigurationSetError::InvalidViewPolicyLength {
-            field,
-            actual: views.len(),
-            maximum: MAX_CONFIGURATION_VIEW_POLICY_ENTRIES,
-            require_nonempty,
-        });
+    if require_nonempty && views.is_empty() {
+        return Err(ConfigurationSetError::EmptyViewList { field });
     }
     let mut unique = HashSet::with_capacity(views.len());
     for view in views {
@@ -1385,8 +1320,6 @@ fn semantic_digest(
 pub enum ConfigurationSetError {
     #[error("configuration-set catalog schema {0} is unsupported")]
     UnsupportedSchema(u16),
-    #[error("configuration-set catalog contains {actual} entries; maximum is {maximum}")]
-    CatalogLimitExceeded { actual: usize, maximum: usize },
     #[error("configuration-set identity must not be nil")]
     NilIdentity,
     #[error("configuration-set identity {0} is duplicated")]
@@ -1423,13 +1356,8 @@ pub enum ConfigurationSetError {
     SemanticDigestMismatch(ConfigurationSetId),
     #[error("configuration root has an invalid library/cell/view segment: {0}")]
     InvalidCellViewReference(String),
-    #[error(
-        "{field} must be trimmed, non-empty, contain no control characters, and not exceed {maximum_bytes} bytes"
-    )]
-    InvalidText {
-        field: &'static str,
-        maximum_bytes: usize,
-    },
+    #[error("{field} must be trimmed, non-empty, and contain no control characters")]
+    InvalidText { field: &'static str },
     #[error("{field} contains invalid absolute instance path {path:?}: {source}")]
     InvalidInstancePath {
         field: &'static str,
@@ -1442,15 +1370,8 @@ pub enum ConfigurationSetError {
         path: String,
         display: String,
     },
-    #[error(
-        "{field} contains {actual} entries; maximum is {maximum} and non-empty is {require_nonempty}"
-    )]
-    InvalidViewPolicyLength {
-        field: &'static str,
-        actual: usize,
-        maximum: usize,
-        require_nonempty: bool,
-    },
+    #[error("{field} names no view")]
+    EmptyViewList { field: &'static str },
     #[error("{field} view name {view:?} is invalid: {reason}")]
     InvalidViewName {
         field: &'static str,
@@ -1461,8 +1382,6 @@ pub enum ConfigurationSetError {
     DuplicateView { field: &'static str, view: String },
     #[error("{field} stop view {view:?} does not occur in its ordered executable policy")]
     StopViewOutsidePolicy { field: &'static str, view: String },
-    #[error("configuration contains {actual} scoped overrides; maximum is {maximum}")]
-    OverrideLimitExceeded { actual: usize, maximum: usize },
     #[error("scoped override path {0:?} is duplicated (paths are case-insensitive)")]
     DuplicateOverridePath(String),
     #[error("scoped override patterns {left:?} and {right:?} overlap at equal specificity")]
@@ -1477,8 +1396,6 @@ pub enum ConfigurationSetError {
     UnsortedOverridePaths,
     #[error("scoped override {0:?} must authorize at least one execution platform")]
     NoEligiblePlatforms(String),
-    #[error("configuration contains {actual} cell bindings; maximum is {maximum}")]
-    CellBindingLimitExceeded { actual: usize, maximum: usize },
     #[error("{field} name {name:?} is invalid: {reason}")]
     InvalidCellBindingName {
         field: &'static str,

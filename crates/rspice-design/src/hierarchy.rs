@@ -1353,15 +1353,17 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     }
 
     /// The ordered view list that governs one instance, and the rule that
-    /// chose it: its own override, then a cell binding for its master's
-    /// library and cell, then the configuration's global view list.
+    /// chose it: the most specific override naming views, then a cell
+    /// binding for its master's library and cell, then the configuration's
+    /// global view list. An override that names no views inherits them, so
+    /// setting its model section or platforms never changes its view.
     fn configured_view_list(
         &self,
         configuration: &'a ConfigurationSet,
         master: &CellViewRef,
         instance_path: &InstancePath,
     ) -> (HierarchyBindingRule, &[String]) {
-        if let Some(scoped) = self.configured_override(instance_path) {
+        if let Some(scoped) = self.configured_view_override(instance_path) {
             return (
                 HierarchyBindingRule::InstanceBinding,
                 &scoped.executable_views,
@@ -1374,6 +1376,25 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             HierarchyBindingRule::ViewList,
             configuration.executable_view_policy(),
         )
+    }
+
+    /// The most specific override matching one instance that names views:
+    /// the one whose view list, and stop, govern it.
+    fn configured_view_override(
+        &self,
+        instance_path: &InstancePath,
+    ) -> Option<&ConfigurationSetOverride> {
+        self.overrides
+            .iter()
+            .filter(|scoped| !scoped.executable_views.is_empty())
+            .filter_map(|scoped| {
+                let pattern = InstancePathPattern::parse(&scoped.instance_path).ok()?;
+                pattern
+                    .matches(instance_path)
+                    .then(|| (scoped, pattern.specificity()))
+            })
+            .max_by_key(|(_, specificity)| *specificity)
+            .map(|(scoped, _)| scoped)
     }
 
     /// The cell binding for one master's library and cell, matched the way
@@ -1468,7 +1489,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             return Vec::new();
         };
         if let Some(stop_view) = self
-            .configured_override(instance_path)
+            .configured_view_override(instance_path)
             .and_then(|scoped| scoped.stop_view.as_ref())
             .or_else(|| {
                 self.configured_cell_binding(master)

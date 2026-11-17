@@ -3,7 +3,7 @@
 use super::*;
 use crate::configuration_set::{
     ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationSetCatalog,
-    ConfigurationSetDefinition,
+    ConfigurationSetDefinition, ConfigurationSetError,
 };
 use crate::schematic::component::Component;
 use rspice_design_model::Point;
@@ -526,6 +526,66 @@ fn rows_a_different_rule_chose_are_never_merged() {
     assert_eq!(cell_bound.instance_paths, ["/X1", "/X4"]);
     assert_eq!(instance_bound.rule, HierarchyBindingRule::InstanceBinding);
     assert_eq!(instance_bound.instance_paths, ["/X2"]);
+}
+
+/// An instance binding that names no views inherits them, from a pattern
+/// binding, the cell binding or the global list, in that order, while its
+/// platforms and model section still apply: setting either never changes a
+/// view.
+#[test]
+fn an_instance_binding_without_views_inherits_them() {
+    let desktop_only = |path: &str| {
+        let mut binding = instance_binding(path, &[], None);
+        binding.eligible_platforms = vec![ConfigurationPlatform::Desktop];
+        binding
+    };
+    let mut definition = bound_configuration(&["schematic"], &[]);
+    definition.cell_bindings = vec![cell_binding("amp", &["fast"], None)];
+    definition.overrides = vec![desktop_only("/X1"), desktop_only("/X3")];
+    let resolution = resolve_bound(Some(definition.clone()));
+    assert!(resolution.is_valid(), "{:#?}", resolution.bindings);
+    let cell_bound = row(&resolution, "/X1");
+    assert_eq!(
+        cell_bound.reference,
+        CellViewRef::new("work", "amp", "fast")
+    );
+    assert_eq!(cell_bound.rule, HierarchyBindingRule::CellBinding);
+    let listed = row(&resolution, "/X3");
+    assert_eq!(
+        listed.reference,
+        CellViewRef::new("work", "buf", "schematic")
+    );
+    assert_eq!(listed.rule, HierarchyBindingRule::ViewList);
+
+    definition.overrides = vec![instance_binding("/*", &["slow"], None), desktop_only("/X2")];
+    let resolution = resolve_bound(Some(definition.clone()));
+    let patterned = row(&resolution, "/X2");
+    assert_eq!(patterned.reference, CellViewRef::new("work", "amp", "slow"));
+    assert_eq!(patterned.rule, HierarchyBindingRule::InstanceBinding);
+
+    // A model section set alone keeps the inherited view and still applies:
+    // here it asks for a source-backed view the inherited one is not.
+    let mut sectioned = instance_binding("/X1", &[], None);
+    sectioned.model_section = Some("ff".to_owned());
+    definition.overrides = vec![sectioned];
+    let resolution = resolve_bound(Some(definition.clone()));
+    let sectioned = row(&resolution, "/X1");
+    assert_eq!(sectioned.reference, CellViewRef::new("work", "amp", "fast"));
+    assert!(
+        sectioned
+            .diagnostic
+            .as_deref()
+            .is_some_and(|problem| problem.contains("model section 'ff' at /X1")),
+        "{:?}",
+        sectioned.diagnostic
+    );
+
+    // A stop belongs to a view list, so a binding that names none has none.
+    definition.overrides = vec![instance_binding("/X1", &[], Some("fast"))];
+    assert!(matches!(
+        ConfigurationSetCatalog::default().create(definition),
+        Err(ConfigurationSetError::StopViewOutsidePolicy { .. })
+    ));
 }
 
 #[test]

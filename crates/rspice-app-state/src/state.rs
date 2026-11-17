@@ -49,7 +49,7 @@ pub use configuration_set::{
     ConfigurationBlackBoxPolicy, ConfigurationCellBinding, ConfigurationCloneScope,
     ConfigurationModelProfile, ConfigurationPlatform, ConfigurationSet, ConfigurationSetCatalog,
     ConfigurationSetDefinition, ConfigurationSetError, ConfigurationSetId,
-    ConfigurationSetOverride, MAX_CONFIGURATION_CELL_BINDINGS, UnresolvedBindingPolicy,
+    ConfigurationSetOverride, UnresolvedBindingPolicy,
 };
 pub use connectivity_contract::{
     BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,

@@ -1283,11 +1283,8 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
         ConfigurationSetError::DuplicateName(name) => {
             format!("Another configuration is named {name}. Pick another name.")
         }
-        ConfigurationSetError::InvalidText {
-            field: name,
-            maximum_bytes,
-        } => format!(
-            "{} must not be empty, start or end with a space, or exceed {maximum_bytes} characters.",
+        ConfigurationSetError::InvalidText { field: name } => format!(
+            "{} must not be empty, or start or end with a space.",
             field(name)
         ),
         ConfigurationSetError::InvalidInstancePath {
@@ -1306,20 +1303,8 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
             "{} {path} is the netlist spelling; write {display}.",
             field(name)
         ),
-        ConfigurationSetError::InvalidViewPolicyLength {
-            field: name,
-            actual,
-            maximum,
-            require_nonempty,
-        } => {
-            if *require_nonempty && *actual == 0 {
-                format!("{} is empty. Add at least one view.", field(name))
-            } else {
-                format!(
-                    "{} holds {actual} views; it can hold {maximum}.",
-                    field(name)
-                )
-            }
+        ConfigurationSetError::EmptyViewList { field: name } => {
+            format!("{} is empty. Add at least one view.", field(name))
         }
         ConfigurationSetError::InvalidViewName {
             field: name,
