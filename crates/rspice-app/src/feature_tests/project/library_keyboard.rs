@@ -155,7 +155,7 @@ fn shift_f10_opens_the_rows_menu_with_the_bands_items() {
     let mut replay = library_page();
     press(&mut replay, Key::ArrowRight);
     let menu = replay.key(Key::F10, Modifiers::SHIFT);
-    only(&menu, "Where used\u{2026}", Role::Button);
+    only(&menu, "Where view is used\u{2026}", Role::Button);
     only(&menu, "Rename view\u{2026}", Role::Button);
 }
 

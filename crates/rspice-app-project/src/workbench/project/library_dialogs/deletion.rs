@@ -28,6 +28,8 @@ pub struct LibraryDeletionImpact {
     pub open_views: usize,
     pub dirty_open_views: usize,
     pub instance_references: usize,
+    /// Placements of the target in layouts the deletion leaves standing.
+    pub layout_placements: usize,
     source_bundles: usize,
     configuration_roots: usize,
     project_root: bool,
@@ -40,6 +42,7 @@ impl LibraryDeletionImpact {
         self.open_views += other.open_views;
         self.dirty_open_views += other.dirty_open_views;
         self.instance_references += other.instance_references;
+        self.layout_placements += other.layout_placements;
         self.source_bundles += other.source_bundles;
         self.configuration_roots += other.configuration_roots;
         self.project_root |= other.project_root;
@@ -157,7 +160,7 @@ impl ProjectState {
             );
         }
         for target in &targets {
-            let impact = library_deletion_impact(model, target);
+            let impact = deletion_impact_among(model, target, &targets);
             can_delete(model, target, &impact, Some(resolution))?;
         }
         if self.library_deletion_pending() {
@@ -203,7 +206,7 @@ impl ProjectFeature {
         let mut impact = LibraryDeletionImpact::default();
         let mut gate = Ok(());
         for each in &targets {
-            let each_impact = library_deletion_impact(cx.model, each);
+            let each_impact = deletion_impact_among(cx.model, each, &targets);
             if gate.is_ok() {
                 gate = can_delete(
                     cx.model,
@@ -234,6 +237,7 @@ impl ProjectFeature {
             impact.open_views, impact.dirty_open_views
         );
         let reference_count = placements.to_string();
+        let layout_count = impact.layout_placements.to_string();
         let source_count = impact.source_bundles.to_string();
         let root_count = impact.configuration_roots.to_string();
         let stale_error = (!revision_current).then(|| {
@@ -303,6 +307,7 @@ impl ProjectFeature {
             }
             kv_row(ui, "Open views", &open_count);
             kv_row(ui, "Placements in this project", &reference_count);
+            kv_row(ui, "Layout placements", &layout_count);
             kv_row(ui, "Owned source bundles", &source_count);
             kv_row(ui, "Configuration roots", &root_count);
 
@@ -510,7 +515,7 @@ fn delete_staged_batch(cx: &mut Cx<'_, ProjectFeature>, targets: Vec<LibraryDele
     let mut catalog = (*cx.model.workspace.content.design_management).clone();
     let mut catalog_changed = false;
     for target in &targets {
-        let impact = library_deletion_impact(cx.model, target);
+        let impact = deletion_impact_among(cx.model, target, &targets);
         let checked = can_delete(cx.model, target, &impact, resolution).and_then(|()| {
             remove_from_design_management(
                 &mut catalog,
@@ -657,6 +662,18 @@ fn can_delete(
             target.kind_label().to_ascii_lowercase()
         ));
     }
+    // A layout that places the target would be left holding a master that
+    // no longer exists, so it blocks, as it does a library's deletion.
+    if impact.layout_placements > 0 {
+        let count = impact.layout_placements;
+        return Err(format!(
+            "{count} layout placement{} of '{}' {} in this project. Remove {} before deleting it.",
+            if count == 1 { "" } else { "s" },
+            target.display_path(),
+            if count == 1 { "stands" } else { "stand" },
+            if count == 1 { "it" } else { "them" }
+        ));
+    }
     let placements = impact.instance_references;
     if placements > 0 && resolution.is_none() {
         return Err(format!(
@@ -733,9 +750,31 @@ fn validate_library_deletion_target(
     Ok(())
 }
 
+/// What deleting `target` alone takes and leaves behind.
 pub fn library_deletion_impact(
     model: &Model,
     target: &LibraryDeletionTarget,
+) -> LibraryDeletionImpact {
+    deletion_impact_among(model, target, std::slice::from_ref(target))
+}
+
+/// Whether a deletion of `targets` takes the view `reference` names.
+fn deleted_by(targets: &[LibraryDeletionTarget], reference: &crate::state::CellViewRef) -> bool {
+    targets.iter().any(|target| {
+        reference.library.eq_ignore_ascii_case(target.library())
+            && reference.cell.eq_ignore_ascii_case(target.cell())
+            && target
+                .view()
+                .is_none_or(|view| reference.view.eq_ignore_ascii_case(view))
+    })
+}
+
+/// What deleting `target` as one of `targets` takes and leaves behind: a
+/// layout another of them takes does not stand to hold a placement.
+fn deletion_impact_among(
+    model: &Model,
+    target: &LibraryDeletionTarget,
+    targets: &[LibraryDeletionTarget],
 ) -> LibraryDeletionImpact {
     let matches = |reference: &crate::state::CellViewRef| {
         reference.library == target.library()
@@ -796,11 +835,19 @@ pub fn library_deletion_impact(
         .cell_instances(target.library(), target.cell(), target.view())
         .len();
 
+    let layout_placements = model
+        .cell_layout_placements(target.library(), target.cell(), target.view())
+        .iter()
+        .filter(|usage| !deleted_by(targets, &usage.layout))
+        .map(|usage| usage.placements)
+        .sum();
+
     LibraryDeletionImpact {
         views,
         open_views,
         dirty_open_views,
         instance_references,
+        layout_placements,
         source_bundles,
         configuration_roots,
         project_root,

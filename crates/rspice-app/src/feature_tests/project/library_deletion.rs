@@ -9,8 +9,9 @@ use rspice_app_project::workbench::project::workspace_state::{
     DeletionInstanceResolution, LibraryDeletionTarget,
 };
 use rspice_app_state::state::{
-    Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
-    SchematicState, View, ViewType,
+    Cell, CellViewRef, ComponentType, LayoutEdit, LayoutInstance, LayoutObjectId,
+    LayoutOrientation, LayoutPoint, LayoutTransform, Library, LibraryCellInstance, OpenCellView,
+    Point, SchematicState, View, ViewType,
 };
 
 use super::with_cx;
@@ -1331,4 +1332,147 @@ fn a_staged_deletion_removes_the_object_and_what_it_owned() {
         "the view's Verilog-A source goes with it"
     );
     assert_eq!(content.project.library_mutation_audit().len(), 1);
+}
+
+/// `count` instances of `master` placed in the layout `owner`, through the
+/// one way an edit reaches a layout.
+fn place_in_layout(
+    state: &mut crate::workbench::app_state::AppState,
+    owner: &CellViewRef,
+    master: &CellViewRef,
+    count: i64,
+) {
+    let revision = state
+        .model
+        .workspace
+        .content
+        .physical_layout_document(owner)
+        .expect("the layout exists")
+        .revision();
+    let edits = (0..count)
+        .map(|index| LayoutEdit::InsertInstance {
+            id: LayoutObjectId::new(),
+            value: LayoutInstance {
+                master: master.clone(),
+                transform: LayoutTransform {
+                    origin: LayoutPoint::new(index * 10_000, 0),
+                    orientation: LayoutOrientation::R0,
+                },
+                array: None,
+                terminal_bindings: Default::default(),
+                properties: Default::default(),
+            },
+        })
+        .collect::<Vec<_>>();
+    state
+        .model
+        .apply_physical_layout_transaction(owner, revision, &edits)
+        .expect("the placements commit");
+}
+
+/// user/amp with a layout, placed twice in the layout of soc/chip.
+fn project_with_amp_placed_in_a_layout() -> crate::workbench::app_state::AppState {
+    let mut state = default_project_with_active_keep_cell();
+    let user = state
+        .model
+        .library_manager
+        .get_library_mut("user")
+        .expect("the default project's library");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("layout", ViewType::Layout));
+    user.add_cell(amp);
+    let mut soc = Library::new("soc");
+    let mut chip = Cell::new("chip");
+    chip.add_view(View::new("layout", ViewType::Layout));
+    soc.add_cell(chip);
+    state.model.library_manager.add_library(soc);
+    state.provision_test_project_technology_contract();
+    let amp_layout = CellViewRef::new("user", "amp", "layout");
+    let chip_layout = CellViewRef::new("soc", "chip", "layout");
+    for owner in [&amp_layout, &chip_layout] {
+        state
+            .model
+            .initialize_physical_layout_document(owner.clone())
+            .expect("the layout initializes from the project's PDK");
+    }
+    place_in_layout(&mut state, &chip_layout, &amp_layout, 2);
+    state
+}
+
+/// A layout that places a cell counts where the cell is used, for the cell
+/// and for its library, and the cell's deletion names the placements and
+/// refuses until they are gone: deleting it would leave the layout placing
+/// a master that no longer exists.
+#[test]
+fn a_layout_placement_counts_where_used_and_blocks_the_cells_deletion() {
+    let state = project_with_amp_placed_in_a_layout();
+    let chip_layout = CellViewRef::new("soc", "chip", "layout");
+
+    let placed = state.model.cell_layout_placements("user", "amp", None);
+    assert_eq!(
+        placed
+            .iter()
+            .map(|usage| (usage.layout.clone(), usage.placements))
+            .collect::<Vec<_>>(),
+        vec![(chip_layout.clone(), 2)]
+    );
+    assert!(
+        state
+            .model
+            .cell_view_consumers(&CellViewRef::new("user", "amp", "layout"))
+            .contains(&chip_layout.display_path()),
+        "the inspector's Used by names the layout"
+    );
+    let (_, outside) = state.model.library_external_placements("user");
+    assert_eq!(
+        outside
+            .iter()
+            .map(|usage| (usage.layout.clone(), usage.placements))
+            .collect::<Vec<_>>(),
+        vec![(chip_layout.clone(), 2)],
+        "the library's Where used counts the placement made from outside it"
+    );
+    let (_, inside) = state.model.library_external_placements("soc");
+    assert!(inside.is_empty(), "soc's own cells are placed nowhere");
+
+    let target = LibraryDeletionTarget::Cell {
+        library: "user".to_owned(),
+        cell: "amp".to_owned(),
+    };
+    assert_eq!(
+        library_deletion_impact(&state.model, &target).layout_placements,
+        2
+    );
+    let mut app = app_with_state(state);
+    app.state
+        .project
+        .open_library_deletions_review(&app.state.model, vec![target])
+        .expect("the review opens and states the refusal");
+    let refused = app
+        .state
+        .project
+        .confirm_library_deletion_review(
+            &app.state.model,
+            DeletionInstanceResolution::RemoveInstances,
+        )
+        .expect_err("a cell a layout places is not deleted");
+    assert!(
+        refused.contains("2 layout placements of 'user/amp'"),
+        "{refused}"
+    );
+    app.state.project.library_deletion_review.close();
+
+    app.state.project.pending_delete_cell = Some(("user".into(), "amp".into()));
+    app.state.project.library_deletion_review.resolution =
+        Some(DeletionInstanceResolution::RemoveInstances);
+    process_pending(&mut app);
+    assert!(
+        app.state
+            .model
+            .library_manager
+            .get_library("user")
+            .and_then(|library| library.get_cell("amp"))
+            .is_some(),
+        "the staged deletion is refused alike"
+    );
 }

@@ -1,15 +1,18 @@
-//! Where a library cell is placed: the schematic instances that bind it.
+//! Where a library cell is placed: the schematic instances that bind it and
+//! the layouts that place it.
 //!
-//! The library's Where used report, the inspector's consumer count and the
-//! Verilog-A navigator's Used in section all ask this one question, so it is
-//! answered once. Every schematic of the project is in the workspace's
-//! buffers; the one open in the editor is read from the editor instead,
-//! because its buffer is only brought up to date when the view is left.
+//! The library's Where used report, the inspector's consumer count, the
+//! deletion reviews and the Verilog-A navigator's Used in section all ask
+//! this one question, so it is answered once. Every schematic of the project
+//! is in the workspace's buffers; the one open in the editor is read from
+//! the editor instead, because its buffer is only brought up to date when the
+//! view is left. Every layout is in the workspace's physical-layout catalog.
 //!
 //! The panels that show the answer ask it every frame, and the answer walks
-//! every component of every drawing. So each answer is remembered with the
-//! [stamps](rspice_design::stamped) of the drawings it was read from, and is
-//! read again only once one of them has moved.
+//! every component of every drawing and every instance of every layout. So
+//! each answer is remembered with the [stamps](rspice_design::stamped) of the
+//! drawings and the layouts it was read from, and is read again only once one
+//! of them has moved.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,7 +35,10 @@ thread_local! {
 struct CellUses {
     /// Every placed instance, by schematic and then by instance name.
     instances: Vec<CellInstanceUse>,
-    /// The schematics those instances are placed in, each once, as paths.
+    /// Every layout that places it, by layout.
+    layouts: Vec<LayoutPlacementUse>,
+    /// The schematics and then the layouts it is placed in, each once, as
+    /// paths.
     consumers: Arc<[String]>,
 }
 
@@ -52,11 +58,12 @@ thread_local! {
 }
 
 /// Every drawing an answer reads, by its stamp: the one open in the editor
-/// with its reference, and every buffer by its key.
+/// with its reference, every buffer by its key, and the layouts.
 #[derive(Default)]
 struct Drawings {
     live: Option<(CellViewRef, u64)>,
     buffers: HashMap<String, u64>,
+    layouts: u64,
 }
 
 impl Drawings {
@@ -71,6 +78,7 @@ impl Drawings {
                 .iter()
                 .map(|(key, schematic)| (key.clone(), schematic.content_stamp()))
                 .collect(),
+            layouts: model.workspace.content.physical_layout_stamp(),
         }
     }
 
@@ -85,7 +93,8 @@ impl Drawings {
             }
             _ => false,
         };
-        live && self.buffers.len() == content.schematic_buffers.len()
+        live && self.layouts == content.physical_layout_stamp()
+            && self.buffers.len() == content.schematic_buffers.len()
             && content
                 .schematic_buffers
                 .iter()
@@ -114,6 +123,15 @@ pub struct CellInstanceUse {
     pub component_id: u64,
 }
 
+/// One layout that places a library cell, and how many times.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutPlacementUse {
+    /// The layout view the cell is placed in.
+    pub layout: CellViewRef,
+    /// How many of that layout's instances place it.
+    pub placements: usize,
+}
+
 impl Model {
     /// Every instance in the project that binds `library`/`cell`, ordered by
     /// schematic and then by instance name.
@@ -130,8 +148,57 @@ impl Model {
         self.cell_uses(library, cell, view).instances.clone()
     }
 
-    /// The schematics that place `reference`, each once, as the paths the
-    /// panels print.
+    /// Every layout in the project that places `library`/`cell`, or with
+    /// `view` that view of it alone, ordered by layout.
+    pub fn cell_layout_placements(
+        &self,
+        library: &str,
+        cell: &str,
+        view: Option<&str>,
+    ) -> Vec<LayoutPlacementUse> {
+        self.cell_uses(library, cell, view).layouts.clone()
+    }
+
+    /// Every placement of a cell of `library` made from outside it: the
+    /// schematic instances with the cell each places, by schematic and then
+    /// by instance name, and the layouts, by layout. A library's own cells
+    /// placing each other is its own hierarchy and is not counted.
+    pub fn library_external_placements(
+        &self,
+        library: &str,
+    ) -> (Vec<(String, CellInstanceUse)>, Vec<LayoutPlacementUse>) {
+        let Some(found) = self.library_manager.get_library(library) else {
+            return (Vec::new(), Vec::new());
+        };
+        let outside = |reference: &CellViewRef| !reference.library.eq_ignore_ascii_case(library);
+        let mut instances = Vec::new();
+        let mut layouts = std::collections::BTreeMap::<String, LayoutPlacementUse>::new();
+        for cell in found.cells.values() {
+            let uses = self.cell_uses(library, &cell.name, None);
+            instances.extend(
+                uses.instances
+                    .iter()
+                    .filter(|usage| outside(&usage.schematic))
+                    .map(|usage| (cell.name.clone(), usage.clone())),
+            );
+            for usage in uses.layouts.iter().filter(|usage| outside(&usage.layout)) {
+                layouts
+                    .entry(usage.layout.key().to_ascii_lowercase())
+                    .and_modify(|merged| merged.placements += usage.placements)
+                    .or_insert_with(|| usage.clone());
+            }
+        }
+        instances.sort_by_key(|(_, usage)| {
+            (
+                usage.schematic.key().to_ascii_lowercase(),
+                usage.instance.to_ascii_lowercase(),
+            )
+        });
+        (instances, layouts.into_values().collect())
+    }
+
+    /// The schematics and then the layouts that place `reference`, each
+    /// once, as the paths the panels print.
     pub fn cell_view_consumers(&self, reference: &CellViewRef) -> Arc<[String]> {
         Arc::clone(
             &self
@@ -209,13 +276,31 @@ impl Model {
                     right.instance.to_ascii_lowercase(),
                 ))
         });
+        let mut layouts = content
+            .physical_layout_documents()
+            .values()
+            .filter_map(|document| {
+                let placements = document
+                    .instances()
+                    .values()
+                    .filter(|instance| masters(&instance.master, library, cell, view))
+                    .count();
+                (placements > 0).then(|| LayoutPlacementUse {
+                    layout: document.owner().clone(),
+                    placements,
+                })
+            })
+            .collect::<Vec<_>>();
+        layouts.sort_by_key(|usage| usage.layout.key().to_ascii_lowercase());
         let mut consumers = uses
             .iter()
             .map(|usage| usage.schematic.display_path())
             .collect::<Vec<_>>();
         consumers.dedup();
+        consumers.extend(layouts.iter().map(|usage| usage.layout.display_path()));
         CellUses {
             instances: uses,
+            layouts,
             consumers: consumers.into(),
         }
     }
@@ -295,6 +380,14 @@ pub fn places(
             && binding.cell.eq_ignore_ascii_case(cell)
             && view.is_none_or(|view| binding.view.eq_ignore_ascii_case(view))
     })
+}
+
+/// Whether a layout instance of `master` places `library`/`cell`, or its
+/// `view` alone, by the comparison [`places`] makes.
+fn masters(master: &CellViewRef, library: &str, cell: &str, view: Option<&str>) -> bool {
+    master.library.eq_ignore_ascii_case(library)
+        && master.cell.eq_ignore_ascii_case(cell)
+        && view.is_none_or(|view| master.view.eq_ignore_ascii_case(view))
 }
 
 fn collect(

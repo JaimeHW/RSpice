@@ -45,7 +45,9 @@ pub enum LibraryIntent {
     },
     /// The manager's Symbol & form page, on this symbol view.
     OpenSymbolForm(CellViewRef),
-    ReportUsage(CellViewRef),
+    /// Where used of a view, of every view of a cell, or of a library's
+    /// cells as placed from outside it.
+    ReportUsage(UsageSubject),
     NewLibrary,
     RenameLibrary(String),
     DeleteLibrary(String),
@@ -92,11 +94,129 @@ pub enum LibraryIntent {
     RestoreFromPublication,
 }
 
+/// What Where used is asked of: one view, every view of a cell, or the
+/// cells of a library as placed from outside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UsageSubject {
+    View(CellViewRef),
+    Cell { library: String, cell: String },
+    Library(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LibraryUsageReport {
-    reference: CellViewRef,
-    /// Each placement: the schematic it is on and the instance's name.
+    subject: UsageSubject,
+    /// Each schematic placement: the schematic it is on and the instance's
+    /// name, with the cell it places in a library's report.
     placements: Vec<(String, String)>,
+    /// Each layout that places it, with how many times.
+    layouts: Vec<(String, usize)>,
+}
+
+impl LibraryUsageReport {
+    fn of(model: &Model, subject: UsageSubject) -> Self {
+        let schematic = |library: &str, cell: &str, view: Option<&str>| {
+            model
+                .cell_instances(library, cell, view)
+                .into_iter()
+                .map(|usage| (usage.schematic.display_path(), usage.instance))
+                .collect::<Vec<_>>()
+        };
+        let (placements, layouts) = match &subject {
+            UsageSubject::View(reference) => {
+                let view = Some(reference.view.as_str());
+                (
+                    schematic(&reference.library, &reference.cell, view),
+                    model.cell_layout_placements(&reference.library, &reference.cell, view),
+                )
+            }
+            UsageSubject::Cell { library, cell } => (
+                schematic(library, cell, None),
+                model.cell_layout_placements(library, cell, None),
+            ),
+            UsageSubject::Library(library) => {
+                let (instances, layouts) = model.library_external_placements(library);
+                let placements = instances
+                    .into_iter()
+                    .map(|(cell, usage)| {
+                        (
+                            usage.schematic.display_path(),
+                            format!("{} ({cell})", usage.instance),
+                        )
+                    })
+                    .collect();
+                (placements, layouts)
+            }
+        };
+        Self {
+            subject,
+            placements,
+            layouts: layouts
+                .into_iter()
+                .map(|usage| (usage.layout.display_path(), usage.placements))
+                .collect(),
+        }
+    }
+
+    /// "amp/symbol is placed 3 times in 2 schematics and once in 1 layout."
+    fn summary(&self) -> String {
+        let count = |count: usize, one: &str, many: &str| {
+            if count == 1 {
+                format!("{count} {one}")
+            } else {
+                format!("{count} {many}")
+            }
+        };
+        let times = |placements: usize| match placements {
+            1 => "once".to_owned(),
+            placements => format!("{placements} times"),
+        };
+        let mut schematics = self
+            .placements
+            .iter()
+            .map(|(schematic, _)| schematic.as_str())
+            .collect::<Vec<_>>();
+        schematics.dedup();
+        let mut places = Vec::new();
+        if !self.placements.is_empty() {
+            places.push(format!(
+                "{} in {}",
+                times(self.placements.len()),
+                count(schematics.len(), "schematic", "schematics")
+            ));
+        }
+        let layout_placements = self.layouts.iter().map(|(_, placements)| placements).sum();
+        if layout_placements > 0 {
+            places.push(format!(
+                "{} in {}",
+                times(layout_placements),
+                count(self.layouts.len(), "layout", "layouts")
+            ));
+        }
+        let places = places.join(" and ");
+        match &self.subject {
+            UsageSubject::Library(library) if places.is_empty() => {
+                format!("No cell of {library} is placed outside it in this project.")
+            }
+            UsageSubject::Library(library) => {
+                format!("Cells of {library} are placed {places} outside it.")
+            }
+            _ if places.is_empty() => format!(
+                "{} is not placed in any schematic or layout of this project.",
+                self.path()
+            ),
+            _ => format!("{} is placed {places}.", self.path()),
+        }
+    }
+
+    /// The path the report names its subject by.
+    fn path(&self) -> String {
+        match &self.subject {
+            UsageSubject::View(reference) => reference.display_path(),
+            UsageSubject::Cell { library, cell } => format!("{library}/{cell}"),
+            UsageSubject::Library(library) => library.clone(),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -845,6 +965,12 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
             cell: cell.clone(),
         });
     }
+    if menu_item(ui, "Where cell is used\u{2026}", None) {
+        intent = Some(LibraryIntent::ReportUsage(UsageSubject::Cell {
+            library: library.clone(),
+            cell: cell.clone(),
+        }));
+    }
     if menu_item(ui, "Set as project top", target.top_refusal.as_deref()) {
         intent = Some(LibraryIntent::SetProjectTop {
             library: library.clone(),
@@ -870,8 +996,10 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     let (reference, _, _) = target.view.clone()?;
     let read_only = target.read_only();
     let mut intent = None;
-    if menu_item(ui, "Where used\u{2026}", None) {
-        intent = Some(LibraryIntent::ReportUsage(reference.clone()));
+    if menu_item(ui, "Where view is used\u{2026}", None) {
+        intent = Some(LibraryIntent::ReportUsage(UsageSubject::View(
+            reference.clone(),
+        )));
     }
     if menu_item(
         ui,
@@ -1070,6 +1198,11 @@ fn library_items(
         ) {
             intent = Some(LibraryIntent::RenameLibrary(library.clone()));
         }
+        if menu_item(ui, "Where used\u{2026}", None) {
+            intent = Some(LibraryIntent::ReportUsage(UsageSubject::Library(
+                library.clone(),
+            )));
+        }
         if menu_item(
             ui,
             "Delete library\u{2026}",
@@ -1237,18 +1370,10 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                     .prompt(format!("Cannot open {}: {error}", manager.label()));
             }
         }
-        LibraryIntent::ReportUsage(reference) => {
-            let placements = library_view_usage(cx.model, &reference);
-            let summary = usage_summary(&reference, &placements);
-            ctx.data_mut(|data| {
-                data.insert_temp(
-                    egui::Id::new(USAGE_REPORT_ID),
-                    LibraryUsageReport {
-                        reference,
-                        placements,
-                    },
-                );
-            });
+        LibraryIntent::ReportUsage(subject) => {
+            let report = LibraryUsageReport::of(cx.model, subject);
+            let summary = report.summary();
+            ctx.data_mut(|data| data.insert_temp(egui::Id::new(USAGE_REPORT_ID), report));
             cx.wb.prompt(summary);
         }
         LibraryIntent::NewLibrary => cx.state.open_new_library_dialog(cx.model),
@@ -1452,10 +1577,22 @@ pub fn command_intent(
                 Err("every library is read-only")
             }
         }
-        LibraryCommand::WhereUsed => target
-            .view
-            .map(|(reference, _, _)| LibraryIntent::ReportUsage(reference))
-            .ok_or("select a view"),
+        LibraryCommand::WhereUsed => match column {
+            BrowserColumn::Library => target
+                .library
+                .map(|(library, _)| LibraryIntent::ReportUsage(UsageSubject::Library(library)))
+                .ok_or("select a library"),
+            BrowserColumn::Cell => target
+                .cell
+                .map(|(library, cell, _)| {
+                    LibraryIntent::ReportUsage(UsageSubject::Cell { library, cell })
+                })
+                .ok_or("select a cell"),
+            BrowserColumn::View => target
+                .view
+                .map(|(reference, _, _)| LibraryIntent::ReportUsage(UsageSubject::View(reference)))
+                .ok_or("select a view"),
+        },
         LibraryCommand::Rename | LibraryCommand::Delete => {
             let rename = command == LibraryCommand::Rename;
             match column {
@@ -1519,54 +1656,32 @@ pub fn library_page_in_front(workspace: Workspace, state: &ProjectState) -> bool
     workspace == Workspace::Project && state.project_page == ProjectPage::Library
 }
 
-fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<(String, String)> {
-    model
-        .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
-        .into_iter()
-        .map(|usage| (usage.schematic.display_path(), usage.instance))
-        .collect()
-}
-
-/// "amp/symbol is placed 3 times in 2 schematics."
-fn usage_summary(reference: &CellViewRef, placements: &[(String, String)]) -> String {
-    let path = reference.display_path();
-    if placements.is_empty() {
-        return format!("{path} is not placed in any schematic of this project.");
-    }
-    let mut schematics = placements
-        .iter()
-        .map(|(schematic, _)| schematic.as_str())
-        .collect::<Vec<_>>();
-    schematics.dedup();
-    let plural = |count: usize, one: &str, many: &str| {
-        if count == 1 {
-            format!("{count} {one}")
-        } else {
-            format!("{count} {many}")
-        }
-    };
-    format!(
-        "{path} is placed {} in {}.",
-        plural(placements.len(), "time", "times"),
-        plural(schematics.len(), "schematic", "schematics")
-    )
-}
-
 fn show_library_usage_report(ctx: &Context) {
     let Some(report) =
         ctx.data(|data| data.get_temp::<LibraryUsageReport>(egui::Id::new(USAGE_REPORT_ID)))
     else {
         return;
     };
-    let description = usage_summary(&report.reference, &report.placements);
+    let description = report.summary();
     let choice = Dialog::new("Where used", "Close")
         .description(&description)
         .size(DialogSize::Transaction)
         .show(ctx, |ui| {
             if !report.placements.is_empty() {
-                property_card(ui, "Placements", |ui| {
+                property_card(ui, "Schematic placements", |ui| {
                     for (schematic, instance) in &report.placements {
                         property_row(ui, schematic, instance);
+                    }
+                });
+            }
+            if !report.layouts.is_empty() {
+                property_card(ui, "Layout placements", |ui| {
+                    for (layout, placements) in &report.layouts {
+                        let count = match placements {
+                            1 => "1 placement".to_owned(),
+                            count => format!("{count} placements"),
+                        };
+                        property_row(ui, layout, &count);
                     }
                 });
             }
@@ -1830,26 +1945,64 @@ mod tests {
             .workspace
             .insert_schematic_editor("work/consumer/schematic".to_owned(), inactive);
 
-        let placements = library_view_usage(&harness.model, &reference);
-        assert_eq!(placements.len(), 2);
+        let report = LibraryUsageReport::of(&harness.model, UsageSubject::View(reference.clone()));
+        assert_eq!(report.placements.len(), 2);
         assert!(
-            placements
+            report
+                .placements
                 .iter()
                 .any(|(schematic, _)| schematic.contains("work/consumer/schematic"))
         );
         assert_eq!(
-            usage_summary(&reference, &placements),
+            report.summary(),
             format!(
                 "{} is placed 2 times in 2 schematics.",
                 reference.display_path()
             )
         );
+        let nowhere = LibraryUsageReport {
+            placements: Vec::new(),
+            ..report
+        };
         assert_eq!(
-            usage_summary(&reference, &[]),
+            nowhere.summary(),
             format!(
-                "{} is not placed in any schematic of this project.",
+                "{} is not placed in any schematic or layout of this project.",
                 reference.display_path()
             )
+        );
+    }
+
+    #[test]
+    fn where_used_counts_layouts_and_a_librarys_placements_from_outside_it() {
+        let cell = LibraryUsageReport {
+            subject: UsageSubject::Cell {
+                library: "user".to_owned(),
+                cell: "amp".to_owned(),
+            },
+            placements: vec![("user/top/schematic".to_owned(), "I1".to_owned())],
+            layouts: vec![("soc/chip/layout".to_owned(), 2)],
+        };
+        assert_eq!(
+            cell.summary(),
+            "user/amp is placed once in 1 schematic and 2 times in 1 layout."
+        );
+        let library = LibraryUsageReport {
+            subject: UsageSubject::Library("user".to_owned()),
+            placements: Vec::new(),
+            ..cell
+        };
+        assert_eq!(
+            library.summary(),
+            "Cells of user are placed 2 times in 1 layout outside it."
+        );
+        let unplaced = LibraryUsageReport {
+            layouts: Vec::new(),
+            ..library
+        };
+        assert_eq!(
+            unplaced.summary(),
+            "No cell of user is placed outside it in this project."
         );
     }
 
