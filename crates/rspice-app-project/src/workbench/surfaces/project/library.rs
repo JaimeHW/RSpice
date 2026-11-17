@@ -1087,11 +1087,7 @@ fn library_items(
         intent = Some(LibraryIntent::PublishProject);
     }
     let restore = readiness.restore_blocker();
-    if menu_item(
-        ui,
-        "Restore project from publication\u{2026}",
-        restore,
-    ) {
+    if menu_item(ui, "Restore project from publication\u{2026}", restore) {
         intent = Some(LibraryIntent::RestoreFromPublication);
     }
     if menu_item(ui, "Audit history\u{2026}", None) {
