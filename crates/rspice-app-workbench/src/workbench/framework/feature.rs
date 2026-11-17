@@ -651,7 +651,7 @@ impl ForeignAvailability {
     /// The most commands a feature may declare it reads, its menus'
     /// included. Each answer is held whole, reason and all, in the context
     /// the shell lends.
-    pub const CAPACITY: usize = 12;
+    pub const CAPACITY: usize = 16;
 
     /// The answers `availability` gives for `keys`, in order.
     pub fn take(
