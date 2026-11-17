@@ -12,6 +12,8 @@ mod filters;
 mod periodic;
 mod small_signal;
 
+#[cfg(any(feature = "native", all(feature = "wasm-jit", test)))]
+pub(crate) use context::INTEGRATION_CANDIDATE_FAILED;
 #[doc(hidden)]
 pub use context::IdtModState;
 pub(crate) use context::idtmod_wrapped_value;
@@ -20,8 +22,6 @@ pub use context::{
     VmContext, terminal_pair_current_endpoints, terminal_pair_current_index,
     terminal_pair_current_len,
 };
-#[cfg(any(feature = "native", all(feature = "wasm-jit", test)))]
-pub(crate) use context::INTEGRATION_CANDIDATE_FAILED;
 #[cfg(feature = "native")]
 pub(crate) use context::{INTEGRATION_CANDIDATE_IDLE, INTEGRATION_CANDIDATE_NONE};
 #[cfg(feature = "native")]
