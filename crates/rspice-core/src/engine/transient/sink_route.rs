@@ -341,9 +341,10 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        result.fft_results = fft::evaluate(&engine, netlist, result, tstop, abort)?;
+        // A `.FFT` card may transform a lead power.
         let requests = lead_power::requested_lead_power(netlist)?;
         lead_power::record_lead_power(&requests, result);
+        result.fft_results = fft::evaluate(&engine, netlist, result, tstop, abort)?;
         Ok(())
     }
 
