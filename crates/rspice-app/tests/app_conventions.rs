@@ -1740,7 +1740,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/surfaces/simulate.rs", "page_kit"),
             ("workbench/surfaces/simulate.rs", "page_models"),
             ("workbench/surfaces/simulate.rs", "page_outputs"),
-            ("workbench/surfaces/simulate.rs", "page_raster"),
             ("workbench/surfaces/simulate.rs", "page_runset"),
             ("workbench/surfaces/simulate.rs", "page_save"),
             ("workbench/surfaces/simulate.rs", "pages"),

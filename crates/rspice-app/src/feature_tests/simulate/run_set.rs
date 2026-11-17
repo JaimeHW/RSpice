@@ -3,7 +3,7 @@
 //! The page owns three facts — the axes it declares, the forecast they resolve
 //! to, and the rule that combines them — and it owes the reader the refusals
 //! and advisories that come out of validating them. These cases read the text
-//! the route paints; `page_raster` reads where it lands.
+//! the route paints.
 
 use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
 
