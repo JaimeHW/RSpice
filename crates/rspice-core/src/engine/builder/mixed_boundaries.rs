@@ -72,8 +72,21 @@ pub(super) fn plan_conversions(
                 Some(segment) => segment.kind(),
                 None => converter_kind(port.bit.is_some(), port.direction.into()),
             };
-            let selected =
-                rules.select_for_boundary_node(kind, &node_label, host.instance_name(), signal)?;
+            // A port that declares no discipline has the default discrete
+            // one, as an XSPICE event port does.
+            let discipline = circuit
+                .port_disciplines
+                .get(&(host.instance_name().to_owned(), signal.to_owned()))
+                .map(String::as_str)
+                .filter(|discipline| !discipline.is_empty())
+                .unwrap_or(connect_modules::EVENT_DISCIPLINE);
+            let selected = rules.select_for_boundary_node(
+                kind,
+                &node_label,
+                host.instance_name(),
+                signal,
+                discipline,
+            )?;
             if let Some(selected) = &selected {
                 connect_modules::check_execution(
                     selected,

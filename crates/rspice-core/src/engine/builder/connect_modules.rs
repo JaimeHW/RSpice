@@ -131,8 +131,9 @@ impl OriginalCoordinates<'_> {
 
 /// The continuous discipline a SPICE deck node has.
 const DECK_DISCIPLINE: &str = "electrical";
-/// The discrete discipline an XSPICE event net has.
-const EVENT_DISCIPLINE: &str = "logic";
+/// The discrete discipline an XSPICE event net has, and a Verilog-AMS port
+/// that declares none.
+pub(super) const EVENT_DISCIPLINE: &str = "logic";
 
 /// The name the shipped connect library is registered under: no file, so a
 /// refusal about it names no path a deck author could open.
@@ -222,6 +223,20 @@ impl PlannedConnectModule {
     }
 }
 
+/// The discrete discipline a boundary port converts as. A digital port
+/// declared with no discipline carries the analog default in its module's
+/// port list; on the event side it has the default discrete discipline.
+fn event_side_discipline<'a>(db: &DisciplineDb, discipline: &'a str) -> &'a str {
+    if db
+        .get_discipline(discipline)
+        .is_some_and(|declared| declared.domain == rspice_veriloga::disciplines::Domain::Discrete)
+    {
+        discipline
+    } else {
+        EVENT_DISCIPLINE
+    }
+}
+
 /// Which of Table 7-2's kinds a planned bridge needs, and the port direction
 /// that produces it.
 ///
@@ -250,7 +265,11 @@ fn boundary_value_kind(kind: super::XspiceAutoBridgeKind) -> ConnectValueKind {
 /// Select the connect module for one boundary node.
 ///
 /// `node_label` is the deck's own name for the node, which becomes section
-/// 7.8.5's `SigName` in the generated instance name.
+/// 7.8.5's `SigName` in the generated instance name. `discipline` is the
+/// discrete discipline of the port: the one a Verilog-AMS port declares, or
+/// [`EVENT_DISCIPLINE`] for an XSPICE event port, which declares none. A
+/// connect statement applies only to the disciplines it names, so the
+/// port's own discipline is the one that selects.
 pub(super) fn select_for_boundary(
     table: &ConnectRuleTable,
     db: &DisciplineDb,
@@ -258,7 +277,9 @@ pub(super) fn select_for_boundary(
     node_label: &str,
     instance_name: &str,
     port_name: &str,
+    discipline: &str,
 ) -> Result<Option<PlannedConnectModule>, SimulationError> {
+    let discipline = event_side_discipline(db, discipline);
     let (port_direction, expected) = boundary_direction(kind);
     let value_kind = boundary_value_kind(kind);
     // A logic-only configuration leaves existing real conversion policy alone.
@@ -274,7 +295,7 @@ pub(super) fn select_for_boundary(
     let mut signal = Signal::default();
     let lower = signal.push(
         NetSegment::new(node_label)
-            .declared(EVENT_DISCIPLINE)
+            .declared(discipline)
             .digital_behavioral()
             .with_value_kind(value_kind),
     );
@@ -290,9 +311,9 @@ pub(super) fn select_for_boundary(
     );
 
     let resolved = resolve_disciplines(&signal, table, db, None, ResolutionMode::Basic)
-        .map_err(|error| connect_error(node_label, instance_name, &error))?;
+        .map_err(|error| connect_error(node_label, instance_name, port_name, &error))?;
     let plan = plan_connect_modules(&signal, &resolved, table, db)
-        .map_err(|error| connect_error(node_label, instance_name, &error))?;
+        .map_err(|error| connect_error(node_label, instance_name, port_name, &error))?;
 
     let Some(insertion) = plan.insertions.into_iter().next() else {
         return Ok(None);
@@ -313,17 +334,11 @@ pub(super) fn select_for_boundary(
     }
 
     let rule = table
-        .select_typed(
-            DECK_DISCIPLINE,
-            EVENT_DISCIPLINE,
-            expected,
-            Some(value_kind),
-            db,
-        )
-        .map_err(|error| connect_error(node_label, instance_name, &error))?;
+        .select_typed(DECK_DISCIPLINE, discipline, expected, Some(value_kind))
+        .map_err(|error| connect_error(node_label, instance_name, port_name, &error))?;
     let parameters = rule
         .numeric_parameters()
-        .map_err(|error| connect_error(node_label, instance_name, &error))?
+        .map_err(|error| connect_error(node_label, instance_name, port_name, &error))?
         .into_iter()
         .map(|(name, value)| (name.to_string(), value))
         .collect();
@@ -350,11 +365,12 @@ pub(super) fn select_for_boundary(
 fn connect_error(
     node_label: &str,
     instance_name: &str,
+    port_name: &str,
     error: &rspice_veriloga::connect::ConnectError,
 ) -> SimulationError {
     connect_refusal(format!(
-        "node '{node_label}' is a mixed-discipline connection and its connect rules do not \
-         settle it: {error}"
+        "node '{node_label}' is a mixed-discipline connection at port '{port_name}' of \
+         instance '{instance_name}' and its connect rules do not settle it: {error}"
     ))
     .instance(instance_name)
     .into()
@@ -1040,12 +1056,21 @@ impl DesignConnectRules {
         node_label: &str,
         instance_name: &str,
         port_name: &str,
+        discipline: &str,
     ) -> Result<Option<PlannedConnectModule>, SimulationError> {
         let Some((table, db)) = self.selected() else {
             return Ok(None);
         };
-        let Some(mut selected) =
-            select_for_boundary(table, db, kind, node_label, instance_name, port_name)?
+        let discipline = event_side_discipline(db, discipline);
+        let Some(mut selected) = select_for_boundary(
+            table,
+            db,
+            kind,
+            node_label,
+            instance_name,
+            port_name,
+            discipline,
+        )?
         else {
             return Ok(None);
         };
@@ -1072,12 +1097,11 @@ impl DesignConnectRules {
         let rule = table
             .select_typed(
                 DECK_DISCIPLINE,
-                EVENT_DISCIPLINE,
+                discipline,
                 boundary_direction(kind).1,
                 Some(boundary_value_kind(kind)),
-                db,
             )
-            .map_err(|error| connect_error(node_label, instance_name, &error))?;
+            .map_err(|error| connect_error(node_label, instance_name, port_name, &error))?;
         selected.location = self
             .locations
             .borrow_mut()
@@ -1161,8 +1185,13 @@ pub(super) fn attach_to_planned_bridges(
             .port
             .clone()
             .unwrap_or_else(|| (node_label.clone(), "d".to_string()));
-        let Some(mut selected) =
-            rules.select_for_boundary_node(bridge.kind, &node_label, &instance_name, &port_name)?
+        let Some(mut selected) = rules.select_for_boundary_node(
+            bridge.kind,
+            &node_label,
+            &instance_name,
+            &port_name,
+            EVENT_DISCIPLINE,
+        )?
         else {
             continue;
         };

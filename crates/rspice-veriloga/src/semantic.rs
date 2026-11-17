@@ -390,6 +390,7 @@ pub use analog_events::AnalogEventBinding;
 mod array_coordinates;
 mod bounded_loop;
 mod builtin_limiters;
+mod interconnect;
 use builtin_limiters::{BUILTIN_LIMITER_NAMES, BuiltinLimiter};
 mod concatenation_operands;
 mod constant_dependencies;
@@ -525,6 +526,9 @@ pub struct SemanticAnalyzer {
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
     discrete_validity: HashMap<SmolStr, SmolStr>,
+    /// Ports that declare nothing and only join discrete ports below them,
+    /// by module; see [`interconnect`].
+    implicit_discrete_ports: HashMap<SmolStr, HashSet<SmolStr>>,
     /// Analog reads of discrete signals so far (`AnalyzedModule::discrete_reads`).
     discrete_reads: Vec<(SmolStr, Span)>,
     discrete_projection: discrete_projection::ProjectionBuilder,
@@ -628,6 +632,7 @@ impl SemanticAnalyzer {
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
             discrete_validity: HashMap::new(),
+            implicit_discrete_ports: HashMap::new(),
             discrete_reads: Vec::new(),
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
@@ -713,6 +718,8 @@ impl SemanticAnalyzer {
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();
         self.warnings.clear();
+        self.implicit_discrete_ports =
+            interconnect::implicitly_discrete_ports(source, &self.disciplines);
 
         // Second pass: analyze modules in declaration order while applying
         // the file-scoped default-transition and default-discipline settings.

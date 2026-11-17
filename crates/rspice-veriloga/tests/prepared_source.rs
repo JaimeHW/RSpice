@@ -1049,7 +1049,6 @@ fn named_connection_configurations_preserve_alternatives_and_reject_duplicate_de
                 "electrical",
                 "logic",
                 rspice_veriloga::connect::ConnectDirection::DiscreteToAnalog,
-                &specification.disciplines,
             )
             .unwrap();
         assert_eq!(rule.numeric_parameters().unwrap()[0].1, supply);

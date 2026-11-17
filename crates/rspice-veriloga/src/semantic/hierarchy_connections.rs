@@ -171,6 +171,91 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
     })
 }
 
+/// The discipline basic resolution (Annex F.2.1) gives port `name` of a
+/// module that declares none for it: resolved bottom-up from the ports it
+/// joins in the instances below, with the `resolveto` statements applied.
+/// `None` when it joins none, so the module's default stands.
+///
+/// Figure 7-3's `digital_blk` joins `cmos1`, `cmos2` and its `twoblks`
+/// child's port, itself resolved to `cmos3`, and its port resolves to
+/// `cmos1`: the discipline the connect statement that converts it names.
+fn resolved_interconnect(
+    analyzed: &AnalyzedFile,
+    sources: &HashMap<SmolStr, &Module>,
+    source: &Module,
+    module: &AnalyzedModule,
+    name: &str,
+    depth: usize,
+) -> Option<SmolStr> {
+    if let Some(declared) = declared_discipline(source, module, name) {
+        return Some(declared);
+    }
+    if depth > 256 {
+        return None;
+    }
+    let mut signal = Signal::default();
+    let mut children = Vec::new();
+    for instance in &source.instances {
+        let (Some(child_source), Some(child)) = (
+            sources.get(&instance.module).copied(),
+            analyzed.modules.get(&instance.module),
+        ) else {
+            continue;
+        };
+        for (index, connection) in instance.connections.iter().enumerate() {
+            let (port, actual) = match connection {
+                Connection::Named { port, signal, .. } => (Some(port.clone()), signal),
+                Connection::Ordered { signal, .. } => (
+                    child_source.ports.get(index).map(|port| port.name.clone()),
+                    signal,
+                ),
+            };
+            let (Some(port), Some(Expression::Identifier(actual))) = (port, actual) else {
+                continue;
+            };
+            if actual.name != name {
+                continue;
+            }
+            let discipline =
+                resolved_interconnect(analyzed, sources, child_source, child, &port, depth + 1)
+                    .or_else(|| child.default_discipline.clone())
+                    .or_else(|| {
+                        child
+                            .digital
+                            .signals
+                            .iter()
+                            .any(|signal| signal.name == port)
+                            .then(|| SmolStr::new("logic"))
+                    });
+            let Some(discipline) = discipline else {
+                continue;
+            };
+            let lower = signal.push(NetSegment::new(port.clone()).declared(discipline));
+            children.push(PortLink::new(
+                lower,
+                PortDirection::Inout,
+                instance.name.clone(),
+                port,
+            ));
+        }
+    }
+    if children.is_empty() {
+        return None;
+    }
+    let mut root = NetSegment::new(name);
+    root.children = children;
+    let root = signal.push(root);
+    let resolved = resolve_disciplines(
+        &signal,
+        &analyzed.connect_rules,
+        &analyzed.disciplines,
+        module.default_discipline.as_deref(),
+        ResolutionMode::Basic,
+    )
+    .ok()?;
+    resolved.discipline(root).map(SmolStr::new)
+}
+
 struct BoundarySignal {
     signal: Signal,
     actual: Expression,
@@ -286,9 +371,22 @@ fn prepare_boundaries(
         for (port_index, actual) in connections.iter().enumerate() {
             let Some(actual) = actual else { continue };
             let port = &child.ports[port_index];
-            let Some(lower) = endpoint(child_source, child, &port.name) else {
+            let Some(mut lower) = endpoint(child_source, child, &port.name) else {
                 continue;
             };
+            // A discrete port the child declares no discipline for takes the
+            // one its own interconnect resolves to.
+            if lower.net_kind.is_some()
+                && declared_discipline(child_source, child, &port.name).is_none()
+                && let Some(resolved) =
+                    resolved_interconnect(analyzed, sources, child_source, child, &port.name, 0)
+                && analyzed
+                    .disciplines
+                    .get_discipline(&resolved)
+                    .is_some_and(|discipline| discipline.domain == Domain::Discrete)
+            {
+                lower.segment.declared = Some(resolved);
+            }
             compatibility::check_actual(
                 analyzed,
                 source,
@@ -518,7 +616,6 @@ fn prepare_boundaries(
                     &insertion.discrete,
                     insertion.direction,
                     value_kind,
-                    &analyzed.disciplines,
                 )
                 .map_err(|cause| error(cause.to_string(), span))?;
             // Connect rules have no parent instance parameter scope. Validate

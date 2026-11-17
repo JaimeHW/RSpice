@@ -914,6 +914,10 @@ pub struct CircuitData {
     /// modules' ports, for the converters the build inserts on those ports.
     #[cfg(feature = "veriloga")]
     pub(crate) port_sensitivities: Vec<PortSensitivity>,
+    /// The discipline each mixed module's port declares, by instance and
+    /// port: a connect statement applies only to the disciplines it names.
+    #[cfg(feature = "veriloga")]
+    pub(crate) port_disciplines: HashMap<(String, String), String>,
     /// Device evaluation time summed while a transient's phase timings arm
     /// it around one Newton assembly; `None`, reading no clock, otherwise.
     pub(crate) device_evaluation_clock: Option<std::time::Duration>,

@@ -860,13 +860,16 @@ impl SemanticAnalyzer {
                     .filter_map(|port| port.discipline.as_ref()),
             )
             .any(discrete_discipline);
-        if !module.has_digital_content() && !typed_discrete {
+        // A structural module whose undeclared port only joins discrete ports
+        // below it (Annex F.2.1) has that port as a wire and nothing else.
+        let implicit_only = !module.has_digital_content() && !typed_discrete;
+        if implicit_only && !self.implicit_discrete_ports.contains_key(&module.name) {
             return;
         }
         self.digital_selector_constants = self.digital_constants(module);
         self.check_port_declarations(module);
 
-        let mut signals = self.collect_digital_signals(module);
+        let mut signals = self.collect_digital_signals(module, implicit_only);
         // IEEE 1364-2005 section 6.1.3: a net delay is the net's own.
         for net_delay in &module.net_delays {
             if let Some(signal) = signals.iter_mut().find(|signal| {
@@ -1487,7 +1490,11 @@ impl SemanticAnalyzer {
     // Declarations
     // ------------------------------------------------------------------
 
-    fn collect_digital_signals(&mut self, module: &Module) -> Vec<AnalyzedDigitalSignal> {
+    fn collect_digital_signals(
+        &mut self,
+        module: &Module,
+        implicit_only: bool,
+    ) -> Vec<AnalyzedDigitalSignal> {
         let mut signals: Vec<AnalyzedDigitalSignal> = Vec::new();
         let mut seen: HashMap<SmolStr, Span> = HashMap::new();
 
@@ -1545,7 +1552,7 @@ impl SemanticAnalyzer {
         }
         self.promote_module_level_numeric_variables(module, &mut signals, &mut seen);
         self.reject_variable_input_ports(module, &signals);
-        self.push_implicit_port_nets(module, &mut signals, &mut seen);
+        self.push_implicit_port_nets(module, implicit_only, &mut signals, &mut seen);
         for signal in &mut signals {
             signal.element_alias = self.physical_nodes.real_aliases.get(&signal.name).cloned();
         }
@@ -2167,12 +2174,17 @@ impl SemanticAnalyzer {
     /// Continuous disciplines stay in the analog domain. A discrete discipline
     /// such as `logic` still declares a wire when no explicit storage type is
     /// present, for both ports and internal nets.
+    ///
+    /// In a module with no digital content of its own, only the ports that
+    /// join discrete ports below them (`implicit_discrete_ports`) are wires.
     fn push_implicit_port_nets(
         &mut self,
         module: &Module,
+        implicit_only: bool,
         signals: &mut Vec<AnalyzedDigitalSignal>,
         seen: &mut HashMap<SmolStr, Span>,
     ) {
+        let implicit = self.implicit_discrete_ports.get(&module.name).cloned();
         let analog: std::collections::HashSet<&SmolStr> = module
             .nets
             .iter()
@@ -2199,7 +2211,11 @@ impl SemanticAnalyzer {
             }
             let bounds = self.resolve_vector_range(declaration.range.as_ref(), "wire");
             for name in &declaration.names {
-                if seen.contains_key(name) || analog.contains(name) {
+                if seen.contains_key(name)
+                    || analog.contains(name)
+                    || (implicit_only
+                        && !implicit.as_ref().is_some_and(|ports| ports.contains(name)))
+                {
                     continue;
                 }
                 seen.insert(name.clone(), declaration.span);

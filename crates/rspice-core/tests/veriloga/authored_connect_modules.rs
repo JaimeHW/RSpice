@@ -355,6 +355,119 @@ endconnectrules
     }
 }
 
+/// Two discrete families at deck nodes, as section 7.7.2's `logic18` and
+/// `logic32` example names them: a statement applies to the disciplines it
+/// declares (section 7.8.4 rule 3), so each port converts through its own
+/// family's statement, and a port no statement names is refused by name.
+/// Every natureless discrete discipline is compatible with every other, and
+/// selecting by that compatibility gave the `logic32` port the 1.8 V
+/// converter.
+#[test]
+fn each_discrete_family_converts_through_the_statement_that_names_it() {
+    let modules = r#"
+`timescale 1ns/1ps
+discipline logic18; domain discrete; enddiscipline
+discipline logic32; domain discrete; enddiscipline
+module d18(o); output o; logic18 o; reg o; initial begin o = 0; #10 o = 1; end endmodule
+module d32(o); output o; logic32 o; reg o; initial begin o = 0; #10 o = 1; end endmodule
+connectmodule l2e18(d, a); input d; output a; logic18 d; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 1.8 : 0.0, 0, 10p);
+endmodule
+connectmodule bid32(d, a); inout d; inout a; logic32 d; electrical a;
+  reg r; real lvl, g;
+  assign d = r;
+  initial begin r = 1'bz; lvl = 0.0; g = 0.0; end
+  always @(d) begin
+    lvl = (d === 1'b1) ? 3.2 : 0.0;
+    g = (d === 1'b1 || d === 1'b0) ? 1.0 / 10.0 : 0.0;
+  end
+  analog I(a) <+ g * (V(a) - lvl);
+endmodule
+"#;
+    let run = |rules: &str| {
+        let source = Source::new(&format!(
+            "{modules}connectrules fam;\n{rules}endconnectrules\n"
+        ));
+        let deck = Netlist::parse(&format!(
+            "* two families\nX1 a18 d18\nX2 a32 d32\nR1 a18 0 1k\nR2 a32 0 1k\n\
+             .va \"{0}\" d18 module=d18\n.va \"{0}\" d32 module=d32\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        Engine::default().run_tran(&deck, 20e-9, 100e-12)
+    };
+
+    // Only the bidirectional module names `logic32`: 3.2 V behind 10 ohm
+    // into 1 kohm.
+    let result = run("connect l2e18;\nconnect bid32;\n").unwrap();
+    assert!((voltage(&result, "a18", 15e-9) - 1.8).abs() < 1e-6);
+    assert!((voltage(&result, "a32", 15e-9) - 3.2 * 1000.0 / 1010.0).abs() < 1e-6);
+
+    // Only the 1.8 V statement: the `logic32` port matches none.
+    let error = run("connect l2e18;\n")
+        .expect_err("no statement names logic32")
+        .to_string()
+        .to_lowercase();
+    assert!(
+        error.contains("port 'o' of instance 'x2'") && error.contains("'logic32'"),
+        "{error}"
+    );
+}
+
+/// Verilog-AMS LRM 2.4 Figure 7-3 with `resolveto`: `twoblks` and
+/// `digital_blk` declare nothing for their ports, which only join discrete
+/// ports below them, so basic resolution (Annex F.2.1) makes them discrete
+/// nets: NetB resolves to `cmos3`, NetA to `cmos1`, and the one mixed port is
+/// `digital_blk`'s, converted by the statement for `cmos1`. Before, both
+/// ports were analog nodes, every leaf needed its own converter, and `cmos1`
+/// matched all four statements.
+#[test]
+fn figure_7_3_converts_once_at_the_resolved_discipline() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+discipline cmos1; domain discrete; enddiscipline
+discipline cmos2; domain discrete; enddiscipline
+discipline cmos3; domain discrete; enddiscipline
+discipline cmos4; domain discrete; enddiscipline
+module blk1(out); output out; cmos1 out; reg out; initial begin out = 0; #10 out = 1; end endmodule
+module blk2(out); output out; cmos2 out; reg out; initial begin out = 0; #10 out = 1; end endmodule
+module blk3(out); output out; cmos3 out; reg out; initial begin out = 0; #10 out = 1; end endmodule
+module blk4(out); output out; cmos4 out; reg out; initial begin out = 0; #10 out = 1; end endmodule
+module twoblks(out); output out; blk3 b3(out); blk4 b4(out); endmodule
+module digital_blk(out); output out; blk1 b1(out); blk2 b2(out); twoblks t(out); endmodule
+module ablk(out, y); inout out; electrical out; output y; electrical y;
+  analog begin I(out) <+ V(out) / 1e6; V(y) <+ 2.0 * V(out); end
+endmodule
+module mix(y); output y; electrical y; digital_blk d(n); ablk a(n, y); endmodule
+connectmodule c1e(d, a); input d; cmos1 d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 1.1 : 0.0, 0, 10p); endmodule
+connectmodule c2e(d, a); input d; cmos2 d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 2.2 : 0.0, 0, 10p); endmodule
+connectmodule c3e(d, a); input d; cmos3 d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 3.3 : 0.0, 0, 10p); endmodule
+connectmodule c4e(d, a); input d; cmos4 d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 4.4 : 0.0, 0, 10p); endmodule
+connectrules fig73;
+  connect c1e input cmos1, output electrical;
+  connect c2e input cmos2, output electrical;
+  connect c3e input cmos3, output electrical;
+  connect c4e input cmos4, output electrical;
+  connect cmos3 cmos4 resolveto cmos3;
+  connect cmos1 cmos2 cmos3 resolveto cmos1;
+endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* Figure 7-3\nXM y mix\nRY y 0 1k\n.va \"{}\" mix module=mix\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 20e-9, 100e-12).unwrap();
+    assert!(voltage(&result, "y", 5e-9).abs() < 1e-9);
+    assert!((voltage(&result, "y", 15e-9) - 2.0 * 1.1).abs() < 1e-6);
+}
+
 #[test]
 fn authored_adc_and_dac_join_xspice_with_independent_sampled_state() {
     let source = Source::new(&format!(
@@ -2258,8 +2371,11 @@ connectmodule high_gain(value,a);
 endmodule
 connectrules chosen; connect low_gain; connect high_gain; endconnectrules
 "#;
-    for ambiguous in [false, true] {
-        let source = Source::new(&if ambiguous {
+    // With both disciplines on `Voltage` the two are compatible (section
+    // 3.11.1), which decides only that they may meet on a net: each statement
+    // still applies to the discipline it names alone (section 7.8.4 rule 3).
+    for compatible in [false, true] {
+        let source = Source::new(&if compatible {
             model.replace("potential Temperature", "potential Voltage")
         } else {
             model.to_owned()
@@ -2269,13 +2385,7 @@ connectrules chosen; connect low_gain; connect high_gain; endconnectrules
             source.path()
         ))
         .unwrap();
-        let outcome = Engine::default().run_tran(&deck, 1.5e-9, 50e-12);
-        if ambiguous {
-            let error = outcome.unwrap_err().to_string();
-            assert!(error.contains("match both connect module"), "{error}");
-            continue;
-        }
-        let result = outcome.unwrap();
+        let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
         for (time, level) in [(0.5e-9, 2.0), (1.4e-9, 4.0)] {
             for (node, expected) in [("p", level), ("q", 1.5 * level), ("r", 2.0 * level)] {
                 let actual = voltage(&result, node, time);
@@ -2531,6 +2641,9 @@ connectrules chosen; connect dac; endconnectrules
     }
 }
 
+/// The connect statement reuses `drive` for the compatible disciplines the
+/// boundary has by naming them (section 7.7.1); a statement applies to the
+/// disciplines it declares.
 #[test]
 fn compatible_disciplines_preserve_loaded_connect_body_physics() {
     let source = Source::new(
@@ -2560,7 +2673,7 @@ module top(output electrical p);
  stimulus source(value);
  load receiver(value,p);
 endmodule
-connectrules chosen; connect drive; endconnectrules
+connectrules chosen; connect drive input receive_data, output local_electrical; endconnectrules
 "#,
     );
     let deck = Netlist::parse(&format!(

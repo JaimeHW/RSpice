@@ -26,7 +26,16 @@ fn parse(source: &str) -> SourceFile {
 /// the logic families the LRM's figures name.
 fn db() -> DisciplineDb {
     let mut db = DisciplineDb::with_standard();
-    for name in ["cmos1", "cmos2", "cmos3", "cmos4", "ttl", "ddiscrete"] {
+    for name in [
+        "cmos1",
+        "cmos2",
+        "cmos3",
+        "cmos4",
+        "ttl",
+        "ddiscrete",
+        "logic18",
+        "logic32",
+    ] {
         db.add_discipline(crate::disciplines::Discipline::builtin(
             name,
             Domain::Discrete,
@@ -852,23 +861,97 @@ endconnectrules
 }
 
 #[test]
-fn a_compatible_discipline_selects_a_rule_written_for_its_sibling() {
+fn a_rule_is_reused_for_a_compatible_discipline_only_where_it_names_it() {
     // Section 7.7.1: "Connect modules can be reused for different, but
-    // compatible disciplines". `cmos1` is natureless, so section 3.11.1's
-    // Natureless Discipline Rule makes it compatible with `ddiscrete`.
-    let mut signal = Signal::default();
-    let lower = signal.push(NetSegment::new("d").declared("cmos1"));
-    signal.push(
-        NetSegment::new("mixed")
-            .declared("electrical")
-            .with_child(PortLink::new(lower, PortDirection::Output, "u0", "out")),
+    // compatible disciplines by specifying different discipline combinations
+    // in which the connect module can be used." `cmos1` is natureless, so
+    // section 3.11.1 makes it compatible with the module's `ddiscrete`; the
+    // statement that names it is what makes the module serve it.
+    let cmos1_port = || {
+        let mut signal = Signal::default();
+        let lower = signal.push(NetSegment::new("d").declared("cmos1"));
+        signal.push(
+            NetSegment::new("mixed")
+                .declared("electrical")
+                .with_child(PortLink::new(lower, PortDirection::Output, "u0", "out")),
+        );
+        signal
+    };
+    let named = format!(
+        "{LRM_CONNECT_MODULES}\
+connectrules reuse;
+    connect logic_to_elect input cmos1, output electrical;
+endconnectrules
+"
     );
-    let plan = plan(&signal, &lrm_source()).expect("planned");
-    assert_eq!(plan.insertions[0].connect_module, "logic_to_elect");
-    assert_eq!(plan.insertions[0].discrete, "cmos1");
+    let plan_named = plan(&cmos1_port(), &named).expect("planned");
+    assert_eq!(plan_named.insertions[0].connect_module, "logic_to_elect");
+    assert_eq!(plan_named.insertions[0].discrete, "cmos1");
     assert_eq!(
-        plan.insertions[0].instance, "mixed__logic_to_elect__cmos1",
+        plan_named.insertions[0].instance, "mixed__logic_to_elect__cmos1",
         "section 7.8.5 names the instance after the bottom discipline, which is the net's"
+    );
+
+    // Without the override the statement declares `ddiscrete`, and a `cmos1`
+    // port matches no statement: the refusal names the port's discipline.
+    let error = plan(&cmos1_port(), &lrm_source()).expect_err("no statement names cmos1");
+    let ConnectError::NoConnectRule { discrete, .. } = &error else {
+        panic!("got {error}");
+    };
+    assert_eq!(discrete, "cmos1");
+}
+
+/// Two supply families, as section 7.7.2's `logic18` and `logic32` example
+/// names them: each port converts through the statement for its own family.
+/// Every natureless discrete discipline is compatible with every other
+/// (section 3.11.1), so compatibility gave the `logic32` port the `logic18`
+/// converter and made two family-specific converters ambiguous.
+#[test]
+fn each_discrete_family_converts_through_the_statement_that_names_it() {
+    let families = "\
+connectmodule l2e18(d, a);
+    input d; output a; logic18 d; electrical a;
+endmodule
+connectmodule l2e32(d, a);
+    input d; output a; logic32 d; electrical a;
+endmodule
+connectmodule bid32(d, a);
+    inout d; inout a; logic32 d; electrical a;
+endmodule
+";
+    let port = |discipline: &str| {
+        let mut signal = Signal::default();
+        let lower = signal.push(NetSegment::new("o").declared(discipline));
+        signal.push(
+            NetSegment::new("a")
+                .declared("electrical")
+                .with_child(PortLink::new(lower, PortDirection::Output, "x1", "o")),
+        );
+        signal
+    };
+    let module = |rules: &str, discipline: &str| {
+        plan(&port(discipline), &format!("{families}{rules}"))
+            .map(|plan| plan.insertions[0].connect_module.to_string())
+    };
+
+    // A directed 1.8 V converter and a bidirectional 3.2 V one: only the
+    // bidirectional module names `logic32`.
+    let mixed = "connectrules fam; connect l2e18; connect bid32; endconnectrules\n";
+    assert_eq!(module(mixed, "logic18").unwrap(), "l2e18");
+    assert_eq!(module(mixed, "logic32").unwrap(), "bid32");
+
+    // Two directed converters, one per family: neither is ambiguous.
+    let both = "connectrules fam; connect l2e18; connect l2e32; endconnectrules\n";
+    assert_eq!(module(both, "logic18").unwrap(), "l2e18");
+    assert_eq!(module(both, "logic32").unwrap(), "l2e32");
+
+    // Section 7.8.4 rule 3: a mixed port matches one connect statement, and a
+    // `logic32` port with only the `logic18` statement matches none.
+    let only18 = "connectrules fam; connect l2e18; endconnectrules\n";
+    let error = module(only18, "logic32").expect_err("no statement names logic32");
+    assert!(
+        error.to_string().contains("'logic32'") && error.to_string().contains("net 'a'"),
+        "{error}"
     );
 }
 

@@ -152,6 +152,8 @@ impl CircuitData {
             noiseless_devices: std::collections::HashSet::new(),
             #[cfg(feature = "veriloga")]
             port_sensitivities: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            port_disciplines: HashMap::new(),
             device_evaluation_clock: None,
         }
     }

@@ -263,8 +263,13 @@ pub(super) fn try_build_mixed_signal_instance(
         })?;
 
     // A port's supply attributes reach the converter the build inserts on
-    // it, which binds to the nets they name.
+    // it, which binds to the nets they name, and its discipline selects the
+    // connect statement that converts it.
     for port in &artifact.hir.ports {
+        circuit.port_disciplines.insert(
+            (element.name.clone(), port.name.to_string()),
+            port.discipline.to_string(),
+        );
         if port.supply_sensitivity.is_some() || port.ground_sensitivity.is_some() {
             circuit
                 .port_sensitivities

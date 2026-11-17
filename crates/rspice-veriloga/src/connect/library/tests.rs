@@ -130,7 +130,7 @@ fn selection_reaches_one_module_for_each_direction() {
         (ConnectDirection::Bidirectional, "bidir"),
     ] {
         let rule = table
-            .select("electrical", "logic", required, &db)
+            .select("electrical", "logic", required)
             .unwrap_or_else(|error| panic!("{} selects: {error}", required.label()));
         assert_eq!(rule.connect_module, expected, "{}", required.label());
     }
@@ -757,7 +757,6 @@ fn the_real_modules_delegate_and_select_by_direction() {
                 "logic",
                 direction,
                 Some(crate::connect::ConnectValueKind::Real),
-                &db,
             )
             .unwrap_or_else(|error| panic!("{module} is selectable: {error}"));
         assert_eq!(rule.connect_module, module);

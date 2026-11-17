@@ -444,20 +444,29 @@ impl ConnectRuleTable {
         continuous: &str,
         discrete: &str,
         required: ConnectDirection,
-        db: &DisciplineDb,
     ) -> Result<&InsertionRule, ConnectError> {
-        self.select_typed(continuous, discrete, required, None, db)
+        self.select_typed(continuous, discrete, required, None)
     }
 
     /// Select only bodies whose discrete port can carry the actual net value.
     /// `None` retains discipline-only selection for an untyped source graph.
+    ///
+    /// A statement applies to the disciplines it declares — the ones its
+    /// port overrides name, else its module's port disciplines — and to no
+    /// other. Section 7.7.1 lets a statement reuse a module "for different,
+    /// but compatible disciplines" by naming them, which is only needed if
+    /// naming them is what makes a statement apply; section 7.7.2's own
+    /// example keeps `logic18` and `logic32` apart as two supply families.
+    /// Section 3.11's compatibility decides whether two disciplines may meet
+    /// on a net at all, and every natureless discrete discipline is
+    /// compatible with every other, so selecting by it gave a `logic32` port
+    /// the `logic18` converter.
     pub fn select_typed(
         &self,
         continuous: &str,
         discrete: &str,
         required: ConnectDirection,
         value_kind: Option<ConnectValueKind>,
-        db: &DisciplineDb,
     ) -> Result<&InsertionRule, ConnectError> {
         let mut best: Option<&InsertionRule> = None;
         let mut best_rank = 0u8;
@@ -466,8 +475,8 @@ impl ConnectRuleTable {
         for rule in &self.insertions {
             if value_kind.is_some_and(|kind| rule.discrete.value_kind != Some(kind))
                 || !rule.direction.admits(required)
-                || !disciplines_compatible(db, &rule.continuous.discipline, continuous)
-                || !disciplines_compatible(db, &rule.discrete.discipline, discrete)
+                || rule.continuous.discipline != continuous
+                || rule.discrete.discipline != discrete
             {
                 continue;
             }
@@ -1015,7 +1024,7 @@ pub fn plan_connect_modules(
             let value_kind = signal.segments[discrete_segment].value_kind;
 
             let rule = table
-                .select_typed(continuous, discrete, required, value_kind, db)
+                .select_typed(continuous, discrete, required, value_kind)
                 .map_err(|error| match error {
                     // The selector knows the disciplines but not the net; the
                     // diagnostic clause 7 asks for names both.

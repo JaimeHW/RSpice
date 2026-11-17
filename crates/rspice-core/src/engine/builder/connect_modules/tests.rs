@@ -19,7 +19,7 @@ fn table(source: &str) -> (ConnectRuleTable, DisciplineDb) {
 
 fn select(kind: Kind, source: &str) -> PlannedConnectModule {
     let (table, db) = table(source);
-    select_for_boundary(&table, &db, kind, "din", "a_inv", "in")
+    select_for_boundary(&table, &db, kind, "din", "a_inv", "in", "logic")
         .unwrap_or_else(|error| panic!("selects: {error}"))
         .expect("a connect module is selected")
 }
@@ -59,7 +59,7 @@ fn a_logic_only_library_leaves_real_conversion_policy_unchanged() {
     let (table, db) = table(&builtin_connect_library_source());
     for kind in [Kind::RealToV, Kind::VToReal] {
         assert!(
-            select_for_boundary(&table, &db, kind, "w", "a1", "r")
+            select_for_boundary(&table, &db, kind, "w", "a1", "r", "logic")
                 .expect("no error")
                 .is_none()
         );
@@ -262,7 +262,7 @@ connectrules only_d2a;
 endconnectrules
 ";
     let (table, db) = table(source);
-    let error = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in")
+    let error = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in", "logic")
         .expect_err("no analog-to-discrete rule");
     assert_eq!(error.instance_name(), Some("a1"));
     let error = format!("{error}");
@@ -284,7 +284,7 @@ endconnectrules
 ",
     );
     let (table, db) = table(&source);
-    let error = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in")
+    let error = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in", "logic")
         .expect_err("an identifier is refused");
     assert!(
         format!("{error}").contains("numeric literal"),
@@ -305,7 +305,7 @@ endconnectrules
 ",
     );
     let (table, db) = table(&source);
-    let selected = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in")
+    let selected = select_for_boundary(&table, &db, Kind::Adc, "din", "a1", "in", "logic")
         .expect("a net-named supply selects")
         .expect("the a2d rule applies");
     assert_eq!(selected.supply_net(), Some("vdd"));
