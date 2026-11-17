@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use egui::{Color32, Context, Frame, Grid, RichText, Stroke, TextEdit, Ui};
+use egui::{Color32, Context, Frame, RichText, Stroke, TextEdit, Ui};
 
 use crate::product::ContentDigest;
 use crate::state::model_library::ModelSourceAuthority;
@@ -335,33 +335,7 @@ fn compare_with_current(
     model: &Model,
     rows: &[ProjectAuditRow],
 ) {
-    let delta = (|| {
-        let [row] = selected_rows(dialog, rows)[..] else {
-            return Err("Select one schematic revision to compare with the current design.");
-        };
-        let (Some(id), Some(view)) = (row.schematic_revision, row.view.as_ref()) else {
-            return Err(NOT_A_DRAWING);
-        };
-        let record = find_project_schematic_revision(model, id)
-            .ok_or("The selected schematic revision no longer exists.")?;
-        let delta = if *view == model.workspace.content.active_schematic_reference() {
-            model
-                .schematic
-                .editor_ref()
-                .design
-                .semantic_delta_since(record)
-        } else {
-            model
-                .workspace
-                .content
-                .schematic_buffers
-                .get(&view.key())
-                .ok_or("The selected revision's view is no longer in the project.")?
-                .semantic_delta_since(record)
-        };
-        Ok((revision_label(record), delta))
-    })();
-    match delta {
+    match changes_since(&selected_rows(dialog, rows), model) {
         Ok((revision, delta)) => {
             dialog.comparison = Some(ProjectRevisionComparison::Schematic {
                 label: format!("{revision} \u{2192} current design"),
@@ -372,6 +346,38 @@ fn compare_with_current(
         }
         Err(error) => dialog.error = Some(error.to_owned()),
     }
+}
+
+/// The selected revision, as a comparison's heading names it, and what
+/// changed in its view's drawing since it was recorded.
+fn changes_since(
+    selected: &[&ProjectAuditRow],
+    model: &Model,
+) -> Result<(String, ValidatedRevisionSemanticDelta), &'static str> {
+    let [row] = selected else {
+        return Err("Select one schematic revision to compare with the current design.");
+    };
+    let (Some(id), Some(view)) = (row.schematic_revision, row.view.as_ref()) else {
+        return Err(NOT_A_DRAWING);
+    };
+    let record = find_project_schematic_revision(model, id)
+        .ok_or("The selected schematic revision no longer exists.")?;
+    let delta = if *view == model.workspace.content.active_schematic_reference() {
+        model
+            .schematic
+            .editor_ref()
+            .design
+            .semantic_delta_since(record)
+    } else {
+        model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&view.key())
+            .ok_or("The selected revision's view is no longer in the project.")?
+            .semantic_delta_since(record)
+    };
+    Ok((revision_label(record), delta))
 }
 
 /// Restore the one selected schematic revision: in place when its view is
@@ -758,7 +764,12 @@ fn history_table(
     if t.metrics.is_touch() {
         room -= t.metrics.touch_target() - TABLE_EDGE_INSET;
     }
-    let widths = fit_widths(&shown.natural, room);
+    let whole = shown
+        .columns
+        .iter()
+        .map(|&column| WHOLE_COLUMNS[column])
+        .collect::<Vec<_>>();
+    let widths = fit_widths(&shown.natural, &whole, room);
     let columns = shown
         .columns
         .iter()
@@ -837,7 +848,7 @@ fn action_buttons(
     let width = ui.available_width();
     let stacked = natural > width;
     let mut pressed = None;
-    let mut show = |ui: &mut Ui| {
+    let show = |ui: &mut Ui| {
         for (label, gate, destructive, press) in &buttons {
             let mut button = Button::new(label)
                 .enabled(gate.is_ok())
@@ -855,9 +866,9 @@ fn action_buttons(
         }
     };
     if stacked {
-        ui.vertical(|ui| show(ui));
+        ui.vertical(show);
     } else {
-        ui.horizontal(|ui| show(ui));
+        ui.horizontal(show);
     }
     match pressed {
         Some(Press::Restore) => {
@@ -1303,25 +1314,57 @@ fn revision_comparison(ui: &mut Ui, comparison: &ProjectRevisionComparison) {
                 ui.label("The selected retained records expose identical metadata.");
                 return;
             }
-            Grid::new("retained-project-record-comparison")
-                .num_columns(3)
-                .striped(true)
-                .show(ui, |ui| {
-                    comparison_heading(ui, "Field");
-                    comparison_heading(ui, "First");
-                    comparison_heading(ui, "Second");
-                    ui.end_row();
-                    for (field, first, second) in &comparison.fields {
-                        ui.label(*field);
-                        ui.monospace(first);
-                        ui.monospace(second);
-                        ui.end_row();
-                    }
-                });
+            let fields = comparison
+                .fields
+                .iter()
+                .map(|(field, _, _)| (*field, false));
+            let columns = [
+                Column::words(
+                    "Field",
+                    fixed_width(ui, "Field", fields, TABLE_EDGE_INSET, CELL_PAD),
+                ),
+                Column::name("First", LEAST_CUT_WIDTH),
+                Column::name("Second", LEAST_CUT_WIDTH),
+            ];
+            comparison_table(
+                ui,
+                "workbench.project.revision_history.metadata_comparison",
+                &columns,
+                comparison.fields.len(),
+                |index| {
+                    let (field, first, second) = &comparison.fields[index];
+                    vec![
+                        Cell::text(*field),
+                        Cell::number(first),
+                        Cell::number(second),
+                    ]
+                },
+            );
         }
     }
 }
 
+/// A comparison's table, every row of it: the dialog's body scrolls past it.
+/// Given only the room left under the history, it scrolled inside that room
+/// and the dialog, sized to what it held, never grew to show it.
+fn comparison_table(
+    ui: &mut Ui,
+    id: &str,
+    columns: &[Column],
+    rows: usize,
+    row_at: impl FnMut(usize) -> Vec<Cell>,
+) {
+    let line = LineHeights::grid(&Tokens::get(ui.ctx()));
+    let tall = line.head + line.row * rows as f32;
+    ui.allocate_ui(egui::vec2(ui.available_width(), tall), |ui| {
+        let _ = DataTable::new(id, columns, rows)
+            .max_height(tall)
+            .show(ui, row_at);
+    });
+}
+
+/// What changed between two drawings, domain by domain, on the history's
+/// own table: the domain's name taking the width, its counts to the right.
 fn semantic_comparison(
     ui: &mut Ui,
     delta: &ValidatedRevisionSemanticDelta,
@@ -1337,46 +1380,64 @@ fn semantic_comparison(
         });
         return;
     }
-    Grid::new("validated-revision-semantic-delta")
-        .num_columns(4)
-        .striped(true)
-        .show(ui, |ui| {
-            comparison_heading(ui, "Domain");
-            comparison_heading(ui, "Added");
-            comparison_heading(ui, "Removed");
-            comparison_heading(ui, "Modified");
-            ui.end_row();
-            delta_row(ui, "Components", delta.components);
-            delta_row(ui, "Wires", delta.wires);
-            delta_row(ui, "Buses", delta.buses);
-            delta_row(ui, "Bus taps", delta.bus_taps);
-            delta_row(ui, "Junctions", delta.junctions);
-            delta_row(ui, "Net labels", delta.net_labels);
-            delta_row(ui, "Design notes", delta.design_notes);
-            delta_row(ui, "Documentation shapes", delta.documentation_shapes);
-            ui.label("Connections");
-            ui.monospace(delta.connections_added.to_string());
-            ui.monospace(delta.connections_removed.to_string());
-            ui.monospace("\u{2014}");
-            ui.end_row();
-            ui.label("Document policy");
-            ui.monospace("\u{2014}");
-            ui.monospace("\u{2014}");
-            ui.monospace(if delta.grid_changed || delta.document_policy_changed {
-                "changed"
-            } else {
-                "\u{2014}"
-            });
-            ui.end_row();
-        });
-}
-
-fn delta_row(ui: &mut Ui, label: &str, delta: ValidatedRevisionObjectDelta) {
-    ui.label(label);
-    ui.monospace(delta.added.to_string());
-    ui.monospace(delta.removed.to_string());
-    ui.monospace(delta.modified.to_string());
-    ui.end_row();
+    let counts = |object: ValidatedRevisionObjectDelta| {
+        [object.added, object.removed, object.modified].map(|count| Cell::number(count.to_string()))
+    };
+    let policy = if delta.grid_changed || delta.document_policy_changed {
+        Cell::text("changed")
+    } else {
+        Cell::absent()
+    };
+    let lines = [
+        ("Components", counts(delta.components)),
+        ("Wires", counts(delta.wires)),
+        ("Buses", counts(delta.buses)),
+        ("Bus taps", counts(delta.bus_taps)),
+        ("Junctions", counts(delta.junctions)),
+        ("Net labels", counts(delta.net_labels)),
+        ("Design notes", counts(delta.design_notes)),
+        ("Documentation shapes", counts(delta.documentation_shapes)),
+        (
+            "Connections",
+            [
+                Cell::number(delta.connections_added.to_string()),
+                Cell::number(delta.connections_removed.to_string()),
+                Cell::absent(),
+            ],
+        ),
+        ("Document policy", [Cell::absent(), Cell::absent(), policy]),
+    ];
+    let domains = lines.iter().map(|(domain, _)| (*domain, false));
+    let mut columns = vec![Column::name(
+        "Domain",
+        fixed_width(ui, "Domain", domains, TABLE_EDGE_INSET, CELL_PAD),
+    )];
+    for (place, head) in ["Added", "Removed", "Modified"].into_iter().enumerate() {
+        let words = lines
+            .iter()
+            .map(|(_, cells)| (cells[place].text.as_str(), true));
+        let trail = if place == 2 {
+            TABLE_EDGE_INSET
+        } else {
+            CELL_PAD
+        };
+        columns.push(Column::number(
+            head,
+            fixed_width(ui, head, words, CELL_PAD, trail),
+        ));
+    }
+    comparison_table(
+        ui,
+        "workbench.project.revision_history.semantic_comparison",
+        &columns,
+        lines.len(),
+        |index| {
+            let (domain, cells) = &lines[index];
+            std::iter::once(Cell::text(*domain))
+                .chain(cells.iter().cloned())
+                .collect()
+        },
+    );
 }
 
 /// The history table's columns, in order.
@@ -1390,6 +1451,9 @@ const COLUMNS: [&str; 6] = [
 ];
 /// The columns whose identifiers and times are set in mono.
 const MONO_COLUMNS: [bool; 6] = [true, true, false, false, false, false];
+/// The columns a table too wide for its room never cuts: the revision, when
+/// it was made and its status are read whole or not at all.
+const WHOLE_COLUMNS: [bool; 6] = [true, true, false, false, false, true];
 /// The narrowest a column with too much to say is cut to. A table that
 /// cannot fit with its widest columns cut that far keeps every column whole
 /// and scrolls sideways under its first one, as on a phone.
@@ -1436,27 +1500,15 @@ fn shown_columns(rows: &[ProjectAuditRow]) -> Vec<usize> {
 /// with the sort mark, with the padding the table puts either side of a
 /// cell's words: the panel inset at the table's outer edges.
 fn natural_widths(ui: &Ui, rows: &[ProjectAuditRow], shown: &[usize]) -> Vec<f32> {
-    let measure = |text: &str, font: &egui::FontId| {
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), Color32::PLACEHOLDER)
-            .size()
-            .x
-    };
-    let head = theme::sans(tokens::FS_0, FontWeight::Medium);
     let last = shown.len().saturating_sub(1);
     shown
         .iter()
         .enumerate()
         .map(|(place, &column)| {
-            let font = if MONO_COLUMNS[column] {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
-            } else {
-                theme::sans(tokens::FS_0, FontWeight::Regular)
-            };
             let words = rows
                 .iter()
-                .map(|row| measure(row_text(row, column), &font))
-                .fold(measure(COLUMNS[column], &head) + SORT_MARK_ROOM, f32::max);
+                .map(|row| words_width(ui, row_text(row, column), MONO_COLUMNS[column]))
+                .fold(head_width(ui, COLUMNS[column]) + SORT_MARK_ROOM, f32::max);
             let lead = if place == 0 {
                 TABLE_EDGE_INSET
             } else {
@@ -1472,14 +1524,57 @@ fn natural_widths(ui: &Ui, rows: &[ProjectAuditRow], shown: &[usize]) -> Vec<f32
         .collect()
 }
 
+/// How wide `text` is in a table cell's face, mono or sans.
+fn words_width(ui: &Ui, text: &str, mono: bool) -> f32 {
+    let font = if mono {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    };
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER)
+        .size()
+        .x
+}
+
+/// How wide a column head's words are.
+fn head_width(ui: &Ui, head: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            head.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Medium),
+            Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
+}
+
+/// How wide a comparison's column is to hold its head and `words`, each
+/// mono or not, whole, with `lead` and `trail` of padding either side.
+fn fixed_width<'a>(
+    ui: &Ui,
+    head: &str,
+    words: impl IntoIterator<Item = (&'a str, bool)>,
+    lead: f32,
+    trail: f32,
+) -> f32 {
+    let widest = words
+        .into_iter()
+        .map(|(text, mono)| words_width(ui, text, mono))
+        .fold(head_width(ui, head), f32::max);
+    (widest + lead + trail + 2.0).ceil()
+}
+
 /// Natural column widths fitted to `room`. Room to spare widens every column
-/// in proportion. Too little is taken from the widest columns alone: they
-/// are cut to one common width, as wide as still fits, and every column
-/// narrower than that keeps its whole text. Shrinking every column in
-/// proportion elided an eight-letter revision ("built-i...") beside a column
-/// of prose that could have given the room up. A table that would cut a
-/// column below [`LEAST_CUT_WIDTH`] keeps its natural widths and scrolls.
-fn fit_widths(natural: &[f32], room: f32) -> Vec<f32> {
+/// in proportion. Too little is taken from the widest columns alone that
+/// are not `whole`: they are cut to one common width, as wide as still
+/// fits, and every column narrower than that, or whole, keeps its whole
+/// text. Shrinking every column in proportion elided an eight-letter
+/// revision ("built-i...") beside a column of prose that could have given
+/// the room up, and cutting the widest alone elided the time a revision was
+/// made. A table that would cut a column below [`LEAST_CUT_WIDTH`] keeps its
+/// natural widths and scrolls.
+fn fit_widths(natural: &[f32], whole: &[bool], room: f32) -> Vec<f32> {
     let total = natural.iter().sum::<f32>().max(1.0);
     if total <= room {
         let scale = room / total;
@@ -1488,9 +1583,20 @@ fn fit_widths(natural: &[f32], room: f32) -> Vec<f32> {
             .map(|width| (width * scale).floor())
             .collect();
     }
-    let mut sorted = natural.to_vec();
+    let kept = natural
+        .iter()
+        .zip(whole)
+        .filter(|(_, whole)| **whole)
+        .map(|(width, _)| width)
+        .sum::<f32>();
+    let mut sorted = natural
+        .iter()
+        .zip(whole)
+        .filter(|(_, whole)| !**whole)
+        .map(|(width, _)| *width)
+        .collect::<Vec<_>>();
     sorted.sort_by(f32::total_cmp);
-    let mut below = 0.0;
+    let mut below = kept;
     let mut cap = 0.0;
     for (index, width) in sorted.iter().enumerate() {
         let wider = (sorted.len() - index) as f32;
@@ -1505,17 +1611,17 @@ fn fit_widths(natural: &[f32], room: f32) -> Vec<f32> {
     if cap < LEAST_CUT_WIDTH {
         return natural.to_vec();
     }
-    natural.iter().map(|width| width.min(cap).floor()).collect()
-}
-
-/// A comparison table's column heading, in the history table's face.
-fn comparison_heading(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-    );
+    natural
+        .iter()
+        .zip(whole)
+        .map(|(width, whole)| {
+            if *whole {
+                *width
+            } else {
+                width.min(cap).floor()
+            }
+        })
+        .collect()
 }
 
 /// The history table's key for a validated schematic revision, which its
@@ -1769,11 +1875,20 @@ mod tests {
     /// as a phone's would, keeps every column whole and scrolls.
     #[test]
     fn a_table_that_cannot_fit_cuts_only_its_widest_columns() {
-        let fitted = fit_widths(&[60.0, 120.0, 190.0, 260.0, 60.0], 600.0);
+        let cut = [false; 5];
+        let fitted = fit_widths(&[60.0, 120.0, 190.0, 260.0, 60.0], &cut, 600.0);
         assert_eq!(fitted, vec![60.0, 120.0, 180.0, 180.0, 60.0]);
-        let roomy = fit_widths(&[50.0, 150.0], 400.0);
+        // A column read whole or not at all, the time, keeps its width
+        // however wide it is; the room comes from the prose beside it.
+        let timed = fit_widths(
+            &[60.0, 200.0, 190.0, 260.0, 60.0],
+            &[false, true, false, false, false],
+            600.0,
+        );
+        assert_eq!(timed, vec![60.0, 200.0, 140.0, 140.0, 60.0]);
+        let roomy = fit_widths(&[50.0, 150.0], &[false; 2], 400.0);
         assert_eq!(roomy, vec![100.0, 300.0]);
-        let narrow = fit_widths(&[100.0, 200.0, 300.0], 250.0);
+        let narrow = fit_widths(&[100.0, 200.0, 300.0], &[false; 3], 250.0);
         assert_eq!(narrow, vec![100.0, 200.0, 300.0]);
     }
 
@@ -1878,12 +1993,22 @@ mod tests {
             "an age stands for the time: {texts:?}"
         );
 
-        dialog.stand_on(schematic_row_key(records[1].id()));
+        // The baseline, which the resistor moved on from.
+        dialog.stand_on(schematic_row_key(records[0].id()));
         compare_with_current(&mut dialog, &harness.model, &rows);
         let Some(ProjectRevisionComparison::Schematic { label, .. }) = &dialog.comparison else {
             panic!("no comparison: {:?}", dialog.error);
         };
-        assert!(label.contains(&made), "{label:?}");
+        let baseline = crate::time_compat::utc_stamp(records[0].created_unix_ms());
+        assert!(label.contains(&baseline), "{label:?}");
+        // What changed is stated domain by domain, each name whole.
+        let texts = painted_body(1200.0, &rows, &harness.model, &mut dialog);
+        for domain in ["Components", "Documentation shapes", "Document policy"] {
+            assert!(
+                texts.iter().any(|(text, _)| text == domain),
+                "{domain:?} is not stated whole: {texts:?}"
+            );
+        }
     }
 
     /// Restore says why it cannot act on what is selected: a record that
