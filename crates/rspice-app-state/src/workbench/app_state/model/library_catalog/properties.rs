@@ -46,7 +46,6 @@ impl Model {
             .ok_or_else(|| format!("Library '{library}' disappeared during the edit"))?;
         edit.set_description(description);
         edit.set_read_only(read_only);
-        drop(edit);
         self.publish_project_library_mutation(mutation);
         Ok(())
     }

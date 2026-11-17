@@ -1156,15 +1156,7 @@ fn record_saved_symbol_revisions(state: &mut dyn LifecycleSourceMut, scope: Save
 /// The cell views a save of `scope` writes with a change, or `None` for a
 /// project never saved, every view of which is new to its file.
 fn changed_cell_views(view: &LifecycleView<'_>, scope: SaveScope) -> Option<Vec<CellViewRef>> {
-    if view
-        .platform
-        .project_lifecycle
-        .authority
-        .accepted()
-        .is_none()
-    {
-        return None;
-    }
+    view.platform.project_lifecycle.authority.accepted()?;
     let documents = match scope {
         SaveScope::AllDocuments => dirty_documents_fresh(view),
         SaveScope::ActiveDocument if active_document_is_dirty_fresh(view) => {

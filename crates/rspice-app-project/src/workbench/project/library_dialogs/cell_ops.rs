@@ -328,7 +328,10 @@ impl ProjectFeature {
         let content = if builtin {
             "The model's source and its includes, as an editable cell.".to_owned()
         } else {
-            format!("All {view_count} views and their content.")
+            match view_count {
+                1 => "Its view and its content.".to_owned(),
+                count => format!("All {count} views and their content."),
+            }
         };
         let catalog_current =
             cx.model.library_manager.revision() == cx.state.copy_cell_library_revision;

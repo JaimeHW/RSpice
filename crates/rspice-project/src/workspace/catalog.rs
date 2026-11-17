@@ -65,6 +65,10 @@ fn validate_physical_layout_document_catalog(
     Ok(())
 }
 
+/// A cell a copy reads and the cell it makes, each as its library and
+/// its name.
+pub type CellCopyPair<'a> = ((&'a str, &'a str), (&'a str, &'a str));
+
 impl ProjectWorkspace {
     pub fn physical_layout_documents(
         &self,
@@ -156,11 +160,10 @@ impl ProjectWorkspace {
     /// The catalog with a copy of every layout each cell of `copies` owns,
     /// owned by that cell's copy. With `rebind`, a copy places the copies of
     /// the cells `copies` names where its original placed those cells; else
-    /// it places what its original placed. Each pair is the source library
-    /// and cell, then the target's.
+    /// it places what its original placed.
     pub fn prepare_copy_physical_layout_cells(
         &self,
-        copies: &[((&str, &str), (&str, &str))],
+        copies: &[CellCopyPair<'_>],
         rebind: bool,
     ) -> Result<PreparedPhysicalLayoutCatalog, rspice_design::physical_layout::LayoutDocumentError>
     {

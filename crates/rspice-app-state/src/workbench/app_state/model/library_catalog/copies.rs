@@ -416,7 +416,6 @@ impl Model {
             library.add_cell(Cell::new(&target.cell));
         }
         library.add_view(&target.cell, record);
-        drop(library);
         if let Some(buffer) = self
             .workspace
             .schematic_editor(&source.key())

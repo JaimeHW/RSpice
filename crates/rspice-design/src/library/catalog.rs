@@ -194,7 +194,11 @@ impl LibraryCatalog {
     /// Record that a save wrote every view of every writable library, as a
     /// project's first save does.
     pub fn record_writable_views_saved_runtime(&mut self, at: u64) {
-        for library in self.libraries.values_mut().filter(|library| !library.read_only) {
+        for library in self
+            .libraries
+            .values_mut()
+            .filter(|library| !library.read_only)
+        {
             for cell in library.cells.values_mut() {
                 for view in cell.views.values_mut() {
                     view.saved_at = Some(at);

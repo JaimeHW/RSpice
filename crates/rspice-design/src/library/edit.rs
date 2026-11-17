@@ -36,9 +36,10 @@ impl<'a> LibraryEdit<'a> {
         if description.is_empty() {
             self.library.metadata.remove(super::LIBRARY_DESCRIPTION);
         } else {
-            self.library
-                .metadata
-                .insert(super::LIBRARY_DESCRIPTION.to_owned(), description.to_owned());
+            self.library.metadata.insert(
+                super::LIBRARY_DESCRIPTION.to_owned(),
+                description.to_owned(),
+            );
         }
     }
 

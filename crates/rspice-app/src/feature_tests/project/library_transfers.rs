@@ -367,6 +367,21 @@ fn library_and_cell_properties_survive_save_and_reopen() {
             Some("Two-stage amplifier")
         );
     }
+    let mut reopened = reopened;
+    reopened
+        .state
+        .model
+        .edit_library_properties("parts", "Analog parts", false)
+        .expect("a read-only library the project keeps is made writable again");
+    assert!(
+        !reopened
+            .state
+            .model
+            .library_manager
+            .get_library("parts")
+            .unwrap()
+            .read_only
+    );
     for _ in 0..3 {
         app.execute_command_key(ids::UNDO);
     }
