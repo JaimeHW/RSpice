@@ -21,6 +21,8 @@ use crate::product::ContentDigest;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::LifecycleSourceMut;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, Model};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_formats::project_results::segment_folder;
 
 const MANIFEST_SCHEMA_VERSION: u16 = 2;
 /// A saved project's checkpoints are kept in a folder beside its file, named
@@ -538,9 +540,7 @@ pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
     let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
-    rspice_results::store_reader::keep_segments_in(
-        &rspice_formats::project_results::segment_folder(snapshot),
-    );
+    rspice_results::store_reader::keep_segments_in(&segment_folder(snapshot));
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
 }
@@ -794,12 +794,12 @@ pub fn edit(summary: &ProjectCheckpointSummary, edit: &CheckpointEdit) -> Result
 }
 
 /// Delete a checkpoint: its manifest first, so it is no longer listed, then
-/// its snapshot.
+/// its snapshot and the results only it kept.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn delete(summary: &ProjectCheckpointSummary) -> Result<(), String> {
     let ProjectCheckpointLocator::Native { manifest, snapshot } = &summary.locator;
     let mut failures = Vec::new();
-    remove_artifacts([manifest, snapshot], &mut failures);
+    remove_checkpoint(manifest, snapshot, &mut failures);
     joined(failures)
 }
 
@@ -807,7 +807,10 @@ pub fn delete(summary: &ProjectCheckpointSummary) -> Result<(), String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn delete_set_aside(artifact: &ProjectCheckpointQuarantine) -> Result<(), String> {
     let mut failures = Vec::new();
-    remove_artifacts(&artifact.artifacts, &mut failures);
+    remove_artifacts(
+        artifact.artifacts.iter().map(PathBuf::as_path),
+        &mut failures,
+    );
     joined(failures)
 }
 
@@ -846,6 +849,14 @@ pub fn after_save(
             .map_err(|error| format!("the time could not be read: {error}"))
             .and_then(|now| seal_checkpoint(replaced, ProjectCheckpointReason::Save, now))
             .and_then(|(manifest, serialized)| {
+                // Its results are kept beside it first, as any checkpoint's.
+                crate::io::result_segments::keep_segments_now(
+                    crate::io::result_segments::file_segments(
+                        &replaced.file.simulation_results,
+                        &replaced.file.workspace.visualization_documents,
+                    ),
+                    &directory.join(&manifest.snapshot_name),
+                )?;
                 publish_native(&directory, &manifest, serialized.as_bytes())
             });
         if let Err(error) = kept {
@@ -862,7 +873,7 @@ pub fn after_save(
                 {
                     let ProjectCheckpointLocator::Native { manifest, snapshot } =
                         &checkpoint.locator;
-                    remove_artifacts([manifest, snapshot], &mut failures);
+                    remove_checkpoint(manifest, snapshot, &mut failures);
                 }
             }
             Err(error) => failures.push(error),
@@ -874,11 +885,11 @@ pub fn after_save(
     joined(failures)
 }
 
-/// Copy the project's checkpoints in `from` into `to`, each snapshot before
-/// its manifest so a checkpoint is never listed before its bytes are there,
-/// and when `remove` is set delete each from `from` once its copy is in
-/// place. A checkpoint whose bytes no longer match its manifest stays where
-/// it is.
+/// Copy the project's checkpoints in `from` into `to`, each snapshot and the
+/// results it reads before its manifest so a checkpoint is never listed
+/// before what it holds is there, and when `remove` is set delete each from
+/// `from` once its copy is in place. A checkpoint whose bytes no longer match
+/// its manifest stays where it is.
 #[cfg(not(target_arch = "wasm32"))]
 fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), String> {
     let catalog = list_directory(from, project_id)?;
@@ -912,11 +923,12 @@ fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), S
                 publish_new_private_file(&target_snapshot, &bytes)
                     .map_err(|error| format!("its snapshot could not be copied: {error}"))?;
             }
+            carry_results(snapshot, &target_snapshot)?;
             publish_new_private_file(&target_manifest, &manifest_bytes)
                 .map_err(|error| format!("its manifest could not be copied: {error}"))
         })();
         match copied {
-            Ok(()) if remove => remove_artifacts([manifest, snapshot], &mut failures),
+            Ok(()) if remove => remove_checkpoint(manifest, snapshot, &mut failures),
             Ok(()) => {}
             Err(error) => {
                 failures.push(format!("checkpoint {}: {error}", checkpoint.checkpoint_id))
@@ -927,9 +939,49 @@ fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), S
         .map_err(|error| format!("the checkpoint folder could not be synchronized: {error}"))?;
     if remove {
         // Only an emptied folder goes; anything set aside in it stays.
+        if let Some(results) = segment_folder(&from.join("checkpoint")).parent() {
+            let _ = std::fs::remove_dir(results);
+        }
         let _ = std::fs::remove_dir(from);
     }
     joined(failures)
+}
+
+/// Keep the results the checkpoint at `snapshot` reads beside its copy at
+/// `target` too, each segment by the cheapest way the volume allows.
+#[cfg(not(target_arch = "wasm32"))]
+fn carry_results(snapshot: &Path, target: &Path) -> Result<(), String> {
+    let entries = match std::fs::read_dir(segment_folder(snapshot)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("its results could not be read: {error}")),
+    };
+    let segments = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let digest =
+                rspice_results::store_reader::parse_digest(path.file_stem()?.to_str()?).ok()?;
+            // A partial copy is not a segment.
+            let named = rspice_results::store_reader::kept_segment_name(&digest);
+            (path.file_name()? == named.as_str()).then_some(
+                rspice_formats::project_results::StoredSegment {
+                    digest,
+                    source: Some(path),
+                },
+            )
+        })
+        .collect();
+    crate::io::result_segments::keep_segments_now(segments, target)
+}
+
+/// Remove a checkpoint: its manifest first, so it stops being listed, then
+/// its snapshot, then the results only it kept. A segment a reader still has
+/// open is left for a later removal.
+#[cfg(not(target_arch = "wasm32"))]
+fn remove_checkpoint(manifest: &Path, snapshot: &Path, failures: &mut Vec<String>) {
+    remove_artifacts([manifest, snapshot], failures);
+    let _ = std::fs::remove_dir_all(segment_folder(snapshot));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1267,9 +1319,7 @@ fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Res
     for index in retention_removals(&catalog.checkpoints, budget_bytes) {
         let ProjectCheckpointLocator::Native { manifest, snapshot } =
             &catalog.checkpoints[index].locator;
-        remove_artifacts([manifest, snapshot], &mut failures);
-        // The results only this checkpoint kept go with it.
-        let _ = std::fs::remove_dir_all(rspice_formats::project_results::segment_folder(snapshot));
+        remove_checkpoint(manifest, snapshot, &mut failures);
     }
     joined(failures)
 }
@@ -1278,7 +1328,7 @@ fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Res
 /// before its snapshot goes, with the lease an edit of it left; a file
 /// already gone is not a failure.
 #[cfg(not(target_arch = "wasm32"))]
-fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a PathBuf>, failures: &mut Vec<String>) {
+fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a Path>, failures: &mut Vec<String>) {
     for path in paths {
         if let Err(error) = crate::io::durable_file::remove_published(path) {
             failures.push(format!("'{}': {error}", path.display()));

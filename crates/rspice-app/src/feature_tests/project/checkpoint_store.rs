@@ -8,6 +8,7 @@ use std::path::Path;
 
 use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted, saved_project};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, ProjectCheckpointSummary, budget_use, create,
@@ -17,6 +18,8 @@ use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{ComponentType, Point};
 use rspice_app_state::workbench::preferences::ScalarPreference;
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_formats::project_results::segment_folder;
+use rspice_results::store_reader::kept_segment_name;
 
 /// One more part on the open schematic: a change a save writes.
 fn edit(app: &mut RSpiceApp, index: i32) {
@@ -147,6 +150,56 @@ fn only_a_save_that_changes_the_project_keeps_the_version_it_replaced() {
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].reason(), ProjectCheckpointReason::Save);
     assert_eq!(kept[0].project_revision(), saved_revision);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The version a save replaces is kept with the results it read: a save that
+/// drops a stored run still leaves that run's segment beside the "Before
+/// save" checkpoint, so restoring it brings the run back with its samples.
+#[test]
+fn the_version_a_save_replaced_keeps_its_results_beside_its_checkpoint() {
+    let root = unique_temp_dir("checkpoint-store-results");
+    let _unsaved = keep_unsaved_checkpoints_in(root.join("unsaved"));
+    let mut state: AppState =
+        rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
+            "a run kept with the version it belongs to
+V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
+R1 in out 1k
+C1 out 0 10n
+.tran 0.1u 300u
+.end
+",
+        );
+    state.open_project_session();
+    let file = root.join("kept.rspiceproj");
+    assert!(state.save_project_to_path(&file), "saved with its run");
+    let segment = state
+        .platform
+        .project_lifecycle
+        .result_cache
+        .capture(&state.model.simulation)
+        .stored_segments()[0]
+        .digest;
+
+    drop(std::mem::take(&mut state.model.simulation));
+    assert!(state.save_project_to_path(&file), "saved without it");
+
+    let kept = list(&state.model).expect("listed").checkpoints;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].reason(), ProjectCheckpointReason::Save);
+    // Each checkpoint keeps its results in a folder of its own in there.
+    let location = storage_location(&state.model).expect("the folder is named");
+    let results = segment_folder(&location.join("checkpoint"));
+    let results = results.parent().expect("the results folder");
+    assert!(
+        std::fs::read_dir(results)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|folder| folder.path().join(kept_segment_name(&segment)).is_file()),
+        "the run's segment is kept beside the checkpoint of the version that read it"
+    );
+    drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
 

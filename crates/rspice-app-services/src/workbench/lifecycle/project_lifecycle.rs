@@ -984,10 +984,7 @@ pub fn save_native(
         let published = destination.publish(&persistence::NativeStorage, file, |candidate| {
             prepare_post_save_registry(state, candidate, scope, SnapshotContent::Current)
         })?;
-        crate::io::result_segments::release_unread_segments(
-            &file_segments(&published.candidate),
-            path,
-        );
+        let read = file_segments(&published.candidate);
         let candidate = ProjectSnapshot {
             file: published.candidate,
             workspace_session,
@@ -999,6 +996,9 @@ pub fn save_native(
             scope,
             published.registry,
         );
+        // Only once the version this save replaced is kept as a checkpoint, with its results,
+        // does the folder let go of what the saved file no longer reads.
+        crate::io::result_segments::release_unread_segments(&read, path);
         Ok(())
     })();
     state
