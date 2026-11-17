@@ -1,12 +1,9 @@
-//! File ▸ Export ▸ Netlist and View Netlist. The export writes the deck the
-//! run executes, with every enabled analysis's card and its Verilog-A beside
-//! it, so the file runs in the CLI as the design runs here; View Netlist shows
-//! the design deck the code feature generates. Both record in the model's
-//! Console, and a refusal is prompted on the session's status bar.
+//! File ▸ Export ▸ Netlist. The export writes the deck the run executes, with
+//! every enabled analysis's card and its Verilog-A beside it, so the file runs
+//! in the CLI as the design runs here. It records in the model's Console, and
+//! a refusal is prompted on the session's status bar.
 
-use super::netlist_export::{
-    build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
-};
+use super::netlist_export::record_netlist_warnings_in;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::Model;
@@ -122,35 +119,4 @@ pub fn action_export_netlist_with_io(
         }
         Err(e) => model.report_failure("Netlist export failed", e.to_string()),
     }
-}
-
-pub fn action_view_netlist(model: &mut Model, wb: &mut WorkbenchSession) {
-    if model.schematic.document().components.is_empty() {
-        wb.prompt("No circuit to netlist. Add components first.");
-        return;
-    }
-
-    let netlist_content = match build_menu_netlist_in(model) {
-        Ok(generated) => {
-            record_netlist_warnings_in(model, generated.warnings);
-            generated.source
-        }
-        Err(reasons) => {
-            model.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                netlist_failure_text("Netlist generation", &reasons),
-            );
-            return;
-        }
-    };
-
-    // The Netlist workspace this command opens shows the deck itself.
-    let total_lines = netlist_content.lines().count();
-    model.simulation.source.netlist_content = netlist_content;
-    model.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!("Generated the netlist ({total_lines} lines)."),
-    );
 }

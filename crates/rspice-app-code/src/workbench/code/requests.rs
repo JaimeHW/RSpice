@@ -49,8 +49,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             );
         }
         CodeRequest::GenerateNetlist => {
-            crate::workbench::menu_bar::netlist_actions::action_view_netlist(cx.model, cx.wb);
-            cx.wb.activate(Workspace::Netlist);
+            crate::workbench::surfaces::netlist::generation::show_generated_netlist(cx);
         }
         CodeRequest::ShowInNetlist => return Some(CodeHandOff::ShowInNetlist),
         CodeRequest::FindCodeDocument => {

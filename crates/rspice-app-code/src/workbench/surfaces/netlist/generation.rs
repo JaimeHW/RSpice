@@ -89,6 +89,22 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
     }
 }
 
+/// Take the reader to the generated netlist of the design as it stands now:
+/// its page in the Netlist workspace, with the generated netlist in front.
+///
+/// The netlist is generated first. Only the Netlist page generates it while it
+/// is drawn, so a jump from elsewhere would otherwise arrive at nothing when
+/// the page was never opened, or at a netlist older than the design.
+pub fn show_generated_netlist(cx: &mut Cx<'_, CodeFeature>) {
+    refresh_generated_artifact(cx);
+    crate::workbench::documents::netlist_document::show_generated_deck(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.code_workspace.page,
+        cx.wb,
+    );
+}
+
 pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
     let input_digest =
         match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(

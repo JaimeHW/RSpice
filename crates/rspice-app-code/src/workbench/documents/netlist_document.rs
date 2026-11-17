@@ -1227,16 +1227,25 @@ pub fn replace_owned_dependency_source(
 }
 
 /// Take the reader to the generated deck from another workspace: its page in
-/// the Netlist workspace, with the generated primary in front. It works over
-/// the model, the netlist editor's state, the Code workspace's page and the
-/// workbench.
+/// the Netlist workspace, with the generated primary in front. With nothing
+/// generated the generated document still comes to the front, where the page
+/// states why there is none, rather than leaving another deck under the
+/// command's name. It works over the model, the netlist editor's state, the
+/// Code workspace's page and the workbench.
 pub fn show_generated_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     page: &mut CodeWorkspacePage,
     workbench: &mut crate::workbench::state::WorkbenchSession,
 ) {
-    let _ = open_generated_primary_in(model, netlist);
+    if !open_generated_primary_in(model, netlist)
+        && model.netlist_artifacts.generated_document.is_none()
+    {
+        netlist.active_dependency_identity = None;
+        netlist.active_dependency_root = None;
+        netlist.active_document = ActiveNetlistDocument::Generated;
+        netlist.active_document_initialized = true;
+    }
     *page = CodeWorkspacePage::Netlist;
     if workbench.workspace != crate::workbench::state::Workspace::Netlist {
         workbench.activate(crate::workbench::state::Workspace::Netlist);
@@ -1253,7 +1262,11 @@ pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumen
     {
         return false;
     }
-    if netlist.active_document == ActiveNetlistDocument::Generated
+    // A session that never chose a document is not showing the generated one
+    // yet, whatever the default says: the page would put a retained deck in
+    // front on its first frame.
+    if netlist.active_document_initialized
+        && netlist.active_document == ActiveNetlistDocument::Generated
         && netlist.active_dependency_identity.is_none()
     {
         return false;

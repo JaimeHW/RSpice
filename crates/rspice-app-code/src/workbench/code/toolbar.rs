@@ -118,12 +118,7 @@ fn no_compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
 /// Take the reader to the generated deck: its page in the Netlist workspace,
 /// with the generated primary in front.
 fn show_generated_deck(cx: &mut Cx<'_, CodeFeature>) {
-    crate::workbench::documents::netlist_document::show_generated_deck(
-        cx.model,
-        &mut cx.state.netlist,
-        &mut cx.state.code_workspace.page,
-        cx.wb,
-    );
+    crate::workbench::surfaces::netlist::generation::show_generated_netlist(cx);
 }
 
 /// The generated deck's button, in the slot the toolbar took for it.

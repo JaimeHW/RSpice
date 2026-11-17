@@ -8,6 +8,7 @@ use crate::workbench::app::veriloga_interface_tests;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::render_new_veriloga_device_form;
 use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle;
 
+mod generated_netlist_jumps;
 #[cfg(not(target_arch = "wasm32"))]
 mod netlist_document;
 pub(super) mod netlist_export;

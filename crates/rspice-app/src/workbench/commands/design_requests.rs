@@ -73,16 +73,14 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
     );
 }
 
-/// Open the generated netlist on its source map, at the first line it maps,
-/// with the manager closed.
+/// Show the generated netlist's source map, at the first line it maps, with
+/// the manager closed. The caller has put the generated netlist in front the
+/// way every jump to it does.
 pub(in crate::workbench) fn open_connectivity_source_map(state: &mut AppState) {
     state.design.connectivity_manager.close();
-    state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     state.workbench.navigator_visible = true;
     state.workbench.drawer =
         Some(rspice_app_workbench::workbench::state::workbench_session::Drawer::Navigator);
-    state.code.netlist.active_document =
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     state.workbench.set_navigator_filter("source mapping");
     if let Some(line) = state
         .model
