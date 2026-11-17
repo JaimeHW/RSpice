@@ -1395,6 +1395,54 @@ fn save_project_to_path_writes_simulation_results() {
     );
 }
 
+/// Every save says so on the status bar by the project's name. The first
+/// save of an untitled project names it after its file, and says so there.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_save_says_saved_and_names_a_rename_it_made() {
+    let mut state = AppState::default();
+    state
+        .model
+        .workspace
+        .content
+        .project
+        .rename("Untitled Project")
+        .expect("valid name");
+    let root = std::env::temp_dir().join(format!(
+        "rspice-save-prompt-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let path = root.join("amp_v2.rspiceproj");
+
+    assert!(state.save_project_to_path(&path));
+    assert_eq!(
+        crate::workbench::app_state::prompt_text(&state.workbench),
+        Some("Saved amp_v2, named after its file (was \u{201c}Untitled Project\u{201d})")
+    );
+
+    state
+        .model
+        .workspace
+        .content
+        .project
+        .rename("amp_v3")
+        .expect("valid name");
+    assert!(matches!(
+        state.save_project_scope(SaveScope::AllDocuments),
+        SaveRequestOutcome::CanonicalComplete
+    ));
+    assert_eq!(
+        crate::workbench::app_state::prompt_text(&state.workbench),
+        Some("Saved amp_v3")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Markers are the reader's own annotation of a result. Losing them on
 /// close is data loss, so they are written beside the retained datasets
 /// and re-attach to the analysis they named.

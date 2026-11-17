@@ -446,6 +446,9 @@ impl AppState {
                         rspice_app_services::services::recent_files::RecentKind::Schematic,
                         path,
                     );
+                    if let Some(name) = file_workflow::file_name_string(path) {
+                        self.prompt(format!("Saved {name}"));
+                    }
                     self.record(
                         LogSeverity::Info,
                         LogSource::Studio,
@@ -1118,6 +1121,8 @@ impl AppState {
         if !self.load_project_from_path(path) {
             return false;
         }
+        let saved = format!("Saved {}", self.model.workspace.content.project.name());
+        self.prompt(saved);
         self.record(
             LogSeverity::Info,
             LogSource::Studio,

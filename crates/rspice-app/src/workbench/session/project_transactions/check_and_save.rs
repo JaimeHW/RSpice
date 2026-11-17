@@ -258,6 +258,7 @@ pub(crate) fn complete_validated_save(state: &mut AppState, newer_changes: bool)
         message.push_str(NEWER_CHANGES);
     }
     state.project.check_and_save.close();
+    state.prompt(message.clone());
     state.record(LogSeverity::Info, LogSource::Studio, message);
 }
 

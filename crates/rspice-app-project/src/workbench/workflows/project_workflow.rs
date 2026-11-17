@@ -472,13 +472,26 @@ pub fn save_native_scope(
         crate::workbench::lifecycle::project_lifecycle::documents_saved_with_their_sheets(
             &parts, scope,
         );
+    // And the name, which a first save of a default-named project replaces.
+    let name_before = parts
+        .lifecycle
+        .model
+        .workspace
+        .content
+        .project
+        .name()
+        .to_owned();
     match crate::workbench::lifecycle::project_lifecycle::save_native(
         &mut parts, scope, path, authority,
     ) {
         Ok(()) => {
-            if let Some(saved) = documents_saved_together(&written_together) {
-                parts.workbench.prompt(saved);
-            }
+            let saved = documents_saved_together(&written_together).unwrap_or_else(|| {
+                saved_prompt(
+                    &name_before,
+                    parts.lifecycle.model.workspace.content.project.name(),
+                )
+            });
+            parts.workbench.prompt(saved);
             let LifecycleParts {
                 model, platform, ..
             } = parts.lifecycle;
@@ -509,6 +522,17 @@ pub fn save_native_scope(
             );
             Err(message)
         }
+    }
+}
+
+/// What the status line says of a save: "Saved amp_v2". A first save that
+/// named a default-named project after its file says so, with the name it
+/// replaced.
+pub fn saved_prompt(name_before: &str, name_after: &str) -> String {
+    if name_before == name_after || name_before.trim().is_empty() {
+        format!("Saved {name_after}")
+    } else {
+        format!("Saved {name_after}, named after its file (was \u{201c}{name_before}\u{201d})")
     }
 }
 
@@ -818,6 +842,10 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
                     },
                 );
                 if !project_copy {
+                    parts.workbench.prompt(format!(
+                        "Saved {}",
+                        parts.lifecycle.model.workspace.content.project.name()
+                    ));
                     continuation = Some(canonical_save_continuation_event(
                         &parts,
                         transaction,
