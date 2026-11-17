@@ -107,7 +107,7 @@ pub fn show(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) -> Option<Example> {
             DialogHintTone::Neutral,
         ),
         None => (
-            "Opens as a new project you save where you choose",
+            "Opens unsaved: the first Save asks where to keep it",
             DialogHintTone::Neutral,
         ),
     };

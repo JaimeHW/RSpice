@@ -32,6 +32,7 @@ pub(crate) fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
         LandingAction::OpenSchematic => {
             app.execute_command_key(ProjectCommand::OpenSchematic.key())
         }
+        LandingAction::Examples => app.state.project.open_examples(),
         LandingAction::OpenRecent(recent) => {
             #[cfg(not(target_arch = "wasm32"))]
             app.open_recent_file(recent);

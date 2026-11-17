@@ -170,6 +170,43 @@ fn the_landing_lists_each_recent_project_under_one_heading() {
     }
 }
 
+/// A first-time reader finds a working circuit on the landing: Examples
+/// opens the dialog, and the example it opens is a project that runs at
+/// once, unsaved, with no file dialog in the way.
+#[test]
+fn examples_on_the_landing_open_a_circuit_unsaved() {
+    for size in [vec2(1440.0, 900.0), vec2(390.0, 844.0)] {
+        let mut app = landing_app();
+        let (ctx, landing) = settled(&mut app, size);
+        let asked = click(
+            &ctx,
+            &mut app,
+            size,
+            landing.text("Examples\u{2026}").center(),
+        );
+        assert_eq!(asked, Some(LandingAction::Examples), "{size:?}");
+        crate::workbench::shell_host::project::landing::execute_action(
+            &mut app,
+            LandingAction::Examples,
+        );
+        assert!(
+            app.state.project.examples_selection.is_some(),
+            "the Examples dialog opens"
+        );
+        let example = rspice_app_state::workbench::examples::EXAMPLES[0];
+        crate::workbench::session::project_transactions::request_example(&mut app.state, example);
+        assert!(app.state.platform.project_lifecycle.is_open());
+        assert_eq!(
+            app.state.model.workspace.content.project.name(),
+            example.name
+        );
+        assert!(
+            app.state.model.workspace.content.project.path.is_none(),
+            "nothing was written: the first Save asks where"
+        );
+    }
+}
+
 /// Pressing a row asks to open that project; pressing its pin asks to pin
 /// it, and the shell then writes the pin.
 #[test]

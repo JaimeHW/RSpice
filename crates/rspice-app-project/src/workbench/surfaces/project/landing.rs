@@ -54,6 +54,8 @@ pub enum LandingAction {
     OpenProject,
     OpenNetlist,
     OpenSchematic,
+    /// The Examples dialog: a working circuit, opened unsaved.
+    Examples,
     OpenRecent(RecentFile),
     /// Pin, locate or remove one recent project.
     Recent(RecentRowAction),
@@ -908,6 +910,13 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
             WorkbenchIcon::Design,
             false,
             LandingAction::OpenSchematic,
+        ),
+        (
+            "Examples…",
+            "Working circuits, ready to run",
+            WorkbenchIcon::Simulate,
+            false,
+            LandingAction::Examples,
         ),
     ] {
         if action_row(ui, title, detail, icon, primary).clicked() {

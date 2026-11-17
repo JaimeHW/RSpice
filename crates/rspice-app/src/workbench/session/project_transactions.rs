@@ -1564,7 +1564,8 @@ pub(crate) fn go_on_leaving(
 
 /// Replace the session with a new project holding `example`, named after it.
 ///
-/// The project is not saved: [`show`] asks where once this succeeds.
+/// The project is not saved: it opens in place, ready to run, and its first
+/// Save asks where to keep it.
 pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> Result<(), String> {
     let params = NewProjectParams {
         name: example.name.to_owned(),
@@ -1576,12 +1577,10 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
     Ok(())
 }
 
-/// Open `name` as a new project, then ask where to save it.
+/// Open `name` as a new, unsaved project.
 fn open_example(state: &mut AppState, name: &str) {
-    if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
-        && create_example_project(state, example).is_ok()
-    {
-        state.save_project_as();
+    if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name) {
+        let _ = create_example_project(state, example);
     }
 }
 
