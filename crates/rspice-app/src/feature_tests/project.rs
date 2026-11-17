@@ -8,6 +8,7 @@ mod configuration_dialogs;
 mod configuration_inspector;
 mod configuration_page;
 mod configuration_transactions;
+mod dependencies;
 mod design_management;
 mod examples;
 mod file_workflow;
