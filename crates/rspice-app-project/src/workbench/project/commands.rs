@@ -231,25 +231,9 @@ impl ProjectCommand {
             Self::NewCell => ("New cell…", "File", open, global, NEW_CELL),
             Self::NewView => ("New cell view…", "File", open, global, NONE),
             Self::OpenSchematic => ("Open schematic…", "File", waits, global, NONE),
-            Self::Page(ProjectPage::Overview) => {
-                ("Open project overview", "Project", page, global, NONE)
-            }
-            Self::Page(ProjectPage::Library) => {
-                ("Open project library", "Project", page, global, NONE)
-            }
-            Self::Page(ProjectPage::Configuration) => (
-                "Open testbench configuration",
-                "Project",
-                page,
-                global,
-                NONE,
-            ),
-            Self::Page(ProjectPage::Dependencies) => {
-                ("Open dependency manifest", "Project", page, global, NONE)
-            }
-            Self::Page(ProjectPage::Recovery) => {
-                ("Open recovery center", "Project", page, global, NONE)
-            }
+            // A page goes by the name its tab shows, as Simulate's and
+            // Verify's pages do; its group says whose page it is.
+            Self::Page(page_shown) => (page_shown.label(), "Project", page, global, NONE),
             Self::DesignManagement => (
                 "Sheets, variants and annotation\u{2026}",
                 "Design",

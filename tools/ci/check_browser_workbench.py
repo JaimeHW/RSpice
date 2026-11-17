@@ -269,7 +269,7 @@ def model_validation_clock(browser):
 
     # Also snapshot the working project: unchanged saved bytes alone could hide
     # an invalid receipt left in memory by the failed operation.
-    choose_command(browser, "Open recovery center")
+    choose_command(browser, "Recovery")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Create checkpoint", "button")
@@ -423,7 +423,7 @@ def run_with_saved_provider(browser, decision):
     wait_for(lambda: any(c["value"] == "Run 1 finished"
                         for c in controls(browser.snapshot())), "the saved-provider simulation", 120)
     browser.capture("provider-run-completed")
-    choose_command(browser, "Open recovery center")
+    choose_command(browser, "Recovery")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Create checkpoint", "button")
@@ -656,7 +656,7 @@ def run(browser):
     browser.click("Schematic canvas", "canvas")
     configuration_opening_input(browser)
     review_intervals = create_and_resolve_review(browser)
-    choose_command(browser, "Open recovery center")
+    choose_command(browser, "Recovery")
     wait_for(lambda: any(control["label"] == "Create checkpoint"
                         for control in controls(browser.snapshot())), "the recovery workspace")
     if checkpoint_records(browser):

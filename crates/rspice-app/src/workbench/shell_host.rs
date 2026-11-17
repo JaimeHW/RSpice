@@ -630,7 +630,7 @@ impl Host for RSpiceApp {
         let messages = app.state.workbench.messages();
         match workspace {
             Workspace::Project => match app.state.project.project_page {
-                ProjectPage::Overview => "Project overview".to_owned(),
+                ProjectPage::Overview => "Project".to_owned(),
                 ProjectPage::Library => "Cell view".to_owned(),
                 ProjectPage::Configuration => "Configuration".to_owned(),
                 ProjectPage::Dependencies => "Dependency".to_owned(),
@@ -681,7 +681,11 @@ impl Host for RSpiceApp {
 
         let app = self;
         match workspace {
-            Workspace::Project => "Project overview".to_owned(),
+            // The narrow layout shows no document bar, so its title names the
+            // page in front.
+            Workspace::Project => {
+                format!("Project \u{b7} {}", app.state.project.project_page.label())
+            }
             Workspace::Design => design_title_cell(&app.state.model),
             Workspace::Simulate => "Simulation plan".to_owned(),
             Workspace::Stimulus => "Stimulus Library".to_owned(),

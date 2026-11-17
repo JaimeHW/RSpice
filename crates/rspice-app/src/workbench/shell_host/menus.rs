@@ -10,6 +10,7 @@ use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
@@ -385,6 +386,8 @@ const VIEW_MENU: &[MenuEntry] = &[
     results(ResultsCommand::ToggleResultsSplit).access('R'),
     command_as(ShellCommand::OpenProblems, "Problems").access('P'),
     Separator,
+    MenuEntry::submenu("Project", PROJECT_PAGES_MENU).access('J'),
+    Separator,
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
         MenuContext::SourceEditor,
@@ -392,6 +395,16 @@ const VIEW_MENU: &[MenuEntry] = &[
     ),
     command_as(ShellCommand::ToggleFocusMode, "Focus mode").access('M'),
     command_as(ShellCommand::ToggleFullScreen, "Full screen").access('U'),
+];
+
+/// The Project workspace's pages, in the order of its tabs and under their
+/// names.
+const PROJECT_PAGES_MENU: &[MenuEntry] = &[
+    project(ProjectCommand::Page(ProjectPage::Overview)).access('O'),
+    project(ProjectCommand::Page(ProjectPage::Library)).access('L'),
+    project(ProjectCommand::Page(ProjectPage::Configuration)).access('C'),
+    project(ProjectCommand::Page(ProjectPage::Dependencies)).access('D'),
+    project(ProjectCommand::Page(ProjectPage::Recovery)).access('R'),
 ];
 
 /// The grid's styles, one of which is drawn; G steps through them.
