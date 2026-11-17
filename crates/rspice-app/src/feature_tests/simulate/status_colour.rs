@@ -91,7 +91,7 @@ const STATUS_IN_COLOUR: [&str; 6] = [
 /// under `src/workbench`, and the spellings it bans on top, each the trace
 /// of a habit that surface was written with. The studio is the walked
 /// [`studio_sources`] instead of a list.
-const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
+const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 9] = [
     (
         "dialog content",
         &[
