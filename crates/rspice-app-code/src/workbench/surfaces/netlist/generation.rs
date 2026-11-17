@@ -72,7 +72,13 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
         ActiveNetlistDocument::GeneratedDiff => {
             Some(cx.state.netlist.generated_diff_source.clone())
         }
-        ActiveNetlistDocument::RunSnapshot => cx.runs.manual_run.last_run_buffer.clone(),
+        ActiveNetlistDocument::RunSnapshot => Some(
+            crate::workbench::documents::netlist_document::run_snapshot_source_in(
+                cx.model,
+                &cx.state.netlist,
+                cx.runs,
+            ),
+        ),
     });
     if let Some(projected) = projected
         && cx.model.simulation.source.netlist_content != projected
