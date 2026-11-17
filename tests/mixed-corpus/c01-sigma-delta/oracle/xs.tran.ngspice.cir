@@ -4,8 +4,11 @@
 .include ../net/mod1-ct.cir
 Xmod inp inm dclk dv dvb mod1
 vin inp inm dc 0 sin(0 'inampl' 'infreq' 0 0)
-* Step capped at 1 ns: at the default step and at 20 ns the window codes move with
-* the step; at 5 ns and 1 ns all 19 agree.
-.tran 0.1u 2m 0 1n
+* Step capped at 0.1 ns, where the window codes have converged: at 0.05 ns
+* all 19 agree with it. At the default step, 20 ns and 1 ns they move with
+* the step (1 ns reads 376 and 389 at 1650 and 1750 us, 0.1 ns 375 and 388):
+* the modulator's decisions follow each clock edge's dating, which is the
+* first accepted point past adc_bridge's threshold.
+.tran 0.1u 2m 0 0.1n
 .save v(adaclout) v(inp) v(inm)
 .end

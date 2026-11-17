@@ -14,22 +14,21 @@ oracle = "O6"
 expect = "c01::code"
 abs = 3.0
 rel = 0.0
-why = "code = 2·(ones among the window's first 498 counted decisions) + the last decision, against 997·(1/2 + v̄/4) (analytic/c01.rs): the first-order ΣΔ keeps the ones count within ±1 of 498·(1/2 + v̄/4) → ±2 codes, and the last decision is within 1 of its mean → ±1. Was 500 + 250·v̄ over 500 clocks, which missed the clock the counter's reset swallows and counted the last decision twice: 1.5 to 2.5 codes high against ngspice and Icarus+ngspice alike"
+why = "allowed = max |O6 − O1| over the 19 windows + one LSB, rounded up: the closed form 997·(1/2 + v̄/4) (analytic/c01.rs; code = 2·(ones among the window's first 498 counted decisions) + the last decision) reads 1.01 codes from the converged O1 at most (1150 µs; O2 reads the same codes), so 1.01 + 1 = 2.01 → 3 codes. Was 500 + 250·v̄ over 500 clocks, which missed the clock the counter's reset swallows and counted the last decision twice: 1.5 to 2.5 codes high against ngspice and Icarus+ngspice alike"
 
 # The code gates against the independent oracles, set before any RSpice run
 # from the oracles alone: allowed = max |O1 − O2| over the windows and both
 # variants, plus one code (the quantizer's LSB). O1 (ngspice-46, the xs
 # deck; ref/xs.tran.O1.out serves vams too) and O2 (ngspice-46 + d_cosim +
-# Icarus, the vams deck; ref/vams.tran.O2.out) read the same code in all 19
-# windows, so max |O1 − O2| = 0 and allowed = 0 + 1 = 1 code. The LSB covers
-# ngspice's own step dependence: refined 10x (0.1 ns ceiling) it moves O1 by
-# one code. xs carries a tie the oracles never meet: the clock's 2 ns ramp
-# crosses adc_buff's 0.5 V threshold 1 ns after its breakpoint, RSpice puts
-# an accepted point exactly there on 734 of its 9,999 rising edges, and the
-# rounding of that point's time decides each such edge (both simulators test
-# `in <= in_low` first, ngspice-46 icm/digital/adc_bridge/cfunc.mod:222,
-# 237); ngspice-46 never lands on the crossing. vams dates the clock at its
-# crossing, so no edge waits on a tie.
+# Icarus, the vams deck; ref/vams.tran.O2.out) are captured step-converged
+# at a 0.1 ns cap: at 0.05 ns every window reads the same code in both. They
+# read the same code in all 19 windows, so max |O1 − O2| = 0 and allowed =
+# 0 + 1 = 1 code. At the 1 ns cap they were captured with before, the codes
+# moved with the step (1650 and 1750 µs read 376 and 389 at 1 ns, 375 and
+# 388 at 0.1 ns): ngspice and RSpice's xs alike date each clock edge at the
+# first accepted point past adc_bridge's 0.5 V threshold (ngspice-46
+# icm/digital/adc_bridge/cfunc.mod:222, 237), and the modulator's decisions
+# follow those dates.
 [[q]]
 id = "code"
 analysis = "tran"
@@ -139,9 +138,28 @@ kind = "stat"
 stat = "var"
 over = "samples"
 of = { kind = "held_at", signal = "v(adaclout)", times = { start = 1.5e-4, step = 1e-4, count = 49 }, scale = 1024.0 }
-interval = [0.733, 3.97]
+interval = [0.730, 3.96]
 oracle = "O6"
-why = "250²·σ²·NT/Tw = 1.25 (+ ≤ 4/3 quantization), so the true variance lies in [1.25, 2.583] codes²; the 49-window sample variance has 48 df, so at χ² 99% per tail it lies in [1.25·χ²(0.01,48)/48, 2.583·χ²(0.99,48)/48] = [1.25·28.177/48, 2.583·73.683/48] = [0.7338, 3.9656], rounded outward (manager ruling; the design's [0.72, 3.3] did not follow from this rationale)"
+why = "the code is 997/4 = 249.25 per volt of the input's mean over the 99.8 µs of counted clocks (analytic/c01.rs), so the noise adds 249.25²·σ²·NT/Tw = 249.25²·0.01·0.2/99.8 = 1.245 codes² (+ ≤ 4/3 quantization), and the true variance lies in [1.245, 2.578] codes²; the 49-window sample variance has 48 df, so at χ² 99% per tail it lies in [1.245·χ²(0.01,48)/48, 2.578·χ²(0.99,48)/48] = [1.245·28.177/48, 2.578·73.683/48] = [0.7309, 3.958], rounded outward. Was [0.733, 3.97] from 250 per volt over 100 µs"
+insensitive = "a 49-window sample variance held to its chi² 99 % interval, a factor of 5.4 wide: a 1 % scaling moves it 2 %. The mean code beside it catches a scaling"
+insensitive_time = "each code is held for its 100 µs window and read in the middle: a 1 % stretch moves the read at most 49.5 µs, inside the same window"
+
+# The mean code: the zero-mean input leaves the closed form's 997/2 = 498.5,
+# and the 49 windows' mean carries each window's variance (≤ 2.578 codes²,
+# above) over 49: σ ≤ 0.2294, so at 99% two-sided (2.576σ) the mean lies in
+# 498.5 ± 0.591 = [497.909, 499.091], rounded outward. O1 reads 498.163.
+[[q]]
+id = "mean"
+analysis = "trnoise"
+variants = ["xs", "vams"]
+kind = "stat"
+stat = "mean"
+over = "samples"
+of = { kind = "held_at", signal = "v(adaclout)", times = { start = 1.5e-4, step = 1e-4, count = 49 }, scale = 1024.0 }
+interval = [497.9, 499.1]
+oracle = "O6"
+why = "997/2 at zero input mean, ± 2.576 σ of a 49-window mean (derivation above)"
+insensitive_time = "each code is held for its 100 µs window and read in the middle: a 1 % stretch moves the read at most 49.5 µs, inside the same window"
 
 [[q]]
 id = "var"
@@ -155,3 +173,5 @@ ratio = [0.48, 2.08]
 oracle = "O1"
 ref = "ref/xs.trnoise.O1.out"
 why = "F-test 99%, (48, 48) df; independent RNG streams"
+insensitive = "an F-test of two 49-window variances, 99 % over (48, 48) df, a factor of 4.3 wide: a 1 % scaling moves the ratio 2 %"
+insensitive_time = "each code is held for its 100 µs window and read in the middle: a 1 % stretch moves the read at most 49.5 µs, inside the same window"
