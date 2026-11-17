@@ -2,8 +2,8 @@
 //!
 //! Compares simulation results against reference files for CI/CD testing.
 //! Both files may be in any supported result format (rawfile, CSV, TSV,
-//! JSON, HDF5 — auto-detected by extension), with configurable absolute
-//! and relative tolerances.
+//! JSON, HDF5, or a run's results store — auto-detected by extension), with
+//! configurable absolute and relative tolerances.
 
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::export_table::ColumnData;
@@ -20,6 +20,7 @@ mod fft;
 mod interpolation;
 mod monte_carlo;
 mod selection;
+mod store_bless;
 use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -166,6 +167,9 @@ pub fn execute(args: CompareArgs, config: &Config, quiet: bool) -> Result<(), Cl
     validate_compare_tolerance("--reltol", args.reltol)?;
     if args.bless {
         publish::destinations::protect_sources(&args.golden, config.source_paths())?;
+        if detect_format(&args.golden) == crate::cli::InputFormat::Rsr {
+            return Err(store_bless::store_golden_refusal(&args.golden));
+        }
     }
     if args.section.is_some()
         && !supports_sections(detect_format(&args.result))
@@ -186,18 +190,28 @@ pub fn execute(args: CompareArgs, config: &Config, quiet: bool) -> Result<(), Cl
         });
     }
     // Promotion and validation must use the same bytes even if a simulator
-    // replaces or edits the result while comparison is running.
+    // replaces or edits the result while comparison is running. A results
+    // store is blessed as those bytes converted to the golden's format.
+    let store = detect_format(&args.result) == crate::cli::InputFormat::Rsr;
     let snapshot = args
         .bless
-        .then(|| ResultSnapshot::read(&args.result, config.resources.limits()))
+        .then(|| {
+            if store {
+                store_bless::snapshot(&args.result, &args.golden, config)
+            } else {
+                ResultSnapshot::read(&args.result, config.resources.limits())
+            }
+        })
         .transpose()?;
+    // A store has no sections, so a selector names only the golden's.
+    let result_section = args.section.as_deref().filter(|_| !store);
     if !args.golden.exists() {
         if args.bless {
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
             let snapshot = snapshot.as_ref().expect("bless captured a snapshot");
-            let data = comparison_data(&args.result, snapshot.load(args.section.as_deref())?)?;
+            let data = comparison_data(&args.result, snapshot.load(result_section)?)?;
             let mut comparison = validate_bless_candidate(&data, &args)?;
             bless_golden(snapshot, &data, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
@@ -229,7 +243,7 @@ pub fn execute(args: CompareArgs, config: &Config, quiet: bool) -> Result<(), Cl
 
     // Load and parse files
     let result_data = if let Some(snapshot) = &snapshot {
-        comparison_data(&args.result, snapshot.load(args.section.as_deref())?)?
+        comparison_data(&args.result, snapshot.load(result_section)?)?
     } else {
         load_comparison_data(
             &args.result,

@@ -731,3 +731,121 @@ fn a_dump_that_holds_a_different_level_fails_the_comparison() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `TRAN_DECK` at a different amplitude, so its result differs from the golden.
+const DRIFTED_TRAN_DECK: &str = "* transient compare test
+v1 in 0 sin(0 1.5 1k)
+r1 in out 1k
+c1 out 0 1u
+.tran 10u 100u
+.end
+";
+
+fn compare_status(args: &[&str]) -> (Option<i32>, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("compare")
+        .args(args)
+        .output()
+        .expect("run rspice");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// The results store a run leaves beside its output compares as that output does.
+#[test]
+fn a_results_store_compares_against_the_table_its_run_wrote() {
+    let dir = test_dir("rsr_vs_csv");
+    let csv = simulate(&dir, "csv", "result.csv");
+    let store = dir.join("result.rsr");
+    assert!(store.is_dir(), "the run leaves its store beside its output");
+    rspice_ok(&[
+        "compare",
+        store.to_str().unwrap(),
+        csv.to_str().unwrap(),
+        "--abstol",
+        "0",
+        "--reltol",
+        "0",
+    ]);
+}
+
+/// A store blessed into a missing golden is written in the format the golden's extension names,
+/// as the bytes the run's own output of that format holds.
+#[test]
+fn a_results_store_blesses_a_missing_golden_in_the_format_its_name_names() {
+    let dir = test_dir("rsr_bless_missing");
+    let csv = simulate(&dir, "csv", "result.csv");
+    let store = dir.join("result.rsr");
+    let golden = dir.join("golden.csv");
+    let (code, stderr) =
+        compare_status(&[store.to_str().unwrap(), golden.to_str().unwrap(), "--bless"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(
+        std::fs::read(&golden).unwrap(),
+        std::fs::read(&csv).unwrap(),
+        "the blessed golden is the store as the run's own CSV"
+    );
+
+    let golden = dir.join("golden.h5");
+    let (code, stderr) =
+        compare_status(&[store.to_str().unwrap(), golden.to_str().unwrap(), "--bless"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    let (code, stderr) = compare_status(&[
+        csv.to_str().unwrap(),
+        golden.to_str().unwrap(),
+        "--abstol",
+        "0",
+        "--reltol",
+        "0",
+    ]);
+    assert_eq!(code, Some(0), "the HDF5 golden holds the run: {stderr}");
+}
+
+/// A store blessed over a drifted golden keeps the golden's own format: a text rawfile stays a
+/// text rawfile.
+#[test]
+fn a_results_store_blesses_an_existing_golden_in_the_golden_s_own_format() {
+    let dir = test_dir("rsr_bless_ascii");
+    let golden = simulate_deck(&dir, DRIFTED_TRAN_DECK, "ascii", "golden.raw");
+    let raw = simulate(&dir, "raw", "result.raw");
+    let store = dir.join("result.rsr");
+    let (code, _) = compare_status(&[store.to_str().unwrap(), golden.to_str().unwrap()]);
+    assert_eq!(code, Some(3), "the drifted golden differs from the run");
+
+    let (code, stderr) =
+        compare_status(&[store.to_str().unwrap(), golden.to_str().unwrap(), "--bless"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    let blessed = String::from_utf8_lossy(&std::fs::read(&golden).unwrap()).into_owned();
+    assert!(
+        blessed.lines().any(|line| line.trim_end() == "Values:"),
+        "the golden stays a text rawfile:\n{blessed}"
+    );
+    let (code, stderr) = compare_status(&[
+        raw.to_str().unwrap(),
+        golden.to_str().unwrap(),
+        "--abstol",
+        "0",
+        "--reltol",
+        "0",
+    ]);
+    assert_eq!(code, Some(0), "the golden now holds the run: {stderr}");
+}
+
+/// A golden is one result file, so a bless never writes a store.
+#[test]
+fn a_bless_into_a_results_store_golden_is_refused() {
+    let dir = test_dir("rsr_bless_store_golden");
+    simulate(&dir, "raw", "result.raw");
+    let store = dir.join("result.rsr");
+    let golden = dir.join("golden.rsr");
+    let (code, stderr) =
+        compare_status(&[store.to_str().unwrap(), golden.to_str().unwrap(), "--bless"]);
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(
+        stderr.contains("a results store (.rsr) is the directory a run writes, not a golden file"),
+        "{stderr}"
+    );
+    assert!(!golden.exists(), "nothing is written for a refused bless");
+}

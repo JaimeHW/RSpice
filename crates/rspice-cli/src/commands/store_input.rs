@@ -14,7 +14,7 @@ use rspice_results::stored_transient::{StoreEvents, StoredTransientRun, fill_row
 use rspice_results_store::{FileIo, SegmentReader, StoreDir, StoreError};
 
 use crate::cli::{CliError, ConvertArgs, InputFormat, NumericBound, OutputFormat};
-use crate::commands::export_table::{ExportTable, scalar_table};
+use crate::commands::export_table::{ExportTable, scalar_table_taking_samples};
 use crate::commands::run::{Column, ColumnStop, RowCursor, plan_columns};
 use crate::commands::run_signals::ScalarSignal;
 use crate::commands::waveform_io::{MIN_RESULT_SAMPLES, conversion_error};
@@ -64,8 +64,9 @@ fn signals(
     .map_err(|error| conversion_error(path, error))
 }
 
-fn table(signals: &[ScalarSignal], time: Vec<f64>) -> ExportTable {
-    scalar_table(
+/// The table of `signals` over `time`, taking the signals' samples.
+fn table(signals: &mut [ScalarSignal], time: Vec<f64>) -> ExportTable {
+    scalar_table_taking_samples(
         "transient",
         "Transient Analysis",
         "time",
@@ -75,15 +76,19 @@ fn table(signals: &[ScalarSignal], time: Vec<f64>) -> ExportTable {
     )
 }
 
-/// The store's whole transient as a table.
+/// The store's whole transient as a table. The run read back is dropped before the table is
+/// built, and the table takes the signals' samples, so at most two copies of the values are held
+/// at once.
 pub(crate) fn load_table(
     path: &Path,
     limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
     let mut run = open(path)?;
     run.read_all().map_err(|error| read_error(path, error))?;
-    let signals = signals(path, &run.shell, limits)?;
-    Ok(table(&signals, std::mem::take(&mut run.shell.time)))
+    let mut signals = signals(path, &run.shell, limits)?;
+    let time = std::mem::take(&mut run.shell.time);
+    drop(run);
+    Ok(table(&mut signals, time))
 }
 
 /// Convert a store as [`load_table`]'s table converts, reading it a chunk at a time, to a
@@ -140,7 +145,7 @@ pub(crate) fn convert_streamed(
     for signal in &mut signals {
         signal.values = Vec::new();
     }
-    let mut table = table(&signals, Vec::new());
+    let mut table = table(&mut signals, Vec::new());
     let Ok(keep) = table.selected_columns(&args.variables) else {
         return Ok(false);
     };
