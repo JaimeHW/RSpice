@@ -107,6 +107,14 @@ pub(super) fn overview_header(
                     facts_font,
                     tokens.color.text_faint,
                 );
+                // A reader who cannot see the line hears it whole.
+                facts_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        true,
+                        header_facts(snapshot.project_revision, snapshot.location.as_deref()),
+                    )
+                });
                 if shortened && let Some(location) = snapshot.location.as_deref() {
                     facts_response.on_hover_text(location);
                 }

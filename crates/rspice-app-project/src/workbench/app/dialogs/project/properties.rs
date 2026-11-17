@@ -325,7 +325,9 @@ impl ProjectFeature {
                     dialog.top = top.clone();
                     edited = true;
                 }
-                rows.field_line(None, FieldLine::Derived(&runs_from));
+                // Wrapped, not cut: on a phone's column the cut took the
+                // cell runs start at, which is the line's whole point.
+                rows.derived(&runs_from);
                 let entries = dialog.include_search_paths.clone();
                 let edit = rows.list(
                     "Include search paths",
@@ -351,16 +353,15 @@ impl ProjectFeature {
                 }
                 let not_found = (!dialog.missing_include_paths.is_empty())
                     .then(|| format!("Not found: {}", dialog.missing_include_paths.join(", ")));
-                rows.field_line(
-                    Some(include_id()),
-                    match (&dialog.include_refusal, &not_found) {
-                        (Some(refusal), _) => FieldLine::Error(refusal),
-                        (None, Some(not_found)) => FieldLine::Derived(not_found),
-                        (None, None) => FieldLine::Derived(
-                            "Searched in this order, after the folder of the file that includes.",
-                        ),
-                    },
-                );
+                match (&dialog.include_refusal, &not_found) {
+                    (Some(refusal), _) => {
+                        rows.field_line(Some(include_id()), FieldLine::Error(refusal));
+                    }
+                    (None, Some(not_found)) => rows.derived(not_found),
+                    (None, None) => rows.derived(
+                        "Searched in this order, after the folder of the file that includes.",
+                    ),
+                }
                 rows.section("Project file");
                 match &dialog.location {
                     Some(location) => rows.value_mono("Location", location),

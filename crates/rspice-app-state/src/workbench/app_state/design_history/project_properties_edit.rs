@@ -5,8 +5,11 @@
 //! one step holding the properties as they were and as they became. Undo
 //! puts them back and Redo forward, each as a project transaction of its
 //! own, so the project revision only moves forward. A step stands on the
-//! revision its last move left: a project change made since refuses it and
-//! says so, rather than overwriting that change.
+//! properties its last move left: a change to them made since refuses it
+//! and says so, rather than overwriting that change, as does a top cell to
+//! go back to that the project can no longer run from. It pins the
+//! properties rather than the project revision, which the step undone
+//! before it has moved on: what a step overwrites is all it guards.
 
 use super::*;
 use crate::state::workspace::ProjectProperties;
@@ -17,8 +20,6 @@ pub struct ProjectPropertiesEditRecord {
     description: String,
     before: ProjectProperties,
     after: ProjectProperties,
-    undo_guard_revision: ObjectRevision,
-    redo_guard_revision: Option<ObjectRevision>,
 }
 
 impl Model {
@@ -47,15 +48,13 @@ impl Model {
         {
             return Err(refusal);
         }
-        let undo_guard_revision = replace(self, &before, &candidate)?;
+        replace(self, &before, &candidate)?;
         self.push_project_record(
             RecordHeader::project_only(),
             ProjectDesignBody::ProjectPropertiesEdit(Box::new(ProjectPropertiesEditRecord {
                 description: description.into(),
                 before,
                 after: candidate,
-                undo_guard_revision,
-                redo_guard_revision: None,
             })),
         );
         Ok(())
@@ -69,14 +68,10 @@ impl ProjectPropertiesEditRecord {
 
     pub(super) fn after_design_matches(&self, state: &Model) -> bool {
         state.workspace.content.project.properties() == self.after
-            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     pub(super) fn before_design_matches(&self, state: &Model) -> bool {
         state.workspace.content.project.properties() == self.before
-            && self
-                .redo_guard_revision
-                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     pub(super) fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
@@ -96,26 +91,48 @@ impl ProjectPropertiesEditRecord {
     pub(super) fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
-                "The project properties change cannot be undone because the project changed since."
+                "The project properties change cannot be undone because they changed since."
                     .to_owned(),
             );
         }
         self.validate_mutation(state, "undone")?;
-        self.redo_guard_revision = Some(replace(state, &self.after, &self.before)?);
-        Ok(())
+        runnable_top(state, &self.after, &self.before, "undone")?;
+        replace(state, &self.after, &self.before)
     }
 
     pub(super) fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
-                "The project properties change cannot be redone because the project changed since."
+                "The project properties change cannot be redone because they changed since."
                     .to_owned(),
             );
         }
         self.validate_mutation(state, "redone")?;
-        self.undo_guard_revision = replace(state, &self.before, &self.after)?;
-        Ok(())
+        runnable_top(state, &self.before, &self.after, "redone")?;
+        replace(state, &self.before, &self.after)
     }
+}
+
+/// Refuse a step that would move the top to a cell the project can no
+/// longer run from: one deleted, or whose schematic went, since.
+fn runnable_top(
+    state: &Model,
+    current: &ProjectProperties,
+    properties: &ProjectProperties,
+    operation: &str,
+) -> Result<(), String> {
+    if (&current.root_library, &current.top_cell)
+        == (&properties.root_library, &properties.top_cell)
+    {
+        return Ok(());
+    }
+    state
+        .project_top_refusal(&properties.root_library, &properties.top_cell)
+        .map_or(Ok(()), |refusal| {
+            Err(format!(
+                "The project properties change cannot be {operation}: {refusal}"
+            ))
+        })
 }
 
 /// Write `properties` over `current` as one project transaction. A new top
@@ -127,8 +144,8 @@ fn replace(
     state: &mut Model,
     current: &ProjectProperties,
     properties: &ProjectProperties,
-) -> Result<ObjectRevision, String> {
-    let revision = state
+) -> Result<(), String> {
+    state
         .workspace
         .content
         .project
@@ -144,7 +161,7 @@ fn replace(
     if chain_moved {
         state.invalidate_source_evidence();
     }
-    Ok(revision)
+    Ok(())
 }
 
 /// A refusal of the descriptor's, as the status bar states it.

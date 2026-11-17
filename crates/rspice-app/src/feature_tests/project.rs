@@ -31,6 +31,7 @@ mod overview;
 mod overview_layout;
 mod overview_rows;
 mod project_workflow;
+mod properties;
 mod publication;
 mod rails;
 mod recovery_comparison;
