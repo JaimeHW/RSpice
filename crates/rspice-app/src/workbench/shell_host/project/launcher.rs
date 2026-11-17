@@ -108,11 +108,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         return;
     }
 
-    refresh_catalog_if_requested(
-        &mut app.state.platform,
-        &app.state.model,
-        app.file_workflow_io.as_ref(),
-    );
+    refresh_catalog_if_requested(ctx, &mut app.state.platform);
 
     let screen = ctx.content_rect();
     let large_targets = app.state.workbench.coarse_pointer

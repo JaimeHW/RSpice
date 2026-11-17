@@ -13,9 +13,8 @@ use rspice_app_workbench::workbench::framework::command_registry::ids;
 /// asked of it carried out by the shell as soon as it has drawn.
 pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     rspice_app_services::workbench::lifecycle::recovery::refresh_catalog_if_requested(
+        ui.ctx(),
         &mut app.state.platform,
-        &app.state.model,
-        app.file_workflow_io.as_ref(),
     );
 
     let action = landing(ui, &mut features::cx(app));

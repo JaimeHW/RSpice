@@ -26,7 +26,9 @@ use rspice_app_services::workbench::lifecycle::recovery::{
 };
 use rspice_app_services::workbench::lifecycle::recovery_checkpoint::{
     AutosaveRestoreCandidate, CheckpointBinding, CheckpointIdentity, CheckpointOwnership,
+    orphan_test_checkpoint, write_checkpoint,
 };
+use rspice_app_state::state::{ComponentType, Point, SchematicState};
 use rspice_app_state::workbench::workspace::Workspace;
 
 pub(super) const IDLE_FRAMES: usize = 30;
@@ -202,6 +204,53 @@ fn the_launcher_recovery_page_reads_the_saved_project_once_per_selection() {
             ..DiskReads::default()
         }
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The launcher looks for the recent drawings' autosaves on a background
+/// thread: stating and reading them can block on a slow drive. The frame
+/// that asks reads nothing and says it is looking, and the autosave is
+/// listed on a later frame.
+#[test]
+fn the_launcher_looks_for_autosaves_off_the_frame() {
+    let root = unique_temp_dir("launcher-discovery");
+    let schematic_path = root.join("amp.rsch");
+    let mut drawing = SchematicState::default();
+    rspice_app_services::io::save_schematic(&drawing, &schematic_path, false)
+        .expect("the drawing is saved");
+    drawing.with_undo("Place", |schematic| {
+        schematic.add_component(ComponentType::Resistor, Point::new(40, 40));
+    });
+    let checkpoint = write_checkpoint(&schematic_path, &drawing).expect("the autosave is written");
+    orphan_test_checkpoint(&checkpoint).expect("the autosave is left as a crash leaves it");
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.platform.recent_files = vec![RecentFile {
+        kind: RecentKind::Schematic,
+        path: schematic_path,
+        opened_at_unix_ms: 0,
+        pinned: false,
+        missing: false,
+    }];
+    open_project_launcher(
+        &mut app.state.project,
+        &mut app.state.workbench,
+        &mut app.state.platform,
+    );
+    app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
+    let ctx = offscreen();
+
+    take_disk_reads();
+    let asked = first_seen(&ctx, &mut app);
+    let reads = take_disk_reads();
+    assert_eq!((reads.checkpoint_directories, reads.file_stats), (0, 0));
+    let text = painted(&asked);
+    assert!(
+        text.contains("Looking for autosaves\u{2026}") || text.contains("1 component"),
+        "{text}"
+    );
+    assert!(!text.contains("No interrupted work found"), "{text}");
+    paint_until(&ctx, &mut app, |text| text.contains("1 component"));
     let _ = std::fs::remove_dir_all(root);
 }
 

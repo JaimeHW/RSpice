@@ -74,6 +74,9 @@ pub(super) fn recovery_page(
                         .recovery_catalog
                         .selected_checkpoint
                         .clone();
+                    // "No interrupted work found" while the search is still
+                    // running would be a claim it has not yet made.
+                    let searching = cx.platform.recovery_catalog.discovering();
                     Frame::new()
                         .inner_margin(Margin::symmetric(16, 0))
                         .show(ui, |ui| {
@@ -84,16 +87,23 @@ pub(super) fn recovery_page(
                                     .show(ui, |ui| {
                                         ui.vertical_centered(|ui| {
                                             ui.label(
-                                                egui::RichText::new("No interrupted work found")
+                                                egui::RichText::new(if searching {
+                                                    "Looking for autosaves\u{2026}"
+                                                } else {
+                                                    "No interrupted work found"
+                                                })
                                                     .font(theme::sans(
                                                         tokens::FS_2,
                                                         FontWeight::SemiBold,
                                                     ))
                                                     .color(t.color.text),
                                             );
+                                            if searching {
+                                                return;
+                                            }
                                             ui.label(
                                                 egui::RichText::new(
-                                                    "No eligible interrupted-session checkpoint is associated with a recent local schematic.",
+                                                    "No recent drawing left an autosave from an interrupted session.",
                                                 )
                                                 .font(theme::sans(
                                                     tokens::FS_1,

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::io::{FileWorkflowIo, ProjectExecutionContext, ProjectSimulationResults};
+use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::services::recent_files::RecentKind;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
@@ -196,6 +196,8 @@ pub struct RecoveryCatalog {
     pub pending_discard: Option<RecoveryCandidate>,
     pub notice: Option<RecoveryNotice>,
     refresh_requested: bool,
+    /// The search for the recent drawings' autosaves, while it runs.
+    discovery: Option<Discovery>,
     /// Why opening the selected checkpoint would destroy the open work, as
     /// last worked out; `None` until it is worked out again. Working it out
     /// reads the saved project, which no paint pass may do, so it is kept
@@ -211,14 +213,24 @@ impl Default for RecoveryCatalog {
             pending_discard: None,
             notice: None,
             refresh_requested: true,
+            discovery: None,
             replacement_block: None,
         }
     }
 }
 
+/// What a search for autosaves found, filled in by the thread that searched.
+#[derive(Debug, Clone, Default)]
+struct Discovery(std::sync::Arc<std::sync::Mutex<Option<Vec<RecoveryCandidate>>>>);
+
 impl RecoveryCatalog {
     pub fn request_refresh(&mut self) {
         self.refresh_requested = true;
+    }
+
+    /// Whether the recent drawings' autosaves are still being looked for.
+    pub fn discovering(&self) -> bool {
+        self.discovery.is_some()
     }
 
     pub fn selected(&self) -> Option<&RecoveryCandidate> {
@@ -288,37 +300,53 @@ impl RecoveryCatalog {
     }
 }
 
-/// Refresh once when the launcher opens, enters Recovery, or completes a
-/// destructive checkpoint action. Parsing never occurs in every paint frame.
-pub fn refresh_catalog_if_requested(
-    platform: &mut PlatformState,
-    model: &Model,
-    io: &(impl FileWorkflowIo + ?Sized),
-) {
-    if !platform.recovery_catalog.refresh_requested {
+/// Refresh when the launcher opens, enters Recovery, or completes a
+/// destructive checkpoint action. The recent drawings' autosaves are looked
+/// for on a background thread, since stating and reading them can block on a
+/// slow or absent drive, and what was found is listed on the first call after
+/// the search is done. A frame that only paints looks for nothing.
+pub fn refresh_catalog_if_requested(ctx: &egui::Context, platform: &mut PlatformState) {
+    take_discovered(&mut platform.recovery_catalog);
+    if !platform.recovery_catalog.refresh_requested || platform.recovery_catalog.discovering() {
         return;
     }
-
     let source_paths = platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Schematic)
         .map(|recent| recent.path.clone())
         .collect::<Vec<_>>();
-    let mut live_paths = model
-        .workspace
-        .content
-        .schematic_buffers
-        .keys()
-        .filter_map(|key| model.workspace.session.schematic_sessions.get(key))
-        .filter_map(|session| session.current_file.clone())
-        .collect::<Vec<_>>();
-    if let Some(path) = model.schematic.session.current_file.clone() {
-        live_paths.push(path);
-    }
-
-    let candidates = discover_candidates(&source_paths, &live_paths, io);
+    let found = Discovery::default();
+    let slot = found.clone();
+    let repaint = ctx.clone();
+    crate::workbench::platform::spawn_or_inline(move || {
+        let candidates = discover_candidates(&source_paths);
+        *slot
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(candidates);
+        repaint.request_repaint();
+    });
     let catalog = &mut platform.recovery_catalog;
+    catalog.refresh_requested = false;
+    catalog.discovery = Some(found);
+    // In the browser the search ran inline and is already done.
+    take_discovered(catalog);
+}
+
+/// List what a finished search found, keeping the selection where it still
+/// names an autosave.
+fn take_discovered(catalog: &mut RecoveryCatalog) {
+    let Some(candidates) = catalog.discovery.as_ref().and_then(|discovery| {
+        discovery
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }) else {
+        return;
+    };
+    catalog.discovery = None;
     let previous = catalog.selected_checkpoint.clone();
     catalog.candidates = candidates;
     catalog.selected_checkpoint = previous
@@ -341,11 +369,7 @@ pub fn refresh_catalog_if_requested(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn discover_candidates(
-    source_paths: &[PathBuf],
-    _live_paths: &[PathBuf],
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> Vec<RecoveryCandidate> {
+fn discover_candidates(source_paths: &[PathBuf]) -> Vec<RecoveryCandidate> {
     let mut sources = source_paths.to_vec();
     sources.sort();
     sources.dedup();
@@ -356,7 +380,7 @@ fn discover_candidates(
             disk_observation::checkpoint_directory();
             crate::workbench::lifecycle::recovery_checkpoint::checkpoint_paths_for_source(&original)
                 .into_iter()
-                .filter_map(move |checkpoint| discover_candidate(original.clone(), checkpoint, io))
+                .filter_map(move |checkpoint| discover_candidate(original.clone(), checkpoint))
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
@@ -369,20 +393,12 @@ fn discover_candidates(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn discover_candidates(
-    _source_paths: &[PathBuf],
-    _live_paths: &[PathBuf],
-    _io: &(impl FileWorkflowIo + ?Sized),
-) -> Vec<RecoveryCandidate> {
+fn discover_candidates(_source_paths: &[PathBuf]) -> Vec<RecoveryCandidate> {
     Vec::new()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn discover_candidate(
-    original: PathBuf,
-    checkpoint: PathBuf,
-    _io: &(impl FileWorkflowIo + ?Sized),
-) -> Option<RecoveryCandidate> {
+fn discover_candidate(original: PathBuf, checkpoint: PathBuf) -> Option<RecoveryCandidate> {
     disk_observation::file_stat();
     let checkpoint_meta = std::fs::metadata(&checkpoint).ok()?;
     let checkpoint_modified = checkpoint_meta.modified().ok()?;
@@ -1391,8 +1407,7 @@ mod tests {
         let checkpoint = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
-        let candidates =
-            discover_candidates(&[source.clone()], &[], &crate::io::NativeFileWorkflowIo);
+        let candidates = discover_candidates(&[source.clone()]);
         assert_eq!(candidates.len(), 1);
         assert!(matches!(
             candidates[0].integrity,
@@ -1411,8 +1426,7 @@ mod tests {
         let checkpoint = checkpoint_generation_path(&source, uuid::Uuid::new_v4());
         std::fs::write(&checkpoint, "not schematic json").expect("write checkpoint");
 
-        let mut candidates =
-            discover_candidates(&[source.clone()], &[], &crate::io::NativeFileWorkflowIo);
+        let mut candidates = discover_candidates(&[source.clone()]);
         assert_eq!(candidates.len(), 1);
         let mut candidate = candidates.remove(0);
         assert_eq!(candidate.checkpoint, checkpoint);
@@ -1426,7 +1440,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn discovery_lists_every_generation_even_when_the_source_is_live() {
+    fn discovery_lists_every_generation_of_a_source() {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source, true).expect("save source");
@@ -1439,11 +1453,7 @@ mod tests {
         generated_bytes.push(b'\n');
         std::fs::write(&generated, generated_bytes).expect("write generated point");
 
-        let candidates = discover_candidates(
-            &[source.clone()],
-            &[source],
-            &crate::io::NativeFileWorkflowIo,
-        );
+        let candidates = discover_candidates(&[source]);
 
         assert_eq!(candidates.len(), 2);
         assert!(

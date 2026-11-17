@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 
 use rspice_app_project::workbench::project::commands::ProjectCommand;
-use rspice_app_services::io::NativeFileWorkflowIo;
 use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, canonical_native_path,
@@ -48,11 +47,19 @@ fn listed_candidate(app: &mut RSpiceApp, schematic_path: &Path) -> RecoveryCandi
         missing: false,
     });
     app.state.platform.recovery_catalog.request_refresh();
-    refresh_catalog_if_requested(
-        &mut app.state.platform,
-        &app.state.model,
-        &NativeFileWorkflowIo,
-    );
+    // The search runs on a background thread; the launcher lists what it
+    // found on the first frame after it is done.
+    let ctx = egui::Context::default();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    refresh_catalog_if_requested(&ctx, &mut app.state.platform);
+    while app.state.platform.recovery_catalog.discovering() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the search never ended"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        refresh_catalog_if_requested(&ctx, &mut app.state.platform);
+    }
     app.state
         .platform
         .recovery_catalog
