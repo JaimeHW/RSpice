@@ -32,4 +32,6 @@ pub use passive::{
 };
 pub(crate) use passive::{ResistorValues, SolutionDependentCompanionStep, ThermalUpdateError};
 pub use sources::{CurrentSources, VoltageSources};
-pub(crate) use sources::{PwlSnapshot, SourceExcitation, SourceTimeBasis, SourceTimeSide};
+pub(crate) use sources::{
+    PwlSnapshot, SourceExcitation, SourceTimeBasis, SourceTimeSide, inline_pwl_points,
+};

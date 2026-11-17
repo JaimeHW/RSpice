@@ -462,6 +462,8 @@ use advanced_mos::{
 mod generated_model_routing;
 #[cfg(test)]
 mod inventory_tests;
+#[cfg(test)]
+mod pwl_time_order_tests;
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_model_routing::{
     GeneratedRoutingContext, try_route_generated_bjt_model, try_route_generated_diode_model,
@@ -1853,7 +1855,49 @@ fn validate_source_inputs(
         | SourceSpec::DcAcTransient { transient, .. } => {
             validate_source_inputs(source_name, transient, dialect, resource_limits)
         }
+        // LTspice refuses a table whose times decrease ("PWL time,value
+        // pairs out of chronological order"), and so does the default. A
+        // repeated time is a vertical step, which LTspice plays. ngspice
+        // warns ([`warn_non_increasing_pwl_times`]) and Xyce says nothing
+        // (N_DEV_SourceData.C, PWLinData); both play the table as written,
+        // by the first segment whose end follows the time.
+        SourceSpec::Pwl { points, .. } if dialect == SpiceDialect::BestAvailable => {
+            match points.windows(2).find(|pair| pair[1].0 < pair[0].0) {
+                Some(pair) => Err(SimulationError::Circuit(format!(
+                    "source '{source_name}': PWL time {} follows time {}; PWL times must not decrease",
+                    pair[1].0, pair[0].0
+                ))),
+                None => Ok(None),
+            }
+        }
         _ => Ok(None),
+    }
+}
+
+/// ngspice warns about a PWL table with a time that does not increase, a
+/// repeated time included, and then plays it as written (vsrcpar.c and
+/// isrcpar.c test `t[i+1] <= t[i]`). This reads the tables the deck wrote:
+/// a TRNOISE train is expanded later, and its random-telegraph steps repeat
+/// a time.
+fn warn_non_increasing_pwl_times(elements: &[Element]) {
+    for element in elements {
+        let (family, spec) = match &element.kind {
+            ElementKind::VoltageSource(spec) => ("voltage", spec),
+            ElementKind::CurrentSource(spec) => ("current", spec),
+            _ => continue,
+        };
+        if crate::circuit::inline_pwl_points(spec)
+            .is_some_and(|points| points.windows(2).any(|pair| pair[1].0 <= pair[0].0))
+        {
+            // Once per run, not once per elaboration of it.
+            let line = format!(
+                "{family} source {} has non-increasing PWL time points",
+                element.name
+            );
+            if crate::log_scope::first_saying(&line) {
+                log::warn!("{line}");
+            }
+        }
     }
 }
 
@@ -6779,6 +6823,9 @@ impl Engine {
             netlist,
             self.config.spice_dialect,
         );
+        if self.config.spice_dialect == SpiceDialect::Ngspice {
+            warn_non_increasing_pwl_times(&flat_elements);
+        }
         if let Some(tstop) = transient_stop_time {
             super::transient::noise::expand_transient_noise(
                 &mut flat_elements,

@@ -81,7 +81,7 @@ pub(crate) struct PwlSnapshot<'a> {
 
 /// The inline PWL table a source plays, under any wrapper that keeps its
 /// transient behavior.
-fn inline_pwl_points(spec: &crate::netlist::SourceSpec) -> Option<&[(Value, Value)]> {
+pub(crate) fn inline_pwl_points(spec: &crate::netlist::SourceSpec) -> Option<&[(Value, Value)]> {
     use crate::netlist::SourceSpec;
     match spec {
         SourceSpec::Pwl { points, .. } => Some(points),
