@@ -1,7 +1,8 @@
 //! The Library page worked from the keyboard alone: the arrows and type-ahead
 //! move within a column, Left and Right between the columns, Enter opens, F2
 //! renames, Delete reviews a deletion and Shift+F10 opens a row's menu; the
-//! page's operations are commands the palette runs.
+//! page's operations are commands the palette runs. A cell dragged onto a
+//! library opens Copy Cell aimed at it.
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
@@ -347,4 +348,50 @@ fn the_view_type_narrows_every_library_to_cells_holding_one() {
             .any(|row| row.starts_with("bias") || row.starts_with("schematic")),
         "{listed:?}"
     );
+}
+
+/// A press on `from`, carried across in steps and let go on `to`.
+fn drag(replay: &mut Replay, from: egui::Pos2, to: egui::Pos2) {
+    let button = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(from), button(from, true)]);
+    for step in 1..=6 {
+        let at = from + (to - from) * (step as f32 / 6.0);
+        replay.frames(vec![egui::Event::PointerMoved(at)]);
+    }
+    replay.frames(vec![button(to, false)]);
+}
+
+/// A cell dragged onto another library opens Copy Cell aimed at it, under
+/// the cell's own name; one dragged onto a read-only library opens nothing.
+#[test]
+fn a_cell_dragged_onto_a_library_opens_copy_cell_aimed_at_it() {
+    let mut replay = library_page_with_analog();
+    let controls = replay.frames(Vec::new());
+    let bias = only(&controls, "bias, 1", Role::ListBoxOption).center;
+    let analog = only(&controls, "analog, 2", Role::ListBoxOption).center;
+    let reference = only(&controls, "ref, 0, read-only", Role::ListBoxOption).center;
+
+    drag(&mut replay, bias, reference);
+    assert!(
+        !replay.app.state.project.copy_cell_dialog,
+        "a read-only library takes no copy"
+    );
+
+    drag(&mut replay, bias, analog);
+    let project = &replay.app.state.project;
+    assert!(project.copy_cell_dialog, "Copy Cell opens");
+    assert_eq!(
+        (
+            project.copy_cell_source_library.as_str(),
+            project.copy_cell_source_cell.as_str()
+        ),
+        ("work", "bias")
+    );
+    assert_eq!(project.copy_cell_target_library, "analog");
+    assert_eq!(project.copy_cell_name, "bias");
 }

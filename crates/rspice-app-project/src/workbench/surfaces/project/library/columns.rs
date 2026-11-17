@@ -16,8 +16,8 @@ use rspice_app_state::veriloga_library::{
 
 use super::*;
 use crate::ui::widgets::table::{
-    Cell as Entry, Column, ContextRequest, DataTable, Group, LineHeights, RowKey, Selection,
-    TableResponse, TableState,
+    Cell as Entry, Column, ContextRequest, DataTable, Group, LineHeights, RowDrag, RowKey,
+    Selection, TableResponse, TableState,
 };
 
 /// One of the page's three columns.
@@ -131,6 +131,40 @@ impl Find {
 
 /// The key the built-in library's row goes by: no project library's name.
 const BUILTIN_KEY: RowKey = RowKey::Number(0);
+
+/// The Cell column's list of a project library's cells.
+const CELLS_TABLE: &str = "workbench.project.library.cells";
+
+/// The Cell column's list of the built-in library's models.
+const MODELS_TABLE: &str = "workbench.project.library.models";
+
+/// What a row dragged onto library `target` asks for: Copy Cell of the
+/// cell, or of the built-in model, aimed at that library.
+fn dropped_onto(
+    ctx: &Context,
+    cx: &Cx<'_, ProjectFeature>,
+    find: &Find,
+    drag: RowDrag,
+    target: &str,
+) -> Option<LibraryIntent> {
+    let target = target.to_owned();
+    if drag.is_from(CELLS_TABLE) {
+        let manager = &cx.model.library_manager;
+        let cells = cell_rows(ctx, manager, find);
+        Some(LibraryIntent::CopyCellInto {
+            library: manager.selected_library.clone()?,
+            cell: cells.rows.get(drag.row)?.name.clone(),
+            target,
+        })
+    } else if drag.is_from(MODELS_TABLE) {
+        Some(LibraryIntent::CopyModelInto {
+            registry_name: find.builtin_models().get(drag.row)?.registry_name,
+            target,
+        })
+    } else {
+        None
+    }
+}
 
 /// One library as its column lists it.
 pub(super) struct LibraryRow {
@@ -517,6 +551,7 @@ pub(super) fn library_column(
                 .list()
                 .state(&mut browser.libraries)
                 .keys(&libraries.keys)
+                .drops()
                 .focus(focus)
                 .max_height(body)
                 .show(ui, |row| {
@@ -532,6 +567,11 @@ pub(super) fn library_column(
     answer_moves(browser, BrowserColumn::Library, &response);
     if response.activate.is_some() {
         browser.focus = Some(BrowserColumn::Cell);
+    }
+    if let Some((row, drag)) = response.dropped
+        && let Some(target) = libraries.rows.get(row).filter(|target| !target.builtin)
+    {
+        return dropped_onto(ui.ctx(), cx, find, drag, &target.name);
     }
     let lead = browser.libraries.selected_key().cloned()?;
     let Some(library) = text(&lead).map(str::to_owned) else {
@@ -586,29 +626,26 @@ pub(super) fn cell_column(
     let columns = [Column::name("Cell", 60.0), Column::number("Views", 44.0)];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
-        DataTable::new(
-            "workbench.project.library.cells",
-            &columns,
-            cells.rows.len(),
-        )
-        .list()
-        .state(&mut browser.cells)
-        .keys(&cells.keys)
-        .multi_select()
-        .focus(focus)
-        .max_height(body)
-        .show(ui, |row| {
-            let cell = &cells.rows[row];
-            let name = Entry::text(cell.name.as_str());
-            vec![
-                if cell.description.trim().is_empty() {
-                    name
-                } else {
-                    name.hint(cell.description.as_str())
-                },
-                Entry::number(cell.views.as_str()),
-            ]
-        })
+        DataTable::new(CELLS_TABLE, &columns, cells.rows.len())
+            .list()
+            .state(&mut browser.cells)
+            .keys(&cells.keys)
+            .multi_select()
+            .drag_rows()
+            .focus(focus)
+            .max_height(body)
+            .show(ui, |row| {
+                let cell = &cells.rows[row];
+                let name = Entry::text(cell.name.as_str());
+                vec![
+                    if cell.description.trim().is_empty() {
+                        name
+                    } else {
+                        name.hint(cell.description.as_str())
+                    },
+                    Entry::number(cell.views.as_str()),
+                ]
+            })
     });
     answer_moves(browser, BrowserColumn::Cell, &response);
     let library = manager.selected_library.clone()?;
@@ -770,11 +807,12 @@ fn builtin_cell_column(
     let columns = [Column::name("Cell", 60.0), Column::words("Version", 64.0)];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
-        DataTable::new("workbench.project.library.models", &columns, shown.len())
+        DataTable::new(MODELS_TABLE, &columns, shown.len())
             .list()
             .state(&mut browser.cells)
             .keys(&keys)
             .groups(&groups)
+            .drag_rows()
             .focus(focus)
             .max_height(body)
             .show(ui, |row| {

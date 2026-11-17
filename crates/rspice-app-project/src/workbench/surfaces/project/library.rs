@@ -57,6 +57,18 @@ pub enum LibraryIntent {
         library: String,
         cell: String,
     },
+    /// Copy Cell into `target`, the library the cell was dragged onto.
+    CopyCellInto {
+        library: String,
+        cell: String,
+        target: String,
+    },
+    /// Copy Cell of a built-in model into `target`, the library it was
+    /// dragged onto.
+    CopyModelInto {
+        registry_name: &'static str,
+        target: String,
+    },
     RenameCell {
         library: String,
         cell: String,
@@ -1219,6 +1231,46 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 cx.wb.prompt(error);
             }
         }
+        LibraryIntent::CopyCellInto {
+            library,
+            cell,
+            target,
+        } => {
+            let opened = match copy_refusal(cx.model, &target) {
+                Some(refusal) => Err(refusal),
+                None => cx.state.open_copy_cell_dialog(cx.model, &library, &cell),
+            };
+            match opened {
+                Ok(()) => {
+                    // Into another library the copy keeps its name, if free.
+                    let free = cx
+                        .model
+                        .library_manager
+                        .get_library(&target)
+                        .is_some_and(|library| library.get_cell(&cell).is_none());
+                    if free {
+                        cx.state.copy_cell_name = cell;
+                    }
+                    cx.state.copy_cell_target_library = target;
+                }
+                Err(error) => cx.wb.prompt(error),
+            }
+        }
+        LibraryIntent::CopyModelInto {
+            registry_name,
+            target,
+        } => {
+            let opened = match copy_refusal(cx.model, &target) {
+                Some(refusal) => Err(refusal),
+                None => cx
+                    .state
+                    .open_copy_builtin_model_dialog(cx.model, registry_name),
+            };
+            match opened {
+                Ok(()) => cx.state.copy_cell_target_library = target,
+                Err(error) => cx.wb.prompt(error),
+            }
+        }
         LibraryIntent::RenameCell { library, cell } => {
             if let Err(error) = cx.state.open_rename_cell_dialog(cx.model, &library, &cell) {
                 cx.wb.prompt(error);
@@ -1276,6 +1328,18 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
         LibraryIntent::RestoreFromPublication => {
             super::library_publication::open_restore(ctx, cx.model);
         }
+    }
+}
+
+/// Why library `target` cannot take a copy dragged onto it, or `None` when
+/// it can.
+fn copy_refusal(model: &Model, target: &str) -> Option<String> {
+    match model.library_manager.get_library(target) {
+        None => Some(format!("Library '{target}' no longer exists.")),
+        Some(library) if library.read_only => Some(format!(
+            "Library '{target}' is read-only; it cannot take a copy."
+        )),
+        Some(_) => None,
     }
 }
 
