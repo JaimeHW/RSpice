@@ -597,6 +597,16 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         // band's inner width: subtracting the margins again leaves the fill
         // 20 px short of the edge.
         ui.set_width(visible_workspace_width(ui));
+        ui.spacing_mut().item_spacing.y = t.metrics.bar_pad;
+        // The selection beside the find while the strip has room for some of
+        // it; on a strip too narrow for any, on a row of its own under the
+        // find, so a phone still names what is selected.
+        let selection = if cx.state.builtin_models.open {
+            builtin_models::selection_path(&cx.state.builtin_models)
+        } else {
+            shown_selection_path(cx.model, cx.state)
+        };
+        let mut beside = true;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             let search_width = (ui.available_width() * 0.32).clamp(150.0, 380.0);
@@ -633,29 +643,35 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             if asked {
                 select_found(ui.ctx(), cx);
             }
-            let selection = if cx.state.builtin_models.open {
-                builtin_models::selection_path(&cx.state.builtin_models)
-            } else {
-                shown_selection_path(cx.model, cx.state)
-            };
-            // A strip too narrow for any of the path leaves the selection
-            // to the band and the inspector, rather than a label over none;
-            // the separator before it is counted in.
+            // The separator before the selection is counted in.
             let separator = ui.spacing().item_spacing.x * 2.0;
-            if ui.available_width() - CONTEXT_FIXED_WIDTH - separator < MIN_SELECTION_ROOM {
-                return;
-            }
-            ui.separator();
-            let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(0.0);
-            let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-            let selection = elide_text(ui, &selection, &font, room);
-            context_value(ui, "Selection", &selection, t.color.text);
-            if read_only {
+            beside = ui.available_width() - CONTEXT_FIXED_WIDTH - separator >= MIN_SELECTION_ROOM;
+            if beside {
                 ui.separator();
-                context_value(ui, "Access", "read-only", t.color.text_dim);
+                selection_context(ui, &selection, read_only);
             }
         });
+        if !beside {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                selection_context(ui, &selection, read_only);
+            });
+        }
     });
+}
+
+/// The selection, cut to the room the strip leaves it, and whether the
+/// library is read-only.
+fn selection_context(ui: &mut Ui, selection: &str, read_only: bool) {
+    let t = Tokens::get(ui.ctx());
+    let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(MIN_SELECTION_ROOM);
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let shown = elide_text(ui, selection, &font, room);
+    context_value(ui, "Selection", &shown, t.color.text);
+    if read_only {
+        ui.separator();
+        context_value(ui, "Access", "read-only", t.color.text_dim);
+    }
 }
 
 /// What the context strip spends beside the selection's own text: its label,
