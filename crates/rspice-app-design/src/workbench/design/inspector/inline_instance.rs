@@ -160,19 +160,26 @@ fn source_contract_rejection(
     crate::properties::property_bridge::source_commit_refusal(component, &values, sheet)
 }
 
-/// The text a committed value is stored as. A module's number stays as it
-/// was typed, so long as the deck reads the same value from that text.
+/// The text a committed value is stored as. A number stays as it was typed,
+/// so long as the deck reads the same value from that text: a pulse width
+/// typed `49n` reaches the netlist as `49n`, not `0.000000049`. A spelling
+/// the deck cannot read as one token (`49 ns`, `1µs`) is stored as the
+/// number it means.
 fn parameter_source_text(
     definition: &PropertyDefinition,
     typed: &str,
     value: &PropertyValue,
 ) -> String {
-    if definition.verilog_numbers
-        && let PropertyValue::Number { value: number, .. } = value
-        && rspice_vocabulary::quantity::engineering::parse_engineering_value(typed.trim())
-            .is_ok_and(|read| (read - number).abs() <= 1e-12 * number.abs())
-    {
-        return typed.trim().to_owned();
+    let typed = typed.trim();
+    if let PropertyValue::Number { value: number, .. } = value {
+        let read = if definition.verilog_numbers {
+            rspice_vocabulary::quantity::engineering::parse_engineering_value(typed).ok()
+        } else {
+            rspice_results::spice_value::parse_spice_value_checked(typed).ok()
+        };
+        if read.is_some_and(|read| (read - number).abs() <= 1e-12 * number.abs()) {
+            return typed.to_owned();
+        }
     }
     crate::properties::property_bridge::property_value_to_string(value)
 }

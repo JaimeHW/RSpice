@@ -617,6 +617,56 @@ fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
     );
 }
 
+/// A pulse source whose every timing field is typed the way a SPICE deck
+/// writes it (`49n`, `1n`, a bare `0`) commits each value as typed, and the
+/// netlist carries the card those values spell.
+///
+/// The time fields used to refuse a bare scale suffix ("explicit unit
+/// required"), so a pulse set this way kept its defaults and ran another
+/// waveform.
+#[test]
+fn a_pulse_typed_the_spice_way_netlists_as_its_card() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let id = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::VoltageSourcePulse, Point::new(0, 0));
+    for (key, typed) in [
+        ("v1", "0"),
+        ("v2", "1.8"),
+        ("td", "0"),
+        ("tr", "1n"),
+        ("tf", "1n"),
+        ("pw", "49n"),
+        ("per", "100n"),
+    ] {
+        let field = InlineEditField::Parameter(key.to_owned());
+        assert!(begin_edit(&mut app.design_cx(), id, field.clone()));
+        update_edit(&mut app.design_cx(), typed.to_owned());
+        let refused = app
+            .state
+            .workbench
+            .inline_edit
+            .error_for(id, &field)
+            .map(str::to_owned);
+        assert_eq!(refused, None, "{key} = {typed}");
+        app.state
+            .commit_inline_component_edit()
+            .unwrap_or_else(|error| panic!("{key} = {typed}: {error}"));
+    }
+    let netlist =
+        rspice_app_state::simulation::table_route::generate_netlist(&app.state.model.schematic)
+            .netlist;
+    let name = &app.state.model.schematic.document().components[0].name;
+    let card = netlist
+        .lines()
+        .find(|line| line.starts_with(&format!("{name} ")))
+        .unwrap_or_else(|| panic!("the netlist carries {name}:\n{netlist}"));
+    assert!(card.ends_with("PULSE(0 1.8 0 1n 1n 49n 100n)"), "{card}");
+}
+
 /// A probe states the signal it saves, and an unbound one is the problem to
 /// act on. Its stable ID, raw anchor and the toolbar's own actions are gone.
 #[cfg(not(target_arch = "wasm32"))]
