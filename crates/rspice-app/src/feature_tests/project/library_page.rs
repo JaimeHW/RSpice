@@ -12,11 +12,10 @@ use crate::workbench::shell_host::project::library_publication::prepare_project_
 use crate::workbench::shell_host::project::library_publication::restore_project_from_publication;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::library::{
-    AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
+    AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, library_context,
 };
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// Carry `intent` out as the page does, then answer what it raised, as
 /// the shell does once the page returns.
@@ -71,10 +70,6 @@ fn a_long_selection_is_cut_so_access_stays_on_the_page() {
 /// configuration opens on the Project workspace's Configuration page.
 #[test]
 fn every_kind_of_view_opens_the_view_that_was_asked_for() {
-    assert_eq!(icon_for_view(ViewType::VerilogA), WorkbenchIcon::Code);
-    assert_eq!(icon_for_view(ViewType::Spice), WorkbenchIcon::Code);
-    assert_eq!(icon_for_view(ViewType::Config), WorkbenchIcon::Sliders);
-
     for (view_type, name) in [
         (ViewType::Spice, "spice"),
         (ViewType::Verilog, "verilog"),
@@ -687,7 +682,7 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
     let mut replay = Replay::of(app);
     replay.frames(Vec::new());
 
-    replay.click("symbol", Role::Button);
+    replay.click("symbol, symbol, modified", Role::ListBoxOption);
     let state = &replay.app.state;
     assert_eq!(
         state.workbench.workspace,
@@ -700,7 +695,12 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
         "a click selects the view"
     );
 
-    let at = super::super::replay::only(&replay.frames(Vec::new()), "symbol", Role::Button).center;
+    let at = super::super::replay::only(
+        &replay.frames(Vec::new()),
+        "symbol, symbol, modified",
+        Role::ListBoxOption,
+    )
+    .center;
     let press = |pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -730,8 +730,10 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
 /// column does. The rail lists the built-in library as the column does.
 #[test]
 fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
-    use super::super::replay::Replay;
-    use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_LIBRARY;
+    use egui::accesskit::Role;
+
+    use super::super::replay::{Replay, only};
+    use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS};
 
     let mut app = RSpiceApp::test_instance();
     let mut cell = Cell::new("amp");
@@ -753,28 +755,23 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     );
 
     let controls = replay.frames(Vec::new());
-    let named = |label: &str| {
-        let mut found = controls
-            .iter()
-            .filter(|control| control.label == label)
-            .collect::<Vec<_>>();
-        found.sort_by(|left, right| left.center.x.total_cmp(&right.center.x));
-        found
-    };
-    // The rail announces a row's meta after its name; the column does not.
-    assert_eq!(
-        named(&format!("{BUILTIN_VERILOGA_LIBRARY}, read-only")).len(),
-        1,
-        "the rail lists the built-in library"
+    // The rail announces a row's access after its name; the column's list
+    // announces each of its cells: the name, the cell count and the access.
+    only(
+        &controls,
+        &format!("{BUILTIN_VERILOGA_LIBRARY}, read-only"),
+        Role::Button,
     );
-    assert_eq!(
-        named(BUILTIN_VERILOGA_LIBRARY).len(),
-        1,
-        "the Library column lists the built-in library"
+    only(
+        &controls,
+        &format!(
+            "{BUILTIN_VERILOGA_LIBRARY}, {}, read-only",
+            BUILTIN_VERILOGA_MODELS.len()
+        ),
+        Role::ListBoxOption,
     );
-    let authoring = named("authoring");
-    assert_eq!(authoring.len(), 2, "the rail and the column list it");
-    let rail_row = authoring[0].center;
+    only(&controls, "authoring, 1", Role::ListBoxOption);
+    let rail_row = only(&controls, "authoring", Role::Button).center;
     let press = |pressed| egui::Event::PointerButton {
         pos: rail_row,
         button: egui::PointerButton::Primary,

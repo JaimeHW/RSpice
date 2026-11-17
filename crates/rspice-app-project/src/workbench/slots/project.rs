@@ -29,6 +29,9 @@ pub struct BuiltinModelsBrowser {
 pub struct ProjectState {
     /// The Library page's built-in Verilog-A library.
     pub builtin_models: Box<BuiltinModelsBrowser>,
+    /// The Library page's three lists: their selections, keyboard memory and
+    /// the column the keyboard works in.
+    pub library_browser: Box<crate::workbench::surfaces::project::library::LibraryBrowserState>,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -223,6 +226,7 @@ impl ProjectState {
         self.project_library_filter.clear();
         self.builtin_models.open = false;
         self.builtin_models.source = None;
+        self.library_browser = Default::default();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;

@@ -23,6 +23,7 @@ mod library_changes;
 mod library_configuration_frames;
 mod library_deletion;
 mod library_inspector;
+mod library_keyboard;
 mod library_page;
 mod library_undo;
 mod new_cell;

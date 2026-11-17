@@ -268,7 +268,7 @@ fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_cli
         "{painted}"
     );
 
-    let clicked = click_announced(&ctx, &mut app, settled, "symbol_b");
+    let clicked = click_announced(&ctx, &mut app, settled, "symbol_b, symbol");
 
     assert_eq!(
         app.state.model.library_manager.selected_view.as_deref(),

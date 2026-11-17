@@ -15,17 +15,29 @@ use super::*;
 use crate::workbench::framework::feature::CodePort;
 use crate::workbench::slots::BuiltinModelsBrowser;
 
-/// How much of the page the columns keep while a source is open below them.
-const COLUMNS_HEIGHT_WITH_SOURCE: f32 = 214.0;
-const SOURCE_BAR_HEIGHT: f32 = 30.0;
+/// The list rows the columns keep in view while a source is open below them.
+const ROWS_KEPT_WITH_SOURCE: f32 = 7.0;
 
-/// The columns' height: all of `available` until a source is open below them.
-pub(super) fn columns_height(browser: &BuiltinModelsBrowser, available: f32) -> f32 {
+/// The columns' height: all of `available` until a source is open below them,
+/// then their heading and a few rows, on the live metrics.
+pub(super) fn columns_height(ui: &Ui, browser: &BuiltinModelsBrowser, available: f32) -> f32 {
     if browser.open && browser.source.is_some() {
-        available.min(COLUMNS_HEIGHT_WITH_SOURCE)
+        let t = Tokens::get(ui.ctx());
+        let kept = column_head_height(ui)
+            + ROWS_KEPT_WITH_SOURCE * crate::ui::widgets::table::LineHeights::list(&t).row;
+        available.min(kept)
     } else {
         available
     }
+}
+
+/// The models a filter leaves, in the catalogue's order: grouped by class.
+pub(super) fn shown_models(filter: &str) -> Vec<&'static BuiltinVerilogAModel> {
+    let query = filter.trim().to_ascii_lowercase();
+    BUILTIN_VERILOGA_MODELS
+        .iter()
+        .filter(|model| matches_filter(model, &query))
+        .collect()
 }
 
 pub fn selected_model(browser: &BuiltinModelsBrowser) -> Option<&'static BuiltinVerilogAModel> {
@@ -131,26 +143,6 @@ pub enum BuiltinModelsIntent {
     CopyModel(&'static str),
 }
 
-/// The library's row in the Library column, under the project's libraries.
-pub(super) fn library_row(ui: &mut Ui, browser: &BuiltinModelsBrowser) -> Option<LibraryIntent> {
-    let count = BUILTIN_VERILOGA_MODELS.len().to_string();
-    browser_row(
-        ui,
-        BrowserRowSpec {
-            icon: WorkbenchIcon::Folder,
-            label: BUILTIN_VERILOGA_LIBRARY,
-            meta: &count,
-            status: "read-only",
-            selected: browser.open,
-            read_only: true,
-        },
-    )
-    .clicked()
-    .then_some(LibraryIntent::BuiltinModels(
-        BuiltinModelsIntent::ShowLibrary,
-    ))
-}
-
 fn matches_filter(model: &BuiltinVerilogAModel, query: &str) -> bool {
     query.is_empty()
         || [
@@ -164,124 +156,39 @@ fn matches_filter(model: &BuiltinVerilogAModel, query: &str) -> bool {
         .any(|field| field.to_ascii_lowercase().contains(query))
 }
 
-/// The heading a device class's models stand under, on the rows' own pitch.
-fn class_heading(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width(), BROWSER_ROW_HEIGHT),
-        Sense::hover(),
-    );
-    ui.painter().text(
-        pos2(rect.left() + 10.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_faint,
-    );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
-}
-
-pub(super) fn cell_column(
+/// The menu a model or file row opens: the band's own two actions.
+pub(super) fn row_items(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
-    filter: &str,
-    width: f32,
-    height: f32,
+    writable_library_available: bool,
 ) -> Option<LibraryIntent> {
-    let query = filter.trim().to_ascii_lowercase();
-    let shown = BUILTIN_VERILOGA_MODELS
-        .iter()
-        .filter(|model| matches_filter(model, &query))
-        .collect::<Vec<_>>();
-    let selected = selected_model(browser).map(|model| model.registry_name);
-    let no_match = if shown.is_empty() {
-        format!("No cells match \u{201c}{}\u{201d}", filter.trim())
-    } else {
-        String::new()
-    };
-    let count = ColumnCount {
-        shown: shown.len(),
-        total: BUILTIN_VERILOGA_MODELS.len(),
-        empty: &no_match,
-    };
-    browser_column(ui, "Cell", count, width, height, |ui| {
-        let mut intent = None;
-        let mut class = None;
-        for model in &shown {
-            if class != Some(model.class) {
-                class = Some(model.class);
-                class_heading(ui, model.class.label());
-            }
-            let response = browser_row(
-                ui,
-                BrowserRowSpec {
-                    icon: WorkbenchIcon::Project,
-                    label: model.name,
-                    meta: model.version,
-                    status: "",
-                    selected: selected == Some(model.registry_name),
-                    read_only: false,
-                },
-            )
-            .on_hover_text(format!("{} (module {})", model.summary, model.module));
-            if response.clicked() {
-                intent = Some(LibraryIntent::BuiltinModels(
-                    BuiltinModelsIntent::SelectModel(model.registry_name),
-                ));
-            }
-        }
-        intent
-    })
-}
-
-pub(super) fn view_column(
-    ui: &mut Ui,
-    browser: &BuiltinModelsBrowser,
-    width: f32,
-    height: f32,
-) -> Option<LibraryIntent> {
-    let count = ColumnCount {
-        shown: browser.files.len(),
-        total: browser.files.len(),
-        empty: "No cell selected",
-    };
-    browser_column(ui, "View", count, width, height, |ui| {
-        let mut intent = None;
-        for (index, file) in browser.files.iter().enumerate() {
-            let response = browser_row(
-                ui,
-                BrowserRowSpec {
-                    icon: if index == 0 {
-                        WorkbenchIcon::VerilogA
-                    } else {
-                        WorkbenchIcon::Code
-                    },
-                    label: file,
-                    meta: if index == 0 { "Verilog-A" } else { "Include" },
-                    status: "",
-                    selected: browser.file.as_deref() == Some(file.as_str()),
-                    read_only: false,
-                },
-            );
-            if response.double_clicked() {
-                intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
-                    file.clone(),
-                )));
-            } else if response.clicked() {
-                intent = Some(LibraryIntent::BuiltinModels(
-                    BuiltinModelsIntent::SelectFile(file.clone()),
-                ));
-            }
-        }
-        intent
-    })
+    let mut intent = None;
+    if let Some(file) = browser.file.as_ref()
+        && menu_item(ui, "Open read-only", None)
+    {
+        intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
+            file.clone(),
+        )));
+    }
+    if let Some(model) = selected_model(browser)
+        && menu_item(
+            ui,
+            "Copy cell\u{2026}",
+            (!writable_library_available)
+                .then_some("Every library is read-only; none can take a copy."),
+        )
+    {
+        intent = Some(LibraryIntent::BuiltinModels(
+            BuiltinModelsIntent::CopyModel(model.registry_name),
+        ));
+    }
+    intent
 }
 
 /// The band under the columns: what the selected model is, and the two things
 /// a read-only library offers, Copy cell… while `libraries` holds a writable
-/// one. The strip above already names the selection.
-/// The band: `creation` draws the page's creation actions at its right end,
-/// then the selected model's own actions and summary follow.
+/// one. `creation` draws the page's Library actions at its right end; the strip
+/// above already names the selection.
 pub fn detail(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
@@ -294,50 +201,45 @@ pub fn detail(
         .libraries_by_key()
         .any(|(_, library)| !library.read_only);
     let mut intent = None;
-    let shown = egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            ui.set_min_height(DETAIL_HEIGHT - 10.0);
-            ui.horizontal(|ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(asked) = creation(ui) {
-                        intent = Some(asked);
-                    }
-                    if browser.source.is_none()
-                        && let Some(file) = browser.file.as_ref()
-                        && Button::new("Open read-only").accent().show(ui).clicked()
-                    {
-                        intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
-                            file.clone(),
-                        )));
-                    }
-                    if let Some(model) = model
-                        && Button::new("Copy cell\u{2026}")
-                            .enabled(writable_library_available)
-                            .show(ui)
-                            .on_disabled_hover_text(
-                                "Every library is read-only; none can take a copy.",
-                            )
-                            .clicked()
-                    {
-                        intent = Some(LibraryIntent::BuiltinModels(
-                            BuiltinModelsIntent::CopyModel(model.registry_name),
-                        ));
-                    }
-                    if let Some(model) = model {
-                        let font = egui::TextStyle::Body.resolve(ui.style());
-                        let summary = elide_text(ui, model.summary, &font, ui.available_width());
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            let label = ui.label(&summary);
-                            if summary != model.summary {
-                                label.on_hover_text(model.summary);
-                            }
-                        });
-                    }
-                });
+    let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
+        ui.set_min_height(t.metrics.ctl_h);
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if browser.source.is_none()
+                    && let Some(file) = browser.file.as_ref()
+                    && Button::new("Open read-only").accent().show(ui).clicked()
+                {
+                    intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
+                        file.clone(),
+                    )));
+                }
+                if let Some(model) = model
+                    && Button::new("Copy cell\u{2026}")
+                        .enabled(writable_library_available)
+                        .show(ui)
+                        .on_disabled_hover_text("Every library is read-only; none can take a copy.")
+                        .clicked()
+                {
+                    intent = Some(LibraryIntent::BuiltinModels(
+                        BuiltinModelsIntent::CopyModel(model.registry_name),
+                    ));
+                }
+                if let Some(asked) = creation(ui) {
+                    intent = Some(asked);
+                }
+                if let Some(model) = model {
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    let summary = elide_text(ui, model.summary, &font, ui.available_width());
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let label = ui.label(&summary);
+                        if summary != model.summary {
+                            label.on_hover_text(model.summary);
+                        }
+                    });
+                }
             });
         });
+    });
     ui.painter().hline(
         shown.response.rect.x_range(),
         shown.response.rect.top(),
@@ -364,10 +266,8 @@ pub(super) fn source_pane(
         vec2(ui.available_width(), height),
         Layout::top_down(Align::Min),
         |ui| {
-            let (bar, bar_response) = ui.allocate_exact_size(
-                vec2(ui.available_width(), SOURCE_BAR_HEIGHT),
-                Sense::hover(),
-            );
+            let (bar, bar_response) =
+                ui.allocate_exact_size(vec2(ui.available_width(), bar_height(ui)), Sense::hover());
             ui.painter().rect_filled(bar, 0.0, t.color.bg_panel);
             ui.painter().hline(
                 bar.x_range(),
@@ -384,9 +284,9 @@ pub(super) fn source_pane(
             );
             bar_response
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
-            let close = egui::Rect::from_min_size(
-                pos2(bar.right() - 70.0, bar.top() + 3.0),
-                vec2(62.0, SOURCE_BAR_HEIGHT - 6.0),
+            let close = egui::Rect::from_center_size(
+                pos2(bar.right() - 10.0 - 31.0, bar.center().y),
+                vec2(62.0, t.metrics.ctl_h),
             );
             if ui
                 .put(close, egui::Button::new("Close").frame(false))
