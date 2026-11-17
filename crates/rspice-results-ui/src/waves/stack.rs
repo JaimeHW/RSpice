@@ -93,11 +93,14 @@ pub trait StackHost {
     fn show_event_markers(&mut self, _ui: &mut Ui, _model: &StripModel, _frame: EventLaneFrame) {}
     /// The real event lanes (`E()`) placed in `pane`, as step traces
     /// ([`super::logic::real_step_trace`]) that share its unit axis.
+    ///
+    /// `view` is the strip's visible time window, which a stored run's lanes are read over.
     fn real_step_traces(
         &mut self,
         _model: &StripModel,
         _pane: &UnitPane,
         _tokens: &Tokens,
+        _view: (f64, f64),
     ) -> Vec<ResolvedExpr> {
         Vec::new()
     }
@@ -984,8 +987,9 @@ fn show_strip_plot(
     // A real event lane is placed in a pane, and joins that pane's traces on
     // its unit axis.
     let mut pane_exprs = route_expressions(host, model, &panes, &t);
+    let view = shared_x_view(host.session(), model.analysis_key, panes.len()).unwrap_or(x_domain);
     for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
-        exprs.extend(host.real_step_traces(model, pane, &t));
+        exprs.extend(host.real_step_traces(model, pane, &t, view));
     }
     // A pane with nothing to show keeps its header row, where its hidden
     // traces wait to be shown again and its plotted ones are named, and gives

@@ -56,6 +56,18 @@ pub(crate) struct SummaryRef {
     pub(crate) x_max: f64,
 }
 
+/// An event signal's changes over a window of time, with the change before it and the change
+/// after it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventSpan {
+    /// The last change before the window: the value held into it.
+    pub before: Option<EventChange>,
+    /// The changes in the window, in commit order.
+    pub within: Vec<EventChange>,
+    /// The first change after the window.
+    pub after: Option<EventChange>,
+}
+
 /// Where one `EVENTS` frame is and what it covers.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EventsRef {
@@ -1081,6 +1093,90 @@ impl<I: SegmentIo> SegmentReader<I> {
             changes.truncate(keep);
         }
         Ok(changes)
+    }
+
+    /// The changes of event signal `signal` with time in `t0 ..= t1`, with the last change
+    /// before `t0` and the first after `t1`: what a view of that window shows, the value held
+    /// into it and the change that ends it. Reads the frames over the window and at most one
+    /// frame on each side of it.
+    pub fn events_around(
+        &mut self,
+        signal: usize,
+        t0: f64,
+        t1: f64,
+    ) -> Result<EventSpan, StoreError> {
+        let within = self.events(signal, t0, t1)?;
+        let (kind, frames) = self.event_frame_refs(signal)?;
+        // A signal's frames are in commit order and its times never fall, so the last change
+        // before `t0` is in the last frame that starts before it, and the first change after
+        // `t1` in the first frame that ends after it.
+        let mut decoded = Vec::new();
+        let before = match frames.iter().rposition(|frame| frame.t_min < t0) {
+            Some(at) => {
+                self.decode_event_frame(frames[at], kind, &mut decoded)?;
+                decoded
+                    .iter()
+                    .rev()
+                    .find(|change| change.time < t0)
+                    .cloned()
+            }
+            None => None,
+        };
+        let after = match frames.iter().position(|frame| frame.t_max > t1) {
+            Some(at) => {
+                self.decode_event_frame(frames[at], kind, &mut decoded)?;
+                decoded.iter().find(|change| change.time > t1).cloned()
+            }
+            None => None,
+        };
+        Ok(EventSpan {
+            before,
+            within,
+            after,
+        })
+    }
+
+    /// How many changes of event signal `signal` come before time `t`, reading at most the one
+    /// frame that spans `t`.
+    pub fn events_before(&mut self, signal: usize, t: f64) -> Result<u64, StoreError> {
+        let (kind, frames) = self.event_frame_refs(signal)?;
+        let mut count = 0;
+        let mut decoded = Vec::new();
+        for frame in frames {
+            if frame.t_max < t {
+                count += u64::from(frame.count);
+            } else if frame.t_min < t {
+                self.decode_event_frame(frame, kind, &mut decoded)?;
+                count += decoded.iter().filter(|change| change.time < t).count() as u64;
+            } else {
+                break;
+            }
+        }
+        Ok(count)
+    }
+
+    fn event_frame_refs(&self, signal: usize) -> Result<(EventKind, Vec<EventsRef>), StoreError> {
+        let position = self
+            .event_position(signal as u32)
+            .ok_or_else(|| Self::not_event(signal))?;
+        let frames = self
+            .catalogue
+            .events
+            .get(position)
+            .cloned()
+            .unwrap_or_default();
+        Ok((self.event_signals[position].1, frames))
+    }
+
+    fn decode_event_frame(
+        &self,
+        frame: EventsRef,
+        kind: EventKind,
+        out: &mut Vec<EventChange>,
+    ) -> Result<(), StoreError> {
+        let (_, payload) = self.read_frame(frame.offset)?;
+        out.clear();
+        decode_events(&payload, frame.offset, kind, out)
     }
 
     /// The position of signal id `signal` among the event signals.

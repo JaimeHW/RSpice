@@ -142,6 +142,58 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
     assert!(!path.exists(), "the last waveform took its segment with it");
 }
 
+/// A comparator's digital output on a pulse train: its history goes to the store.
+const MIXED: &str = "stored events
+V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)
+R1 in 0 1k
+a_adc [in] [dig] adc
+.model adc adc_bridge(in_low=0.4 in_high=0.6)
+.tran 0.1u 100u
+.end
+";
+
+#[test]
+fn a_stored_transient_keeps_its_event_histories_in_its_store_and_reads_them_as_returned_in_memory()
+{
+    let bridge = EngineBridge::new();
+    let same = |a: &crate::results::DigitalEventPoint, b: &crate::results::DigitalEventPoint| {
+        a.value_code == b.value_code
+    };
+    for start in [0.0, 33.3e-6] {
+        let config = config(100e-6, start, None);
+        let (expected, _, _) = in_memory(&bridge, MIXED, &config);
+        let actual = bridge
+            .run(&AnalysisConfig::Transient(config.clone()), MIXED)
+            .unwrap();
+        let (
+            SimulationResult::Transient { events, store, .. },
+            SimulationResult::Transient {
+                events: expected, ..
+            },
+        ) = (actual, expected)
+        else {
+            panic!("both routes return a transient");
+        };
+        assert!(store.is_some());
+        assert_eq!(events.digital.len(), expected.digital.len());
+        assert!(!events.digital.is_empty());
+        for (trace, whole) in events.digital.iter().zip(&expected.digital) {
+            assert_eq!(trace.node_name, whole.node_name);
+            assert!(trace.points.is_stored() && !whole.points.is_stored());
+            assert_eq!(trace.points.len(), whole.points.len(), "start {start}");
+            assert!(whole.points.len() > 10);
+            for (t0, t1) in [(start, 100e-6), (40e-6, 45e-6), (52e-6, 52e-6), (0.0, 1e-6)] {
+                assert_eq!(
+                    trace.points.around(t0, t1, same).unwrap(),
+                    whole.points.around(t0, t1, same).unwrap(),
+                    "start {start}, window {t0} ..= {t1}"
+                );
+            }
+            assert_eq!(*trace.points, *whole.points);
+        }
+    }
+}
+
 #[test]
 fn a_run_whose_rows_cannot_fit_is_refused_before_it_solves_and_leaves_no_segment() {
     FREE_SPACE.with(|free| *free.borrow_mut() = Some(quota(4096)));

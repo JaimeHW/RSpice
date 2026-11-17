@@ -1761,7 +1761,8 @@ fn stacked_export_state(preference: usize) -> ResultsTestHost {
                     points: vec![crate::state::DigitalEventPointEvidence {
                         time_s: 0.0,
                         value_code: 1,
-                    }],
+                    }]
+                    .into(),
                 }],
                 real_traces: Vec::new(),
                 digital_buses: Vec::new(),

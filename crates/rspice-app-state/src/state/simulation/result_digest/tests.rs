@@ -984,7 +984,8 @@ fn events_with_and_without_a_bus() -> (AnalysisResult, AnalysisResult) {
                 time_s: 5.0e-9,
                 value_code: 1,
             },
-        ],
+        ]
+        .into(),
     };
     let payload = |digital_buses| AnalysisResultPayload::TransientEvents {
         voltage_impulses: None,

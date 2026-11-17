@@ -91,9 +91,12 @@ fn strip_lane_rows(
     display_name: super::DisplayName<'_>,
 ) -> Vec<super::readout::ReadoutRow> {
     let digits = usize::from(presentation.displayed_significant_digits().get());
+    let Some(lanes) = super::lanes::lanes_at_cursors(model, cursors) else {
+        return Vec::new();
+    };
     let specs = super::lanes::lane_specs(model, state.event_lanes.get(&model.analysis_key));
-    let user = super::lanes::user_bus_lanes(&mut state.derived, model, &specs);
-    super::lanes::lane_readout_rows(model, &specs, &user, cursors, digits, display_name)
+    let user = super::lanes::user_bus_lanes(&mut state.derived, model, &lanes, &specs);
+    super::lanes::lane_readout_rows(model, &lanes, &specs, &user, cursors, digits, display_name)
 }
 
 /// Height of one marker row.

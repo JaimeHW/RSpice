@@ -486,7 +486,8 @@ mod availability_tests {
                 points: vec![crate::state::DigitalEventPointEvidence {
                     time_s: 0.25,
                     value_code: 0,
-                }],
+                }]
+                .into(),
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),

@@ -315,15 +315,34 @@ pub fn stack_height(specs: &[LaneSpec]) -> f32 {
     specs.iter().map(LaneSpec::height).sum()
 }
 
-/// Each user bus row's word, reassembled once per data version.
+/// The strip's lanes over `t0 ..= t1`: a stored run's read there, any other run's whole.
+pub fn lanes_over(model: &StripModel, (t0, t1): (f64, f64)) -> Option<Arc<EventLanes>> {
+    model.event_lanes.as_ref().map(|lanes| lanes.over(t0, t1))
+}
+
+/// The strip's lanes where the cursors stand: a stored run's read between them (or at the one
+/// that is placed), any other run's whole.
+pub fn lanes_at_cursors(model: &StripModel, cursors: CursorPair) -> Option<Arc<EventLanes>> {
+    let lanes = model.event_lanes.as_ref()?;
+    Some(match (cursors.a, cursors.b) {
+        (Some(a), Some(b)) => lanes.over(a.min(b), a.max(b)),
+        (Some(t), None) | (None, Some(t)) => lanes.over(t, t),
+        (None, None) => Arc::clone(lanes),
+    })
+}
+
+/// The bits of the window `lanes` were read over, for keys of what is built from them.
+fn window_bits(lanes: &EventLanes) -> Option<(u64, u64)> {
+    lanes.window().map(|(t0, t1)| (t0.to_bits(), t1.to_bits()))
+}
+
+/// Each user bus row's word, reassembled from `lanes` once per data version and window.
 pub fn user_bus_lanes(
     derived: &mut DerivedSeries,
     model: &StripModel,
+    lanes: &EventLanes,
     specs: &[LaneSpec],
 ) -> Vec<Option<Arc<BusLane>>> {
-    let Some(lanes) = model.event_lanes.as_deref() else {
-        return vec![None; specs.len()];
-    };
     specs
         .iter()
         .map(|spec| match spec {
@@ -334,7 +353,7 @@ pub fn user_bus_lanes(
                 ..
             } => {
                 let nets: Vec<&str> = members.iter().map(|member| member.net.as_str()).collect();
-                let key = stable_hash(&(model.analysis_key, label, &nets));
+                let key = stable_hash(&(model.analysis_key, label, &nets, window_bits(lanes)));
                 // Every member is a plotted logic lane of this run, which is
                 // what made the row, so the word always reassembles.
                 Some(derived.bus_lane_or(key, || {
@@ -392,9 +411,13 @@ pub fn lane_rows<'a>(
 }
 
 /// The `E()` lanes plotted in `pane`, as step traces on its unit axis
-/// through the strip's last instant.
-pub fn real_step_traces(model: &StripModel, pane: &UnitPane) -> Vec<ResolvedExpr> {
-    let Some(lanes) = model.event_lanes.as_deref() else {
+/// through the strip's last instant. A stored run's are read over `view`.
+pub fn real_step_traces(
+    model: &StripModel,
+    pane: &UnitPane,
+    view: (f64, f64),
+) -> Vec<ResolvedExpr> {
+    let Some(lanes) = lanes_over(model, view) else {
         return Vec::new();
     };
     model
@@ -409,7 +432,12 @@ pub fn real_step_traces(model: &StripModel, pane: &UnitPane) -> Vec<ResolvedExpr
                 .x_range
                 .map(|range| range.1)
                 .or_else(|| lane.x.last().copied())?;
-            let key = stable_hash(&(model.analysis_key, &lane.source_waveform_name, "step"));
+            let key = stable_hash(&(
+                model.analysis_key,
+                &lane.source_waveform_name,
+                "step",
+                window_bits(&lanes),
+            ));
             Some(real_step_trace(real, end, lane.color, key))
         })
         .collect()
@@ -419,17 +447,18 @@ pub fn real_step_traces(model: &StripModel, pane: &UnitPane) -> Vec<ResolvedExpr
 /// lane reads at A and at B, and each `E()` lane's value, difference and
 /// unit. A level or a word has no difference or slope, so those cells say
 /// so.
+///
+/// `lanes` are the strip's where the cursors stand ([`lanes_at_cursors`]), and `user` the user
+/// buses reassembled from them.
 pub fn lane_readout_rows(
     model: &StripModel,
+    lanes: &EventLanes,
     specs: &[LaneSpec],
     user: &[Option<Arc<BusLane>>],
     cursors: CursorPair,
     significant_digits: usize,
     display_name: super::DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
-    let Some(lanes) = model.event_lanes.as_deref() else {
-        return Vec::new();
-    };
     let read = |lane: EventLane<'_>, at: Option<f64>| {
         at.and_then(|t| lane.readout_at(t, significant_digits))
             .map_or_else(|| READOUT_ABSENT.to_owned(), |readout| readout.text)

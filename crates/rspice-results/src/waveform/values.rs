@@ -192,6 +192,15 @@ impl std::error::Error for ColumnReadFailure {}
 /// Failures of reads that had no caller to return them to, waiting for diagnostics to collect.
 static UNREPORTED_FAILURES: Mutex<Vec<ColumnReadFailure>> = Mutex::new(Vec::new());
 
+/// Keep a failed read that had no caller to return it to, for diagnostics to collect.
+#[cfg(feature = "engine-evidence")]
+pub(crate) fn report_column_read_failure(failure: ColumnReadFailure) {
+    UNREPORTED_FAILURES
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(failure);
+}
+
 /// Take every stored column read that failed behind a waveform's values since the last call, so
 /// a host can show each one. Each column fails at most once: its window keeps the gap it showed.
 pub fn take_column_read_failures() -> Vec<ColumnReadFailure> {

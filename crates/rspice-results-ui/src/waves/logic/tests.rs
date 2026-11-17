@@ -123,8 +123,10 @@ fn a_word_with_an_unknown_bit_falls_back_to_binary_and_says_why() {
         .iter_mut()
         .find(|trace| trace.node_name == "b[1]")
         .unwrap();
-    b1.points.retain(|point| point.time_s < 80.0 * NS);
-    b1.points.push(DigitalEventPointEvidence {
+    b1.points
+        .make_mut()
+        .retain(|point| point.time_s < 80.0 * NS);
+    b1.points.make_mut().push(DigitalEventPointEvidence {
         time_s: 80.0 * NS,
         value_code: 2,
     });
@@ -817,5 +819,129 @@ fn a_typed_word_reads_in_the_buses_spellings() {
             Some(200),
             "{radix:?} {spelled}"
         );
+    }
+}
+
+/// A history kept in a run's store, read through the store's window queries.
+struct StoredHistory(Vec<rspice_results::events::points::EventChange>);
+
+impl rspice_results::events::points::EventHistorySource for StoredHistory {
+    fn name(&self) -> &str {
+        "stored"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn count(&self) -> Result<u64, String> {
+        Ok(self.0.len() as u64)
+    }
+
+    fn before(&self, t: f64) -> Result<u64, String> {
+        Ok(self.0.iter().filter(|change| change.time < t).count() as u64)
+    }
+
+    fn span(&self, t0: f64, t1: f64) -> Result<rspice_results::events::points::EventSpan, String> {
+        Ok(rspice_results::events::points::EventSpan {
+            before: self.0.iter().rev().find(|c| c.time < t0).cloned(),
+            within: self
+                .0
+                .iter()
+                .filter(|c| c.time >= t0 && c.time <= t1)
+                .cloned()
+                .collect(),
+            after: self.0.iter().find(|c| c.time > t1).cloned(),
+        })
+    }
+}
+
+/// `trace` as its run's store keeps it.
+fn stored(trace: &DigitalEventTraceEvidence) -> DigitalEventTraceEvidence {
+    use rspice_results::events::points::{EventChange, EventPoint, EventPoints, EventValue, Logic};
+    let change = |time_s: f64, strength: u8| EventChange {
+        signal: 0,
+        time: time_s,
+        sequence: 0,
+        value: EventValue::Logic(Logic::X),
+        strength,
+    };
+    // The strength byte the store writes for an event code, found through the store's own
+    // reading of it.
+    let strength = |code: u8| {
+        (0..=u8::MAX)
+            .find(|&strength| {
+                DigitalEventPointEvidence::from_change(&change(0.0, strength))
+                    .is_some_and(|point| point.value_code == code)
+            })
+            .expect("every event code has a stored strength")
+    };
+    let changes = trace
+        .points
+        .iter()
+        .map(|point| change(point.time_s, strength(point.value_code)))
+        .collect();
+    DigitalEventTraceEvidence {
+        node_name: trace.node_name.clone(),
+        points: EventPoints::stored(
+            std::sync::Arc::new(StoredHistory(changes)),
+            f64::NEG_INFINITY,
+        )
+        .unwrap(),
+    }
+}
+
+#[test]
+fn a_stored_runs_lanes_hold_nothing_until_a_window_reads_them_as_the_whole_lanes_read_there() {
+    use std::sync::Arc;
+    let (digital, buses) = fixture();
+    let whole = EventLanes::from_evidence(&digital, &[], &buses);
+    let kept: Vec<_> = digital.iter().map(stored).collect();
+    let lanes = Arc::new(EventLanes::from_evidence(&kept, &[], &buses));
+    assert!(lanes.reads_windows() && !whole.reads_windows());
+    assert_eq!(lanes.logic.len(), whole.logic.len());
+    assert!(lanes.logic.iter().all(|lane| lane.times().is_empty()));
+    for (t0, t1) in [
+        (0.0, 100.0 * NS),
+        (25.0 * NS, 55.0 * NS),
+        (31.0 * NS, 31.0 * NS),
+        (-5.0 * NS, -NS),
+        (95.0 * NS, 300.0 * NS),
+    ] {
+        let window = lanes.over(t0, t1);
+        assert!(
+            Arc::ptr_eq(&window, &lanes.over(t0, t1)),
+            "a window is read once"
+        );
+        assert_eq!(window.window(), Some((t0, t1)));
+        let instants = (0..=40).map(|step| t0 + (t1 - t0) * f64::from(step) / 40.0);
+        for t in instants {
+            for lane in &whole.logic {
+                let read = window.logic(lane.name()).unwrap();
+                assert_eq!(read.level_at(t), lane.level_at(t), "{} at {t}", lane.name());
+                assert_eq!(
+                    read.next_edge(t),
+                    lane.next_edge(t),
+                    "{} after {t}",
+                    lane.name()
+                );
+                assert_eq!(
+                    read.previous_edge(t),
+                    lane.previous_edge(t),
+                    "{} before {t}",
+                    lane.name()
+                );
+            }
+            for bus in &whole.buses {
+                let read = window.bus(bus.name()).unwrap();
+                assert_eq!(read.value_at(t), bus.value_at(t), "{} at {t}", bus.name());
+                assert_eq!(
+                    read.next_edge(t),
+                    bus.next_edge(t),
+                    "{} after {t}",
+                    bus.name()
+                );
+            }
+        }
     }
 }

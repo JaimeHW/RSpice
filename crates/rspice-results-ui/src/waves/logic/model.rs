@@ -18,6 +18,7 @@ use rspice_results::events::{
     DigitalBusEvidence, DigitalEventTraceEvidence, RealEventTraceEvidence,
 };
 use rspice_results::visualization_document::BusValueName;
+use std::sync::{Arc, Mutex};
 
 /// One level of a scalar digital net, as a VCD bit spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,12 +479,166 @@ pub struct EventLanes {
     pub logic: Vec<LogicLane>,
     pub buses: Vec<BusLane>,
     pub real: Vec<RealLane>,
+    /// A stored run's histories, which its lanes read a window of: its lanes here are named
+    /// and hold no points. `None` when every lane holds its whole history.
+    stored: Option<StoredHistories>,
+    /// The window these lanes were read over, when they are a stored run's.
+    window: Option<(f64, f64)>,
+}
+
+/// The last few windows a stored run's lanes were read over, each by its bounds' bits, most
+/// recent last.
+type ReadWindows = Arc<Mutex<Vec<((u64, u64), Arc<EventLanes>)>>>;
+
+/// The histories of a stored run, kept by the lanes that read windows of them, and the last few
+/// windows they read.
+#[derive(Clone)]
+struct StoredHistories {
+    digital: Vec<DigitalEventTraceEvidence>,
+    real: Vec<RealEventTraceEvidence>,
+    buses: Vec<DigitalBusEvidence>,
+    windows: ReadWindows,
+}
+
+/// Windows of a stored run's lanes kept at once: the view's, and the cursors'.
+const STORED_WINDOWS: usize = 4;
+
+impl PartialEq for StoredHistories {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.windows, &other.windows)
+    }
+}
+
+impl std::fmt::Debug for StoredHistories {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "StoredHistories({} digital, {} real)",
+            self.digital.len(),
+            self.real.len()
+        )
+    }
 }
 
 impl EventLanes {
     /// The lanes of a `TransientEvents` payload: one logic lane per digital
     /// trace, one bus lane per declared bus, one real lane per real trace.
+    ///
+    /// A history its run's store keeps is not read here: its lane is named and empty until
+    /// [`Self::over`] reads the window a view shows.
     pub fn from_evidence(
+        digital: &[DigitalEventTraceEvidence],
+        real: &[RealEventTraceEvidence],
+        buses: &[DigitalBusEvidence],
+    ) -> Self {
+        let stored = digital.iter().any(|trace| trace.points.is_stored())
+            || real.iter().any(|trace| trace.points.is_stored());
+        if !stored {
+            return Self::read(digital, real, buses);
+        }
+        let mut lanes = Self::read(
+            &digital
+                .iter()
+                .map(|trace| DigitalEventTraceEvidence {
+                    node_name: trace.node_name.clone(),
+                    points: Default::default(),
+                })
+                .collect::<Vec<_>>(),
+            &real
+                .iter()
+                .map(|trace| RealEventTraceEvidence {
+                    node_name: trace.node_name.clone(),
+                    points: Default::default(),
+                })
+                .collect::<Vec<_>>(),
+            buses,
+        );
+        lanes.stored = Some(StoredHistories {
+            digital: digital.to_vec(),
+            real: real.to_vec(),
+            buses: buses.to_vec(),
+            windows: Arc::default(),
+        });
+        lanes
+    }
+
+    /// Whether these lanes are a stored run's, read a window at a time by [`Self::over`].
+    pub fn reads_windows(&self) -> bool {
+        self.stored.is_some()
+    }
+
+    /// The window these lanes were read over: `None` for lanes that hold every point.
+    pub fn window(&self) -> Option<(f64, f64)> {
+        self.window
+    }
+
+    /// The lanes over `t0 ..= t1`. A stored run's lanes read the changes there, the one held
+    /// into the window and the one after it, from its store, and keep the last few windows they
+    /// read; a lane a reader added keeps every point. Lanes that hold every point are
+    /// themselves.
+    pub fn over(self: &Arc<Self>, t0: f64, t1: f64) -> Arc<Self> {
+        let Some(stored) = &self.stored else {
+            return Arc::clone(self);
+        };
+        let (t0, t1) = (t0.min(t1), t0.max(t1));
+        let key = (t0.to_bits(), t1.to_bits());
+        let mut windows = stored.windows.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(at) = windows.iter().position(|(held, _)| *held == key) {
+            let hit = windows.remove(at);
+            let lanes = Arc::clone(&hit.1);
+            windows.push(hit);
+            return lanes;
+        }
+        // Each history is read as far on each side as its lane's value changes, so an edge
+        // stepped to from the window is one. A history that cannot be read shows no points;
+        // its failure is reported with the run's other unreadable stored data.
+        let level = |code: u8| LogicLevel::from_event_code(code).unwrap_or(LogicLevel::Unknown);
+        let digital: Vec<_> = stored
+            .digital
+            .iter()
+            .map(|trace| DigitalEventTraceEvidence {
+                node_name: trace.node_name.clone(),
+                points: trace
+                    .points
+                    .around(t0, t1, |a, b| level(a.value_code) == level(b.value_code))
+                    .unwrap_or_default()
+                    .into(),
+            })
+            .collect();
+        let real: Vec<_> = stored
+            .real
+            .iter()
+            .map(|trace| RealEventTraceEvidence {
+                node_name: trace.node_name.clone(),
+                points: trace
+                    .points
+                    .around(t0, t1, |a, b| a.value == b.value)
+                    .unwrap_or_default()
+                    .into(),
+            })
+            .collect();
+        let mut lanes = Self::read(&digital, &real, &stored.buses);
+        // A lane a reader added (a `digital()` expression's) follows the stored ones.
+        lanes
+            .logic
+            .extend(self.logic.iter().skip(stored.digital.len()).cloned());
+        lanes
+            .buses
+            .extend(self.buses.iter().skip(stored.buses.len()).cloned());
+        lanes
+            .real
+            .extend(self.real.iter().skip(stored.real.len()).cloned());
+        lanes.window = Some((t0, t1));
+        let lanes = Arc::new(lanes);
+        if windows.len() == STORED_WINDOWS {
+            windows.remove(0);
+        }
+        windows.push((key, Arc::clone(&lanes)));
+        lanes
+    }
+
+    /// Every lane of histories that hold every point.
+    fn read(
         digital: &[DigitalEventTraceEvidence],
         real: &[RealEventTraceEvidence],
         buses: &[DigitalBusEvidence],
@@ -532,6 +687,8 @@ impl EventLanes {
                     )
                 })
                 .collect(),
+            stored: None,
+            window: None,
         }
     }
 

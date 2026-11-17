@@ -108,8 +108,9 @@ impl StackHost for WaveStackHost<'_, '_> {
         model: &StripModel,
         pane: &UnitPane,
         _tokens: &Tokens,
+        view: (f64, f64),
     ) -> Vec<ResolvedExpr> {
-        rspice_results_ui::waves::lanes::real_step_traces(model, pane)
+        rspice_results_ui::waves::lanes::real_step_traces(model, pane, view)
     }
 }
 

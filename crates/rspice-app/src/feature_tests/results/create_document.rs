@@ -253,7 +253,8 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
                         time_s: 1.0e-9,
                         value_code: 1,
                     },
-                ],
+                ]
+                .into(),
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),

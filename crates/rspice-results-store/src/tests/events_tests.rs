@@ -3,8 +3,8 @@
 use super::reader_tests::{RecordingIo, crash_states};
 use super::support::{Rng, meta};
 use crate::{
-    Axis, EventChange, EventValue, Logic, MemoryIo, RunStatus, Schema, SegmentIo, SegmentReader,
-    SegmentWriter, Signal, SignalKind, StoreError,
+    Axis, EventChange, EventSpan, EventValue, Logic, MemoryIo, RunStatus, Schema, SegmentIo,
+    SegmentReader, SegmentWriter, Signal, SignalKind, StoreError,
 };
 
 const LOGIC: u32 = 1;
@@ -228,6 +228,65 @@ fn event_changes_read_back_with_x_z_and_strength() {
     assert!(reader.events(0, 0.0, 1.0).is_err());
     assert!(reader.event_count(4).is_err());
     assert!(reader.events(99, 0.0, 1.0).is_err());
+}
+
+#[test]
+fn a_window_reads_the_changes_on_each_side_of_it_and_counts_those_before_it_as_brute_force() {
+    let (steps, after) = run(1000, 5000, 11);
+    let (_, io) = write(writer(64), &steps, &after, usize::MAX, usize::MAX);
+    let mut reader = SegmentReader::open(io).unwrap();
+    let x = |row: usize| steps[row].x;
+    let windows = [
+        (x(0), x(0)),
+        (x(10), x(10)),
+        (0.5 * (x(10) + x(11)), 0.5 * (x(10) + x(11))),
+        (x(200), x(700)),
+        (x(999), x(999)),
+        (-1.0, -0.5),
+        (2.0 * x(999), 3.0 * x(999)),
+        (x(500), x(400)),
+    ];
+    for signal in EVENT_SIGNALS {
+        let signal = signal as usize;
+        let written = reader
+            .events(signal, f64::NEG_INFINITY, f64::INFINITY)
+            .unwrap();
+        assert!(reader.event_frames(signal).unwrap() > 2, "signal {signal}");
+        for (t0, t1) in windows {
+            let expected = EventSpan {
+                before: written
+                    .iter()
+                    .rev()
+                    .find(|change| change.time < t0)
+                    .cloned(),
+                within: written
+                    .iter()
+                    .filter(|change| change.time >= t0 && change.time <= t1)
+                    .cloned()
+                    .collect(),
+                after: written.iter().find(|change| change.time > t1).cloned(),
+            };
+            let span = reader.events_around(signal, t0, t1).unwrap();
+            // By key, which compares a NaN value by its bits.
+            let parts = |span: &EventSpan| {
+                (
+                    span.before.as_ref().map(key),
+                    keys(&span.within),
+                    span.after.as_ref().map(key),
+                )
+            };
+            assert_eq!(
+                parts(&span),
+                parts(&expected),
+                "signal {signal} over {t0} ..= {t1}"
+            );
+            assert_eq!(
+                reader.events_before(signal, t0).unwrap(),
+                written.iter().filter(|change| change.time < t0).count() as u64
+            );
+        }
+    }
+    assert!(reader.events_around(0, 0.0, 1.0).is_err());
 }
 
 /// A signal's frames, read one at a time in order, are its whole history.

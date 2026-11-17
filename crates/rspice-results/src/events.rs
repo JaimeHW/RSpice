@@ -1,5 +1,6 @@
 //! Exact retained digital/real events, bus declarations, and history validation.
 
+pub mod points;
 pub mod projection;
 
 use crate::analysis_payload::AnalysisResultPayload;
@@ -25,7 +26,8 @@ pub struct DigitalEventPointEvidence {
 #[serde(deny_unknown_fields)]
 pub struct DigitalEventTraceEvidence {
     pub node_name: String,
-    pub points: Vec<DigitalEventPointEvidence>,
+    /// In memory, or the run's results store's signal of the node.
+    pub points: points::EventPoints<DigitalEventPointEvidence>,
 }
 
 /// One committed real-valued event on an XSPICE event node.
@@ -41,7 +43,8 @@ pub struct RealEventPointEvidence {
 #[serde(deny_unknown_fields)]
 pub struct RealEventTraceEvidence {
     pub node_name: String,
-    pub points: Vec<RealEventPointEvidence>,
+    /// In memory, or the run's results store's signal of the node.
+    pub points: points::EventPoints<RealEventPointEvidence>,
 }
 
 /// Who declared a digital bus that a retained result carries.
@@ -387,6 +390,11 @@ pub fn validate_event_history(
                 trace.node_name
             ));
         }
+        // A stored history is checked as it is read: its store refuses a change it cannot
+        // hold, and keeps each signal's changes in commit order.
+        if trace.points.is_stored() {
+            continue;
+        }
         let times = trace.points.iter().map(|point| point.time_s);
         validate_event_times(&trace.node_name, times)?;
         // The typed decoder owns the encoding: a code it refuses
@@ -409,6 +417,9 @@ pub fn validate_event_history(
                 "event node '{}' is retained more than once",
                 trace.node_name
             ));
+        }
+        if trace.points.is_stored() {
+            continue;
         }
         let times = trace.points.iter().map(|point| point.time_s);
         validate_event_times(&trace.node_name, times)?;

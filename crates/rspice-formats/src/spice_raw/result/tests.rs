@@ -177,7 +177,8 @@ fn mixed_transient() -> AnalysisResult<RetainedWaveform> {
                 points: vec![RealEventPointEvidence {
                     time_s: 2e-10,
                     value: 0.75,
-                }],
+                }]
+                .into(),
             }],
             digital_buses: vec![DigitalBusEvidence {
                 name: "q".to_owned(),

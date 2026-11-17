@@ -143,7 +143,8 @@ pub fn events_analysis() -> AnalysisResult {
                 points: vec![RealEventPointEvidence {
                     time_s: 2.5e-10,
                     value: 0.75,
-                }],
+                }]
+                .into(),
             }],
             digital_buses: vec![bus("addr"), bus("data")],
             hdl_sources: Vec::new(),

@@ -69,10 +69,12 @@ pub struct RealEventPoint {
 }
 
 /// The committed event history of one node.
+#[cfg(feature = "engine-evidence")]
 #[derive(Debug, Clone, PartialEq)]
-pub struct EventNodeHistory<P> {
+pub struct EventNodeHistory<P: crate::events::points::EventPoint> {
     pub node_name: String,
-    pub points: Vec<P>,
+    /// In memory, or the run's results store's signal of the node.
+    pub points: crate::events::points::EventPoints<P>,
 }
 
 /// One exact complex value retained from an analysis result.

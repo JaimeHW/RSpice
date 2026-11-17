@@ -529,7 +529,7 @@ fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f6
     let events = |run: &crate::state::SimulationRun| match run.analyses[0].result_payload.as_ref() {
         Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) => digital_traces
             .iter()
-            .map(|trace| (trace.node_name.to_ascii_uppercase(), trace.points.clone()))
+            .map(|trace| (trace.node_name.to_ascii_uppercase(), trace.points.to_vec()))
             .collect::<Vec<_>>(),
         _ => Vec::new(),
     };

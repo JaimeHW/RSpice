@@ -208,12 +208,12 @@ impl LiveTransientAccumulator {
                 None => {
                     self.digital_events.push(DigitalEventTraceEvidence {
                         node_name: event.name,
-                        points: Vec::new(),
+                        points: Default::default(),
                     });
                     self.digital_events.len() - 1
                 }
             };
-            let points = &mut self.digital_events[index].points;
+            let points = self.digital_events[index].points.make_mut();
             if points
                 .last()
                 .is_some_and(|last| last.time_s >= time || last.value_code == event.value_code)
@@ -248,12 +248,12 @@ impl LiveTransientAccumulator {
                 None => {
                     self.real_events.push(RealEventTraceEvidence {
                         node_name: event.name,
-                        points: Vec::new(),
+                        points: Default::default(),
                     });
                     self.real_events.len() - 1
                 }
             };
-            let points = &mut self.real_events[index].points;
+            let points = self.real_events[index].points.make_mut();
             if points
                 .last()
                 .is_some_and(|last| last.time_s >= time || last.value == event.value)

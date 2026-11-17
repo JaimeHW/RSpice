@@ -1883,7 +1883,8 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
                 points: vec![crate::results::DigitalEventPoint {
                     time_s: 5e-10,
                     value_code: 1,
-                }],
+                }]
+                .into(),
             }],
             real: Vec::new(),
             digital_buses: Vec::new(),

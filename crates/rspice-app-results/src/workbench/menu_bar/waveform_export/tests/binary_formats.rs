@@ -280,7 +280,8 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
                         time_s: 1.0e-8,
                         value_code: 1,
                     },
-                ],
+                ]
+                .into(),
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),

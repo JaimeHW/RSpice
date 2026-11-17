@@ -251,8 +251,8 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     else {
         panic!("events");
     };
-    digital_traces[1].points.pop();
-    digital_traces[1].points[1].value_code = 4;
+    digital_traces[1].points.make_mut().pop();
+    digital_traces[1].points.make_mut()[1].value_code = 4;
     state.model.simulation = crate::io::simulation_state_from_results(
         crate::io::capture_simulation_results(&replacement),
     )
@@ -291,7 +291,8 @@ fn scalar_state(source: EventSelectionSource) -> (ResultsTestHost, &'static str)
                             time_s: 1.0,
                             value: 0.5,
                         },
-                    ],
+                    ]
+                    .into(),
                 }],
                 hdl_sources: Vec::new(),
             });
@@ -336,9 +337,9 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                         unreachable!()
                     };
                     if change_time {
-                        digital_traces[0].points[1].time_s = 2.0;
+                        digital_traces[0].points.make_mut()[1].time_s = 2.0;
                     } else {
-                        digital_traces[0].points[1].value_code = 4;
+                        digital_traces[0].points.make_mut()[1].value_code = 4;
                     }
                 }
                 EventSelectionSource::ExactReal => {
@@ -348,9 +349,9 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                         unreachable!()
                     };
                     if change_time {
-                        real_traces[0].points[1].time_s = 2.0;
+                        real_traces[0].points.make_mut()[1].time_s = 2.0;
                     } else {
-                        real_traces[0].points[1].value = 0.75;
+                        real_traces[0].points.make_mut()[1].value = 0.75;
                     }
                 }
                 _ => {
@@ -463,6 +464,7 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
     };
     digital_traces[1]
         .points
+        .make_mut()
         .push(crate::state::DigitalEventPointEvidence {
             time_s: 20.0e-9,
             value_code: 0,
@@ -636,7 +638,7 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
             digital_buses[0].msb = 0;
             digital_buses[0].lsb = 1;
         } else {
-            digital_traces[1].points[1].value_code = 4;
+            digital_traces[1].points.make_mut()[1].value_code = 4;
         }
         assert!(
             state.model.simulation.retained.runs[0].analyses[0]
@@ -913,7 +915,8 @@ fn mixed_event_state() -> ResultsTestHost {
                     time_s: 2.0e-9,
                     value: 0.123_456_789_012_345_67,
                 },
-            ],
+            ]
+            .into(),
         }],
         hdl_sources: Vec::new(),
     });

@@ -39,7 +39,7 @@ pub use io::{MemoryIo, SegmentIo};
 #[cfg(any(unix, windows))]
 pub use manifest::StoreDir;
 pub use manifest::{Manifest, Member};
-pub use reader::{SegmentReader, SegmentState};
+pub use reader::{EventSpan, SegmentReader, SegmentState};
 pub use run_writer::{RunIo, RunWriter};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use sink::{StoreSink, sink_stop};

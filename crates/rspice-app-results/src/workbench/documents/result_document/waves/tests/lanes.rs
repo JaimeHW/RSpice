@@ -637,7 +637,11 @@ fn a_real_net_draws_as_a_step_trace() {
         .iter()
         .find(|pane| pane.unit == model.lane_unit(lane))
         .expect("the lane opens the pane of its unit");
-    let steps = rspice_results_ui::waves::lanes::real_step_traces(model, pane);
+    let steps = rspice_results_ui::waves::lanes::real_step_traces(
+        model,
+        pane,
+        (f64::NEG_INFINITY, f64::INFINITY),
+    );
     assert_eq!(steps.len(), 1, "one step trace for the one real net");
     let step = &steps[0];
     // Every committed change is a vertical of the trace at its exact time.

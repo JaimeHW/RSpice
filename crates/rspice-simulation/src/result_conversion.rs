@@ -64,14 +64,13 @@ fn transient_events_payload(
         .into_iter()
         .map(|trace| rspice_results::events::DigitalEventTraceEvidence {
             node_name: trace.node_name,
+            // A stored history stays the store's signal, read as evidence.
             points: trace
                 .points
-                .into_iter()
                 .map(|point| rspice_results::events::DigitalEventPointEvidence {
                     time_s: point.time_s,
                     value_code: point.value_code,
-                })
-                .collect(),
+                }),
         })
         .collect::<Vec<_>>();
     digital_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
@@ -82,12 +81,10 @@ fn transient_events_payload(
             node_name: trace.node_name,
             points: trace
                 .points
-                .into_iter()
                 .map(|point| rspice_results::events::RealEventPointEvidence {
                     time_s: point.time_s,
                     value: point.value,
-                })
-                .collect(),
+                }),
         })
         .collect::<Vec<_>>();
     real_traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));

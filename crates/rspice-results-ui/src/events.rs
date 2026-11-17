@@ -923,7 +923,8 @@ mod tests {
                         time_s: 0.5,
                         value_code: 0,
                     },
-                ],
+                ]
+                .into(),
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
@@ -962,14 +963,16 @@ mod tests {
                             time_s: 0.5,
                             value_code: 1,
                         },
-                    ],
+                    ]
+                    .into(),
                 },
                 rspice_results::events::DigitalEventTraceEvidence {
                     node_name: "z".to_owned(),
                     points: vec![rspice_results::events::DigitalEventPointEvidence {
                         time_s: 0.5,
                         value_code: 1,
-                    }],
+                    }]
+                    .into(),
                 },
             ],
             real_traces: Vec::new(),
@@ -1130,7 +1133,8 @@ mod tests {
                             time_s: 1.0e-9,
                             value_code: 1,
                         },
-                    ],
+                    ]
+                    .into(),
                 }],
                 real_traces: Vec::new(),
                 digital_buses: Vec::new(),

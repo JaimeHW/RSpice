@@ -41,8 +41,10 @@ fn scene() -> (EventLanes, LogicLane, LogicLane, RealLane) {
         .iter_mut()
         .find(|trace| trace.node_name == "b[1]")
         .unwrap();
-    b1.points.retain(|point| point.time_s < 80.0 * NS);
-    b1.points.push(DigitalEventPointEvidence {
+    b1.points
+        .make_mut()
+        .retain(|point| point.time_s < 80.0 * NS);
+    b1.points.make_mut().push(DigitalEventPointEvidence {
         time_s: 80.0 * NS,
         value_code: 2,
     });

@@ -273,6 +273,50 @@ impl Drop for StoredRun {
     }
 }
 
+/// One digital or real event signal of a stored run, as its history reads it.
+pub(crate) struct StoredEventSignal {
+    run: Arc<StoredRun>,
+    signal: usize,
+    name: String,
+}
+
+impl StoredEventSignal {
+    pub(crate) fn new(run: Arc<StoredRun>, signal: usize, name: String) -> Arc<Self> {
+        Arc::new(Self { run, signal, name })
+    }
+}
+
+impl rspice_results::events::points::EventHistorySource for StoredEventSignal {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn store(&self) -> String {
+        self.run.path().display().to_string()
+    }
+
+    fn count(&self) -> Result<u64, String> {
+        self.run
+            .reader()
+            .event_count(self.signal)
+            .map_err(|error| error.to_string())
+    }
+
+    fn before(&self, t: f64) -> Result<u64, String> {
+        self.run
+            .reader()
+            .events_before(self.signal, t)
+            .map_err(|error| error.to_string())
+    }
+
+    fn span(&self, t0: f64, t1: f64) -> Result<rspice_results_store::EventSpan, String> {
+        self.run
+            .reader()
+            .events_around(self.signal, t0, t1)
+            .map_err(|error| error.to_string())
+    }
+}
+
 /// One column of a stored run, as a waveform reads it.
 pub(crate) struct StoredColumn {
     run: Arc<StoredRun>,

@@ -11,6 +11,8 @@ pub use retained::{
 mod trace;
 mod values;
 pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
+#[cfg(feature = "engine-evidence")]
+pub(crate) use values::report_column_read_failure;
 pub use values::{
     ColumnReadFailure, ColumnSource, ColumnTile, RowsAround, StoredWindow, ValueExtent,
     WaveformValues, WindowLead, take_column_read_failures,

@@ -72,7 +72,8 @@ fn model(plotted: &[&str]) -> StripModel {
                             time_s: 40.0 * NS,
                             value: 0.75,
                         },
-                    ],
+                    ]
+                    .into(),
                 }],
                 digital_buses: vec![DigitalBusEvidence {
                     name: "q".to_owned(),
@@ -246,7 +247,12 @@ fn the_readers_requests_edit_the_layout() {
     assert_eq!(labels(&specs), ["bus1"]);
     assert_eq!(layout.selected, [LaneKey::Bus("bus1".to_owned())]);
     let mut derived = DerivedSeries::default();
-    let user = user_bus_lanes(&mut derived, &model, &specs);
+    let user = user_bus_lanes(
+        &mut derived,
+        &model,
+        model.event_lanes.as_deref().unwrap(),
+        &specs,
+    );
     let word = user[0].as_ref().expect("the user bus reassembles");
     assert_eq!(word.members(), ["clk", "q[0]"]);
 
@@ -273,7 +279,7 @@ fn a_real_lane_steps_in_the_pane_of_its_unit() {
     let model = model(&["E(w)"]);
     let panes = model.unit_panes();
     assert_eq!(panes.len(), 1, "E(w) reads in V, the pane V(a) owns");
-    let steps = real_step_traces(&model, &panes[0]);
+    let steps = real_step_traces(&model, &panes[0], (f64::NEG_INFINITY, f64::INFINITY));
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].label, "E(w)");
     assert_eq!(*steps[0].x, [0.0, 40.0 * NS, 40.0 * NS, 100.0 * NS]);
@@ -281,6 +287,7 @@ fn a_real_lane_steps_in_the_pane_of_its_unit() {
 
     let rows = lane_readout_rows(
         &model,
+        model.event_lanes.as_deref().unwrap(),
         &[],
         &[],
         CursorPair {
@@ -314,6 +321,7 @@ fn the_cursor_table_reads_logic_and_bus_lanes_at_both_cursors() {
     let specs = lane_specs(&model, Some(&layout));
     let rows = lane_readout_rows(
         &model,
+        model.event_lanes.as_deref().unwrap(),
         &specs,
         &vec![None; specs.len()],
         CursorPair {
@@ -351,6 +359,7 @@ fn the_cursor_reads_a_bus_in_octal_and_ascii() {
         let specs = lane_specs(&model, Some(&layout));
         let rows = lane_readout_rows(
             &model,
+            model.event_lanes.as_deref().unwrap(),
             &specs,
             &vec![None; specs.len()],
             CursorPair {
@@ -398,6 +407,7 @@ fn a_named_bus_word_reads_as_its_name() {
     assert_eq!(value_column_chars(&specs), "UNREACHED".len());
     let rows = lane_readout_rows(
         &model,
+        model.event_lanes.as_deref().unwrap(),
         &specs,
         &vec![None; specs.len()],
         CursorPair {

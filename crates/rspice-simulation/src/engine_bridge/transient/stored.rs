@@ -18,7 +18,8 @@ use rspice_core::engine::{SinkTransient, TransientResult, TransientState};
 use rspice_core::result_sink::SinkStop;
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::stored_transient::{
-    SlotTarget, clear_rows, fill_events, fill_rows, fill_span, instance_parameters, slot_targets,
+    SlotTarget, clear_rows, fill_event_traces, fill_impulses, fill_rows, fill_span,
+    instance_parameters, slot_targets,
 };
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
 use rspice_results_store::{FileIo, SegmentReader, StoreError, StoreSink, WatchedIo, WatchedSink};
@@ -28,7 +29,9 @@ use rspice_simulation_contract::result_storage::ResultStorageFailure;
 use super::super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
 use crate::results::{SampledWaveform, TransientStoreReceipt, TransientStoreStop};
-use crate::results_store::{StoredColumn, StoredRun};
+use crate::results_store::{StoredColumn, StoredEventSignal, StoredRun};
+use rspice_results::events::points::{EventPoint, EventPoints};
+use std::collections::HashMap;
 
 /// What the store's object is called when it cannot be had.
 const STORE_OBJECT: &str = "the transient's results store";
@@ -196,7 +199,9 @@ impl EngineBridge {
                     }
                 };
                 let targets = slot_targets(reader, &shell).map_err(StoreError::Schema)?;
-                fill_events(reader, &mut shell)?;
+                // The digital and real histories stay in the store: a view reads the window it
+                // shows, and the outputs that read them whole read them back.
+                fill_impulses(reader, &mut shell)?;
                 Ok((shell, targets, instance_parameters(reader)))
             })
             .map_err(|error| store_failure(&path, error))?;
@@ -241,8 +246,8 @@ impl EngineBridge {
 }
 
 impl StoredTransient {
-    /// Read every row into the shell, with each instance parameter as the constant trace the
-    /// run kept, so it is the result the run returned in memory.
+    /// Read every row and event into the shell, with each instance parameter as the constant
+    /// trace the run kept, so it is the result the run returned in memory.
     pub(super) fn read_rows(&mut self) -> Result<(), SimulationError> {
         let rows = self.rows()?;
         let Self {
@@ -254,6 +259,7 @@ impl StoredTransient {
         } = self;
         run.with_reader(|reader| {
             fill_rows(reader, targets, shell, 0, rows)?;
+            fill_event_traces(reader, shell)?;
             for (slot, &target) in targets.iter().enumerate() {
                 let SlotTarget::Parameter(index) = target else {
                     continue;
@@ -267,11 +273,58 @@ impl StoredTransient {
         .map_err(|error| store_failure(&receipt.path, error))
     }
 
-    /// Give the rows [`Self::read_rows`] read back their memory, keeping the shell's
+    /// The store's event signal of each digital and of each real node the run traced, by name.
+    /// A later signal of a name takes its place, as [`fill_event_traces`] reads them.
+    pub(super) fn event_signals(&self) -> Result<super::EventSignals, SimulationError> {
+        let schema = self
+            .run
+            .reader()
+            .schema()
+            .map_err(|error| store_failure(&self.receipt.path, error))?;
+        let (mut digital, mut real) = (HashMap::new(), HashMap::new());
+        for (id, signal) in schema.signals.iter().enumerate() {
+            if signal.kind.slots() != 0 {
+                continue;
+            }
+            match signal.quantity.as_str() {
+                "digital" => digital.insert(signal.name.clone(), id),
+                "real_event" => real.insert(signal.name.clone(), id),
+                _ => continue,
+            };
+        }
+        Ok((digital, real))
+    }
+
+    /// The history of `node`, store signal `signal`, from `from` on: read from the store when
+    /// something asks, never held.
+    pub(super) fn event_points<P: EventPoint>(
+        &self,
+        signal: usize,
+        node: &str,
+        from: f64,
+    ) -> Result<EventPoints<P>, SimulationError> {
+        let source = StoredEventSignal::new(Arc::clone(&self.run), signal, node.to_owned());
+        EventPoints::stored(source, from).map_err(|cause| {
+            SimulationError::ResultStorage(ResultStorageFailure::Io {
+                cause: format!(
+                    "the transient's results segment {} could not be read back: {cause}",
+                    self.receipt.path.display()
+                ),
+            })
+        })
+    }
+
+    /// Give the rows and events [`Self::read_rows`] read back their memory, keeping the shell's
     /// `device_traces` traces of its own.
     pub(super) fn drop_rows(&mut self, device_traces: usize) {
         clear_rows(&self.targets, &mut self.shell);
         self.shell.device_op_traces.truncate(device_traces);
+        for trace in &mut self.shell.digital_traces {
+            trace.points = Vec::new();
+        }
+        for trace in &mut self.shell.real_traces {
+            trace.points = Vec::new();
+        }
     }
 
     /// Read the first and last rows into the shell, each instance parameter included: what the

@@ -202,7 +202,7 @@ impl From<EventNodeHistory<DigitalEventPoint>> for WorkerDigitalEventTrace {
     fn from(value: EventNodeHistory<DigitalEventPoint>) -> Self {
         Self {
             node_name: value.node_name,
-            points: value.points.into_iter().map(Into::into).collect(),
+            points: value.points.iter().copied().map(Into::into).collect(),
         }
     }
 }
@@ -226,7 +226,7 @@ impl From<EventNodeHistory<RealEventPoint>> for WorkerRealEventTrace {
     fn from(value: EventNodeHistory<RealEventPoint>) -> Self {
         Self {
             node_name: value.node_name,
-            points: value.points.into_iter().map(Into::into).collect(),
+            points: value.points.iter().copied().map(Into::into).collect(),
         }
     }
 }

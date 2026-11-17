@@ -205,6 +205,27 @@ impl StoreReader {
         self.with_reader(|reader| reader.events(signal, t0, t1))
     }
 
+    /// How many changes event signal `signal` holds.
+    pub fn event_count(&self, signal: usize) -> Result<u64, StoreError> {
+        self.with_reader(|reader| reader.event_count(signal))
+    }
+
+    /// How many changes of event signal `signal` come before time `t`.
+    pub fn events_before(&self, signal: usize, t: f64) -> Result<u64, StoreError> {
+        self.with_reader(|reader| reader.events_before(signal, t))
+    }
+
+    /// The changes of event signal `signal` with time in `t0 ..= t1`, with the last change
+    /// before `t0` and the first after `t1`.
+    pub fn events_around(
+        &self,
+        signal: usize,
+        t0: f64,
+        t1: f64,
+    ) -> Result<rspice_results_store::EventSpan, StoreError> {
+        self.with_reader(|reader| reader.events_around(signal, t0, t1))
+    }
+
     fn signal_of(&self, slot: usize) -> Result<usize, StoreError> {
         self.slot_signals
             .get(slot)

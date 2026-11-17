@@ -829,7 +829,8 @@ fn bussed_event_payload(digital_buses: Vec<DigitalBusEvidence>) -> AnalysisResul
                 time_s: 5.0e-9,
                 value_code: 1,
             },
-        ],
+        ]
+        .into(),
     };
     AnalysisResultPayload::TransientEvents {
         voltage_impulses: None,

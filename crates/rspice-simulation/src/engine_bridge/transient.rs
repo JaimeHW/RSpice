@@ -14,6 +14,31 @@ use rspice_simulation_contract::config::TransientAnalysisConfig;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod stored;
+#[cfg(not(target_arch = "wasm32"))]
+use stored::StoredTransient;
+
+/// A stored run's digital and real event signals, each by its node.
+type EventSignals = (HashMap<String, usize>, HashMap<String, usize>);
+
+/// A stored transient, which a build without a results store never makes.
+#[cfg(target_arch = "wasm32")]
+enum StoredTransient {}
+
+#[cfg(target_arch = "wasm32")]
+impl StoredTransient {
+    fn event_signals(&self) -> Result<EventSignals, SimulationError> {
+        match *self {}
+    }
+
+    fn event_points<P: rspice_results::events::points::EventPoint>(
+        &self,
+        _signal: usize,
+        _node: &str,
+        _from: f64,
+    ) -> Result<rspice_results::events::points::EventPoints<P>, SimulationError> {
+        match *self {}
+    }
+}
 
 impl EngineBridge {
     /// Validate source/environment identity using the same materialization as execution.
@@ -458,7 +483,7 @@ fn convert_transient_result(
         interpolate_start,
         abort,
     )?;
-    let events = collect_event_history(&tran_result, start_time, abort)?;
+    let events = collect_event_history(&tran_result, start_time, None, abort)?;
     // The engine already evaluated every `.fft` card this deck carried, inside
     // this solve. Carrying the spectra out is all that is left to do with them.
     let spectra = super::recorded_fft::recorded_spectra(netlist, &tran_result.fft_results, abort)?;
@@ -618,7 +643,7 @@ fn convert_stored_transient(
     } else {
         (Vec::new(), Vec::new())
     };
-    let events = collect_event_history(&stored.shell, start_time, abort)?;
+    let events = collect_event_history(&stored.shell, start_time, Some(&stored), abort)?;
     let spectra = super::recorded_fft::recorded_spectra(netlist, &stored.shell.fft_results, abort)?;
     let (time, waveforms) = stored.waveforms(&window, abort)?;
     let result = SimulationResult::Transient {
@@ -933,9 +958,13 @@ fn evaluate_transient_measurements(
 /// accepted the change, which is not generally an analog timestep. A node
 /// whose whole history precedes the output window is dropped entirely rather
 /// than retained empty, so the payload never claims a node it cannot show.
+///
+/// A stored run's histories stay in its store: each is the store's signal of its node from the
+/// window's start on, which a view reads a window of and a whole-history reader reads back.
 fn collect_event_history(
     tran_result: &rspice_core::engine::TransientResult,
     start_time: f64,
+    stored: Option<&StoredTransient>,
     abort: &dyn AbortSignal,
 ) -> Result<crate::results::TransientEventHistory, SimulationError> {
     use crate::results::{
@@ -950,6 +979,7 @@ fn collect_event_history(
     let retained = |time: f64| time >= window_start;
     let mut event_nodes =
         HashSet::with_capacity(tran_result.digital_traces.len() + tran_result.real_traces.len());
+    let signals = stored.map(StoredTransient::event_signals).transpose()?;
 
     let mut digital = Vec::new();
     for trace in &tran_result.digital_traces {
@@ -960,26 +990,33 @@ fn collect_event_history(
                 "transient event history contains an empty or duplicate node identity".to_owned(),
             ));
         }
-        if trace.points.iter().any(|point| !point.time.is_finite())
-            || trace
+        let signal = signals
+            .as_ref()
+            .and_then(|(digital, _)| digital.get(&trace.node_name));
+        let points = if let (Some(stored), Some(&signal)) = (stored, signal) {
+            stored.event_points(signal, &trace.node_name, window_start)?
+        } else {
+            if trace.points.iter().any(|point| !point.time.is_finite())
+                || trace
+                    .points
+                    .windows(2)
+                    .any(|pair| pair[1].time < pair[0].time)
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "transient digital event node '{}' has an invalid time history",
+                    trace.node_name
+                )));
+            }
+            trace
                 .points
-                .windows(2)
-                .any(|pair| pair[1].time < pair[0].time)
-        {
-            return Err(SimulationError::SolverError(format!(
-                "transient digital event node '{}' has an invalid time history",
-                trace.node_name
-            )));
-        }
-        let points = trace
-            .points
-            .iter()
-            .filter(|point| retained(point.time))
-            .map(|point| DigitalEventPoint {
-                time_s: point.time,
-                value_code: point.value.event_code(),
-            })
-            .collect::<Vec<_>>();
+                .iter()
+                .filter(|point| retained(point.time))
+                .map(|point| DigitalEventPoint {
+                    time_s: point.time,
+                    value_code: point.value.event_code(),
+                })
+                .collect()
+        };
         if !points.is_empty() {
             digital.push(EventNodeHistory {
                 node_name: trace.node_name.clone(),
@@ -997,29 +1034,36 @@ fn collect_event_history(
                 "transient event history contains an empty or duplicate node identity".to_owned(),
             ));
         }
-        if trace
-            .points
-            .iter()
-            .any(|point| !point.time.is_finite() || !point.value.is_finite())
-            || trace
+        let signal = signals
+            .as_ref()
+            .and_then(|(_, real)| real.get(&trace.node_name));
+        let points = if let (Some(stored), Some(&signal)) = (stored, signal) {
+            stored.event_points(signal, &trace.node_name, window_start)?
+        } else {
+            if trace
                 .points
-                .windows(2)
-                .any(|pair| pair[1].time < pair[0].time)
-        {
-            return Err(SimulationError::SolverError(format!(
-                "transient real event node '{}' has an invalid time/value history",
-                trace.node_name
-            )));
-        }
-        let points = trace
-            .points
-            .iter()
-            .filter(|point| retained(point.time))
-            .map(|point| RealEventPoint {
-                time_s: point.time,
-                value: point.value,
-            })
-            .collect::<Vec<_>>();
+                .iter()
+                .any(|point| !point.time.is_finite() || !point.value.is_finite())
+                || trace
+                    .points
+                    .windows(2)
+                    .any(|pair| pair[1].time < pair[0].time)
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "transient real event node '{}' has an invalid time/value history",
+                    trace.node_name
+                )));
+            }
+            trace
+                .points
+                .iter()
+                .filter(|point| retained(point.time))
+                .map(|point| RealEventPoint {
+                    time_s: point.time,
+                    value: point.value,
+                })
+                .collect()
+        };
         if !points.is_empty() {
             real.push(EventNodeHistory {
                 node_name: trace.node_name.clone(),
@@ -1317,7 +1361,7 @@ mod tests {
                 .collect(),
         );
         let cropped =
-            collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).unwrap();
+            collect_event_history(&result, 0.5, None, &rspice_core::abort_signal::NoAbort).unwrap();
         assert!(!cropped.is_empty());
         let voltage = cropped.voltage_impulses.unwrap();
         assert_eq!((voltage.start_time_s, voltage.stop_time_s), (0.5, 1.0));
@@ -1350,19 +1394,21 @@ mod tests {
             }]
         );
         let full =
-            collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort).unwrap();
+            collect_event_history(&result, 0.0, None, &rspice_core::abort_signal::NoAbort).unwrap();
         assert_eq!(
             full.current_impulses.unwrap().traces[0].points[0].charge_coulombs,
             -0.002
         );
         result.current_impulses.as_mut().unwrap()[0].points[0].charge_coulombs = f64::NAN;
-        assert!(collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).is_err());
+        assert!(
+            collect_event_history(&result, 0.5, None, &rspice_core::abort_signal::NoAbort).is_err()
+        );
         result.current_impulses = None;
         result.voltage_impulses.as_mut().unwrap()[0].points[0].volt_seconds = f64::NAN;
-        assert!(collect_event_history(&result, 0.5, &rspice_core::NoAbort).is_err());
+        assert!(collect_event_history(&result, 0.5, None, &rspice_core::NoAbort).is_err());
         result.voltage_impulses = None;
         assert!(
-            collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort)
+            collect_event_history(&result, 0.0, None, &rspice_core::abort_signal::NoAbort)
                 .unwrap()
                 .is_empty()
         );
