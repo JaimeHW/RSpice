@@ -38,6 +38,15 @@ impl Model {
         library: &str,
         new_name: &str,
     ) -> Result<(usize, WorkspacePruned), String> {
+        // The cell and view selected in the renamed library stay selected
+        // under its new name, as they do through a cell or view rename.
+        let kept_selection = (self.library_manager.selected_library.as_deref() == Some(library))
+            .then(|| {
+                (
+                    self.library_manager.selected_cell.clone(),
+                    self.library_manager.selected_view.clone(),
+                )
+            });
         let source = self
             .library_manager
             .get_library(library)
@@ -45,12 +54,13 @@ impl Model {
         if source.read_only {
             return Err(format!("Library '{library}' is read-only"));
         }
+        if library == new_name {
+            return Err(format!("Library '{library}' already has that name"));
+        }
         if crate::state::canonical_cell_view_owner_key(library, "", "")
             == crate::state::canonical_cell_view_owner_key(new_name, "", "")
         {
-            return Err(format!(
-                "Library '{library}' already has that identity; a name differing only in case or normalization is the same library"
-            ));
+            return Err(case_only_rename_refusal("library"));
         }
         if let Some(conflict) =
             conflicting_library_name(&self.library_manager, new_name, Some(library))
@@ -153,6 +163,13 @@ impl Model {
         self.publish_project_library_mutation(project_mutation);
 
         self.library_manager.select_library(new_name);
+        match kept_selection {
+            Some((Some(cell), Some(view))) => {
+                self.library_manager.select_view(new_name, &cell, &view);
+            }
+            Some((Some(cell), None)) => self.library_manager.select_cell(new_name, &cell),
+            _ => {}
+        }
         Ok((
             remapped,
             WorkspacePruned {
@@ -320,6 +337,14 @@ impl Model {
 
 /// The existing library whose canonical identity `name` would collide with,
 /// ignoring one map key the caller is about to vacate.
+/// The one refusal a library, a cell and a view give a name that differs
+/// from the old one only in case. The catalog, the configurations, the
+/// project's sources and Design management all key names ignoring case, so
+/// such a rename has nothing to move and is refused alike for all three.
+pub(super) fn case_only_rename_refusal(kind: &str) -> String {
+    format!("A {kind} cannot be renamed to a name that differs only in case.")
+}
+
 fn conflicting_library_name(
     libraries: &crate::state::LibraryManager,
     name: &str,
@@ -354,10 +379,7 @@ fn require_no_configuration_roots(
     if names.is_empty() {
         return Ok(());
     }
-    let mut listed = names.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
-    if names.len() > 4 {
-        listed.push_str(&format!(" and {} more", names.len() - 4));
-    }
+    let listed = names.join(", ");
     Err(format!(
         "Configuration set roots still reference {scope} ({listed}). Rebind or remove those configurations first."
     ))

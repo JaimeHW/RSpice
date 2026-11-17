@@ -284,6 +284,23 @@ pub struct CellRemovalScope {
     pub hierarchy_pruned: bool,
 }
 
+/// Whether `component` is a placement of `library`/`cell`, or of its `view`
+/// alone: the one comparison every count and removal of placements makes.
+/// Names are compared ignoring ASCII case, as the catalog keeps them unique
+/// that way.
+pub fn places(
+    component: &crate::state::Component,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> bool {
+    component.library_cell.as_ref().is_some_and(|binding| {
+        binding.library.eq_ignore_ascii_case(library)
+            && binding.cell.eq_ignore_ascii_case(cell)
+            && view.is_none_or(|view| binding.view.eq_ignore_ascii_case(view))
+    })
+}
+
 fn collect(
     document: &SchematicDocument,
     schematic: &CellViewRef,
@@ -291,13 +308,7 @@ fn collect(
     uses: &mut Vec<CellInstanceUse>,
 ) {
     for component in &document.components {
-        let Some(binding) = component.library_cell.as_ref() else {
-            continue;
-        };
-        if binding.library.eq_ignore_ascii_case(library)
-            && binding.cell.eq_ignore_ascii_case(cell)
-            && view.is_none_or(|view| binding.view.eq_ignore_ascii_case(view))
-        {
+        if places(component, library, cell, view) {
             uses.push(CellInstanceUse {
                 schematic: schematic.clone(),
                 instance: component.name.clone(),

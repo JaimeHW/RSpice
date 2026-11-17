@@ -79,11 +79,7 @@ impl Model {
         display_path: &str,
     ) {
         let places_target = |component: &crate::state::Component| {
-            component.library_cell.as_ref().is_some_and(|binding| {
-                binding.library == library
-                    && binding.cell == cell
-                    && view.is_none_or(|view| binding.view == view)
-            })
+            crate::workbench::app_state::cell_usage::places(component, library, cell, view)
         };
 
         let active = self.workspace.content.active_schematic_reference();

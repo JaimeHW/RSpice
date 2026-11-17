@@ -852,6 +852,58 @@ fn rename_library_propagation_matrix() {
     ));
 }
 
+/// A name that differs only in case gets one answer for a library, a cell
+/// and a view alike, and changes nothing; a renamed library keeps its
+/// selected cell and view, as a renamed cell or view keeps its own.
+#[test]
+fn case_only_renames_are_refused_alike_and_a_renamed_library_keeps_its_selection() {
+    let mut state = state_with_populated_user_library();
+    state
+        .model
+        .library_manager
+        .select_view("user", "amp", "schematic");
+
+    for (kind, refused) in [
+        ("library", state.rename_library("user", "User").map(|_| ())),
+        ("cell", state.rename_cell("user", "amp", "AMP").map(|_| ())),
+        (
+            "view",
+            state
+                .rename_view("user", "amp", "schematic", "Schematic")
+                .map(|_| ()),
+        ),
+    ] {
+        assert_eq!(
+            refused.expect_err("a case-only rename is refused"),
+            format!("A {kind} cannot be renamed to a name that differs only in case.")
+        );
+    }
+    assert!(
+        state
+            .model
+            .library_manager
+            .get_library("user")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("schematic"))
+            .is_some(),
+        "nothing was renamed"
+    );
+
+    state
+        .rename_library("user", "project_lib")
+        .expect("a writable library renames");
+    let manager = &state.model.library_manager;
+    assert_eq!(
+        (
+            manager.selected_library.as_deref(),
+            manager.selected_cell.as_deref(),
+            manager.selected_view.as_deref()
+        ),
+        (Some("project_lib"), Some("amp"), Some("schematic")),
+        "the renamed library keeps its selection"
+    );
+}
+
 #[test]
 fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
     let mut state = state_with_populated_user_library();

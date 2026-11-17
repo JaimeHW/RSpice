@@ -439,6 +439,11 @@ impl Model {
         if cell == new_name {
             return Err(format!("Cell '{cell}' already has that name"));
         }
+        if crate::state::canonical_cell_view_owner_key(library, cell, "")
+            == crate::state::canonical_cell_view_owner_key(library, new_name, "")
+        {
+            return Err(super::libraries::case_only_rename_refusal("cell"));
+        }
         let requested_identity = crate::state::canonical_cell_view_owner_key(library, new_name, "");
         if lib.cells.iter().any(|(candidate_key, candidate)| {
             candidate_key != cell
@@ -589,10 +594,11 @@ impl Model {
         }
         let requested_identity =
             crate::state::canonical_cell_view_owner_key(library, cell, new_name);
+        if view == new_name {
+            return Err(format!("View '{view}' already has that name"));
+        }
         if crate::state::canonical_cell_view_owner_key(library, cell, view) == requested_identity {
-            return Err(format!(
-                "View '{view}' already has that identity; a name differing only in case or normalization is the same view"
-            ));
+            return Err(super::libraries::case_only_rename_refusal("view"));
         }
         if owning_cell.views.iter().any(|(candidate_key, candidate)| {
             candidate_key != view
