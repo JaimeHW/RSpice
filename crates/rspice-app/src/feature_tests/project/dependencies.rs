@@ -651,7 +651,13 @@ fn a_design_library_opens_on_the_library_page_and_reviews_its_deletion() {
         ProjectPage::Library
     );
     assert_eq!(
-        libraries.app.state.model.library_manager.selected_library.as_deref(),
+        libraries
+            .app
+            .state
+            .model
+            .library_manager
+            .selected_library
+            .as_deref(),
         Some("cells")
     );
 
