@@ -5981,6 +5981,7 @@ fn analog_task_spelling(kind: crate::analog_tasks::AnalogTaskKind) -> &'static s
         AnalogTaskKind::FileStrobe => "$fstrobe",
         AnalogTaskKind::FileMonitor => "$fmonitor",
         AnalogTaskKind::FileClose => "$fclose",
+        AnalogTaskKind::FileDebug => "$fdebug",
         AnalogTaskKind::Finish => "$finish",
         AnalogTaskKind::Error => "$error",
         AnalogTaskKind::Warning => "$warning",

@@ -194,7 +194,8 @@ impl CircuitData {
 
     /// Deliver accepted analog calls exactly once, in runtime, generated, then
     /// mixed-signal instance order and each instance's source execution order.
-    /// Rejected candidates are never delivered.
+    /// Rejected candidates are never delivered, except their `$debug` and
+    /// `$fdebug` calls, which the next accepted point delivers first.
     ///
     /// Mixed-signal trials must be closed before delivery, because a later
     /// rollback must not restore output already delivered to the host. Every

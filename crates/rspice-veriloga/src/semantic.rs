@@ -4131,13 +4131,13 @@ impl SemanticAnalyzer {
     fn is_descriptor_task(name: &str) -> bool {
         matches!(
             name,
-            "$fdisplay" | "$fwrite" | "$fstrobe" | "$fmonitor" | "$fclose"
+            "$fdisplay" | "$fwrite" | "$fstrobe" | "$fmonitor" | "$fdebug" | "$fclose"
         )
     }
 
     /// `$strobe`, `$display`, `$write`, `$monitor`, `$debug`, `$info`,
     /// `$warning`, `$error` and `$fatal`, and the file tasks `$fdisplay`,
-    /// `$fwrite`, `$fstrobe`, `$fmonitor` and `$fclose`: a string literal
+    /// `$fwrite`, `$fstrobe`, `$fmonitor`, `$fdebug` and `$fclose`: a string literal
     /// stays text for the host's formatter, and every other argument is a
     /// numeric operand captured when the call runs. A file task's descriptor
     /// and `$fatal`'s level lead as integers. An argument of another type (a
@@ -4169,6 +4169,7 @@ impl SemanticAnalyzer {
             "$fwrite" => AnalogTaskKind::FileWrite,
             "$fstrobe" => AnalogTaskKind::FileStrobe,
             "$fmonitor" => AnalogTaskKind::FileMonitor,
+            "$fdebug" => AnalogTaskKind::FileDebug,
             "$fclose" => AnalogTaskKind::FileClose,
             _ => return Err(Self::unknown_system_task_error(call)),
         };

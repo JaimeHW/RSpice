@@ -42,6 +42,7 @@ const ANALOG_SYSTEM_TASKS: &[&str] = &[
     "$fwrite",
     "$fstrobe",
     "$fmonitor",
+    "$fdebug",
     "$fclose",
     "$bound_step",
     "$discontinuity",

@@ -1421,7 +1421,13 @@ impl CircuitData {
         self.xspice_output_iterates.clear();
         #[cfg(feature = "veriloga")]
         {
-            self.veriloga_devices = snapshot.veriloga_devices;
+            let mut restored = snapshot.veriloga_devices;
+            // What `$debug` and `$fdebug` wrote in the rejected attempt stays
+            // written.
+            for (image, rejected) in restored.iter_mut().zip(self.veriloga_devices.iter_mut()) {
+                image.keep_debug_analog_tasks_of(rejected);
+            }
+            self.veriloga_devices = restored;
             self.sync_veriloga_simulation_parameters();
         }
         #[cfg(feature = "veriloga-builtins-base")]

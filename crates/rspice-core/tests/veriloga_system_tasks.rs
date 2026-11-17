@@ -285,3 +285,49 @@ const ONCE_PER_POINT: &str = "`include \"disciplines.vams\"\nmodule once(q); ino
      $fclose(k); end\n\
      if (n > 0) V(q) <+ n;\n\
      else I(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\nend\nendmodule\n";
+
+/// `$debug` and `$fdebug` write at every evaluation, a rejected point's
+/// included (LRM 2.4 sections 9.4.6 and 9.5.9): the step that overshoots a
+/// `cross` event is rejected for one that lands on it, and its evaluations
+/// print all the same, in the order they ran.
+#[test]
+fn debug_writes_at_every_evaluation_a_rejected_points_included() {
+    let directory = scratch("debug");
+    let (outcome, records) = run(
+        &directory,
+        "@(initial_step) fd = $fopen(\"debug.txt\", \"w\");\n\
+         @(cross(V(x) - 0.25, +1)) a = 1;\n\
+         $debug(\"debug %.17g\", $abstime); $fdebug(fd, \"%.17g\", $abstime);",
+        10e-9,
+    );
+    let SimulationOutcome::Completed(result) = outcome.unwrap() else {
+        panic!("the run completes");
+    };
+    let printed: Vec<f64> = stdout(&records)
+        .iter()
+        .filter_map(|text| text.strip_prefix("debug "))
+        .map(|time| time.trim().parse().unwrap())
+        .collect();
+    for time in &result.time {
+        assert!(
+            printed.contains(time),
+            "accepted {time} printed: {printed:?}"
+        );
+    }
+    let rejected: Vec<f64> = printed
+        .iter()
+        .copied()
+        .filter(|time| !result.time.contains(time))
+        .collect();
+    assert!(
+        !rejected.is_empty(),
+        "a rejected point prints: {printed:?} accepted {:?}",
+        result.time
+    );
+    let written: Vec<f64> = std::fs::read_to_string(directory.join("debug.txt"))
+        .unwrap()
+        .lines()
+        .map(|time| time.parse().unwrap())
+        .collect();
+    assert_eq!(written, printed);
+}

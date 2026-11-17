@@ -2,7 +2,9 @@
 //!
 //! An evaluation records calls in source execution order. Only acceptance
 //! publishes them to the host; another Newton evaluation replaces the candidate
-//! calls. Tasks whose semantics require immediate delivery, including `$fatal`,
+//! calls. `$debug` and `$fdebug` are the exception: every evaluation's calls
+//! are kept, a rejected point's included, and the next acceptance publishes
+//! them. Tasks whose semantics require immediate delivery, including `$fatal`,
 //! must use the host's immediate diagnostic path instead of this journal.
 
 use std::fmt;
@@ -21,7 +23,8 @@ pub enum AnalogTaskKind {
     Write,
     Strobe,
     Monitor,
-    /// `$debug`: written for every evaluation of an accepted point.
+    /// `$debug`: written at every evaluation, a rejected point's included
+    /// (LRM 2.4 section 9.4.6).
     Debug,
     /// `$fdisplay`, `$fwrite`, `$fstrobe` and `$fmonitor`: the first operand
     /// is the file or multichannel descriptor.
@@ -31,10 +34,13 @@ pub enum AnalogTaskKind {
     FileMonitor,
     /// `$fclose(descriptor)`.
     FileClose,
+    /// `$fdebug`: `$debug` to the descriptor its first operand names, written
+    /// even for a rejected point (LRM 2.4 section 9.5.9).
+    FileDebug,
 }
 
 impl AnalogTaskKind {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Finish,
         Self::Stop,
         Self::Fatal,
@@ -51,6 +57,7 @@ impl AnalogTaskKind {
         Self::FileStrobe,
         Self::FileMonitor,
         Self::FileClose,
+        Self::FileDebug,
     ];
 
     /// A stable small code, for machine-code descriptors that carry the kind.
@@ -93,6 +100,7 @@ impl AnalogTaskKind {
                 | Self::FileStrobe
                 | Self::FileMonitor
                 | Self::FileClose
+                | Self::FileDebug
         )
     }
 
@@ -103,13 +111,14 @@ impl AnalogTaskKind {
         self != Self::Finish
     }
 
-    /// Whether every evaluation of an accepted point writes, rather than only
-    /// the evaluation the point is accepted with: `$debug` alone. Each file
-    /// task writes as its console twin does (LRM 2.4 section 9.5.2):
-    /// `$fdisplay` and `$fwrite` once per accepted point, as `$display` and
-    /// `$write` do. A rejected point still writes nothing.
+    /// Whether every evaluation writes, a rejected point's included, rather
+    /// than only the evaluation a point is accepted with: `$debug` and
+    /// `$fdebug`, which show the solver's iterations (LRM 2.4 sections 9.4.6
+    /// and 9.5.9). Every other file task writes as its console twin does
+    /// (section 9.5.2): `$fdisplay` and `$fwrite` once per accepted point, as
+    /// `$display` and `$write` do.
     pub fn writes_every_evaluation(self) -> bool {
-        self == Self::Debug
+        matches!(self, Self::Debug | Self::FileDebug)
     }
 }
 
@@ -219,23 +228,20 @@ impl std::error::Error for AnalogEffectError {}
 /// resetting an analysis retires both candidate and undelivered accepted calls.
 ///
 /// A task that writes on every evaluation
-/// ([`AnalogTaskKind::writes_every_evaluation`]) is kept across the Newton
-/// evaluations of one point rather than replaced by the next one, and is
-/// published, ahead of the accepted evaluation's own calls, only when that
-/// point is accepted. An evaluation at another time, or a withdrawn trial,
-/// discards what a rejected point wrote.
+/// ([`AnalogTaskKind::writes_every_evaluation`]) is kept from every
+/// evaluation, a rejected point's and a withdrawn trial's included, rather
+/// than replaced by the next one. The next accepted point publishes those
+/// calls, in the order they ran, ahead of its own evaluation's other calls.
 #[derive(Debug, Default, PartialEq)]
 pub struct AnalogEffectJournal {
     limits: AnalogEffectLimits,
     candidate: Vec<AnalogTaskInvocation>,
     accepted: Vec<AnalogTaskInvocation>,
-    /// Every-evaluation calls of the point being solved.
-    executions: Vec<AnalogTaskInvocation>,
-    /// The time the point being solved is at.
-    point_time: Option<f64>,
+    /// Every-evaluation calls not yet published.
+    debug: Vec<AnalogTaskInvocation>,
     candidate_bytes: usize,
     accepted_bytes: usize,
-    executions_bytes: usize,
+    debug_bytes: usize,
     failure: Option<AnalogEffectError>,
     evaluation_in_progress: bool,
 }
@@ -245,17 +251,16 @@ impl Clone for AnalogEffectJournal {
         // Vec::clone retains elements but need not retain spare capacity.
         // A rollback clone must keep acceptance allocation-free as well.
         let mut accepted =
-            Vec::with_capacity(self.accepted.len() + self.candidate.len() + self.executions.len());
+            Vec::with_capacity(self.accepted.len() + self.candidate.len() + self.debug.len());
         accepted.extend(self.accepted.iter().cloned());
         Self {
             limits: self.limits,
             candidate: self.candidate.clone(),
             accepted,
-            executions: self.executions.clone(),
-            point_time: self.point_time,
+            debug: self.debug.clone(),
             candidate_bytes: self.candidate_bytes,
             accepted_bytes: self.accepted_bytes,
-            executions_bytes: self.executions_bytes,
+            debug_bytes: self.debug_bytes,
             failure: self.failure,
             evaluation_in_progress: self.evaluation_in_progress,
         }
@@ -268,26 +273,6 @@ impl AnalogEffectJournal {
     pub fn begin_evaluation(&mut self) {
         self.discard_candidate();
         self.evaluation_in_progress = true;
-    }
-
-    /// Note the time of the evaluation about to run. Every-evaluation calls
-    /// of a point at another time belong to a point that was never accepted.
-    pub fn begin_point(&mut self, time: f64) {
-        if self.point_time != Some(time) {
-            self.discard_executions();
-            self.point_time = Some(time);
-        }
-    }
-
-    /// Withdraw a rejected trial: its every-evaluation calls go with it.
-    pub fn discard_trial(&mut self) {
-        self.discard_candidate();
-        self.discard_executions();
-    }
-
-    fn discard_executions(&mut self) {
-        self.executions.clear();
-        self.executions_bytes = 0;
     }
 
     pub fn complete_evaluation(&mut self) {
@@ -365,9 +350,11 @@ impl AnalogEffectJournal {
         self.evaluation_in_progress = false;
     }
 
+    /// A new analysis starts: undelivered accepted calls are retired, but the
+    /// every-evaluation calls of evaluations that ran stay for the next
+    /// acceptance to publish.
     pub fn reset_analysis(&mut self) {
-        self.discard_trial();
-        self.point_time = None;
+        self.discard_candidate();
         self.accepted.clear();
         self.accepted_bytes = 0;
     }
@@ -396,7 +383,7 @@ impl AnalogEffectJournal {
             .candidate
             .len()
             .checked_add(self.accepted.len())
-            .and_then(|count| count.checked_add(self.executions.len()))
+            .and_then(|count| count.checked_add(self.debug.len()))
             .and_then(|count| count.checked_add(1))
             .ok_or(AnalogEffectError::CallLimit)?;
         if calls > self.limits.calls {
@@ -407,7 +394,7 @@ impl AnalogEffectJournal {
             .ok_or(AnalogEffectError::ArgumentLimit)?;
         let total_bytes = payload
             .checked_add(self.candidate_bytes)
-            .and_then(|bytes| bytes.checked_add(self.executions_bytes))
+            .and_then(|bytes| bytes.checked_add(self.debug_bytes))
             .and_then(|bytes| bytes.checked_add(self.accepted_bytes))
             .ok_or(AnalogEffectError::ArgumentLimit)?;
         if total_bytes > self.limits.argument_bytes {
@@ -416,10 +403,10 @@ impl AnalogEffectJournal {
         // Reserve delivery capacity now, while errors still belong to candidate
         // evaluation. Circuit-wide accepted-state application is infallible.
         self.accepted
-            .try_reserve(self.candidate.len() + self.executions.len() + 1)
+            .try_reserve(self.candidate.len() + self.debug.len() + 1)
             .map_err(|_| AnalogEffectError::AllocationFailed)?;
         let (buffer, bytes) = if invocation.kind.writes_every_evaluation() {
-            (&mut self.executions, &mut self.executions_bytes)
+            (&mut self.debug, &mut self.debug_bytes)
         } else {
             (&mut self.candidate, &mut self.candidate_bytes)
         };
@@ -454,11 +441,11 @@ impl AnalogEffectJournal {
             self.validate_candidate().is_ok(),
             "task acceptance requires a valid candidate"
         );
-        self.accepted.append(&mut self.executions);
+        self.accepted.append(&mut self.debug);
         self.accepted.append(&mut self.candidate);
-        self.accepted_bytes += self.candidate_bytes + self.executions_bytes;
+        self.accepted_bytes += self.candidate_bytes + self.debug_bytes;
         self.candidate_bytes = 0;
-        self.executions_bytes = 0;
+        self.debug_bytes = 0;
     }
 
     pub fn accepted(&self) -> &[AnalogTaskInvocation] {
@@ -475,9 +462,18 @@ impl AnalogEffectJournal {
 
     pub fn has_candidate(&self) -> bool {
         !self.candidate.is_empty()
-            || !self.executions.is_empty()
+            || !self.debug.is_empty()
             || self.failure.is_some()
             || self.evaluation_in_progress
+    }
+
+    /// Keep the every-evaluation calls `rejected` holds in place of this
+    /// journal's: a rollback that restores this older image after a rejected
+    /// attempt must not unprint what that attempt's evaluations wrote, which
+    /// begins with every call this image already held.
+    pub fn keep_debug_of(&mut self, rejected: &mut Self) {
+        std::mem::swap(&mut self.debug, &mut rejected.debug);
+        std::mem::swap(&mut self.debug_bytes, &mut rejected.debug_bytes);
     }
 
     /// Transfer accepted calls to the analysis host, retaining journal capacity
@@ -622,7 +618,6 @@ mod tests {
             assert!(!kind.writes_every_evaluation());
             let mut journal = AnalogEffectJournal::default();
             for value in [1, 2] {
-                journal.begin_point(0.0);
                 journal.begin_evaluation();
                 journal.record(file(kind, value)).unwrap();
                 journal.complete_evaluation();
@@ -645,35 +640,54 @@ mod tests {
         }
     }
 
+    /// `$debug` writes at every evaluation, a rejected point's included
+    /// (LRM 2.4 section 9.4.6): the next accepted point publishes every one,
+    /// in the order they ran, ahead of its own evaluation's other calls.
     #[test]
-    fn every_evaluation_calls_of_a_rejected_point_are_never_published() {
+    fn every_evaluation_calls_of_a_rejected_point_are_published_with_the_next_accepted_one() {
         let mut journal = AnalogEffectJournal::default();
-        // Two evaluations at one point keep both every-evaluation calls.
+        // Two evaluations of a point the solver then rejects.
         for value in [1, 2] {
-            journal.begin_point(1.0);
             journal.begin_evaluation();
             journal.record(debug(value, 1.0)).unwrap();
             journal.record(call(0, value)).unwrap();
             journal.complete_evaluation();
         }
-        // The solver gave up on that point and tried an earlier one.
-        journal.begin_point(0.5);
+        journal.discard_candidate();
+        // The earlier point it tried instead, accepted.
         journal.begin_evaluation();
         journal.record(debug(3, 0.5)).unwrap();
         journal.record(call(0, 3)).unwrap();
         journal.complete_evaluation();
-        let saved = journal.clone();
+        assert!(journal.has_candidate());
+        let rollback = journal.clone();
         journal.accept_candidate().unwrap();
         assert_eq!(
             journal.drain_accepted().collect::<Vec<_>>(),
-            [debug(3, 0.5), call(0, 3)]
+            [debug(1, 1.0), debug(2, 1.0), debug(3, 0.5), call(0, 3)]
         );
-        // A withdrawn trial takes its every-evaluation calls with it.
-        let mut withdrawn = saved;
-        withdrawn.discard_trial();
+        assert!(!journal.has_candidate());
+        // A withdrawn candidate keeps the debug calls its evaluations made,
+        // and a new analysis still publishes them.
+        let mut withdrawn = rollback;
+        withdrawn.discard_candidate();
+        withdrawn.reset_analysis();
         withdrawn.accept_candidate().unwrap();
-        assert!(withdrawn.accepted().is_empty());
-        assert!(!withdrawn.has_candidate());
+        assert_eq!(
+            withdrawn.drain_accepted().collect::<Vec<_>>(),
+            [debug(1, 1.0), debug(2, 1.0), debug(3, 0.5)]
+        );
+        // A rollback to an image older than the rejected attempt keeps the
+        // attempt's calls.
+        let mut image = AnalogEffectJournal::default();
+        let mut attempt = image.clone();
+        attempt.record(debug(4, 2.0)).unwrap();
+        image.keep_debug_of(&mut attempt);
+        image.accept_candidate().unwrap();
+        assert_eq!(image.drain_accepted().collect::<Vec<_>>(), [debug(4, 2.0)]);
+        // `$fdebug` writes as `$debug` does.
+        assert!(AnalogTaskKind::FileDebug.writes_every_evaluation());
+        assert!(AnalogTaskKind::FileDebug.writes_file());
     }
 
     #[test]

@@ -708,7 +708,7 @@ impl VmContext {
             journal.clear();
         }
         if let Some(journal) = &mut self.analog_effects {
-            journal.discard_trial();
+            journal.discard_candidate();
         }
         if let Some(files) = &mut self.analog_files {
             files.begin_evaluation();
@@ -791,6 +791,16 @@ impl VmContext {
                 .candidate()
                 .map_err(|error| VmError::AnalogTask(error.to_string())),
             None => Ok(&[]),
+        }
+    }
+
+    /// Keep the `$debug` and `$fdebug` calls `rejected`'s evaluations made,
+    /// after a rollback restored this older image of the same instance.
+    pub(crate) fn keep_debug_analog_tasks_of(&mut self, rejected: &mut Self) {
+        if let Some(journal) = rejected.analog_effects.as_deref_mut() {
+            self.analog_effects
+                .get_or_insert_with(Default::default)
+                .keep_debug_of(journal);
         }
     }
 
@@ -1002,7 +1012,6 @@ impl VmContext {
         self.begin_stateful_evaluation_with_tasks(true);
         self.time = 0.0;
         if let Some(journal) = &mut self.analog_effects {
-            journal.begin_point(0.0);
             journal.begin_evaluation();
         }
         if let Some(files) = &mut self.analog_files {
@@ -2013,7 +2022,6 @@ impl VmContext {
         self.record_task_effects = record_tasks;
         if record_tasks && let Some(journal) = &mut self.analog_effects {
             journal.discard_candidate();
-            journal.begin_point(self.time);
         }
         if record_tasks && let Some(files) = &mut self.analog_files {
             files.begin_evaluation();

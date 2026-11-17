@@ -170,7 +170,7 @@ fn task_descriptor(event: &AnalogTaskEvent<'_>) -> Option<u32> {
 }
 
 /// One accepted analog file task as the records it writes: the text a
-/// `$fdisplay`, `$fwrite`, `$fstrobe` or `$fmonitor` sends to each of its
+/// `$fdisplay`, `$fwrite`, `$fstrobe`, `$fmonitor` or `$fdebug` sends to each of its
 /// descriptor's targets, or the warning a bad descriptor raises (IEEE
 /// 1364-2005 section 17.2). `files` is the calling instance's open files;
 /// without them only the standard streams can be written.
@@ -261,6 +261,7 @@ fn analog_file_task_name(kind: AnalogTaskKind) -> &'static str {
         AnalogTaskKind::FileWrite => "$fwrite",
         AnalogTaskKind::FileStrobe => "$fstrobe",
         AnalogTaskKind::FileMonitor => "$fmonitor",
+        AnalogTaskKind::FileDebug => "$fdebug",
         _ => "$fclose",
     }
 }

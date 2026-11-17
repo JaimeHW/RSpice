@@ -5202,6 +5202,16 @@ impl VerilogADevice {
             }))
     }
 
+    /// After a rollback replaced this instance with an image taken before
+    /// `rejected`'s attempt, keep the `$debug` and `$fdebug` calls that
+    /// attempt's evaluations made: they print even for a rejected point (LRM
+    /// 2.4 sections 9.4.6 and 9.5.9), and the next accepted point publishes
+    /// them.
+    pub fn keep_debug_analog_tasks_of(&mut self, rejected: &mut Self) {
+        self.context
+            .keep_debug_analog_tasks_of(&mut rejected.context);
+    }
+
     /// Whether accepted calls remain to be delivered by the analysis host.
     pub fn has_accepted_analog_tasks(&self) -> bool {
         self.context.has_accepted_analog_tasks()

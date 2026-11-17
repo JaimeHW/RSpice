@@ -799,7 +799,7 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
     (
         "$debug",
         Some("format, [arg…]"),
-        "Prints formatted text at every evaluation of the equations.",
+        "Prints formatted text at every evaluation of the equations, including the evaluations of a time step the simulator rejects.",
     ),
     (
         "$fdisplay",
@@ -820,6 +820,11 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
         "$fmonitor",
         Some("fd, format, [arg…]"),
         "Writes formatted text to a file whenever one of its arguments changes.",
+    ),
+    (
+        "$fdebug",
+        Some("fd, format, [arg…]"),
+        "Writes formatted text to a file at every evaluation of the equations, including the evaluations of a time step the simulator rejects.",
     ),
     ("$fclose", Some("fd"), "Closes a file."),
     (
