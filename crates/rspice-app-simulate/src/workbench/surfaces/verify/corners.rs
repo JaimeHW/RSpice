@@ -15,8 +15,6 @@
 //! A run-set sweep, a corner family and a sweep family are all points to the
 //! sheet, so all of them fill this view.
 
-use rspice_results::number_format::fmt_si_bound;
-use rspice_results::specification::SpecificationComparison;
 use rspice_results::verification::{
     Cell as SheetCell, CellStatus, Point, PointAxis, PointSource, Row, RowStatus, Sheet,
 };
@@ -228,18 +226,7 @@ pub(super) fn point_status(sheet: &Sheet, point: usize) -> Option<CellStatus> {
 
 /// A limit as its row states it: `≥ 40 dB`, `≤ 1.2 mA`, `10 dB … 20 dB`.
 pub(crate) fn limit_text(row: &Row) -> String {
-    let quantity = |value: f64| fmt_si_bound(value, &row.unit);
-    match &row.comparison {
-        SpecificationComparison::Tracked => String::new(),
-        SpecificationComparison::Minimum { limit } => format!("\u{2265} {}", quantity(*limit)),
-        SpecificationComparison::Maximum { limit } => format!("\u{2264} {}", quantity(*limit)),
-        SpecificationComparison::Range { minimum, maximum } => {
-            format!("{} \u{2026} {}", quantity(*minimum), quantity(*maximum))
-        }
-        SpecificationComparison::EqualWithin { target, tolerance } => {
-            format!("{} \u{00b1} {}", quantity(*target), quantity(*tolerance))
-        }
-    }
+    rspice_results::verification::limit_text(&row.comparison, &row.unit).unwrap_or_default()
 }
 
 /// A limit's cell: its words in mono, the guard band on hover when it has
@@ -253,7 +240,7 @@ fn limit_cell(row: &Row) -> Cell {
     if row.guard_band > 0.0 {
         cell.hint(format!(
             "Judged against the limit tightened by its guard band of {}.",
-            fmt_si_bound(row.guard_band, &row.unit)
+            format_bound(row.guard_band, &row.unit)
         ))
     } else {
         cell

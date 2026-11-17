@@ -15,12 +15,14 @@ use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
 use crate::diagnostics::LogSeverity;
 use crate::simulation::status::simulation_progress_percent;
 use crate::state::SimulationState;
-use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
-use rspice_results::verification::{CellStatus, Sheet};
+use rspice_results::specification::SpecificationComparison;
+use rspice_results::verification::{
+    CellStatus, Sheet, difference_text, format_bound, format_value, limit_text,
+};
 
 use super::super::layout::LayoutSpec;
 use super::super::state::{ConsoleChannel, ConsolePage};
@@ -716,7 +718,9 @@ pub struct MeasurementTableRow {
     pub value: String,
     pub specification: String,
     pub margin: String,
-    pub worst_point: String,
+    /// Where the run solved the measurement: the point Verify's sheet names
+    /// it by, or its analysis when the run solved one point.
+    pub at: String,
     pub status: &'static str,
     /// The measurement failed its contract or could not be evaluated. Only
     /// the status cell of a failed row is coloured; a pass is neutral.
@@ -729,8 +733,8 @@ pub struct MeasurementTableRow {
 /// with Verify about a run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectVerdict {
-    pub minimum: Option<f64>,
-    pub maximum: Option<f64>,
+    /// The plan's limit, as the sheet holds it.
+    pub comparison: SpecificationComparison,
     /// The unit the limit is stated in; empty for the measurement's own.
     pub unit: String,
     /// The value is inside the guarded limit.
@@ -761,16 +765,24 @@ impl ProjectVerdict {
                     CellStatus::Fail | CellStatus::Error => false,
                     CellStatus::Excluded | CellStatus::Absent => return None,
                 };
-                let (minimum, maximum) = row.comparison.bounds();
                 Some(Self {
-                    minimum,
-                    maximum,
+                    comparison: row.comparison.clone(),
                     unit: row.unit.clone(),
                     holds,
                     signed_margin: cell.signed_margin,
                 })
             })
     }
+}
+
+/// Where the run solved its analysis at position `analysis`, as Verify's At
+/// column names it: the sheet's point when the run solved more than one,
+/// the analysis `label` when it solved one.
+fn solved_at(sheet: Option<&Sheet>, analysis: usize, label: &str) -> String {
+    sheet
+        .filter(|sheet| sheet.points.len() > 1)
+        .and_then(|sheet| sheet.points.get(sheet.point_of_analysis(analysis)?))
+        .map_or_else(|| label.to_owned(), |point| point.label.clone())
 }
 
 /// The selected run's measurements, each with what Verify's sheet says of it.
@@ -793,7 +805,8 @@ pub fn active_measurement_rows(app: &impl WorkbenchHost) -> Vec<MeasurementTable
             let project = &project;
             analysis.measurements.iter().map(move |measurement| {
                 let verdict = project(&measurement.name, position);
-                let mut row = measurement_table_row(measurement, &analysis.label, verdict.as_ref());
+                let at = solved_at(sheet, position, &analysis.label);
+                let mut row = measurement_table_row(measurement, &at, verdict.as_ref());
                 if let std::borrow::Cow::Owned(authored) =
                     notations.display_measurement(&measurement.name)
                 {
@@ -843,31 +856,67 @@ pub fn active_measurement_rows(app: &impl WorkbenchHost) -> Vec<MeasurementTable
                 event_axis,
                 units: None,
             };
-            rows.push(measurement_table_row(&derived, label, verdict.as_ref()));
+            let at = solved_at(sheet, summary.analysis_index, label);
+            rows.push(measurement_table_row(&derived, &at, verdict.as_ref()));
         }
     }
     rows
 }
 
-/// One measurement's row: its value, and its verdict against every contract
-/// that binds it: the plan's, as Verify's sheet judged it, and the deck's own
-/// GOAL and FAILVALUE.
-pub fn measurement_table_row(
-    measurement: &rspice_core::MeasureResult,
-    analysis_label: &str,
-    project: Option<&ProjectVerdict>,
-) -> MeasurementTableRow {
-    let requested_unit = project.map_or("", |project| project.unit.as_str());
-    let value = measurement.value_in_unit(requested_unit).ok().flatten();
-    let display_unit = if !requested_unit.trim().is_empty() {
-        Some(requested_unit.trim())
-    } else {
-        measurement
+/// The units one measurement's row states its numbers in.
+struct RowUnits {
+    /// The value's, and the plan's limit and margin against it: the unit the
+    /// sheet judges the value in, otherwise the measurement's own.
+    value: String,
+    /// GOAL and its tolerance, which stay in the measurement's own unit.
+    goal: String,
+    /// FAILVALUE, held against the raw value in its own unit.
+    raw: String,
+}
+
+impl RowUnits {
+    fn of(measurement: &rspice_core::MeasureResult, project: Option<&ProjectVerdict>) -> Self {
+        let own = measurement
             .units
             .as_ref()
-            .and_then(|units| units.value.symbol())
-    };
-    let specification_text = measurement_contract_text(measurement, project);
+            .and_then(|units| units.value.symbol());
+        let value = project
+            .map(|project| project.unit.trim())
+            .filter(|unit| !unit.is_empty())
+            .or(own)
+            .unwrap_or_default()
+            .to_owned();
+        // A measurement with no units of its own is read in the sheet's, as
+        // the sheet judges it; its goal is a number on the same scale.
+        let goal = match &measurement.units {
+            Some(units) => units.value.symbol().unwrap_or_default().to_owned(),
+            None => value.clone(),
+        };
+        let raw = measurement
+            .units
+            .as_ref()
+            .and_then(|units| units.raw_value.symbol())
+            .unwrap_or_default()
+            .to_owned();
+        Self { value, goal, raw }
+    }
+}
+
+/// One measurement's row: its value, and its verdict against every contract
+/// that binds it: the plan's, as Verify's sheet judged it, and the deck's own
+/// GOAL and FAILVALUE. Numbers are spelled as Verify spells them, each in its
+/// unit; `at` is where the run solved it.
+pub fn measurement_table_row(
+    measurement: &rspice_core::MeasureResult,
+    at: &str,
+    project: Option<&ProjectVerdict>,
+) -> MeasurementTableRow {
+    let units = RowUnits::of(measurement, project);
+    let value = measurement
+        .value_in_unit(project.map_or("", |project| project.unit.as_str()))
+        .ok()
+        .flatten();
+    let specification_text = measurement_contract_text(measurement, project, &units);
     let (status, failed, margin) = if let Some(error) = measurement
         .error
         .as_deref()
@@ -876,7 +925,7 @@ pub fn measurement_table_row(
     {
         ("ERROR", true, error.to_owned())
     } else if measurement_has_contract(measurement, project) {
-        measurement_contract_verdict(measurement, project)
+        measurement_contract_verdict(measurement, project, &units)
     } else if let Some(error) = measurement
         .error
         .as_deref()
@@ -884,25 +933,18 @@ pub fn measurement_table_row(
     {
         ("ERROR", true, error.to_owned())
     } else {
-        ("NO SPEC", false, "—".to_owned())
+        ("NO SPEC", false, "\u{2014}".to_owned())
     };
     MeasurementTableRow {
         name: measurement.name.clone(),
-        expression: "—".to_owned(),
-        value: value
-            .map(|value| {
-                let formatted = format_measure_value(value);
-                if measurement.units.is_some() {
-                    display_unit
-                        .map_or_else(|| formatted.clone(), |unit| format!("{formatted} {unit}"))
-                } else {
-                    formatted
-                }
-            })
-            .unwrap_or_else(|| "—".to_owned()),
+        expression: "\u{2014}".to_owned(),
+        value: value.map_or_else(
+            || "\u{2014}".to_owned(),
+            |value| format_value(value, &units.value),
+        ),
         specification: specification_text,
         margin,
-        worst_point: analysis_label.to_owned(),
+        at: at.to_owned(),
         status,
         failed,
     }
@@ -918,57 +960,56 @@ fn measurement_has_contract(
 fn measurement_contract_text(
     measurement: &rspice_core::MeasureResult,
     project: Option<&ProjectVerdict>,
+    units: &RowUnits,
 ) -> String {
     let mut contracts = Vec::with_capacity(3);
     if let Some(project) = project {
-        let mut text = limit_text(project.minimum, project.maximum);
-        if measurement.units.is_some() && !project.unit.trim().is_empty() {
-            text.push(' ');
-            text.push_str(project.unit.trim());
-        }
-        contracts.push(("PROJECT", text));
+        contracts.push((
+            "PROJECT",
+            limit_text(&project.comparison, &units.value).unwrap_or_else(|| "tracked".to_owned()),
+        ));
     }
     if let Some(expected) = measurement.expected {
-        let text = measurement.tolerance.map_or_else(
-            || format!("= {}", format_measure_value(expected)),
-            |tolerance| {
-                format!(
-                    "{} ± {}",
-                    format_measure_value(expected),
-                    format_measure_value(tolerance)
-                )
-            },
-        );
-        let text = measurement
-            .units
-            .as_ref()
-            .and_then(|units| units.value.symbol())
-            .map_or_else(|| text.clone(), |unit| format!("{text} {unit}"));
-        contracts.push(("GOAL", text));
+        let bound = |value: f64| format_bound(value, &units.goal);
+        contracts.push((
+            "GOAL",
+            measurement.tolerance.map_or_else(
+                || format!("= {}", bound(expected)),
+                |tolerance| format!("{} \u{b1} {}", bound(expected), bound(tolerance)),
+            ),
+        ));
     }
     if let Some(limit) = measurement.failure_limit {
         contracts.push((
             "FAILVALUE",
-            format!(
-                "|raw| < {}{}",
-                format_measure_value(limit),
-                measurement
-                    .units
-                    .as_ref()
-                    .and_then(|units| units.raw_value.symbol())
-                    .map_or(String::new(), |unit| format!(" {unit}"))
-            ),
+            format!("|raw| < {}", format_bound(limit, &units.raw)),
         ));
     }
 
     match contracts.as_slice() {
-        [] => "—".to_owned(),
+        [] => "\u{2014}".to_owned(),
         [(_, text)] => text.clone(),
         _ => contracts
             .into_iter()
             .map(|(label, text)| format!("{label} {text}"))
             .collect::<Vec<_>>()
-            .join(" · "),
+            .join(" \u{b7} "),
+    }
+}
+
+/// One contract's room: how far the value it holds stands inside it,
+/// negative once broken, and that value and its unit, which the room is
+/// spelled against.
+struct Margin<'a> {
+    label: &'static str,
+    room: f64,
+    of: f64,
+    unit: &'a str,
+}
+
+impl Margin<'_> {
+    fn text(&self) -> String {
+        difference_text(self.room, self.of, self.unit)
     }
 }
 
@@ -976,112 +1017,100 @@ fn measurement_contract_text(
 fn measurement_contract_verdict(
     measurement: &rspice_core::MeasureResult,
     project: Option<&ProjectVerdict>,
+    units: &RowUnits,
 ) -> (&'static str, bool, String) {
     let Some(value) = measurement.value else {
-        return ("NO DATA", false, "—".to_owned());
+        return ("NO DATA", false, "\u{2014}".to_owned());
     };
     if measurement.failure_limit.is_some() && measurement.raw_value.is_none() {
         return ("NO DATA", false, "raw value unavailable".to_owned());
     }
-
-    let passed = measurement.passed && project.is_none_or(|project| project.holds);
-    if let Some(units) = &measurement.units {
+    // The value as the plan's limit holds it.
+    let judged =
         match measurement.value_in_unit(project.map_or("", |project| project.unit.as_str())) {
-            Ok(Some(_)) => {}
+            Ok(Some(judged)) => judged,
             Ok(None) => return ("NO DATA", false, "value unavailable".into()),
             Err(error) => return ("ERROR", true, error),
-        }
-        let mut margins = Vec::new();
-        let show = |label: &str, margin: f64, unit: Option<&str>| {
-            let value = format_signed_measure_value(margin);
-            format!(
-                "{label} {value}{}",
-                unit.map_or(String::new(), |unit| format!(" {unit}"))
-            )
         };
-        if let Some(project) = project
-            && let Some(margin) = project.signed_margin
-        {
-            let unit = if project.unit.trim().is_empty() {
-                units.value.symbol()
+
+    let passed = measurement.passed && project.is_none_or(|project| project.holds);
+    let mut margins = Vec::with_capacity(3);
+    if let Some((expected, tolerance)) = measurement.expected.zip(measurement.tolerance) {
+        margins.push(Margin {
+            label: "GOAL",
+            room: tolerance - (value - expected).abs(),
+            of: value,
+            unit: &units.goal,
+        });
+    }
+    if let Some((raw, limit)) = measurement.raw_value.zip(measurement.failure_limit) {
+        let room = limit - raw.abs();
+        // FAILVALUE is inclusive: equality is a failure. Preserve that fact in
+        // the signed presentation even though the mathematical clearance is
+        // exactly zero.
+        margins.push(Margin {
+            label: "FAILVALUE",
+            room: if measurement.failure_limit_exceeded && room == 0.0 {
+                -0.0
             } else {
-                Some(project.unit.trim())
-            };
-            margins.push(show("PROJECT", margin, unit));
-        }
-        if let Some((expected, tolerance)) = measurement.expected.zip(measurement.tolerance) {
-            margins.push(show(
-                "GOAL",
-                tolerance - (value - expected).abs(),
-                units.value.symbol(),
-            ));
-        }
-        if let Some((raw, limit)) = measurement.raw_value.zip(measurement.failure_limit) {
-            let margin = limit - raw.abs();
-            margins.push(show(
-                "FAILVALUE",
-                if measurement.failure_limit_exceeded && margin == 0.0 {
-                    -0.0
-                } else {
-                    margin
-                },
-                units.raw_value.symbol(),
-            ));
-        }
+                room
+            },
+            of: raw,
+            unit: &units.raw,
+        });
+    }
+    if let Some(room) = project.and_then(|project| project.signed_margin) {
+        margins.push(Margin {
+            label: "PROJECT",
+            room,
+            of: judged,
+            unit: &units.value,
+        });
+    }
+
+    if measurement.units.is_some() {
+        // A measurement in units states each contract's room in its own.
+        let mut stated = ["PROJECT", "GOAL", "FAILVALUE"]
+            .into_iter()
+            .filter_map(|label| margins.iter().find(|margin| margin.label == label))
+            .map(|margin| format!("{} {}", margin.label, margin.text()))
+            .collect::<Vec<_>>();
         if !passed && let Some(error) = &measurement.error {
-            margins.push(error.clone());
+            stated.push(error.clone());
         }
         return (
             if passed { "PASS" } else { "FAIL" },
             !passed,
-            if margins.is_empty() {
+            if stated.is_empty() {
                 "unbounded".into()
             } else {
-                margins.join("; ")
+                stated.join("; ")
             },
         );
     }
 
-    let mut margins = Vec::with_capacity(3);
     let has_numeric_bound = measurement.expected.zip(measurement.tolerance).is_some()
         || measurement.failure_limit.is_some()
-        || project.is_some_and(|project| project.minimum.is_some() || project.maximum.is_some());
-
-    if let (Some(expected), Some(tolerance)) = (measurement.expected, measurement.tolerance) {
-        margins.push(tolerance - (value - expected).abs());
-    }
-    if let (Some(raw_value), Some(limit)) = (measurement.raw_value, measurement.failure_limit) {
-        let margin = limit - raw_value.abs();
-        // FAILVALUE is inclusive: equality is a failure. Preserve that fact in
-        // the signed presentation even though the mathematical clearance is
-        // exactly zero.
-        margins.push(if measurement.failure_limit_exceeded && margin == 0.0 {
-            -0.0
-        } else {
-            margin
-        });
-    }
-    margins.extend(project.and_then(|project| project.signed_margin));
-
-    let limiting_margin = margins
-        .into_iter()
-        .filter(|margin| margin.is_finite())
-        .reduce(f64::min);
+        || project.is_some_and(|project| project.comparison != SpecificationComparison::Tracked);
+    let limiting = margins
+        .iter()
+        .filter(|margin| margin.room.is_finite())
+        .min_by(|left, right| left.room.total_cmp(&right.room));
     let margin = if passed {
-        limiting_margin.map_or_else(
+        limiting.map_or_else(
             || {
                 if has_numeric_bound {
-                    "—".to_owned()
+                    "\u{2014}".to_owned()
                 } else {
                     "unbounded".to_owned()
                 }
             },
-            format_signed_measure_value,
+            Margin::text,
         )
     } else if let Some(margin) =
-        limiting_margin.filter(|margin| *margin < 0.0 || margin.is_sign_negative())
+        limiting.filter(|margin| margin.room < 0.0 || margin.room.is_sign_negative())
     {
-        format_signed_measure_value(margin)
+        margin.text()
     } else {
         measurement
             .error
@@ -1093,19 +1122,6 @@ fn measurement_contract_verdict(
     (if passed { "PASS" } else { "FAIL" }, !passed, margin)
 }
 
-fn limit_text(minimum: Option<f64>, maximum: Option<f64>) -> String {
-    match (minimum, maximum) {
-        (Some(minimum), Some(maximum)) => format!(
-            "{} … {}",
-            format_measure_value(minimum),
-            format_measure_value(maximum)
-        ),
-        (Some(minimum), None) => format!("≥ {}", format_measure_value(minimum)),
-        (None, Some(maximum)) => format!("≤ {}", format_measure_value(maximum)),
-        (None, None) => "tracked".to_owned(),
-    }
-}
-
 /// The measurement table's headings, in the order its columns print.
 const MEASUREMENT_HEADINGS: [&str; 7] = [
     "Measurement",
@@ -1113,7 +1129,7 @@ const MEASUREMENT_HEADINGS: [&str; 7] = [
     "Value",
     "Spec",
     "Margin",
-    "Worst point",
+    "At",
     "Status",
 ];
 
@@ -1127,7 +1143,7 @@ fn measurement_cells(row: &MeasurementTableRow) -> [(&str, bool); 7] {
         (row.value.as_str(), true),
         (row.specification.as_str(), true),
         (row.margin.as_str(), true),
-        (row.worst_point.as_str(), false),
+        (row.at.as_str(), false),
         (row.status, true),
     ]
 }
@@ -1392,19 +1408,6 @@ pub fn log_message_color(tokens: &Tokens, severity: LogSeverity) -> egui::Color3
         LogSeverity::Error | LogSeverity::Warning => tokens.color.text,
         LogSeverity::Info | LogSeverity::Debug => tokens.color.text_dim,
         LogSeverity::Trace => tokens.color.text_faint,
-    }
-}
-
-fn format_measure_value(value: f64) -> String {
-    fmt_si(value, "", 6).trim().to_owned()
-}
-
-fn format_signed_measure_value(value: f64) -> String {
-    let value = format_measure_value(value);
-    if value.starts_with('-') {
-        value
-    } else {
-        format!("+{value}")
     }
 }
 

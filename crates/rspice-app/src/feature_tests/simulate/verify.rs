@@ -266,6 +266,89 @@ fn an_soa_limit_line_selects_its_check_in_verify() {
     );
 }
 
+/// The console's Measurements tab spells a corner run's numbers as Verify
+/// does, each in its specification's unit, and names the point the sheet
+/// solved each row at, so the gain of one corner reads apart from the next.
+#[test]
+fn the_console_spells_a_corner_run_as_verify_and_names_each_point() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::seed_run_set;
+    use rspice_app_workbench::workbench::docks::console::active_measurement_rows;
+    use rspice_results::verification::{difference_text, format_value, limit_text};
+
+    let mut app = RSpiceApp::test_instance();
+    seed_run_set(
+        &mut app.state.model,
+        &["TT", "SS"],
+        &[1.62, 1.8],
+        &[27.0, 125.0],
+    );
+    let sheet = app
+        .state
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("the run is judged");
+    let rows = active_measurement_rows(&app);
+    assert_eq!(
+        rows.len(),
+        2 * sheet.points.len(),
+        "gain and idd at each point"
+    );
+    let mut named = Vec::new();
+    for row in &rows {
+        let specification = sheet
+            .rows
+            .iter()
+            .find(|specification| specification.measurement.eq_ignore_ascii_case(&row.name))
+            .expect("each measurement has a specification");
+        let point = sheet
+            .points
+            .iter()
+            .position(|point| point.label == row.at)
+            .unwrap_or_else(|| panic!("{:?} names a point of the sheet", row.at));
+        let cell = &specification.cells[point];
+        let value = cell.value.expect("the point measured it");
+        let unit = specification.unit.as_str();
+        assert_eq!(row.value, format_value(value, unit), "{row:?}");
+        assert_eq!(
+            Some(row.specification.as_str()),
+            limit_text(&specification.comparison, unit).as_deref(),
+            "{row:?}"
+        );
+        assert_eq!(
+            row.margin,
+            difference_text(cell.signed_margin.expect("judged"), value, unit),
+            "{row:?}"
+        );
+        named.push((row.name.clone(), row.at.clone()));
+    }
+    named.sort();
+    named.dedup();
+    assert_eq!(named.len(), rows.len(), "no two rows read alike");
+
+    let failing = rows
+        .iter()
+        .find(|row| row.failed)
+        .expect("gain fails at the slow corner");
+    assert_eq!(
+        (
+            failing.name.as_str(),
+            failing.value.as_str(),
+            failing.specification.as_str(),
+            failing.margin.as_str(),
+            failing.at.as_str(),
+        ),
+        (
+            "gain",
+            "39.40 dB",
+            "\u{2265} 40 dB",
+            "-0.60 dB",
+            "SS 1.62 V 125 \u{b0}C"
+        ),
+        "the row reads as Verify's Specifications states it"
+    );
+}
+
 /// A run whose limit was edited after it ran: the console's Measurements
 /// table states what Verify's sheet says against the plan as it stands, and a
 /// publication of the run keeps the verdict it was sealed with. The two
@@ -372,7 +455,7 @@ fn the_console_reads_the_sheet_and_a_publication_keeps_the_sealed_verdict() {
     };
     assert_eq!(
         (row.status, row.failed, row.specification.as_str()),
-        ("PASS", false, "≥ 35.000000"),
+        ("PASS", false, "≥ 35 dB"),
         "the console states the sheet's verdict against the plan's limit"
     );
 

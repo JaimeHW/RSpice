@@ -32,6 +32,7 @@ use crate::workbench::slots::SimulateState;
 use super::super::state::VerificationSessionState;
 use super::super::state::workbench_session::WidthClass;
 use crate::state::VerificationPage;
+use rspice_results::verification::{difference_text, format_bound, format_value};
 
 use checks::*;
 use corners::*;
@@ -176,104 +177,8 @@ fn verification_plan_id(model: &Model) -> Option<crate::product::SimulationPlanI
         .map(|plan| plan.id())
 }
 
-/// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
-/// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
-fn takes_si_prefix(unit: &str) -> bool {
-    !(unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
-}
-
-/// A measured value in engineering notation with its unit: four significant
-/// digits, an SI prefix where the unit takes one, never a bare exponent.
-fn format_value(value: f64, unit: &str) -> String {
-    if takes_si_prefix(unit) {
-        rspice_results::number_format::fmt_si_significant(value, unit, 4)
-    } else {
-        rspice_results::number_format::fmt_significant(value, 4, &format!(" {unit}"))
-    }
-}
-
-/// One bound of a limit in the notation of the values held against it,
-/// without the zeros nobody wrote it with: `40 dB`, `1.2 mA`.
-fn format_bound(value: f64, unit: &str) -> String {
-    if takes_si_prefix(unit) {
-        return rspice_results::number_format::fmt_si_bound(value, unit);
-    }
-    let text = rspice_results::number_format::fmt_significant(value, 4, "");
-    // Scientific notation carries its own exponent, and trimming its mantissa
-    // would change the number.
-    let number = if text.contains('.') && !text.contains(['e', 'E']) {
-        text.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        text.as_str()
-    };
-    format!("{number} {unit}")
-}
-
 fn format_scalar(value: f64) -> String {
     format_value(value, "")
-}
-
-/// `value` times ten to the `decades`, by an exact power of ten.
-fn shifted(value: f64, decades: i32) -> f64 {
-    let factor = 10f64.powi(decades.unsigned_abs().min(300) as i32);
-    if decades >= 0 {
-        value * factor
-    } else {
-        value / factor
-    }
-}
-
-/// The decade of the last digit [`format_value`] prints of `value`: four
-/// significant digits end three decades under the leading one, whatever
-/// prefix the unit takes. Zero prints to three decimals.
-fn last_digit_decade(value: f64) -> i32 {
-    if value == 0.0 || !value.is_finite() {
-        return -3;
-    }
-    value.abs().log10().floor() as i32 - 3
-}
-
-/// A difference taken from `of` — a margin to a limit, a change from a
-/// reference — in the notation of the values beside it and at their
-/// resolution: rounded to the last digit `of` is printed with, no more
-/// significant digits than a value, and signed either way. A margin of
-/// -0.6 dB from 39.40 dB reads `-0.60 dB`, and 40 µA from 1.160 mA `+40 µA`.
-fn difference_text(difference: f64, of: f64, unit: &str) -> String {
-    let decade = last_digit_decade(of);
-    let steps = shifted(difference, -decade).round();
-    if !steps.is_finite() {
-        return format_value(difference, unit);
-    }
-    if steps == 0.0 {
-        // Nothing at the value's resolution: zero spelled as the value is,
-        // on the side the difference falls.
-        let sign = if difference > 0.0 {
-            "+"
-        } else if difference < 0.0 {
-            "-"
-        } else {
-            ""
-        };
-        let shown = format_value(of, unit);
-        let (number, rest) = shown.split_once(' ').unwrap_or((shown.as_str(), ""));
-        let (mantissa, exponent) = number
-            .find(['e', 'E'])
-            .map_or((number, ""), |at| number.split_at(at));
-        let decimals = mantissa
-            .split_once('.')
-            .map_or(0, |(_, digits)| digits.len());
-        let space = if rest.is_empty() { "" } else { " " };
-        return format!("{sign}{:.decimals$}{exponent}{space}{rest}", 0.0);
-    }
-    let digits = (steps.abs().log10().floor() as usize + 1).min(4);
-    let rounded = shifted(steps, decade);
-    let sign = if rounded > 0.0 { "+" } else { "" };
-    let text = if takes_si_prefix(unit) {
-        rspice_results::number_format::fmt_si_significant(rounded, unit, digits)
-    } else {
-        rspice_results::number_format::fmt_significant(rounded, digits, &format!(" {unit}"))
-    };
-    format!("{sign}{}", text.trim_end())
 }
 
 fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {

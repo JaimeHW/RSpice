@@ -185,22 +185,7 @@ pub fn definition_index(
         })
 }
 
-/// A limit as the table states it: `≥ 40 dB`, `≤ 1.2 mA`, `10 MHz … 20 MHz`,
-/// `50 Ω ± 1 Ω`; `None` for a tracked specification, which bounds nothing.
-pub fn limit_text(comparison: &SpecificationComparison, unit: &str) -> Option<String> {
-    let bound = |value: f64| super::format_bound(value, unit);
-    match *comparison {
-        SpecificationComparison::Tracked => None,
-        SpecificationComparison::Minimum { limit } => Some(format!("\u{2265} {}", bound(limit))),
-        SpecificationComparison::Maximum { limit } => Some(format!("\u{2264} {}", bound(limit))),
-        SpecificationComparison::Range { minimum, maximum } => {
-            Some(format!("{} \u{2026} {}", bound(minimum), bound(maximum)))
-        }
-        SpecificationComparison::EqualWithin { target, tolerance } => {
-            Some(format!("{} \u{00b1} {}", bound(target), bound(tolerance)))
-        }
-    }
-}
+pub use rspice_results::verification::limit_text;
 
 /// The words a limit cell opens with: what it shows, when typing that back
 /// gives the same limit, otherwise every digit of it, which always does.

@@ -14,6 +14,7 @@
 mod checks;
 mod points;
 mod sheet;
+mod spelling;
 mod statistics;
 
 pub use checks::{
@@ -24,6 +25,7 @@ pub use sheet::{
     Acceptance, Cell, CellStatus, LimitsSinceRun, NEAR_LIMIT_FRACTION, Row, RowStatus, Sheet,
     StatusCounts, Summary, Worst,
 };
+pub use spelling::{difference_text, format_bound, format_value, limit_text};
 pub use statistics::{JointYield, PointStatistics, Statistics, Trial, YieldCount};
 
 #[cfg(test)]

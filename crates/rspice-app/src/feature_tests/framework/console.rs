@@ -743,9 +743,15 @@ fn sheet_verdict(
     unit: &str,
     signed_margin: f64,
 ) -> ProjectVerdict {
+    use rspice_results::specification::SpecificationComparison;
+    let comparison = match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) => SpecificationComparison::Range { minimum, maximum },
+        (Some(limit), None) => SpecificationComparison::Minimum { limit },
+        (None, Some(limit)) => SpecificationComparison::Maximum { limit },
+        (None, None) => SpecificationComparison::Tracked,
+    };
     ProjectVerdict {
-        minimum,
-        maximum,
+        comparison,
         unit: unit.to_owned(),
         holds: signed_margin >= 0.0,
         signed_margin: Some(signed_margin),
@@ -754,7 +760,7 @@ fn sheet_verdict(
 
 /// The table states the sheet's verdict and margin, not one of its own: a
 /// value inside the bare limit that the sheet failed (a guard band narrowed
-/// it) reads as the sheet reads it.
+/// it) reads as the sheet reads it, in the sheet's unit and spelling.
 #[test]
 fn measurement_table_states_the_sheets_verdict_and_margin() {
     let measurement = rspice_core::MeasureResult::success("gain", 9.5);
@@ -762,15 +768,16 @@ fn measurement_table_states_the_sheets_verdict_and_margin() {
     let row = measurement_table_row(&measurement, "AC", Some(&passing));
     assert_eq!(row.status, "PASS");
     assert!(!row.failed, "a pass is neutral");
-    assert_eq!(row.specification, "9.000000 … 10.000000");
-    assert_eq!(row.margin, "+500.000000 m");
-    assert_eq!(row.worst_point, "AC");
+    assert_eq!(row.value, "9.500 dB");
+    assert_eq!(row.specification, "9 dB … 10 dB");
+    assert_eq!(row.margin, "+0.500 dB");
+    assert_eq!(row.at, "AC");
 
     let guarded = sheet_verdict(Some(9.0), Some(10.0), "dB", -0.25);
     let row = measurement_table_row(&measurement, "AC", Some(&guarded));
     assert_eq!(row.status, "FAIL");
     assert!(row.failed);
-    assert_eq!(row.margin, "-250.000000 m");
+    assert_eq!(row.margin, "-0.250 dB");
 }
 
 #[test]
@@ -790,15 +797,9 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
     };
     let row = measurement_table_row(&passing, "TRAN", None);
     assert_eq!(row.status, "PASS");
-    assert_eq!(
-        row.value, "20.000000",
-        "the published axis remains the value"
-    );
-    assert_eq!(row.specification, "|raw| < 4.000000");
-    assert_eq!(
-        row.margin, "+1.000000",
-        "the margin uses raw=3, not value=20"
-    );
+    assert_eq!(row.value, "20.00", "the published axis remains the value");
+    assert_eq!(row.specification, "|raw| < 4");
+    assert_eq!(row.margin, "+1.000", "the margin uses raw=3, not value=20");
 
     let failing_at_limit = rspice_core::MeasureResult {
         raw_value: Some(-4.0),
@@ -811,7 +812,7 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
     assert_eq!(row.status, "FAIL");
     assert!(row.failed);
     assert_eq!(
-        row.margin, "-0.000000",
+        row.margin, "-0.000",
         "inclusive FAILVALUE equality must retain a failing sign"
     );
 }
@@ -835,12 +836,13 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
     let row = measurement_table_row(&passing, "AC", Some(&spec));
     assert_eq!(row.status, "PASS");
     assert_eq!(
-        row.margin, "+1.000000",
+        row.margin, "+1.00 dB",
         "the project upper bound limits clearance"
     );
-    assert!(row.specification.contains("PROJECT 9.000000 … 11.000000"));
-    assert!(row.specification.contains("GOAL 10.000000 ± 2.000000"));
-    assert!(row.specification.contains("FAILVALUE |raw| < 5.000000"));
+    assert_eq!(
+        row.specification,
+        "PROJECT 9 dB … 11 dB · GOAL 10 dB ± 2 dB · FAILVALUE |raw| < 5"
+    );
 
     let authored_failure = rspice_core::MeasureResult {
         raw_value: Some(6.0),
@@ -852,7 +854,7 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
     let row = measurement_table_row(&authored_failure, "AC", Some(&spec));
     assert_eq!(row.status, "FAIL");
     assert_eq!(
-        row.margin, "-1.000000",
+        row.margin, "-1.000",
         "a passing project bound must not hide the authored failure margin"
     );
 
@@ -865,7 +867,7 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
     let spec = sheet_verdict(Some(9.0), Some(11.0), "dB", -1.0);
     let row = measurement_table_row(&project_failure, "AC", Some(&spec));
     assert_eq!(row.status, "FAIL");
-    assert_eq!(row.margin, "-1.000000");
+    assert_eq!(row.margin, "-1.00 dB");
 }
 
 /// Lifecycle words are states, not severities: only a failed run is marked.
@@ -1448,20 +1450,16 @@ fn measurement_units_keep_console_project_and_authored_contracts_distinct() {
     let mut spec = sheet_verdict(Some(200.0), Some(300.0), "mV", 50.0);
     let row = measurement_table_row(&measured, "TRAN", Some(&spec));
     assert_eq!(row.status, "PASS");
-    assert!(
-        row.value.starts_with("250") && row.value.ends_with(" mV"),
-        "{}",
-        row.value
+    assert_eq!(row.value, "250.0 mV", "the value in the sheet's unit");
+    assert_eq!(
+        row.specification,
+        "PROJECT 200 mV … 300 mV · GOAL 250 mV ± 10 mV · FAILVALUE |raw| < 500 mV"
     );
-    assert!(
-        row.margin.contains("PROJECT +50") && row.margin.contains("mV"),
-        "{}",
-        row.margin
-    );
-    assert!(
-        row.margin.contains("GOAL") && row.margin.contains(" V"),
-        "{}",
-        row.margin
+    // The project's room is 50 in the sheet's millivolts; the goal's is 0.01
+    // in the measurement's own volts, which reads 10 mV, never 0.01 mV.
+    assert_eq!(
+        row.margin,
+        "PROJECT +50.0 mV; GOAL +10.0 mV; FAILVALUE +250.0 mV"
     );
     spec.unit = "mA".into();
     let row = measurement_table_row(&measured, "TRAN", Some(&spec));
