@@ -3773,6 +3773,27 @@ mod fixed_lane_tests {
         assert_eq!(current, [5.0], "failed evaluation must not publish payload");
         assert_eq!(derivative_current, [4.0]);
         assert_eq!(candidate_valid, [false]);
+
+        // A static solve stamps nothing for a `ddt`: the same charge there
+        // does not fail the trial, and leaves no candidate to accept.
+        assert_eq!(
+            rspice_eval_ddt(
+                &mut current,
+                &previous,
+                &older,
+                &initialized,
+                &mut derivative_current,
+                &derivative_previous,
+                &mut candidate_valid,
+                GeneratedDdtCoefficients::inactive(),
+                0,
+                f64::INFINITY,
+            ),
+            Ok(0.0)
+        );
+        assert_eq!(current, [5.0]);
+        assert_eq!(derivative_current, [4.0]);
+        assert_eq!(candidate_valid, [false]);
     }
 
     #[test]

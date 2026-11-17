@@ -4685,7 +4685,8 @@ impl ModelPlan {
                 out,
                 "{pad}let ddt_derivative_coefficients = self.ddt_coefficients;\n\
                  {pad}let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {{\n\
-                 {pad}    let result = if !primal.is_finite() || !input.is_finite() {{\n\
+                 {pad}    let result = if ctx.integration_operators_enabled() && !ddt_derivative_coefficients.active {{ Ok(0.0) }}\n\
+                 {pad}    else if !primal.is_finite() || !input.is_finite() {{\n\
                  {pad}        Err(GeneratedDdtCandidateError::NonFiniteInput {{ field: \"derivative operands\" }})\n\
                  {pad}    }} else if !ctx.integration_operators_enabled() {{ Ok(0.0) }} else {{\n\
                  {pad}        evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)\n\

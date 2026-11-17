@@ -137,6 +137,15 @@ pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
 ) -> Result<f64, GeneratedDdtCandidateError> {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
     candidate_valid[slot] = false;
+    if !coefficients.active && !value.is_finite() {
+        // A static solve (the operating point, a DC sweep, a transient's
+        // initial point) stamps nothing for a `ddt`, so a charge that is not
+        // finite there does not fail the trial; ngspice and Xyce do not load
+        // a charge outside transient either. It leaves no candidate, so no
+        // accepted point carries it into a transient's history, and the
+        // transient's first step meets the charge again and refuses it.
+        return Ok(0.0);
+    }
     let candidate = evaluate_generated_ddt_candidate(
         coefficients,
         value,

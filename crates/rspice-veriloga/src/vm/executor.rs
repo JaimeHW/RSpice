@@ -9,7 +9,10 @@
 //! This is the reference runtime: whatever the JIT and the generated Rust
 //! backend produce is expected to agree with it numerically.
 
-use super::context::{INTEGRATION_CANDIDATE_FAILED, INTEGRATION_CANDIDATE_VALID};
+use super::context::{
+    INTEGRATION_CANDIDATE_FAILED, INTEGRATION_CANDIDATE_IDLE, INTEGRATION_CANDIDATE_NONE,
+    INTEGRATION_CANDIDATE_VALID,
+};
 use super::{PeriodicOperatorKind, VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
@@ -707,6 +710,17 @@ impl<'a> Vm<'a> {
                 if self.context.state_values.len() <= *idx {
                     self.context.allocate_states(*idx + 1);
                 }
+                if !self.context.integration_coefficients().active && !current_value.is_finite() {
+                    // A static solve stamps nothing for a `ddt`: a charge that
+                    // is not finite there does not fail the trial and leaves
+                    // no candidate, as on the native route.
+                    let status = &mut self.context.state_candidate_valid[*idx];
+                    if *status != INTEGRATION_CANDIDATE_NONE {
+                        *status = INTEGRATION_CANDIDATE_IDLE;
+                    }
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
                 self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_FAILED;
                 let candidate = rspice_veriloga_runtime::evaluate_generated_ddt_candidate(
                     self.context.integration_coefficients().into(),
@@ -849,6 +863,17 @@ impl<'a> Vm<'a> {
             Instruction::DdtDerivativeState(idx) => {
                 let input = self.pop()?;
                 let primal = self.pop()?;
+                // A static solve stamps nothing for a `ddt`, so neither its
+                // charge nor the charge's derivative can fail the trial.
+                if self.context.periodic_frame.is_none()
+                    && self.context.evaluation_mode.dynamic_operators_enabled()
+                    && (!matches!(self.context.analysis_type, 1 | 3)
+                        || self.context.analysis_phase.is_equilibrium())
+                    && !self.context.integration_coefficients().active
+                {
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
                 if !input.is_finite() || !primal.is_finite() {
                     return Err(VmError::InvalidNumericResult(
                         "ddt derivative operands must be finite".into(),
@@ -3429,32 +3454,61 @@ mod tests {
         assert!(context.accepted_checkpoint().is_ok());
     }
 
+    /// A static solve stamps nothing for a `ddt`, so a charge that is not
+    /// finite at the operating point does not fail it, as in ngspice and
+    /// Xyce, which load no charge outside transient. Nothing accepted there
+    /// seeds a transient's history, and the transient's step still refuses
+    /// the charge.
     #[test]
-    fn nonfinite_operating_point_candidate_is_not_promoted_to_transient_history() {
+    fn nonfinite_operating_point_charge_stamps_nothing_and_is_not_promoted_to_transient_history() {
         let mut context = VmContext::with_states(0, 1);
 
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
+            )
+            .expect("a static solve does not refuse a non-finite charge")
+            .to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(f64::INFINITY),
+                    Instruction::PushConst(f64::NAN),
+                    Instruction::DdtDerivativeState(0),
+                ],
+            )
+            .expect("nor its derivative")
+            .to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            context.state_candidate_valid,
+            vec![super::INTEGRATION_CANDIDATE_NONE]
+        );
+        context
+            .validate_advance_state()
+            .expect("the operating point accepts");
+
+        context.set_integration_coefficients(
+            IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
+        );
+        assert!(!context.state_initialized[0]);
+        assert_eq!(context.state_values[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_values_prev[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_derivatives[0].to_bits(), 0.0_f64.to_bits());
+
+        context.begin_stateful_evaluation();
         assert!(
             execute_with_context(
                 &mut context,
                 vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
             )
-            .is_err()
-        );
-        assert!(context.validate_advance_state().is_err());
-        assert!(!context.state_initialized[0]);
-
-        context.set_integration_coefficients(
-            IntegrationCoefficients::backward_euler(1.0).expect("a representable interval"),
-        );
-
-        assert!(!context.state_initialized[0]);
-        assert_eq!(context.state_values[0].to_bits(), 0.0_f64.to_bits());
-        assert_eq!(context.state_values_prev[0].to_bits(), 0.0_f64.to_bits());
-        assert_eq!(context.state_values_older[0].to_bits(), 0.0_f64.to_bits());
-        assert_eq!(context.state_derivatives[0].to_bits(), 0.0_f64.to_bits());
-        assert_eq!(
-            context.state_candidate_valid,
-            vec![super::INTEGRATION_CANDIDATE_FAILED]
+            .is_err(),
+            "a transient step refuses the charge"
         );
     }
 

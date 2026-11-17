@@ -2308,6 +2308,19 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
         }
         return 0.0;
     }
+    if ctx.integration_active == 0 && !value.is_finite() {
+        // A static solve (the operating point, a DC sweep, a transient's
+        // initial point) stamps nothing for a `ddt`, so a charge that is not
+        // finite there does not fail the trial; ngspice and Xyce do not load
+        // a charge outside transient either. The site keeps no candidate, so
+        // no accepted point carries the charge into a transient's history,
+        // and the transient's first step meets it again and refuses it.
+        let status = unsafe { &mut *ctx.state_candidate_valid.add(state_id) };
+        if *status != crate::vm::INTEGRATION_CANDIDATE_NONE {
+            *status = crate::vm::INTEGRATION_CANDIDATE_IDLE;
+        }
+        return 0.0;
+    }
     unsafe {
         *ctx.state_candidate_valid.add(state_id) = crate::vm::INTEGRATION_CANDIDATE_FAILED;
     }
@@ -2362,6 +2375,15 @@ pub unsafe extern "C" fn rspice_ddt_derivative_native(
             state_id,
             "has invalid state storage",
         );
+    }
+    // A static solve stamps nothing for a `ddt`, so neither its charge nor
+    // the charge's derivative can fail the trial there; see
+    // `rspice_ddt_state_native`.
+    if ctx.integration_active == 0
+        && ctx.static_dae_probe == 0
+        && (!matches!(ctx.analysis_type, 1 | 3) || ctx.analysis_phase.is_equilibrium())
+    {
+        return 0.0;
     }
     let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
     if operands.iter().any(|value| !value.is_finite()) {
@@ -3876,8 +3898,8 @@ mod tests {
         EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
         rspice_above_state_native, rspice_absdelay_derivative_max_native,
         rspice_absdelay_derivative_native, rspice_absdelay_state_max_native,
-        rspice_absdelay_state_native, rspice_cross_state_native, rspice_ddt_state_native,
-        rspice_dynamic_variable_slot_native, rspice_idt_state_native,
+        rspice_absdelay_state_native, rspice_cross_state_native, rspice_ddt_derivative_native,
+        rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_idt_state_native,
         rspice_integer_operation_native, rspice_laplace_derivative_native,
         rspice_laplace_step_native, rspice_last_crossing_state_native,
         rspice_limiter_previous_native, rspice_limiter_store_native,
@@ -4100,6 +4122,65 @@ mod tests {
             assert_eq!((values, derivatives, older_candidate), before);
             assert_eq!(initialized[0], 0);
         }
+    }
+
+    /// The native twin of the interpreter's operating-point test: a static
+    /// solve stamps nothing for a `ddt`, so its charge and the charge's
+    /// derivative do not fail the trial there, and the site keeps no
+    /// candidate; a transient step still refuses the same charge.
+    #[test]
+    fn a_static_solve_does_not_refuse_a_nonfinite_ddt_charge() {
+        let previous = [0.0];
+        let older = [0.0];
+        let previous_derivatives = [0.0];
+        let mut values = [0.0];
+        let mut derivatives = [0.0];
+        let mut initialized = [0_u8];
+        let mut candidate_valid = [0_u8];
+        let mut older_candidate = [0.0];
+        let mut ctx = empty_eval_context();
+        ctx.state_prev = previous.as_ptr();
+        ctx.state_prev_len = previous.len();
+        ctx.state_older = older.as_ptr();
+        ctx.state_older_len = older.len();
+        ctx.state_values = values.as_mut_ptr();
+        ctx.state_values_len = values.len();
+        ctx.state_derivatives = derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = derivatives.len();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
+        ctx.state_initialized = initialized.as_mut_ptr();
+        ctx.state_initialized_len = initialized.len();
+        ctx.state_candidate_valid = candidate_valid.as_mut_ptr();
+        ctx.state_candidate_valid_len = candidate_valid.len();
+        ctx.state_older_candidate = older_candidate.as_mut_ptr();
+        ctx.state_older_candidate_len = older_candidate.len();
+        ctx.clear_runtime_error();
+
+        let charge = [f64::INFINITY];
+        let derivative = [f64::INFINITY, f64::NAN];
+        assert_eq!(
+            unsafe { rspice_ddt_state_native(charge.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert_eq!(
+            unsafe { rspice_ddt_derivative_native(derivative.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert!(ctx.take_runtime_error().is_none());
+        assert_eq!(candidate_valid[0], crate::vm::INTEGRATION_CANDIDATE_NONE);
+        assert_eq!(values[0].to_bits(), 0.0_f64.to_bits());
+
+        ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 1.0;
+        ctx.integration_previous_value_scale = 1.0;
+        unsafe { rspice_ddt_state_native(charge.as_ptr(), &ctx, 0) };
+        assert!(
+            ctx.take_runtime_error()
+                .is_some_and(|error| error.contains("must be finite")),
+            "a transient step refuses the charge"
+        );
+        assert_eq!(candidate_valid[0], crate::vm::INTEGRATION_CANDIDATE_FAILED);
     }
 
     #[test]

@@ -3610,7 +3610,8 @@ impl Instance {
         let ddt_state = self.stamp_state.as_mut();
         let ddt_derivative_coefficients = self.ddt_coefficients;
         let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
-            let result = if !primal.is_finite() || !input.is_finite() {
+            let result = if ctx.integration_operators_enabled() && !ddt_derivative_coefficients.active { Ok(0.0) }
+            else if !primal.is_finite() || !input.is_finite() {
                 Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
             } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
                 evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
