@@ -38,7 +38,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-01-symbols-cdf",
         page: ModelsPage::Symbols,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "92bb41d1adc5e7a4a06bdbb6de9ac4145aa3c2a668f10f9b9b63c3d2e022a81f",
+        fingerprint: "8a8a561ca54d020dae8836a6accddd29ba3854710424a52928fb630469dfa4db",
     },
     ModelsBaseline {
         name: "models-02-corners-sections",
