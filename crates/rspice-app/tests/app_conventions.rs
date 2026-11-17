@@ -2244,7 +2244,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-project/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_recent_header",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_section_header",
-    "rspice-app-project/src/workbench/surfaces/project/overview/status.rs::status_rows",
     "rspice-app-design/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
