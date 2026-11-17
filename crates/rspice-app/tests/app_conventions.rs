@@ -1475,6 +1475,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/surfaces/project.rs", "overview"),
             ("workbench/surfaces/project.rs", "recovery"),
             ("workbench/surfaces/project/library.rs", "builtin_models"),
+            ("workbench/tools/project_launcher.rs", "recent_rows"),
         ],
     ),
     (
