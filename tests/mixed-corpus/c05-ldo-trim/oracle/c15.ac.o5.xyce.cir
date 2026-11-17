@@ -1,0 +1,27 @@
+* C5 LDO, trim code 15 twin, ac: O5-O4 (Xyce 7.10) held-digital oracle deck
+* The O5 circuit at code 15 (oracle/mx.o5-c15.cir) in Xyce syntax: BSIM4
+* LEVEL 54 (oracle/models-bsim4.xyce.inc), the body with VSWITCH switches
+* (oracle/ldo_body.xyce.inc), and the ESD junction as JUNCAP200 (D level=200).
+* As in oracle/c15.ac.o5.ngspice.cir, each closed trim switch is stated as its
+* 10 ohm on-resistance with the bits at 0 V (every switch open, roff 1e12), so
+* the two twins state the same circuit.
+.include models-bsim4.xyce.inc
+.include ldo_body.xyce.inc
+.include ../net/ldo.cir
+djesd 0 vout djmod AB=1e-9 LS=1.3e-4 LG=0
+.model djmod D level=200
+vtr3 tr3_h 0 0
+rtr3 tr3_h tr3 20
+vtr2 tr2_h 0 0
+rtr2 tr2_h tr2 20
+vtr1 tr1_h 0 0
+rtr1 tr1_h tr1 20
+vtr0 tr0_h 0 0
+rtr0 tr0_h tr0 20
+ron3 l1 l2 10
+ron2 l2 l3 10
+ron1 l3 l4 10
+ron0 l4 0 10
+.ac dec 10 10 100meg
+.print ac format=std vr(vout) vi(vout)
+.end

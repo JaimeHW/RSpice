@@ -11,9 +11,9 @@ mx	dc-load	worker	pass	load (O5-O4) [40] |a−e|=3.179e-5 allowed 6.357e-3 (a=1.
 mx	ac	interp	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
 mx	ac	native	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
 mx	ac	worker	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
-mx	ac@trim	interp	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°
-mx	ac@trim	native	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°
-mx	ac@trim	worker	pass	psrr (O5) [2] Δ=1.256e-8 dB, 3.638e-8° allowed 8.7e-4 dB, 5.7e-3°
+mx	ac@trim	interp	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°; pending 1
+mx	ac@trim	native	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°; pending 1
+mx	ac@trim	worker	pass	psrr (O5) [2] Δ=1.256e-8 dB, 3.638e-8° allowed 8.7e-4 dB, 5.7e-3°; pending 1
 mx	stb	interp	pass	margins.gm (O5-O1) [0] |a−e|=6.487e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	stb	native	pass	margins.gm (O5-O1) [0] |a−e|=6.487e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	stb	worker	pass	margins.gm (O5-O1) [0] |a−e|=6.480e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)

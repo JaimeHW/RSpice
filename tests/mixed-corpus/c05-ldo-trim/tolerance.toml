@@ -218,6 +218,42 @@ abs_db = 8.7e-4
 abs_deg = 5.7e-3
 why = "the state 145 us after the code-15 latch settles to rel 1e-4 of the held code-15 operating point: 20·log10(1 + 1e-4) dB and 1e-4 rad"
 
+# ac@trim against the independent simulators, on the held circuit at code 15
+# (oracle/c15.ac.o5.*.cir: the code-0 ac twins with the four trim bits at
+# vcc). Set from the oracles before any RSpice run: on the same held circuit
+# at code 0, ngspice-46 and Xyce 7.10 differ by at most 0.045 dB and 0.44°
+# over the whole dec-10 grid (ref/mx.ac.O5-O1.out against ref/mx.ac.O5-O4.out,
+# worst at 100 kHz), and the transient state RSpice linearizes at is within
+# 8.7e-4 dB and 5.7e-3° of the held code-15 operating point (the O5 gate
+# above), so allowed = 0.045 + 0.00087 dB and 0.44 + 0.0057°, rounded up.
+# What neither twin can check is that the transient reached code 15: the
+# tran cell's `trim` gate and the O5 gate above cover that.
+[[q]]
+id = "psrr"
+analysis = "ac@trim"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5-O1"
+ref = "ref/c15.ac.O5-O1.out"
+abs_db = 0.05
+abs_deg = 0.45
+why = "ngspice-46 against Xyce 7.10 on the held circuit (0.045 dB, 0.44°) plus the transient state's settling to the held operating point (derivation above)"
+
+[[q]]
+id = "psrr"
+analysis = "ac@trim"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5-O4"
+ref = "ref/c15.ac.O5-O4.out"
+abs_db = 0.05
+abs_deg = 0.45
+why = "as O5-O1: the oracles' own spread plus the transient state's settling"
+
 # ---- stb -----------------------------------------------------------------
 
 [[q]]
