@@ -458,5 +458,5 @@ fn click_where(output: &egui::FullOutput, pick: impl Fn(&str) -> bool) -> Vec<eg
         .iter()
         .find_map(|(_, node)| node.label().filter(|label| pick(label)))
         .unwrap_or_else(|| panic!("no control is announced as asked"));
-    click_on(output, &label)
+    click_on(output, label)
 }

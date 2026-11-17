@@ -28,6 +28,7 @@ pub(super) fn recovery_page(
         &[
             ("Discard selected autosave…", false),
             ("Safe mode\u{2026}", false),
+            #[cfg(not(target_arch = "wasm32"))]
             ("Save as new project\u{2026}", false),
             ("Open recovery comparison", true),
         ],
@@ -134,6 +135,7 @@ pub(super) fn recovery_page(
                             }
                         });
 
+                    #[cfg(not(target_arch = "wasm32"))]
                     if !projects.is_empty() {
                         project_checkpoints(ui, cx, &projects);
                     }
@@ -177,15 +179,18 @@ pub(super) fn recovery_page(
         if Button::new("Safe mode\u{2026}").show(ui).clicked() {
             *action = Some(LauncherAction::Page(ProjectLauncherPage::SafeMode));
         }
+        #[cfg(not(target_arch = "wasm32"))]
         let project_checkpoint = cx
             .platform
             .recovery_catalog
             .selected_project_checkpoint()
             .cloned();
+        #[cfg(not(target_arch = "wasm32"))]
         let save = Button::new("Save as new project\u{2026}")
             .enabled(project_checkpoint.is_some())
             .show(ui)
             .on_disabled_hover_text("Select a project checkpoint to save it as a new project");
+        #[cfg(not(target_arch = "wasm32"))]
         if save.clicked()
             && let Some(checkpoint) = project_checkpoint
         {
@@ -229,6 +234,7 @@ pub(super) fn recovery_page(
 /// The checkpoints kept beside each recent project's file, a group per
 /// project: what is left of a project whose file will not open. Selecting one
 /// offers it as a new project; Enter or a double-click saves it as one.
+#[cfg(not(target_arch = "wasm32"))]
 fn project_checkpoints(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,

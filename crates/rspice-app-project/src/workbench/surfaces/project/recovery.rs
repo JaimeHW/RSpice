@@ -957,7 +957,12 @@ fn comparison_list(ui: &mut Ui, found: &CheckpointComparison) -> Option<Recovery
     let width = ui.available_width();
     let kind_width = 104.0;
     for difference in found {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+        let document = difference.document.label();
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), &document));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_value(difference.kind.label());
+        });
         ui.painter().text(
             pos2(rect.left(), rect.center().y),
             Align2::LEFT_CENTER,
@@ -968,7 +973,7 @@ fn comparison_list(ui: &mut Ui, found: &CheckpointComparison) -> Option<Recovery
         paint_elided(
             ui,
             pos2(rect.left() + kind_width, rect.top() + 2.0),
-            &difference.document.label(),
+            &document,
             body_font(),
             tokens.color.text,
             (width - kind_width).max(1.0),
@@ -1757,7 +1762,7 @@ fn restore_project_checkpoint(
     use crate::workbench::lifecycle::project_checkpoint::{
         ProjectCheckpointReason, start_create, start_load,
     };
-    if browser_restore_pending() {
+    if browser_restore_pending().is_some() {
         return;
     }
     if let Some(refusal) = restore_refusal(cx) {

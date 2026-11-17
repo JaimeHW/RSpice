@@ -205,7 +205,9 @@ pub struct RecoveryCatalog {
     /// with the newest first: reachable here when the file will not open.
     pub projects: Vec<RecentProjectCheckpoints>,
     /// The project checkpoints' table; its selection is the checkpoint's
-    /// identity, and excludes a selected autosave.
+    /// identity, and excludes a selected autosave. The browser keeps no
+    /// project checkpoints beside a file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub project_table: rspice_ui_kit::widgets::table::TableState,
     /// The project checkpoint the reader asked to save as a new project,
     /// for the shell to ask where.
@@ -229,6 +231,7 @@ impl Default for RecoveryCatalog {
             candidates: Vec::new(),
             selected_checkpoint: None,
             projects: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             project_table: Default::default(),
             save_as_new_project: None,
             pending_discard: None,
@@ -289,6 +292,7 @@ impl RecoveryCatalog {
     }
 
     /// The project checkpoint selected in its table.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn selected_project_checkpoint(
         &self,
     ) -> Option<&crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary> {
@@ -310,8 +314,11 @@ impl RecoveryCatalog {
     }
 
     pub fn select(&mut self, checkpoint: PathBuf) {
-        self.project_table.selection = None;
-        self.project_table.others.clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.project_table.selection = None;
+            self.project_table.others.clear();
+        }
         if self.selected_checkpoint.as_ref() != Some(&checkpoint)
             && self
                 .candidates
@@ -426,10 +433,15 @@ fn take_discovered(catalog: &mut RecoveryCatalog) {
     let previous = catalog.selected_checkpoint.clone();
     catalog.candidates = candidates;
     catalog.projects = projects;
+    #[cfg(not(target_arch = "wasm32"))]
     if catalog.selected_project_checkpoint().is_none() {
         catalog.project_table.selection = None;
         catalog.project_table.others.clear();
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let project_selected = catalog.project_table.selection.is_some();
+    #[cfg(target_arch = "wasm32")]
+    let project_selected = false;
     catalog.selected_checkpoint = previous
         .filter(|selected| {
             catalog
@@ -439,7 +451,7 @@ fn take_discovered(catalog: &mut RecoveryCatalog) {
         })
         .or_else(|| {
             // A project checkpoint the reader chose stays the selection.
-            if catalog.project_table.selection.is_some() {
+            if project_selected {
                 return None;
             }
             catalog
