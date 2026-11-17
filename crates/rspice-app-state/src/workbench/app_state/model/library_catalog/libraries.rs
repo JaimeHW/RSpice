@@ -95,6 +95,10 @@ impl Model {
             .remove_library(library)
             .ok_or_else(|| format!("Library '{library}' disappeared during the rename"))?;
         moved.name = new_name.to_owned();
+        // A model-bound symbol names its library; it follows the rename.
+        for cell in moved.cells.values_mut() {
+            rspice_design::model_bound_symbol::restamp_model_bound_identity(cell, new_name, None);
+        }
         self.library_manager.add_library(moved);
 
         let old_prefix = format!("{library}/");

@@ -1,7 +1,9 @@
 //! Scoped catalog edits keep live library records behind their owner.
 
 use super::{Cell, Library, View, ViewType};
-use crate::model_bound_symbol::{SymbolConstructionPlan, prepare_symbol_construction};
+use crate::model_bound_symbol::{
+    SymbolConstructionPlan, prepare_symbol_construction, restamp_model_bound_identity,
+};
 use crate::symbol::SymbolDocument;
 use crate::symbol::edit::{SymbolDocumentSnapshot, restore_symbol_snapshot_in_view};
 use crate::symbol::publication::EncodedSymbolEditorBundle;
@@ -32,11 +34,13 @@ impl<'a> LibraryEdit<'a> {
         self.library.remove_cell(name)
     }
 
+    /// Rename a cell, its model-bound symbol following it.
     pub fn rename_cell(&mut self, name: &str, new_name: &str) -> bool {
         let Some(mut moved) = self.library.cells.remove(name) else {
             return false;
         };
         moved.name = new_name.to_owned();
+        restamp_model_bound_identity(&mut moved, &self.library.name, None);
         self.library.cells.insert(new_name.to_owned(), moved);
         true
     }

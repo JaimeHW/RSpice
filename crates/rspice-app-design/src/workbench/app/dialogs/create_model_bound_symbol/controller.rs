@@ -679,11 +679,11 @@ pub fn build_symbol_definition(
     })?;
     let binding_id = current.map_or_else(
         || {
-            let material = format!(
-                "rspice:model-bound-symbol:{}:{library_name}/{cell_name}",
-                model.workspace.content.project.id()
-            );
-            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, material.as_bytes()).to_string()
+            rspice_design::model_bound_symbol::model_bound_binding_id(
+                model.workspace.content.project.id(),
+                &library_name,
+                &cell_name,
+            )
         },
         |definition| definition.identity.binding_id,
     );

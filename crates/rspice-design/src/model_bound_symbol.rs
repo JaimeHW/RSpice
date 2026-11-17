@@ -28,8 +28,8 @@ mod import;
 pub use construction::SymbolConstructionPlan;
 use definition::serialize_cell;
 pub use definition::{
-    load_model_bound_symbol, materialize_symbol_document, prepare_symbol_construction,
-    store_model_bound_symbol,
+    load_model_bound_symbol, materialize_symbol_document, model_bound_binding_id,
+    prepare_symbol_construction, restamp_model_bound_identity, store_model_bound_symbol,
 };
 pub use fixture::build_symbol_test_fixture_document;
 pub use import::SymbolDefinitionImport;

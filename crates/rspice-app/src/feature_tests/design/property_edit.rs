@@ -268,6 +268,98 @@ fn placed_model_bound_instance_opens_its_authoritative_typed_form() {
     ));
 }
 
+/// Rename cell, Copy cell and Rename library carry a model-bound symbol to
+/// its new place: an instance placed from it there still opens the typed
+/// form, and the stored definition names the new library and cell. A copy is
+/// a symbol of its own, with its own binding.
+#[test]
+fn a_renamed_or_copied_model_bound_cell_keeps_its_typed_form() {
+    for operation in ["rename cell", "copy cell", "rename library"] {
+        let mut state = AppState::default();
+        let definition = model_bound_definition();
+        let mut binding = install_definition(&mut state, &definition);
+        let (library, cell) = match operation {
+            "rename cell" => {
+                state
+                    .model
+                    .rename_cell("model_cells", "nmos_core", "nmos_renamed")
+                    .expect("the cell is renamed");
+                ("model_cells", "nmos_renamed")
+            }
+            "copy cell" => {
+                let (copied, _) =
+                    state
+                        .model
+                        .copy_cell("model_cells", "nmos_core", "model_cells", "nmos_copy");
+                copied.expect("the cell is copied");
+                ("model_cells", "nmos_copy")
+            }
+            _ => {
+                state
+                    .model
+                    .rename_library("model_cells", "cmos_cells")
+                    .expect("the library is renamed");
+                ("cmos_cells", "nmos_core")
+            }
+        };
+
+        let stored = state
+            .model
+            .library_manager
+            .get_library(library)
+            .and_then(|found| found.get_cell(cell))
+            .and_then(|found| found.metadata.get(MODEL_BOUND_SYMBOL_METADATA_KEY))
+            .map(|encoded| {
+                ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), cell)
+                    .expect("the stored definition decodes")
+            })
+            .unwrap_or_else(|| panic!("{operation}: the definition travels with the cell"));
+        assert_eq!(
+            (
+                stored.identity.library.as_str(),
+                stored.identity.cell.as_str()
+            ),
+            (library, cell),
+            "{operation}: the definition names its new place"
+        );
+        assert_eq!(
+            stored.identity.binding_id == definition.identity.binding_id,
+            operation != "copy cell",
+            "{operation}: a rename keeps the binding, a copy gets its own"
+        );
+
+        binding.library = library.to_owned();
+        binding.cell = cell.to_owned();
+        let instance = Component::new(7, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(binding)
+            .with_name_value("M7", cell);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(instance);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(7);
+        state.open_property_editor(7);
+        let sheet = state
+            .design
+            .property_registry
+            .get(ComponentType::CellInstance)
+            .unwrap_or_else(|| panic!("{operation}: the instance opens a cell form"));
+        assert_eq!(
+            sheet.get("w").map(|field| field.prop_type),
+            Some(PropertyType::Number),
+            "{operation}: the typed form, not the identity sheet"
+        );
+    }
+}
+
 #[test]
 fn a_plain_schematic_cell_gets_its_declared_parameters_and_a_typed_multiplicity() {
     let mut state = AppState::default();

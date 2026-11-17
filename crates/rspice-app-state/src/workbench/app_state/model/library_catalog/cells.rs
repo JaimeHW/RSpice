@@ -364,6 +364,18 @@ impl Model {
         )?;
 
         copy.name = new_name.to_owned();
+        // A copied model-bound symbol is a symbol of its own: it names its
+        // new place and carries its own binding.
+        let binding_id = rspice_design::model_bound_symbol::model_bound_binding_id(
+            self.workspace.content.project.id(),
+            dst_library,
+            new_name,
+        );
+        rspice_design::model_bound_symbol::restamp_model_bound_identity(
+            &mut copy,
+            dst_library,
+            Some(&binding_id),
+        );
         let view_names: Vec<String> = copy.views.keys().cloned().collect();
         let view_count = view_names.len();
         self.library_manager

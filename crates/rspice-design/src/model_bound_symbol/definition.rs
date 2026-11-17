@@ -234,6 +234,65 @@ fn project_definition_metadata(
     Ok(())
 }
 
+/// The binding id a model-bound symbol made in `project` for
+/// `library`/`cell` carries: the same cell of the same project always gets
+/// the same one, and a copy under another name gets its own.
+pub fn model_bound_binding_id(
+    project: impl std::fmt::Display,
+    library: &str,
+    cell: &str,
+) -> String {
+    let material = format!("rspice:model-bound-symbol:{project}:{library}/{cell}");
+    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, material.as_bytes()).to_string()
+}
+
+/// Point the model-bound symbol stored on `cell` and on each of its views
+/// at `library` and the cell's own name, so a renamed or copied cell keeps
+/// its parameter form. `binding_id` replaces the binding, for a copy, which
+/// is a symbol of its own; a rename keeps it. A definition that does not
+/// decode is left as it is: it was already unusable, and renaming must not
+/// fail over it.
+pub fn restamp_model_bound_identity(cell: &mut Cell, library: &str, binding_id: Option<&str>) {
+    let name = cell.name.clone();
+    restamp_identity_in(&mut cell.metadata, &name, library, &name, binding_id);
+    for view in cell.views.values_mut() {
+        let source = format!("{name}/{}", view.name);
+        restamp_identity_in(&mut view.metadata, &source, library, &name, binding_id);
+    }
+}
+
+fn restamp_identity_in(
+    metadata: &mut HashMap<String, String>,
+    source: &str,
+    library: &str,
+    cell: &str,
+    binding_id: Option<&str>,
+) {
+    let Some(encoded) = metadata.get(MODEL_BOUND_SYMBOL_METADATA_KEY) else {
+        return;
+    };
+    let Ok(mut definition) =
+        ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), source)
+    else {
+        return;
+    };
+    let identity = &mut definition.identity;
+    if identity.library == library
+        && identity.cell == cell
+        && binding_id.is_none_or(|binding_id| identity.binding_id == binding_id)
+    {
+        return;
+    }
+    identity.library = library.to_owned();
+    identity.cell = cell.to_owned();
+    if let Some(binding_id) = binding_id {
+        identity.binding_id = binding_id.to_owned();
+    }
+    if let Ok(encoded) = serde_json::to_string(&definition) {
+        metadata.insert(MODEL_BOUND_SYMBOL_METADATA_KEY.to_owned(), encoded);
+    }
+}
+
 fn definition_from_cell(
     cell: &Cell,
 ) -> Result<Option<ModelBoundSymbolDefinition>, SymbolDefinitionError> {
