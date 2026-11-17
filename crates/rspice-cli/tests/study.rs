@@ -1249,6 +1249,63 @@ fn study_run_replays_a_d_vcd_dump() {
     assert_eq!(study_events(&root, &study, "clk"), expected);
 }
 
+/// A study's results file holds its run's samples and event changes itself: the run's results
+/// store goes with the process, so a file that named the store could not be read. Read after the
+/// process has exited, every waveform and event history is written out, nothing names a store
+/// segment, and the results check against digests of their own values.
+#[test]
+fn a_study_results_file_holds_its_samples_after_its_process_exits() {
+    fn walk<'a>(value: &'a Value, found: &mut Vec<&'a Value>) {
+        match value {
+            Value::Object(fields) => {
+                assert!(
+                    !fields.contains_key("segment"),
+                    "the results name a store segment: {value}"
+                );
+                if fields.contains_key("node_name") {
+                    found.push(&fields["points"]);
+                }
+                if fields.contains_key("x") && fields.contains_key("y") {
+                    found.extend([&fields["x"], &fields["y"]]);
+                }
+                fields.values().for_each(|field| walk(field, found));
+            }
+            Value::Array(items) => items.iter().for_each(|item| walk(item, found)),
+            _ => {}
+        }
+    }
+    let root = common::test_dir("study-self-contained");
+    let study = data_file_study(&root, D_SOURCE_CIRCUIT);
+    std::fs::write(root.join("circuits/events.txt"), "0 0s\n1n 1s\n2n 0s\n").unwrap();
+    let destination = root.join("result.json");
+    let output = invoke(
+        &root,
+        &[
+            "study",
+            "run",
+            study.to_str().unwrap(),
+            "--output",
+            destination.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let artifact: Value = serde_json::from_slice(&std::fs::read(&destination).unwrap()).unwrap();
+    let mut held = Vec::new();
+    walk(&artifact["results"], &mut held);
+    // Two waveforms' axes and samples at least, and the d node's history.
+    assert!(held.len() >= 5, "{artifact}");
+    for values in held {
+        assert!(
+            values.as_array().is_some_and(|values| !values.is_empty()),
+            "not written out: {values}"
+        );
+    }
+    let results: rspice_formats::project_results::ProjectSimulationResults =
+        serde_json::from_value(artifact["results"].clone()).unwrap();
+    results.validate().unwrap();
+}
+
 /// The stimulus file's bytes are part of the prepared run's identity, and a
 /// file the circuit names that cannot be read is refused before anything
 /// runs, naming the instance, the parameter and the path.

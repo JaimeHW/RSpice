@@ -18,6 +18,7 @@ use crate::saved_output::SavedOutputReceipt;
 use crate::waveform::RetainedWaveform;
 use std::collections::BTreeMap;
 
+mod in_memory;
 mod native_scalar_units;
 mod quasi_periodic;
 mod saved_output;

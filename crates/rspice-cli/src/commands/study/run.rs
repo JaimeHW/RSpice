@@ -12,6 +12,7 @@ use rspice_formats::project_results::{
 use rspice_results::provenance::AnalysisResultProvenance;
 use rspice_results::run::{ExecutionTarget, SimulationRun, SimulationRunLifecycle};
 use rspice_results::saved_output::SavedOutputMaterializationStatus;
+use rspice_simulation::error::{ResultStorageFailure, SimulationError};
 use rspice_simulation::execution::{PreparedRunAuthorization, SavePolicy};
 use rspice_simulation::output_contract::materialization::{
     apply_saved_output_policy, materialize_saved_outputs,
@@ -200,6 +201,16 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
                 ));
             }
         }
+        // The results file outlives the run's results store, which goes when this process does:
+        // it holds every sample and event change itself, and its digests are of those values.
+        retained.read_stored_into_memory().map_err(|unread| {
+            let cause = unread.to_string();
+            failure::execution(
+                SimulationError::ResultStorage(ResultStorageFailure::Io { cause }),
+                &authored.id,
+                args.study.timeout,
+            )
+        })?;
         retained.validate_retained_evidence().map_err(|message| {
             failure::classified(
                 message,
