@@ -11,6 +11,9 @@ use std::io;
 pub enum StoreError {
     /// The backing store reported that it is out of space.
     DiskFull,
+    /// The run's segments held `written` bytes, and the next write would have taken them past
+    /// the run's storage budget of `budget` bytes.
+    StorageBudget { budget: u64, written: u64 },
     /// The in-memory backend could not grow.
     MemoryFull,
     /// Any other I/O failure, with the operating system's message.
@@ -50,6 +53,16 @@ impl StoreError {
             reason: reason.into(),
         }
     }
+
+    /// Why a segment this error refused closes over the chunks it holds: the disk filled, or the
+    /// run reached its storage budget. `None` for an error that leaves no room question.
+    pub(crate) fn filled(&self) -> Option<crate::StopReason> {
+        match self {
+            Self::DiskFull => Some(crate::StopReason::DiskFull),
+            Self::StorageBudget { .. } => Some(crate::StopReason::StorageBudget),
+            _ => None,
+        }
+    }
 }
 
 /// Reserve room for `additional` more items in `out`, or fail with the typed
@@ -74,6 +87,15 @@ pub(crate) fn reserve<T>(
 
 impl From<io::Error> for StoreError {
     fn from(error: io::Error) -> Self {
+        if let Some(refusal) = error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<crate::watch::BudgetRefusal>())
+        {
+            return Self::StorageBudget {
+                budget: refusal.budget,
+                written: refusal.written,
+            };
+        }
         match error.kind() {
             // A user's disk quota running out fills the disk as far as the run can tell.
             io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::DiskFull,
@@ -90,6 +112,11 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DiskFull => f.write_str("the results store is out of disk space"),
+            Self::StorageBudget { budget, written } => write!(
+                f,
+                "the run's results reached their {budget}-byte storage budget ({written} bytes \
+                 written)"
+            ),
             Self::MemoryFull => f.write_str("the in-memory results store could not grow"),
             Self::Io { message, .. } => write!(f, "results store I/O failed: {message}"),
             Self::Corrupt { offset, reason } => {

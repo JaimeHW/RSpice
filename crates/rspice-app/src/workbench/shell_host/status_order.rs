@@ -475,8 +475,16 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
                     )
                 })
                 .unwrap_or_default();
+            let cause = if run
+                .results_storage_stop()
+                .is_some_and(|stop| stop.budget.is_some())
+            {
+                "storage budget reached"
+            } else {
+                "results storage full"
+            };
             (
-                Cow::Owned(format!("stopped{at}: results storage full")),
+                Cow::Owned(format!("stopped{at}: {cause}")),
                 errors,
                 StatusMark::Problem(Problem::Failure),
             )
@@ -798,13 +806,14 @@ mod tests {
         app.state.open_project_session();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        run.stop_on_full_results_storage(ResultsStorageStop {
+        run.stop_on_results_storage(ResultsStorageStop {
             analysis: "TRAN".to_owned(),
             at: Some(2.31e-3),
             rows: 2_310_004,
             bytes: 1 << 30,
             free: Some(84 << 20),
             folder: "/Volumes/X/rspice-results/7-1-0".to_owned(),
+            budget: None,
         });
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.elapsed_time = 0.52;

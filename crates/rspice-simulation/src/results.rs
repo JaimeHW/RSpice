@@ -35,13 +35,25 @@ pub struct TransientStoreReceipt {
     pub stopped: Option<TransientStoreStop>,
 }
 
-/// A transient its results store stopped: the volume holding the store filled.
+/// A transient its results store stopped: the volume holding the store filled, or the run's
+/// results reached its plan's storage budget.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientStoreStop {
     /// The time of the last row kept.
     pub at: Option<f64>,
     /// The bytes the volume had free when the run ended, when the host can say.
     pub free: Option<u64>,
+    /// The plan's storage budget, when it stopped the run rather than the volume.
+    pub budget: Option<StorageBudgetReached>,
+}
+
+/// The storage budget a run's plan set, which its results reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageBudgetReached {
+    /// The bytes the plan lets the run keep.
+    pub budget: u64,
+    /// The bytes the run's results store held, across every analysis of the run, when it stopped.
+    pub written: u64,
 }
 
 /// The waveform a stability run retains its Nyquist contour under.

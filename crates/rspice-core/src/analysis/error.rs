@@ -1349,7 +1349,10 @@ impl SimulationError {
                     false,
                 )
             }
-            Self::ResultSink(crate::result_sink::SinkStop::DiskFull { .. }) => (
+            Self::ResultSink(
+                crate::result_sink::SinkStop::DiskFull { .. }
+                | crate::result_sink::SinkStop::StorageBudget { .. },
+            ) => (
                 SimulationErrorCode::ResourceLimit,
                 SimulationErrorCategory::ResourceLimit,
                 false,

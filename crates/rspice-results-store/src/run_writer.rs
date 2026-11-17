@@ -154,9 +154,9 @@ mod threaded {
     enum Outcome<I> {
         /// It wrote `END` with the status the run ended with.
         Closed(StoreReceipt, I),
-        /// A full disk refused a write, and the segment closed over the chunks it already held,
-        /// `END` saying the run stopped there.
-        Full(StoreReceipt, I),
+        /// A full disk or the run's storage budget refused a write (the error), and the segment
+        /// closed over the chunks it already held, `END` saying the run stopped there.
+        Full(StoreReceipt, I, StoreError),
         Failed(StoreError),
     }
 
@@ -192,10 +192,10 @@ mod threaded {
                 }
                 Err(error) => error,
             };
-            if matches!(error, StoreError::DiskFull) {
-                return match self.encoder.close_after_full() {
-                    Ok((receipt, io)) => Outcome::Full(receipt, io),
-                    Err(_) => Outcome::Failed(StoreError::DiskFull),
+            if let Some(reason) = error.filled() {
+                return match self.encoder.close_after_full(reason) {
+                    Ok((receipt, io)) => Outcome::Full(receipt, io, error),
+                    Err(_) => Outcome::Failed(error),
                 };
             }
             self.encoder.sync_after_stop();
@@ -252,8 +252,9 @@ mod threaded {
         sync_due: Arc<AtomicBool>,
         thread: Option<JoinHandle<Outcome<I>>>,
         stopped: bool,
-        /// The segment the writer thread closed after a full disk stopped it.
-        closed: Option<(StoreReceipt, I)>,
+        /// The segment the writer thread closed after a full disk or the storage budget stopped
+        /// it, and the error that did.
+        closed: Option<(StoreReceipt, I, StoreError)>,
         /// The error that stopped the writer thread, which `finish` reports again.
         failure: Option<StoreError>,
         /// What the run said of itself, handed to the writer thread with the last chunk.
@@ -347,9 +348,9 @@ mod threaded {
         fn writer_error(&mut self) -> StoreError {
             self.stopped = true;
             match self.join() {
-                Outcome::Full(receipt, io) => {
-                    self.closed = Some((receipt, io));
-                    StoreError::DiskFull
+                Outcome::Full(receipt, io, error) => {
+                    self.closed = Some((receipt, io, error.clone()));
+                    error
                 }
                 Outcome::Failed(error) => {
                     self.failure = Some(error.clone());
@@ -500,15 +501,15 @@ mod threaded {
             };
             if let Err(error) = sent {
                 return match self.closed.take() {
-                    Some(closed) if stopped => Ok(closed),
-                    Some(_) => Err(StoreError::DiskFull),
+                    Some((receipt, io, _)) if stopped => Ok((receipt, io)),
+                    Some((.., full)) => Err(full),
                     None => Err(self.failure.take().unwrap_or(error)),
                 };
             }
             match self.join() {
                 Outcome::Closed(receipt, io) => Ok((receipt, io)),
-                Outcome::Full(receipt, io) if stopped => Ok((receipt, io)),
-                Outcome::Full(..) => Err(StoreError::DiskFull),
+                Outcome::Full(receipt, io, _) if stopped => Ok((receipt, io)),
+                Outcome::Full(.., full) => Err(full),
                 Outcome::Failed(error) => Err(error),
             }
         }

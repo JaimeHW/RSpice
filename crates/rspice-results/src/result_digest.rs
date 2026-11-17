@@ -67,6 +67,8 @@ const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 struct ResultDigestWriter {
     hasher: Sha256,
     retained_bytes: u64,
+    /// The part of `retained_bytes` a results store holds rather than memory.
+    held_bytes: u64,
 }
 
 impl crate::convergence_quality::ConvergenceEncoder for ResultDigestWriter {
@@ -89,6 +91,7 @@ impl ResultDigestWriter {
         let mut writer = Self {
             hasher: Sha256::new(),
             retained_bytes: 0,
+            held_bytes: 0,
         };
         writer.raw(RESULT_DIGEST_MAGIC);
         writer.raw(&(encoding_version as u16).to_be_bytes());
@@ -240,9 +243,9 @@ impl ResultDigestWriter {
     /// `count` values of `bytes` each that a store holds for the result.
     fn held_values(&mut self, count: usize, bytes: u64) {
         let count = u64::try_from(count).unwrap_or(u64::MAX);
-        self.retained_bytes = self
-            .retained_bytes
-            .saturating_add(count.saturating_mul(bytes));
+        let held = count.saturating_mul(bytes);
+        self.retained_bytes = self.retained_bytes.saturating_add(held);
+        self.held_bytes = self.held_bytes.saturating_add(held);
     }
 
     fn finish(self) -> ContentDigest {
@@ -251,6 +254,10 @@ impl ResultDigestWriter {
 
     fn retained_bytes(&self) -> u64 {
         self.retained_bytes
+    }
+
+    fn held_bytes(&self) -> u64 {
+        self.held_bytes
     }
 
     fn raw(&mut self, bytes: &[u8]) {
@@ -297,6 +304,14 @@ where
     pub fn retained_data_bytes(&self) -> u64 {
         self.result_data_writer(ResultDigestEncoding::CURRENT)
             .retained_bytes()
+    }
+
+    /// The retained bytes the result keeps in memory: [`Self::retained_data_bytes`] less the
+    /// values a results store holds for it, which the store counts as it writes them.
+    #[must_use]
+    pub fn memory_data_bytes(&self) -> u64 {
+        let writer = self.result_data_writer(ResultDigestEncoding::CURRENT);
+        writer.retained_bytes().saturating_sub(writer.held_bytes())
     }
 
     fn result_data_writer(&self, version: ResultDigestEncoding) -> ResultDigestWriter {

@@ -22,6 +22,15 @@ impl AnalysisResult {
     pub fn retained_storage_bytes(&self) -> u64 {
         self.result_data_ref().retained_data_bytes()
     }
+
+    /// Logical bytes of the retained evidence this analysis keeps in memory:
+    /// [`Self::retained_storage_bytes`] less the samples a results store
+    /// holds for it, which the store counts against the run's storage budget
+    /// as it writes them.
+    #[must_use]
+    pub fn retained_memory_bytes(&self) -> u64 {
+        self.result_data_ref().memory_data_bytes()
+    }
 }
 
 impl SimulationRun {

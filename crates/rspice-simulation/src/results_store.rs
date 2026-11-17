@@ -9,8 +9,8 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use rspice_results_store::{FileIo, SegmentIo};
@@ -168,6 +168,41 @@ pub(crate) fn free_space(segment: &Path) -> rspice_results_store::FreeSpace {
         return free;
     }
     rspice_results_store::volume_free_space(segment.parent().unwrap_or(segment))
+}
+
+pub use rspice_results_store::StorageBudget;
+
+thread_local! {
+    /// The storage budget of the run solving on this thread, which every segment it writes is
+    /// counted against. The bridge solves a task on the thread the runner started it on.
+    static STORAGE_BUDGET: std::cell::RefCell<Option<Arc<StorageBudget>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Count every segment the run on this thread writes against `budget` until the guard drops.
+#[must_use]
+pub(crate) fn install_storage_budget(budget: Arc<StorageBudget>) -> StorageBudgetGuard {
+    let previous = STORAGE_BUDGET.with(|slot| slot.replace(Some(budget)));
+    StorageBudgetGuard { previous }
+}
+
+/// What removes a run's storage budget from its thread, on every exit path.
+pub(crate) struct StorageBudgetGuard {
+    previous: Option<Arc<StorageBudget>>,
+}
+
+impl Drop for StorageBudgetGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        STORAGE_BUDGET.with(|slot| {
+            slot.replace(previous);
+        });
+    }
+}
+
+/// The storage budget of the run on this thread, when its plan set one.
+pub(crate) fn storage_budget() -> Option<Arc<StorageBudget>> {
+    STORAGE_BUDGET.with(|slot| slot.borrow().clone())
 }
 
 /// A new segment file in this process's store folder.

@@ -135,6 +135,11 @@ pub struct SimulationRunner {
     #[cfg(not(target_arch = "wasm32"))]
     transient_states: Arc<crate::engine_services::TransientStateStore>,
 
+    /// The storage budget of the run whose tasks this runner solves: one count of the bytes they
+    /// write to the results store, kept across its tasks until the next run's replaces it.
+    #[cfg(not(target_arch = "wasm32"))]
+    storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
+
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
 
@@ -170,6 +175,8 @@ impl SimulationRunner {
             backends: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             transient_states: Arc::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            storage_budget: None,
             thread_handle: None,
             pending_result: None,
             source_locator: Default::default(),
@@ -240,6 +247,19 @@ impl SimulationRunner {
         lock_progress(&self.progress, "SimulationRunner::progress_fraction")
             .status
             .progress()
+    }
+
+    /// Hold the tasks started from here on, a run's, to its plan's storage budget of `limit`
+    /// bytes, one count across all of them that starts at nothing; `None` holds them to none.
+    /// Its transients stop, keeping what they wrote, at the write that would pass it. A browser
+    /// run keeps its results in memory, which the run's own retention check holds to the budget.
+    pub fn begin_storage_budget(&mut self, limit: Option<u64>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.storage_budget = limit.map(crate::results_store::StorageBudget::new);
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = limit;
     }
 
     /// Abort current simulation
@@ -543,6 +563,7 @@ impl SimulationRunner {
                     transient_states,
                 )),
                 backends: Some(self.backends.clone()),
+                storage_budget: self.storage_budget.clone(),
                 ..RunStreams::default()
             };
             let handle = std::thread::spawn(move || {
@@ -681,6 +702,9 @@ pub(in crate::runner) struct RunStreams {
     pub(in crate::runner) transient_states: Option<crate::engine_services::TransientStateHandoff>,
     /// Where the run records which code ran it.
     pub(in crate::runner) backends: Option<rspice_core::backends::BackendRecorder>,
+    /// The storage budget the run's transients write their results stores against.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::runner) storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
 }
 
 fn lock_progress<'a>(
@@ -1043,6 +1067,8 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         transient_checkpoint_observer,
         transient_states,
         backends,
+        #[cfg(not(target_arch = "wasm32"))]
+        storage_budget,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
@@ -1057,6 +1083,9 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     let _backends = backends
         .as_ref()
         .map(rspice_core::backends::BackendRecorder::install);
+    // Every results store the run writes counts against its plan's storage budget.
+    #[cfg(not(target_arch = "wasm32"))]
+    let _storage_budget = storage_budget.map(crate::results_store::install_storage_budget);
 
     // Update status: parsing
     {

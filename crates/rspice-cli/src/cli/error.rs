@@ -576,6 +576,12 @@ impl CliError {
                     ) => {
                         details.bytes = *bytes;
                     }
+                    rspice_core::SimulationError::ResultSink(
+                        rspice_core::result_sink::SinkStop::StorageBudget { budget, written },
+                    ) => {
+                        details.bytes = Some(*written);
+                        details.limit = usize::try_from(*budget).ok();
+                    }
                     rspice_core::SimulationError::BehavioralReference(error) => {
                         details.instance_name = Some(error.owner_name.clone());
                         details.canonical_instance_name = Some(error.canonical_owner_name.clone());

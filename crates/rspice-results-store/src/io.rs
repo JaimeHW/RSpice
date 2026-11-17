@@ -20,6 +20,9 @@ pub trait SegmentIo {
     fn flush(&mut self) -> io::Result<()>;
     /// The segment's current length in bytes.
     fn size(&self) -> io::Result<u64>;
+    /// The writer is closing the segment: what it writes from here on is the run's last event
+    /// changes, summaries, index and `END`, never another row.
+    fn closing(&mut self) {}
 }
 
 impl<T: SegmentIo + ?Sized> SegmentIo for Box<T> {
@@ -37,6 +40,9 @@ impl<T: SegmentIo + ?Sized> SegmentIo for Box<T> {
     }
     fn size(&self) -> io::Result<u64> {
         (**self).size()
+    }
+    fn closing(&mut self) {
+        (**self).closing();
     }
 }
 

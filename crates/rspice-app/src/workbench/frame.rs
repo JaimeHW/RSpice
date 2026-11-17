@@ -644,13 +644,21 @@ fn run_notice(state: &AppState, run_id: rspice_app_state::product::RunId) -> Opt
         // The reader's own Stop. The Console and the status bar already say
         // it, and a warning for doing what they asked would be noise.
         Lifecycle::Aborted => return None,
-        // The volume holding its results store filled: what it kept is its
-        // result, and the notice says where it stopped.
+        // The volume holding its results store filled, or its results
+        // reached its plan's storage budget: what it kept is its result, and
+        // the notice says where it stopped.
         Lifecycle::Completed | Lifecycle::Failed if run.results_storage_stop().is_some() => (
             ToastKind::Error,
-            format!("Run {sequence} stopped: results storage full"),
+            if run
+                .results_storage_stop()
+                .is_some_and(|stop| stop.budget.is_some())
+            {
+                format!("Run {sequence} stopped: storage budget reached")
+            } else {
+                format!("Run {sequence} stopped: results storage full")
+            },
             run.results_storage_stop()
-                .map(rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_full_message)
+                .map(rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_stop_message)
                 .unwrap_or_default(),
         ),
         // A member that finished is counted in its campaign's summary; a
@@ -1647,13 +1655,14 @@ mod tests {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         let run = app.state.model.simulation.start_run();
-        run.stop_on_full_results_storage(ResultsStorageStop {
+        run.stop_on_results_storage(ResultsStorageStop {
             analysis: "Transient".to_owned(),
             at: Some(2.31e-3),
             rows: 2_310_004,
             bytes: 1 << 30,
             free: Some(84 << 20),
             folder: "/Volumes/X/rspice-results/7-1-0".to_owned(),
+            budget: None,
         });
         run.lifecycle = Lifecycle::Completed;
         let run_id = run.run_id;

@@ -59,11 +59,12 @@ pub const SUPPLY_DEFAULTED_CODE: &str = "RUN-BOUNDARY-SUPPLY-DEFAULTED";
 const SUPPLY_TEMPLATE_CODE: &str = "RUN-BOUNDARY-SUPPLY-TEMPLATE-STATIC";
 const DC_INDUCTOR_LOOP_CODE: &str = "RUN-DC-INDUCTOR-LOOP";
 pub const STORAGE_FULL_CODE: &str = "RUN-RESULTS-STORAGE-FULL";
+pub const STORAGE_BUDGET_CODE: &str = "RUN-RESULTS-STORAGE-BUDGET";
 pub const COLUMN_UNREADABLE_CODE: &str = "RUN-RESULTS-COLUMN-UNREADABLE";
 
 /// Every rule code a notice record carries, which is what tells a notice
 /// from a failure in the batch they share.
-const NOTICE_CODES: [&str; 11] = [
+const NOTICE_CODES: [&str; 12] = [
     PARAMETER_CODE,
     AID_CODE,
     TIMESTEP_CODE,
@@ -74,6 +75,7 @@ const NOTICE_CODES: [&str; 11] = [
     SUPPLY_TEMPLATE_CODE,
     DC_INDUCTOR_LOOP_CODE,
     STORAGE_FULL_CODE,
+    STORAGE_BUDGET_CODE,
     COLUMN_UNREADABLE_CODE,
 ];
 
@@ -96,8 +98,9 @@ pub(crate) enum RunNotice {
         name: String,
         reason: String,
     },
-    /// The volume holding the run's results store filled: the transient
-    /// stopped there and kept the rows it had written.
+    /// The volume holding the run's results store filled, or the run's
+    /// results reached its plan's storage budget: the transient stopped there
+    /// and kept the rows it had written.
     StorageFull(ResultsStorageStop),
     /// A column of the run's results store that a waveform could not read:
     /// its trace shows no samples where it could not.
@@ -260,9 +263,10 @@ impl Model {
         self.raise_run_notices(analysis, raised, run_sequence, facts);
     }
 
-    /// Record that the volume holding the run's results store filled and
-    /// stopped `stop.analysis`, keeping the rows it had written.
-    pub fn publish_results_storage_full(
+    /// Record that the volume holding the run's results store filled, or the
+    /// run's results reached its plan's storage budget, and stopped
+    /// `stop.analysis`, keeping the rows it had written.
+    pub fn publish_results_storage_stop(
         &mut self,
         stop: &ResultsStorageStop,
         run_sequence: u64,
@@ -529,12 +533,13 @@ impl Model {
                 Some(plan()),
             ),
             // Nothing in the design is at fault: the reader frees space on
-            // the volume, or shortens the run, and runs it again.
+            // the volume, raises the plan's storage budget, or shortens the
+            // run, and runs it again.
             RunNotice::StorageFull(stop) => (
                 DiagnosticLevel::Error,
                 condition.analyses.sentence(),
                 None,
-                storage_full_message(stop),
+                storage_stop_message(stop),
                 None,
             ),
             RunNotice::ColumnUnreadable { column, cause } => (
@@ -730,7 +735,15 @@ fn notice_key(notice: &RunNotice, scope: &str) -> FindingKey {
         RunNotice::MeasureFailed { name, .. } => {
             (MEASURE_PRODUCER, MEASURE_CODE, name.to_ascii_uppercase())
         }
-        RunNotice::StorageFull(stop) => (RESULTS_PRODUCER, STORAGE_FULL_CODE, stop.folder.clone()),
+        RunNotice::StorageFull(stop) => (
+            RESULTS_PRODUCER,
+            if stop.budget.is_some() {
+                STORAGE_BUDGET_CODE
+            } else {
+                STORAGE_FULL_CODE
+            },
+            stop.folder.clone(),
+        ),
         RunNotice::ColumnUnreadable { column, .. } => {
             (RESULTS_PRODUCER, COLUMN_UNREADABLE_CODE, column.clone())
         }
@@ -848,13 +861,27 @@ fn aid_name(aid: ContinuationAid) -> &'static str {
 }
 
 /// `Stopped at t = 2.31ms: the volume holding /tmp/rspice-results/… filled;
-/// 2310004 points kept (1.10 GiB), 84.0 MiB free`.
-pub fn storage_full_message(stop: &ResultsStorageStop) -> String {
+/// 2310004 points kept (1.10 GiB), 84.0 MiB free`, or, when the plan's
+/// storage budget stopped it, `Stopped at t = 2.31ms: results reached the
+/// plan's 1.00 GiB storage budget; 1.00 GiB written, Run Set point TT · 27 °C`.
+pub fn storage_stop_message(stop: &ResultsStorageStop) -> String {
     use rspice_simulation_contract::run_set::format_bytes;
     let at = stop
         .at
         .map(|at| format!(" at t = {}s", engineering(at)))
         .unwrap_or_default();
+    if let Some(budget) = &stop.budget {
+        let point = budget
+            .point
+            .as_deref()
+            .map(|point| format!(", Run Set point {point}"))
+            .unwrap_or_default();
+        return format!(
+            "Stopped{at}: results reached the plan's {} storage budget; {} written{point}",
+            format_bytes(budget.budget),
+            format_bytes(budget.written)
+        );
+    }
     let free = stop
         .free
         .map(|free| format!(", {} free", format_bytes(free)))

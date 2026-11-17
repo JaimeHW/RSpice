@@ -16,7 +16,8 @@ pub struct SimulationRun {
 }
 
 /// A transient its results storage stopped: the volume holding the run's results store filled,
-/// and the run kept the rows it had written.
+/// or the run's results reached its plan's storage budget, and the run kept the rows it had
+/// written.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultsStorageStop {
     /// The analysis it stopped.
@@ -31,6 +32,19 @@ pub struct ResultsStorageStop {
     pub free: Option<u64>,
     /// The folder holding the store.
     pub folder: String,
+    /// The plan's storage budget, when it stopped the run rather than the volume.
+    pub budget: Option<ResultsStorageBudget>,
+}
+
+/// The storage budget a run's plan set, which its results reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultsStorageBudget {
+    /// The bytes the plan lets the run keep.
+    pub budget: u64,
+    /// The bytes the run's results store held, across its analyses, when it stopped.
+    pub written: u64,
+    /// The Run Set point the stopped analysis solved, as a results table names it.
+    pub point: Option<String>,
 }
 
 impl Deref for SimulationRun {
@@ -130,8 +144,9 @@ impl SimulationRun {
         self.results_storage_stop.as_ref()
     }
 
-    /// Say that the volume holding the run's results store filled and stopped `stop.analysis`.
-    pub fn stop_on_full_results_storage(&mut self, stop: ResultsStorageStop) {
+    /// Say that the volume holding the run's results store filled, or its results reached its
+    /// plan's storage budget, and stopped `stop.analysis`.
+    pub fn stop_on_results_storage(&mut self, stop: ResultsStorageStop) {
         self.results_storage_stop = Some(stop);
     }
 

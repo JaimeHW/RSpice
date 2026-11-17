@@ -2889,7 +2889,9 @@ fn stopped_run(
     }
     let filled = matches!(
         source,
-        rspice_core::SimulationError::ResultSink(SinkStop::DiskFull { .. })
+        rspice_core::SimulationError::ResultSink(
+            SinkStop::DiskFull { .. } | SinkStop::StorageBudget { .. }
+        )
     );
     if !filled {
         store.discard();

@@ -4,6 +4,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core_base::result_sink::{
     EventChange, ResultSchema, ResultSink, RunMeta, RunStatus, SinkReceipt, SinkStop,
@@ -76,13 +77,90 @@ pub fn available_bytes(_path: &Path) -> Option<u64> {
     None
 }
 
+/// The bytes one run may keep in its results store, its plan's storage budget, and the bytes the
+/// segments it writes hold so far: one count for the whole run, shared by every segment it writes,
+/// whichever task writes it.
+#[derive(Debug)]
+pub struct StorageBudget {
+    limit: u64,
+    written: AtomicU64,
+}
+
+impl StorageBudget {
+    /// A run's budget of `limit` bytes, with nothing written yet.
+    pub fn new(limit: u64) -> Arc<Self> {
+        Arc::new(Self {
+            limit,
+            written: AtomicU64::new(0),
+        })
+    }
+
+    /// The bytes the run may keep.
+    pub fn limit(&self) -> u64 {
+        self.limit
+    }
+
+    /// The bytes the run's segments hold.
+    pub fn written(&self) -> u64 {
+        self.written.load(Ordering::Acquire)
+    }
+
+    /// Count `bytes` more against the budget, or refuse them, counting nothing, when they would
+    /// take it past its limit; the refusal says what was written. A segment closing is never
+    /// refused: `refusable` is false for the writes that close it.
+    fn take(&self, bytes: u64, refusable: bool) -> Result<(), u64> {
+        self.written
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |written| {
+                let after = written.saturating_add(bytes);
+                (!refusable || after <= self.limit).then_some(after)
+            })
+            .map(drop)
+    }
+
+    /// Give back `bytes` a segment no longer holds.
+    fn release(&self, bytes: u64) {
+        let _ = self
+            .written
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |written| {
+                Some(written.saturating_sub(bytes))
+            });
+    }
+}
+
+/// A write the run's storage budget refused, carried through the segment's I/O error.
+#[derive(Debug)]
+pub(crate) struct BudgetRefusal {
+    pub(crate) budget: u64,
+    pub(crate) written: u64,
+}
+
+impl std::fmt::Display for BudgetRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the write would take the run's results past their {}-byte storage budget ({} bytes \
+             written)",
+            self.budget, self.written
+        )
+    }
+}
+
+impl std::error::Error for BudgetRefusal {}
+
 /// A segment that keeps room on its volume for the segment to close: a write that grows it past
-/// the free space less [`CLOSING_RESERVE`] fails as storage full. Every write after that is the
-/// writer closing the segment, which the reserve is for.
+/// the free space less [`CLOSING_RESERVE`] fails as storage full. With a run's
+/// [`StorageBudget`], every byte the segment grows by is counted against it, and a write that
+/// would take the run past it fails as [`crate::StoreError::StorageBudget`]. Every write after
+/// either refusal, and every write once the writer says it is closing, is the writer closing the
+/// segment, which the reserve is for and the budget never refuses.
 pub struct WatchedIo<I> {
     io: I,
     free: FreeSpace,
-    full: bool,
+    budget: Option<Arc<StorageBudget>>,
+    /// The bytes this segment has counted against the budget.
+    counted: u64,
+    /// A write was refused or the writer is closing the segment: nothing is refused any more.
+    closing: bool,
 }
 
 impl<I> WatchedIo<I> {
@@ -90,8 +168,17 @@ impl<I> WatchedIo<I> {
         Self {
             io,
             free,
-            full: false,
+            budget: None,
+            counted: 0,
+            closing: false,
         }
+    }
+
+    /// Count what the segment writes against `budget`, the run's, shared by its segments.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Option<Arc<StorageBudget>>) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// The segment's own I/O.
@@ -106,28 +193,65 @@ impl<I: SegmentIo> SegmentIo for WatchedIo<I> {
     }
 
     fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        if !self.full {
-            let grows = (offset + data.len() as u64).saturating_sub(self.io.size()?);
-            if grows > 0
+        let watched = !self.closing || self.budget.is_some();
+        let size = if watched { self.io.size()? } else { 0 };
+        let grows = (offset + data.len() as u64).saturating_sub(size);
+        if grows > 0 && watched {
+            if !self.closing
                 && (self.free)().is_some_and(|free| free < grows.saturating_add(CLOSING_RESERVE))
             {
-                self.full = true;
+                self.closing = true;
                 return Err(std::io::ErrorKind::StorageFull.into());
+            }
+            if let Some(budget) = &self.budget {
+                if let Err(written) = budget.take(grows, !self.closing) {
+                    self.closing = true;
+                    return Err(std::io::Error::other(BudgetRefusal {
+                        budget: budget.limit(),
+                        written,
+                    }));
+                }
+                self.counted += grows;
             }
         }
         let written = self.io.write_at(offset, data);
-        // The volume filled before the watch saw it: the writes closing the segment still try.
-        if written
-            .as_ref()
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::StorageFull)
-        {
-            self.full = true;
+        if let Err(error) = &written {
+            // The volume filled before the watch saw it: the writes closing the segment still try.
+            if error.kind() == std::io::ErrorKind::StorageFull {
+                self.closing = true;
+            }
+            // What the failed write did not grow the segment by is not the run's.
+            if grows > 0
+                && let Some(budget) = &self.budget
+            {
+                let grew = self
+                    .io
+                    .size()
+                    .map_or(0, |after| after.saturating_sub(size))
+                    .min(grows);
+                budget.release(grows - grew);
+                self.counted -= grows - grew;
+            }
         }
         written
     }
 
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.io.truncate(len)
+        let Some(budget) = &self.budget else {
+            return self.io.truncate(len);
+        };
+        let size = self.io.size()?;
+        self.io.truncate(len)?;
+        // A segment cut back holds less: its provisional tail, overwritten and cut, is not kept.
+        let shrinks = size.saturating_sub(len).min(self.counted);
+        budget.release(shrinks);
+        self.counted -= shrinks;
+        Ok(())
+    }
+
+    fn closing(&mut self) {
+        self.closing = true;
+        self.io.closing();
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

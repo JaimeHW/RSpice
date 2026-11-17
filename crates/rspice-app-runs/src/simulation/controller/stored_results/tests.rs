@@ -1,14 +1,16 @@
-//! A run's results store as the controller reports it: a transient its volume stopped keeps its
-//! rows and says where it stopped, a stored column a waveform could not read is a finding of the
+//! A run's results store as the controller reports it: a transient its volume or its plan's
+//! storage budget stopped keeps its rows and says where it stopped, a stored column a waveform could not read is a finding of the
 //! run that wrote it, and a stored run saved with its project keeps its segment beside the file
 //! and reopens with the same samples.
 
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::{
-    COLUMN_UNREADABLE_CODE, STORAGE_FULL_CODE,
+    COLUMN_UNREADABLE_CODE, STORAGE_BUDGET_CODE, STORAGE_FULL_CODE,
 };
 use rspice_results::waveform::ColumnReadFailure;
-use rspice_simulation::results::{SampledWaveform, TransientStoreReceipt, TransientStoreStop};
+use rspice_simulation::results::{
+    SampledWaveform, StorageBudgetReached, TransientStoreReceipt, TransientStoreStop,
+};
 
 use super::*;
 use crate::simulation::controller::test_host::RunTestHost;
@@ -86,6 +88,7 @@ fn a_transient_its_results_storage_stopped_keeps_its_rows_and_says_where_it_stop
     let stop = TransientStoreStop {
         at: Some(2.31e-3),
         free: Some(84 * 1024 * 1024),
+        budget: None,
     };
 
     controller.accept_completion(&mut state, &export_io, Ok(stored_transient(Some(stop))));
@@ -129,6 +132,60 @@ fn a_transient_its_results_storage_stopped_keeps_its_rows_and_says_where_it_stop
         .map(|record| (record.level, record.message.as_str()))
         .collect();
     assert_eq!(full, [(DiagnosticLevel::Error, message)]);
+}
+
+/// The plan's storage budget stops a run by name, beside a full volume: its rows stand as its
+/// result, and the run's log, its finding and the status bar say the budget, not the volume.
+#[test]
+fn a_transient_its_plans_storage_budget_stopped_says_the_budget() {
+    let mut controller = SimulationController::new();
+    let (mut state, run_sequence) = running(&mut controller);
+    let export_io = super::super::test_execution::MockExportWorkflowIo::default();
+    let stop = TransientStoreStop {
+        at: Some(2.31e-3),
+        free: Some(84 * 1024 * 1024),
+        budget: Some(StorageBudgetReached {
+            budget: 1024 * 1024,
+            written: 1000 * 1024,
+        }),
+    };
+
+    controller.accept_completion(&mut state, &export_io, Ok(stored_transient(Some(stop))));
+
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is kept");
+    assert!(run.analyses[0].success && run.analyses[0].has_data());
+    let message = "Stopped at t = 2.31ms: results reached the plan's 1.00 MiB storage budget; \
+                   1000.00 KiB written";
+    let logged: Vec<_> = run
+        .log
+        .lines()
+        .iter()
+        .filter(|line| line.severity == LogSeverity::Error)
+        .map(|line| line.message.as_str())
+        .collect();
+    assert_eq!(logged, [format!("Transient: {message}")]);
+    assert_eq!(
+        state.model.simulation.execution.status,
+        "Stopped: storage budget reached"
+    );
+    let records = state.model.diagnostics.published_run_records(run_sequence);
+    let codes: Vec<_> = records
+        .iter()
+        .filter(|record| {
+            record
+                .canonical
+                .code
+                .as_ref()
+                .starts_with("RUN-RESULTS-STORAGE")
+        })
+        .map(|record| (record.canonical.code.as_ref(), record.message.as_str()))
+        .collect();
+    assert_eq!(codes, [(STORAGE_BUDGET_CODE, message)]);
 }
 
 #[test]

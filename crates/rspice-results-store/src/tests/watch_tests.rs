@@ -1,6 +1,7 @@
 //! The disk watch: a write that would eat the closing reserve is refused, a run whose storage
 //! fills stops there typed with every whole chunk kept, and the preflight refuses a run whose
-//! rows cannot fit before it begins.
+//! rows cannot fit before it begins. A run's storage budget counts what every segment of the run
+//! holds and stops the run whose next write would pass it, the same way.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,8 +15,8 @@ use rspice_core::result_sink::{
 };
 
 use crate::{
-    CLOSING_RESERVE, FileIo, FreeSpace, RunStatus, SegmentIo, SegmentReader, SegmentState,
-    StopReason, StoreSink, WatchedIo, WatchedSink,
+    CLOSING_RESERVE, FileIo, FreeSpace, MemoryIo, RunStatus, SegmentIo, SegmentReader,
+    SegmentState, StopReason, StorageBudget, StoreError, StoreSink, WatchedIo, WatchedSink,
 };
 
 fn scratch(tag: &str) -> PathBuf {
@@ -178,5 +179,99 @@ fn the_preflight_refuses_rows_that_cannot_fit_and_warns_of_rows_that_likely_do_n
     );
     let (mut inner, _) = fits.into_parts();
     inner.end(SinkStatus::Completed).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A volume with room for anything.
+fn roomy() -> FreeSpace {
+    Arc::new(|| Some(1 << 40))
+}
+
+#[test]
+fn a_storage_budget_counts_what_every_segment_holds_and_refuses_the_write_that_would_pass_it() {
+    let budget = StorageBudget::new(1000);
+    let watched = || WatchedIo::new(MemoryIo::new(), roomy()).with_budget(Some(budget.clone()));
+    let (mut first, mut second) = (watched(), watched());
+    first.write_at(0, &[1; 400]).unwrap();
+    // Rewriting what is there grows nothing; a provisional tail cut back is given back.
+    first.write_at(0, &[2; 400]).unwrap();
+    first.write_at(400, &[3; 200]).unwrap();
+    first.truncate(400).unwrap();
+    assert_eq!(budget.written(), 400);
+    second.write_at(0, &[4; 600]).unwrap();
+    assert_eq!(budget.written(), 1000);
+    let refused = StoreError::from(first.write_at(400, &[5; 1]).unwrap_err());
+    assert_eq!(
+        refused,
+        StoreError::StorageBudget {
+            budget: 1000,
+            written: 1000
+        }
+    );
+    assert_eq!(first.size().unwrap(), 400);
+    // The writes closing the refused segment, and those of a segment its writer is closing, are
+    // counted and never refused.
+    first.write_at(400, &[6; 64]).unwrap();
+    second.closing();
+    second.write_at(600, &[7; 64]).unwrap();
+    assert_eq!(budget.written(), 1128);
+}
+
+#[test]
+fn a_run_its_storage_budget_stops_keeps_its_whole_chunks_and_says_the_budget() {
+    let dir = scratch("budget");
+    let netlist = Netlist::parse(
+        "rc\nv1 in 0 sin(0 1 100k)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 200u\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let run_into = |segment: &Path, budget: &Arc<StorageBudget>, stop: f64| {
+        let mut sink = StoreSink::new(
+            WatchedIo::new(FileIo::create(segment).unwrap(), roomy())
+                .with_budget(Some(budget.clone())),
+        );
+        let run = engine
+            .run_tran_into_sink_with_startup_mode_and_abort(
+                &netlist,
+                stop,
+                1e-9,
+                TransientStartupMode::OperatingPoint,
+                &rspice_core::NoAbort,
+                &mut sink,
+            )
+            .unwrap();
+        (run.stopped, run.receipt.rows)
+    };
+    // One budget for the run's two transients: the first fits, the second reaches it.
+    let budget = StorageBudget::new(256 * 1024);
+    let (first, second) = (dir.join("first"), dir.join("second"));
+    let (stopped, _) = run_into(&first, &budget, 2e-6);
+    assert_eq!(stopped, None);
+    let after_first = budget.written();
+    assert_eq!(after_first, std::fs::metadata(&first).unwrap().len());
+    let (stopped, rows) = run_into(&second, &budget, 200e-6);
+    let Some(SinkStop::StorageBudget {
+        budget: limit,
+        written,
+    }) = stopped
+    else {
+        panic!("the budget stops the run: {stopped:?}");
+    };
+    assert_eq!(limit, 256 * 1024);
+    assert!(written <= limit && written > after_first, "{written}");
+    // What the run's segments hold is what the budget counted: the refused chunk is not kept,
+    // the closing frames are.
+    let held = std::fs::metadata(&first).unwrap().len() + std::fs::metadata(&second).unwrap().len();
+    assert_eq!(budget.written(), held);
+    let reader = SegmentReader::open(FileIo::open(&second).unwrap()).unwrap();
+    assert!(matches!(
+        reader.state(),
+        SegmentState::Complete {
+            status: RunStatus::Stopped(StopReason::StorageBudget),
+            ..
+        }
+    ));
+    assert_eq!(reader.rows(), rows);
+    assert!(rows > 1000 && rows < 200_000, "{rows} rows kept");
     let _ = std::fs::remove_dir_all(&dir);
 }

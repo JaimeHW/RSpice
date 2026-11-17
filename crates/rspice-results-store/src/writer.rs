@@ -33,6 +33,8 @@ use crate::{RunMeta, Schema, SegmentIo, StoreError, codec};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
     DiskFull,
+    /// The run's results reached the storage budget its plan set.
+    StorageBudget,
     MemoryFull,
     Cancelled,
     Timeout,
@@ -55,6 +57,7 @@ impl RunStatus {
             Self::Stopped(StopReason::Cancelled) => (1, 3, ""),
             Self::Stopped(StopReason::Timeout) => (1, 4, ""),
             Self::Stopped(StopReason::Failed(message)) => (1, 5, message),
+            Self::Stopped(StopReason::StorageBudget) => (1, 6, ""),
         }
     }
 
@@ -66,6 +69,7 @@ impl RunStatus {
             (1, 3) => Self::Stopped(StopReason::Cancelled),
             (1, 4) => Self::Stopped(StopReason::Timeout),
             (1, 5) => Self::Stopped(StopReason::Failed(message)),
+            (1, 6) => Self::Stopped(StopReason::StorageBudget),
             _ => return None,
         })
     }
@@ -397,13 +401,17 @@ impl<I: SegmentIo> Encoder<I> {
         let _ = self.io.flush();
     }
 
-    /// After a full disk refused a write: close the segment over the chunks already in it, its
-    /// `END` saying the run stopped there. These writes are what a watched volume keeps its last
-    /// free space for. The chunk that failed, and every row staged after it, are not kept.
-    pub(crate) fn close_after_full(mut self) -> Result<(StoreReceipt, I), StoreError> {
+    /// After a full disk or the run's storage budget refused a write: close the segment over the
+    /// chunks already in it, its `END` saying the run stopped there for `reason`. These writes
+    /// are what a watched volume keeps its last free space for. The chunk that failed, and every
+    /// row staged after it, are not kept.
+    pub(crate) fn close_after_full(
+        mut self,
+        reason: StopReason,
+    ) -> Result<(StoreReceipt, I), StoreError> {
         // A refused write can leave bytes past the real tail; closing truncates them.
         self.file_end = self.file_end.max(self.io.size()?);
-        self.finish(&RunStatus::Stopped(StopReason::DiskFull))
+        self.finish(&RunStatus::Stopped(reason))
     }
 
     pub(crate) fn layout(&self) -> &Layout {
@@ -737,6 +745,7 @@ impl<I: SegmentIo> Encoder<I> {
 
     /// Write the last frames and `END`; returns the receipt and the segment's I/O.
     pub(crate) fn finish(mut self, status: &RunStatus) -> Result<(StoreReceipt, I), StoreError> {
+        self.io.closing();
         for position in 0..self.events.len() {
             if self.events[position].len() > 0 {
                 self.write_events(position)?;
@@ -820,8 +829,9 @@ pub struct SegmentWriter<I: SegmentIo> {
     open: Batch,
     encoder: Encoder<I>,
     stopped: bool,
-    /// What stopped it was a full disk: `finish` then closes the segment over its chunks.
-    full: bool,
+    /// What stopped it was a full disk or the run's storage budget: `finish` then closes the
+    /// segment over its chunks.
+    full: Option<StoreError>,
 }
 
 impl<I: SegmentIo> SegmentWriter<I> {
@@ -853,7 +863,7 @@ impl<I: SegmentIo> SegmentWriter<I> {
             open: Batch::new(chunk_rows, encoder.layout().slots),
             encoder,
             stopped: false,
-            full: false,
+            full: None,
         })
     }
 
@@ -876,7 +886,7 @@ impl<I: SegmentIo> SegmentWriter<I> {
             open: kept.batch,
             encoder,
             stopped: false,
-            full: false,
+            full: None,
         })
     }
 
@@ -893,7 +903,7 @@ impl<I: SegmentIo> SegmentWriter<I> {
     fn guard<T>(&mut self, result: Result<T, StoreError>) -> Result<T, StoreError> {
         if let Err(error) = &result {
             self.stopped = true;
-            self.full = matches!(error, StoreError::DiskFull);
+            self.full = error.filled().is_some().then(|| error.clone());
             self.encoder.sync_after_stop();
         }
         result
@@ -978,24 +988,24 @@ impl<I: SegmentIo> SegmentWriter<I> {
 
     /// Write the last chunk and `END` with `status`; returns the receipt and the segment's I/O.
     ///
-    /// After a full disk stopped the writer, the segment closes over the chunks it holds with
-    /// `END` saying so; that is the receipt for a run ended as stopped, and a run ended as
-    /// completed is told the disk was full.
+    /// After a full disk or the run's storage budget stopped the writer, the segment closes over
+    /// the chunks it holds with `END` saying so; that is the receipt for a run ended as stopped,
+    /// and a run ended as completed is told what filled.
     pub fn finish(mut self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
-        if self.stopped && !self.full {
-            return Err(StoreError::WriterStopped);
-        }
-        if !self.stopped {
-            match self.encoder.write_batch(&self.open) {
+        let full = match (self.stopped, self.full.take()) {
+            (true, None) => return Err(StoreError::WriterStopped),
+            (true, Some(full)) => full,
+            (false, _) => match self.encoder.write_batch(&self.open) {
                 Ok(()) => return self.encoder.finish(&status),
-                Err(StoreError::DiskFull) => {}
+                Err(error) if error.filled().is_some() => error,
                 Err(error) => return Err(error),
-            }
-        }
-        let closed = self.encoder.close_after_full()?;
+            },
+        };
+        let reason = full.filled().unwrap_or(StopReason::DiskFull);
+        let closed = self.encoder.close_after_full(reason)?;
         match status {
             RunStatus::Stopped(_) => Ok(closed),
-            RunStatus::Completed => Err(StoreError::DiskFull),
+            RunStatus::Completed => Err(full),
         }
     }
 

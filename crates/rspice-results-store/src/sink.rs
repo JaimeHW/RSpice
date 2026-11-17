@@ -184,14 +184,17 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
     }
 }
 
-/// The engine's typed stop for a store error: storage and memory exhaustion stay typed, every
-/// other failure carries its message.
+/// The engine's typed stop for a store error: storage, budget and memory exhaustion stay typed,
+/// every other failure carries its message.
 pub fn sink_stop(error: StoreError) -> SinkStop {
     match error {
         StoreError::DiskFull => SinkStop::DiskFull {
             needed: None,
             available: None,
         },
+        StoreError::StorageBudget { budget, written } => {
+            SinkStop::StorageBudget { budget, written }
+        }
         StoreError::MemoryFull => SinkStop::MemoryFull { bytes: None },
         other => SinkStop::Io(other.to_string()),
     }
@@ -260,6 +263,7 @@ fn store_status(status: sink::RunStatus) -> RunStatus {
         sink::RunStatus::Completed => RunStatus::Completed,
         sink::RunStatus::Stopped(reason) => RunStatus::Stopped(match reason {
             sink::StopReason::DiskFull => StopReason::DiskFull,
+            sink::StopReason::StorageBudget => StopReason::StorageBudget,
             sink::StopReason::MemoryFull => StopReason::MemoryFull,
             sink::StopReason::Cancelled => StopReason::Cancelled,
             sink::StopReason::Timeout => StopReason::Timeout,

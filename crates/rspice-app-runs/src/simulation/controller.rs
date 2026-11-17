@@ -540,6 +540,10 @@ impl SimulationController {
         self.execution_artifacts.clear();
         self.current_source_domain = source_domain;
         self.current_save_policy = dispatched_save_policy;
+        // One count of what the run's tasks write to the results store, held to its plan's
+        // storage budget as they write it.
+        self.runner
+            .begin_storage_budget(dispatched_save_policy.maximum_storage_bytes());
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
         self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
@@ -1410,9 +1414,11 @@ impl SimulationController {
                         }))
                 })
                 .fold(0_u64, |total, existing| {
-                    total.saturating_add(existing.retained_storage_bytes())
+                    total.saturating_add(existing.retained_memory_bytes())
                 });
-            let requested = already_retained.saturating_add(analysis.retained_storage_bytes());
+            // What the results store holds is held to the budget as it is written, by the
+            // bytes the store wrote; only what the run keeps in memory is counted here.
+            let requested = already_retained.saturating_add(analysis.retained_memory_bytes());
             if requested > maximum {
                 return Err(format!(
                     "the run's results would take {}, more than its {} storage limit",
@@ -1634,7 +1640,10 @@ impl SimulationController {
         let completed_run =
             completed_run_id.and_then(|run_id| model.simulation.retained.run_by_sequence(run_id));
         let run_success = completed_run.is_some_and(|run| run.success);
-        let storage_full = completed_run.is_some_and(|run| run.results_storage_stop().is_some());
+        // Whether the run's results storage stopped it, and whether its plan's budget did.
+        let storage_stop = completed_run
+            .and_then(|run| run.results_storage_stop())
+            .map(|stop| stop.budget.is_some());
         self.live_transient.clear();
 
         if let Some(run_id) = completed_run_id
@@ -1705,12 +1714,11 @@ impl SimulationController {
         execution.active_execution = None;
         execution.abort_request = None;
 
-        execution.status = if storage_full {
-            "Stopped: results storage full".to_string()
-        } else if run_success {
-            "Complete".to_string()
-        } else {
-            "Completed with errors".to_string()
+        execution.status = match storage_stop {
+            Some(true) => "Stopped: storage budget reached".to_string(),
+            Some(false) => "Stopped: results storage full".to_string(),
+            None if run_success => "Complete".to_string(),
+            None => "Completed with errors".to_string(),
         };
 
         self.complete_campaign_member(state, run_success);

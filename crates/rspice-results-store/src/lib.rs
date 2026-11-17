@@ -51,6 +51,7 @@ pub use tile::{BlockCache, BlockKey, NoBlockCache, Tile, pixel_of};
 #[cfg(any(unix, windows))]
 pub use watch::volume_free_space;
 pub use watch::{
-    CLOSING_RESERVE, FreeSpace, SpaceWarning, WatchedIo, WatchedSink, available_bytes,
+    CLOSING_RESERVE, FreeSpace, SpaceWarning, StorageBudget, WatchedIo, WatchedSink,
+    available_bytes,
 };
 pub use writer::{RunStatus, SegmentWriter, StopReason, StoreReceipt};

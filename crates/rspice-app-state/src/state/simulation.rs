@@ -141,7 +141,7 @@ pub use rspice_results::specification::PreparedSpecificationPolicy;
 pub use rspice_results::specification_verdict::SpecificationVerdictStatus;
 pub use rspice_results::waveform::SharedWaveformValues;
 pub use rspice_vocabulary::hierarchy_path::OccurrenceProbeSpelling;
-pub use run::{ResultsStorageStop, SimulationRun};
+pub use run::{ResultsStorageBudget, ResultsStorageStop, SimulationRun};
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub use rspice_results::run_history::RunHistoryRevision;
 pub use rspice_results::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};

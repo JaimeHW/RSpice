@@ -25,6 +25,9 @@ pub enum ResultStorageFailure {
         available: Option<u64>,
         folder: Option<String>,
     },
+    /// The run's results reached the storage budget its plan set, `written` bytes of a `budget`,
+    /// before the run kept a row.
+    Budget { budget: u64, written: u64 },
     /// Memory could not grow to hold what the store buffers.
     MemoryFull { bytes: Option<u64> },
     /// The store could not be created, written or read back, in the host's words.
@@ -37,6 +40,7 @@ impl ResultStorageFailure {
     pub fn from_sink_stop(stop: SinkStop, folder: Option<String>) -> Self {
         match stop {
             SinkStop::DiskFull { available, .. } => Self::Full { available, folder },
+            SinkStop::StorageBudget { budget, written } => Self::Budget { budget, written },
             SinkStop::MemoryFull { bytes } => Self::MemoryFull { bytes },
             SinkStop::Io(cause) => Self::Io { cause },
         }
@@ -45,7 +49,7 @@ impl ResultStorageFailure {
     /// The stable error code, the one the engine gives the same stop.
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Insufficient { .. } | Self::Full { .. } => "resource_limit",
+            Self::Insufficient { .. } | Self::Full { .. } | Self::Budget { .. } => "resource_limit",
             Self::MemoryFull { .. } => "allocation_failed",
             Self::Io { .. } => "output_commit_failed",
         }
@@ -54,9 +58,10 @@ impl ResultStorageFailure {
     /// The failure class, the one the engine gives the same stop.
     pub const fn category(&self) -> SimulationErrorCategory {
         match self {
-            Self::Insufficient { .. } | Self::Full { .. } | Self::MemoryFull { .. } => {
-                SimulationErrorCategory::ResourceLimit
-            }
+            Self::Insufficient { .. }
+            | Self::Full { .. }
+            | Self::Budget { .. }
+            | Self::MemoryFull { .. } => SimulationErrorCategory::ResourceLimit,
             Self::Io { .. } => SimulationErrorCategory::OutputCommit,
         }
     }
@@ -89,6 +94,13 @@ impl fmt::Display for ResultStorageFailure {
                     None => Ok(()),
                 }
             }
+            Self::Budget { budget, written } => write!(
+                formatter,
+                "Results storage budget reached: the run's results reached the plan's {} storage \
+                 budget before the run kept a row; {} written",
+                format_bytes(*budget),
+                format_bytes(*written)
+            ),
             Self::MemoryFull { bytes: Some(bytes) } => write!(
                 formatter,
                 "Results storage full: results memory is full ({})",

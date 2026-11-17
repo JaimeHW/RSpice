@@ -285,6 +285,9 @@ impl Engine {
                 let status = match &stop {
                     None => RunStatus::Completed,
                     Some(SinkStop::MemoryFull { .. }) => RunStatus::Stopped(StopReason::MemoryFull),
+                    Some(SinkStop::StorageBudget { .. }) => {
+                        RunStatus::Stopped(StopReason::StorageBudget)
+                    }
                     Some(_) => RunStatus::Stopped(StopReason::DiskFull),
                 };
                 // The shell goes with the rows, so a reader with neither the engine nor the
@@ -312,6 +315,9 @@ impl Engine {
                     SimulationError::Aborted => StopReason::Cancelled,
                     SimulationError::TimeLimitExceeded => StopReason::Timeout,
                     SimulationError::ResultSink(SinkStop::DiskFull { .. }) => StopReason::DiskFull,
+                    SimulationError::ResultSink(SinkStop::StorageBudget { .. }) => {
+                        StopReason::StorageBudget
+                    }
                     SimulationError::ResultSink(SinkStop::MemoryFull { .. }) => {
                         StopReason::MemoryFull
                     }

@@ -261,6 +261,118 @@ fn a_default_plan_over_a_hundred_point_run_set_runs() {
     assert_eq!(point_traces(run, "vstart", "out").len(), 100);
 }
 
+/// The plan's storage budget holds a Run Set to what it writes as it writes
+/// it: a 1 MiB budget stops the first point's transient at the write that
+/// would pass it, named as the budget and not the volume, the points not yet
+/// solved are not started, as on Stop, and the rows the transient wrote stand
+/// as its result, read back from the store like any other.
+#[test]
+fn a_run_set_stops_at_its_plans_storage_budget_keeping_what_it_wrote() {
+    use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_stop_message;
+    use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
+
+    const BUDGET: u64 = 1 << 20;
+    let mut app = rc_swept_over_vstart();
+    let axis = app
+        .state
+        .model
+        .sim_setup
+        .run_set
+        .dimensions
+        .last_mut()
+        .expect("the vstart axis");
+    let source = std::mem::take(&mut axis.source);
+    *axis = RunSetDimension::new(
+        "dimension-vstart",
+        RunSetDimensionKind::Parameter,
+        &["0.25", "0.5", "0.75"],
+        1,
+    );
+    axis.source = source;
+    // Each point's transient writes far more than the budget holds.
+    edit_the_transient(&mut app.state, |draft| {
+        draft.stop = "2m".to_owned();
+        draft.step = "10n".to_owned();
+        draft.max_step = "10n".to_owned();
+    });
+    // Each point's transient starts at its own `vstart`.
+    app.state.model.sim_setup.options.initial_conditions = vec![NodeVoltage {
+        net: "out".to_owned(),
+        value: "vstart".to_owned(),
+    }];
+    app.state.model.sim_setup.save_policy.maximum_storage_bytes = BUDGET;
+
+    app.invalidate_simulation_preflight();
+    start(&mut app.state, &mut app.simulation_controller, false);
+    app.settle_preflight();
+    assert!(
+        preflight_blockers(&app).is_empty(),
+        "{:#?}",
+        preflight_blockers(&app)
+    );
+    let _ = app.queued_by_its_check();
+    let _ = app.dispatch_frame();
+    app.finish_the_run();
+
+    assert_eq!(
+        app.state.model.simulation.execution.status,
+        "Stopped: storage budget reached"
+    );
+    let run = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    let stop = run
+        .results_storage_stop()
+        .expect("the budget stopped the run");
+    let budget = stop.budget.as_ref().expect("its budget, not its volume");
+    assert_eq!(budget.budget, BUDGET);
+    // What the store holds: every whole chunk up to the write that would
+    // have passed the budget, and the frames that closed the segment.
+    assert!(
+        budget.written > BUDGET / 2 && budget.written <= BUDGET + 64 * 1024,
+        "{} bytes written",
+        budget.written
+    );
+    let point = budget.point.as_deref().expect("the point it reached it at");
+    assert!(point.ends_with("vstart = 0.25"), "{point}");
+    let at = stop.at.expect("the time it reached");
+    assert!(at > 0.0 && at < 2e-3, "{at}");
+    let message = storage_stop_message(stop);
+    assert!(
+        message.starts_with("Stopped at t = ")
+            && message.contains(": results reached the plan's 1.00 MiB storage budget; ")
+            && message.ends_with(&format!(" written, Run Set point {point}")),
+        "{message}"
+    );
+    let unstarted = run
+        .log
+        .lines()
+        .iter()
+        .filter(|line| {
+            line.message
+                .ends_with("not run: the run reached its plan's storage budget")
+        })
+        .count();
+    assert_eq!(unstarted, 1, "{:#?}", run.log.lines());
+
+    // The first point's rows stand as its result; no later point ran.
+    let traces = point_traces(run, "vstart", "out");
+    assert_eq!(traces.len(), 1, "{traces:?}");
+    let (value, times, volts) = &traces[0];
+    assert_eq!(value, "0.25");
+    assert_eq!(times.len(), volts.len());
+    assert_eq!(times.len() as u64, stop.rows);
+    assert_eq!(times.last().copied(), Some(at));
+    // It charges from 0.25 V toward the 1 V drive.
+    assert!((volts[0] - 0.25).abs() < 1e-6, "{}", volts[0]);
+    assert!(volts.windows(2).all(|pair| pair[1] >= pair[0] - 1e-9));
+}
+
 /// The run's transient traces of `net`, one per point the run set swept
 /// `variable` to: the point's value as the run set spells it, its times and
 /// volts.

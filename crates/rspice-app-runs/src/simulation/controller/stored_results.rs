@@ -1,10 +1,10 @@
-//! What the app says about the results stores its transients write: a run its volume stopped,
-//! and a stored column a waveform could not read.
+//! What the app says about the results stores its transients write: a run its volume or its
+//! plan's storage budget stopped, and a stored column a waveform could not read.
 
-use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_full_message;
+use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_stop_message;
 
 use super::*;
-use crate::state::ResultsStorageStop;
+use crate::state::{ResultsStorageBudget, ResultsStorageStop};
 
 impl SimulationController {
     /// The stop a transient's results store names, as the run keeps it, and the store remembered
@@ -35,13 +35,30 @@ impl SimulationController {
                 .unwrap_or(&receipt.path)
                 .display()
                 .to_string(),
+            budget: stop.budget.map(|reached| ResultsStorageBudget {
+                budget: reached.budget,
+                written: reached.written,
+                point: self.current_run_set_point(),
+            }),
         })
     }
 
-    /// Say that the volume holding the run's results store filled and stopped `stop.analysis`:
-    /// one line in the run's log, one finding in its batch, and the run marked so the status bar
-    /// says how it ended. The rows it kept stand as its result.
-    pub(super) fn report_results_storage_full(
+    /// The Run Set point the current task solves, as a results table names it: its corner,
+    /// supply and temperature, then each value the Run Set swept.
+    fn current_run_set_point(&self) -> Option<String> {
+        let point = self.current_provenance.as_ref()?.pvt_point()?;
+        let mut label = point.label();
+        for swept in point.swept_values() {
+            label.push_str(&format!(" \u{b7} {} = {}", swept.name, swept.value));
+        }
+        Some(label)
+    }
+
+    /// Say that the volume holding the run's results store filled, or its results reached its
+    /// plan's storage budget, and stopped `stop.analysis`: one line in the run's log, one finding
+    /// in its batch, and the run marked so the status bar says how it ended. The rows it kept
+    /// stand as its result.
+    pub(super) fn report_results_storage_stop(
         &self,
         state: &mut impl RunHost,
         stop: &ResultsStorageStop,
@@ -50,13 +67,13 @@ impl SimulationController {
         self.run_line(
             state.model_mut(),
             LogSeverity::Error,
-            format!("{}: {}", stop.analysis, storage_full_message(stop)),
+            format!("{}: {}", stop.analysis, storage_stop_message(stop)),
         );
         let facts = state.slot_facts();
         let model = state.model_mut();
-        model.publish_results_storage_full(stop, run_sequence, facts);
+        model.publish_results_storage_stop(stop, run_sequence, facts);
         if let Some(run) = model.simulation.retained.run_by_sequence_mut(run_sequence) {
-            run.stop_on_full_results_storage(stop.clone());
+            run.stop_on_results_storage(stop.clone());
         }
     }
 

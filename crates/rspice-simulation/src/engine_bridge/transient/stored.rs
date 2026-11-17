@@ -5,7 +5,8 @@
 //! windows of the segment's columns, read when something first asks for their values. Before the
 //! first row, the store's volume must have room for the rows the run cannot avoid writing, or the
 //! run is refused before it solves; a volume that fills while it runs stops it at that accepted
-//! point, keeping every row written.
+//! point, keeping every row written. So does the run's storage budget, when its plan set one: every
+//! segment the run writes counts against it, and the write that would pass it stops the run.
 //!
 //! A deck whose `.FFT` cards or lead-power outputs read whole waveforms after the run is read
 //! back whole, completed by the engine and converted in memory, as before. `.MEAS TRAN` and
@@ -28,7 +29,9 @@ use rspice_simulation_contract::result_storage::ResultStorageFailure;
 
 use super::super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
-use crate::results::{SampledWaveform, TransientStoreReceipt, TransientStoreStop};
+use crate::results::{
+    SampledWaveform, StorageBudgetReached, TransientStoreReceipt, TransientStoreStop,
+};
 use crate::results_store::{StoredColumn, StoredEventSignal, StoredRun};
 use rspice_results::events::points::{EventPoint, EventPoints};
 use std::collections::HashMap;
@@ -83,8 +86,9 @@ impl EngineBridge {
         })?;
         let dir = path.parent().unwrap_or(&path).to_path_buf();
         let free = crate::results_store::free_space(&path);
+        let budget = crate::results_store::storage_budget();
         let mut sink = WatchedSink::new(
-            StoreSink::new(WatchedIo::new(io, free.clone())),
+            StoreSink::new(WatchedIo::new(io, free.clone()).with_budget(budget.clone())),
             free,
             span.tstop / span.max_step,
             span.tstop / span.max_step.min(span.tstep),
@@ -130,13 +134,11 @@ impl EngineBridge {
         let (inner, free) = sink.into_parts();
         let (shell, digest, stopped, states) = match ran {
             Ok(ran) => ran,
-            // The volume filled as the run handed over its events: it stopped there, and its
-            // segment keeps every whole chunk it wrote.
-            Err(rspice_core::SimulationError::ResultSink(stop @ SinkStop::DiskFull { .. }))
-                if refused.is_none() =>
-            {
-                (None, None, Some(stop), Vec::new())
-            }
+            // The volume filled, or the run reached its storage budget, as the run handed over
+            // its events: it stopped there, and its segment keeps every whole chunk it wrote.
+            Err(rspice_core::SimulationError::ResultSink(
+                stop @ (SinkStop::DiskFull { .. } | SinkStop::StorageBudget { .. }),
+            )) if refused.is_none() => (None, None, Some(stop), Vec::new()),
             Err(source) => {
                 // The segment closes before it is deleted: a host may refuse to delete an open
                 // file.
@@ -163,7 +165,8 @@ impl EngineBridge {
         };
         let reader = match reader {
             Ok(reader) if shell.is_some() || reader.rows() > 0 => reader,
-            // A volume that filled before the segment held a whole chunk kept nothing.
+            // A volume that filled, or a budget reached, before the segment held a whole chunk
+            // kept nothing.
             Ok(_) => {
                 let _ = std::fs::remove_file(&path);
                 return Err(SimulationError::ResultStorage(
@@ -209,6 +212,19 @@ impl EngineBridge {
             Some(SinkStop::DiskFull { .. }) => Some(TransientStoreStop {
                 at: last_time(&run),
                 free: free(),
+                budget: None,
+            }),
+            // What the run's segments hold once this one closed is what it wrote.
+            Some(SinkStop::StorageBudget {
+                budget: limit,
+                written,
+            }) => Some(TransientStoreStop {
+                at: last_time(&run),
+                free: free(),
+                budget: Some(StorageBudgetReached {
+                    budget: limit,
+                    written: budget.as_ref().map_or(written, |budget| budget.written()),
+                }),
             }),
             Some(other) => {
                 return Err(SimulationError::ResultStorage(
@@ -231,8 +247,8 @@ impl EngineBridge {
             parameters,
             receipt,
         };
-        // A run its volume stopped keeps its rows where they are: the outputs that read whole
-        // waveforms once the run ends are not taken over the part it kept.
+        // A run its volume or budget stopped keeps its rows where they are: the outputs that read
+        // whole waveforms once the run ends are not taken over the part it kept.
         if stored.receipt.stopped.is_some() || engine.transient_rows_are_whole(netlist) {
             return Ok((StoredOutcome::Stored(stored), states));
         }

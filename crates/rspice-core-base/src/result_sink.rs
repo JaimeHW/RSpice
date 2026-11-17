@@ -136,6 +136,8 @@ pub struct EventChange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
     DiskFull,
+    /// The run's results reached the storage budget its plan set.
+    StorageBudget,
     MemoryFull,
     Cancelled,
     Timeout,
@@ -169,6 +171,9 @@ pub enum SinkStop {
         needed: Option<u64>,
         available: Option<u64>,
     },
+    /// The run's results reached the storage budget its plan set: its segments held `written`
+    /// bytes, and the next write would have taken them past `budget`.
+    StorageBudget { budget: u64, written: u64 },
     /// Memory could not grow to hold what the sink buffers.
     MemoryFull { bytes: Option<u64> },
     /// Any other failure, with its message.
@@ -192,6 +197,10 @@ impl fmt::Display for SinkStop {
                     (None, None) => Ok(()),
                 }
             }
+            Self::StorageBudget { budget, written } => write!(
+                formatter,
+                "the results reached their {budget}-byte storage budget ({written} bytes written)"
+            ),
             Self::MemoryFull { bytes: Some(bytes) } => {
                 write!(formatter, "results memory is full ({bytes} bytes)")
             }
@@ -447,6 +456,14 @@ mod tests {
             }
             .to_string(),
             "the results storage is full"
+        );
+        assert_eq!(
+            SinkStop::StorageBudget {
+                budget: 1024,
+                written: 1000
+            }
+            .to_string(),
+            "the results reached their 1024-byte storage budget (1000 bytes written)"
         );
         assert_eq!(
             SinkStop::MemoryFull { bytes: None }.to_string(),

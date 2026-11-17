@@ -487,11 +487,14 @@ impl<'s> TransientRows<'s> {
         Ok(())
     }
 
-    /// A refusal for want of disk or memory is the run's stop; any other is its error.
+    /// A refusal for want of disk, memory or storage budget is the run's stop; any other is its
+    /// error.
     #[cold]
     fn refused(&mut self, stop: SinkStop) -> Result<(), SimulationError> {
         match stop {
-            SinkStop::DiskFull { .. } | SinkStop::MemoryFull { .. }
+            SinkStop::DiskFull { .. }
+            | SinkStop::StorageBudget { .. }
+            | SinkStop::MemoryFull { .. }
                 if matches!(self.target, Target::External(_)) =>
             {
                 self.stop = Some(stop);

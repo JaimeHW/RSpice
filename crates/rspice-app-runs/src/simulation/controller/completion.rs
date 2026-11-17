@@ -185,7 +185,7 @@ impl SimulationController {
                         facts,
                     );
                     if let Some(stop) = &storage_stop {
-                        self.report_results_storage_full(state, stop, run_sequence);
+                        self.report_results_storage_stop(state, stop, run_sequence);
                     }
                     // What the run's checks reported is filed beside them,
                     // one row each. A testbench that reported an error
@@ -271,6 +271,30 @@ impl SimulationController {
                         .model_mut()
                         .simulation
                         .select_latest_analysis_in_run_sequence(run_id);
+                }
+
+                // The run reached its plan's storage budget: the analyses it
+                // has not started stop there, as on Stop, and what it kept
+                // stands.
+                if storage_stop
+                    .as_ref()
+                    .is_some_and(|stop| stop.budget.is_some())
+                    && !self.pending_analyses.is_empty()
+                {
+                    let unstarted = self.pending_analyses.len();
+                    self.pending_analyses.clear();
+                    self.run_line(
+                        state.model_mut(),
+                        LogSeverity::Error,
+                        format!(
+                            "{unstarted} {} not run: the run reached its plan's storage budget",
+                            if unstarted == 1 {
+                                "analysis was"
+                            } else {
+                                "analyses were"
+                            }
+                        ),
+                    );
                 }
 
                 // =========================================================

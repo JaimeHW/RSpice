@@ -405,9 +405,10 @@ fn expected_descriptor(
         | SimulationError::ResultSink(rspice_core::result_sink::SinkStop::Io(_)) => {
             (Code::OutputCommitFailed, Category::OutputCommit, false)
         }
-        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::DiskFull { .. }) => {
-            (Code::ResourceLimit, Category::ResourceLimit, false)
-        }
+        SimulationError::ResultSink(
+            rspice_core::result_sink::SinkStop::DiskFull { .. }
+            | rspice_core::result_sink::SinkStop::StorageBudget { .. },
+        ) => (Code::ResourceLimit, Category::ResourceLimit, false),
         SimulationError::ResultSink(rspice_core::result_sink::SinkStop::MemoryFull { .. }) => {
             (Code::AllocationFailed, Category::ResourceLimit, false)
         }
@@ -515,6 +516,10 @@ fn one_of_every_variant() -> Vec<SimulationError> {
         SimulationError::ResultSink(rspice_core::result_sink::SinkStop::DiskFull {
             needed: Some(4096),
             available: Some(512),
+        }),
+        SimulationError::ResultSink(rspice_core::result_sink::SinkStop::StorageBudget {
+            budget: 1 << 20,
+            written: 1000 << 10,
         }),
         SimulationError::ResultSink(rspice_core::result_sink::SinkStop::MemoryFull { bytes: None }),
         SimulationError::ResultSink(rspice_core::result_sink::SinkStop::Io(
