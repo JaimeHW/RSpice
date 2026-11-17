@@ -516,6 +516,39 @@ fn a_library_added_since_the_last_frame_is_a_dependency() {
     );
 }
 
+/// The attach dialog proves its candidate libraries when the model
+/// catalogue changes, not on each frame it stays open: a library imported
+/// while it is open is offered on the next frame, and the frames after that
+/// hash nothing.
+#[test]
+fn the_attach_dialog_proves_its_candidates_when_the_catalogue_changes() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    app.state.project.technology_attachment.open = true;
+    let ctx = offscreen();
+    paint_until(&ctx, &mut app, |text| {
+        text.contains("No model library can be attached")
+    });
+
+    app.state
+        .model
+        .model_library_manager
+        .load_library_bytes(
+            "late.lib",
+            b".model nlate nmos level=1 vto=0.5".to_vec(),
+            None,
+        )
+        .expect("the model library imports");
+    let offered = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    assert!(
+        offered.contains("\u{b7} 1 model \u{b7} 1 source file")
+            && !offered.contains("No model library can be attached"),
+        "{offered}"
+    );
+    assert_eq!(idle_frames(&ctx, &mut app).1.model_library_hashes, 0);
+}
+
 /// How long an idle Overview frame takes on an empty project and on the
 /// large one, and how much of it one answer of the unsaved-document count
 /// is. Numbers to read from a release build, not a rule: the rule is the

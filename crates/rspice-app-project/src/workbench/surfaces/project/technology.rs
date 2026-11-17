@@ -6,6 +6,9 @@
 //! sources is reported with the sources it would break instead of being
 //! offered as a plain choice.
 
+use std::sync::Arc;
+
+use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
 use crate::workbench::app_state::Model;
@@ -182,7 +185,14 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
         return;
     }
 
-    let catalog = technology_candidates(cx.model);
+    // Proving a candidate hashes its library's retained sources, so the
+    // candidates are proven when the catalogue changes, not on each repaint.
+    let catalog = derived(
+        ctx,
+        "technology.candidates",
+        cx.model.model_library_manager.catalog_stamp(),
+        || Arc::new(technology_candidates(cx.model)),
+    );
     let candidates = &catalog.candidates;
     let packages = cx
         .model
