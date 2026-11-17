@@ -1393,6 +1393,48 @@ R2 b out 1
         );
     }
 
+    /// A latch whose held Newton cycles: the nodeset on its internal node
+    /// still names its state, for the DC and the transient operating point
+    /// (ngspice-46: V(q) = -0.999999 for both, through dynamic GMIN
+    /// stepping, 341 iterations). It came out 0, the symmetric point.
+    #[test]
+    fn a_nodeset_picks_the_latch_state_its_held_newton_cannot_settle() {
+        const LATCH: &str = "\
+latch nodeset
+.subckt latch q qb
+Ga 0 q value={tanh(10*V(qb))}
+Ra q 0 1
+Gb 0 qb value={tanh(10*V(q))}
+Rb qb 0 1
+Ri q qi 1
+Ci qi 0 1p
+.ends
+X1 q qb latch
+Rl q 0 1meg
+.nodeset V(x1.qi)=-1
+";
+        let expected = -10.0_f64.tanh() * (1.0e6 / (1.0e6 + 1.0));
+        let netlist = Netlist::parse(&format!("{LATCH}.op\n.end\n")).expect("deck parses");
+        let op = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("operating point");
+        let q = op.try_voltage_named("q").expect("V(q)");
+        assert!(
+            (q - expected).abs() < 1e-6,
+            "DC V(q) = {q}, ngspice -0.999999"
+        );
+
+        let netlist = Netlist::parse(&format!("{LATCH}.tran 1n 2n\n.end\n")).expect("deck parses");
+        let tran = Engine::default()
+            .run_tran(&netlist, 2e-9, 1e-9)
+            .expect("transient");
+        let q = tran.try_voltage_waveform_named("q").expect("V(q)")[0];
+        assert!(
+            (q - expected).abs() < 1e-6,
+            "transient V(q) at 0 = {q}, ngspice -0.999999"
+        );
+    }
+
     /// The startup-directive scope is a cache, so the hints it serves must be
     /// the ones a cold collector computes — including for a second netlist
     /// that happens to be elaborated inside the scope of the first.

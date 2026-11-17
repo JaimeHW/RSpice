@@ -33,7 +33,7 @@ fn recorded_aid(
 
 /// What a GMIN walk steps down (ngspice `cktop.c`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GminWalk {
+pub(super) enum GminWalk {
     /// RSpice's nodal walk: a conductance from every node to ground and the
     /// device junction GMIN step down together to the device GMIN, and one
     /// solve then closes on the nodal floor.
@@ -51,7 +51,10 @@ enum GminWalk {
 
 /// A walk's stride is in decades: ngspice's `factor` is `10^stride`, and it
 /// starts at `gminfactor` = 10, one decade.
-const MAX_GMIN_STEP_DECADES: Value = 1.0;
+pub(super) const MAX_GMIN_STEP_DECADES: Value = 1.0;
+
+/// The stages a GMIN walk tries, accepted or failed, before it stops.
+pub(super) const MAX_GMIN_ATTEMPTS: usize = 2048;
 
 /// A failure that finds the factor below 1.00005 gives up.
 fn min_gmin_step_decades() -> Value {
@@ -63,7 +66,12 @@ impl GminWalk {
     /// stride that reaches it. `new_gmin` and `dynamic_gmin` land on their
     /// target with the factor that reaches it (`factor = CKTgmin / gtarget`),
     /// so a landing that fails retries part of the way down.
-    fn next_stage(self, accepted: Value, walk_end: Value, stride: Value) -> (Value, Value) {
+    pub(super) fn next_stage(
+        self,
+        accepted: Value,
+        walk_end: Value,
+        stride: Value,
+    ) -> (Value, Value) {
         let target = Engine::next_descending_gmin(accepted, walk_end, stride);
         let lands_with_its_factor = matches!(self, Self::Device | Self::Dynamic);
         if lands_with_its_factor && walk_end > 0.0 && target == walk_end && target < accepted {
@@ -78,7 +86,7 @@ impl GminWalk {
     /// to its 1.5th power, up to `gminfactor`; a slow one (over three
     /// quarters) takes its square root, which `new_gmin` keeps at 3 or more
     /// and `dynamic_gmin` at 1.00005 or more.
-    fn stride_after_success(self, stride: Value, used: usize, itl2: usize) -> Value {
+    pub(super) fn stride_after_success(self, stride: Value, used: usize, itl2: usize) -> Value {
         let mut stride = stride;
         if used <= itl2 / 4 {
             stride = (stride * 1.5).min(MAX_GMIN_STEP_DECADES);
@@ -96,7 +104,7 @@ impl GminWalk {
     /// The stride a failed stage retries with: the fourth root of the factor,
     /// or none once the factor is below 1.00005 and the walk has stalled
     /// against a fold.
-    fn stride_after_failure(stride: Value) -> Option<Value> {
+    pub(super) fn stride_after_failure(stride: Value) -> Option<Value> {
         (stride >= min_gmin_step_decades()).then_some(stride * 0.25)
     }
 }
@@ -1208,7 +1216,6 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         // ngspice's `dynamic_gmin` and `new_gmin` (`cktop.c`), in decades: a
         // step is log10 of its `factor`.
-        const MAX_GMIN_ATTEMPTS: usize = 2048;
         let stopped = |reached: Option<Value>, unsolved: Value, iterations: usize| {
             SimulationError::from(ContinuationFailure {
                 aid: ContinuationAid::GminStepping,

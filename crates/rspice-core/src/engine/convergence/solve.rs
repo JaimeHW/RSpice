@@ -561,11 +561,12 @@ impl Engine {
         let node_hints = &hints.constraints;
         if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
-                self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                self.solve_nodeset_held_startup(
                     circuit,
                     matrix,
                     &initial_guess,
                     node_hints,
+                    HeldStartup::Dc,
                     abort,
                 )
             }) {
@@ -573,9 +574,13 @@ impl Engine {
                     initial_guess = nodeset_solution;
                 }
                 Err(err) if Self::is_recoverable_startup_error(&err) => {
-                    log::debug!(
-                        "NODESET-constrained DC startup did not converge: {err}; continuing from hinted seed."
-                    );
+                    if node_hints.is_empty() {
+                        log::debug!(
+                            "NODESET-constrained DC startup did not converge: {err}; continuing from hinted seed."
+                        );
+                    } else {
+                        Self::warn_nodesets_not_held(circuit, node_hints, &err);
+                    }
                 }
                 Err(err) => return Err(err),
             }
@@ -606,19 +611,24 @@ impl Engine {
         let mut seed = vec![0.0; circuit.matrix_size()];
         if hints.has_nodesets {
             match Self::with_nodeset_phase(circuit, true, |circuit| {
-                self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                self.solve_nodeset_held_startup(
                     circuit,
                     matrix,
                     &seed,
                     &hints.constraints,
+                    HeldStartup::Dc,
                     abort,
                 )
             }) {
                 Ok(nodeset_solution) => seed = nodeset_solution,
                 Err(err) if Self::is_recoverable_startup_error(&err) => {
-                    log::debug!(
-                        "NODESET-constrained DC startup did not converge: {err}; holding the .IC nodes from the zero seed."
-                    );
+                    if hints.constraints.is_empty() {
+                        log::debug!(
+                            "NODESET-constrained DC startup did not converge: {err}; holding the .IC nodes from the zero seed."
+                        );
+                    } else {
+                        Self::warn_nodesets_not_held(circuit, &hints.constraints, &err);
+                    }
                 }
                 Err(err) => return Err(err),
             }
@@ -875,13 +885,14 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
         node_hints: &[StartupVoltageConstraint],
+        nodal_gmin: Value,
     ) -> Result<bool, SimulationError> {
         let snapshot = circuit.nonlinear_state_snapshot();
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
-            Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+            Self::stamp_nodal_gmin_stage(circuit, probe, nodal_gmin, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
             if self.requires_operating_point_correction_form(circuit) {
                 let mut correction_rhs = Vec::new();
@@ -987,6 +998,191 @@ impl Engine {
         node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_constrained_dc_stage(
+            circuit,
+            matrix,
+            initial_guess,
+            node_hints,
+            ConstrainedStage {
+                nodal_gmin: None,
+                max_iterations: self.continuation_iteration_budget(1, 64),
+            },
+            abort,
+        )
+        .map(|(solution, _)| solution)
+    }
+
+    /// The `.NODESET`-held startup: each held node pinned, from `seed`, as
+    /// [`Self::solve_nonlinear_dc_startup_with_constraints_and_abort`]
+    /// solves it, and when Newton does not converge there, the same held
+    /// system under a GMIN walk: a conductance from every node to ground
+    /// steps down from 1e4 S, where it outweighs every device's gain and the
+    /// held system has one solution Newton finds, to the device GMIN with
+    /// ngspice's `dynamic_gmin` strides (`cktop.c`), each stage starting
+    /// where the last converged, and one solve closes on the nodal floor.
+    /// The operating point is then solved free from that held point.
+    ///
+    /// The references release the nodesets before their walks go far.
+    /// ngspice pins them (`cktload.c`) only in the `MODEINITJCT` and
+    /// `MODEINITFIX` iterations that open `dynamic_gmin`'s first stage, at
+    /// 1e-3 S. Xyce's `gminSteppingSolve` solves the held system once,
+    /// without its stepping conductance (`nodesetCont1`,
+    /// N_NLS_NOX_Interface.C), and steps from 1e4 S with the circuit free.
+    /// At 1e-3 S a latch with a loop gain of 100 is still bistable and its
+    /// held Newton cycles; ngspice reaches the nodeset's state there only
+    /// because its diagonal GMIN, added after the pinned row, moves the held
+    /// node off its value and breaks the cycle. Holding the nodesets from
+    /// 1e4 S down tracks the one held solution to the floor.
+    fn solve_nodeset_held_startup(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        seed: &[Value],
+        held: &[StartupVoltageConstraint],
+        kind: HeldStartup,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        use super::continuation::{GminWalk, MAX_GMIN_ATTEMPTS, MAX_GMIN_STEP_DECADES};
+        // One factor above the first stage, which is Xyce's GMIN-stepping
+        // start (`gminSteppingSolve`: 10^4 S).
+        const HELD_WALK_START: Value = 1.0e5;
+
+        let stage = |engine: &Self,
+                     circuit: &mut CircuitData,
+                     matrix: &mut StaticMatrix,
+                     guess: &[Value],
+                     stage: ConstrainedStage| match kind {
+            HeldStartup::Dc => {
+                engine.solve_constrained_dc_stage(circuit, matrix, guess, held, stage, abort)
+            }
+            HeldStartup::Transient { time } => engine
+                .solve_transient_op_held_stage(circuit, matrix, time, guess, held, stage, abort),
+        };
+        let direct = stage(
+            self,
+            circuit,
+            matrix,
+            seed,
+            ConstrainedStage {
+                nodal_gmin: None,
+                max_iterations: self.continuation_iteration_budget(1, 64),
+            },
+        )
+        .map(|(solution, _)| solution);
+        match direct {
+            Err(error) if Self::is_recoverable_startup_error(&error) && !held.is_empty() => {
+                log::debug!(
+                    "NODESET-held DC startup did not converge: {error}; stepping GMIN with the nodesets held."
+                );
+            }
+            other => return other,
+        }
+        let floor = match kind {
+            HeldStartup::Dc => self.dc_nodal_gmin_floor(circuit),
+            HeldStartup::Transient { .. } => {
+                self.transient_operating_point_nodal_gmin_floor(circuit)
+            }
+        };
+        let walk_end = self
+            .config
+            .convergence_config
+            .junction_gmin_target
+            .max(0.0)
+            .max(floor);
+        let itl2 = self.config.dc_transfer_max_iterations.max(1);
+        let stage_budget = self.gmin_stage_newton_budget();
+        let mut solution = Self::sanitize_initial_guess(seed, circuit.matrix_size());
+        let mut accepted = HELD_WALK_START;
+        let mut stride = MAX_GMIN_STEP_DECADES;
+        let mut attempts = 0usize;
+        while accepted > walk_end {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let (target, next_stride) = GminWalk::Dynamic.next_stage(accepted, walk_end, stride);
+            stride = next_stride;
+            if attempts >= MAX_GMIN_ATTEMPTS || target >= accepted {
+                return Err(SimulationError::ConvergenceFailed(attempts));
+            }
+            attempts += 1;
+            let accepted_state = circuit.nonlinear_state_snapshot();
+            match stage(
+                self,
+                circuit,
+                matrix,
+                &solution,
+                ConstrainedStage {
+                    nodal_gmin: Some(target),
+                    max_iterations: stage_budget,
+                },
+            ) {
+                Ok((candidate, used)) => {
+                    solution = candidate;
+                    accepted = target;
+                    stride = GminWalk::Dynamic.stride_after_success(stride, used, itl2);
+                }
+                Err(error) if Self::is_recoverable_startup_error(&error) => {
+                    circuit.restore_nonlinear_state(accepted_state);
+                    stride = GminWalk::stride_after_failure(stride).ok_or(error)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        stage(
+            self,
+            circuit,
+            matrix,
+            &solution,
+            ConstrainedStage {
+                nodal_gmin: None,
+                max_iterations: self.dc_direct_newton_budget(),
+            },
+        )
+        .map(|(solution, _)| solution)
+    }
+
+    /// Warn that the held startup could not hold `held` (the nodesets, and
+    /// any `.IC` the operating point holds with them), naming each node and
+    /// the voltage it was to be held at.
+    fn warn_nodesets_not_held(
+        circuit: &CircuitData,
+        held: &[StartupVoltageConstraint],
+        error: &SimulationError,
+    ) {
+        let name = |node: usize| circuit.node_name_by_id(node).unwrap_or("?").to_owned();
+        let held = held
+            .iter()
+            .map(|constraint| {
+                if constraint.negative == 0 {
+                    format!("V({})={}", name(constraint.positive), constraint.voltage)
+                } else {
+                    format!(
+                        "V({},{})={}",
+                        name(constraint.positive),
+                        name(constraint.negative),
+                        constraint.voltage
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        log::warn!(
+            "The .NODESET/.IC startup could not hold {held} ({error}); the operating point is solved from its starting guess"
+        );
+    }
+
+    /// One held solve: Newton with each of `node_hints` pinned, at the
+    /// nodal conductance `stage.nodal_gmin` (the floor when `None`). Returns
+    /// the solution and the iterations it took.
+    fn solve_constrained_dc_stage(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        node_hints: &[StartupVoltageConstraint],
+        stage: ConstrainedStage,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Value>, usize), SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
         let mut solution = Self::sanitize_initial_guess(initial_guess, size);
@@ -1000,7 +1196,8 @@ impl Engine {
         let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        let max_iterations = self.continuation_iteration_budget(1, 64);
+        let nodal_gmin = stage.nodal_gmin.unwrap_or(gmin_floor);
+        let max_iterations = stage.max_iterations;
 
         for iteration in 0..max_iterations {
             if abort.is_aborted() {
@@ -1009,7 +1206,7 @@ impl Engine {
 
             matrix.clear_values();
             rhs.fill(0.0);
-            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, nodal_gmin, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
             self.try_stamp_operating_point_newton_system(
                 circuit,
@@ -1025,7 +1222,9 @@ impl Engine {
                 false,
                 &mut correction_rhs,
             )?;
-            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            if nodal_gmin <= gmin_floor {
+                Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            }
             Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,
@@ -1071,11 +1270,12 @@ impl Engine {
                     matrix,
                     &new_solution,
                     node_hints,
+                    nodal_gmin,
                 )?;
 
             std::mem::swap(&mut solution, &mut new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
-                return Ok(solution);
+                return Ok((solution, iteration + 1));
             }
         }
 
@@ -2412,31 +2612,40 @@ impl Engine {
         node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        let solution = self.solve_nonlinear_transient_op_startup_unchecked(
+        let (solution, _) = self.solve_transient_op_held_stage(
             circuit,
             matrix,
             time,
             initial_guess,
             node_hints,
+            ConstrainedStage {
+                nodal_gmin: None,
+                max_iterations: self.continuation_iteration_budget(1, 64),
+            },
             abort,
         )?;
-        self.check_settled_compact_model_private_nodes(circuit, &solution)?;
         Ok(solution)
     }
 
-    fn solve_nonlinear_transient_op_startup_unchecked(
+    /// One held transient operating-point solve: Newton with each of
+    /// `node_hints` pinned, at the nodal conductance `stage.nodal_gmin` (the
+    /// floor when `None`). Returns the solution and the iterations it took.
+    #[allow(clippy::too_many_arguments)]
+    fn solve_transient_op_held_stage(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         time: Value,
         initial_guess: &[Value],
         node_hints: &[StartupVoltageConstraint],
+        stage: ConstrainedStage,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>, SimulationError> {
+    ) -> Result<(Vec<Value>, usize), SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let gmin_floor = self.transient_operating_point_nodal_gmin_floor(circuit);
-        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
+        let floor = self.transient_operating_point_nodal_gmin_floor(circuit);
+        let gmin_floor = stage.nodal_gmin.unwrap_or(floor);
+        let junction_gmin = self.effective_device_junction_gmin(floor);
         let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
         self.prime_operating_point_seed(
@@ -2454,7 +2663,7 @@ impl Engine {
         // the first Newton correction. Adding a large correction to the seed
         // can otherwise leave cancellation error in a tiny source current.
         let startup_seed = solution.clone();
-        let max_iterations = self.continuation_iteration_budget(1, 64);
+        let max_iterations = stage.max_iterations;
 
         for iteration in 0..max_iterations {
             if abort.is_aborted() {
@@ -2480,7 +2689,9 @@ impl Engine {
                 false,
                 &mut correction_rhs,
             )?;
-            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            if gmin_floor <= floor {
+                Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            }
             Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,
@@ -2549,7 +2760,12 @@ impl Engine {
 
             std::mem::swap(&mut solution, &mut new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
-                return Ok(solution);
+                // A stage above the floor holds the private nodes with its
+                // own conductance; only the circuit's own system settles them.
+                if gmin_floor <= floor {
+                    self.check_settled_compact_model_private_nodes(circuit, &solution)?;
+                }
+                return Ok((solution, iteration + 1));
             }
         }
 
@@ -2985,8 +3201,13 @@ impl Engine {
         let mut nodeset_startup_solution = None;
         if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
-                self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
-                    circuit, matrix, time, &solution, node_hints, abort,
+                self.solve_nodeset_held_startup(
+                    circuit,
+                    matrix,
+                    &solution,
+                    node_hints,
+                    HeldStartup::Transient { time },
+                    abort,
                 )
             }) {
                 Ok(nodeset_solution) => {
@@ -2994,9 +3215,13 @@ impl Engine {
                     solution = nodeset_solution;
                 }
                 Err(err) if Self::is_recoverable_startup_error(&err) => {
-                    log::debug!(
-                        "NODESET-constrained transient operating-point startup did not converge: {err}; continuing from hinted seed."
-                    );
+                    if node_hints.is_empty() {
+                        log::debug!(
+                            "NODESET-constrained transient operating-point startup did not converge: {err}; continuing from hinted seed."
+                        );
+                    } else {
+                        Self::warn_nodesets_not_held(circuit, node_hints, &err);
+                    }
                 }
                 Err(err) => return Err(err),
             }
@@ -3301,6 +3526,24 @@ enum NoGainProjection {
     /// operating points: CircuitSim90's SEU latch settles in the state
     /// opposite Xyce's.
     Unprojected,
+}
+
+/// Which operating point a held startup solves.
+#[derive(Clone, Copy, Debug)]
+enum HeldStartup {
+    Dc,
+    /// A transient's operating point at `time`.
+    Transient {
+        time: Value,
+    },
+}
+
+/// One stage of a held solve: its nodal conductance to ground, the floor when
+/// `None`, and its Newton budget.
+#[derive(Clone, Copy, Debug)]
+struct ConstrainedStage {
+    nodal_gmin: Option<Value>,
+    max_iterations: usize,
 }
 
 #[cfg(test)]
