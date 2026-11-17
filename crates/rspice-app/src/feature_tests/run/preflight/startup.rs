@@ -223,6 +223,44 @@ fn an_initial_condition_typed_on_the_solver_page_starts_the_transient_there() {
     );
 }
 
+/// A default plan swept over a 100-point Run Set runs. Each point's transient
+/// streams its outputs, so what it writes is only known as the store writes
+/// it; no ceiling of what it might write refuses the plan before it begins.
+#[test]
+fn a_default_plan_over_a_hundred_point_run_set_runs() {
+    use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
+
+    let mut app = rc_swept_over_vstart();
+    let values = (0..100).map(|k| format!("{}m", 5 * k)).collect::<Vec<_>>();
+    let values = values.iter().map(String::as_str).collect::<Vec<_>>();
+    let axis = app
+        .state
+        .model
+        .sim_setup
+        .run_set
+        .dimensions
+        .last_mut()
+        .expect("the vstart axis");
+    let source = std::mem::take(&mut axis.source);
+    *axis = RunSetDimension::new(
+        "dimension-vstart",
+        RunSetDimensionKind::Parameter,
+        &values,
+        1,
+    );
+    axis.source = source;
+    ran(&mut app, "out");
+    let run = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    assert_eq!(point_traces(run, "vstart", "out").len(), 100);
+}
+
 /// The run's transient traces of `net`, one per point the run set swept
 /// `variable` to: the point's value as the run set spells it, its times and
 /// volts.

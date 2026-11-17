@@ -433,6 +433,7 @@ pub(super) fn saved_output_dialog(
                 report.storage_estimate(),
                 report.compatible_analysis_count(),
                 report.retained_engine_source_analysis_ids().len(),
+                report.streamed_analysis_ids().len(),
             )
         },
     );
@@ -1629,15 +1630,30 @@ pub(super) fn saved_output_storage_summary(
     estimate: &SavedOutputStorageEstimate,
     compatible_analyses: usize,
     retained_engine_source_analyses: usize,
+    streamed_analyses: usize,
 ) -> String {
+    let analyses = if compatible_analyses == 1 {
+        "analysis"
+    } else {
+        "analyses"
+    };
     if retained_engine_source_analyses > 0 {
         return format!(
-            "deferred · shared source ceiling counted at plan level · {compatible_analyses} compatible {}",
-            if compatible_analyses == 1 {
-                "analysis"
-            } else {
-                "analyses"
-            }
+            "deferred · shared source ceiling counted at plan level · {compatible_analyses} compatible {analyses}"
+        );
+    }
+    if streamed_analyses > 0 {
+        // The solve decides how many points it accepts; the store counts
+        // them as the run writes them.
+        let known = match estimate {
+            SavedOutputStorageEstimate::ExactBytes(bytes) if *bytes > 0 => format!(
+                "{} + ",
+                rspice_simulation_contract::run_set::format_bytes(*bytes)
+            ),
+            _ => String::new(),
+        };
+        return format!(
+            "{known}streamed · counted as the run writes it · {compatible_analyses} compatible {analyses}"
         );
     }
     match estimate {

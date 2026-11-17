@@ -60,14 +60,15 @@ pub fn plan_capture_workload<'a>(
     CaptureWorkload::narrowed(points_by_analysis, matrix, engine_task_points)
 }
 
-/// Refuse a plan whose retained evidence would not fit its declared ceiling.
+/// Refuse a plan whose retained evidence provably would not fit its declared
+/// ceiling.
 ///
-/// The forecast is [`CaptureLedger::total_bytes`] — the same number the Save
-/// page's ledger prints, from the same fold over the same groups, priced over
-/// the same per-analysis workload. This used to be its own accumulation, which
-/// meant a page could show a forecast under the ceiling while preparation
-/// refused the run for exceeding it, and nothing in either place would have
-/// said which was wrong.
+/// Only a lower bound refuses: [`CaptureLedger::proven_bytes`], from the same
+/// fold over the same groups the Save page's ledger prints, priced over the
+/// same per-analysis workload. A ceiling never does — an engine's result-value
+/// allowance or a transient's unknown point count says what a run might
+/// write, not what it will. The store counts the bytes the run actually
+/// writes against the same ceiling and stops the run where they cross it.
 pub fn validate_plan_saved_output_budget<'a>(
     groups: &[CaptureGroup],
     outputs: &[SavedOutput],
@@ -99,12 +100,12 @@ pub fn validate_plan_saved_output_budget<'a>(
             ),
         ));
     }
-    let forecast = ledger.total_bytes();
+    let forecast = ledger.proven_bytes();
     if forecast > policy.maximum_storage_bytes {
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!(
-                "Saved-output forecast {} exceeds this plan's {} storage budget",
+                "Saved outputs need at least {}, more than this plan's {} storage budget",
                 rspice_simulation_contract::run_set::format_bytes(forecast),
                 rspice_simulation_contract::run_set::format_bytes(policy.maximum_storage_bytes)
             ),

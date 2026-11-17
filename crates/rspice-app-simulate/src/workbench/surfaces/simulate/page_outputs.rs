@@ -157,6 +157,28 @@ pub fn projected_output_bytes_for(
         .unwrap_or_default()
 }
 
+/// What `output` wrote in the newest run that kept results: each sample it
+/// materialized an x and a y value.
+fn written_bytes(model: &Model, output: crate::product::SavedOutputId) -> Option<u64> {
+    let retained = &model.simulation.retained;
+    let run = retained
+        .runs
+        .get(retained.newest_retained_result_run_index()?)?;
+    let samples = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.saved_output_receipts)
+        .filter(|receipt| receipt.output_id == output)
+        .filter_map(|receipt| match &receipt.status {
+            crate::state::SavedOutputMaterializationStatus::Materialized {
+                sample_count, ..
+            } => Some(*sample_count),
+            _ => None,
+        })
+        .reduce(u64::saturating_add)?;
+    Some(samples.saturating_mul(2 * std::mem::size_of::<f64>() as u64))
+}
+
 fn registry(
     ui: &mut Ui,
     cx: &mut Cx<'_, SimulateFeature>,
@@ -185,7 +207,18 @@ fn registry(
             .find(|group| group.id == owner)
             .map_or_else(|| UNGROUPED_NAME.to_owned(), |group| group.name.clone())
     };
-    let size_cell = |output: &SavedOutput| -> (String, Tone) {
+    let size_cell = |index: usize, output: &SavedOutput| -> (String, Tone) {
+        // A streamed output's size is the solve's: what it wrote once a run
+        // has written it, and before that only that it streams.
+        if reports
+            .get(index)
+            .is_some_and(|report| !report.streamed_analysis_ids().is_empty())
+        {
+            return written_bytes(cx.model, output.id).map_or_else(
+                || ("streamed".to_owned(), Tone::Dim),
+                |bytes| (format_bytes(bytes), Tone::Neutral),
+            );
+        }
         match projected.get(&output.id) {
             Some(Some(bytes)) => (format_bytes(*bytes), Tone::Neutral),
             // Named rather than dashed: an output whose size cannot be proven
@@ -200,7 +233,7 @@ fn registry(
         .map(|(index, output)| {
             let (status, status_tone) = status_cell(reports.get(index));
             let group = group_name(index);
-            let (size, size_tone) = size_cell(output);
+            let (size, size_tone) = size_cell(index, output);
             // Which enabled analyses would write this output, from the
             // derivation the Add-output dialog previews it with.
             let consumers =

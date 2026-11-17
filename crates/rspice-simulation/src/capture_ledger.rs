@@ -196,6 +196,8 @@ pub struct CaptureLedger {
     /// Engine results retained by Save All or Automatic without output contracts.
     engine_ceiling_bytes: Option<u64>,
     indeterminate: Vec<IndeterminateOutput>,
+    /// Outputs that stream to the store at every point the solve accepts.
+    streamed: usize,
 }
 
 impl CaptureLedger {
@@ -234,6 +236,7 @@ impl CaptureLedger {
             })
             .collect();
         let mut indeterminate = Vec::new();
+        let mut streamed = 0;
         let mut shared_source_analyses = std::collections::HashSet::new();
         for (index, (output, report)) in outputs.iter().zip(reports).enumerate() {
             let owner = membership.owner(index);
@@ -257,6 +260,7 @@ impl CaptureLedger {
             }
             shared_source_analyses
                 .extend(report.retained_engine_source_analysis_ids().iter().copied());
+            streamed += usize::from(!report.streamed_analysis_ids().is_empty());
         }
         let save_all = selection_mode == OutputSelectionMode::SaveAll;
         let per_analysis_engine_bytes = retained_engine_source_upper_bound_bytes(1);
@@ -271,6 +275,7 @@ impl CaptureLedger {
                         .iter()
                         .map(|(id, _)| *id)
                         .chain(report.retained_engine_source_analysis_ids().iter().copied())
+                        .chain(report.streamed_analysis_ids().iter().copied())
                 })
                 .collect::<std::collections::HashSet<_>>();
             let contracted_points = contracted.iter().fold(0u64, |total, analysis| {
@@ -299,6 +304,7 @@ impl CaptureLedger {
             engine_ceiling_bytes: (save_all || engine_points > 0)
                 .then(|| per_analysis_engine_bytes.saturating_mul(engine_points)),
             indeterminate,
+            streamed,
         }
     }
 
@@ -326,10 +332,11 @@ impl CaptureLedger {
     /// The whole forecast: every printed row plus every printed plan-level
     /// line, and nothing that is not printed.
     ///
-    /// This is the number the budget is checked against and the number the
-    /// page's status line shows. A row a surface chooses not to draw is still
-    /// counted here, which is deliberate — a total that shrank when a row was
-    /// hidden would be a different claim about the same plan.
+    /// This is the number the page's status line shows. A row a surface
+    /// chooses not to draw is still counted here, which is deliberate — a
+    /// total that shrank when a row was hidden would be a different claim
+    /// about the same plan. Its plan-level lines are ceilings, so the budget
+    /// is checked against [`Self::proven_bytes`] instead.
     #[must_use]
     pub fn total_bytes(&self) -> u64 {
         self.rows
@@ -340,9 +347,26 @@ impl CaptureLedger {
             .saturating_add(self.engine_ceiling_bytes.unwrap_or(0))
     }
 
+    /// What the plan writes at least: the groups' rows, each priced at the
+    /// points its analyses fix before the solve. The plan-level lines are
+    /// ceilings, and a streamed output adds what only the solve decides; the
+    /// store counts both against the budget as the run writes them.
+    #[must_use]
+    pub fn proven_bytes(&self) -> u64 {
+        self.rows
+            .iter()
+            .fold(0u64, |total, row| total.saturating_add(row.bytes))
+    }
+
     #[must_use]
     pub fn indeterminate_count(&self) -> usize {
         self.indeterminate.len()
+    }
+
+    /// Outputs that stream to the store at every point the solve accepts.
+    #[must_use]
+    pub const fn streamed_count(&self) -> usize {
+        self.streamed
     }
 }
 

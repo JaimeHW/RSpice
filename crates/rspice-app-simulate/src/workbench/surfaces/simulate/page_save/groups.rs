@@ -60,13 +60,15 @@ pub(super) fn capture_groups(
     let budget = cx.model.sim_setup.save_policy.maximum_storage_bytes;
     let total = ledger.total_bytes();
     let indeterminate = ledger.indeterminate_count();
-    let over_budget = total > budget;
+    // Only what the plan provably writes is over the budget; a ceiling over it
+    // is held to the budget by the store as the run writes.
+    let over_budget = ledger.proven_bytes() > budget;
     let status = if selection_error.is_some() {
         "Selection preflight unavailable".to_owned()
     } else if over_budget {
         format!(
-            "{} forecast exceeds {} ceiling",
-            format_bytes(total),
+            "{} needed exceeds {} ceiling",
+            format_bytes(ledger.proven_bytes()),
             format_bytes(budget)
         )
     } else if selection_mode == OutputSelectionMode::SaveAll {
@@ -218,6 +220,20 @@ pub(super) fn capture_groups(
                 card_note(
                     ui,
                     &format!("Output selection cannot be forecast yet: {error}"),
+                );
+            }
+            let streamed = ledger.streamed_count();
+            if streamed > 0 {
+                card_note(
+                    ui,
+                    &format!(
+                        "{streamed} output{} stream{} at every point the solve accepts. The store \
+                         counts what the run writes against the {} budget and stops the run \
+                         where it crosses it, keeping what it wrote.",
+                        if streamed == 1 { "" } else { "s" },
+                        if streamed == 1 { "s" } else { "" },
+                        format_bytes(budget)
+                    ),
                 );
             }
             card_note(

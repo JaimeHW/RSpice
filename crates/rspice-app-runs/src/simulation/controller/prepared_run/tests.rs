@@ -642,11 +642,11 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
     SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("two deferred outputs share the same prepared analysis source state");
 
+    // The shared source is a ceiling, not what the run writes: below it the
+    // run still prepares, and the store holds it to the budget as it writes.
     state.model.sim_setup.save_policy.maximum_storage_bytes = one_source - 1;
-    let error =
-        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect_err("the shared source-state ceiling is still enforced");
-    assert!(error.message().contains("storage budget"), "{error}");
+    SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .expect("a ceiling over the budget does not refuse the run");
 }
 
 #[test]

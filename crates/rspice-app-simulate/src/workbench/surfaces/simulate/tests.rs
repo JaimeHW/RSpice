@@ -900,11 +900,11 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
 #[test]
 fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
     assert_eq!(
-        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1, 0),
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1, 0, 0),
         "960 B · 1 compatible analysis"
     );
     assert_eq!(
-        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(1_536), 2, 0),
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(1_536), 2, 0, 0),
         "1.50 KiB · 2 compatible analyses"
     );
     assert_eq!(
@@ -914,12 +914,21 @@ fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
             },
             1,
             0,
+            0,
         ),
         "indeterminate · adaptive transient grid"
     );
     assert_eq!(
-        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(0), 2, 2),
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(0), 2, 2, 0),
         "deferred · shared source ceiling counted at plan level · 2 compatible analyses"
+    );
+    assert_eq!(
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(0), 1, 0, 1),
+        "streamed · counted as the run writes it · 1 compatible analysis"
+    );
+    assert_eq!(
+        saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(512), 2, 0, 1),
+        "512 B + streamed · counted as the run writes it · 2 compatible analyses"
     );
 }
 

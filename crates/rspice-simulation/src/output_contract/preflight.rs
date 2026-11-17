@@ -34,6 +34,9 @@ pub struct SavedOutputPreflightReport {
     bytes_by_analysis: Vec<(AnalysisInstanceId, u64)>,
     compatible_analysis_count: usize,
     retained_engine_source_analysis_ids: Vec<AnalysisInstanceId>,
+    /// Analyses whose point count only the solve decides: there the output
+    /// streams to the store, which counts its bytes as the run writes them.
+    streamed_analysis_ids: Vec<AnalysisInstanceId>,
 }
 
 impl SavedOutputPreflightReport {
@@ -47,6 +50,7 @@ impl SavedOutputPreflightReport {
             bytes_by_analysis: Vec::new(),
             compatible_analysis_count: 0,
             retained_engine_source_analysis_ids: Vec::new(),
+            streamed_analysis_ids: Vec::new(),
         }
     }
 
@@ -66,6 +70,7 @@ impl SavedOutputPreflightReport {
             bytes_by_analysis: Vec::new(),
             compatible_analysis_count: 1,
             retained_engine_source_analysis_ids: Vec::new(),
+            streamed_analysis_ids: Vec::new(),
         }
     }
 
@@ -104,6 +109,13 @@ impl SavedOutputPreflightReport {
     pub fn retained_engine_source_analysis_ids(&self) -> &[AnalysisInstanceId] {
         &self.retained_engine_source_analysis_ids
     }
+
+    /// Analyses where the output streams to the store at every point the
+    /// solve accepts. Its estimate is then only the part known before the
+    /// solve: a lower bound, never a ceiling.
+    pub fn streamed_analysis_ids(&self) -> &[AnalysisInstanceId] {
+        &self.streamed_analysis_ids
+    }
 }
 
 /// Conservative logical-byte ceiling for complete engine waveform source
@@ -134,11 +146,8 @@ pub fn preflight_saved_output<'a>(
     if let SavedOutputSemanticStatus::Invalid { reason } = &semantic_status {
         return SavedOutputPreflightReport::invalid(reason.clone());
     }
-    let engine_columns = output.origin
-        == rspice_simulation_contract::saved_output::SavedOutputOrigin::Automatic
-        && output.save_policy == SavedOutputPolicy::EveryAcceptedPoint;
-    let (storage_estimate, bytes_by_analysis, kept_engine_columns) =
-        storage_estimate(&contracts, &analyses, engine_columns);
+    let (storage_estimate, bytes_by_analysis, streamed_analysis_ids) =
+        storage_estimate(&contracts, &analyses);
     let retained_engine_source_analysis_ids =
         if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
             contracts
@@ -146,7 +155,7 @@ pub fn preflight_saved_output<'a>(
                 .map(PreparedSavedOutput::analysis_id)
                 .collect()
         } else {
-            kept_engine_columns
+            Vec::new()
         };
     SavedOutputPreflightReport {
         semantic_status,
@@ -154,6 +163,7 @@ pub fn preflight_saved_output<'a>(
         bytes_by_analysis,
         compatible_analysis_count: contracts.len(),
         retained_engine_source_analysis_ids,
+        streamed_analysis_ids,
     }
 }
 
@@ -219,22 +229,19 @@ fn semantic_status(
 /// caller that prices the output over a run set needs the parts, because the
 /// analyses producing it do not all run at the same number of points.
 ///
-/// With `engine_columns`, the output is Automatic's node voltage kept at every
-/// point its analysis accepted. Where only the solve decides how many points
-/// that is, the output is the engine's own column for that analysis: it adds
-/// nothing of its own, and the analysis is returned to be counted once as
-/// retained engine source, under the engine's result-value ceiling.
+/// A raw voltage or current on an analysis whose point count only the solve
+/// decides streams to the store: that analysis is returned apart and adds
+/// nothing here, so the estimate is what is known before the solve.
 fn storage_estimate(
     contracts: &[PreparedSavedOutput],
     analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-    engine_columns: bool,
 ) -> (
     SavedOutputStorageEstimate,
     Vec<(AnalysisInstanceId, u64)>,
     Vec<AnalysisInstanceId>,
 ) {
     let mut by_analysis: Vec<(AnalysisInstanceId, u64)> = Vec::new();
-    let mut kept_engine_columns = Vec::new();
+    let mut streamed = Vec::new();
     let mut total = 0_u64;
     for contract in contracts {
         if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
@@ -275,8 +282,8 @@ fn storage_estimate(
         };
         let sample_count = match deterministic_sample_count(contract, spec) {
             Ok(sample_count) => sample_count,
-            Err(_) if engine_columns => {
-                kept_engine_columns.push(contract.analysis_id);
+            Err(_) if contract.kind == SavedOutputKind::RawVoltageOrCurrent => {
+                streamed.push(contract.analysis_id);
                 continue;
             }
             Err(reason) => return (indeterminate(reason), Vec::new(), Vec::new()),
@@ -322,7 +329,7 @@ fn storage_estimate(
     (
         SavedOutputStorageEstimate::ExactBytes(total),
         by_analysis,
-        kept_engine_columns,
+        streamed,
     )
 }
 
@@ -580,12 +587,11 @@ mod tests {
         }
     }
 
-    /// Automatic's node voltage keeps every point a transient accepted, and
-    /// is then the engine's own column: nothing of its own, its analysis
-    /// counted once as retained engine source. On a grid the analysis fixes
-    /// it is still priced at that grid.
+    /// Automatic's node voltage keeps every point a transient accepted, so it
+    /// streams there, known only as the run writes it. On a grid the
+    /// analysis fixes it is still priced at that grid.
     #[test]
-    fn an_automatic_node_voltage_on_a_transient_is_its_engine_column() {
+    fn an_automatic_node_voltage_streams_on_a_transient() {
         let automatic = output(
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
@@ -597,7 +603,8 @@ mod tests {
             report.storage_estimate(),
             &SavedOutputStorageEstimate::ExactBytes(0)
         );
-        assert_eq!(report.retained_engine_source_analysis_ids(), [transient]);
+        assert_eq!(report.streamed_analysis_ids(), [transient]);
+        assert!(report.retained_engine_source_analysis_ids().is_empty());
 
         let spec = AnalysisSpec::Ac {
             start_freq: 1.0,
@@ -610,22 +617,25 @@ mod tests {
             report.storage_estimate(),
             &SavedOutputStorageEstimate::ExactBytes(31 * 4 * 8)
         );
-        assert!(report.retained_engine_source_analysis_ids().is_empty());
+        assert!(report.streamed_analysis_ids().is_empty());
     }
 
+    /// An output an engineer keeps at every accepted point streams on a
+    /// transient as Automatic's does: nothing known before the solve, so
+    /// nothing to refuse it on.
     #[test]
-    fn preflight_marks_adaptive_transient_capture_indeterminate() {
+    fn an_output_at_every_accepted_point_streams_on_a_transient() {
         let output = output(
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::FullSourcePrecision,
         );
-        let spec = transient_spec();
-        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
-        assert!(matches!(
+        let (analysis, spec) = (AnalysisInstanceId::new(), transient_spec());
+        let report = preflight_saved_output(&output, [(analysis, &spec)]);
+        assert_eq!(
             report.storage_estimate(),
-            SavedOutputStorageEstimate::Indeterminate { reason }
-                if reason.contains("data-dependent")
-        ));
+            &SavedOutputStorageEstimate::ExactBytes(0)
+        );
+        assert_eq!(report.streamed_analysis_ids(), [analysis]);
     }
 
     #[test]
