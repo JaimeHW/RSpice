@@ -26,20 +26,50 @@ pub enum VerilogACompileOutcome {
 /// evaluating, the browser's by ending its worker.
 ///
 /// The requester keeps it (and its clones) for as long as it wants the
-/// result. A native compile whose requester has dropped every clone (the
-/// project was closed, or the compile was let go) stops as if cancelled:
-/// nothing is left to read what it would find.
+/// result. A compile whose requester has dropped every clone (the project was
+/// closed, or the compile was let go) stops as if cancelled: nothing is left
+/// to read what it would find. A native compile sees that through its weak
+/// hold; the browser's worker is ended when the last clone drops.
 #[derive(Debug, Clone, Default)]
 pub struct CompileCancellation {
     stopped: Arc<AtomicBool>,
-    requester: Arc<()>,
+    requester: Arc<Requester>,
+}
+
+/// The requester's interest in one compile. In the browser it names the
+/// worker running the compile, so letting go of it ends that worker and no
+/// later one.
+#[derive(Debug, Default)]
+struct Requester {
+    /// The browser worker's request id, once it has started; 0 before.
+    #[cfg(target_arch = "wasm32")]
+    worker: std::sync::atomic::AtomicU32,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Requester {
+    /// The worker running the compile, once it has started.
+    fn worker(&self) -> Option<u32> {
+        Some(self.worker.load(Ordering::Relaxed)).filter(|&id| id != 0)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for Requester {
+    fn drop(&mut self) {
+        if let Some(id) = self.worker() {
+            worker::finish(Some(id));
+        }
+    }
 }
 
 impl CompileCancellation {
     pub fn cancel(&self) {
         self.stopped.store(true, Ordering::Relaxed);
+        // The worker this compile started, or, before it has one, whichever
+        // is running.
         #[cfg(target_arch = "wasm32")]
-        worker::cancel();
+        worker::finish(self.requester.worker());
     }
 
     /// What the compile itself holds: the cancellation, without keeping the
@@ -63,7 +93,7 @@ impl PipelineControl for CompileCancellation {
 #[derive(Debug)]
 pub struct CompileJob {
     stopped: Arc<AtomicBool>,
-    requester: Weak<()>,
+    requester: Weak<Requester>,
 }
 
 impl CompileJob {
@@ -170,16 +200,18 @@ pub fn start_compile(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // The worker is ended from the outside; nothing inside it listens.
-        let _ = cancellation;
-        worker::start(
+        // The worker is ended from the outside, by a cancel or by the
+        // requester letting go; nothing inside it listens.
+        let id = worker::start(
             &bundle,
             selected_module.as_deref(),
             cells.as_deref(),
             delay_select,
             sender,
             std::rc::Rc::new(wake),
-        )
+        )?;
+        cancellation.requester.worker.store(id, Ordering::Relaxed);
+        Ok(())
     }
 }
 

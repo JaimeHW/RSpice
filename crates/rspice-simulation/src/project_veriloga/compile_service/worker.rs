@@ -201,7 +201,7 @@ mod browser {
         delay_select: DigitalDelaySelect,
         sender: mpsc::Sender<VerilogACompileOutcome>,
         wake: Rc<dyn Fn()>,
-    ) -> Result<(), String> {
+    ) -> Result<u32, String> {
         if ACTIVE_WORKER.with(|active| active.borrow().is_some()) {
             return Err("A browser Verilog-A compile is already active.".to_owned());
         }
@@ -338,7 +338,7 @@ mod browser {
                 js_error_message(error)
             ));
         }
-        Ok(())
+        Ok(id)
     }
 
     pub(crate) fn finish(expected_id: Option<u32>) {
@@ -411,9 +411,7 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use browser::cancel;
-#[cfg(target_arch = "wasm32")]
-pub(super) use browser::start;
+pub(super) use browser::{finish, start};
 
 #[cfg(test)]
 mod tests {
