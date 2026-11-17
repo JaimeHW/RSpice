@@ -619,7 +619,7 @@ impl CommandSet for ProjectCommand {
                     || reads.platform.browser_schematic_save_name.is_some(),
                 "no project is open",
             ),
-            Self::SaveAs | Self::CloseProject => (open, "no project is open"),
+            Self::SaveAs | Self::SaveCopy | Self::CloseProject => (open, "no project is open"),
             Self::SaveAll => (
                 open && project_has_unsaved_changes(reads),
                 "no unsaved project changes",
@@ -691,6 +691,7 @@ impl CommandSet for ProjectCommand {
             // replace project persistence just because that editor is active.
             Self::Save => cx.wb.outbox.push(ProjectFileAction::Save),
             Self::SaveAs => cx.wb.outbox.push(ProjectFileAction::SaveAs),
+            Self::SaveCopy => cx.wb.outbox.push(ProjectFileAction::SaveCopy),
             Self::SaveAll => cx.wb.outbox.push(ProjectFileAction::SaveAll),
             Self::CloseProject => cx.wb.outbox.push(ProjectFileAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(cx.state, cx.model),

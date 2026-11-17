@@ -2099,13 +2099,14 @@ fn the_check_and_save_dialog_draws_in_the_project_context_and_what_it_raises_is_
 }
 
 /// What the technology attachment dialog's migration copy hands the shell,
-/// carried out as the dialog once did it: the copy saved as a new project,
+/// carried out as the dialog once did it: a copy saved as a new project,
+/// the open one kept,
 /// then its line in the log once it is saved.
 const MIGRATION_COPY_SAVED: &[Step] = &[(
     "SaveMigrationCopy",
     &[
         "ProjectRequest::SaveMigrationCopy => {",
-        "let saved = app.state.save_project_as();",
+        "let saved = app.state.save_project_copy();",
         "if saved {",
         "app.state.record(",
         "\"Saved a migration copy that keeps the current technology; no technology was attached.\",",

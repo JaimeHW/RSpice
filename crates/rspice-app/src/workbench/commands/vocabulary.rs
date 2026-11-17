@@ -330,6 +330,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::NewProject.key(),
     ProjectCommand::Save.key(),
     ProjectCommand::SaveAs.key(),
+    ProjectCommand::SaveCopy.key(),
     ProjectCommand::SaveAll.key(),
     ShellCommand::RevertActiveDocument.key(),
     ShellCommand::CloseActiveDocument.key(),

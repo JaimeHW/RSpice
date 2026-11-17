@@ -78,6 +78,7 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         ProjectCommand::OpenProject,
         ProjectCommand::Save,
         ProjectCommand::SaveAs,
+        ProjectCommand::SaveCopy,
         ProjectCommand::SaveAll,
         ProjectCommand::CloseProject,
         ProjectCommand::NewCell,

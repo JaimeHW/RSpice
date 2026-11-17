@@ -2110,6 +2110,100 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
     );
 }
 
+/// Save as is the same project in a new place: its identity, revision and
+/// name stay, and nothing is read back from disk, so the step before it is
+/// still on Undo. Its checkpoints follow it, as the checkpoint store's own
+/// test shows.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_as_keeps_the_project_its_revision_and_its_undo() {
+    let directory = rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("save-as");
+    let original = directory.join("first").join("amp.rspiceproj");
+    let moved = directory.join("second").join("amp_v2.rspiceproj");
+    std::fs::create_dir_all(original.parent().unwrap()).expect("fixture directory");
+    std::fs::create_dir_all(moved.parent().unwrap()).expect("fixture directory");
+    let mut state = AppState::default();
+    assert!(state.save_project_to_path(&original));
+    let mut properties = state.model.workspace.content.project.properties();
+    properties.description = "Trimmed across corners".to_owned();
+    state
+        .model
+        .publish_project_properties(properties, "test")
+        .expect("the description changes");
+    assert!(state.model.can_undo_project_design());
+    let project = &state.model.workspace.content.project;
+    let (id, revision, name) = (project.id(), project.revision(), project.name().to_owned());
+
+    assert!(state.save_project_as_to_path(&moved));
+
+    let project = &state.model.workspace.content.project;
+    assert_eq!(project.id(), id, "the same project");
+    assert_eq!(project.revision(), revision, "its history goes on");
+    assert_eq!(project.name(), name, "moving a project does not rename it");
+    assert_eq!(project.description, "Trimmed across corners");
+    assert!(
+        state.model.can_undo_project_design(),
+        "the edit before Save as is still on Undo"
+    );
+    assert!(
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+        "everything was saved"
+    );
+    let reread = std::fs::read_to_string(&moved).expect("the file was written");
+    assert!(
+        reread.contains(&id.to_string()),
+        "the file keeps the identity"
+    );
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// Save a copy writes a new project, with an identity and a history of its
+/// own, and leaves the reader in the project they had open, its file and its
+/// Undo as they were.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_a_copy_forks_and_keeps_the_open_project() {
+    let directory =
+        rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("save-copy");
+    std::fs::create_dir_all(&directory).expect("fixture directory");
+    let original = directory.join("amp.rspiceproj");
+    let copy = directory.join("amp copy.rspiceproj");
+    let mut state = AppState::default();
+    assert!(state.save_project_to_path(&original));
+    let mut properties = state.model.workspace.content.project.properties();
+    properties.description = "Before the copy".to_owned();
+    state
+        .model
+        .publish_project_properties(properties, "test")
+        .expect("the description changes");
+    let id = state.model.workspace.content.project.id();
+
+    assert!(state.save_project_copy_to_path(&copy));
+
+    let project = &state.model.workspace.content.project;
+    assert_eq!(project.id(), id, "the open project is the one it was");
+    assert_eq!(
+        project.path.as_deref().and_then(Path::file_name),
+        original.file_name(),
+        "and its file"
+    );
+    assert!(state.model.can_undo_project_design());
+    assert!(
+        rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+        "the copy does not save the open project"
+    );
+    let written = std::fs::read_to_string(&copy).expect("the copy was written");
+    assert!(
+        !written.contains(&id.to_string()),
+        "the copy is a project of its own"
+    );
+    assert!(
+        written.contains("Before the copy"),
+        "with the work as it is"
+    );
+    let _ = std::fs::remove_dir_all(directory);
+}
+
 /// Save As carries on in the new file: the project location, the recent
 /// list and the saved session all name it, and the session read back by
 /// the next start reopens it there.

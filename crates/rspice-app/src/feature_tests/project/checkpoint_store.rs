@@ -121,7 +121,7 @@ fn a_manual_checkpoint_survives_automatic_ones_a_first_save_and_a_save_as() {
     std::fs::create_dir_all(&elsewhere).expect("another folder");
     assert!(
         app.state
-            .save_project_to_path(&elsewhere.join("amp-v2.rspiceproj")),
+            .save_project_as_to_path(&elsewhere.join("amp-v2.rspiceproj")),
         "a Save as"
     );
     let after_save_as = listed(&app);

@@ -259,6 +259,7 @@ pub(in crate::workbench) fn run_project_file_action(
             ProjectFileAction::OpenSchematic => FileMenuAction::Open,
             ProjectFileAction::Save => FileMenuAction::Save,
             ProjectFileAction::SaveAs => FileMenuAction::SaveProjectAs,
+            ProjectFileAction::SaveCopy => FileMenuAction::SaveProjectCopy,
             ProjectFileAction::SaveAll => FileMenuAction::SaveAll,
             ProjectFileAction::CloseProject => FileMenuAction::CloseProject,
         },
@@ -366,7 +367,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
         }
         ProjectRequest::SaveMigrationCopy => {
-            let saved = app.state.save_project_as();
+            let saved = app.state.save_project_copy();
             if saved {
                 app.state.record(
                     LogSeverity::Info,

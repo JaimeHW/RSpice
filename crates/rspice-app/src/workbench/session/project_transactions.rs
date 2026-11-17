@@ -1025,13 +1025,13 @@ impl AppState {
                     Ok(()) => SaveContinuationEvent::Saved(transaction),
                     Err(error) => SaveContinuationEvent::Failed(transaction, error),
                 },
-                AfterResultsKept::SaveAs { path } => {
-                    if self.write_project_as(&path) {
+                AfterResultsKept::SaveCopy { path } => {
+                    if self.write_project_copy(&path) {
                         SaveContinuationEvent::Saved(transaction)
                     } else {
                         SaveContinuationEvent::Failed(
                             transaction,
-                            "the project was not saved as a new file".to_owned(),
+                            "the copy of the project was not written".to_owned(),
                         )
                     }
                 }
@@ -1048,13 +1048,14 @@ impl AppState {
     }
 }
 
-/// Saving the project as a new file: the inspector's pending edit
-/// committed, a live mirror refused, then the copy written where the reader
-/// picks and opened in place of the project it came from.
+/// Saving the project at another file, or a copy of it: the inspector's
+/// pending edit committed, a live mirror refused, then the file the reader
+/// picks written.
 impl AppState {
-    /// Save the open project as a new file and carry on working in it, or
-    /// save a copy through the browser. Returns whether it saved, or, in the
-    /// browser, whether the save started.
+    /// Save the open project at another file and carry on working in it: the
+    /// same project, with its revision history, audit records, checkpoints
+    /// and Undo. In the browser, a copy is downloaded. Returns whether it
+    /// saved, or, in the browser, whether the save started.
     pub(crate) fn save_project_as(&mut self) -> bool {
         if !self.commit_pending_inspector_edit() {
             return false;
@@ -1085,15 +1086,18 @@ impl AppState {
 
     /// Save the project at `path` and carry on working there.
     ///
-    /// The file is written under the project's copy rules (its own project
-    /// identity, never over the open file), then opened in place of the
-    /// project it came from, so the project location, the recent list, the
-    /// window title and the saved session all name the new file. The file it
-    /// came from keeps what was last saved to it.
+    /// It is the project's own save to a file the reader picked: the project
+    /// keeps its identity, revision history and audit records, its
+    /// checkpoints follow it and nothing is reloaded, so Undo carries on. The
+    /// project location, the recent list, the window title and the saved
+    /// session all name the new file; the file it came from keeps what was
+    /// last saved to it.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn save_project_as_to_path(&mut self, path: &std::path::Path) -> bool {
-        let then = AfterResultsKept::SaveAs {
+        let then = AfterResultsKept::Save {
+            scope: SaveScope::AllDocuments,
             path: path.to_path_buf(),
+            authority: DestinationAuthority::UserSelected,
         };
         match project_lifecycle::begin_results_save(self, path, then) {
             // It is written once the results it names are kept beside it.
@@ -1104,30 +1108,87 @@ impl AppState {
                 return false;
             }
         }
-        self.write_project_as(path)
+        save_native_scope(
+            self,
+            SaveScope::AllDocuments,
+            path,
+            DestinationAuthority::UserSelected,
+        )
+        .is_ok()
     }
 
-    /// Write the project as a new file at `path`, its results already kept beside it, and
-    /// open it in place of the project it came from.
+    /// Write an independent copy of the open project where the reader picks
+    /// and carry on in this one, or download one in the browser. Returns
+    /// whether it was written, or, in the browser, whether the save started.
+    pub(crate) fn save_project_copy(&mut self) -> bool {
+        if !self.commit_pending_inspector_edit() {
+            return false;
+        }
+        if let Some(message) = project_workflow::live_mirror_save_block(&self.model, true) {
+            self.prompt(message);
+            return false;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let default_name = format!(
+                "{} copy",
+                project_workflow::project_save_dialog_default_name(&self.model, &self.platform)
+                    .trim_end_matches(".rspiceproj")
+            );
+            match rspice_app_services::io::show_save_project_dialog(Some(default_name.as_str())) {
+                Ok(path) => self.save_project_copy_to_path(&path),
+                Err(ProjectIoError::Cancelled) => false,
+                Err(error) => {
+                    self.report_failure("Project copy failed", error.to_string());
+                    false
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        self.save_project_copy_in_browser()
+    }
+
+    /// Write an independent copy of the project at `path`: a new project, its
+    /// own identity and a history that starts there. The open project, its
+    /// file and its Undo are untouched.
     #[cfg(not(target_arch = "wasm32"))]
-    fn write_project_as(&mut self, path: &std::path::Path) -> bool {
+    pub(crate) fn save_project_copy_to_path(&mut self, path: &std::path::Path) -> bool {
+        let then = AfterResultsKept::SaveCopy {
+            path: path.to_path_buf(),
+        };
+        match project_lifecycle::begin_results_save(self, path, then) {
+            Ok(Some(_)) => return true,
+            Ok(None) => {}
+            Err(error) => {
+                lifecycle_error(self, error, "Project copy failed");
+                return false;
+            }
+        }
+        self.write_project_copy(path)
+    }
+
+    /// Write the copy at `path`, its results already kept beside it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_project_copy(&mut self, path: &std::path::Path) -> bool {
         if let Err(error) =
             rspice_app_services::workbench::lifecycle::project_lifecycle::save_project_copy_native(
                 self, path,
             )
         {
-            lifecycle_error(self, error, "Project Save As failed");
+            lifecycle_error(self, error, "Project copy failed");
             return false;
         }
-        if !self.load_project_from_path(path) {
-            return false;
-        }
-        let saved = format!("Saved {}", self.model.workspace.content.project.name());
-        self.prompt(saved);
+        let file = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |file| file.to_string_lossy().into_owned(),
+        );
+        self.prompt(format!("Saved a copy as {file}"));
         self.record(
             LogSeverity::Info,
             LogSource::Studio,
-            format!("Saved the project as {}.", path.display()),
+            format!("Saved a copy of the project at {}.", path.display()),
         );
         true
     }

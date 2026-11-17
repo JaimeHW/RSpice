@@ -12,6 +12,7 @@ pub(crate) enum FileMenuAction {
     NewProject,
     OpenProject,
     SaveProjectAs,
+    SaveProjectCopy,
     SaveAll,
     RevertActiveDocument,
     CloseActiveDocument,
@@ -48,6 +49,9 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::SaveProjectAs => {
             state.save_project_as();
+        }
+        FileMenuAction::SaveProjectCopy => {
+            state.save_project_copy();
         }
         FileMenuAction::SaveAll => {
             state.save_project_scope(

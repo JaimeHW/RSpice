@@ -473,6 +473,7 @@ pub enum ProjectFileAction {
     OpenSchematic,
     Save,
     SaveAs,
+    SaveCopy,
     SaveAll,
     CloseProject,
 }

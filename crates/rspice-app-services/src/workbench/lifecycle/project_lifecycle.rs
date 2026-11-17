@@ -1055,8 +1055,9 @@ pub enum AfterResultsKept {
         path: PathBuf,
         authority: DestinationAuthority,
     },
-    /// Write the project as a new file at `path` and carry on working there.
-    SaveAs { path: PathBuf },
+    /// Write an independent copy of the project at `path`, a new project
+    /// with a history of its own, and carry on in this one.
+    SaveCopy { path: PathBuf },
 }
 
 /// A save in its first phase: the results it names being kept beside its file, on a thread of
