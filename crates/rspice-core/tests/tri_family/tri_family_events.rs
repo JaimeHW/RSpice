@@ -884,9 +884,9 @@ endmodule\n";
 
 /// The sigma-delta modulator's clock path: a 2 ns ramp through a
 /// single-threshold `adc_bridge` whose output a module reads. The coupled run
-/// roots the converter and lands one representable instant past each
-/// crossing, where the input can read a rounding short of the threshold; the
-/// root's crossing decides there, so every edge the converter publishes is
+/// roots the converter and lands up to 64 ulps past each crossing
+/// (`root_landing`), where the input reads past the threshold; the root's
+/// crossing decides there, so every edge the converter publishes is
 /// its crossing plus its 1 ns delay, landed in one point, and the module's
 /// `#2` after each rising edge falls on the tick image.
 #[test]
@@ -1062,9 +1062,9 @@ fn clock_copy_edges(result: &TransientResult) -> Vec<(f64, DigitalState)> {
 }
 
 /// The same clock path through the connect converter the build inserts on
-/// the module's own input. The root lands one representable instant past
-/// each crossing, where the input can read a rounding short of the
-/// threshold, so the converter decides by the crossing there, as
+/// the module's own input. The root lands up to 64 ulps past each crossing
+/// (`root_landing`), where the input reads past the threshold, so the
+/// converter decides by the crossing there, as
 /// `adc_bridge` does: every edge is its crossing plus 1 ns, landed in one
 /// point, and the module's `#2` after each rising edge falls on the tick
 /// image. Decided by the landed sample, 7 of these 200 edges came a solver

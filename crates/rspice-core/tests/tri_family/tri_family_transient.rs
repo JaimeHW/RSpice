@@ -123,7 +123,7 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 ///
 /// Re-measured at 1156 points, grid 7665aafb3056dd2f (was 4ae14cf492891c88),
 /// when a coupled converter's event began to be dated at the crossing its root
-/// located rather than at the landing one representable instant past it.
+/// located rather than at the landing, then one representable instant past it.
 /// Every `d_clk` edge moves one ulp earlier — the 1.7 V fall that publishes
 /// `x` at 6.04848484848484880e-9 s now does so at 6.04848484848484798e-9 s —
 /// and the 713 points downstream of the edges (the inverter's, the DAC's
