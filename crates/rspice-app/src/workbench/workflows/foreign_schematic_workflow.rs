@@ -8,7 +8,8 @@
 //! after the cell, constant parameters its design variables, the drawing's
 //! model text and the source program's own cards for the models its parts
 //! name a model library of the project, and every file the drawing includes
-//! a model library bound in place. A card with no project place stays on the
+//! a model library bound in place. Any other card the netlist can carry goes
+//! into the design's Added lines. A card with no project place stays on the
 //! sheet as text. Every notice is written to the log.
 
 mod plan;
@@ -142,6 +143,7 @@ pub(crate) fn import_foreign_schematic_file(
         SchematicLoadOrigin::PersistentPath(path),
     )?;
     own_sheets.extend(top_sheet.map(|sheet| (reference.clone(), sheet)));
+    add_added_lines(&mut app.state, &reference, &plan, &mut notices);
     give_own_sheets(&mut app.state, own_sheets, &mut notices);
     adopt_as_top_cell(&mut app.state, &reference, &mut notices);
     let model_bindings = add_model_libraries(
@@ -411,6 +413,39 @@ fn note_cards_with_no_place(
             format!(
                 "`{}` stays on the sheet as text: {reason}.",
                 card.text.lines().next().unwrap_or_default()
+            ),
+        ));
+    }
+}
+
+/// Makes the cards no plan field holds the imported design's Added lines,
+/// which every run of the design appends to its generated netlist. The
+/// design's name is new to the project, so lines an earlier cell of that
+/// name left behind are replaced.
+fn add_added_lines(
+    state: &mut AppState,
+    design: &CellViewRef,
+    plan: &ForeignPlan,
+    notices: &mut Vec<(ForeignNoticeSeverity, String)>,
+) {
+    let text = plan
+        .added_lines
+        .iter()
+        .map(|card| card.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    rspice_design::added_lines::set_added_lines(
+        &mut state.model.workspace.content.added_lines,
+        design,
+        text,
+    );
+    for card in &plan.added_lines {
+        notices.push((
+            ForeignNoticeSeverity::Notice,
+            format!(
+                "`{}` runs from the Added lines of {}.",
+                card.text.lines().next().unwrap_or_default(),
+                design.display_path()
             ),
         ));
     }

@@ -6,8 +6,10 @@
 //! `.model`, `.func` and subcircuit text is model-library text. Solver
 //! options and a single `.temp` set the plan's options. A stepped run
 //! (`.step`, or a `.temp` list) is an axis of the plan's run set, and a
-//! `.meas` card a measurement the plan defines. A card none of these can
-//! hold stays on the sheet, with the reason.
+//! `.meas` card a measurement the plan defines. Any other card the netlist
+//! can carry goes into the design's Added lines, which every run appends to
+//! the generated netlist. A card none of these can hold stays on the sheet,
+//! with the reason.
 
 use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole, ForeignTool};
 use rspice_design::schematic::component_type::ComponentType;
@@ -41,6 +43,8 @@ pub(super) struct ForeignPlan {
     pub(super) model_text: Vec<String>,
     /// `.include` and `.lib` cards, for the files they name.
     pub(super) includes: Vec<ForeignCard>,
+    /// Cards the plan has no field for, for the design's Added lines.
+    pub(super) added_lines: Vec<ForeignCard>,
     /// Cards that stay on the sheet, and why.
     pub(super) kept: Vec<(ForeignCard, String)>,
     pub(super) notices: Vec<String>,
@@ -118,14 +122,24 @@ pub(super) fn plan_from_cards(
             // `.backanno` and `.end` tell the source program alone something.
             ForeignCardRole::SourceOnly => {}
             ForeignCardRole::Other => {
-                let reason = match card.keyword().as_str() {
-                    ".plot" | ".probe" | ".save" | ".print" => {
+                if matches!(
+                    card.keyword().as_str(),
+                    ".plot" | ".probe" | ".save" | ".print"
+                ) {
+                    plan.kept.push((
+                        card,
                         "RSpice keeps every waveform, and a probe chooses what is plotted"
-                            .to_owned()
-                    }
-                    keyword => format!("RSpice has no project place for `{keyword}`"),
-                };
-                plan.kept.push((card, reason));
+                            .to_owned(),
+                    ));
+                } else if let Some(refusal) =
+                    rspice_simulation::netlist_gen::added_lines_refusals(&card.text)
+                        .into_iter()
+                        .next()
+                {
+                    plan.kept.push((card, refusal.message));
+                } else {
+                    plan.added_lines.push(card);
+                }
             }
         }
     }

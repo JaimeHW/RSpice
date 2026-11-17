@@ -190,6 +190,9 @@ fn parameters_options_and_temperature_find_their_plan_places() {
         card(ForeignCardRole::Step, ".step param R 1k 2k 1k"),
         card(ForeignCardRole::SourceOnly, ".backanno"),
         card(ForeignCardRole::Other, "K1 L1 L2 1"),
+        card(ForeignCardRole::Other, ".nodeset V(out)=0"),
+        card(ForeignCardRole::Other, ".four 1k V(out)"),
+        card(ForeignCardRole::Other, ".plot tran V(out)"),
     ]);
     let [(_, AnalysisDraft::Transient(tran))] = plan.analyses.as_slice() else {
         panic!("one transient analysis");
@@ -222,7 +225,18 @@ fn parameters_options_and_temperature_find_their_plan_places() {
         .iter()
         .map(|(card, _)| card.text.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(kept, [".options cshunt=1p", "K1 L1 L2 1"]);
+    assert_eq!(
+        kept,
+        [".options cshunt=1p", ".four 1k V(out)", ".plot tran V(out)"]
+    );
+    // A card the netlist can carry and the plan has no field for is the
+    // design's Added lines; an analysis there would be refused, so it stays.
+    let added = plan
+        .added_lines
+        .iter()
+        .map(|card| card.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(added, ["K1 L1 L2 1", ".nodeset V(out)=0"]);
     assert!(plan.notices[0].contains("plotwinsize=0"));
     // A temperature list and a stepped parameter are axes of the run set.
     assert_eq!(
@@ -469,7 +483,7 @@ fn drawing_folder() -> PathBuf {
          SYMBOL buffer 352 96 R0\nSYMATTR InstName U1\n\
          TEXT 32 240 Left 2 !.tran 0 20m 0 10u\\n.param R=1k\\n.include buffers.lib\n\
          TEXT 32 270 Left 2 !.step param R list 1k 2k\\n.meas TRAN vmax MAX V(out)\n\
-         TEXT 32 300 Left 2 !.model D1N D(Is=1n)\\nK1 L1 L2 1\n",
+         TEXT 32 300 Left 2 !.model D1N D(Is=1n)\\n.nodeset V(out)=0\n",
     )
     .expect("schematic");
     folder
@@ -570,8 +584,25 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         [
             ".tran 0 20m 0 10u\n.param R=1k\n.include buffers.lib",
             ".step param R list 1k 2k\n.meas TRAN vmax MAX V(out)",
-            ".model D1N D(Is=1n)\nK1 L1 L2 1",
+            ".model D1N D(Is=1n)\n.nodeset V(out)=0",
         ]
+    );
+    // The start-up guess has no field in the plan: it is the design's Added
+    // lines, which every run of the design appends to its netlist.
+    assert_eq!(
+        rspice_design::added_lines::added_lines_of(
+            &model.workspace.content.added_lines,
+            &model.workspace.content.active_view,
+        ),
+        Some(".nodeset V(out)=0")
+    );
+    assert!(
+        log.iter().any(|line| line
+            == &format!(
+                "`.nodeset V(out)=0` runs from the Added lines of {}.",
+                model.workspace.content.active_view.display_path()
+            )),
+        "{log:#?}"
     );
 
     // The stepped parameter is an axis of the plan's run set and the
