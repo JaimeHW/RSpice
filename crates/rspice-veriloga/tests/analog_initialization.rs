@@ -5,8 +5,9 @@ use support::DeviceFixture;
 
 #[test]
 fn static_topology_refresh_does_not_evaluate_uninitialized_dynamic_equations() {
-    // VBIC initializes a temperature divisor at initial_step. Topology is
-    // needed before that event, but its ddt operands are not defined yet.
+    // VBIC initializes a temperature divisor at initial_step, and reads it
+    // in both its resistive and its charge equations. Topology is needed
+    // before that event, but those operands are not defined yet.
     let fixture = DeviceFixture::compile(
         r#"module initial_step_charge(p,n);
 inout p,n; electrical p,n;
@@ -14,7 +15,7 @@ parameter integer enabled=1;
 real divisor;
 analog begin
     @(initial_step) divisor=2;
-    if (enabled) I(p,n)<+V(p,n);
+    if (enabled) I(p,n)<+V(p,n)*2/divisor;
     I(p,n)<+ddt(V(p,n)/divisor);
 end
 endmodule"#,
@@ -37,7 +38,11 @@ endmodule"#,
         assert_eq!(device.variable("divisor"), Some(0.0));
     }
     // Discovery must not suppress a real numerical failure when equations
-    // are actually requested before their initial event.
+    // are actually requested before their initial event. This evaluation is
+    // static, and a static solve loads no charge (ngspice-46 asks a Verilog-A
+    // model for its reactive part only in transient, osdiload.c:156-158), so the
+    // failure it must report is the resistive branch's V*2/divisor; the
+    // undefined ddt(V/divisor) beside it does not fail it.
     device.update_voltages(&[2.0]);
     assert!(device.try_evaluate().is_err());
 
