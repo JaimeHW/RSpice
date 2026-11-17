@@ -175,6 +175,9 @@ pub(super) struct PlannedConnectModule {
     /// The net each supply port is wired to at this boundary; see
     /// [`supply_ports::bind`].
     pub(super) supply_bindings: Vec<SupplyPortBinding>,
+    /// Whether the statement's `connect_mode` is `merged` (section 7.8.3's
+    /// default): the ports on one net that select it share one instance.
+    pub(super) merged: bool,
 }
 
 impl PlannedConnectModule {
@@ -357,6 +360,7 @@ pub(super) fn select_for_boundary(
         location: None,
         supply_ports: DeclaredSupplyPort::of_rule(rule),
         supply_bindings: Vec::new(),
+        merged: rule.mode == rspice_veriloga::ast::ConnectMode::Merged,
     }))
 }
 

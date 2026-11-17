@@ -468,6 +468,46 @@ endconnectrules
     assert!((voltage(&result, "y", 15e-9) - 2.0 * 1.1).abs() < 1e-6);
 }
 
+/// Section 7.8.4 insertion rule 3: the ports on one net that select one
+/// connect module in `merged` mode (section 7.8.3's default) share one
+/// instance, which reads their resolved drive; in `split` mode each has its
+/// own. Two deck instances drive 1 and 0 onto one node through a resistive
+/// D/A that releases on x: merged reads x and leaves the 1 kohm load at 0 V,
+/// split is the two 100 ohm drivers' divider.
+#[test]
+fn merged_ports_of_two_deck_instances_share_one_authored_module() {
+    let run = |mode: &str| {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module d1(o); output o; reg o; initial begin o = 0; #10 o = 1; end endmodule
+module d0(o); output o; reg o; initial o = 0; endmodule
+connectmodule d2ar(d, a); input d; output a; logic d; electrical a;
+  real lv, g; initial begin lv = 0.0; g = 0.0; end
+  always @(d) begin
+    lv = (d === 1'b1) ? 1.8 : 0.0;
+    g = (d === 1'b1 || d === 1'b0) ? 0.01 : 0.0;
+  end
+  analog I(a) <+ g * (V(a) - lv);
+endmodule
+connectrules mr; connect d2ar {mode}; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* two instances on one node\nXA n d1\nXB n d0\nRL n 0 1k\n\
+             .va \"{0}\" d1 module=d1\n.va \"{0}\" d0 module=d0\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        let result = Engine::default().run_tran(&deck, 20e-9, 100e-12).unwrap();
+        voltage(&result, "n", 15e-9)
+    };
+    assert!(run("merged").abs() < 1e-9, "merged");
+    assert!(run("").abs() < 1e-9, "merged by default");
+    let divider = 1.8 * (100.0 * 1000.0 / 1100.0) / (100.0 + 100.0 * 1000.0 / 1100.0);
+    assert!((run("split") - divider).abs() < 1e-6, "split");
+}
+
 #[test]
 fn authored_adc_and_dac_join_xspice_with_independent_sampled_state() {
     let source = Source::new(&format!(

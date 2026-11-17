@@ -38,7 +38,14 @@ pub(super) fn plan_conversions(
     let names = circuit.node_names_sorted();
     let segments = split_segments(circuit, &physical, &names)?;
     let merged = merged_real_drivers(circuit, &physical)?;
-    let mut pending = Vec::new();
+    let mut pending: Vec<PendingConverter> = Vec::new();
+    // Section 7.8.4 insertion rules 3 and 4: the ports on one net that select
+    // one authored connect module in `merged` mode, for one discrete
+    // discipline, share one instance, which reads their resolved drive; every
+    // other port has its own. Keyed by net, module, discipline and kind, to
+    // the pending converter the first such port planned.
+    let mut shared_modules: Vec<((usize, String, String, XspiceAutoBridgeKind), usize)> =
+        Vec::new();
     for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
         for (port_index, (port, signal)) in host.direct_event_ports().enumerate() {
             if crate::event_net::joins_on_event_kernel(
@@ -94,6 +101,27 @@ pub(super) fn plan_conversions(
                     &node_label,
                     host.instance_name(),
                 )?;
+            }
+            // A built-in converter keeps its per-driver law; an authored
+            // module's body is the one instance the merged ports share.
+            let merge_key = selected
+                .as_ref()
+                .filter(|selected| {
+                    selected.merged && selected.execution.is_some() && segment.is_none()
+                })
+                .map(|selected| {
+                    (
+                        port.node,
+                        selected.name.clone(),
+                        discipline.to_owned(),
+                        kind,
+                    )
+                });
+            if let Some(key) = &merge_key
+                && let Some(&(_, index)) = shared_modules.iter().find(|(planned, _)| planned == key)
+            {
+                pending[index].0.extend(members);
+                continue;
             }
             let scoped = metadata.get(&port.node);
             // A built-in converter binds live to the net the HDL port's
@@ -168,6 +196,9 @@ pub(super) fn plan_conversions(
             // names. Allocate the same spelling here to retain node identity.
             let event_name =
                 format!("{}.{}__event{suffix}", host.instance_name(), signal).to_uppercase();
+            if let Some(key) = merge_key {
+                shared_modules.push((key, pending.len()));
+            }
             pending.push((
                 members,
                 event_name,
@@ -280,6 +311,11 @@ impl SplitSegment {
         converter_kind(self.logic, self.traffic)
     }
 }
+
+/// One converter to insert: the (host, port) pairs its event endpoint joins,
+/// the endpoint's node name, whether it joins a split segment's code models,
+/// and the bridge.
+type PendingConverter = (Vec<(usize, usize)>, String, bool, PlannedXspiceAutoBridge);
 
 /// The nets a module's port shares with XSPICE event ports and an analog
 /// element: each splits into a digital segment and its electrical node.
