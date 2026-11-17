@@ -100,6 +100,9 @@ impl Diode {
             // chart requires finite IKF and Inorm with Inorm/IKF > -1.
             // A positive overflowing ratio is still on the smooth chart.
             knee.is_finite() && components[0].0 / knee > -1.0
+        } else if forward && self.follows_ltspice_junction_law() {
+            // LTspice's knee joins the bare current where that turns positive.
+            knee.is_finite() && knee >= 0.0 && (knee == 0.0 || components[0].0 != 0.0)
         } else {
             knee_locally_c2(components[0].0, knee, forward)
         };

@@ -110,3 +110,54 @@ fn the_ngspice_diode_keeps_matched_breakdown_and_its_cubic() {
         );
     }
 }
+
+/// LTspice limits high injection as `cd*sqrt(IKF/(IKF+cd))`, the law Xyce
+/// writes as `Inorm/sqrt(1+Inorm/IKF)`, on forward current alone. It adds
+/// ISR after the knee and scales IKF with AREA and M. ngspice's
+/// `cd/(1+sqrt(cd/IKF))` stays in the ngspice dialect.
+#[test]
+fn the_default_diode_limits_high_injection_as_ltspice_does() {
+    let model = "is=1e-14 ikf=1e-3";
+    // (instance, model, bias, LTspice current)
+    let cases = [
+        ("", model, 0.5, 2.4824745780e-06),
+        ("", model, 0.655, 7.0467408450e-04),
+        ("", model, 0.8, 1.6426259783e-02),
+        ("", model, 1.5, 1.2391836637e+04),
+        (
+            "",
+            "is=1e-14 ikf=1e-3 isr=1e-10 nr=2",
+            0.655,
+            7.2339721707e-04,
+        ),
+        ("", "is=1e-14 ikf=1e-3 n=2", 1.31, 7.0467408516e-04),
+        ("10", model, 0.655, 7.0467408391e-03),
+        ("m=10", model, 0.655, 7.0467408391e-03),
+        ("", "is=1e-6 ikf=1e-5", 0.3, 1.0437709707e-03),
+        ("", "is=1e-6 ikf=1e-5", -0.455, -1.0000004321e-06),
+        (
+            "",
+            "is=1e-6 ikf=1e-5 bv=5 ibv=1e-10",
+            -5.3,
+            -1.1895683594e-05,
+        ),
+    ];
+    for (instance, model, bias, expected) in cases {
+        let current = diode_current(SpiceDialect::BestAvailable, bias, instance, model);
+        assert_rel_close(
+            &format!("d1 {instance} ({model}) at {bias} V"),
+            current,
+            expected,
+            1e-4,
+        );
+    }
+    // ngspice-46 on the same IS=1e-14, IKF=1e-3 diode.
+    for (bias, expected) in [
+        (0.655, 4.982932967494e-04),
+        (0.8, 1.551419616215e-02),
+        (1.5, 1.239233451897e+04),
+    ] {
+        let current = diode_current(SpiceDialect::Ngspice, bias, "", model);
+        assert_rel_close(&format!("ngspice d1 at {bias} V"), current, expected, 1e-9);
+    }
+}

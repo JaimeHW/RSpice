@@ -2986,6 +2986,17 @@ impl Diode {
         if vd >= -3.0 * n_vt {
             return if self.xyce_dialect {
                 Self::apply_xyce_forward_knee(current, conductance, self.forward_knee_current)
+            } else if self.follows_ltspice_junction_law() {
+                // LTspice 17.2.4: `cd*sqrt(IKF/(IKF+cd))` on forward current
+                // alone, the law Xyce writes as `Inorm/sqrt(1+Inorm/IKF)`.
+                // Its IS=1e-14, IKF=1e-3 diode draws 7.0467e-4 A at 0.655 V
+                // where ngspice's `cd/(1+sqrt(cd/IKF))` gives 4.9829e-4, and
+                // its reverse current passes unknee'd.
+                if current > 0.0 {
+                    Self::apply_xyce_forward_knee(current, conductance, self.forward_knee_current)
+                } else {
+                    (current, conductance)
+                }
             } else {
                 Self::apply_forward_knee(current, conductance, self.forward_knee_current)
             };
