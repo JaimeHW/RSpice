@@ -14,6 +14,8 @@ mod deck_run_control;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_source_menu;
 #[cfg(not(target_arch = "wasm32"))]
+mod drawn_exit_projects;
+#[cfg(not(target_arch = "wasm32"))]
 mod engine_recovery_path;
 mod measurement;
 mod output_contract;
