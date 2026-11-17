@@ -27,6 +27,11 @@ const LEAD_MARK_RADIUS: f32 = 8.0;
 /// Side of a cell's icon, and the gap between it and the words.
 const LEAD_ICON_SIDE: f32 = 14.0;
 const LEAD_ICON_GAP: f32 = 6.0;
+/// The unsaved dot after a cell's words: the document tab's, its gap from
+/// the words, and the room the two take.
+const UNSAVED_RADIUS: f32 = 3.0;
+const UNSAVED_GAP: f32 = 5.0;
+const UNSAVED_ROOM: f32 = UNSAVED_GAP + 2.0 * UNSAVED_RADIUS;
 
 /// Where one row goes and how it is marked.
 pub(super) struct RowPlace<'g> {
@@ -99,10 +104,13 @@ impl DataTable<'_> {
                 .zip(cells)
                 .filter(|(_, cell)| !cell.text.is_empty())
                 .map(|(column, cell)| {
-                    let words = match cell.ink {
+                    let mut words = match cell.ink {
                         Ink::Problem(problem) => problem.announce(&cell.text),
                         _ => cell.text.clone(),
                     };
+                    if cell.unsaved {
+                        words.push_str(", unsaved changes");
+                    }
                     if self.kind == Kind::Grid {
                         format!("{}: {words}", column.head)
                     } else {
@@ -217,6 +225,9 @@ impl DataTable<'_> {
             }
             let mut span = self.text_span(column_index, cell_rect);
             let words_start = span.min;
+            if cell.unsaved {
+                span.max = (span.max - UNSAVED_ROOM).max(span.min);
+            }
             if let Some(open) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span) {
                 answered.twist = Some(open);
             }
@@ -299,6 +310,25 @@ impl DataTable<'_> {
                     problem,
                 },
             );
+            if cell.unsaved
+                && let Some(words) = painted
+            {
+                let centre = pos2(
+                    words.landed.right() + UNSAVED_GAP + UNSAVED_RADIUS,
+                    cell_rect.center().y,
+                );
+                #[cfg(any(test, feature = "test-support"))]
+                crate::probe::probe(
+                    ui,
+                    "table.unsaved",
+                    Rect::from_center_size(centre, egui::Vec2::splat(2.0 * UNSAVED_RADIUS)),
+                );
+                ui.painter().with_clip_rect(clip).circle_filled(
+                    centre,
+                    UNSAVED_RADIUS,
+                    t.color.text_dim,
+                );
+            }
             #[cfg(any(test, feature = "test-support"))]
             if let Some(text) = painted
                 && column.align == Align::Right

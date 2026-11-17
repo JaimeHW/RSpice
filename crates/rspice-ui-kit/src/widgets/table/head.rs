@@ -19,6 +19,8 @@ use super::{Align, CELL_PAD, DataTable, Sort, SortDirection, View, Words, paint_
 /// The width of a sort mark, and the room it takes beside a head's words.
 const SORT_MARK_W: f32 = 7.0;
 const SORT_MARK_ROOM: f32 = SORT_MARK_W + 4.0;
+/// The width of the strip over a column's right edge that a press drags.
+const EDGE_GRIP: f32 = 6.0;
 
 /// Where a table's head goes this frame.
 pub(super) struct HeadPlace<'g> {
@@ -36,10 +38,20 @@ pub(super) struct HeadPlace<'g> {
     pub(super) sortable: bool,
 }
 
+/// What the reader did to a table's head this frame.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct HeadAnswer {
+    /// The column whose head was clicked to sort by.
+    pub(super) sort: Option<usize>,
+    /// The column whose right edge was dragged, and the width it is dragged
+    /// to.
+    pub(super) resize: Option<(usize, f32)>,
+}
+
 impl DataTable<'_> {
-    /// Paint the band rows and the head row. Returns the column whose head
-    /// the reader clicked to sort by.
-    pub(super) fn head(&self, ui: &mut Ui, place: HeadPlace<'_>) -> Option<usize> {
+    /// Paint the band rows and the head row, and report a head clicked to
+    /// sort by and an edge dragged to size its column.
+    pub(super) fn head(&self, ui: &mut Ui, place: HeadPlace<'_>) -> HeadAnswer {
         let t = Tokens::get(ui.ctx());
         let HeadPlace {
             block,
@@ -73,10 +85,11 @@ impl DataTable<'_> {
         #[cfg(any(test, feature = "test-support"))]
         crate::probe::probe(ui, "table.head", rect);
         if !ui.is_rect_visible(rect) {
-            return None;
+            return HeadAnswer::default();
         }
         ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
         let mut clicked = None;
+        let mut edges = Vec::new();
         for index in geometry.in_view(view.offset, view.width) {
             let Some(column) = self.columns.get(index) else {
                 continue;
@@ -184,13 +197,46 @@ impl DataTable<'_> {
                     egui::Stroke::new(1.0, t.color.border),
                 );
             }
+            // Every edge but the table's last can be dragged, where it shows.
+            if sortable && index + 1 < self.columns.len() && clip.x_range().contains(cell.right()) {
+                edges.push((index, cell));
+            }
+        }
+        // The edges after the heads, so a press on an edge drags it while a
+        // click there still sorts: an edge senses dragging alone, and takes
+        // no keyboard stop.
+        let mut resize = None;
+        for (index, cell) in edges {
+            let grip = Rect::from_x_y_ranges(
+                cell.right() - EDGE_GRIP * 0.5..=cell.right() + EDGE_GRIP * 0.5,
+                cell.y_range(),
+            )
+            .intersect(ui.clip_rect());
+            #[cfg(any(test, feature = "test-support"))]
+            crate::probe::probe(ui, &format!("table.edge.{}", self.page_column(index)), grip);
+            let edge = ui.interact(grip, ui.id().with((self.id, "edge", index)), Sense::DRAG);
+            if edge.hovered() || edge.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+                ui.painter().vline(
+                    cell.right(),
+                    cell.y_range(),
+                    egui::Stroke::new(1.0, t.color.border_strong),
+                );
+            }
+            let delta = edge.drag_delta().x;
+            if edge.dragged() && delta != 0.0 {
+                resize = Some((index, geometry.width(index) + delta));
+            }
         }
         ui.painter().hline(
             rect.x_range(),
             rect.bottom() - 0.5,
             egui::Stroke::new(1.0, t.color.border),
         );
-        clicked
+        HeadAnswer {
+            sort: clicked,
+            resize,
+        }
     }
 
     /// Paint one band row: each span's label once, centred over the part of

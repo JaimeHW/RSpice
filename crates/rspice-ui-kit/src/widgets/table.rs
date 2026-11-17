@@ -17,7 +17,8 @@
 //!
 //! A page that hands the table a [`TableState`] gets the rest of a results
 //! grid: a selection the keyboard moves, a sort a head click sets, foldable
-//! group heads, a row filter, type-ahead and Ctrl+C; one that asks for
+//! group heads, a row filter, type-ahead, Ctrl+C, and a column's right edge
+//! that the reader drags to size it; one that asks for
 //! [`DataTable::multi_select`] lets the reader select several rows the way a
 //! file list does. Enter, F2, Delete and the menu key are reported for the
 //! page to act on. Under a coarse pointer such a table puts a mark before
@@ -72,6 +73,9 @@ pub const TABLE_ROW_H: f32 = 24.0;
 pub const TABLE_EDGE_INSET: f32 = crate::panels::PANEL_INSET;
 /// Space between a cell's words and the rule on either side of it.
 const CELL_PAD: f32 = 8.0;
+/// The narrowest the reader can drag a column: room for a letter and an
+/// ellipsis between its pads.
+const MIN_COLUMN_W: f32 = 2.0 * CELL_PAD + 16.0;
 /// The widest a table reads the way a phone does: the width the
 /// application's own layout turns to bottom navigation at. A table no wider
 /// than this freezes its first column only, and shows its pinned column
@@ -283,6 +287,9 @@ pub struct Cell {
     /// How many levels of a tree the words step in.
     indent: u8,
     twist: Twist,
+    /// What the row names has unsaved changes: the document tab's neutral
+    /// dot follows the words.
+    unsaved: bool,
 }
 
 /// Whether a cell's row opens and closes in a tree.
@@ -309,6 +316,7 @@ impl Cell {
             icon: None,
             indent: 0,
             twist: Twist::None,
+            unsaved: false,
         }
     }
 
@@ -387,6 +395,14 @@ impl Cell {
     /// children whose words line up with its siblings that have them.
     pub fn leaf(mut self) -> Self {
         self.twist = Twist::Leaf;
+        self
+    }
+
+    /// The same words followed by the document tab's neutral dot: what the
+    /// row names has unsaved changes. The dot says nothing is wrong, only
+    /// that the saved version differs.
+    pub fn unsaved(mut self) -> Self {
+        self.unsaved = true;
         self
     }
 
@@ -880,6 +896,20 @@ impl<'a> DataTable<'a> {
             self.lead_gutter = t.metrics.touch_target();
             self.columns.to_mut()[0].width += self.lead_gutter - TABLE_EDGE_INSET;
         }
+        // A column the reader sized keeps that width, whatever share of the
+        // spare it was given: the flexible columns left share what is over.
+        if let Some(state) = state.as_deref()
+            && !state.widths.is_empty()
+        {
+            let sized = (0..self.columns.len())
+                .filter_map(|shown| Some((shown, *state.widths.get(&self.page_column(shown))?)))
+                .collect::<Vec<_>>();
+            let columns = self.columns.to_mut();
+            for (shown, width) in sized {
+                columns[shown].width = width.max(MIN_COLUMN_W);
+                columns[shown].flex = 0.0;
+            }
+        }
         let order = self.order.clone();
         let mut shown_row = move |row: usize| {
             let cells = row_at(row);
@@ -1293,8 +1323,8 @@ impl<'a> DataTable<'a> {
             }
         }
 
-        if self.kind == Kind::Grid
-            && let Some(column) = self.head(
+        if self.kind == Kind::Grid {
+            let answer = self.head(
                 ui,
                 head::HeadPlace {
                     block: head_block,
@@ -1306,11 +1336,19 @@ impl<'a> DataTable<'a> {
                     sort,
                     sortable: state.is_some(),
                 },
-            )
-            && let Some(state) = state.as_deref_mut()
-        {
-            state.cycle_sort(column);
-            memory.reveal = true;
+            );
+            if let Some(state) = state.as_deref_mut() {
+                if let Some(column) = answer.sort {
+                    state.cycle_sort(column);
+                    memory.reveal = true;
+                }
+                if let Some((column, width)) = answer.resize {
+                    state
+                        .widths
+                        .insert(self.page_column(column), width.max(MIN_COLUMN_W));
+                    ui.ctx().request_repaint();
+                }
+            }
         }
         if geometry.frozen() > 0 {
             let edge = viewport_left + geometry.freeze_edge();

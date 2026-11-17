@@ -14,7 +14,7 @@
 //! its head unless nothing in it is left to show.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A row's identity that outlives its position in the page's row order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -86,6 +86,10 @@ pub struct TableState {
     pub filter: String,
     /// The labels of the folded groups.
     pub folded: BTreeSet<String>,
+    /// The widths the reader dragged columns to, in points, by the page's
+    /// column. A column sized here keeps its width; one not named takes the
+    /// width the page gave it.
+    pub widths: BTreeMap<usize, f32>,
 }
 
 impl TableState {

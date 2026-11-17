@@ -1166,3 +1166,109 @@ fn a_table_without_state_draws_as_it_always_has() {
     );
     assert_eq!(values[0].right(), cell(&geometry, 1).right() - CELL_PAD);
 }
+
+/// Press on `from`, move to `to` and let go, over three frames as a hand
+/// does: egui starts a drag only once the press has moved.
+fn drag(table: &mut Keyed, from: Pos2, to: Pos2) {
+    let button = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let _ = table.frame(vec![Event::PointerMoved(from), button(from, true)]);
+    let _ = table.frame(vec![Event::PointerMoved(to)]);
+    let _ = table.frame(vec![button(to, false)]);
+}
+
+#[test]
+fn a_dragged_edge_sizes_its_column_and_the_name_column_gives_the_room() {
+    let mut table = Keyed::new(4);
+    let (_, geometry) = table.frame(Vec::new());
+    let name = head(&geometry, 0);
+    let value = head(&geometry, 1);
+    let edge = geometry
+        .one("table.edge.1")
+        .expect("the value column's edge");
+    assert!(edge.contains(value.right_center()));
+    assert_eq!(
+        geometry.one("table.edge.2"),
+        None,
+        "the last column's edge is the table's own"
+    );
+
+    drag(
+        &mut table,
+        value.right_center(),
+        value.right_center() + vec2(40.0, 0.0),
+    );
+    let (_, geometry) = table.frame(Vec::new());
+    assert_eq!(table.state.widths.get(&1), Some(&(value.width() + 40.0)));
+    assert_eq!(head(&geometry, 1).width(), value.width() + 40.0);
+    assert_eq!(head(&geometry, 0).width(), name.width() - 40.0);
+    assert_eq!(
+        cell(&geometry, 1).width(),
+        head(&geometry, 1).width(),
+        "the rows follow their head"
+    );
+    assert_eq!(table.state.sort, None, "a drag on an edge is not a sort");
+
+    // Never narrower than a letter between its pads.
+    let value = head(&geometry, 1);
+    drag(
+        &mut table,
+        value.right_center(),
+        value.left_center() - vec2(80.0, 0.0),
+    );
+    let (_, geometry) = table.frame(Vec::new());
+    assert_eq!(head(&geometry, 1).width(), MIN_COLUMN_W);
+}
+
+#[test]
+fn a_table_without_state_has_no_edges_to_drag() {
+    let ctx = context();
+    let columns = named_columns();
+    let (_, geometry, _) = frame(&ctx, WIDTH, Vec::new(), |ui| {
+        DataTable::new("plain", &columns, 3).show(ui, named_row)
+    });
+    assert!(geometry.all("table.edge.0").is_empty());
+}
+
+#[test]
+fn an_unsaved_cell_carries_the_dot_after_its_words_and_says_so() {
+    let ctx = context();
+    ctx.enable_accesskit();
+    let columns = named_columns();
+    let draw = |ui: &mut egui::Ui| {
+        DataTable::new("unsaved", &columns, 2).show(ui, |row| {
+            let mut cells = named_row(row);
+            if row == 1 {
+                cells[0] = Cell::text("Row 1").unsaved();
+            }
+            cells
+        })
+    };
+    let _ = frame(&ctx, WIDTH, Vec::new(), draw);
+    let (_, geometry, output) = frame(&ctx, WIDTH, Vec::new(), draw);
+    let dots = geometry.all("table.unsaved");
+    assert_eq!(dots.len(), 1, "only the unsaved row is marked");
+    let line = geometry.one("table.line.1").expect("row 1");
+    assert!(line.contains(dots[0].center()));
+    assert!(dots[0].left() < cell(&geometry, 0).right());
+    let spoken = output
+        .platform_output
+        .accesskit_update
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        // A row that only reads is announced by its value, one that answers a
+        // click by its label.
+        .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
+        .collect::<Vec<_>>();
+    assert!(
+        spoken
+            .iter()
+            .any(|label| label.starts_with("Output: Row 1, unsaved changes")),
+        "{spoken:?}"
+    );
+}
