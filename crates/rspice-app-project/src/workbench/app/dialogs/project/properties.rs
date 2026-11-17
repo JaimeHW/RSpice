@@ -294,7 +294,7 @@ impl ProjectFeature {
             .status(status)
             .show(ctx, |rows| {
                 let mut edited = rows
-                    .text("Name", name_id(), &mut dialog.name, "Project name")
+                    .text_sans("Name", name_id(), &mut dialog.name, "Project name")
                     .changed();
                 rows.field_line(
                     Some(name_id()),
@@ -364,7 +364,7 @@ impl ProjectFeature {
                 }
                 rows.section("Project file");
                 match &dialog.location {
-                    Some(location) => rows.value_mono("Location", location),
+                    Some(location) => rows.value("Location", location),
                     None => rows.value("Location", "Not saved"),
                 }
                 rows.value("Revision", &dialog.revision.to_string());

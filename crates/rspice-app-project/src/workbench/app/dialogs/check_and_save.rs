@@ -283,7 +283,7 @@ impl CheckAndSaveParts<'_> {
                 }
                 rows.value("Documents", report.document_scope_label());
                 note_changed = rows
-                    .text("Revision note", note, &mut self.dialog.revision_note, "")
+                    .text_sans("Revision note", note, &mut self.dialog.revision_note, "")
                     .changed();
                 Some(note)
             });

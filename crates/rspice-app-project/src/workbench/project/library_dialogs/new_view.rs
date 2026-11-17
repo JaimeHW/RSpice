@@ -252,10 +252,10 @@ impl ProjectFeature {
                 (None, None) => Ok(None),
             })
             .show(ctx, |rows| {
-                rows.value_mono("Library", &dialogs.new_view_library);
-                rows.value_mono("Cell", &dialogs.new_view_cell);
+                rows.value("Library", &dialogs.new_view_library);
+                rows.value("Cell", &dialogs.new_view_cell);
                 if rows
-                    .text("View name", name_id, &mut dialogs.new_view_name, "")
+                    .text_sans("View name", name_id, &mut dialogs.new_view_name, "")
                     .changed()
                 {
                     dialogs.new_view_name_edited = true;

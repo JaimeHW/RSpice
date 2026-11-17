@@ -74,6 +74,8 @@ impl ProjectFeature {
         let choice = CommandForm::new("New cell", "Create")
             .option_columns()
             .describe("Create a named cell in a writable library with the selected initial views.")
+            // The description takes Enter as a line break.
+            .primary_on_enter(false)
             .primary_enabled(
                 catalog_current
                     && !lib_names.is_empty()
@@ -91,13 +93,14 @@ impl ProjectFeature {
                 }
                 let name = egui::Id::new("new-cell-name");
                 name_changed = rows
-                    .text("Cell name", name, &mut dialogs.new_cell_name, "")
+                    .text_sans("Cell name", name, &mut dialogs.new_cell_name, "")
                     .changed();
-                rows.text(
+                rows.text_multiline(
                     "Description",
                     egui::Id::new("new-cell-description"),
                     &mut dialogs.new_cell_description,
                     "",
+                    3,
                 );
                 rows.check_columns(
                     "Views",
