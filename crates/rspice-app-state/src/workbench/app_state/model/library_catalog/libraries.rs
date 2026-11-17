@@ -264,7 +264,7 @@ impl Model {
         }
         if self.workspace.content.project.root_library == library {
             return Err(format!(
-                "Library '{library}' holds the project root cell '{}'. Repoint the project root before deleting it.",
+                "Library '{library}' holds the project top cell '{}'. Choose a cell of another library with Set as project top before deleting it.",
                 self.workspace.content.project.top_cell
             ));
         }

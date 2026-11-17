@@ -912,8 +912,9 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         .delete_library("user")
         .expect_err("the project root library cannot be deleted");
     assert!(
-        root_error.contains("holds the project root cell"),
-        "{root_error}"
+        root_error.contains("holds the project top cell")
+            && root_error.contains("with Set as project top"),
+        "the refusal names the action that lets the library go: {root_error}"
     );
 
     state.model.workspace.content.project.root_library = "spare".to_owned();

@@ -52,6 +52,11 @@ pub enum LibraryIntent {
         library: String,
         cell: String,
     },
+    /// Make the cell the project's top cell.
+    SetProjectTop {
+        library: String,
+        cell: String,
+    },
     DeleteCell {
         library: String,
         cell: String,
@@ -1019,6 +1024,21 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                                 });
                                 ui.close();
                             }
+                            let top_refusal = project_top_refusal(cx.model, &library, &cell);
+                            if ui
+                                .add_enabled(
+                                    top_refusal.is_none(),
+                                    egui::Button::new("Set as project top"),
+                                )
+                                .on_disabled_hover_text(top_refusal.unwrap_or_default())
+                                .clicked()
+                            {
+                                intent = Some(LibraryIntent::SetProjectTop {
+                                    library: library.clone(),
+                                    cell: cell.clone(),
+                                });
+                                ui.close();
+                            }
                             ui.separator();
                             if let Some((reference, _, _, _)) = selected.clone()
                                 && ui
@@ -1274,6 +1294,14 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 cx.wb.prompt(error);
             }
         }
+        LibraryIntent::SetProjectTop { library, cell } => {
+            match cx.model.set_project_top(&library, &cell) {
+                Ok(()) => cx.wb.prompt(format!(
+                    "{library}/{cell} is the project top; runs without a configuration start there."
+                )),
+                Err(error) => cx.wb.prompt(error),
+            }
+        }
         LibraryIntent::DeleteCell { library, cell } => {
             if let Err(error) = cx
                 .state
@@ -1314,6 +1342,19 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
             super::library_publication::open_restore(ctx, cx.model);
         }
     }
+}
+
+/// Why Set as project top is not offered for `library`/`cell`, or `None`
+/// when it is.
+fn project_top_refusal(model: &Model, library: &str, cell: &str) -> Option<String> {
+    let project = &model.workspace.content.project;
+    if (project.root_library.as_str(), project.top_cell.as_str()) == (library, cell) {
+        return Some("This cell is the project top.".to_owned());
+    }
+    if model.safe_mode.project_read_only() {
+        return Some("The project is open read-only.".to_owned());
+    }
+    model.project_top_refusal(library, cell)
 }
 
 fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<(String, String)> {
