@@ -139,7 +139,7 @@ pub(crate) fn convert_streamed(
         digital: &shell.digital_traces,
         real: &shell.real_traces,
     };
-    let Some(columns) = plan_columns(&shell, &targets, &signals, Some(&events)) else {
+    let Some(columns) = plan_columns(&shell, &targets, &signals, Some(&events), false) else {
         return Ok(false);
     };
     for signal in &mut signals {
@@ -162,7 +162,7 @@ pub(crate) fn convert_streamed(
         .iter()
         .filter_map(|column| match column {
             Column::Slot(slot) => Some(*slot),
-            Column::Digital(_) | Column::Real(_) => None,
+            Column::Digital(_) | Column::Real(_) | Column::Derived(_) => None,
         })
         .collect::<Vec<_>>();
     let Some((first, points)) = kept_rows(path, &mut reader, &slots, lo, hi)? else {
@@ -189,7 +189,7 @@ pub(crate) fn convert_streamed(
     let output = args.output.as_path();
     let dir = path.to_path_buf();
     crate::commands::publish::artifact(output, |writer| {
-        let mut cursor = RowCursor::over(&dir, &mut reader, &columns, Some(&events), first);
+        let mut cursor = RowCursor::over(&dir, &mut reader, &columns, Some(&events), None, first);
         if args.to == OutputFormat::Hdf5 {
             write_hdf5(writer, output, &table, points, &mut cursor)?;
         } else {

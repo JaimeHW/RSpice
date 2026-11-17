@@ -24,7 +24,7 @@ use rspice_core::engine::{
     TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
-use rspice_core::netlist::AnalysisCommand;
+use rspice_core::netlist::{AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_core::xspice::DigitalValue;
 use rspice_results::stored_transient::{
@@ -588,18 +588,29 @@ impl StoredTransient {
         } else {
             None
         };
-        let plan = probe_plan(
-            ctx,
-            &self.shell,
-            &self.rows.targets,
-            events.as_ref(),
-            event_dump,
-        );
+        let plan = probe_plan(ctx, &self.shell, &self.rows.targets, events.as_ref());
         drop(events);
         let plan = plan.and_then(|plan| {
             let Some(mut plan) = plan else {
                 return Ok(None);
             };
+            if plan
+                .columns
+                .iter()
+                .any(|column| matches!(column, Column::Derived(_)))
+            {
+                // An event dump writes no rows; a table or a `.prn` file reads them staged.
+                let stage = !event_dump
+                    && (ctx.output.is_some()
+                        || super::xyce_files::prints(ctx, OutputAnalysisKind::Tran));
+                let Some(derived) = self.derive(ctx, &plan, stage)? else {
+                    return Ok(None);
+                };
+                plan.derived = Some(derived);
+            }
+            if event_dump {
+                plan.columns.clear();
+            }
             let measures = netlist
                 .measurements
                 .iter()
@@ -620,6 +631,102 @@ impl StoredTransient {
         });
         self.rows.clear(&mut self.shell);
         plan
+    }
+
+    /// Evaluate `plan`'s derived columns over every chunk of the store exactly as the whole
+    /// run's projection evaluates them, the chunk's rows in the shell, and stage their values
+    /// in a file for the outputs that write them when `stage` is set. `None` when the run is
+    /// read back whole for them instead, which then reports or writes them as it does: a
+    /// chunk's projection fails or names other columns than the first chunk's, a derived value
+    /// is not finite, or the staged file cannot be written.
+    fn derive(
+        &mut self,
+        ctx: &RunContext<'_>,
+        plan: &StreamPlan,
+        stage: bool,
+    ) -> Result<Option<DerivedColumns>, CliError> {
+        let abort = &crate::abort::ProcessAbort;
+        let signals = plan
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| matches!(column, Column::Derived(_)))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let whole = |why: &dyn std::fmt::Display| {
+            log::debug!("the transient is read back whole: {why}");
+            Ok(None)
+        };
+        let mut derived = DerivedColumns {
+            path: stage.then(|| {
+                std::env::temp_dir().join(format!(
+                    ".rspice-derived-{}-{}",
+                    std::process::id(),
+                    NEXT_STORE.fetch_add(1, Ordering::Relaxed)
+                ))
+            }),
+            offsets: Vec::new(),
+        };
+        let mut out = match &derived.path {
+            Some(path) => match std::fs::File::create(path) {
+                Ok(file) => Some(std::io::BufWriter::new(file)),
+                Err(error) => return whole(&format_args!("its derived columns: {error}")),
+            },
+            None => None,
+        };
+        let spans = self.rows.reader.chunk_spans().collect::<Vec<_>>();
+        let mut offset = 0_u64;
+        let mut bytes = Vec::new();
+        for &(first, count) in &spans {
+            self.rows.fill(&mut self.shell, first, count as u64)?;
+            let chunk = match crate::commands::run_signals::transient_export_signals(
+                ctx.netlist,
+                &self.shell,
+                ctx.transient_limits(),
+                abort,
+            ) {
+                Ok(chunk) => chunk,
+                Err(rspice_core::SimulationError::Aborted) => {
+                    return Err(super::cancellation_cli_error(ctx.args.timeout));
+                }
+                Err(_) => return whole(&"a chunk of its signals does not project"),
+            };
+            if chunk.len() != plan.signals.len()
+                || chunk
+                    .iter()
+                    .zip(&plan.signals)
+                    .any(|(chunk, signal)| chunk.display_name != signal.display_name)
+            {
+                return whole(&"a chunk of its signals projects other columns");
+            }
+            derived.offsets.push(offset);
+            for &index in &signals {
+                let values = &chunk[index].values;
+                if values.len() != count {
+                    return whole(&"a chunk of its signals projects other rows");
+                }
+                if values.iter().any(|value| !value.is_finite()) {
+                    return whole(&format_args!(
+                        "{} has a value that is not finite",
+                        chunk[index].display_name
+                    ));
+                }
+                if let Some(out) = &mut out {
+                    bytes.clear();
+                    for value in values {
+                        bytes.extend_from_slice(&value.to_le_bytes());
+                    }
+                    if let Err(error) = std::io::Write::write_all(out, &bytes) {
+                        return whole(&format_args!("its derived columns: {error}"));
+                    }
+                }
+                offset += (count * std::mem::size_of::<f64>()) as u64;
+            }
+        }
+        if let Some(Err(error)) = out.map(|mut out| std::io::Write::flush(&mut out)) {
+            return whole(&format_args!("its derived columns: {error}"));
+        }
+        Ok(Some(derived))
     }
 
     /// The deck's `.MEASURE TRAN` results, measured in passes over the store's rows (after one
@@ -1189,6 +1296,26 @@ pub(super) struct StreamPlan {
     columns: Vec<Column>,
     /// The deck's `.MEASURE TRAN` results, measured from the store; `None` when it has none.
     pub(super) measurements: Option<Vec<MeasureResult>>,
+    /// The derived columns' values, when a column is one.
+    derived: Option<DerivedColumns>,
+}
+
+/// The values of a plan's derived columns, evaluated chunk by chunk from the store's columns
+/// and staged, when an output writes them, in a file in the system's temporary directory:
+/// chunk after chunk, each chunk's values one derived column after another. The file goes when
+/// this does.
+pub(crate) struct DerivedColumns {
+    path: Option<PathBuf>,
+    /// Where each chunk's values start in the file.
+    offsets: Vec<u64>,
+}
+
+impl Drop for DerivedColumns {
+    fn drop(&mut self) {
+        if let Some(path) = &self.path {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 impl StreamPlan {
@@ -1197,7 +1324,7 @@ impl StreamPlan {
     pub(super) fn reads_events(&self) -> bool {
         self.columns
             .iter()
-            .any(|column| !matches!(column, Column::Slot(_)))
+            .any(|column| matches!(column, Column::Digital(_) | Column::Real(_)))
     }
 }
 
@@ -1211,17 +1338,19 @@ pub(crate) enum Column {
     Digital(usize),
     /// The real event trace at this index among the result's, sampled as its `E(node)` column.
     Real(usize),
+    /// The derived column at this index among the plan's, which the projection evaluates from
+    /// the store's columns row by row: a printed expression, or a voltage between two nodes.
+    Derived(usize),
 }
 
 /// Project the probe rows in `shell` and keep the plan only when [`plan_columns`] finds every
-/// projected signal's values. For an event dump, which writes no table, the plan reads no rows
-/// and has no columns.
+/// projected signal's values. A deck's `.PRINT TRAN` columns are derived from the store's when
+/// none reads rows other than its own.
 fn probe_plan(
     ctx: &RunContext<'_>,
     shell: &TransientResult,
     targets: &[SlotTarget],
     events: Option<&RunEvents<'_>>,
-    event_dump: bool,
 ) -> Result<Option<StreamPlan>, CliError> {
     let Ok(mut signals) = crate::commands::run_signals::transient_export_signals(
         ctx.netlist,
@@ -1234,26 +1363,35 @@ fn probe_plan(
         return Ok(None);
     };
     let events = events.map(|events| events as &dyn EventSource);
-    let Some(mut columns) = plan_columns(shell, targets, &signals, events) else {
+    let prints = ctx.netlist.output_requests.iter().any(|request| {
+        matches!(
+            request.directive,
+            OutputDirectiveKind::Print | OutputDirectiveKind::Plot
+        ) && request
+            .analysis
+            .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+    });
+    let derived =
+        prints && !rspice_core::analysis::tran_print_operands_read_other_rows(ctx.netlist);
+    let Some(columns) = plan_columns(shell, targets, &signals, events, derived) else {
         return Ok(None);
     };
     for signal in &mut signals {
         signal.values = Vec::new();
     }
-    if event_dump {
-        columns.clear();
-    }
     Ok(Some(StreamPlan {
         signals,
         columns,
         measurements: None,
+        derived: None,
     }))
 }
 
 /// Where each of `signals`, projected from the rows `shell` holds, reads its values over the
 /// whole run: the store column the projection names it after, holding its values bit for bit
 /// on those rows, or, given the run's `events`, the event trace its `D(node)` or `E(node)`
-/// column is sampled from, as [`EventCursor`] samples it. `None` when a signal is neither.
+/// column is sampled from, as [`EventCursor`] samples it, or, when `derived` is set, the
+/// projection's own evaluation of the store's columns. `None` when a signal is none of these.
 ///
 /// A digital level is always finite, and a real event value is wherever every one of them is,
 /// which this checks, as the in-memory route checks every column; `None` when one is not.
@@ -1262,10 +1400,12 @@ pub(crate) fn plan_columns(
     targets: &[SlotTarget],
     signals: &[ScalarSignal],
     events: Option<&dyn EventSource>,
+    derived: bool,
 ) -> Option<Vec<Column>> {
     let slots = signal_slots(shell, targets, signals)?;
     let mut real_checked = false;
     let mut columns = Vec::with_capacity(signals.len());
+    let mut derived_columns = 0;
     for (signal, slot) in signals.iter().zip(slots) {
         if let Some(slot) = slot {
             columns.push(Column::Slot(slot));
@@ -1275,11 +1415,21 @@ pub(crate) fn plan_columns(
             log::debug!("{} is read back whole: {why}", signal.display_name);
             None
         };
+        let event = events.and_then(|_| event_column(shell, &signal.display_name));
+        let Some(column) = event else {
+            if derived {
+                columns.push(Column::Derived(derived_columns));
+                derived_columns += 1;
+                continue;
+            }
+            return unplanned(if events.is_some() {
+                "it is neither a store column nor an event trace's"
+            } else {
+                "it is no store column"
+            });
+        };
         let Some(events) = events else {
             return unplanned("it is no store column");
-        };
-        let Some(column) = event_column(shell, &signal.display_name) else {
-            return unplanned("it is neither a store column nor an event trace's");
         };
         if matches!(column, Column::Real(_)) && !real_checked {
             if !real_events_finite(events, shell.real_traces.len()) {
@@ -1355,7 +1505,8 @@ enum EventCursorPoints<'e> {
 }
 
 impl<'e> EventCursor<'e> {
-    /// A cursor at the start of `column`'s trace in `events`; `None` for a store slot.
+    /// A cursor at the start of `column`'s trace in `events`; `None` for a column that is no
+    /// event trace's.
     fn open(events: &'e dyn EventSource, column: Column) -> Option<Self> {
         let (points, value) = match column {
             Column::Digital(index) => (
@@ -1363,7 +1514,7 @@ impl<'e> EventCursor<'e> {
                 digital_level(DigitalValue::default()),
             ),
             Column::Real(index) => (EventCursorPoints::Real(events.real(index).peekable()), 0.0),
-            Column::Slot(_) => return None,
+            Column::Slot(_) | Column::Derived(_) => return None,
         };
         Some(Self {
             points,
@@ -1701,6 +1852,7 @@ impl StoredRows {
             &mut self.reader,
             &plan.columns,
             events,
+            plan.derived.as_ref(),
             first,
         )
     }
@@ -1742,8 +1894,12 @@ pub(crate) struct RowCursor<'r> {
     values: Vec<Option<Vec<f64>>>,
     /// Each event column's place in its trace, where it has one.
     cursors: Vec<Option<EventCursor<'r>>>,
+    derived: Option<&'r DerivedColumns>,
+    /// The derived columns' staged file, once a row reads one.
+    derived_file: Option<std::fs::File>,
     error: Option<StoreError>,
     event_error: Option<EventProjectionError>,
+    derived_error: Option<std::io::Error>,
     non_finite: bool,
 }
 
@@ -1757,12 +1913,14 @@ pub(crate) enum ColumnStop {
 
 impl<'r> RowCursor<'r> {
     /// A cursor over rows `first..` of the store in `dir` that `reader` reads, whose output
-    /// signal `n` (variable `n + 1`) is `columns[n]`, an event trace's read from `events`.
+    /// signal `n` (variable `n + 1`) is `columns[n]`, an event trace's read from `events` and a
+    /// derived column's from `derived`.
     pub(crate) fn over(
         dir: &'r Path,
         reader: &'r mut SegmentReader<FileIo>,
         columns: &'r [Column],
         events: Option<&'r dyn EventSource>,
+        derived: Option<&'r DerivedColumns>,
         first: u64,
     ) -> Self {
         let spans = reader.chunk_spans().collect();
@@ -1777,8 +1935,11 @@ impl<'r> RowCursor<'r> {
             x: None,
             values: vec![None; columns.len()],
             cursors: columns.iter().map(|_| None).collect(),
+            derived,
+            derived_file: None,
             error: None,
             event_error: None,
+            derived_error: None,
             non_finite: false,
         }
     }
@@ -1814,6 +1975,16 @@ impl<'r> RowCursor<'r> {
                         .and_then(|values| values.get(offset))
                         .copied()
                 }
+                Some(Column::Derived(derived)) => {
+                    if self.values[column].is_none() {
+                        let values = self.read_derived(chunk, derived);
+                        self.values[column] = Some(values);
+                    }
+                    self.values[column]
+                        .as_ref()
+                        .and_then(|values| values.get(offset))
+                        .copied()
+                }
                 Some(event) => self
                     .time(chunk, offset)
                     .and_then(|time| self.event_value(column, event, time)),
@@ -1837,6 +2008,46 @@ impl<'r> RowCursor<'r> {
             self.x = Some(x);
         }
         self.x.as_ref().and_then(|x| x.get(offset)).copied()
+    }
+
+    /// Derived column `derived`'s values over chunk `chunk`, from the staged file; none when
+    /// the read fails, which is kept for [`Self::read_failure`].
+    fn read_derived(&mut self, chunk: usize, derived: usize) -> Vec<f64> {
+        use std::io::{Read as _, Seek as _};
+        let rows = self.spans[chunk].1;
+        let width = rows * std::mem::size_of::<f64>();
+        let read = |cursor: &mut Self| -> std::io::Result<Vec<f64>> {
+            let staged = cursor
+                .derived
+                .ok_or_else(|| std::io::Error::other("a derived column has no staged values"))?;
+            let start = staged
+                .offsets
+                .get(chunk)
+                .copied()
+                .ok_or_else(|| std::io::Error::other("a chunk has no staged values"))?;
+            if cursor.derived_file.is_none() {
+                let path = staged
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| std::io::Error::other("the derived columns were not staged"))?;
+                cursor.derived_file = Some(std::fs::File::open(path)?);
+            }
+            let file = cursor
+                .derived_file
+                .as_mut()
+                .ok_or_else(|| std::io::Error::other("the staged file is not open"))?;
+            file.seek(std::io::SeekFrom::Start(start + (derived * width) as u64))?;
+            let mut bytes = vec![0_u8; width];
+            file.read_exact(&mut bytes)?;
+            Ok(bytes
+                .chunks_exact(std::mem::size_of::<f64>())
+                .map(|value| f64::from_le_bytes(value.try_into().unwrap_or_default()))
+                .collect())
+        };
+        read(self).unwrap_or_else(|error| {
+            self.derived_error.get_or_insert(error);
+            Vec::new()
+        })
     }
 
     /// Event column `column`, `event`'s trace, at a row at `time`: read on from the last row
@@ -1900,6 +2111,14 @@ impl<'r> RowCursor<'r> {
     pub(crate) fn read_failure(&mut self, path: &Path) -> Option<CliError> {
         if let Some(error) = self.error.take() {
             return Some(store_error(self.dir, error));
+        }
+        if let Some(error) = self.derived_error.take() {
+            return Some(CliError::output_error(
+                self.derived
+                    .and_then(|derived| derived.path.as_deref())
+                    .unwrap_or(self.dir),
+                error,
+            ));
         }
         self.event_error
             .take()

@@ -2120,6 +2120,27 @@ pub fn tran_four_operands_read_other_rows(netlist: &Netlist, four_index: usize) 
     })
 }
 
+/// Whether a row of the deck's `.PRINT TRAN` and `.PLOT TRAN` columns reads
+/// rows other than its own: an operand that carries a time integral (`sdt`)
+/// from row to row, written in an expression or in a user function one calls,
+/// or a measure printed by name, whose running value is measured over the run
+/// up to the row. [`evaluate_tran_output_requests_with_abort`] over a span of
+/// a run's rows gives other values there than over the whole run. An operand
+/// whose user functions cannot be expanded counts as reading other rows.
+pub fn tran_print_operands_read_other_rows(netlist: &Netlist) -> bool {
+    printed::prints_measures(netlist, "TRAN")
+        || matching_print_requests(netlist, OutputAnalysisKind::Tran)
+            .iter()
+            .any(|request| {
+                request.operand_kinds().iter().any(|kind| match kind {
+                    OutputOperandKind::Expression { body } => {
+                        expression_reads_other_rows(body, &netlist.params)
+                    }
+                    _ => false,
+                })
+            })
+}
+
 /// Whether an output expression, its user functions expanded as
 /// [`evaluate_output_operand`] expands them, reads rows other than the one it
 /// is evaluated at.
