@@ -66,7 +66,7 @@ pub use form::{
     text_field, value_row,
 };
 pub use measurement_table::measurement_table;
-pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
+pub use ordered_chips::{OrderedChipsEdit, ordered_chips, required_ordered_chips};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
     pane_footer_inset, pane_header, pane_header_height, pane_header_inset, two_pane,

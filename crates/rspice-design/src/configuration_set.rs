@@ -952,6 +952,15 @@ fn remap_cell_bindings(
     changed
 }
 
+/// Whether `definition` would be stored as it stands, checked the way the
+/// catalog checks it on create and update. A name shared with another
+/// configuration is the catalog's to refuse, not this.
+pub fn check_definition(
+    definition: &ConfigurationSetDefinition,
+) -> Result<(), ConfigurationSetError> {
+    validate_definition(&normalize_definition(definition.clone()))
+}
+
 fn validate_definition(
     definition: &ConfigurationSetDefinition,
 ) -> Result<(), ConfigurationSetError> {

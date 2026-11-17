@@ -136,7 +136,7 @@ fn another_selection_waits_while_edits_are_not_applied() {
 }
 
 #[test]
-fn view_to_use_writes_an_exact_binding_and_inherited_removes_it() {
+fn view_to_use_puts_a_view_first_and_inherited_keeps_the_rest_of_the_binding() {
     let mut definition = definition("schematic");
     definition.overrides.push(ConfigurationSetOverride {
         instance_path: "/*".to_owned(),
@@ -156,33 +156,99 @@ fn view_to_use_writes_an_exact_binding_and_inherited_removes_it() {
         crate::state::ConfigurationPlatform::ALL.to_vec(),
         "a new binding runs on every platform, not only the one drawing it"
     );
-    assert_eq!(
-        governing_binding(&definition, "/X1").unwrap().instance_path,
-        "/X1",
-        "the exact binding is more specific than the pattern"
-    );
-    assert_eq!(
-        governing_binding(&definition, "/X2").unwrap().instance_path,
-        "/*"
-    );
     assert!(is_pattern(&definition.overrides[0]));
     assert!(!is_pattern(exact));
 
+    // Picking a view puts it first and keeps the others as fallbacks.
     definition.overrides[1].model_section = Some("tt".to_owned());
     set_instance_view(&mut definition, "/X1", Some("schematic"));
+    assert_eq!(
+        instance_binding(&definition, "/X1")
+            .unwrap()
+            .executable_views,
+        ["schematic", "extracted"]
+    );
+    set_instance_view(&mut definition, "/X1", Some("extracted"));
     let exact = instance_binding(&definition, "/X1").unwrap();
-    assert_eq!(exact.executable_views, ["schematic"]);
+    assert_eq!(exact.executable_views, ["extracted", "schematic"]);
     assert_eq!(
         exact.model_section.as_deref(),
         Some("tt"),
         "a change of view keeps the binding's other properties"
     );
 
+    // Inherited stops naming views; the model section stays bound.
     set_instance_view(&mut definition, "/X1", None);
+    let exact = instance_binding(&definition, "/X1").unwrap();
+    assert!(exact.executable_views.is_empty());
+    assert_eq!(exact.model_section.as_deref(), Some("tt"));
+    // A binding left setting nothing is no binding.
+    apply_binding_change(
+        &mut definition,
+        "/X1",
+        &[],
+        BindingChange::ModelSection(None),
+    );
     assert!(instance_binding(&definition, "/X1").is_none());
     assert_eq!(definition.overrides.len(), 1, "the pattern binding stays");
-    set_instance_view(&mut definition, "/X1", None);
-    assert_eq!(definition.overrides.len(), 1);
+}
+
+/// What an instance inherits follows the resolver: a pattern binding that
+/// names views, then its cell's binding, then the global list.
+#[test]
+fn an_instance_inherits_in_the_order_the_resolver_binds() {
+    let mut definition = definition("schematic");
+    let amp = ("user", "amp");
+    assert_eq!(
+        inherited_views(&definition, "/X1", amp),
+        (vec!["schematic".to_owned(), "spice".to_owned()], None)
+    );
+    definition.cell_bindings.push(ConfigurationCellBinding {
+        library: "user".to_owned(),
+        cell: "amp".to_owned(),
+        executable_views: vec!["extracted".to_owned(), "spice".to_owned()],
+        stop_view: Some("extracted".to_owned()),
+    });
+    assert_eq!(
+        inherited_views(&definition, "/X1", amp),
+        (
+            vec!["extracted".to_owned(), "spice".to_owned()],
+            Some("extracted".to_owned())
+        )
+    );
+    // A binding of its own that names no views inherits past itself.
+    apply_binding_change(
+        &mut definition,
+        "/X1",
+        &[],
+        BindingChange::ModelSection(Some("tt".to_owned())),
+    );
+    assert_eq!(
+        instance_binding(&definition, "/X1")
+            .unwrap()
+            .executable_views,
+        Vec::<String>::new(),
+        "a model section set alone copies no view list"
+    );
+    assert_eq!(
+        inherited_views(&definition, "/X1", amp).0,
+        ["extracted", "spice"]
+    );
+    definition.overrides.insert(
+        0,
+        ConfigurationSetOverride {
+            instance_path: "/*".to_owned(),
+            executable_views: vec!["spice".to_owned()],
+            stop_view: None,
+            model_section: None,
+            eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+        },
+    );
+    assert_eq!(
+        inherited_views(&definition, "/X1", amp),
+        (vec!["spice".to_owned()], Some("extracted".to_owned())),
+        "a pattern binding beats the cell binding; the cell binding's stop still applies"
+    );
 }
 
 #[test]

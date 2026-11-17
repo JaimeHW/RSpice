@@ -10,6 +10,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use rspice_design::configuration_set::check_definition;
 use rspice_design::stamped::Stamped;
 
 use crate::state::workspace::{DesignProjectionCache, DesignProjectionKey, HierarchyResolution};
@@ -63,6 +64,9 @@ pub struct FieldEdit {
     /// Which field: its own stable key.
     pub(crate) field: String,
     pub text: String,
+    /// Why the text was refused when it was committed. The field keeps what
+    /// was typed, and says this under it, until it is corrected or put back.
+    pub refusal: Option<String>,
 }
 
 /// One change to an instance or pattern binding, made in the inspector.
@@ -71,9 +75,12 @@ pub(crate) enum BindingChange {
     Views(crate::ui::widgets::OrderedChipsEdit),
     Stop(Option<String>),
     ModelSection(Option<String>),
-    RunsOn(Vec<ConfigurationPlatform>),
+    OnlyOn(Vec<ConfigurationPlatform>),
     /// A pattern binding's pattern.
     Path(String),
+    /// Stop naming views, so they are inherited again; the binding's model
+    /// section and platforms stay.
+    Inherit,
     Remove,
 }
 
@@ -208,27 +215,42 @@ impl ConfigurationPageState {
     }
 
     /// Edit `id`'s definition. The first edit starts the draft from what the
-    /// project holds; an edit that puts it back the way it was ends it.
+    /// project holds; an edit that puts it back the way it was ends it. An
+    /// edit the configuration could not store is refused here, at the field
+    /// that made it: the draft stays as it was and [`Self::refusal`] says
+    /// why, so the tables never stop resolving because of one bad entry.
+    /// Returns whether the edit was taken.
     pub fn edit(
         &mut self,
         catalog: &ConfigurationSetCatalog,
         id: ConfigurationSetId,
         edit: impl FnOnce(&mut ConfigurationSetDefinition),
-    ) {
+    ) -> bool {
         let Some(committed) = catalog.find(id) else {
-            return;
+            return false;
         };
-        let mut draft = match self.draft.take() {
-            Some(draft) if draft.id == id => draft,
-            _ => ConfigurationDraft {
+        let mut definition = match &self.draft {
+            Some(draft) if draft.id == id => draft.definition.clone(),
+            _ => committed.definition().clone(),
+        };
+        edit(&mut definition);
+        if let Err(error) = check_definition(&definition) {
+            self.refusal = Some(plain_refusal(&error));
+            return false;
+        }
+        let base_revision = match &self.draft {
+            Some(draft) if draft.id == id => draft.base_revision,
+            _ => committed.revision(),
+        };
+        self.set_draft(
+            (definition != *committed.definition()).then_some(ConfigurationDraft {
                 id,
-                base_revision: committed.revision(),
-                definition: committed.definition().clone(),
-            },
-        };
-        edit(&mut draft.definition);
-        self.set_draft((draft.definition != *committed.definition()).then_some(draft));
+                base_revision,
+                definition,
+            }),
+        );
         self.refusal = None;
+        true
     }
 
     /// The configuration `id` was renamed to `name` at `revision` by a
@@ -435,10 +457,8 @@ pub(crate) struct ConfigurationTables {
     pub(crate) addable_stops: Vec<String>,
     /// The view list a cell without a binding inherits, in the page's words.
     pub(crate) inherited: String,
-    /// Per tree row: the view its own instance binding uses, and where the
-    /// binding that governs it runs.
+    /// Per tree row: the views its own instance binding names, in order.
     pub(crate) instance_to_use: Vec<Option<String>>,
-    pub(crate) instance_runs_on: Vec<&'static str>,
     /// Per hierarchy binding: its cell's view-to-use choices, an index into
     /// `view_options`.
     pub(crate) binding_options: Vec<usize>,
@@ -665,7 +685,7 @@ impl ConfigurationTables {
             |definition| definition.executable_view_policy.join(", then "),
         );
 
-        let (instance_to_use, instance_runs_on) = instance_bindings(instances, definition);
+        let instance_to_use = instance_bindings(instances, definition);
 
         let mut view_options = Vec::new();
         let mut options_of = HashMap::new();
@@ -756,7 +776,6 @@ impl ConfigurationTables {
             addable_stops,
             inherited,
             instance_to_use,
-            instance_runs_on,
             binding_options,
             view_options,
             cell_rows,
@@ -769,7 +788,7 @@ impl ConfigurationTables {
     }
 }
 
-/// The view `library`/`cell`'s own binding uses, or Inherited.
+/// The views `library`/`cell`'s own binding uses, or Inherited.
 fn cell_to_use(
     definition: Option<&ConfigurationSetDefinition>,
     library: &str,
@@ -777,18 +796,21 @@ fn cell_to_use(
 ) -> String {
     definition
         .and_then(|definition| cell_binding(definition, library, cell))
-        .and_then(|binding| binding.executable_views.first())
-        .map_or_else(|| INHERITED.to_owned(), String::clone)
+        .filter(|binding| !binding.executable_views.is_empty())
+        .map_or_else(
+            || INHERITED.to_owned(),
+            |binding| view_list_label(&binding.executable_views),
+        )
 }
 
-/// For each tree row, the view its own instance binding uses and where the
-/// binding that governs it runs: every binding parsed once, every path once.
+/// For each tree row, the views its own instance binding names, if it names
+/// any: every binding parsed once, every path once.
 fn instance_bindings(
     instances: &[InstanceRow],
     definition: Option<&ConfigurationSetDefinition>,
-) -> (Vec<Option<String>>, Vec<&'static str>) {
+) -> Vec<Option<String>> {
     let Some(definition) = definition else {
-        return (vec![None; instances.len()], vec!["All"; instances.len()]);
+        return vec![None; instances.len()];
     };
     // The first exact binding of a path is its own, as `instance_binding`
     // finds it.
@@ -798,37 +820,14 @@ fn instance_bindings(
             exact.entry(path.fold_key()).or_insert(index);
         }
     }
-    let patterns = definition
-        .overrides
-        .iter()
-        .filter_map(|binding| {
-            InstancePathPattern::parse(&binding.instance_path)
-                .ok()
-                .map(|pattern| (binding, pattern))
-        })
-        .collect::<Vec<_>>();
     instances
         .iter()
         .map(|row| {
-            let Ok(path) = InstancePath::parse(&row.path) else {
-                return (None, "All");
-            };
-            let to_use = exact
-                .get(&path.fold_key())
-                .and_then(|index| definition.overrides[*index].executable_views.first())
-                .cloned();
-            // The matching binding that pins the most positions by name, as
-            // the resolver chooses it.
-            let runs_on = patterns
-                .iter()
-                .filter(|(_, pattern)| pattern.matches(&path))
-                .max_by_key(|(_, pattern)| pattern.specificity())
-                .map_or("All", |(binding, _)| {
-                    runs_on_label(&binding.eligible_platforms)
-                });
-            (to_use, runs_on)
+            let path = InstancePath::parse(&row.path).ok()?;
+            let views = &definition.overrides[*exact.get(&path.fold_key())?].executable_views;
+            (!views.is_empty()).then(|| view_list_label(views))
         })
-        .unzip()
+        .collect()
 }
 
 /// The catalog the page resolves: Default stops using any configuration,
@@ -990,15 +989,21 @@ pub(crate) fn apply_cell_binding_change(
                 .filter(|stop| views.iter().any(|view| view.eq_ignore_ascii_case(stop)));
         }
         BindingChange::Stop(stop) => binding.stop_view = stop,
-        BindingChange::Remove => {
+        BindingChange::Remove | BindingChange::Inherit => {
             definition.cell_bindings.remove(index);
+            return;
         }
-        BindingChange::ModelSection(_) | BindingChange::RunsOn(_) | BindingChange::Path(_) => {}
+        BindingChange::ModelSection(_) | BindingChange::OnlyOn(_) | BindingChange::Path(_) => {}
+    }
+    // A cell binding holds nothing but its views: without them it is none.
+    if definition.cell_bindings[index].executable_views.is_empty() {
+        definition.cell_bindings.remove(index);
     }
 }
 
-/// Bind every instance of `library`/`cell` to exactly `view`, or with
-/// `None` remove the cell binding so they inherit the view list again.
+/// Make `view` the first view every instance of `library`/`cell` tries,
+/// keeping the rest of its binding's list behind it, or with `None` remove
+/// the cell binding so they inherit the view list again.
 pub fn set_cell_view(
     definition: &mut ConfigurationSetDefinition,
     library: &str,
@@ -1012,11 +1017,7 @@ pub fn set_cell_view(
                 binding.library.eq_ignore_ascii_case(library)
                     && binding.cell.eq_ignore_ascii_case(cell)
             }) {
-                binding.executable_views = vec![view.to_owned()];
-                binding.stop_view = binding
-                    .stop_view
-                    .take()
-                    .filter(|stop| stop.eq_ignore_ascii_case(view));
+                move_to_front(&mut binding.executable_views, view);
             } else {
                 definition.cell_bindings.push(ConfigurationCellBinding {
                     library: library.to_owned(),
@@ -1061,30 +1062,10 @@ pub(crate) fn is_pattern(binding: &ConfigurationSetOverride) -> bool {
     InstancePath::parse(&binding.instance_path).is_err()
 }
 
-/// The binding that governs `path`: the matching one that pins the most
-/// positions by name, as the resolver chooses it.
-pub(crate) fn governing_binding<'a>(
-    definition: &'a ConfigurationSetDefinition,
-    path: &str,
-) -> Option<&'a ConfigurationSetOverride> {
-    count_scan();
-    let instance = InstancePath::parse(path).ok()?;
-    definition
-        .overrides
-        .iter()
-        .filter_map(|binding| {
-            let pattern = InstancePathPattern::parse(&binding.instance_path).ok()?;
-            pattern
-                .matches(&instance)
-                .then(|| (binding, pattern.specificity()))
-        })
-        .max_by_key(|(_, specificity)| *specificity)
-        .map(|(binding, _)| binding)
-}
-
-/// Bind `path` to exactly `view`, or with `None` remove its instance binding
-/// so it inherits the view list again. A binding's other properties survive
-/// a change of view; a new binding runs on every platform.
+/// Make `view` the first view `path`'s own binding tries, keeping the rest
+/// of its list behind it, or with `None` stop the binding naming views so
+/// `path` inherits them again. A binding's model section and platforms
+/// survive either; a new binding runs on every platform.
 pub fn set_instance_view(
     definition: &mut ConfigurationSetDefinition,
     path: &str,
@@ -1098,17 +1079,12 @@ pub fn set_instance_view(
         InstancePath::parse(&binding.instance_path).is_ok_and(|exact| exact.fold_key() == key)
     });
     match (view, existing) {
-        (None, Some(index)) => {
-            definition.overrides.remove(index);
+        (None, Some(_)) => {
+            apply_binding_change(definition, path, &[], BindingChange::Inherit);
         }
         (None, None) => {}
         (Some(view), Some(index)) => {
-            let binding = &mut definition.overrides[index];
-            binding.executable_views = vec![view.to_owned()];
-            binding.stop_view = binding
-                .stop_view
-                .take()
-                .filter(|stop| stop.eq_ignore_ascii_case(view));
+            move_to_front(&mut definition.overrides[index].executable_views, view);
         }
         (Some(view), None) => definition.overrides.push(ConfigurationSetOverride {
             instance_path: parsed.to_string(),
@@ -1120,9 +1096,24 @@ pub fn set_instance_view(
     }
 }
 
-/// Apply `change` to the binding stored under `path`. An instance with no
-/// binding of its own gets one, starting from `inherited`, the view list it
-/// inherits, so editing it changes only what the reader changed.
+/// Put `view` first in `views`, adding it when the list does not hold it.
+fn move_to_front(views: &mut Vec<String>, view: &str) {
+    views.retain(|listed| !listed.eq_ignore_ascii_case(view));
+    views.insert(0, view.to_owned());
+}
+
+/// A binding's view list in the page's words: its one view, or every view
+/// in the order they are tried.
+pub(crate) fn view_list_label(views: &[String]) -> String {
+    views.join(", ")
+}
+
+/// Apply `change` to the binding stored under `path`. A binding names views
+/// only once its view list or stop is edited: a model section or platform set
+/// alone leaves the views inherited. Editing the views of a binding that
+/// inherits them starts from `inherited`, the list it inherits, so the edit
+/// changes only what the reader changed. An instance's own binding that ends
+/// up setting nothing is removed.
 pub(crate) fn apply_binding_change(
     definition: &mut ConfigurationSetDefinition,
     path: &str,
@@ -1139,13 +1130,16 @@ pub(crate) fn apply_binding_change(
     });
     let index = match (position, &change) {
         (Some(index), _) => index,
-        (None, BindingChange::Remove | BindingChange::Path(_)) => return,
+        (None, BindingChange::Remove | BindingChange::Path(_) | BindingChange::Inherit) => {
+            return;
+        }
         (None, _) => {
             definition.overrides.push(ConfigurationSetOverride {
                 instance_path: exact_key
+                    .as_ref()
                     .and_then(|_| InstancePath::parse(path).ok())
                     .map_or_else(|| path.to_owned(), |exact| exact.to_string()),
-                executable_views: inherited.to_vec(),
+                executable_views: Vec::new(),
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
@@ -1154,6 +1148,11 @@ pub(crate) fn apply_binding_change(
         }
     };
     let binding = &mut definition.overrides[index];
+    if matches!(change, BindingChange::Views(_) | BindingChange::Stop(_))
+        && binding.executable_views.is_empty()
+    {
+        binding.executable_views = inherited.to_vec();
+    }
     match change {
         BindingChange::Views(edit) => {
             edit.apply(&mut binding.executable_views);
@@ -1169,22 +1168,84 @@ pub(crate) fn apply_binding_change(
                 .map(|section| section.trim().to_owned())
                 .filter(|section| !section.is_empty());
         }
-        BindingChange::RunsOn(platforms) => binding.eligible_platforms = platforms,
+        BindingChange::OnlyOn(platforms) => binding.eligible_platforms = platforms,
         BindingChange::Path(pattern) => binding.instance_path = pattern.trim().to_owned(),
+        BindingChange::Inherit => {
+            binding.executable_views.clear();
+            binding.stop_view = None;
+        }
         BindingChange::Remove => {
             definition.overrides.remove(index);
+            return;
         }
+    }
+    if exact_key.is_some() && sets_nothing(&definition.overrides[index]) {
+        definition.overrides.remove(index);
     }
 }
 
-/// Where a binding runs, in the page's words.
-pub(crate) fn runs_on_label(platforms: &[ConfigurationPlatform]) -> &'static str {
+/// Whether a binding names no views, no model section and no platform
+/// restriction: it binds as if it were not there.
+fn sets_nothing(binding: &ConfigurationSetOverride) -> bool {
+    binding.executable_views.is_empty()
+        && binding.model_section.is_none()
+        && ConfigurationPlatform::ALL
+            .iter()
+            .all(|platform| binding.eligible_platforms.contains(platform))
+}
+
+/// The choices for a binding's platform restriction, in the page's words.
+pub(crate) const ONLY_ON: [&str; 3] = ["Any platform", "Desktop", "Browser"];
+
+/// The one platform a binding is restricted to, or that it is not.
+pub(crate) fn only_on_label(platforms: &[ConfigurationPlatform]) -> &'static str {
     let desktop = platforms.contains(&ConfigurationPlatform::Desktop);
     let browser = platforms.contains(&ConfigurationPlatform::Browser);
     match (desktop, browser) {
-        (true, false) => "Desktop",
-        (false, true) => "Browser",
-        _ => "All",
+        (true, false) => ONLY_ON[1],
+        (false, true) => ONLY_ON[2],
+        _ => ONLY_ON[0],
+    }
+}
+
+/// The views an instance inherits when its own binding names none, and the
+/// stop that goes with them, in the resolver's order: the most specific other
+/// binding that names views, then its cell's binding, then the global list.
+/// The stop is that binding's, else the cell binding's.
+pub(crate) fn inherited_views(
+    definition: &ConfigurationSetDefinition,
+    path: &str,
+    (library, cell): (&str, &str),
+) -> (Vec<String>, Option<String>) {
+    count_scan();
+    let cell_binding = cell_binding(definition, library, cell);
+    let cell_stop = cell_binding.and_then(|binding| binding.stop_view.clone());
+    let Ok(instance) = InstancePath::parse(path) else {
+        return (definition.executable_view_policy.clone(), cell_stop);
+    };
+    let own = instance.fold_key();
+    let governing = definition
+        .overrides
+        .iter()
+        .filter(|binding| !binding.executable_views.is_empty())
+        .filter(|binding| {
+            !InstancePath::parse(&binding.instance_path).is_ok_and(|exact| exact.fold_key() == own)
+        })
+        .filter_map(|binding| {
+            let pattern = InstancePathPattern::parse(&binding.instance_path).ok()?;
+            pattern
+                .matches(&instance)
+                .then(|| (binding, pattern.specificity()))
+        })
+        .max_by_key(|(_, specificity)| *specificity)
+        .map(|(binding, _)| binding);
+    match (governing, cell_binding) {
+        (Some(binding), _) => (
+            binding.executable_views.clone(),
+            binding.stop_view.clone().or(cell_stop),
+        ),
+        (None, Some(binding)) => (binding.executable_views.clone(), cell_stop),
+        (None, None) => (definition.executable_view_policy.clone(), None),
     }
 }
 
@@ -1325,7 +1386,9 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
             "Pattern bindings {left} and {right} match the same instances equally. Make one more specific."
         ),
         ConfigurationSetError::NoEligiblePlatforms(path) => {
-            format!("{path} runs on no platform. Set Runs on to All, Desktop or Browser.")
+            format!(
+                "{path} is allowed on no platform. Set Only on to Any platform, Desktop or Browser."
+            )
         }
         ConfigurationSetError::InvalidModelSection(section) => {
             format!("{section} is not a model section name.")

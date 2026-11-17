@@ -11,22 +11,27 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{ordered_chips, select};
+use crate::ui::widgets::{Problem, ordered_chips, problem_line, select};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{property_row, property_row_wrapped};
 use crate::workbench::project::configuration_state::{
     BindingChange, ConfigurationPageState, ConfigurationResolution, ConfigurationRow,
-    ConfigurationSelection, FieldEdit, apply_binding_change, apply_cell_binding_change,
-    cell_binding, cell_view_names, governing_binding, instance_binding, runs_on_label,
-    used_for_runs,
+    ConfigurationSelection, FieldEdit, ONLY_ON, apply_binding_change, apply_cell_binding_change,
+    cell_binding, cell_view_names, inherited_views, instance_binding, only_on_label, used_for_runs,
 };
 
-const RUNS_ON: [&str; 3] = ["All", "Desktop", "Browser"];
 const NO_STOP: &str = "None";
+
+/// The text fields' state for one frame: what is being typed, and the text a
+/// field committed this frame, by field, so a refused commit can be put back
+/// into the field that made it.
+struct Fields {
+    buffer: Option<FieldEdit>,
+    committed: Option<(String, String)>,
+}
 
 /// What the inspector asked for this frame.
 enum InspectorAction {
-    Rename(String),
     Binding {
         path: String,
         inherited: Vec<String>,
@@ -55,7 +60,10 @@ pub fn project_configuration(
     let shown = &*page;
     let selection = shown.selection(catalog);
     let resolution = shown.last_resolution();
-    let mut buffer = shown.field_edit.clone();
+    let mut fields = Fields {
+        buffer: shown.field_edit.clone(),
+        committed: None,
+    };
     let definition = match selection {
         ConfigurationSelection::Configuration(id) => shown.definition(catalog, id),
         ConfigurationSelection::Default => None,
@@ -69,7 +77,7 @@ pub fn project_configuration(
             resolution.as_deref(),
             &path,
             editable,
-            &mut buffer,
+            &mut fields,
         ),
         Some(ConfigurationRow::Cell { library, cell }) => cell_facts(
             ui,
@@ -86,20 +94,21 @@ pub fn project_configuration(
                 resolution.as_deref(),
                 &pattern,
                 editable,
-                &mut buffer,
+                &mut fields,
             )
         }),
         None => match definition {
-            Some(definition) => {
-                configuration(ui, model, selection, definition, editable, &mut buffer)
-            }
+            Some(definition) => configuration(ui, model, selection, definition),
             None => default_facts(ui, model),
         },
     };
-    page.field_edit = buffer;
-    match action? {
+    page.field_edit = fields.buffer;
+    let taken = match action? {
         InspectorAction::UseForRuns(target) => return Some(target),
-        InspectorAction::Deselect => page.row = None,
+        InspectorAction::Deselect => {
+            page.row = None;
+            true
+        }
         InspectorAction::CellBinding {
             library,
             cell,
@@ -107,9 +116,6 @@ pub fn project_configuration(
             change,
         } => edit(page, model, selection, |definition| {
             apply_cell_binding_change(definition, &library, &cell, &inherited, change);
-        }),
-        InspectorAction::Rename(name) => edit(page, model, selection, |definition| {
-            definition.name = name;
         }),
         InspectorAction::Binding {
             path,
@@ -121,15 +127,27 @@ pub fn project_configuration(
                 _ => None,
             };
             let removed = change == BindingChange::Remove;
-            edit(page, model, selection, |definition| {
+            let taken = edit(page, model, selection, |definition| {
                 apply_binding_change(definition, &path, &inherited, change);
             });
-            if let Some(pattern) = renamed {
-                page.row = Some(ConfigurationRow::Pattern(pattern));
-            } else if removed && matches!(page.row, Some(ConfigurationRow::Pattern(_))) {
-                page.row = None;
+            if taken {
+                if let Some(pattern) = renamed {
+                    page.row = Some(ConfigurationRow::Pattern(pattern));
+                } else if removed && matches!(page.row, Some(ConfigurationRow::Pattern(_))) {
+                    page.row = None;
+                }
             }
+            taken
         }
+    };
+    // A typed value the configuration refused stays in its field, with the
+    // reason under it, rather than vanishing into a refusal elsewhere.
+    if !taken && let Some((field, text)) = fields.committed {
+        page.field_edit = Some(FieldEdit {
+            field,
+            text,
+            refusal: page.refusal.take(),
+        });
     }
     None
 }
@@ -139,9 +157,12 @@ fn edit(
     model: &Model,
     selection: ConfigurationSelection,
     change: impl FnOnce(&mut ConfigurationSetDefinition),
-) {
-    if let ConfigurationSelection::Configuration(id) = selection {
-        page.edit(&model.workspace.content.configuration_sets, id, change);
+) -> bool {
+    match selection {
+        ConfigurationSelection::Configuration(id) => {
+            page.edit(&model.workspace.content.configuration_sets, id, change)
+        }
+        ConfigurationSelection::Default => false,
     }
 }
 
@@ -201,26 +222,16 @@ fn action_button(ui: &mut Ui, label: &str, enabled: bool) -> bool {
     clicked
 }
 
-/// The configuration itself, with no row selected.
+/// The configuration itself, with no row selected. Its name is a fact here:
+/// More > Rename… is the one way to rename it.
 fn configuration(
     ui: &mut Ui,
     model: &Model,
     selection: ConfigurationSelection,
     definition: &ConfigurationSetDefinition,
-    editable: bool,
-    buffer: &mut Option<FieldEdit>,
 ) -> Option<InspectorAction> {
     let catalog = &model.workspace.content.configuration_sets;
-    let mut action = committed_text(
-        ui,
-        buffer,
-        "configuration-name",
-        "Name",
-        &definition.name,
-        editable,
-    )
-    .filter(|name| !name.trim().is_empty())
-    .map(|name| InspectorAction::Rename(name.trim().to_owned()));
+    property_row(ui, "Name", &definition.name);
     property_row(ui, "Top cell", &definition.root.display_path());
     property_row(ui, "DUT instance", &definition.dut_path);
     property_row(
@@ -233,13 +244,12 @@ fn configuration(
         "Cell bindings",
         &definition.cell_bindings.len().to_string(),
     );
-    if let Some(use_for_runs) = used_for_runs_row(ui, model, selection, catalog) {
-        action = Some(use_for_runs);
-    }
-    action
+    used_for_runs_row(ui, model, selection, catalog)
 }
 
-/// One instance: what it resolved to, and its own binding.
+/// One instance: what it resolved to, and its own binding. While the shown
+/// edits do not resolve, the binding is still edited from the definition, so
+/// an edit that does not resolve can always be edited back.
 fn instance(
     ui: &mut Ui,
     model: &Model,
@@ -247,87 +257,111 @@ fn instance(
     resolution: Option<&ConfigurationResolution>,
     path: &str,
     editable: bool,
-    buffer: &mut Option<FieldEdit>,
+    fields: &mut Fields,
 ) -> Option<InspectorAction> {
-    let row = resolution.and_then(|resolution| {
+    let resolved = resolution.and_then(|resolution| {
         let row = resolution.instance(path)?;
         let hierarchy = resolution.hierarchy.as_ref().ok()?;
         Some(&hierarchy.bindings[row.binding])
     });
+    let unresolved = resolution.is_some_and(|resolution| resolution.hierarchy.is_err());
     section_header(ui, "Instance", None);
     property_row(ui, "Instance", path);
-    let Some(resolved) = row else {
-        property_row_wrapped(
-            ui,
-            "Status",
-            "This instance is not in the design any more. Pick another row.",
-        );
-        return action_button(ui, "Show the configuration", true)
-            .then_some(InspectorAction::Deselect);
+    let (library, cell) = match resolved {
+        Some(resolved) => {
+            let reference = &resolved.reference;
+            property_row(
+                ui,
+                "Cell",
+                &format!("{}/{}", reference.library, reference.cell),
+            );
+            property_row(
+                ui,
+                "View found",
+                if resolved.status.is_resolved() {
+                    &reference.view
+                } else {
+                    "\u{2014}"
+                },
+            );
+            property_row_wrapped(ui, "Searched", &resolved.view_search_order.join(", then "));
+            if let Some(diagnostic) = &resolved.diagnostic {
+                property_row_wrapped(ui, "Problem", diagnostic);
+            }
+            for warning in &resolved.warnings {
+                property_row_wrapped(ui, "Note", warning);
+            }
+            (reference.library.as_str(), reference.cell.as_str())
+        }
+        None if unresolved => {
+            property_row_wrapped(
+                ui,
+                "Status",
+                "The edits do not resolve, so what this instance binds to is not known.",
+            );
+            ("", "")
+        }
+        None => {
+            property_row_wrapped(
+                ui,
+                "Status",
+                "This instance is not in the design any more. Pick another row.",
+            );
+            return action_button(ui, "Show the configuration", true)
+                .then_some(InspectorAction::Deselect);
+        }
     };
-    let reference = &resolved.reference;
-    property_row(
-        ui,
-        "Cell",
-        &format!("{}/{}", reference.library, reference.cell),
-    );
-    property_row(
-        ui,
-        "View found",
-        if resolved.status.is_resolved() {
-            &reference.view
-        } else {
-            "\u{2014}"
-        },
-    );
-    property_row_wrapped(ui, "Searched", &resolved.view_search_order.join(", then "));
-    if let Some(diagnostic) = &resolved.diagnostic {
-        property_row_wrapped(ui, "Problem", diagnostic);
-    }
-    for warning in &resolved.warnings {
-        property_row_wrapped(ui, "Note", warning);
-    }
     let definition = definition?;
     let exact = instance_binding(definition, path);
-    let inherited = governing_binding(definition, path).map_or_else(
-        || definition.executable_view_policy.clone(),
-        |binding| binding.executable_views.clone(),
-    );
+    let own_views = exact.filter(|binding| !binding.executable_views.is_empty());
+    let (inherited, inherited_stop) = inherited_views(definition, path, (library, cell));
     section_header(
         ui,
         "Binding",
-        Some(if exact.is_some() {
+        Some(if own_views.is_some() {
             "this instance"
         } else {
             "inherited"
         }),
     );
-    let views = exact.map_or(&inherited, |binding| &binding.executable_views);
-    let stop = exact.and_then(|binding| binding.stop_view.clone());
+    // A binding that names views stops where it says, else where its cell's
+    // binding does; one that names none follows the binding it inherits from.
+    let (views, stop) = match own_views {
+        Some(binding) => (
+            binding.executable_views.clone(),
+            binding.stop_view.clone().or_else(|| {
+                cell_binding(definition, library, cell).and_then(|cell| cell.stop_view.clone())
+            }),
+        ),
+        None => (inherited.clone(), inherited_stop),
+    };
     let section = exact
         .and_then(|binding| binding.model_section.clone())
         .unwrap_or_default();
     let platforms = exact.map_or(ConfigurationPlatform::ALL.to_vec(), |binding| {
         binding.eligible_platforms.clone()
     });
-    let views_owned = views.clone();
-    let addable = cell_view_names(&model.library_manager, &reference.library, &reference.cell);
+    let addable = if resolved.is_some() {
+        cell_view_names(&model.library_manager, library, cell)
+    } else {
+        resolution.map_or_else(Vec::new, |resolution| resolution.view_names.clone())
+    };
     let change = binding_fields(
         ui,
         &format!("instance-{path}"),
         BindingFields {
-            views: &views_owned,
+            views: &views,
             stop: stop.as_deref(),
             section: Some(&section),
             platforms: Some(&platforms),
             addable: &addable,
         },
         editable,
-        buffer,
+        fields,
     )
     .or_else(|| {
-        (editable && exact.is_some() && action_button(ui, "Inherit the view list", true))
-            .then_some(BindingChange::Remove)
+        (editable && own_views.is_some() && action_button(ui, "Inherit the view list", true))
+            .then_some(BindingChange::Inherit)
     });
     change.map(|change| InspectorAction::Binding {
         path: path.to_owned(),
@@ -392,7 +426,10 @@ fn cell_facts(
     );
     let stop = binding.and_then(|binding| binding.stop_view.clone());
     let addable = cell_view_names(&model.library_manager, library, cell);
-    let mut unused = None;
+    let mut unused = Fields {
+        buffer: None,
+        committed: None,
+    };
     let change = binding_fields(
         ui,
         &format!("cell-{library}-{cell}"),
@@ -425,7 +462,7 @@ fn pattern_binding(
     resolution: Option<&ConfigurationResolution>,
     pattern: &str,
     editable: bool,
-    buffer: &mut Option<FieldEdit>,
+    fields: &mut Fields,
 ) -> Option<InspectorAction> {
     let binding = definition
         .overrides
@@ -434,15 +471,14 @@ fn pattern_binding(
     section_header(ui, "Pattern binding", None);
     let mut change = committed_text(
         ui,
-        buffer,
+        fields,
         &format!("pattern-{pattern}"),
         "Pattern",
         &binding.instance_path,
         editable,
     )
-    .filter(|text| !text.trim().is_empty())
     .map(BindingChange::Path);
-    let fields = binding_fields(
+    let edited = binding_fields(
         ui,
         &format!("pattern-binding-{pattern}"),
         BindingFields {
@@ -453,9 +489,9 @@ fn pattern_binding(
             addable: resolution.map_or(&[][..], |resolution| &resolution.view_names),
         },
         editable,
-        buffer,
+        fields,
     );
-    change = change.or(fields);
+    change = change.or(edited);
     if editable && action_button(ui, "Remove pattern binding", true) {
         change = Some(BindingChange::Remove);
     }
@@ -471,7 +507,7 @@ struct BindingFields<'a> {
     views: &'a [String],
     stop: Option<&'a str>,
     /// Instance and pattern bindings only: a cell binding names no model
-    /// section and runs wherever its instances do.
+    /// section and binds on every platform its instances do.
     section: Option<&'a str>,
     platforms: Option<&'a [ConfigurationPlatform]>,
     /// The views the view list can add: the bound cell's, or for a pattern,
@@ -485,7 +521,7 @@ fn binding_fields(
     key: &str,
     fields: BindingFields<'_>,
     editable: bool,
-    buffer: &mut Option<FieldEdit>,
+    text: &mut Fields,
 ) -> Option<BindingChange> {
     let mut change = None;
     let t = Tokens::get(ui.ctx());
@@ -536,7 +572,7 @@ fn binding_fields(
     if let Some(current) = fields.section
         && let Some(section) = committed_text(
             ui,
-            buffer,
+            text,
             &format!("{key}-section"),
             "Model section",
             current,
@@ -551,20 +587,22 @@ fn binding_fields(
     let Some(platforms) = fields.platforms else {
         return change;
     };
-    let runs_on = runs_on_label(platforms);
-    let options = RUNS_ON.map(str::to_owned);
+    // A restriction, not a placement: a binding set to one platform binds
+    // nothing on the other, so the instance does not resolve there.
+    let only_on = only_on_label(platforms);
+    let options = ONLY_ON.map(str::to_owned);
     if let Some(index) = choice_row(
         ui,
-        &format!("{key}-runs-on"),
-        "Runs on",
-        runs_on,
+        &format!("{key}-only-on"),
+        "Only on",
+        only_on,
         &options,
         editable,
-    ) && RUNS_ON[index] != runs_on
+    ) && ONLY_ON[index] != only_on
     {
-        change = Some(BindingChange::RunsOn(match RUNS_ON[index] {
-            "Desktop" => vec![ConfigurationPlatform::Desktop],
-            "Browser" => vec![ConfigurationPlatform::Browser],
+        change = Some(BindingChange::OnlyOn(match index {
+            1 => vec![ConfigurationPlatform::Desktop],
+            2 => vec![ConfigurationPlatform::Browser],
             _ => ConfigurationPlatform::ALL.to_vec(),
         }));
     }
@@ -610,7 +648,7 @@ fn choice_row(
 /// keystroke edits the configuration or re-resolves the design.
 fn committed_text(
     ui: &mut Ui,
-    buffer: &mut Option<FieldEdit>,
+    fields: &mut Fields,
     field: &str,
     label: &str,
     current: &str,
@@ -630,10 +668,9 @@ fn committed_text(
     }
     let t = Tokens::get(ui.ctx());
     field_label(ui, label, &t);
-    let mut text = match buffer.as_ref() {
-        Some(edit) if edit.field == field => edit.text.clone(),
-        _ => current.to_owned(),
-    };
+    let held = fields.buffer.as_ref().filter(|edit| edit.field == field);
+    let refusal = held.and_then(|edit| edit.refusal.clone());
+    let mut text = held.map_or_else(|| current.to_owned(), |edit| edit.text.clone());
     let mut committed = None;
     ui.horizontal(|ui| {
         let width = ui.available_width().max(80.0);
@@ -644,14 +681,16 @@ fn committed_text(
                 .font(theme::field_mono()),
         );
         if response.changed() {
-            *buffer = Some(FieldEdit {
+            fields.buffer = Some(FieldEdit {
                 field: field.to_owned(),
                 text: text.clone(),
+                refusal: None,
             });
         }
         if response.lost_focus() {
             let escaped = ui.input(|input| input.key_pressed(Key::Escape));
-            let typed = buffer
+            let typed = fields
+                .buffer
                 .take_if(|edit| edit.field == field)
                 .map(|edit| edit.text);
             if !escaped && let Some(typed) = typed {
@@ -659,6 +698,12 @@ fn committed_text(
             }
         }
     });
+    if let Some(refusal) = &refusal {
+        problem_line(ui, Problem::Failure, refusal);
+    }
+    if let Some(typed) = &committed {
+        fields.committed = Some((field.to_owned(), typed.clone()));
+    }
     ui.add_space(4.0);
     committed
 }

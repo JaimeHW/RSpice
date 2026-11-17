@@ -13,8 +13,8 @@ use rspice_design::hierarchy::{
 use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride};
 use crate::ui::widgets::{SegmentedWidth, segmented, select};
 use crate::workbench::project::configuration_state::{
-    ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED, InstanceRow, is_pattern,
-    runs_on_label, set_cell_view, set_instance_view,
+    ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED, InstanceRow, ONLY_ON,
+    is_pattern, only_on_label, set_cell_view, set_instance_view,
 };
 
 /// Below this width the table scrolls sideways instead of squeezing.
@@ -23,15 +23,14 @@ const INDENT: f32 = 14.0;
 const CHEVRON: f32 = 14.0;
 
 /// The columns, by share of the table's width.
-const COLUMNS: [(&str, f32); 8] = [
+const COLUMNS: [(&str, f32); 7] = [
     ("Instance", 0.16),
     ("Cell", 0.13),
     ("View found", 0.10),
-    ("View to use", 0.13),
+    ("View to use", 0.17),
     ("Bound by", 0.14),
     ("Model section", 0.12),
-    ("Runs on", 0.07),
-    ("Status", 0.15),
+    ("Status", 0.18),
 ];
 
 /// What the reader did to the tables this frame.
@@ -81,6 +80,12 @@ pub(super) fn tables(
     let page = &cx.state.configuration;
     let tab = page.tab;
     let mut edit = tab_header(ui, resolution, tab, editable);
+    if tab == ConfigurationTab::Instances
+        && let Some(definition) = definition
+        && let Some(pattern_edit) = pattern_bindings(ui, definition, page.row.as_ref())
+    {
+        edit = Some(pattern_edit);
+    }
     let Ok(hierarchy) = &resolution.hierarchy else {
         apply_table_edit(cx, id, edit);
         return;
@@ -93,11 +98,6 @@ pub(super) fn tables(
         }
         apply_table_edit(cx, id, edit);
         return;
-    }
-    if let Some(definition) = definition
-        && let Some(pattern_edit) = pattern_bindings(ui, definition, page.row.as_ref())
-    {
-        edit = Some(pattern_edit);
     }
     if let Some(table_edit) = instance_tree(
         ui,
@@ -156,12 +156,13 @@ fn apply_table_edit(
         TableEdit::AddPattern => {
             if let Some(id) = id {
                 let mut added = None;
-                cx.state.configuration.edit(
+                if cx.state.configuration.edit(
                     &cx.model.workspace.content.configuration_sets,
                     id,
                     |definition| added = Some(add_pattern_binding(definition)),
-                );
-                cx.state.configuration.row = added.map(ConfigurationRow::Pattern);
+                ) {
+                    cx.state.configuration.row = added.map(ConfigurationRow::Pattern);
+                }
             }
         }
     }
@@ -296,13 +297,20 @@ fn pattern_bindings(
             vec2(ui.available_width().max(1.0), row_height),
             Sense::click(),
         );
-        let views = binding.executable_views.join(", then ");
-        let runs_on = runs_on_label(&binding.eligible_platforms);
+        let views = if binding.executable_views.is_empty() {
+            INHERITED.to_owned()
+        } else {
+            binding.executable_views.join(", then ")
+        };
         let section = binding.model_section.as_deref().unwrap_or("\u{2014}");
-        let label = format!(
-            "Pattern binding {}: view list {views}; model section {section}; runs on {runs_on}",
+        let mut label = format!(
+            "Pattern binding {}: view list {views}; model section {section}",
             binding.instance_path
         );
+        let only_on = only_on_label(&binding.eligible_platforms);
+        if only_on != ONLY_ON[0] {
+            label = format!("{label}; only on {only_on}");
+        }
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::SelectableLabel,
@@ -317,9 +325,8 @@ fn pattern_bindings(
         let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
         let cells = [
             (binding.instance_path.as_str(), 0.0, 0.22, t.color.text),
-            (views.as_str(), 0.22, 0.41, t.color.text_dim),
-            (section, 0.63, 0.12, t.color.text_dim),
-            (runs_on, 0.75, 0.25, t.color.text_dim),
+            (views.as_str(), 0.22, 0.53, t.color.text_dim),
+            (section, 0.75, 0.25, t.color.text_dim),
         ];
         for (text, start, share, color) in cells {
             let cell = Rect::from_min_size(
@@ -411,7 +418,7 @@ fn header_row(ui: &mut Ui, width: f32, height: f32) {
 }
 
 /// Each column's name and its rect in `row`.
-fn column_rects(row: Rect) -> [(&'static str, Rect); 8] {
+fn column_rects(row: Rect) -> [(&'static str, Rect); 7] {
     let mut left = row.left();
     COLUMNS.map(|(name, share)| {
         let right = (left + row.width() * share).min(row.right());
@@ -502,7 +509,6 @@ fn instance_row(
     } else {
         binding.model_section.as_str()
     };
-    let runs_on = input.tables.instance_runs_on[index];
     let (problem, status) = match unbound_reason(binding.status) {
         Some(reason) => (Some(Problem::Failure), reason),
         None => match binding.warnings.first() {
@@ -512,7 +518,7 @@ fn instance_row(
     };
     let mut label = format!(
         "Instance {}: cell {cell}; view found {found}; view to use {to_use}; \
-         bound by {rule}; model section {section}; runs on {runs_on}",
+         bound by {rule}; model section {section}",
         row.path
     );
     if let Some(problem) = problem {
@@ -631,10 +637,9 @@ fn instance_row(
         t.color.text_dim,
     );
     cell_text(ui, &painter, cells[5].1, section, &mono, t.color.text_dim);
-    cell_text(ui, &painter, cells[6].1, runs_on, &mono, t.color.text_dim);
 
     // Status: blank when bound; the mark and a short reason otherwise.
-    let status_cell = cells[7].1;
+    let status_cell = cells[6].1;
     if let Some(problem) = problem {
         paint_problem_mark(
             &painter,

@@ -8,7 +8,9 @@ use crate::state::{
     CellViewRef, ConfigurationSetDefinition, DEFAULT_STOP_VIEW_TYPES, UnresolvedBindingPolicy,
     default_view_search_order,
 };
-use crate::ui::widgets::{OrderedChipsEdit, ordered_chips, select_mono_with_response};
+use crate::ui::widgets::{
+    OrderedChipsEdit, ordered_chips, required_ordered_chips, select_mono_with_response,
+};
 
 const LABEL_WIDTH: f32 = 112.0;
 const ROW_HEIGHT: f32 = 32.0;
@@ -305,7 +307,7 @@ fn configuration_grid(
         },
         |ui| {
             chip_row(ui, "View list", |ui| {
-                if let Some(chosen) = ordered_chips(
+                if let Some(chosen) = required_ordered_chips(
                     ui,
                     "configuration-view-list",
                     "View list",

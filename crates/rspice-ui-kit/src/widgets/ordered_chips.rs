@@ -70,6 +70,66 @@ pub fn ordered_chips(
     addable: &[String],
     enabled: bool,
 ) -> Option<OrderedChipsEdit> {
+    chip_list(
+        ui,
+        ChipList {
+            id_salt,
+            accessible_label,
+            add_label,
+            values,
+            addable,
+            enabled,
+            keep_one: false,
+        },
+    )
+}
+
+/// [`ordered_chips`] for a list that may never be empty: while it holds one
+/// name, that chip offers no Remove.
+pub fn required_ordered_chips(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    add_label: &str,
+    values: &[String],
+    addable: &[String],
+    enabled: bool,
+) -> Option<OrderedChipsEdit> {
+    chip_list(
+        ui,
+        ChipList {
+            id_salt,
+            accessible_label,
+            add_label,
+            values,
+            addable,
+            enabled,
+            keep_one: true,
+        },
+    )
+}
+
+struct ChipList<'a> {
+    id_salt: &'a str,
+    accessible_label: &'a str,
+    add_label: &'a str,
+    values: &'a [String],
+    addable: &'a [String],
+    enabled: bool,
+    keep_one: bool,
+}
+
+fn chip_list(ui: &mut Ui, list: ChipList<'_>) -> Option<OrderedChipsEdit> {
+    let ChipList {
+        id_salt,
+        accessible_label,
+        add_label,
+        values,
+        addable,
+        enabled,
+        keep_one,
+    } = list;
+    let removable = !(keep_one && values.len() == 1);
     let id = ui.id().with(("ordered-chips", id_salt));
     let mut edit = None;
     ui.horizontal_wrapped(|ui| {
@@ -79,10 +139,9 @@ pub fn ordered_chips(
                 ui,
                 id.with(index),
                 accessible_label,
-                index,
-                values.len(),
+                (index, values.len()),
                 value,
-                enabled,
+                enabled.then_some(removable),
             ) {
                 edit = Some(chosen);
             }
@@ -104,14 +163,15 @@ pub fn ordered_chips(
     edit
 }
 
+/// One chip. `controls` is `None` for a read-only chip, otherwise whether it
+/// offers Remove.
 fn chip(
     ui: &mut Ui,
     id: egui::Id,
     list: &str,
-    index: usize,
-    count: usize,
+    (index, count): (usize, usize),
     value: &str,
-    enabled: bool,
+    controls: Option<bool>,
 ) -> Option<OrderedChipsEdit> {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
@@ -120,13 +180,22 @@ fn chip(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.text,
     );
-    let controls = if enabled { 3.0 * CONTROL_W + 2.0 } else { 0.0 };
+    let control_count = match controls {
+        None => 0.0,
+        Some(true) => 3.0,
+        Some(false) => 2.0,
+    };
+    let controls_width = if control_count > 0.0 {
+        control_count * CONTROL_W + 2.0
+    } else {
+        0.0
+    };
     let height = if t.metrics.is_touch() {
         t.metrics.touch_target()
     } else {
         22.0
     };
-    let size = vec2(galley.size().x + 2.0 * CHIP_PAD_X + controls, height);
+    let size = vec2(galley.size().x + 2.0 * CHIP_PAD_X + controls_width, height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| {
         WidgetInfo::labeled(
@@ -153,12 +222,10 @@ fn chip(
         galley,
         c.text,
     );
-    if !enabled {
-        return None;
-    }
-    let mut left = rect.right() - CHIP_PAD_X * 0.5 - 3.0 * CONTROL_W;
+    let removable = controls?;
+    let mut left = rect.right() - CHIP_PAD_X * 0.5 - control_count * CONTROL_W;
     let mut edit = None;
-    for (icon, verb, available, chosen) in [
+    let offered = [
         (
             Icon::ChevronLeft,
             "earlier",
@@ -172,7 +239,11 @@ fn chip(
             OrderedChipsEdit::MoveLater(index),
         ),
         (Icon::Close, "remove", true, OrderedChipsEdit::Remove(index)),
-    ] {
+    ];
+    for (icon, verb, available, chosen) in offered
+        .into_iter()
+        .filter(|(_, verb, _, _)| removable || *verb != "remove")
+    {
         let control = Rect::from_min_size(pos2(left, rect.top()), vec2(CONTROL_W, rect.height()));
         left += CONTROL_W;
         let label = if verb == "remove" {
@@ -271,6 +342,34 @@ mod tests {
                     .iter()
                     .any(|(_, node)| node.value() == Some("View list 2: spice"))
             );
+        }
+    }
+
+    /// A list that may never be empty offers no Remove on its only chip, and
+    /// one on each chip while it holds more.
+    #[test]
+    fn a_required_list_offers_no_remove_on_its_last_chip() {
+        for (values, removes) in [
+            (names(&["schematic"]), 0),
+            (names(&["schematic", "spice"]), 2),
+        ] {
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let output = ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    required_ordered_chips(ui, "views", "View list", "View", &values, &[], true);
+                });
+            });
+            let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+            let offered = nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.label()
+                        .is_some_and(|label| label.starts_with("Remove "))
+                })
+                .count();
+            assert_eq!(offered, removes, "{values:?}");
         }
     }
 }

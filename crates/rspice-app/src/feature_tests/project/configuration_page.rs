@@ -309,7 +309,7 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
         );
     }
     assert!(shown.says(
-        "Instance columns: Instance, Cell, View found, View to use, Bound by, Model section, Runs on, Status"
+        "Instance columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
     ));
 
     let collapsed = app.state.project.configuration.visible_instances().len();
