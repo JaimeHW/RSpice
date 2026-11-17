@@ -11,6 +11,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
+use crate::workbench::docks::inspector::project::LibraryShown;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
@@ -441,14 +442,6 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
 pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let t = Tokens::get(ui.ctx());
     let builtin = &cx.state.builtin_models;
-    let selection = if builtin.open {
-        builtin_models::selection_path(builtin)
-    } else {
-        cx.model
-            .library_manager
-            .selected_lcv_path()
-            .unwrap_or_else(|| "No library selection".to_owned())
-    };
     // Writable is the ordinary library and says nothing; read-only is the
     // exception the strip states.
     let read_only = builtin.open
@@ -503,6 +496,11 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             if asked {
                 select_found(ui.ctx(), cx);
             }
+            let selection = if cx.state.builtin_models.open {
+                builtin_models::selection_path(&cx.state.builtin_models)
+            } else {
+                shown_selection_path(cx.model, cx.state)
+            };
             // A strip too narrow for any of the path leaves the selection
             // to the band and the inspector, rather than a label over none;
             // the separator before it is counted in.
@@ -745,11 +743,10 @@ struct Target {
 impl Target {
     fn of(model: &Model, state: &ProjectState) -> Self {
         let manager = &model.library_manager;
-        let find = columns::Find::of(state);
-        let cell_shown = selected_cell_shown(model, &find);
-        let cell = selected_cell(manager).filter(|_| cell_shown);
+        let shown = shown_selection(model, state);
+        let cell = selected_cell(manager).filter(|_| shown.cell);
         let view = selected_view(manager)
-            .filter(|(_, view_type, _, _)| cell_shown && find.view(*view_type))
+            .filter(|_| shown.view)
             .map(|(reference, view_type, modified, _)| (reference, view_type, modified));
         // A list's choice counts only while it leads with the selection the
         // page acts on; a selection made elsewhere stands alone.
@@ -1125,8 +1122,40 @@ fn symbol_view(model: &Model, library: &str, cell: &str) -> Option<CellViewRef> 
         .map(|view| CellViewRef::new(library, cell, &view.name))
 }
 
-/// Whether the selected cell is one the Cell column lists: a filter can
-/// hide it, and then the page does not act on it.
+/// Which of the selected cell and view the Cell and View columns list: a
+/// filter can hide either, and then neither the page nor the inspector
+/// beside it acts on or describes it.
+pub(in crate::workbench) fn shown_selection(model: &Model, state: &ProjectState) -> LibraryShown {
+    let find = columns::Find::of(state);
+    let cell = selected_cell_shown(model, &find);
+    let view = cell
+        && model
+            .library_manager
+            .current_view()
+            .is_some_and(|view| find.view(view.view_type));
+    LibraryShown { cell, view }
+}
+
+/// The selection the strip states, as far as the find lists it: a cell or
+/// view the find hides is not named, as the band and the inspector do not
+/// name it.
+fn shown_selection_path(model: &Model, state: &ProjectState) -> String {
+    let manager = &model.library_manager;
+    let Some(library) = manager.current_library() else {
+        return "No library selection".to_owned();
+    };
+    let shown = shown_selection(model, state);
+    let mut path = library.name.clone();
+    if let Some(cell) = manager.current_cell().filter(|_| shown.cell) {
+        path = format!("{path}/{}", cell.name);
+        if let Some(view) = manager.current_view().filter(|_| shown.view) {
+            path = format!("{path}/{}", view.name);
+        }
+    }
+    path
+}
+
+/// Whether the selected cell is one the Cell column lists.
 fn selected_cell_shown(model: &Model, find: &columns::Find) -> bool {
     model
         .library_manager

@@ -45,13 +45,18 @@ pub fn project_library(
             item.technology.as_str()
         }
     });
-    let view = model.library_manager.current_view();
+    // What the page's find hides is not the page's selection: the band
+    // asks for a view, and so does this panel.
+    let cell = model
+        .library_manager
+        .current_cell()
+        .filter(|_| inspector.library_shown.cell);
+    let view = model
+        .library_manager
+        .current_view()
+        .filter(|_| inspector.library_shown.view);
     let view_type = view.map_or("—", |item| item.view_type.caption());
-    let open_target = match (
-        model.library_manager.current_library(),
-        model.library_manager.current_cell(),
-        view,
-    ) {
+    let open_target = match (model.library_manager.current_library(), cell, view) {
         (Some(library), Some(cell), Some(view)) => Some((
             CellViewRef::new(&library.name, &cell.name, &view.name),
             view.view_type,
@@ -110,7 +115,7 @@ pub fn project_library(
             ),
         );
     }
-    if let Some(cell) = model.library_manager.current_cell()
+    if let Some(cell) = cell
         && !cell.description.trim().is_empty()
     {
         property_row(ui, "Description", cell.description.trim());

@@ -391,6 +391,8 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
 /// a refusal in the same frame, or what only the shell carries out.
 fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     let model = &*cx.model;
+    let library_shown =
+        crate::workbench::surfaces::project::library::shown_selection(model, cx.state);
     let project = &mut *cx.state;
     let action = crate::workbench::docks::inspector::project::project(
         ui,
@@ -406,6 +408,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
                 .model
                 .as_deref()
                 .and_then(builtin_veriloga_model),
+            library_shown,
             model,
             facts: cx.runs.slot_facts(cx.peers.design().review_markers()),
             lifecycle: lifecycle_view(model, cx.platform, cx.wb, &cx.peers),

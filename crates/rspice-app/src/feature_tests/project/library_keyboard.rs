@@ -350,6 +350,56 @@ fn the_view_type_narrows_every_library_to_cells_holding_one() {
     );
 }
 
+/// Every word one frame states, labelled or not.
+fn words(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .flat_map(|(_, node)| [node.label(), node.value()])
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A find that hides the selected view hides it everywhere: the strip, the
+/// band and the inspector name none, and the selection waits behind the find
+/// for it to be cleared.
+#[test]
+fn a_view_the_find_hides_is_described_nowhere() {
+    let mut replay = library_page();
+    let path = "work/amp/schematic";
+    let said = words(&replay.frame(Vec::new()));
+    assert!(
+        said.iter().any(|text| text == path),
+        "the page states the selection: {said:#?}"
+    );
+    for _ in 0..3 {
+        replay.key(Key::Tab, Modifiers::SHIFT);
+    }
+    replay.type_text("nothing");
+    assert_eq!(replay.app.state.project.project_library_filter, "nothing");
+    replay.frames(Vec::new());
+    let said = words(&replay.frame(Vec::new()));
+    assert!(
+        said.iter()
+            .any(|text| text == "Select a view to inspect or open"),
+        "the band asks for a view: {said:#?}"
+    );
+    assert!(
+        !said.iter().any(|text| text.contains(path)),
+        "nothing describes the hidden view: {said:#?}"
+    );
+    assert_eq!(
+        selected(&replay),
+        [Some("work"), Some("amp"), Some("schematic")],
+        "the selection waits behind the find"
+    );
+}
+
 /// A press on `from`, carried across in steps and let go on `to`.
 fn drag(replay: &mut Replay, from: egui::Pos2, to: egui::Pos2) {
     let button = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {

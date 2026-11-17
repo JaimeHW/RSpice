@@ -43,10 +43,29 @@ pub struct ProjectInspector<'a> {
     pub builtin_library_open: bool,
     /// The model selected in that library.
     pub builtin_model: Option<&'static BuiltinVerilogAModel>,
+    /// Which of the Library page's selected cell and view its find lists.
+    pub library_shown: LibraryShown,
     pub model: &'a Model,
     pub facts: SlotFacts,
     /// Read for how many documents a save would write.
     pub lifecycle: LifecycleView<'a>,
+}
+
+/// Which of the Library page's selected cell and view its find lists. A
+/// filter can hide either; the page does not act on what it hides, and the
+/// inspector does not describe it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibraryShown {
+    pub cell: bool,
+    pub view: bool,
+}
+
+impl LibraryShown {
+    /// No filter hides anything.
+    pub const ALL: Self = Self {
+        cell: true,
+        view: true,
+    };
 }
 
 /// What the reader asked of the inspector this frame, raised once it has

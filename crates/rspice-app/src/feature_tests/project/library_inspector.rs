@@ -5,7 +5,9 @@ use egui::Ui;
 use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel};
 
 use crate::workbench::app_state::AppState;
-use rspice_app_project::workbench::docks::inspector::project::{ProjectInspector, project_library};
+use rspice_app_project::workbench::docks::inspector::project::{
+    LibraryShown, ProjectInspector, project_library,
+};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::LifecycleView;
 use rspice_app_state::state::ViewType;
@@ -37,6 +39,7 @@ fn announced(
                 checkpoint_selection: &state.project.project_checkpoint_selection,
                 builtin_library_open,
                 builtin_model,
+                library_shown: LibraryShown::ALL,
                 model: &state.model,
                 facts: SlotFacts {
                     preflight_report_retained: false,
