@@ -412,20 +412,14 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             .selected_lcv_path()
             .unwrap_or_else(|| "No library selection".to_owned())
     };
-    let access = if builtin.open {
-        "read only"
-    } else {
-        cx.model
+    // Writable is the ordinary library and says nothing; read-only is the
+    // exception the strip states.
+    let read_only = builtin.open
+        || cx
+            .model
             .library_manager
             .current_library()
-            .map_or("unavailable", |library| {
-                if library.read_only {
-                    "read only"
-                } else {
-                    "writable"
-                }
-            })
-    };
+            .is_some_and(|library| library.read_only);
     // No rule under this strip: the column header below opens with one of its
     // own, and two hairlines a pixel apart read as one thick, uneven line.
     egui::Frame::new()
@@ -455,10 +449,10 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 let font = theme::mono(tokens::FS_0, FontWeight::Regular);
                 let selection = elide_text(ui, &selection, &font, room);
                 context_value(ui, "Selection", &selection, t.color.text);
-                ui.separator();
-                // Writable is the ordinary library. Read-only is the one worth
-                // reading, and neither is a verdict.
-                context_value(ui, "Access", access, t.color.text_dim);
+                if read_only {
+                    ui.separator();
+                    context_value(ui, "Access", "read only", t.color.text_dim);
+                }
             });
         });
 }
@@ -496,10 +490,15 @@ fn library_column(
         .as_deref()
         .filter(|_| !builtin_open);
     // The built-in library is the last row, after the project's own.
+    let count = libraries.len() + 1;
     virtual_browser_column(
         ui,
         "Library",
-        libraries.len() + 1,
+        ColumnCount {
+            shown: count,
+            total: count,
+            empty: "",
+        },
         width,
         height,
         |ui, index| {
@@ -512,7 +511,7 @@ fn library_column(
                     icon: WorkbenchIcon::Folder,
                     label: &library.name,
                     meta: &library.cells,
-                    status: if library.read_only { "RO" } else { "RW" },
+                    status: if library.read_only { "read only" } else { "" },
                     selected: selected == Some(library.name.as_str()),
                     read_only: library.read_only,
                 },
@@ -539,10 +538,24 @@ fn cell_column(
         );
     }
     let manager = &cx.model.library_manager;
-    let cells = cell_rows(ui.ctx(), manager, &cx.state.project_library_filter);
+    let filter = &cx.state.project_library_filter;
+    let cells = cell_rows(ui.ctx(), manager, filter);
     let selected_library = manager.selected_library.as_deref();
     let selected_cell = manager.selected_cell.as_deref();
-    virtual_browser_column(ui, "Cell", cells.len(), width, height, |ui, index| {
+    let total = manager
+        .current_library()
+        .map_or(0, |library| library.cell_count());
+    let no_match = if cells.is_empty() && total > 0 {
+        format!("No cells match \u{201c}{}\u{201d}", filter.trim())
+    } else {
+        String::new()
+    };
+    let count = ColumnCount {
+        shown: cells.len(),
+        total,
+        empty: if total == 0 { "No cells" } else { &no_match },
+    };
+    virtual_browser_column(ui, "Cell", count, width, height, |ui, index| {
         let cell = &cells[index];
         let response = browser_row(
             ui,
@@ -578,12 +591,28 @@ fn view_column(
         return builtin_models::view_column(ui, &cx.state.builtin_models, width, height);
     }
     let manager = &cx.model.library_manager;
-    let views = view_rows(ui.ctx(), manager);
+    // A cell the filter hides is not the one the page acts on: its views
+    // are not listed and the band offers nothing for it.
+    let cell_shown = selected_cell_shown(ui.ctx(), cx);
+    let views = if cell_shown {
+        view_rows(ui.ctx(), manager)
+    } else {
+        Arc::from([])
+    };
     let selected_library = manager.selected_library.as_deref();
     let selected_cell = manager.selected_cell.as_deref();
     let shown_cell = manager.current_cell();
     let selected_view = manager.selected_view.as_deref();
-    virtual_browser_column(ui, "View", views.len(), width, height, |ui, index| {
+    let count = ColumnCount {
+        shown: views.len(),
+        total: views.len(),
+        empty: if cell_shown {
+            "No views"
+        } else {
+            "No cell selected"
+        },
+    };
+    virtual_browser_column(ui, "View", count, width, height, |ui, index| {
         let view = &views[index];
         let modified = shown_cell
             .and_then(|cell| cell.get_view(&view.name))
@@ -594,7 +623,7 @@ fn view_column(
                 icon: icon_for_view(view.view_type),
                 label: &view.name,
                 meta: view.view_type.caption(),
-                status: if modified { "modified" } else { "saved" },
+                status: if modified { "modified" } else { "" },
                 selected: selected_view == Some(view.name.as_str()),
                 read_only: false,
             },
@@ -624,7 +653,7 @@ fn view_column(
 fn column_frame(
     ui: &mut Ui,
     title: &str,
-    count: usize,
+    count: &str,
     width: f32,
     height: f32,
     body: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
@@ -646,7 +675,7 @@ fn column_frame(
             ui.painter().text(
                 pos2(header.right() - 10.0, header.center().y),
                 Align2::RIGHT_CENTER,
-                count.to_string(),
+                count,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_faint,
             );
@@ -671,17 +700,53 @@ fn column_scroll(title: &str) -> ScrollArea {
         .auto_shrink([false, false])
 }
 
+/// What a column's header and its empty body say: the rows it lists, as
+/// "3 of 120" while a filter hides some, and what an empty column holds.
+struct ColumnCount<'a> {
+    shown: usize,
+    total: usize,
+    empty: &'a str,
+}
+
+impl ColumnCount<'_> {
+    fn header(&self) -> String {
+        if self.shown == self.total {
+            self.shown.to_string()
+        } else {
+            format!("{} of {}", self.shown, self.total)
+        }
+    }
+}
+
+/// The text an empty column states in its body, in place of rows.
+fn empty_column_text(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(text)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+    });
+}
+
 /// A column whose rows are laid out in full: the built-in library's, whose
 /// class headings make its rows uneven.
 fn browser_column(
     ui: &mut Ui,
     title: &str,
-    count: usize,
+    count: ColumnCount<'_>,
     width: f32,
     height: f32,
     rows: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
 ) -> Option<LibraryIntent> {
-    column_frame(ui, title, count, width, height, |ui| {
+    column_frame(ui, title, &count.header(), width, height, |ui| {
+        if count.shown == 0 {
+            empty_column_text(ui, count.empty);
+            return None;
+        }
         column_scroll(title).show(ui, rows).inner
     })
 }
@@ -691,14 +756,19 @@ fn browser_column(
 fn virtual_browser_column(
     ui: &mut Ui,
     title: &str,
-    count: usize,
+    count: ColumnCount<'_>,
     width: f32,
     height: f32,
     mut row: impl FnMut(&mut Ui, usize) -> Option<LibraryIntent>,
 ) -> Option<LibraryIntent> {
-    column_frame(ui, title, count, width, height, |ui| {
+    let shown = count.shown;
+    column_frame(ui, title, &count.header(), width, height, |ui| {
+        if shown == 0 {
+            empty_column_text(ui, count.empty);
+            return None;
+        }
         column_scroll(title)
-            .show_rows(ui, BROWSER_ROW_HEIGHT, count, |ui, range| {
+            .show_rows(ui, BROWSER_ROW_HEIGHT, shown, |ui, range| {
                 let mut intent = None;
                 for index in range {
                     if let Some(asked) = row(ui, index) {
@@ -738,14 +808,19 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
             t.color.text_dim
         },
     );
-    let status_width = if spec.status.is_empty() { 0.0 } else { 52.0 };
     let label_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let status_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str, font: &egui::FontId| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
             .size()
             .x
+    };
+    let status_width = if spec.status.is_empty() {
+        0.0
+    } else {
+        measure(spec.status, &status_font) + 10.0
     };
     // The name is what a row is read by: in a narrow column the meta gives way
     // first, and only then is the name itself cut. They never overprint.
@@ -774,7 +849,7 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
             pos2(rect.right() - 8.0, rect.center().y),
             Align2::RIGHT_CENTER,
             spec.status,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
+            status_font,
             t.color.text_dim,
         );
     }
@@ -792,8 +867,9 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
 
 fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
-    let selected = selected_view(&cx.model.library_manager);
-    let selected_cell = selected_cell(&cx.model.library_manager);
+    let cell_shown = selected_cell_shown(ui.ctx(), cx);
+    let selected = selected_view(&cx.model.library_manager).filter(|_| cell_shown);
+    let selected_cell = selected_cell(&cx.model.library_manager).filter(|_| cell_shown);
     let selected_library = cx
         .model
         .library_manager
@@ -812,7 +888,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
             ui.set_min_height(DETAIL_HEIGHT - 10.0);
             ui.horizontal(|ui| {
                 match selected.as_ref() {
-                    Some((reference, view_type, modified, read_only)) => {
+                    Some((reference, view_type, modified, _)) => {
                         ui.label(
                             egui::RichText::new(reference.display_path())
                                 .font(theme::mono(tokens::FS_0, FontWeight::Medium))
@@ -820,15 +896,12 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                         );
                         ui.separator();
                         ui.label(view_type.caption());
-                        ui.separator();
-                        ui.label(if *read_only { "read only" } else { "writable" });
+                        // Only the exception is stated: the row and the strip
+                        // already say a library is read-only, and an unsaved
+                        // edit is a marker, not an alarm.
                         if *modified {
                             ui.separator();
-                            // An unsaved edit is a marker, not an alarm.
-                            ui.label(
-                                egui::RichText::new("working changes")
-                                    .color(t.color.text_dim),
-                            );
+                            ui.label(egui::RichText::new("modified").color(t.color.text_dim));
                         }
                     }
                     None => {
@@ -1020,6 +1093,20 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
         Stroke::new(1.0, t.color.border_strong),
     );
     intent
+}
+
+/// Whether the selected cell is one the Cell column lists: a filter can
+/// hide it, and then the page does not act on it.
+fn selected_cell_shown(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> bool {
+    let manager = &cx.model.library_manager;
+    let Some(cell) = manager.current_cell() else {
+        return false;
+    };
+    let filter = &cx.state.project_library_filter;
+    filter.trim().is_empty()
+        || cell_rows(ctx, manager, filter)
+            .iter()
+            .any(|row| row.name == cell.name)
 }
 
 fn selected_cell(manager: &crate::state::LibraryManager) -> Option<(String, String, bool)> {
@@ -1447,7 +1534,7 @@ mod tests {
                         icon: WorkbenchIcon::Folder,
                         label: "A library with a long name",
                         meta: "43",
-                        status: "RO",
+                        status: "read only",
                         selected: false,
                         read_only: true,
                     },

@@ -687,3 +687,113 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
         Some("authoring")
     );
 }
+
+/// Every string one whole application frame painted, one per line.
+fn painted_frame(app: &mut RSpiceApp) -> String {
+    fn collect(shape: &egui::epaint::Shape, text: &mut String) {
+        match shape {
+            egui::epaint::Shape::Text(shape) => {
+                text.push_str(shape.galley.text());
+                text.push('\n');
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, text);
+                }
+            }
+            _ => {}
+        }
+    }
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 900.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let ctx = ui.ctx().clone();
+                app.prepare_frame(&ctx);
+                app.render_frame_chrome(ui);
+                app.render_frame_dialogs(&ctx);
+            },
+        ));
+    }
+    let mut text = String::new();
+    for clipped in &output.expect("three frames ran").shapes {
+        collect(&clipped.shape, &mut text);
+    }
+    text
+}
+
+/// A library page over `work`, whose cells `amp` (with a schematic) and
+/// `bias` (with none) are in a writable library beside the read-only `ref`,
+/// with `amp` selected.
+fn filtered_library_app() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut amp = Cell::new("amp");
+    let mut schematic = View::new("schematic", ViewType::Schematic);
+    schematic.modified = true;
+    amp.add_view(schematic);
+    amp.add_view(View::new("symbol", ViewType::Symbol));
+    let mut work = Library::new("work");
+    work.add_cell(amp);
+    work.add_cell(Cell::new("bias"));
+    app.state.model.library_manager.add_library(work);
+    let mut reference = Library::new("ref");
+    reference.read_only = true;
+    app.state.model.library_manager.add_library(reference);
+    app.state
+        .model
+        .library_manager
+        .select_view("work", "amp", "schematic");
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Library;
+    app
+}
+
+/// The rows state only the exception: a read-only library and a modified
+/// view are marked; a writable library and a saved view say nothing, and the
+/// band does not repeat the library's access.
+#[test]
+fn library_rows_mark_only_a_read_only_library_and_a_modified_view() {
+    let mut app = filtered_library_app();
+    let text = painted_frame(&mut app);
+    let lines = text.lines().collect::<Vec<_>>();
+    for retired in ["RW", "RO", "saved", "writable", "working changes"] {
+        assert!(!lines.contains(&retired), "{retired:?} in:\n{text}");
+    }
+    assert!(lines.contains(&"read only"), "{text}");
+    assert!(lines.contains(&"modified"), "{text}");
+}
+
+/// A filter that hides the selected cell empties the View column and takes
+/// the cell's actions off the band; the Cell column counts "1 of 2" and says
+/// when nothing matches. A new project starts with no filter.
+#[test]
+fn a_filter_states_what_it_hides_and_never_acts_on_a_hidden_cell() {
+    let mut app = filtered_library_app();
+    let shown = painted_frame(&mut app);
+    assert!(shown.contains("Cell actions"), "{shown}");
+
+    app.state.project.project_library_filter = "bias".to_owned();
+    let hidden = painted_frame(&mut app);
+    let lines = hidden.lines().collect::<Vec<_>>();
+    assert!(lines.contains(&"1 of 2"), "{hidden}");
+    assert!(lines.contains(&"No cell selected"), "{hidden}");
+    assert!(!hidden.contains("Cell actions"), "{hidden}");
+    assert!(!hidden.contains("Open schematic"), "{hidden}");
+
+    app.state.project.project_library_filter = "zzz".to_owned();
+    let none = painted_frame(&mut app);
+    assert!(
+        none.contains("No cells match \u{201c}zzz\u{201d}"),
+        "{none}"
+    );
+
+    app.state.project.on_project_changed();
+    assert!(app.state.project.project_library_filter.is_empty());
+}

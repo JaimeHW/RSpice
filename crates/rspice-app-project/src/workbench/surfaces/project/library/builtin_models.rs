@@ -140,7 +140,7 @@ pub(super) fn library_row(ui: &mut Ui, browser: &BuiltinModelsBrowser) -> Option
             icon: WorkbenchIcon::Folder,
             label: BUILTIN_VERILOGA_LIBRARY,
             meta: &count,
-            status: "RO",
+            status: "read only",
             selected: browser.open,
             read_only: true,
         },
@@ -194,7 +194,17 @@ pub(super) fn cell_column(
         .filter(|model| matches_filter(model, &query))
         .collect::<Vec<_>>();
     let selected = selected_model(browser).map(|model| model.registry_name);
-    browser_column(ui, "Cell", shown.len(), width, height, |ui| {
+    let no_match = if shown.is_empty() {
+        format!("No cells match \u{201c}{}\u{201d}", filter.trim())
+    } else {
+        String::new()
+    };
+    let count = ColumnCount {
+        shown: shown.len(),
+        total: BUILTIN_VERILOGA_MODELS.len(),
+        empty: &no_match,
+    };
+    browser_column(ui, "Cell", count, width, height, |ui| {
         let mut intent = None;
         let mut class = None;
         for model in &shown {
@@ -230,7 +240,12 @@ pub(super) fn view_column(
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
-    browser_column(ui, "View", browser.files.len(), width, height, |ui| {
+    let count = ColumnCount {
+        shown: browser.files.len(),
+        total: browser.files.len(),
+        empty: "No cell selected",
+    };
+    browser_column(ui, "View", count, width, height, |ui| {
         let mut intent = None;
         for (index, file) in browser.files.iter().enumerate() {
             let response = browser_row(

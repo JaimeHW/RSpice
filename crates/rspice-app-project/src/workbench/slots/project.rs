@@ -207,11 +207,14 @@ impl ProjectState {
         self.examples_selection = Some(0);
     }
 
-    /// The open project is being replaced or closed: a Check and save review
-    /// and the Configuration and Dependencies pages' selections belong to the
-    /// project going away.
+    /// The open project is being replaced or closed: a Check and save review,
+    /// the Library page's filter and built-in library, and the Configuration
+    /// and Dependencies pages' selections belong to the project going away.
     pub fn on_project_changed(&mut self) {
         self.check_and_save.close();
+        self.project_library_filter.clear();
+        self.builtin_models.open = false;
+        self.builtin_models.source = None;
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;
