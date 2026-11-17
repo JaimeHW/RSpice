@@ -681,8 +681,8 @@ pub fn build_symbol_definition(
         || {
             rspice_design::model_bound_symbol::model_bound_binding_id(
                 model.workspace.content.project.id(),
-                &library_name,
-                &cell_name,
+                library_name,
+                cell_name,
             )
         },
         |definition| definition.identity.binding_id,
