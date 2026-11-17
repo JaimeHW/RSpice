@@ -36,7 +36,7 @@ pub fn project_library(
     let model = inspector.model;
     let library = model.library_manager.current_library();
     let library_path = library.and_then(|item| item.path.as_ref()).map_or_else(
-        || "in project".to_owned(),
+        || "In this project".to_owned(),
         |path| path.display().to_string(),
     );
     let technology = library.map_or("unbound", |item| {

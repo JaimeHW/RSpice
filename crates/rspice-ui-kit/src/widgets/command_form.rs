@@ -297,6 +297,29 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// [`Self::text`] in the body face, for a name or a description a reader
+    /// writes in words beside a select, which shows its value in that face:
+    /// one face down the form, the field as tall as the select and ending
+    /// where it ends.
+    pub fn text_sans(&mut self, label: &str, id: Id, value: &mut String, hint: &str) -> Response {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let response = form::text_field(
+                ui,
+                egui::TextEdit::singleline(value)
+                    .id(id)
+                    .font(theme::field_sans())
+                    .text_color(t.color.text)
+                    .hint_text(hint)
+                    .margin(egui::Margin::symmetric(8, 4)),
+                width,
+            );
+            form::name_control(ui, &response, label);
+            select_all_until_focused(ui, &response, value);
+            response
+        })
+    }
+
     /// One typed number in a field sized for a number rather than the whole
     /// control column, its `unit` set inside the field's end, and `note`
     /// after the field: what an empty field stands for, where the hint inside

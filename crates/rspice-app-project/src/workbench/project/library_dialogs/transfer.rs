@@ -284,7 +284,7 @@ impl ProjectFeature {
             )
             .status(status)
             .show(ctx, |rows| {
-                rows.value_mono("Source", &source);
+                rows.value("Source", &source);
                 if needs_target
                     && let Some(index) = rows.select(
                         "Library",
@@ -298,7 +298,7 @@ impl ProjectFeature {
                 }
                 if kind == TransferKind::CopyView {
                     edited |= rows
-                        .text(
+                        .text_sans(
                             "Cell",
                             egui::Id::new("library-transfer-cell"),
                             &mut form.target_cell,
@@ -312,7 +312,7 @@ impl ProjectFeature {
                     TransferKind::MoveCell => "Cell name",
                 };
                 let name = egui::Id::new("library-transfer-name");
-                edited |= rows.text(label, name, &mut form.name, "").changed();
+                edited |= rows.text_sans(label, name, &mut form.name, "").changed();
                 Some(name)
             });
         // A refusal belongs to what it refused; an edited form has not been

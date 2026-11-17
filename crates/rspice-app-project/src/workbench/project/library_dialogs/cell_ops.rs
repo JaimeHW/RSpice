@@ -353,7 +353,7 @@ impl ProjectFeature {
             )
             .status(error.as_deref().map_or(Ok(None), Err))
             .show(ctx, |rows| {
-                rows.value_mono("Source", &source);
+                rows.value("Source", &source);
                 rows.derived(&content);
                 if let Some(index) = rows.select(
                     "To library",
@@ -366,7 +366,7 @@ impl ProjectFeature {
                 }
                 let name = egui::Id::new("copy-cell-name");
                 edited |= rows
-                    .text("New name", name, &mut dialogs.copy_cell_name, "")
+                    .text_sans("New name", name, &mut dialogs.copy_cell_name, "")
                     .changed();
                 if !builtin {
                     edited |= rows.checks(

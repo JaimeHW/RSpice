@@ -99,7 +99,7 @@ impl ProjectFeature {
         // Only a library the project keeps has an access of its own.
         let access_editable = library.path.is_none() && form.cell.is_none();
         let location = library.path.as_ref().map_or_else(
-            || "in project".to_owned(),
+            || "In this project".to_owned(),
             |path| path.display().to_string(),
         );
         let technology = library.technology.trim().to_owned();
@@ -116,15 +116,23 @@ impl ProjectFeature {
             .then(|| LIBRARY_CATALOG_STALE_MESSAGE.to_owned())
             .or_else(|| form.error.clone());
         let mut edited = false;
+        let hint = match form.cell {
+            Some(_) => "What the cell is for",
+            None => "What the library is for",
+        };
+        // A description is prose: Enter breaks its line, as in the project's
+        // own properties.
         let choice = CommandForm::new(title, "Apply")
+            .reading_column()
+            .primary_on_enter(false)
             .primary_enabled(catalog_current)
             .status(error.as_deref().map_or(Ok(None), Err))
             .show(ctx, |rows| {
                 match &form.cell {
-                    Some(cell) => rows.value_mono("Cell", &format!("{}/{cell}", form.library)),
-                    None => rows.value_mono("Library", &form.library),
+                    Some(cell) => rows.value("Cell", &format!("{}/{cell}", form.library)),
+                    None => rows.value("Library", &form.library),
                 }
-                rows.value_mono("Location", &location);
+                rows.value("Location", &location);
                 if form.cell.is_none() && !technology.is_empty() {
                     rows.value("Technology", &technology);
                 }
@@ -133,7 +141,7 @@ impl ProjectFeature {
                 }
                 let description = egui::Id::new("library-properties-description");
                 edited |= rows
-                    .text("Description", description, &mut form.description, "")
+                    .text_multiline("Description", description, &mut form.description, hint, 3)
                     .changed();
                 if access_editable {
                     edited |= rows.checks("Access", &mut [("Read-only", &mut form.read_only)]);
@@ -141,9 +149,9 @@ impl ProjectFeature {
                     rows.value(
                         "Access",
                         if form.read_only {
-                            "read-only"
+                            "Read-only"
                         } else {
-                            "writable"
+                            "Writable"
                         },
                     );
                 }
