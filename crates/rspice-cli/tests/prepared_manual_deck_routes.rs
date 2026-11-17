@@ -809,3 +809,71 @@ fn every_clock_edge_runs_its_process_once_under_a_tight_analog_crossing() {
         "every edge counted once"
     );
 }
+
+/// A timer sample-and-hold slewed toward each sample: the corpus's C8 `sh`
+/// rung, written out.
+const SAMPLE_SLEW: &str = "`include \"disciplines.vams\"\n\
+    module sh_slew(in, out);\n  input in; output out; electrical in, out;\n  \
+    real s;\n  analog begin\n    @(initial_step) s = 0.0;\n    \
+    @(timer(0.5e-6, 1e-6)) s = V(in);\n    V(out) <+ slew(s, 1e6, -1e6);\n  \
+    end\nendmodule\n";
+
+/// A timer samples a 0.1 V/us ramp every 1 us from 0.5 us, and the output
+/// slews to each sample at 1 V/us. Sample `k`, taken at `t_k = 0.5 us + k
+/// us`, is the ramp there, `s_k = 0.1 V/us * t_k`. The output holds the
+/// previous sample up to `t_k`, rises from it at 1 V/us, and settles on `s_k`
+/// once it has caught up, 0.05 us after the first sample and 0.1 us after
+/// each later one. The output is piecewise linear and every corner is a
+/// breakpoint (the timer's instants and slew's catch-up corners), so
+/// interpolating the output between accepted points reads it exactly.
+#[test]
+fn a_timer_sample_slews_to_its_closed_form() {
+    let dir = test_dir("timer-sample-slew");
+    write(&dir, "sh.va", SAMPLE_SLEW);
+    write(
+        &dir,
+        "deck.cir",
+        "timer sample slewed\n.hdl \"sh.va\"\nvin in 0 pwl(0 0 10u 1)\n\
+         xsh in out sh_slew\n.tran 10n 10u\n.end\n",
+    );
+    let cli = cli_run(&dir.join("deck.cir"));
+    let time = reals(&cli["axes"][0]["values"]["values"]);
+    let out = cli["signals"]
+        .as_array()
+        .expect("the CLI's signals")
+        .iter()
+        .find(|signal| signal["descriptor"]["canonicalName"].as_str() == Some("v(out)"))
+        .map(|signal| reals(&signal["values"]["samples"]))
+        .expect("v(out)");
+    let at = |t: f64| {
+        let right = time.partition_point(|&point| point < t);
+        if time[right] == t {
+            return out[right];
+        }
+        let left = right - 1;
+        out[left] + (out[right] - out[left]) * (t - time[left]) / (time[right] - time[left])
+    };
+    let closed = |t: f64| {
+        let mut held = 0.0;
+        for k in 0..10 {
+            let sample_at = 0.5e-6 + k as f64 * 1.0e-6;
+            if t <= sample_at {
+                break;
+            }
+            let sample = 1.0e5 * sample_at;
+            held = sample.min(held + 1.0e6 * (t - sample_at));
+        }
+        held
+    };
+    for k in 0..10 {
+        let sample_at = 0.5e-6 + k as f64 * 1.0e-6;
+        for offset in [-0.2e-6, 0.0, 0.01e-6, 0.03e-6, 0.07e-6, 0.3e-6] {
+            let t = sample_at + offset;
+            let (got, want) = (at(t), closed(t));
+            assert!(
+                (got - want).abs() <= 1.0e-12,
+                "out at {t:e} s is {got} V, the closed form {want} V"
+            );
+        }
+    }
+}

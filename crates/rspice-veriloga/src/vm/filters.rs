@@ -605,6 +605,33 @@ mod tests {
         assert_eq!(slew.next_corner_time(2.0), Some(4.0));
     }
 
+    /// A catch-up shorter than the evaluation time can resolve leaves no
+    /// corner: `time` plus it is `time` itself, which acceptance would refuse
+    /// as a corner that is not ahead. The output is within a rounding of the
+    /// input, and the next evaluation follows it.
+    #[test]
+    fn slew_catch_up_below_time_resolution_leaves_no_corner() {
+        let rates = SlewRateMagnitudes {
+            rise: 1.0e6,
+            fall: 1.0e6,
+        };
+        let mut slew = SlewFilter::default();
+        slew.eval_operating_point(0.0, 1.5e-6);
+        slew.promote_operating_point_candidate();
+        let time: f64 = 1.6e-6;
+        let reach: f64 = 1.0e6 * (time - 1.5e-6);
+        let input = (0..4).fold(reach, |value, _| value.next_up());
+        let evaluation = slew.eval_with_input_coefficient(input, time, rates);
+        assert_eq!(evaluation.output, reach, "rate limited");
+        assert_eq!(evaluation.input_coefficient, 0.0);
+        assert_eq!(time + (input - reach) / 1.0e6, time);
+        slew.validate_commit(time)
+            .expect("no corner on the evaluation's own instant");
+        slew.commit();
+        assert_eq!(slew.next_corner_time(time), None);
+        assert_eq!(slew.eval(input, 1.7e-6, rates), input, "and then follows");
+    }
+
     #[test]
     fn slew_exact_corner_makes_long_and_split_steps_identical() {
         let seeded = || {
@@ -1671,7 +1698,14 @@ impl SlewFilter {
             // validation instead of silently dropping an exact breakpoint.
             // Normalized slew magnitudes are finite and strictly positive.
             let remaining_time = (input - state.output).abs() / limited_rate.abs();
-            Some(time + remaining_time)
+            // A catch-up nearer than `time` can resolve rounds onto `time`
+            // itself, and there is no corner left ahead to land on: the
+            // output is within a rounding of the input. Landed on its
+            // catch-up corner, a timer-sampled ramp's slew read 5e-17 V short
+            // of its sample, 5e-23 s of catch-up at 1.6 us, where one ulp is
+            // 2e-22 s. The next evaluation follows the input.
+            let corner = time + remaining_time;
+            (corner != time).then_some(corner)
         } else {
             None
         };
