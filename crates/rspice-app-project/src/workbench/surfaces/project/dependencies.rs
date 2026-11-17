@@ -655,6 +655,16 @@ fn ledger_actions(
     actions
 }
 
+/// Open `library` where it is edited, as its row's Open does: a design
+/// library on the Library page, a model library in Models.
+pub(in crate::workbench) fn open_dependency(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    library: &DependencyLibrary,
+) {
+    run_ledger_action(ctx, cx, library, LedgerAction::Open);
+}
+
 /// Carry out `action` on `library`, if the row still offers it.
 fn run_ledger_action(
     ctx: &Context,

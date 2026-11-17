@@ -361,8 +361,8 @@ fn a_project_with_no_technology_attached_carries_no_mark() {
         .collect();
     assert_eq!(
         technology.len(),
-        2,
-        "the page and the inspector: {technology:?}"
+        1,
+        "the page states it; the inspector speaks of the selected library: {technology:?}"
     );
     for (value, description) in technology {
         assert_eq!(value.as_deref(), Some("Not attached"));
@@ -606,6 +606,81 @@ fn a_model_library_opens_in_models_from_its_row() {
             .selected_library
             .as_deref(),
         Some(name.as_str())
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// The inspector states what a model library's row has no column for: on
+/// whose authority it is read, its digest, how many models it holds and each
+/// file it was read from, whole.
+#[test]
+fn a_model_library_states_its_access_digest_models_and_files_in_the_inspector() {
+    let mut libraries = libraries();
+    let name = libraries.found.clone();
+    libraries.app.state.project.project_dependency_selection =
+        Some(DependencyLibrary::model(&name));
+    let ctx = offscreen();
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    let output = app_frame(&ctx, &mut libraries.app, Vec::new());
+    let nodes = announced(&output);
+    let value = |label: &str| {
+        let found: Vec<_> = nodes
+            .iter()
+            .filter(|(said, ..)| said == label)
+            .map(|(_, value, ..)| value.clone())
+            .collect();
+        assert_eq!(found.len(), 1, "one {label} row: {nodes:#?}");
+        found[0].clone().unwrap_or_default()
+    };
+    let library = libraries
+        .app
+        .state
+        .model
+        .model_library_manager
+        .get_library(&name)
+        .expect("the library is attached")
+        .clone();
+    let access = match library.source_authority {
+        ModelSourceAuthority::BuiltIn => "Ships with RSpice",
+        ModelSourceAuthority::External => "Read from its file on every run",
+        ModelSourceAuthority::RetainedImport { .. } => "Kept in the project as imported",
+        ModelSourceAuthority::ProjectOwned { .. } => "Owned by the project",
+    };
+    assert_eq!(value("Access"), access);
+    let pin = library
+        .source_closure
+        .first()
+        .expect("an imported library pins its file");
+    assert_eq!(
+        value("Digest"),
+        pin.digest.to_string().chars().take(8).collect::<String>()
+    );
+    assert_eq!(value("Models"), library.models.len().to_string());
+    let file = pin
+        .path
+        .file_name()
+        .and_then(|file| file.to_str())
+        .expect("a file name");
+    // Plain words reach a screen reader as a value with no label, so every
+    // node is read, labelled or not.
+    let words: Vec<String> = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .flat_map(|(_, node)| [node.label(), node.value()])
+        .flatten()
+        .map(str::to_owned)
+        .collect();
+    let files = words
+        .iter()
+        .position(|text| text.starts_with("Files"))
+        .unwrap_or_else(|| panic!("the files have a heading of their own: {words:#?}"));
+    assert!(
+        words[files..].iter().any(|text| text.ends_with(file)),
+        "the file it was read from is stated under Files: {words:#?}"
     );
     let _ = std::fs::remove_dir_all(libraries.folder);
 }

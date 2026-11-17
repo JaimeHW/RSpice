@@ -60,6 +60,8 @@ pub enum ProjectInspectorAction {
     UseForRuns(ConfigurationSelection),
     /// Hand the shell what only it carries out.
     Shell(ProjectRequest),
+    /// Open this dependency where it is edited, as its row's Open does.
+    OpenDependency(DependencyLibrary),
 }
 
 pub(in crate::workbench) fn project(

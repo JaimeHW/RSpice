@@ -331,7 +331,9 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
             DependencyRow {
                 status: library_status(model, &key),
                 library: key,
-                version: nonempty_or_unset(&library.technology),
+                // A design library has no version; the technology it is
+                // drawn for is the inspector's to state.
+                version: UNSET.to_owned(),
                 source: library
                     .path
                     .as_deref()
