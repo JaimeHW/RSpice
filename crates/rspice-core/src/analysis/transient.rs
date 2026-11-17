@@ -9,7 +9,9 @@ use self::waveform::{
 use crate::analysis::fourier::FourierResult;
 use crate::analysis::measure::{ContinuousMeasureResult, MeasureResult};
 use crate::netlist::OutputScheduleError;
-use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
+use crate::netlist::{
+    FftFormat, FftOutput, FftWindow, XyceFftMode, XyceIntervalOutput, XyceOutputIntervalSchedule,
+};
 use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -340,6 +342,27 @@ enum TransientOutputCoordinate {
     },
 }
 
+impl TransientOutputCoordinate {
+    /// The sample of a series whose accepted sample `index` is `value(index)`, reading the
+    /// accepted samples in increasing order. Interval schedules use the same current-side
+    /// linear formula as Xyce 7.10's transient integration methods; an exact accepted sample is
+    /// copied without arithmetic so its IEEE-754 value is unchanged.
+    fn sample(self, mut value: impl FnMut(usize) -> Value) -> Value {
+        match self {
+            Self::Accepted(index) => value(index),
+            Self::Linear {
+                previous,
+                current,
+                from_current,
+            } => {
+                let previous_value = value(previous);
+                let current_value = value(current);
+                current_value + from_current * (current_value - previous_value)
+            }
+        }
+    }
+}
+
 /// Sample selection and interpolation used by transient output writers.
 ///
 /// The solver result always retains its complete accepted history. This view
@@ -364,133 +387,53 @@ impl TransientOutputProjection {
         stop_time: Value,
         max_points: usize,
     ) -> Result<Self, OutputScheduleError> {
-        if !start_time.is_finite()
-            || !stop_time.is_finite()
-            || start_time < 0.0
-            || stop_time < start_time
-        {
-            return Err(
-                format!("invalid transient output window [{start_time}, {stop_time}]").into(),
-            );
+        if !output_time_points.is_empty() || output_interval_schedule.is_some() {
+            let mut walk = TransientOutputWalk::new(
+                source_times.len(),
+                output_time_points,
+                output_interval_schedule,
+                start_time,
+                stop_time,
+                max_points,
+            )?;
+            let (mut times, mut coordinates) = (Vec::new(), Vec::new());
+            for &time in source_times {
+                walk.push(time, &mut |row| {
+                    times.push(row.time);
+                    coordinates.push(row.coordinate);
+                })?;
+            }
+            walk.finish()?;
+            return Ok(TransientOutputProjection {
+                source_len: source_times.len(),
+                times,
+                coordinates,
+            });
         }
+        check_output_window(start_time, stop_time)?;
         if source_times.is_empty() {
             return Err("transient result has no accepted samples".into());
         }
-        if !output_time_points.is_empty() && output_interval_schedule.is_some() {
-            return Err(
-                "transient output cannot combine OUTPUTTIMEPOINTS and INITIAL_INTERVAL".into(),
-            );
-        }
-        if let Some(invalid) = output_time_points
-            .iter()
-            .find(|time| !time.is_finite() || **time < 0.0)
-        {
-            return Err(
-                format!("transient output schedule contains invalid time {invalid}").into(),
-            );
-        }
+        let mut previous = None;
         for (index, &time) in source_times.iter().enumerate() {
-            if !time.is_finite() {
-                return Err(format!("transient result time[{index}] is not finite").into());
-            }
-            if index > 0 && time <= source_times[index - 1] {
-                return Err(format!(
-                    "transient result time grid is not strictly increasing at index {index}"
-                )
-                .into());
-            }
+            check_accepted_time(index, time, &mut previous)?;
         }
-
-        let (times, coordinates) = if let Some(schedule) = output_interval_schedule {
-            let first = source_times.partition_point(|time| *time < start_time);
-            let output_start_time = source_times.get(first).copied().ok_or_else(|| {
-                format!("transient result has no accepted sample at or after TSTART={start_time}")
-            })?;
-            if output_start_time > stop_time {
-                return Err("transient output projection selected no samples".into());
-            }
-            let events = schedule.output_events(source_times, start_time, stop_time, max_points)?;
-            let mut times = Vec::with_capacity(events.len());
-            let mut coordinates = Vec::with_capacity(events.len());
-            for event in events {
-                times.push(event.output_time);
-                let Some(target) = event.interpolation_time else {
-                    coordinates.push(TransientOutputCoordinate::Accepted(event.accepted_index));
-                    continue;
-                };
-                let current = event.accepted_index;
-                if current == 0 || current >= source_times.len() {
-                    return Err(format!(
-                        "transient output time {target} has no accepted interpolation bracket"
-                    )
-                    .into());
-                }
-                let previous = current - 1;
-                let width = source_times[current] - source_times[previous];
-                let from_current = (target - source_times[current]) / width;
-                if !from_current.is_finite() || !(-1.0..=0.0).contains(&from_current) {
-                    return Err(format!(
-                        "transient output time {target} has an invalid interpolation bracket"
-                    )
-                    .into());
-                }
-                coordinates.push(TransientOutputCoordinate::Linear {
-                    previous,
-                    current,
-                    from_current,
-                });
-            }
-            (times, coordinates)
-        } else if output_time_points.is_empty() {
-            let first = source_times.partition_point(|time| *time < start_time);
-            let last = source_times.partition_point(|time| *time <= stop_time);
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ResultValues,
-                last.saturating_sub(first),
-                max_points,
-            )?;
-            (
-                source_times[first..last].to_vec(),
-                (first..last)
-                    .map(TransientOutputCoordinate::Accepted)
-                    .collect(),
-            )
-        } else {
-            let mut requested = output_time_points
-                .iter()
-                .copied()
-                .filter(|time| *time >= start_time && *time <= stop_time)
-                .collect::<Vec<_>>();
-            requested.push(stop_time);
-            requested.sort_by(Value::total_cmp);
-            requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ResultValues,
-                requested.len(),
-                max_points,
-            )?;
-
-            let mut coordinates = Vec::with_capacity(requested.len());
-            for &requested_time in &requested {
-                let index = source_times
-                    .binary_search_by(|time| time.total_cmp(&requested_time))
-                    .map_err(|_| {
-                        format!(
-                            "transient result did not land on requested output time {requested_time}"
-                        )
-                    })?;
-                coordinates.push(TransientOutputCoordinate::Accepted(index));
-            }
-            (requested, coordinates)
-        };
-
-        if coordinates.is_empty() {
+        let first = source_times.partition_point(|time| *time < start_time);
+        let last = source_times.partition_point(|time| *time <= stop_time);
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            last.saturating_sub(first),
+            max_points,
+        )?;
+        if last <= first {
             return Err("transient output projection selected no samples".into());
         }
         Ok(TransientOutputProjection {
             source_len: source_times.len(),
-            times,
-            coordinates,
+            times: source_times[first..last].to_vec(),
+            coordinates: (first..last)
+                .map(TransientOutputCoordinate::Accepted)
+                .collect(),
         })
     }
 
@@ -559,11 +502,8 @@ impl TransientOutputProjection {
         &self.times
     }
 
-    /// Project one accepted-history series onto the output grid.
-    ///
-    /// Interval schedules use the same current-side linear formula as Xyce
-    /// 7.10's transient integration methods. Exact accepted samples are copied
-    /// without arithmetic so their IEEE-754 values remain unchanged.
+    /// Project one accepted-history series onto the output grid, sampling it
+    /// as [`TransientOutputRow::sample`] does.
     pub fn project(&self, values: &[Value]) -> Result<Vec<Value>, String> {
         if values.len() != self.source_len {
             return Err(format!(
@@ -575,19 +515,309 @@ impl TransientOutputProjection {
         Ok(self
             .coordinates
             .iter()
-            .map(|coordinate| match *coordinate {
-                TransientOutputCoordinate::Accepted(index) => values[index],
-                TransientOutputCoordinate::Linear {
-                    previous,
-                    current,
-                    from_current,
-                } => {
-                    let current_value = values[current];
-                    current_value + from_current * (current_value - values[previous])
-                }
-            })
+            .map(|coordinate| coordinate.sample(|index| values[index]))
             .collect())
     }
+}
+
+/// One row of a transient output schedule: its time and the accepted samples
+/// it is read from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransientOutputRow {
+    time: Value,
+    coordinate: TransientOutputCoordinate,
+}
+
+impl TransientOutputRow {
+    /// The row's output time.
+    pub fn time(&self) -> Value {
+        self.time
+    }
+
+    /// The row's value of a series whose accepted sample `index` is
+    /// `value(index)`, as [`TransientOutputProjection::project`] projects the
+    /// whole series; the accepted samples are read in increasing order.
+    pub fn sample(&self, value: impl FnMut(usize) -> Value) -> Value {
+        self.coordinate.sample(value)
+    }
+}
+
+/// [`TransientOutputProjection::from_accepted_times`] for an output schedule
+/// (`OUTPUTTIMEPOINTS` or `INITIAL_INTERVAL`), fed one accepted time at a time
+/// and handing over each output row as soon as it is due, so an output can be
+/// scheduled from a run's accepted times as they are read: it holds no time
+/// grid, only the requested times of an `OUTPUTTIMEPOINTS` schedule.
+#[derive(Debug, Clone)]
+pub struct TransientOutputWalk<'s> {
+    schedule: WalkSchedule<'s>,
+    source_len: usize,
+    start_time: Value,
+    stop_time: Value,
+    /// The index the next accepted time has.
+    index: usize,
+    previous_time: Option<Value>,
+    rows: usize,
+}
+
+#[derive(Debug, Clone)]
+enum WalkSchedule<'s> {
+    /// The requested output times, in order, and the next one still due.
+    Points { requested: Vec<Value>, next: usize },
+    /// Xyce's interval scheduler, and whether an accepted time at or after
+    /// the output start has been fed.
+    Interval {
+        output: XyceIntervalOutput<'s>,
+        started: bool,
+    },
+}
+
+impl<'s> TransientOutputWalk<'s> {
+    /// A walk over `source_len` accepted times, which the output schedule
+    /// selects from in `[start_time, stop_time]`; refused when the deck sets no
+    /// schedule.
+    pub fn new(
+        source_len: usize,
+        output_time_points: &[Value],
+        output_interval_schedule: Option<&'s XyceOutputIntervalSchedule>,
+        start_time: Value,
+        stop_time: Value,
+        max_points: usize,
+    ) -> Result<Self, OutputScheduleError> {
+        check_output_window(start_time, stop_time)?;
+        if source_len == 0 {
+            return Err("transient result has no accepted samples".into());
+        }
+        if !output_time_points.is_empty() && output_interval_schedule.is_some() {
+            return Err(
+                "transient output cannot combine OUTPUTTIMEPOINTS and INITIAL_INTERVAL".into(),
+            );
+        }
+        if let Some(invalid) = output_time_points
+            .iter()
+            .find(|time| !time.is_finite() || **time < 0.0)
+        {
+            return Err(
+                format!("transient output schedule contains invalid time {invalid}").into(),
+            );
+        }
+        let schedule = match output_interval_schedule {
+            Some(schedule) => WalkSchedule::Interval {
+                output: XyceIntervalOutput::new(schedule, start_time, stop_time, max_points)?,
+                started: false,
+            },
+            None if !output_time_points.is_empty() => {
+                let mut requested = output_time_points
+                    .iter()
+                    .copied()
+                    .filter(|time| *time >= start_time && *time <= stop_time)
+                    .collect::<Vec<_>>();
+                requested.push(stop_time);
+                requested.sort_by(Value::total_cmp);
+                requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ResultValues,
+                    requested.len(),
+                    max_points,
+                )?;
+                WalkSchedule::Points { requested, next: 0 }
+            }
+            None => return Err("transient output has no output schedule".into()),
+        };
+        Ok(Self {
+            schedule,
+            source_len,
+            start_time,
+            stop_time,
+            index: 0,
+            previous_time: None,
+            rows: 0,
+        })
+    }
+
+    /// Feed the next accepted time and pass the output rows it makes due to
+    /// `emit`, in order.
+    pub fn push(
+        &mut self,
+        time: Value,
+        emit: &mut impl FnMut(TransientOutputRow),
+    ) -> Result<(), OutputScheduleError> {
+        let index = self.index;
+        if index >= self.source_len {
+            return Err(format!(
+                "transient result has more than its {} accepted samples",
+                self.source_len
+            )
+            .into());
+        }
+        self.index += 1;
+        let previous_time = self.previous_time;
+        check_accepted_time(index, time, &mut self.previous_time)?;
+        match &mut self.schedule {
+            WalkSchedule::Points { requested, next } => {
+                while let Some(&requested_time) = requested.get(*next) {
+                    match requested_time.total_cmp(&time) {
+                        std::cmp::Ordering::Less => {
+                            return Err(missed_output_time(requested_time));
+                        }
+                        std::cmp::Ordering::Equal => {
+                            emit(TransientOutputRow {
+                                time: requested_time,
+                                coordinate: TransientOutputCoordinate::Accepted(index),
+                            });
+                            self.rows += 1;
+                            *next += 1;
+                        }
+                        std::cmp::Ordering::Greater => break,
+                    }
+                }
+            }
+            WalkSchedule::Interval { output, started } => {
+                if !*started && time >= self.start_time {
+                    *started = true;
+                    if time > self.stop_time {
+                        return Err("transient output projection selected no samples".into());
+                    }
+                }
+                let last = index + 1 == self.source_len;
+                if last && !*started {
+                    return Err(no_sample_after_start(self.start_time));
+                }
+                let rows = &mut self.rows;
+                let mut failure = None;
+                output.accept(time, last, &mut |event| {
+                    if failure.is_some() {
+                        return;
+                    }
+                    let coordinate = match event.interpolation_time {
+                        None => TransientOutputCoordinate::Accepted(event.accepted_index),
+                        Some(target) => match interpolation_bracket(
+                            target,
+                            event.accepted_index,
+                            index,
+                            time,
+                            previous_time,
+                        ) {
+                            Ok(coordinate) => coordinate,
+                            Err(error) => {
+                                failure = Some(error);
+                                return;
+                            }
+                        },
+                    };
+                    emit(TransientOutputRow {
+                        time: event.output_time,
+                        coordinate,
+                    });
+                    *rows += 1;
+                })?;
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check the schedule is complete once every accepted time is fed, and
+    /// count its rows.
+    pub fn finish(&self) -> Result<usize, OutputScheduleError> {
+        if self.index < self.source_len {
+            return Err(format!(
+                "transient result has {} of its {} accepted samples",
+                self.index, self.source_len
+            )
+            .into());
+        }
+        match &self.schedule {
+            WalkSchedule::Points { requested, next } => {
+                if let Some(&missed) = requested.get(*next) {
+                    return Err(missed_output_time(missed));
+                }
+            }
+            WalkSchedule::Interval { output, started } => {
+                if !*started {
+                    return Err(no_sample_after_start(self.start_time));
+                }
+                output.finish()?;
+            }
+        }
+        if self.rows == 0 {
+            return Err("transient output projection selected no samples".into());
+        }
+        Ok(self.rows)
+    }
+}
+
+/// Refuse an output window that is not finite, starts before zero or ends before it starts.
+fn check_output_window(start_time: Value, stop_time: Value) -> Result<(), OutputScheduleError> {
+    if !start_time.is_finite()
+        || !stop_time.is_finite()
+        || start_time < 0.0
+        || stop_time < start_time
+    {
+        return Err(format!("invalid transient output window [{start_time}, {stop_time}]").into());
+    }
+    Ok(())
+}
+
+/// Refuse accepted time `index`, `time`, when it is not finite or not after `previous`, which
+/// it then replaces.
+fn check_accepted_time(
+    index: usize,
+    time: Value,
+    previous: &mut Option<Value>,
+) -> Result<(), OutputScheduleError> {
+    if !time.is_finite() {
+        return Err(format!("transient result time[{index}] is not finite").into());
+    }
+    if previous
+        .replace(time)
+        .is_some_and(|previous| time <= previous)
+    {
+        return Err(format!(
+            "transient result time grid is not strictly increasing at index {index}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn missed_output_time(requested_time: Value) -> OutputScheduleError {
+    format!("transient result did not land on requested output time {requested_time}").into()
+}
+
+fn no_sample_after_start(start_time: Value) -> OutputScheduleError {
+    format!("transient result has no accepted sample at or after TSTART={start_time}").into()
+}
+
+/// The interpolation an interval-output row at `target` reads from accepted step `current`,
+/// the step at `index` and `time` just fed, and the one before it, at `previous_time`.
+fn interpolation_bracket(
+    target: Value,
+    current: usize,
+    index: usize,
+    time: Value,
+    previous_time: Option<Value>,
+) -> Result<TransientOutputCoordinate, OutputScheduleError> {
+    let previous_time = previous_time.filter(|_| current == index && current > 0);
+    let Some(previous_time) = previous_time else {
+        return Err(format!(
+            "transient output time {target} has no accepted interpolation bracket"
+        )
+        .into());
+    };
+    let width = time - previous_time;
+    let from_current = (target - time) / width;
+    if !from_current.is_finite() || !(-1.0..=0.0).contains(&from_current) {
+        return Err(
+            format!("transient output time {target} has an invalid interpolation bracket").into(),
+        );
+    }
+    Ok(TransientOutputCoordinate::Linear {
+        previous: current - 1,
+        current,
+        from_current,
+    })
 }
 
 /// One accepted digital event sample for a named XSPICE digital node.

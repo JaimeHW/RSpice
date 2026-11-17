@@ -91,6 +91,40 @@ fn a_streamed_output_is_byte_identical_to_the_same_run_read_back_into_memory() {
     }
 }
 
+/// The `format` output of `deck` (a deck without `.end`) written from its store, and of the
+/// same deck with a measurement that reads it back whole, each run asserted to take its route.
+fn streamed_and_read_back(
+    dir: &std::path::Path,
+    tag: &str,
+    deck: &str,
+    format: &str,
+) -> [Vec<u8>; 2] {
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    [("streamed", ""), ("read-back", read_back)].map(|(twin, extra)| {
+        let path = dir.join(format!("{tag}-{twin}.cir"));
+        std::fs::write(&path, format!("{deck}{extra}.end\n")).unwrap();
+        let out = dir.join(format!("{tag}-{twin}.{format}"));
+        let output = run_rspice(&[
+            "run",
+            path.to_str().unwrap(),
+            "-f",
+            format,
+            "-o",
+            out.to_str().unwrap(),
+            "--log-level",
+            "debug",
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{tag} {twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{tag} {twin}: {stderr}"
+        );
+        std::fs::read(&out).unwrap()
+    })
+}
+
 /// A `.PRINT` card chooses a delimited table's columns and names them as it spells them. A
 /// column that is one of the store's is read from the store; an expression or a voltage between
 /// two nodes is evaluated from the store's columns a chunk at a time. Either way the table is
@@ -99,7 +133,6 @@ fn a_streamed_output_is_byte_identical_to_the_same_run_read_back_into_memory() {
 fn a_printed_table_is_written_from_the_store() {
     let dir = test_dir("results-store-printed");
     let body = RC.trim_end_matches(".end\n");
-    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
     for (tag, print, header) in [
         ("columns", ".print tran v(out) i(v1)\n", "time,v(out),i(v1)"),
         (
@@ -108,33 +141,41 @@ fn a_printed_table_is_written_from_the_store() {
             "time,\"v(in,out)\",{2*v(out)-v(in)},v(out)",
         ),
     ] {
-        let mut tables = Vec::new();
-        for (twin, extra) in [("streamed", ""), ("read-back", read_back)] {
-            let deck = dir.join(format!("{tag}-{twin}.cir"));
-            std::fs::write(&deck, format!("{body}{print}{extra}.end\n")).unwrap();
-            let out = dir.join(format!("{tag}-{twin}.csv"));
-            let output = run_rspice(&[
-                "run",
-                deck.to_str().unwrap(),
-                "-f",
-                "csv",
-                "-o",
-                out.to_str().unwrap(),
-                "--log-level",
-                "debug",
-            ]);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(output.status.success(), "{tag} {twin}: {stderr}");
-            assert_eq!(
-                twin == "streamed",
-                !stderr.contains("back whole"),
-                "{tag} {twin}: {stderr}"
-            );
-            tables.push(std::fs::read_to_string(&out).unwrap());
+        let [streamed, read_back] =
+            streamed_and_read_back(&dir, tag, &format!("{body}{print}"), "csv");
+        let table = String::from_utf8(streamed.clone()).unwrap();
+        assert!(table.starts_with(header), "{tag}: {table}");
+        assert!(table.lines().count() > 300, "{tag}");
+        assert_eq!(streamed, read_back, "{tag}");
+    }
+}
+
+/// An `.OPTIONS OUTPUT` schedule's rows are walked from the store's as they are read: a
+/// lattice interpolated between accepted steps, or exact time points the run stopped at, byte
+/// for byte the output of the run read back whole, and fewer rows than every accepted step.
+#[test]
+fn an_output_schedule_is_projected_from_the_store() {
+    let dir = test_dir("results-store-scheduled");
+    let body = RC.trim_end_matches(".end\n");
+    let [every_step, _] = streamed_and_read_back(&dir, "every-step", body, "csv");
+    let every_step = String::from_utf8(every_step).unwrap().lines().count();
+    for (tag, schedule) in [
+        ("interval", ".options output initial_interval=25n\n"),
+        ("points", ".options output outputtimepoints=100n,333n,1u\n"),
+    ] {
+        for format in ["csv", "raw"] {
+            let tag = format!("{tag}-{format}");
+            let [streamed, read_back] =
+                streamed_and_read_back(&dir, &tag, &format!("{body}{schedule}"), format);
+            if format == "csv" {
+                let rows = String::from_utf8(streamed.clone()).unwrap().lines().count();
+                assert!(
+                    rows > 2 && rows < every_step,
+                    "{tag}: {rows} of {every_step}"
+                );
+            }
+            assert_eq!(streamed, read_back, "{tag}");
         }
-        assert!(tables[0].starts_with(header), "{tag}: {}", tables[0]);
-        assert!(tables[0].lines().count() > 300, "{tag}");
-        assert_eq!(tables[0], tables[1], "{tag}");
     }
 }
 

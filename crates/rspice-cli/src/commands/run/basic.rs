@@ -1477,17 +1477,15 @@ fn finish_transient_products(
         (Some(plan), Some(stored))
             if super::xyce_files::prints(ctx, rspice_core::netlist::OutputAnalysisKind::Tran) =>
         {
-            let (first, points) = stored.rows.output_rows(tstart, tstop)?;
-            let points = usize::try_from(points).map_err(|_| CliError::InternalError {
-                message: "a transient output has more rows than this host can address".to_owned(),
-            })?;
+            let view = stored.rows.output_view(ctx.netlist, tstart, tstop)?;
+            let points = view.points();
             let column_events = plan
                 .reads_events()
                 .then(|| stored.rows.events(result))
                 .transpose()?;
             let mut cursor = stored.rows.cursor(
                 plan,
-                first,
+                &view,
                 column_events
                     .as_ref()
                     .map(|events| events as &dyn rspice_core::execution::EventSource),
@@ -1545,7 +1543,7 @@ fn finish_transient_products(
         let mut streamed_rows = None;
         let output_time = match (plan, stored.as_deref_mut()) {
             (Some(_), Some(stored)) => {
-                streamed_rows = Some(stored.rows.output_rows(tstart, tstop)?);
+                streamed_rows = Some(stored.rows.output_view(ctx.netlist, tstart, tstop)?);
                 Vec::new()
             }
             _ => {
@@ -1683,23 +1681,18 @@ fn finish_transient_products(
                 match (&document, streamed_rows, plan, stored) {
                     (
                         TransientOutputDocument::Table { table, events },
-                        Some((first, points)),
+                        Some(view),
                         Some(plan),
                         Some(stored),
                     ) => {
-                        let points =
-                            usize::try_from(points).map_err(|_| CliError::InternalError {
-                                message: "a transient output has more rows than this host \
-                                          can address"
-                                    .to_owned(),
-                            })?;
+                        let points = view.points();
                         let column_events = plan
                             .reads_events()
                             .then(|| stored.rows.events(result))
                             .transpose()?;
                         let mut cursor = stored.rows.cursor(
                             plan,
-                            first,
+                            &view,
                             column_events
                                 .as_ref()
                                 .map(|events| events as &dyn rspice_core::execution::EventSource),
@@ -1714,18 +1707,8 @@ fn finish_transient_products(
                         cursor.finish(&output_path)?;
                         write_raw_event_plots(writer, &output_path, ctx.format, events)
                     }
-                    (
-                        TransientOutputDocument::Hdf5(data),
-                        Some((first, points)),
-                        Some(plan),
-                        Some(stored),
-                    ) => {
-                        let points =
-                            usize::try_from(points).map_err(|_| CliError::InternalError {
-                                message: "a transient output has more rows than this host \
-                                          can address"
-                                    .to_owned(),
-                            })?;
+                    (TransientOutputDocument::Hdf5(data), Some(view), Some(plan), Some(stored)) => {
+                        let points = view.points();
                         // Each dataset is one column of the store, written as it is read, in
                         // the order the document refuses a non-finite sample in.
                         let names = std::iter::once("time")
@@ -1737,7 +1720,7 @@ fn finish_transient_products(
                             .transpose()?;
                         let mut cursor = stored.rows.cursor(
                             plan,
-                            first,
+                            &view,
                             column_events
                                 .as_ref()
                                 .map(|events| events as &dyn rspice_core::execution::EventSource),

@@ -193,8 +193,8 @@ pub use result::{
     HdlDriverKind, HdlSourceLine, HdlTraceDriver, HdlTraceSource, MAX_DIGITAL_BUS_WIDTH, RealTrace,
     RealTracePoint, TransientDeviceOpTrace, TransientFftBin, TransientFftHarmonic,
     TransientFftMetrics, TransientFftResult, TransientFftStatus, TransientFourierResult,
-    TransientOutputProjection, TransientPostResults, TransientResult, TransientStoreTrace,
-    validate_digital_bus_table,
+    TransientOutputProjection, TransientOutputRow, TransientOutputWalk, TransientPostResults,
+    TransientResult, TransientStoreTrace, validate_digital_bus_table,
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};

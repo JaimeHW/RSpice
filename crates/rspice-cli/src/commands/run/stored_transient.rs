@@ -10,6 +10,7 @@
 //! outputs are the store's own columns over every accepted step. Any other output reads the whole
 //! run back into memory first and goes through the in-memory path unchanged.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,11 +21,14 @@ use rspice_core::analysis::{
 };
 use rspice_core::engine::{
     AcceptedTransientRows, ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint,
-    TransientEnd, TransientFourierResult, TransientPostResults, TransientResult,
-    TransientStartupMode, TransientState,
+    TransientEnd, TransientFourierResult, TransientOutputRow, TransientOutputWalk,
+    TransientPostResults, TransientResult, TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
-use rspice_core::netlist::{AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind};
+use rspice_core::netlist::{
+    AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind, OutputScheduleError,
+    XyceOutputIntervalSchedule,
+};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_core::xspice::DigitalValue;
 use rspice_results::stored_transient::{
@@ -512,9 +516,10 @@ impl StoredTransient {
     /// How the outputs can read this run straight from its store, or `None` when they need it in
     /// memory.
     ///
-    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, keeps
-    /// every accepted step, and asks for a rawfile, a delimited table, HDF5, an event dump or
-    /// nothing (a `.PRINT TRAN` card's Xyce `.prn` table is laid out from the store too); when
+    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, and
+    /// asks for a rawfile, a delimited table, HDF5, an event dump or nothing (a `.PRINT TRAN`
+    /// card's Xyce `.prn` table is laid out from the store too, and an output schedule's rows
+    /// are projected from the store's as they are read); when
     /// every output signal is one of the store's columns, value for value, or a column sampled
     /// from an event trace (`D(node)`, `E(node)`); and when its `.MEASURE TRAN` statements, if
     /// any, read only the store's columns in forms measured in one pass over the rows. The
@@ -537,8 +542,6 @@ impl StoredTransient {
                     | OutputFormat::Hdf5
                     | OutputFormat::Vcd
             );
-        let every_step = netlist.options.output_time_points.is_empty()
-            && netlist.options.output_interval_schedule.is_none();
         let rows = self.rows.rows();
         let parameters = !self.rows.parameters.is_empty();
         let whole = if !format_streams {
@@ -547,8 +550,6 @@ impl StoredTransient {
             Some("it saves instance parameters")
         } else if !ctx.engine.transient_rows_are_whole(netlist) {
             Some("its rows are not the run's whole trajectory")
-        } else if !every_step {
-            Some("it prints on an output schedule")
         } else if netlist
             .measurements
             .iter()
@@ -1695,9 +1696,70 @@ impl StoredRows {
         ))
     }
 
+    /// The rows an output carries: every accepted step from `tstart` to `tstop`, or the times
+    /// the deck's `.OPTIONS OUTPUT` schedule selects, projected from the accepted steps as the
+    /// in-memory output projection projects them, from the same time grid, which is the one
+    /// column read whole for it.
+    pub(super) fn output_view(
+        &mut self,
+        netlist: &rspice_core::Netlist,
+        tstart: f64,
+        tstop: f64,
+    ) -> Result<OutputView, CliError> {
+        let options = &netlist.options;
+        if options.output_time_points.is_empty() && options.output_interval_schedule.is_none() {
+            let (first, points) = self.output_rows(tstart, tstop)?;
+            let points = usize::try_from(points).map_err(|_| CliError::InternalError {
+                message: "a transient output has more rows than this host can address".to_owned(),
+            })?;
+            return Ok(OutputView {
+                first,
+                points,
+                schedule: None,
+            });
+        }
+        let schedule_error = |error| CliError::from(rspice_core::SimulationError::from(error));
+        let source_len = usize::try_from(self.rows()).map_err(|_| CliError::InternalError {
+            message: "a transient store holds more rows than this host can address".to_owned(),
+        })?;
+        let chunks = self.reader.chunk_spans().count();
+        let mut times = Vec::new();
+        if chunks > 0 {
+            self.reader
+                .read_chunk_x(0, &mut times)
+                .map_err(|error| store_error(&self.store.dir, error))?;
+        }
+        let schedule = OutputSchedule {
+            time_points: options.output_time_points.clone(),
+            interval: options.output_interval_schedule.clone(),
+            start: times.first().map_or(tstart, |&first| tstart.max(first)),
+            stop: tstop,
+            source_len,
+        };
+        // The schedule is walked once here to check it and count its rows, and again by
+        // each cursor that reads them.
+        let mut walk = schedule.walk().map_err(schedule_error)?;
+        for chunk in 0..chunks {
+            if chunk > 0 {
+                self.reader
+                    .read_chunk_x(chunk, &mut times)
+                    .map_err(|error| store_error(&self.store.dir, error))?;
+            }
+            for &time in &times {
+                walk.push(time, &mut |_| {}).map_err(schedule_error)?;
+            }
+        }
+        let points = walk.finish().map_err(schedule_error)?;
+        Ok(OutputView {
+            first: 0,
+            points,
+            schedule: Some(schedule),
+        })
+    }
+
     /// The rows an output carries over every accepted step from `tstart` to `tstop`, checked
     /// as the in-memory projection checks the time grid: `(first row, row count)`.
-    pub(super) fn output_rows(&mut self, tstart: f64, tstop: f64) -> Result<(u64, u64), CliError> {
+    fn output_rows(&mut self, tstart: f64, tstop: f64) -> Result<(u64, u64), CliError> {
         let invalid = |message: String| {
             CliError::from(rspice_core::SimulationError::from(
                 rspice_core::netlist::OutputScheduleError::Invalid(message),
@@ -1844,17 +1906,21 @@ impl StoredRows {
     pub(super) fn cursor<'r>(
         &'r mut self,
         plan: &'r StreamPlan,
-        first: u64,
+        view: &'r OutputView,
         events: Option<&'r dyn EventSource>,
     ) -> RowCursor<'r> {
-        RowCursor::over(
+        let mut cursor = RowCursor::over(
             &self.store.dir,
             &mut self.reader,
             &plan.columns,
             events,
             plan.derived.as_ref(),
-            first,
-        )
+            view.first,
+        );
+        if let Some(schedule) = &view.schedule {
+            cursor.scheduled = Some(ScheduledRows::new(schedule, plan.columns.len() + 1));
+        }
+        cursor
     }
 
     /// Leave the store beside `output` as `<stem>.rsr/`, replacing an earlier run's store there,
@@ -1877,6 +1943,89 @@ impl StoredRows {
     }
 }
 
+/// The rows an output carries, as [`StoredRows::output_view`] selects them: rows `first ..
+/// first + points` of the store, or the `points` rows `schedule` selects from all of them.
+pub(super) struct OutputView {
+    first: u64,
+    points: usize,
+    schedule: Option<OutputSchedule>,
+}
+
+impl OutputView {
+    pub(super) fn points(&self) -> usize {
+        self.points
+    }
+}
+
+/// A deck's `.OPTIONS OUTPUT` schedule over a store's rows, walked afresh by each pass over
+/// them.
+struct OutputSchedule {
+    time_points: Vec<f64>,
+    interval: Option<XyceOutputIntervalSchedule>,
+    start: f64,
+    stop: f64,
+    source_len: usize,
+}
+
+impl OutputSchedule {
+    fn walk(&self) -> Result<TransientOutputWalk<'_>, OutputScheduleError> {
+        TransientOutputWalk::new(
+            self.source_len,
+            &self.time_points,
+            self.interval.as_ref(),
+            self.start,
+            self.stop,
+            usize::MAX,
+        )
+    }
+}
+
+/// An output schedule's rows as a cursor reads them: the schedule walked over the store's
+/// time column a chunk at a time, and the rows it has made due that the cursor has not
+/// passed. Its row times are the schedule's, and each row's values are sampled from the
+/// store's rows it is read from.
+struct ScheduledRows<'r> {
+    schedule: &'r OutputSchedule,
+    walk: Option<TransientOutputWalk<'r>>,
+    /// The time column's next chunk to read, and the times of the one read, fed up to
+    /// `offset`.
+    chunk: usize,
+    times: Vec<f64>,
+    offset: usize,
+    due: VecDeque<TransientOutputRow>,
+    /// The output row `due`'s first row is.
+    row: usize,
+    /// Each variable's last two values read from the store, by store row: an interpolated row
+    /// reads two adjacent store rows, which the next row reads again or moves past by one.
+    memo: Vec<[Option<(u64, f64)>; 2]>,
+}
+
+impl<'r> ScheduledRows<'r> {
+    fn new(schedule: &'r OutputSchedule, variables: usize) -> Self {
+        Self {
+            schedule,
+            walk: None,
+            chunk: 0,
+            times: Vec::new(),
+            offset: 0,
+            due: VecDeque::new(),
+            row: 0,
+            memo: vec![[None; 2]; variables],
+        }
+    }
+
+    /// Walk the schedule again from its first row.
+    fn restart(&mut self) -> Result<(), OutputScheduleError> {
+        self.walk = Some(self.schedule.walk()?);
+        self.chunk = 0;
+        self.times.clear();
+        self.offset = 0;
+        self.due.clear();
+        self.row = 0;
+        Ok(())
+    }
+}
+
 /// Reads the values of an output's rows a chunk at a time: a store column from the store, each
 /// column of a chunk decoded once, when it is first asked for, and an event trace's column
 /// sampled onto the rows' times as they are read. An error or a non-finite value is recorded
@@ -1895,6 +2044,9 @@ pub(crate) struct RowCursor<'r> {
     /// Each event column's place in its trace, where it has one.
     cursors: Vec<Option<EventCursor<'r>>>,
     derived: Option<&'r DerivedColumns>,
+    /// The output schedule's rows, when the output has one.
+    scheduled: Option<ScheduledRows<'r>>,
+    schedule_error: Option<OutputScheduleError>,
     /// The derived columns' staged file, once a row reads one.
     derived_file: Option<std::fs::File>,
     error: Option<StoreError>,
@@ -1936,6 +2088,8 @@ impl<'r> RowCursor<'r> {
             values: vec![None; columns.len()],
             cursors: columns.iter().map(|_| None).collect(),
             derived,
+            scheduled: None,
+            schedule_error: None,
             derived_file: None,
             error: None,
             event_error: None,
@@ -1946,6 +2100,99 @@ impl<'r> RowCursor<'r> {
 
     /// Variable `variable` (0 is time, then each output signal) of output row `row`.
     pub(crate) fn value(&mut self, row: usize, variable: usize) -> f64 {
+        let value = match self.scheduled {
+            None => self.stored(row, variable),
+            Some(_) => self.scheduled_row(row).map(|output| match variable {
+                0 => output.time(),
+                _ => output.sample(|index| self.sampled(index as u64, variable)),
+            }),
+        };
+        let value = value.unwrap_or(f64::NAN);
+        if !value.is_finite() {
+            self.non_finite = true;
+        }
+        value
+    }
+
+    /// Output row `row` of the output schedule, walking it on from the last row read, or from
+    /// its start when `row` is earlier.
+    fn scheduled_row(&mut self, row: usize) -> Option<TransientOutputRow> {
+        let scheduled = self.scheduled.as_mut()?;
+        if (scheduled.walk.is_none() || row < scheduled.row)
+            && let Err(error) = scheduled.restart()
+        {
+            self.schedule_error.get_or_insert(error);
+            return None;
+        }
+        loop {
+            if row < scheduled.row + scheduled.due.len() {
+                scheduled.due.drain(..row - scheduled.row);
+                scheduled.row = row;
+                return scheduled.due.front().copied();
+            }
+            scheduled.row += scheduled.due.len();
+            scheduled.due.clear();
+            if scheduled.offset == scheduled.times.len() {
+                if scheduled.chunk >= self.spans.len() {
+                    return None;
+                }
+                if let Err(error) = self
+                    .reader
+                    .read_chunk_x(scheduled.chunk, &mut scheduled.times)
+                {
+                    self.error.get_or_insert(error);
+                    return None;
+                }
+                scheduled.chunk += 1;
+                scheduled.offset = 0;
+                continue;
+            }
+            let time = scheduled.times[scheduled.offset];
+            scheduled.offset += 1;
+            let due = &mut scheduled.due;
+            let walk = scheduled.walk.as_mut()?;
+            if let Err(error) = walk.push(time, &mut |output| due.push_back(output)) {
+                self.schedule_error.get_or_insert(error);
+                return None;
+            }
+        }
+    }
+
+    /// Variable `variable` of store row `row`, which a scheduled row is sampled from.
+    fn sampled(&mut self, row: u64, variable: usize) -> f64 {
+        let memo = self
+            .scheduled
+            .as_ref()
+            .and_then(|scheduled| scheduled.memo.get(variable));
+        if let Some(&(_, value)) = memo
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find(|(read, _)| *read == row)
+        {
+            return value;
+        }
+        let value = usize::try_from(row)
+            .ok()
+            .and_then(|row| self.stored(row, variable))
+            .unwrap_or(f64::NAN);
+        if let Some(memo) = self
+            .scheduled
+            .as_mut()
+            .and_then(|scheduled| scheduled.memo.get_mut(variable))
+        {
+            let older = match memo {
+                [None, _] => 0,
+                [_, None] => 1,
+                [Some((first, _)), Some((second, _))] => usize::from(second < first),
+            };
+            memo[older] = Some((row, value));
+        }
+        value
+    }
+
+    /// Variable `variable` of row `first + row` of the store.
+    fn stored(&mut self, row: usize, variable: usize) -> Option<f64> {
         let row = self.first + row as u64;
         let chunk = match self.chunk {
             Some(chunk) if self.spans[chunk].0 <= row => {
@@ -1959,7 +2206,7 @@ impl<'r> RowCursor<'r> {
             _ => self.load(row),
         };
         let offset = (row - self.spans[chunk].0) as usize;
-        let value = match variable.checked_sub(1) {
+        match variable.checked_sub(1) {
             None => self.time(chunk, offset),
             Some(column) => match self.columns.get(column).copied() {
                 Some(Column::Slot(slot)) => {
@@ -1990,12 +2237,7 @@ impl<'r> RowCursor<'r> {
                     .and_then(|time| self.event_value(column, event, time)),
                 None => None,
             },
-        };
-        let value = value.unwrap_or(f64::NAN);
-        if !value.is_finite() {
-            self.non_finite = true;
         }
-        value
     }
 
     /// The time of row `offset` of chunk `chunk`, the chunk the cursor holds.
@@ -2111,6 +2353,9 @@ impl<'r> RowCursor<'r> {
     pub(crate) fn read_failure(&mut self, path: &Path) -> Option<CliError> {
         if let Some(error) = self.error.take() {
             return Some(store_error(self.dir, error));
+        }
+        if let Some(error) = self.schedule_error.take() {
+            return Some(CliError::from(rspice_core::SimulationError::from(error)));
         }
         if let Some(error) = self.derived_error.take() {
             return Some(CliError::output_error(

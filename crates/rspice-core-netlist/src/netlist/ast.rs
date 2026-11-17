@@ -4514,6 +4514,55 @@ impl XyceOutputIntervalSchedule {
         final_time: Value,
         max_points: usize,
     ) -> Result<Vec<XyceOutputEvent>, OutputScheduleError> {
+        let mut output = XyceIntervalOutput::new(self, output_start_time, final_time, max_points)?;
+        let mut events = Vec::new();
+        for (index, &time) in accepted_times.iter().enumerate() {
+            output.accept(time, index + 1 == accepted_times.len(), &mut |event| {
+                events.push(event);
+            })?;
+        }
+        output.finish()?;
+        Ok(events)
+    }
+}
+
+/// Xyce 7.10's interval-output scheduler fed one accepted transient step at a
+/// time, so an output can be scheduled from a run's accepted times as they are
+/// read rather than from the whole grid held at once.
+/// [`XyceOutputIntervalSchedule::output_events`] is this fed the whole grid.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct XyceIntervalOutput<'s> {
+    schedule: &'s XyceOutputIntervalSchedule,
+    output_start_time: Value,
+    final_time: Value,
+    max_points: usize,
+    /// The run's first accepted time, once it is fed.
+    run_initial_time: Option<Value>,
+    previous_time: Option<Value>,
+    /// The index the next accepted step has.
+    index: usize,
+    /// The first accepted time at or after the output start, once it is fed.
+    first_time: Option<Value>,
+    /// Accepted steps fed at or after the output start.
+    window_steps: usize,
+    next_output_time: Value,
+    update_additions: usize,
+    emitted: usize,
+    last_output: Option<Value>,
+    /// Whether the step at the final time has been fed.
+    finished: bool,
+}
+
+impl<'s> XyceIntervalOutput<'s> {
+    /// A scheduler for `schedule`'s output from `output_start_time` to
+    /// `final_time`, emitting at most `max_points` events.
+    pub fn new(
+        schedule: &'s XyceOutputIntervalSchedule,
+        output_start_time: Value,
+        final_time: Value,
+        max_points: usize,
+    ) -> Result<Self, OutputScheduleError> {
         if !output_start_time.is_finite()
             || !final_time.is_finite()
             || output_start_time < 0.0
@@ -4524,50 +4573,11 @@ impl XyceOutputIntervalSchedule {
             )
             .into());
         }
-        let Some(&run_initial_time) = accepted_times.first() else {
-            return Err("Xyce interval output requires accepted transient steps".into());
-        };
-        if !run_initial_time.is_finite() || run_initial_time < 0.0 {
-            return Err("Xyce interval output has an invalid run initial time".into());
-        }
-        for pair in accepted_times.windows(2) {
-            if !pair[1].is_finite() || pair[1] <= pair[0] {
-                return Err(
-                    "Xyce interval output requires finite, strictly increasing accepted times"
-                        .into(),
-                );
-            }
-        }
-        // Xyce finishes a run once its clock is within 1e-10 of the span of
-        // the final time (N_TIA_StepErrorControl.h:158-163), so the last
-        // accepted step may sit just short of it. No row is due there: the
-        // cadence target stays clamped to the final time the run never reached.
-        let final_index = match accepted_times.binary_search_by(|time| time.total_cmp(&final_time))
-        {
-            Ok(index) => index,
-            Err(insert)
-                if insert == accepted_times.len()
-                    && final_time - accepted_times[insert - 1]
-                        < 1.0e-10 * (final_time - run_initial_time) =>
-            {
-                insert - 1
-            }
-            Err(_) => {
-                return Err(format!(
-                    "accepted transient grid does not contain final output time {final_time}"
-                )
-                .into());
-            }
-        };
-        let first_index = accepted_times.partition_point(|time| *time < output_start_time);
-        if first_index > final_index {
-            return Err("Xyce interval output selected no accepted steps".into());
-        }
-        if !self.initial_interval.is_finite() || self.initial_interval <= 0.0 {
+        if !schedule.initial_interval.is_finite() || schedule.initial_interval <= 0.0 {
             return Err("Xyce output initial interval must be finite and positive".into());
         }
         let mut previous_transition = None;
-        for (index, transition) in self.intervals.iter().enumerate() {
+        for (index, transition) in schedule.intervals.iter().enumerate() {
             if !transition.time.is_finite()
                 || transition.time < 0.0
                 || previous_transition.is_some_and(|previous| transition.time <= previous)
@@ -4584,160 +4594,252 @@ impl XyceOutputIntervalSchedule {
             }
             previous_transition = Some(transition.time);
         }
+        Ok(Self {
+            schedule,
+            output_start_time,
+            final_time,
+            max_points,
+            run_initial_time: None,
+            previous_time: None,
+            index: 0,
+            first_time: None,
+            window_steps: 0,
+            next_output_time: 0.0,
+            update_additions: 0,
+            emitted: 0,
+            last_output: None,
+            finished: false,
+        })
+    }
 
-        let mut events: Vec<XyceOutputEvent> = Vec::new();
-        let push = |events: &mut Vec<XyceOutputEvent>,
-                    time: Value,
-                    accepted_index: usize,
-                    interpolate: bool|
-         -> Result<(), OutputScheduleError> {
-            if !time.is_finite()
-                || time < accepted_times[first_index]
-                || time > final_time
-                || events
-                    .last()
-                    .is_some_and(|previous| time < previous.output_time)
+    /// Feed the next accepted time, `last` when the run accepted no later
+    /// step, and pass the output events it makes due to `emit`, in order.
+    pub fn accept(
+        &mut self,
+        current_time: Value,
+        last: bool,
+        emit: &mut impl FnMut(XyceOutputEvent),
+    ) -> Result<(), OutputScheduleError> {
+        let accepted_index = self.index;
+        self.index += 1;
+        let run_initial_time = match self.run_initial_time {
+            Some(time) => time,
+            None => {
+                if !current_time.is_finite() || current_time < 0.0 {
+                    return Err("Xyce interval output has an invalid run initial time".into());
+                }
+                self.run_initial_time = Some(current_time);
+                self.next_output_time = current_time;
+                current_time
+            }
+        };
+        if let Some(previous) = self.previous_time.replace(current_time)
+            && (!current_time.is_finite() || current_time <= previous)
+        {
+            return Err(
+                "Xyce interval output requires finite, strictly increasing accepted times".into(),
+            );
+        }
+        if self.finished {
+            return Ok(());
+        }
+        // Xyce finishes a run once its clock is within 1e-10 of the span of
+        // the final time (N_TIA_StepErrorControl.h:158-163), so the last
+        // accepted step may sit just short of it. No row is due there: the
+        // cadence target stays clamped to the final time the run never reached.
+        let final_time = self.final_time;
+        let at_final = match current_time.total_cmp(&final_time) {
+            std::cmp::Ordering::Equal => true,
+            std::cmp::Ordering::Less
+                if !last
+                    || final_time - current_time < 1.0e-10 * (final_time - run_initial_time) =>
             {
+                last
+            }
+            _ => {
                 return Err(format!(
-                    "Xyce interval output produced a decreasing or out-of-window time {time:.17e}s"
+                    "accepted transient grid does not contain final output time {final_time}"
                 )
                 .into());
             }
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::ResultValues,
-                events.len().saturating_add(1),
-                max_points,
-            )?;
-            events.push(XyceOutputEvent {
-                output_time: time,
-                accepted_index,
-                interpolation_time: interpolate.then_some(time),
-            });
-            Ok(())
         };
+        if current_time < self.output_start_time {
+            if at_final {
+                return Err("Xyce interval output selected no accepted steps".into());
+            }
+            return Ok(());
+        }
+        self.finished = at_final;
+        let accepted_offset = self.window_steps;
+        self.window_steps += 1;
+        self.first_time.get_or_insert(current_time);
+
+        let schedule = self.schedule;
         let tolerance = 2.0 * Value::EPSILON;
-        let first_transition = self.intervals.first().map(|transition| transition.time);
-        let mut next_output_time = run_initial_time;
-        let mut update_additions = 0usize;
+        let first_transition = schedule.intervals.first().map(|transition| transition.time);
+        let output_is_due = current_time >= self.next_output_time
+            || (current_time - self.next_output_time).abs() < tolerance;
+        if !output_is_due {
+            return Ok(());
+        }
 
-        for (accepted_offset, &current_time) in
-            accepted_times[first_index..=final_index].iter().enumerate()
-        {
-            let accepted_index = first_index + accepted_offset;
-            let output_is_due = current_time >= next_output_time
-                || (current_time - next_output_time).abs() < tolerance;
-            if !output_is_due {
-                continue;
+        if accepted_offset == 0 {
+            self.push(current_time, accepted_index, false, emit)?;
+        } else if first_transition.is_none_or(|first| current_time <= first) {
+            let mut interpolation_time = self.next_output_time;
+            while interpolation_time < current_time && current_time - interpolation_time > tolerance
+            {
+                self.push(interpolation_time, accepted_index, true, emit)?;
+                let next = interpolation_time + schedule.initial_interval;
+                if !next.is_finite() || next <= interpolation_time {
+                    return Err(format!(
+                        "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
+                    )
+                    .into());
+                }
+                interpolation_time = next;
             }
-
-            if accepted_offset == 0 {
-                push(&mut events, current_time, accepted_index, false)?;
-            } else if first_transition.is_none_or(|first| current_time <= first) {
-                let mut interpolation_time = next_output_time;
-                while interpolation_time < current_time
-                    && current_time - interpolation_time > tolerance
-                {
-                    push(&mut events, interpolation_time, accepted_index, true)?;
-                    let next = interpolation_time + self.initial_interval;
-                    if !next.is_finite() || next <= interpolation_time {
-                        return Err(format!(
-                            "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
-                        )
-                        .into());
-                    }
-                    interpolation_time = next;
-                }
-                if interpolation_time - current_time <= tolerance {
-                    push(&mut events, current_time, accepted_index, false)?;
-                }
-                if interpolation_time - final_time > tolerance {
-                    push(&mut events, final_time, accepted_index, false)?;
-                }
-            } else {
-                let mut active_index = self
-                    .intervals
-                    .partition_point(|transition| transition.time <= next_output_time)
-                    .saturating_sub(1);
-                let mut interpolation_time = next_output_time;
-                while interpolation_time <= current_time {
-                    let interpolate = current_time - interpolation_time >= tolerance;
-                    push(&mut events, interpolation_time, accepted_index, interpolate)?;
-                    let next = interpolation_time + self.intervals[active_index].interval;
-                    if !next.is_finite() || next <= interpolation_time {
-                        return Err(format!(
-                            "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
-                        )
-                        .into());
-                    }
-                    interpolation_time = next;
-                    if let Some(next_interval) = self.intervals.get(active_index + 1)
-                        && interpolation_time >= next_interval.time
-                    {
-                        active_index += 1;
-                        interpolation_time = next_interval.time;
-                    }
-                }
+            if interpolation_time - current_time <= tolerance {
+                self.push(current_time, accepted_index, false, emit)?;
             }
-
-            next_output_time = if self.intervals.is_empty() {
-                while next_output_time < current_time
-                    || (current_time - next_output_time).abs() < tolerance
+            if interpolation_time - final_time > tolerance {
+                self.push(final_time, accepted_index, false, emit)?;
+            }
+        } else {
+            let mut active_index = schedule
+                .intervals
+                .partition_point(|transition| transition.time <= self.next_output_time)
+                .saturating_sub(1);
+            let mut interpolation_time = self.next_output_time;
+            while interpolation_time <= current_time {
+                let interpolate = current_time - interpolation_time >= tolerance;
+                self.push(interpolation_time, accepted_index, interpolate, emit)?;
+                let next = interpolation_time + schedule.intervals[active_index].interval;
+                if !next.is_finite() || next <= interpolation_time {
+                    return Err(format!(
+                        "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
+                    )
+                    .into());
+                }
+                interpolation_time = next;
+                if let Some(next_interval) = schedule.intervals.get(active_index + 1)
+                    && interpolation_time >= next_interval.time
                 {
-                    crate::resource::ResourceLimitError::ensure(
-                        crate::resource::ResourceKind::ResultValues,
-                        update_additions.saturating_add(1),
-                        max_points,
-                    )?;
-                    let next = next_output_time + self.initial_interval;
-                    if !next.is_finite() || next <= next_output_time {
-                        return Err(format!(
-                            "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
-                        )
-                        .into());
-                    }
-                    next_output_time = next;
-                    update_additions = update_additions.saturating_add(1);
+                    active_index += 1;
+                    interpolation_time = next_interval.time;
                 }
-                next_output_time
-            } else if current_time < self.intervals[0].time {
-                while next_output_time <= current_time {
-                    crate::resource::ResourceLimitError::ensure(
-                        crate::resource::ResourceKind::ResultValues,
-                        update_additions.saturating_add(1),
-                        max_points,
-                    )?;
-                    let next = next_output_time + self.initial_interval;
-                    if !next.is_finite() || next <= next_output_time {
-                        return Err(format!(
-                            "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
-                        )
-                        .into());
-                    }
-                    next_output_time = next;
-                    update_additions = update_additions.saturating_add(1);
-                }
-                next_output_time.min(self.intervals[0].time)
-            } else {
-                let active_index = self
-                    .intervals
-                    .partition_point(|transition| transition.time <= current_time)
-                    - 1;
-                let active = self.intervals[active_index];
-                let quotient = (current_time - active.time) / active.interval;
-                if !quotient.is_finite() || quotient < 0.0 || quotient >= f64::from(i32::MAX) {
-                    return Err("Xyce output cadence step index exceeds its supported range".into());
-                }
-                let step = quotient as i32;
-                let candidate = active.time + f64::from(step + 1) * active.interval;
-                self.intervals
-                    .get(active_index + 1)
-                    .map_or(candidate, |next| candidate.min(next.time))
-            };
-            if next_output_time >= final_time {
-                next_output_time = final_time;
             }
         }
-        Ok(events)
+
+        let mut next_output_time = self.next_output_time;
+        next_output_time = if schedule.intervals.is_empty() {
+            while next_output_time < current_time
+                || (current_time - next_output_time).abs() < tolerance
+            {
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ResultValues,
+                    self.update_additions.saturating_add(1),
+                    self.max_points,
+                )?;
+                let next = next_output_time + schedule.initial_interval;
+                if !next.is_finite() || next <= next_output_time {
+                    return Err(format!(
+                        "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
+                    )
+                    .into());
+                }
+                next_output_time = next;
+                self.update_additions = self.update_additions.saturating_add(1);
+            }
+            next_output_time
+        } else if current_time < schedule.intervals[0].time {
+            while next_output_time <= current_time {
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ResultValues,
+                    self.update_additions.saturating_add(1),
+                    self.max_points,
+                )?;
+                let next = next_output_time + schedule.initial_interval;
+                if !next.is_finite() || next <= next_output_time {
+                    return Err(format!(
+                        "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
+                    )
+                    .into());
+                }
+                next_output_time = next;
+                self.update_additions = self.update_additions.saturating_add(1);
+            }
+            next_output_time.min(schedule.intervals[0].time)
+        } else {
+            let active_index = schedule
+                .intervals
+                .partition_point(|transition| transition.time <= current_time)
+                - 1;
+            let active = schedule.intervals[active_index];
+            let quotient = (current_time - active.time) / active.interval;
+            if !quotient.is_finite() || quotient < 0.0 || quotient >= f64::from(i32::MAX) {
+                return Err("Xyce output cadence step index exceeds its supported range".into());
+            }
+            let step = quotient as i32;
+            let candidate = active.time + f64::from(step + 1) * active.interval;
+            schedule
+                .intervals
+                .get(active_index + 1)
+                .map_or(candidate, |next| candidate.min(next.time))
+        };
+        if next_output_time >= final_time {
+            next_output_time = final_time;
+        }
+        self.next_output_time = next_output_time;
+        Ok(())
+    }
+
+    /// Check the schedule reached its final time, once every accepted time is
+    /// fed.
+    pub fn finish(&self) -> Result<(), OutputScheduleError> {
+        if self.run_initial_time.is_none() {
+            return Err("Xyce interval output requires accepted transient steps".into());
+        }
+        if !self.finished {
+            return Err(format!(
+                "accepted transient grid does not contain final output time {}",
+                self.final_time
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn push(
+        &mut self,
+        time: Value,
+        accepted_index: usize,
+        interpolate: bool,
+        emit: &mut impl FnMut(XyceOutputEvent),
+    ) -> Result<(), OutputScheduleError> {
+        if !time.is_finite()
+            || self.first_time.is_none_or(|first| time < first)
+            || time > self.final_time
+            || self.last_output.is_some_and(|previous| time < previous)
+        {
+            return Err(format!(
+                "Xyce interval output produced a decreasing or out-of-window time {time:.17e}s"
+            )
+            .into());
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            self.emitted.saturating_add(1),
+            self.max_points,
+        )?;
+        self.emitted += 1;
+        self.last_output = Some(time);
+        emit(XyceOutputEvent {
+            output_time: time,
+            accepted_index,
+            interpolation_time: interpolate.then_some(time),
+        });
+        Ok(())
     }
 }
 
