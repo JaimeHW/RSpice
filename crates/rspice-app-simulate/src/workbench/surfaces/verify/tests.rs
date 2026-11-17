@@ -1067,12 +1067,9 @@ fn a_phone_keeps_every_tables_verdict_in_view() {
 #[test]
 fn every_table_right_aligns_its_limits() {
     use super::raster::{page_pass, seed_monte_carlo, seed_soa};
-    let tables: [(
-        VerificationPage,
-        &str,
-        usize,
-        fn(&mut crate::workbench::app_state::Model),
-    ); 4] = [
+    type Seed = fn(&mut crate::workbench::app_state::Model);
+    // Each table's page, its id, its Limit column and the run it shows.
+    let tables: [(VerificationPage, &str, usize, Seed); 4] = [
         (
             VerificationPage::Specifications,
             "verify.specifications",
