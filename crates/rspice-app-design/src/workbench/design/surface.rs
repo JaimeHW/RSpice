@@ -34,7 +34,10 @@ fn show_document(
     cx: &mut Cx<'_, DesignFeature>,
     view_type: Option<ViewType>,
 ) -> Option<Rect> {
-    if cx.model.active_view_read_only() {
+    // A project this window opened read-only says why, and what to do about
+    // it, under the toolbar; "make an editable copy" is not the way out of
+    // that, so the document's banner waits until the project is writable.
+    if cx.model.active_view_read_only() && cx.model.safe_mode.opened_read_only.is_none() {
         read_only_banner(ui);
     }
     occurrence_scope_banner(ui, cx.model);

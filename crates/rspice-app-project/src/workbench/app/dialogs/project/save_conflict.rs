@@ -24,8 +24,8 @@ pub enum SaveConflictAnswer {
 }
 
 /// What the dialog's hint says each answer does to whose work.
-pub const SAVE_CONFLICT_HINT: &str = "Save over it replaces what the other window saved. Open the \
-     saved project gives up the changes here. Esc writes nothing.";
+pub const SAVE_CONFLICT_HINT: &str =
+    "Save over it replaces the other window's save. Open the saved project drops the changes here.";
 
 /// Ask what to do with a save that met its file changed. Returns the answer
 /// once the reader gives one.
@@ -44,17 +44,9 @@ pub fn save_conflict_dialog(conflict: &SaveConflict, ctx: &Context) -> Option<Sa
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(c.text),
             );
-            ui.add_space(6.0);
+            ui.add_space(tokens::SP_4);
             for difference in &conflict.differences {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{}  {}",
-                        difference.side.label(),
-                        difference.document.label()
-                    ))
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(c.text_dim),
-                );
+                difference_row(ui, &difference.document.label(), difference.side.label());
             }
         });
     match choice {
@@ -64,4 +56,46 @@ pub fn save_conflict_dialog(conflict: &SaveConflict, ctx: &Context) -> Option<Sa
         DialogChoice::Ghost => Some(SaveConflictAnswer::OpenSaved),
         DialogChoice::Cancelled => Some(SaveConflictAnswer::Keep),
     }
+}
+
+/// One document that differs: its name, and on which side it changed, set
+/// apart at the row's end as a table's last column is.
+fn difference_row(ui: &mut egui::Ui, document: &str, side: &str) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), t.metrics.row_h),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{document}: {side}"))
+    });
+    let side_width = ui
+        .painter()
+        .layout_no_wrap(side.to_owned(), font.clone(), c.text_dim)
+        .size()
+        .x;
+    let shown = rspice_ui_kit::panels::elide_text(
+        ui,
+        document,
+        &font,
+        rect.width() - side_width - tokens::SP_5,
+    );
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        font.clone(),
+        c.text,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right(), rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        side,
+        font,
+        c.text_dim,
+    );
 }
