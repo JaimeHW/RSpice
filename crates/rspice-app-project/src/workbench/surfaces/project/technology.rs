@@ -983,6 +983,12 @@ pub(super) fn poll_browser_recovery_completions(_: &Context, cx: &mut Cx<'_, Pro
     }
 }
 
+/// Prove `binding` against the catalogue it was made from. The bytes the
+/// catalogue retains are proven against the pins on every platform; a
+/// library read from files on this machine is also proven against those
+/// files, which may have changed since they were parsed. A library whose
+/// bytes the project retains or owns is not: the files it was imported from
+/// may be on another machine, or gone.
 pub(super) fn verify_pinned_model_sources(
     binding: &ProjectTechnologyBinding,
     manager: &ModelLibraryManager,
@@ -994,13 +1000,23 @@ pub(super) fn verify_pinned_model_sources(
         .catalog()
         .validate_attached_technology(Some(binding))?;
     #[cfg(not(target_arch = "wasm32"))]
-    for source in binding.source_closure() {
-        let observed = ModelLibraryManager::calculate_source_digest(&source.path)?;
-        if observed != source.digest {
-            return Err(format!(
-                "Model source '{}' changed after it was parsed. Refresh the model library before attaching it.",
-                source.path.display()
-            ));
+    if manager
+        .get_library(binding.model_library())
+        .is_some_and(|library| {
+            matches!(
+                library.source_authority,
+                crate::state::model_library::ModelSourceAuthority::External
+            )
+        })
+    {
+        for source in binding.source_closure() {
+            let observed = ModelLibraryManager::calculate_source_digest(&source.path)?;
+            if observed != source.digest {
+                return Err(format!(
+                    "Model source '{}' changed after it was parsed. Refresh the model library before attaching it.",
+                    source.path.display()
+                ));
+            }
         }
     }
     Ok(())

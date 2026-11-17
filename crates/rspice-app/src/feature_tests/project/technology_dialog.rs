@@ -6,11 +6,10 @@
 use std::path::PathBuf;
 
 use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::CloudSessionPort;
-
-use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
 
 use super::recovery_frames::{IDLE_FRAMES, app_frame, click_on, offscreen, painted, saved_project};
 
@@ -18,25 +17,34 @@ use super::recovery_frames::{IDLE_FRAMES, app_frame, click_on, offscreen, painte
 /// written.
 const PENDING: &str = "Writing the recovery checkpoint\u{2026}";
 
+/// The one model the test library holds.
+const MODEL_CARD: &str = ".model nmos_demo nmos level=1 vto=0.55\n";
+
 /// A saved project, open on Dependencies, with the test PDK installed and
 /// one model library read from a file in the project's folder, and that
 /// folder.
 fn attachable_project(label: &str) -> (RSpiceApp, PathBuf) {
+    let (mut app, root) = project_with_pdk(label);
+    let file = root.join("demo180.lib");
+    std::fs::write(&file, MODEL_CARD).expect("the model file writes");
+    app.state
+        .model
+        .model_library_manager
+        .load_library_file(&file, None)
+        .expect("the model file imports");
+    (app, root)
+}
+
+/// A saved project, open on Dependencies, with the test PDK installed.
+fn project_with_pdk(label: &str) -> (RSpiceApp, PathBuf) {
     let (mut app, root) = saved_project(label);
-    let model = &mut app.state.model;
     let (archive, authority) = rspice_app_state::state::pdk_config::pdk_technology_test_fixture();
-    model
+    app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(&archive, &authority, "Install the test technology")
         .expect("the test PDK installs");
-    let file = root.join("demo180.lib");
-    std::fs::write(&file, ".model nmos_demo nmos level=1 vto=0.55\n")
-        .expect("the model file writes");
-    model
-        .model_library_manager
-        .load_library_file(&file, None)
-        .expect("the model file imports");
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Dependencies;
     (app, root)
@@ -175,6 +183,43 @@ fn an_attach_writes_its_checkpoint_while_the_application_paints() {
             .entries()
             .any(|entry| entry.message.starts_with("Attached ")),
         "the Console records the change"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A model library whose bytes the project retains attaches on the desktop
+/// as it does in the browser: the retained bytes are its proof, and the
+/// files it was imported from are not read, here where they never existed.
+#[test]
+fn a_retained_model_library_attaches_without_its_original_files() {
+    let (mut app, root) = project_with_pdk("technology-attach-retained");
+    let name = app
+        .state
+        .model
+        .model_library_manager
+        .load_library_bytes("demo180.lib", MODEL_CARD.as_bytes().to_vec(), None)
+        .expect("the model bytes import");
+    let library = app
+        .state
+        .model
+        .model_library_manager
+        .get_library(&name)
+        .expect("the library is in the catalogue");
+    let original = library.root_path.clone().expect("the library has a root");
+    assert!(!original.exists(), "{}", original.display());
+    let ctx = offscreen();
+    let dialog = open_attach_dialog(&ctx, &mut app);
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    paint_until_attached(&ctx, &mut app);
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .map(|binding| binding.model_library().to_owned()),
+        Some(name)
     );
     let _ = std::fs::remove_dir_all(root);
 }
