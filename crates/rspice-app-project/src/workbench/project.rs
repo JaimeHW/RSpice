@@ -345,10 +345,11 @@ pub(in crate::workbench) fn lifecycle_parts<'a>(
 }
 
 /// The Project workspace's navigator: the rail of the page in front, over
-/// the feature's state, the model and the navigator's filter.
+/// the feature's state, the model and the navigator's filter. A library the
+/// rail selects is selected the way the Library page's own column does it.
 fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     let project = &mut *cx.state;
-    crate::workbench::docks::navigator::project::project(
+    let intent = crate::workbench::docks::navigator::project::project(
         ui,
         &mut ProjectNavigator {
             page: project.project_page,
@@ -357,10 +358,14 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             dependency_selection: &mut project.project_dependency_selection,
             checkpoint_recovery: &project.project_checkpoint_recovery,
             checkpoint_selection: &mut project.project_checkpoint_selection,
+            builtin_library_open: project.builtin_models.open,
             model: cx.model,
             filter: cx.wb.navigator_filter(),
         },
     );
+    if let Some(intent) = intent {
+        crate::workbench::surfaces::project::library::apply_library_intent(ui.ctx(), cx, intent);
+    }
 }
 
 /// The Project workspace's inspector: the page in front, over the feature's

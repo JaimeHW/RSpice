@@ -16,6 +16,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::project::DependencyLibrary;
 use crate::workbench::project::configuration_state::ConfigurationPageState;
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::surfaces::project::library::LibraryIntent;
 
 use configuration::project_configuration_navigator;
 use dependencies::project_dependency_navigator;
@@ -24,8 +25,8 @@ use recovery::project_recovery_navigator;
 
 /// What the Project workspace's navigator reads and writes: the project
 /// feature's page and the selections its rails keep, the configuration
-/// page and its dialogs, the recovery catalog, the model, and the
-/// navigator's filter.
+/// page and its dialogs, the recovery catalog, whether the Library page
+/// shows the built-in library, the model, and the navigator's filter.
 pub(in crate::workbench) struct ProjectNavigator<'a> {
     pub(in crate::workbench) page: ProjectPage,
     pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
@@ -33,19 +34,35 @@ pub(in crate::workbench) struct ProjectNavigator<'a> {
     pub(in crate::workbench) dependency_selection: &'a mut Option<DependencyLibrary>,
     pub(in crate::workbench) checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
     pub(in crate::workbench) checkpoint_selection: &'a mut Option<String>,
+    pub(in crate::workbench) builtin_library_open: bool,
     pub(in crate::workbench) model: &'a mut Model,
     pub(in crate::workbench) filter: &'a str,
 }
 
-pub(in crate::workbench) fn project(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
+/// The rail of the page in front. A library row's click is the Library
+/// page's own selection, returned for the page to carry out.
+pub(in crate::workbench) fn project(
+    ui: &mut Ui,
+    nav: &mut ProjectNavigator<'_>,
+) -> Option<LibraryIntent> {
     ScrollArea::vertical()
         .auto_shrink([false, true])
         .show(ui, |ui| match nav.page {
             ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, nav),
-            ProjectPage::Configuration => project_configuration_navigator(ui, nav),
-            ProjectPage::Dependencies => project_dependency_navigator(ui, nav),
-            ProjectPage::Recovery => project_recovery_navigator(ui, nav),
-        });
+            ProjectPage::Configuration => {
+                project_configuration_navigator(ui, nav);
+                None
+            }
+            ProjectPage::Dependencies => {
+                project_dependency_navigator(ui, nav);
+                None
+            }
+            ProjectPage::Recovery => {
+                project_recovery_navigator(ui, nav);
+                None
+            }
+        })
+        .inner
 }
 
 /// The document bar's unsaved dot, set before a row's meta: the

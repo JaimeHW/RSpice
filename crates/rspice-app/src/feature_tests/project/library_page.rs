@@ -617,3 +617,73 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
         "the symbol editor has it in front"
     );
 }
+
+/// A library clicked in the rail is the one the page shows, even when the
+/// built-in library is open: the rail selects the way the page's own Library
+/// column does. The rail lists the built-in library as the column does.
+#[test]
+fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
+    use super::super::replay::Replay;
+    use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_LIBRARY;
+
+    let mut app = RSpiceApp::test_instance();
+    let mut cell = Cell::new("amp");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    let mut library = Library::new("authoring");
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    app.state.project.project_page = ProjectPage::Library;
+    app.state.workbench.activate(Workspace::Project);
+    let mut replay = Replay::of(app);
+    replay.frames(Vec::new());
+    let ctx = replay.ctx().clone();
+    apply_library_intent(
+        &ctx,
+        &mut features::cx(&mut replay.app),
+        LibraryIntent::BuiltinModels(
+            rspice_app_project::workbench::surfaces::project::library::builtin_models::BuiltinModelsIntent::ShowLibrary,
+        ),
+    );
+
+    let controls = replay.frames(Vec::new());
+    let named = |label: &str| {
+        let mut found = controls
+            .iter()
+            .filter(|control| control.label == label)
+            .collect::<Vec<_>>();
+        found.sort_by(|left, right| left.center.x.total_cmp(&right.center.x));
+        found
+    };
+    // The rail announces a row's meta after its name; the column does not.
+    assert_eq!(
+        named(&format!("{BUILTIN_VERILOGA_LIBRARY}, read-only")).len(),
+        1,
+        "the rail lists the built-in library"
+    );
+    assert_eq!(
+        named(BUILTIN_VERILOGA_LIBRARY).len(),
+        1,
+        "the Library column lists the built-in library"
+    );
+    let authoring = named("authoring");
+    assert_eq!(authoring.len(), 2, "the rail and the column list it");
+    let rail_row = authoring[0].center;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: rail_row,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(rail_row), press(true)]);
+    replay.frames(vec![press(false)]);
+
+    let state = &replay.app.state;
+    assert!(
+        !state.project.builtin_models.open,
+        "the page leaves the built-in library"
+    );
+    assert_eq!(
+        state.model.library_manager.selected_library.as_deref(),
+        Some("authoring")
+    );
+}
