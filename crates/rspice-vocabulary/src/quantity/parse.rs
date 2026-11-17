@@ -72,24 +72,38 @@ pub fn parse_ui_quantity(
         return Ok(0.0);
     }
 
+    let typed = source.as_str();
     let si = match kind {
+        // A bare M is a megohm to most readers and a milliohm to SPICE.
+        QuantityInputKind::EngineeringScalar
+            if suffix == "M"
+                && policy.engineering_suffixes == EngineeringSuffixPolicy::StrictRspice =>
+        {
+            return Err(QuantityInputError::AmbiguousScale {
+                typed: typed.to_owned(),
+                mega: format!("{number}Meg"),
+                milli: format!("{number}m"),
+            });
+        }
         QuantityInputKind::EngineeringScalar => scaled_decimal(
             number,
             value,
             parse_prefix(suffix, "", policy.engineering_suffixes)?,
         ),
-        QuantityInputKind::Time => parse_time_or_frequency(number, value, suffix, "s", policy)?,
+        QuantityInputKind::Time => {
+            parse_time_or_frequency(typed, number, value, suffix, "s", policy)?
+        }
         QuantityInputKind::Frequency => {
             if let Some(prefix) = strip_unit(suffix, "rad/s", policy.engineering_suffixes) {
                 value * parse_prefix(prefix, "rad/s", policy.engineering_suffixes)?
                     / std::f64::consts::TAU
             } else {
-                parse_time_or_frequency(number, value, suffix, "Hz", policy)?
+                parse_time_or_frequency(typed, number, value, suffix, "Hz", policy)?
             }
         }
-        QuantityInputKind::Temperature => parse_temperature(value, suffix)?,
-        QuantityInputKind::TemperatureDelta => parse_temperature_delta(value, suffix)?,
-        QuantityInputKind::Angle => parse_angle(value, suffix)?,
+        QuantityInputKind::Temperature => parse_temperature(typed, value, suffix)?,
+        QuantityInputKind::TemperatureDelta => parse_temperature_delta(typed, value, suffix)?,
+        QuantityInputKind::Angle => parse_angle(typed, value, suffix)?,
     };
 
     if !si.is_finite() {
@@ -161,6 +175,7 @@ fn numeric_prefix_len(source: &str) -> usize {
 }
 
 fn parse_time_or_frequency(
+    typed: &str,
     number: &str,
     value: f64,
     suffix: &str,
@@ -168,11 +183,16 @@ fn parse_time_or_frequency(
     policy: QuantityPresentationPolicy,
 ) -> Result<f64, QuantityInputError> {
     let infer = policy.time_frequency_input == TimeFrequencyInput::InferFromFieldQuantity;
+    let takes = if unit == "s" {
+        "a time takes s, ms, us, ns or ps"
+    } else {
+        "a frequency takes Hz, kHz, MHz or GHz"
+    };
     if suffix.is_empty() {
         return if infer {
             Ok(value)
         } else {
-            Err(QuantityInputError::MissingUnit(unit))
+            Err(QuantityInputError::unit(typed, suffix, takes))
         };
     }
     if let Some(prefix) = strip_unit(suffix, unit, policy.engineering_suffixes) {
@@ -184,7 +204,7 @@ fn parse_time_or_frequency(
     }
     match bare_scale(number, value, suffix, unit) {
         Some(read) if infer => read,
-        _ => Err(QuantityInputError::UnexpectedUnit(suffix.to_owned())),
+        _ => Err(QuantityInputError::unit(typed, suffix, takes)),
     }
 }
 
@@ -372,13 +392,18 @@ fn spice_suffix_scale(text: &str) -> (f64, usize) {
     }
 }
 
-fn parse_temperature(value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
+fn parse_temperature(typed: &str, value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
     let kelvin = match suffix {
         "K" => value,
         "C" | "°C" => value + 273.15,
         "F" | "°F" => (value - 32.0) / 1.8 + 273.15,
-        "" => return Err(QuantityInputError::MissingUnit("K, °C, or °F")),
-        _ => return Err(QuantityInputError::UnexpectedUnit(suffix.to_owned())),
+        _ => {
+            return Err(QuantityInputError::unit(
+                typed,
+                suffix,
+                "a temperature takes K, °C or °F",
+            ));
+        }
     };
     if kelvin < -1e-12 {
         Err(QuantityInputError::BelowAbsoluteZero)
@@ -387,21 +412,31 @@ fn parse_temperature(value: f64, suffix: &str) -> Result<f64, QuantityInputError
     }
 }
 
-fn parse_temperature_delta(value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
+fn parse_temperature_delta(
+    typed: &str,
+    value: f64,
+    suffix: &str,
+) -> Result<f64, QuantityInputError> {
     match suffix {
         "K" | "C" | "°C" => Ok(value),
         "F" | "°F" => Ok(value / 1.8),
-        "" => Err(QuantityInputError::MissingUnit("K, °C, or °F")),
-        _ => Err(QuantityInputError::UnexpectedUnit(suffix.to_owned())),
+        _ => Err(QuantityInputError::unit(
+            typed,
+            suffix,
+            "a temperature difference takes K, °C or °F",
+        )),
     }
 }
 
-fn parse_angle(value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
+fn parse_angle(typed: &str, value: f64, suffix: &str) -> Result<f64, QuantityInputError> {
     match suffix {
         "rad" => Ok(value),
         "deg" | "°" => Ok(value.to_radians()),
-        "" => Err(QuantityInputError::MissingUnit("rad or °")),
-        _ => Err(QuantityInputError::UnexpectedUnit(suffix.to_owned())),
+        _ => Err(QuantityInputError::unit(
+            typed,
+            suffix,
+            "an angle takes ° or rad",
+        )),
     }
 }
 
@@ -410,14 +445,25 @@ pub enum QuantityInputError {
     Empty,
     InvalidNumber(String),
     NonFinite,
-    MissingUnit(&'static str),
-    UnexpectedUnit(String),
+    /// No unit was typed where one is required. Carries what was typed and
+    /// the units the field takes, which is what the refusal tells the reader
+    /// to write.
+    MissingUnit {
+        typed: String,
+        takes: &'static str,
+    },
+    /// The unit typed is not one the field takes.
+    UnexpectedUnit {
+        typed: String,
+        takes: &'static str,
+    },
     UnknownEngineeringPrefix(String),
     /// Strict spelling refuses a prefix and unit the engine reads as another
     /// value (`mHz` is megahertz to SPICE).
     SpiceReadsDifferently(String),
-    /// A frequency typed with a bare `M` or `m`, which SPICE reads as milli
-    /// and everything else as mega. Carries both spellings it could mean.
+    /// A frequency typed with a bare `M` or `m`, or a value with a bare `M`,
+    /// which SPICE reads as milli and everything else as mega. Carries both
+    /// spellings it could mean.
     AmbiguousScale {
         typed: String,
         mega: String,
@@ -434,10 +480,14 @@ impl fmt::Display for QuantityInputError {
             Self::Empty => f.write_str("value is empty"),
             Self::InvalidNumber(value) => write!(f, "invalid number: {value}"),
             Self::NonFinite => f.write_str("value must be finite"),
-            Self::MissingUnit(unit) => write!(f, "explicit unit required ({unit})"),
-            Self::UnexpectedUnit(unit) => write!(f, "unexpected unit: {unit}"),
+            Self::MissingUnit { typed, takes } | Self::UnexpectedUnit { typed, takes } => {
+                write!(f, "{typed}: {takes}")
+            }
             Self::UnknownEngineeringPrefix(prefix) => {
-                write!(f, "unknown engineering prefix: {prefix}")
+                write!(
+                    f,
+                    "{prefix} is not a scale: write f, p, n, u, m, k, Meg, G or T"
+                )
             }
             Self::SpiceReadsDifferently(spelling) => {
                 write!(
@@ -453,6 +503,18 @@ impl fmt::Display for QuantityInputError {
                 write!(f, "unsupported locale decimal separator: {separator}")
             }
             Self::BelowAbsoluteZero => f.write_str("temperature is below absolute zero"),
+        }
+    }
+}
+
+impl QuantityInputError {
+    /// `typed` refused for its unit `suffix`, saying what the field `takes`.
+    fn unit(typed: &str, suffix: &str, takes: &'static str) -> Self {
+        let typed = typed.to_owned();
+        if suffix.is_empty() {
+            Self::MissingUnit { typed, takes }
+        } else {
+            Self::UnexpectedUnit { typed, takes }
         }
     }
 }
@@ -477,7 +539,10 @@ mod tests {
                 policy,
                 UiNumberLocale::default()
             ),
-            Err(QuantityInputError::MissingUnit("Hz"))
+            Err(QuantityInputError::MissingUnit {
+                typed: "10".to_owned(),
+                takes: "a frequency takes Hz, kHz, MHz or GHz",
+            })
         );
         assert_eq!(
             parse_ui_quantity(
@@ -597,6 +662,77 @@ mod tests {
         }
     }
 
+    /// A refusal quotes what was typed and says what to write instead, so
+    /// the reader can correct the field without guessing at its syntax.
+    #[test]
+    fn a_refusal_says_what_to_write() {
+        let infer = QuantityPresentationPolicy::default();
+        let strict = QuantityPresentationPolicy {
+            time_frequency_input: TimeFrequencyInput::StrictUnitsRequired,
+            ..infer
+        };
+        for (text, kind, policy, said) in [
+            (
+                "49x",
+                QuantityInputKind::Time,
+                infer,
+                "49x: a time takes s, ms, us, ns or ps",
+            ),
+            (
+                "49",
+                QuantityInputKind::Time,
+                strict,
+                "49: a time takes s, ms, us, ns or ps",
+            ),
+            (
+                "49n",
+                QuantityInputKind::Time,
+                strict,
+                "49n: a time takes s, ms, us, ns or ps",
+            ),
+            (
+                "5 V",
+                QuantityInputKind::Frequency,
+                infer,
+                "5 V: a frequency takes Hz, kHz, MHz or GHz",
+            ),
+            (
+                "25",
+                QuantityInputKind::Temperature,
+                infer,
+                "25: a temperature takes K, °C or °F",
+            ),
+            (
+                "3 X",
+                QuantityInputKind::TemperatureDelta,
+                infer,
+                "3 X: a temperature difference takes K, °C or °F",
+            ),
+            (
+                "90",
+                QuantityInputKind::Angle,
+                infer,
+                "90: an angle takes ° or rad",
+            ),
+            (
+                "10M",
+                QuantityInputKind::EngineeringScalar,
+                infer,
+                "10M: write 10Meg or 10m",
+            ),
+            (
+                "10q",
+                QuantityInputKind::EngineeringScalar,
+                infer,
+                "q is not a scale: write f, p, n, u, m, k, Meg, G or T",
+            ),
+        ] {
+            let refused =
+                parse_ui_quantity(text, kind, policy, UiNumberLocale::default()).expect_err(text);
+            assert_eq!(refused.to_string(), said, "{text} in a {kind:?} field");
+        }
+    }
+
     #[test]
     fn strict_ui_engineering_scalars_disambiguate_meg_m_and_mil() {
         let policy = QuantityPresentationPolicy::default();
@@ -611,10 +747,10 @@ mod tests {
         assert_eq!(parse("10Meg").unwrap(), 10e6);
         assert_eq!(parse("10m").unwrap(), 10e-3);
         assert_eq!(parse("10mil").unwrap(), 254e-6);
-        assert!(matches!(
-            parse("10M"),
-            Err(QuantityInputError::UnknownEngineeringPrefix(prefix)) if prefix == "M"
-        ));
+        assert_eq!(
+            parse("10M").unwrap_err().to_string(),
+            "10M: write 10Meg or 10m"
+        );
     }
 
     #[test]
