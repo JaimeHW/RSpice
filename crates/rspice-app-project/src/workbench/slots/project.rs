@@ -32,6 +32,12 @@ pub struct ProjectState {
     /// The Library page's three lists: their selections, keyboard memory and
     /// the column the keyboard works in.
     pub library_browser: Box<crate::workbench::surfaces::project::library::LibraryBrowserState>,
+    /// Copy library, Copy view or Move cell, while one is open.
+    pub library_transfer:
+        Box<crate::workbench::project::library_dialogs::transfer::LibraryTransferDialog>,
+    /// Library properties or Cell properties, while one is open.
+    pub library_properties:
+        Box<crate::workbench::project::library_dialogs::properties::LibraryPropertiesDialog>,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -85,6 +91,11 @@ pub struct ProjectState {
     pub copy_cell_name: String,
     /// Copy Cell validation error message
     pub copy_cell_error: Option<String>,
+    /// Copy Cell also copies the cells the source instantiates, from
+    /// writable libraries, into the target library.
+    pub copy_cell_include_children: bool,
+    /// Copy Cell points the copies' instances at the copied cells.
+    pub copy_cell_repoint: bool,
     /// Exact library catalog revision captured when Copy Cell opened.
     pub(crate) copy_cell_library_revision: u64,
     /// Rename Cell dialog
@@ -232,6 +243,8 @@ impl ProjectState {
         self.builtin_models.open = false;
         self.builtin_models.source = None;
         *self.library_browser = Default::default();
+        *self.library_transfer = Default::default();
+        *self.library_properties = Default::default();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;

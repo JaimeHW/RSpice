@@ -380,6 +380,8 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "project"),
     ("features::render_dialog", "project"),
     ("features::render_dialog", "project"),
+    ("features::render_dialog", "project"),
+    ("features::render_dialog", "project"),
     ("SimulateFeature::render_plan_removal_review", "simulate"),
     ("SimulateFeature::render_plan_removal_refusal", "simulate"),
     ("render_unopened_project_dialog", "services"),
@@ -1533,8 +1535,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        79,
-        "the frame's 77 dialog steps, the route overlays' 3 owners in place of their host"
+        81,
+        "the frame's 79 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);
@@ -1590,8 +1592,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
     }
     assert_eq!(
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
-        72,
-        "the frame draws 72 dialog steps beside its synthetic ones"
+        74,
+        "the frame draws 74 dialog steps beside its synthetic ones"
     );
 }
 
@@ -1876,6 +1878,14 @@ fn the_cell_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_
     assert_project_step(
         "project.rename_cell",
         "ProjectFeature::process_rename_cell_dialog",
+    );
+    assert_project_step(
+        "project.library_transfer",
+        "ProjectFeature::process_library_transfer_dialog",
+    );
+    assert_project_step(
+        "project.library_properties",
+        "ProjectFeature::process_library_properties_dialog",
     );
     assert_project_step(
         "project.copy_cell",

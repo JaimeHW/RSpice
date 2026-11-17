@@ -486,6 +486,22 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.rename_cell")),
     },
     DialogSpec {
+        key: DialogKey("project.library_transfer"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.library_transfer"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.library_transfer")),
+    },
+    DialogSpec {
+        key: DialogKey("project.library_properties"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("project.library_properties"))
+        }),
+        render: |app, ctx| {
+            features::render_dialog(app, ctx, DialogKey("project.library_properties"))
+        },
+    },
+    DialogSpec {
         key: DialogKey("project.library_deletion_review"),
         modality: Modality::Dialog,
         is_open: Some(|state| {

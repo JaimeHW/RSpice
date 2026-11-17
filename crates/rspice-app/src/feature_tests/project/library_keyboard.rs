@@ -10,6 +10,7 @@ use egui::{Key, Modifiers};
 use super::super::replay::{PRIMARY, Replay, only};
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::commands::{LibraryCommand, ProjectCommand};
+use rspice_app_project::workbench::project::library_dialogs::transfer::TransferKind;
 use rspice_app_project::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectPage};
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
@@ -149,14 +150,33 @@ fn f2_renames_and_delete_reviews_the_row_the_keyboard_is_on() {
 fn shift_f10_opens_the_rows_menu_with_the_bands_items() {
     let mut replay = library_page();
     let menu = replay.key(Key::F10, Modifiers::SHIFT);
-    only(&menu, "Rename cell\u{2026}", Role::Button);
-    only(&menu, "Delete cell\u{2026}", Role::Button);
+    for item in [
+        "Rename cell\u{2026}",
+        "Move cell\u{2026}",
+        "Cell properties\u{2026}",
+        "Delete cell\u{2026}",
+    ] {
+        only(&menu, item, Role::Button);
+    }
 
     let mut replay = library_page();
     press(&mut replay, Key::ArrowRight);
     let menu = replay.key(Key::F10, Modifiers::SHIFT);
-    only(&menu, "Where view is used\u{2026}", Role::Button);
-    only(&menu, "Rename view\u{2026}", Role::Button);
+    for item in [
+        "Open read-only",
+        "Where view is used\u{2026}",
+        "Copy view\u{2026}",
+        "Rename view\u{2026}",
+    ] {
+        only(&menu, item, Role::Button);
+    }
+
+    let mut replay = library_page();
+    press(&mut replay, Key::ArrowLeft);
+    let menu = replay.key(Key::F10, Modifiers::SHIFT);
+    for item in ["Copy library\u{2026}", "Library properties\u{2026}"] {
+        only(&menu, item, Role::Button);
+    }
 }
 
 /// The palette from the keyboard: opened, `label` typed into its search and
@@ -203,6 +223,29 @@ fn the_library_operations_run_from_the_command_palette() {
         shown.iter().any(|control| control.label == "Audit history"),
         "the audit history opens: {shown:?}"
     );
+
+    // Copy library acts on the selected library, the properties on the
+    // cell the keyboard is on, Open view read-only on the selected view.
+    let mut replay = library_page();
+    run_from_palette(&mut replay, "Copy library");
+    let transfer = &replay.app.state.project.library_transfer;
+    assert_eq!(transfer.kind, Some(TransferKind::CopyLibrary));
+    assert_eq!(transfer.source_library, "work");
+    let mut replay = library_page();
+    run_from_palette(&mut replay, "Library or cell properties");
+    let properties = &replay.app.state.project.library_properties;
+    assert_eq!(
+        (properties.library.as_str(), properties.cell.as_deref()),
+        ("work", Some("amp"))
+    );
+    let mut replay = library_page();
+    run_from_palette(&mut replay, "Open view read-only");
+    let content = &replay.app.state.model.workspace.content;
+    assert_eq!(
+        content.active_view,
+        CellViewRef::new("work", "amp", "schematic")
+    );
+    assert!(content.active_read_only_reference());
 }
 
 /// Ctrl+A chooses every cell of the column, Delete opens one review of all
@@ -398,6 +441,20 @@ fn a_view_the_find_hides_is_described_nowhere() {
         [Some("work"), Some("amp"), Some("schematic")],
         "the selection waits behind the find"
     );
+    // Nor is it what an operation acts on.
+    for (command, reason) in [
+        (LibraryCommand::CopyView, "select a view"),
+        (LibraryCommand::OpenReadOnly, "select a view"),
+        (LibraryCommand::MoveCell, "select a cell"),
+    ] {
+        assert_eq!(
+            replay
+                .app
+                .command_availability(ProjectCommand::Library(command).key()),
+            CommandAvailability::Disabled(reason),
+            "{command:?}"
+        );
+    }
 }
 
 /// A press on `from`, carried across in steps and let go on `to`.

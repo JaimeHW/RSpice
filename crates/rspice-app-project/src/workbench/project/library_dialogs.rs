@@ -7,6 +7,8 @@ pub mod deletion;
 pub mod library_ops;
 pub mod new_cell;
 pub mod new_view;
+pub mod properties;
 pub mod rename_view;
+pub mod transfer;
 
 pub(super) use new_view::new_view_target;

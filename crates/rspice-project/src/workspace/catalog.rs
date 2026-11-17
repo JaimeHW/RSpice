@@ -153,36 +153,49 @@ impl ProjectWorkspace {
             .is_some()
     }
 
-    pub fn prepare_copy_physical_layout_cell_documents(
+    /// The catalog with a copy of every layout each cell of `copies` owns,
+    /// owned by that cell's copy. With `rebind`, a copy places the copies of
+    /// the cells `copies` names where its original placed those cells; else
+    /// it places what its original placed. Each pair is the source library
+    /// and cell, then the target's.
+    pub fn prepare_copy_physical_layout_cells(
         &self,
-        source_library: &str,
-        source_cell: &str,
-        target_library: &str,
-        target_cell: &str,
+        copies: &[((&str, &str), (&str, &str))],
+        rebind: bool,
     ) -> Result<PreparedPhysicalLayoutCatalog, rspice_design::physical_layout::LayoutDocumentError>
     {
-        let copies = self
-            .physical_layout_documents
-            .values()
-            .filter(|document| {
-                document.owner().library == source_library && document.owner().cell == source_cell
-            })
-            .map(|document| {
-                document.copy_for_cell(source_library, source_cell, target_library, target_cell)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         let mut candidate = (*self.physical_layout_documents).clone();
-        for document in &copies {
-            let key = document.owner().key();
-            if candidate.contains_key(&key) {
-                return Err(
-                    rspice_design::physical_layout::LayoutDocumentError::DuplicateObject {
-                        kind: "physical-layout document",
-                        id: key,
-                    },
-                );
+        for ((source_library, source_cell), (target_library, target_cell)) in copies {
+            let originals = self
+                .physical_layout_documents
+                .values()
+                .filter(|document| {
+                    document.owner().library == *source_library
+                        && document.owner().cell == *source_cell
+                })
+                .collect::<Vec<_>>();
+            for original in originals {
+                let mut copy = original.copy_for_cell(
+                    source_library,
+                    source_cell,
+                    target_library,
+                    target_cell,
+                )?;
+                if rebind {
+                    for (from, to) in copies {
+                        copy = copy.rebind_cell_references(*from, *to)?;
+                    }
+                }
+                let key = copy.owner().key();
+                if candidate.insert(key.clone(), copy).is_some() {
+                    return Err(
+                        rspice_design::physical_layout::LayoutDocumentError::DuplicateObject {
+                            kind: "physical-layout document",
+                            id: key,
+                        },
+                    );
+                }
             }
-            candidate.insert(key, document.clone());
         }
         validate_physical_layout_document_catalog(&candidate)?;
         Ok(PreparedPhysicalLayoutCatalog {
@@ -200,6 +213,17 @@ impl ProjectWorkspace {
         self.prepare_renamed_layout_catalog(|document| {
             document.rename_cell_references(library, source_cell, target_cell)
         })
+    }
+
+    /// The catalog with every layout's references to `from` naming `to`
+    /// instead, each re-keyed by its owner: a cell moved to another library.
+    pub fn prepare_rebind_physical_layout_cell_documents(
+        &self,
+        from: (&str, &str),
+        to: (&str, &str),
+    ) -> Result<PreparedPhysicalLayoutCatalog, rspice_design::physical_layout::LayoutDocumentError>
+    {
+        self.prepare_renamed_layout_catalog(|document| document.rebind_cell_references(from, to))
     }
 
     pub fn prepare_rename_physical_layout_library_documents(

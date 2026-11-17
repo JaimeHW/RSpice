@@ -85,6 +85,23 @@ pub enum LibraryIntent {
         library: String,
         cell: String,
     },
+    /// Move the cell to another library, with its open tabs, every
+    /// placement and the project top following it.
+    MoveCell {
+        library: String,
+        cell: String,
+    },
+    /// Copy the library into a new one of the project.
+    CopyLibrary(String),
+    /// Copy the view into a cell of a writable library.
+    CopyView(CellViewRef),
+    /// Open the view in Design as a reference that refuses edits.
+    OpenReadOnly(CellViewRef),
+    /// Library properties, or with `cell` Cell properties.
+    EditProperties {
+        library: String,
+        cell: Option<String>,
+    },
     RenameView(CellViewRef),
     DeleteView(CellViewRef),
     /// One review of a multi-selection's cells or views.
@@ -965,6 +982,16 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
             cell: cell.clone(),
         });
     }
+    if menu_item(
+        ui,
+        "Move cell\u{2026}",
+        read_only.then_some("The library is read-only; its cells cannot be moved."),
+    ) {
+        intent = Some(LibraryIntent::MoveCell {
+            library: library.clone(),
+            cell: cell.clone(),
+        });
+    }
     if menu_item(ui, "Where cell is used\u{2026}", None) {
         intent = Some(LibraryIntent::ReportUsage(UsageSubject::Cell {
             library: library.clone(),
@@ -975,6 +1002,12 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
         intent = Some(LibraryIntent::SetProjectTop {
             library: library.clone(),
             cell: cell.clone(),
+        });
+    }
+    if menu_item(ui, "Cell properties\u{2026}", None) {
+        intent = Some(LibraryIntent::EditProperties {
+            library: library.clone(),
+            cell: Some(cell.clone()),
         });
     }
     let label = match target.cells_chosen.len() {
@@ -993,13 +1026,24 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
 
 /// The view's half of Cell actions, the menu a view row opens too.
 fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
-    let (reference, _, _) = target.view.clone()?;
+    let (reference, view_type, _) = target.view.clone()?;
     let read_only = target.read_only();
     let mut intent = None;
+    if menu_item(ui, "Open read-only", read_only_open_refusal(view_type)) {
+        intent = Some(LibraryIntent::OpenReadOnly(reference.clone()));
+    }
     if menu_item(ui, "Where view is used\u{2026}", None) {
         intent = Some(LibraryIntent::ReportUsage(UsageSubject::View(
             reference.clone(),
         )));
+    }
+    if menu_item(
+        ui,
+        "Copy view\u{2026}",
+        (!target.writable_library_available)
+            .then_some("Every library is read-only; none can take a copy."),
+    ) {
+        intent = Some(LibraryIntent::CopyView(reference.clone()));
     }
     if menu_item(
         ui,
@@ -1024,6 +1068,15 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
         );
     }
     intent
+}
+
+/// Why a view of `view_type` does not open read-only, or `None` when it
+/// does: only the drawings Design edits have a read-only reference.
+fn read_only_open_refusal(view_type: ViewType) -> Option<&'static str> {
+    match view_type {
+        ViewType::Schematic | ViewType::Testbench | ViewType::Symbol => None,
+        _ => Some("Only a schematic, a testbench or a symbol opens read-only."),
+    }
 }
 
 /// What Delete asks for in a column: the review of the one row chosen, or
@@ -1198,10 +1251,19 @@ fn library_items(
         ) {
             intent = Some(LibraryIntent::RenameLibrary(library.clone()));
         }
+        if menu_item(ui, "Copy library\u{2026}", None) {
+            intent = Some(LibraryIntent::CopyLibrary(library.clone()));
+        }
         if menu_item(ui, "Where used\u{2026}", None) {
             intent = Some(LibraryIntent::ReportUsage(UsageSubject::Library(
                 library.clone(),
             )));
+        }
+        if menu_item(ui, "Library properties\u{2026}", None) {
+            intent = Some(LibraryIntent::EditProperties {
+                library: library.clone(),
+                cell: None,
+            });
         }
         if menu_item(
             ui,
@@ -1462,6 +1524,34 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 cx.wb.prompt(error);
             }
         }
+        LibraryIntent::MoveCell { library, cell } => {
+            if let Err(error) = cx.state.open_move_cell_dialog(cx.model, &library, &cell) {
+                cx.wb.prompt(error);
+            }
+        }
+        LibraryIntent::CopyLibrary(library) => {
+            if let Err(error) = cx.state.open_copy_library_dialog(cx.model, &library) {
+                cx.wb.prompt(error);
+            }
+        }
+        LibraryIntent::CopyView(reference) => {
+            if let Err(error) = cx.state.open_copy_view_dialog(cx.model, &reference) {
+                cx.wb.prompt(error);
+            }
+        }
+        LibraryIntent::OpenReadOnly(reference) => {
+            cx.wb
+                .outbox
+                .push(ProjectRequest::OpenViewReadOnly(reference));
+        }
+        LibraryIntent::EditProperties { library, cell } => {
+            if let Err(error) =
+                cx.state
+                    .open_library_properties_dialog(cx.model, &library, cell.as_deref())
+            {
+                cx.wb.prompt(error);
+            }
+        }
         LibraryIntent::RenameView(reference) => {
             if let Err(error) = cx.state.open_rename_view_dialog(
                 cx.model,
@@ -1577,6 +1667,45 @@ pub fn command_intent(
                 Err("every library is read-only")
             }
         }
+        LibraryCommand::CopyLibrary => target
+            .library
+            .map(|(library, _)| LibraryIntent::CopyLibrary(library))
+            .ok_or("select a library"),
+        LibraryCommand::CopyView => {
+            let (reference, _, _) = target.view.ok_or("select a view")?;
+            if target.writable_library_available {
+                Ok(LibraryIntent::CopyView(reference))
+            } else {
+                Err("every library is read-only")
+            }
+        }
+        LibraryCommand::MoveCell => {
+            let (library, cell, read_only) = target.cell.ok_or("select a cell")?;
+            writable(read_only, LibraryIntent::MoveCell { library, cell })
+        }
+        LibraryCommand::OpenReadOnly => {
+            let (reference, view_type, _) = target.view.ok_or("select a view")?;
+            match read_only_open_refusal(view_type) {
+                None => Ok(LibraryIntent::OpenReadOnly(reference)),
+                Some(_) => Err("only a schematic, a testbench or a symbol opens read-only"),
+            }
+        }
+        LibraryCommand::Properties => match column {
+            BrowserColumn::Library => target
+                .library
+                .map(|(library, _)| LibraryIntent::EditProperties {
+                    library,
+                    cell: None,
+                })
+                .ok_or("select a library"),
+            BrowserColumn::Cell | BrowserColumn::View => target
+                .cell
+                .map(|(library, cell, _)| LibraryIntent::EditProperties {
+                    library,
+                    cell: Some(cell),
+                })
+                .ok_or("select a cell"),
+        },
         LibraryCommand::WhereUsed => match column {
             BrowserColumn::Library => target
                 .library
@@ -1839,7 +1968,35 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
 fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> String {
     match mutation {
         crate::state::ProjectLibraryMutation::CreateLibrary { library }
-        | crate::state::ProjectLibraryMutation::DeleteLibrary { library } => library.clone(),
+        | crate::state::ProjectLibraryMutation::DeleteLibrary { library }
+        | crate::state::ProjectLibraryMutation::EditProperties {
+            library,
+            cell: None,
+        } => library.clone(),
+        crate::state::ProjectLibraryMutation::EditProperties {
+            library,
+            cell: Some(cell),
+        } => format!("{library}/{cell}"),
+        crate::state::ProjectLibraryMutation::CopyLibrary {
+            source_library,
+            target_library,
+        } => format!("{source_library} \u{2192} {target_library}"),
+        crate::state::ProjectLibraryMutation::MoveCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        } => format!("{source_library}/{source_cell} \u{2192} {target_library}/{target_cell}"),
+        crate::state::ProjectLibraryMutation::CopyView {
+            source_library,
+            source_cell,
+            source_view,
+            target_library,
+            target_cell,
+            target_view,
+        } => format!(
+            "{source_library}/{source_cell}/{source_view} \u{2192} {target_library}/{target_cell}/{target_view}"
+        ),
         crate::state::ProjectLibraryMutation::RenameLibrary {
             from_library,
             to_library,

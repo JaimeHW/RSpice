@@ -353,7 +353,7 @@ pub(super) fn case_only_rename_refusal(kind: &str) -> String {
     format!("A {kind} cannot be renamed to a name that differs only in case.")
 }
 
-fn conflicting_library_name(
+pub(super) fn conflicting_library_name(
     libraries: &crate::state::LibraryManager,
     name: &str,
     vacating: Option<&str>,

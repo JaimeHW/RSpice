@@ -1176,6 +1176,37 @@ impl ProjectSourceRegistry {
         target_library: &str,
         target_cell: &str,
     ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.clone_bundles(
+            (source_library, source_cell, None),
+            (target_library, target_cell),
+        )
+    }
+
+    /// Clone the project-owned source one view uses onto a copy of that view,
+    /// as [`Self::clone_cell_view_bundles`] clones a cell's.
+    pub fn clone_view_bundles(
+        &mut self,
+        source: &CellViewRef,
+        target: &CellViewRef,
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.clone_bundles(
+            (
+                source.library.as_str(),
+                source.cell.as_str(),
+                Some((source.view.as_str(), target.view.as_str())),
+            ),
+            (target.library.as_str(), target.cell.as_str()),
+        )
+    }
+
+    /// Clone the sources the views of one cell use onto the same views of
+    /// the target cell or, with a view and the name of its copy, the one
+    /// that view uses onto the copy.
+    fn clone_bundles(
+        &mut self,
+        (source_library, source_cell, view): (&str, &str, Option<(&str, &str)>),
+        (target_library, target_cell): (&str, &str),
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
         // A copy of a cell owns a copy of each source a view of it uses,
         // shared or not: the copy is a cell of its own.
         let originals = self
@@ -1192,10 +1223,13 @@ impl ProjectSourceRegistry {
                         ) == canonical_cell_view_owner_key(
                             source_library,
                             source_cell,
-                            &reference.view,
+                            view.map_or(reference.view.as_str(), |(source_view, _)| source_view),
                         )
                     })
-                    .map(move |reference| (bundle, reference.view.clone()))
+                    .map(move |reference| {
+                        let copied = view.map_or(reference.view.as_str(), |(_, copy)| copy);
+                        (bundle, copied.to_owned())
+                    })
             })
             .collect::<Vec<_>>();
         let mut candidate = self.clone();
@@ -1240,6 +1274,26 @@ impl ProjectSourceRegistry {
                     == canonical_cell_view_owner_key(library, old_cell, &reference.view)
             },
             |reference| reference.cell = new_cell.to_owned(),
+        )
+    }
+
+    /// Move cell-view source ownership after a cell moved to another library,
+    /// under its name there. Bundle identities remain stable, as through a
+    /// rename.
+    pub fn move_cell_view_bundles(
+        &mut self,
+        (from_library, from_cell): (&str, &str),
+        (to_library, to_cell): (&str, &str),
+    ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        self.rename_cell_view_owners(
+            |reference| {
+                canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+                    == canonical_cell_view_owner_key(from_library, from_cell, &reference.view)
+            },
+            |reference| {
+                to_library.clone_into(&mut reference.library);
+                to_cell.clone_into(&mut reference.cell);
+            },
         )
     }
 

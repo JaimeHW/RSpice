@@ -18,8 +18,12 @@
 //! between as well.
 
 mod cells;
+mod copies;
 mod libraries;
 mod project_root;
+mod properties;
+
+pub use copies::HierarchyCopy;
 
 use super::Model;
 use crate::state::workspace::{DeclaredModule, hdl_view, place_veriloga_view};

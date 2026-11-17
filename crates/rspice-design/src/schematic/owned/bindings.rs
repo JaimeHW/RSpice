@@ -38,6 +38,25 @@ impl Schematic {
         })
     }
 
+    /// Bind every placement of `from_library`/`from_cell` to
+    /// `to_library`/`to_cell` instead, each keeping the view it names: a cell
+    /// moved to another library, or a copied drawing taking up the copies of
+    /// the cells it instantiates.
+    pub fn rebind_cell_bindings(
+        &mut self,
+        (from_library, from_cell): (&str, &str),
+        (to_library, to_cell): (&str, &str),
+    ) -> usize {
+        self.remap_bindings(|binding| {
+            let matched = binding.library == from_library && binding.cell == from_cell;
+            if matched {
+                to_library.clone_into(&mut binding.library);
+                to_cell.clone_into(&mut binding.cell);
+            }
+            matched
+        })
+    }
+
     pub fn rename_view_bindings(
         &mut self,
         library: &str,

@@ -170,6 +170,39 @@ impl LibraryCatalog {
         true
     }
 
+    /// Record that a save wrote a change to one view, at `at` milliseconds
+    /// since the epoch, without claiming a catalog edit.
+    pub fn record_view_saved_runtime(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        at: u64,
+    ) -> bool {
+        let Some(view) = self
+            .libraries
+            .get_mut(library)
+            .and_then(|library| library.cells.get_mut(cell))
+            .and_then(|cell| cell.views.get_mut(view))
+        else {
+            return false;
+        };
+        view.saved_at = Some(at);
+        true
+    }
+
+    /// Record that a save wrote every view of every writable library, as a
+    /// project's first save does.
+    pub fn record_writable_views_saved_runtime(&mut self, at: u64) {
+        for library in self.libraries.values_mut().filter(|library| !library.read_only) {
+            for cell in library.cells.values_mut() {
+                for view in cell.views.values_mut() {
+                    view.saved_at = Some(at);
+                }
+            }
+        }
+    }
+
     /// Sanitize a persistence clone while retaining its observed revision.
     pub fn sanitize_views_for_persistence(&mut self) {
         self.stamp = crate::stamped::issue();

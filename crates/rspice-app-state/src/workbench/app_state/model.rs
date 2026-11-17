@@ -37,7 +37,9 @@ mod veriloga_parameters;
 pub use definition_index::DefinitionRow;
 pub use generated_instance::GeneratedInstanceLocation;
 pub use in_place_layout::InPlaceLayout;
-pub use library_catalog::{LibraryRemoval, PreparedLibraryOperation, WorkspacePruned};
+pub use library_catalog::{
+    HierarchyCopy, LibraryRemoval, PreparedLibraryOperation, WorkspacePruned,
+};
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };

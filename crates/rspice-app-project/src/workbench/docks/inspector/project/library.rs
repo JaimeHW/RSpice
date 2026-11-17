@@ -1,6 +1,7 @@
 //! The inspector beside the Library page: what opening the selected view
-//! does, where its library lives, its checks and the schematics that place
-//! it, or the selected model when the built-in Verilog-A library is open.
+//! does, when it was last saved, what its cell and its library are for and
+//! where the library lives, its checks and the schematics that place it, or
+//! the selected model when the built-in Verilog-A library is open.
 
 use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
@@ -9,7 +10,7 @@ use rspice_ui_kit::panels::section_header;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::design_system::{property_row, property_row_path};
-use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
 
 use super::{ProjectInspector, ProjectInspectorAction, inspector_action_enabled};
 
@@ -123,12 +124,23 @@ pub fn project_library(
     if let Some(file) = view.and_then(|item| item.file_path.as_ref()) {
         property_row_path(ui, "File", &file.display().to_string());
     }
+    if let Some(saved) = view.and_then(|item| item.saved_at).and_then(saved_time) {
+        property_row(ui, "Saved", &saved);
+    }
 
     section_header(ui, "Library", None);
+    if let Some(description) = library
+        .map(|item| item.description())
+        .filter(|description| !description.is_empty())
+    {
+        property_row(ui, "Description", description);
+    }
     if technology != "unbound" {
         property_row(ui, "Technology", technology);
     }
-    property_row(ui, "Source", &library_path);
+    // Cut from the middle, so the folder the library is kept in stays in
+    // view however narrow the panel.
+    property_row_path(ui, "Location", &library_path);
     // A view nobody has edited is in its normal state.
     if view.is_some_and(|item| item.modified) {
         property_row(ui, "State", "modified");
@@ -146,11 +158,33 @@ pub fn project_library(
 
     section_header(ui, "Actions", None);
     let open = inspector_action_enabled(ui, "Open selected view", open_target.is_some());
+    // Library properties in the library column, Cell properties beside a
+    // cell or a view: the page's Properties command, on what it acts on.
+    let properties = inspector_action_enabled(ui, "Properties\u{2026}", library.is_some());
     // No "Where used & impact…": it wrote the consumers to the console, and
     // the "Used by" row above names them in place. No "Revision history…"
     // either — it is a project-level dialog, and the Project overview
     // inspector is where the project's own actions live.
+    if properties {
+        return Some(ProjectInspectorAction::Execute(
+            ProjectCommand::Library(LibraryCommand::Properties).key(),
+        ));
+    }
     open_target.filter(|_| open).map(|(reference, view_type)| {
         ProjectInspectorAction::Shell(ProjectRequest::OpenView(reference, view_type))
     })
+}
+
+/// When a save last wrote a view with a change, on the reader's clock, as
+/// Project properties states the project's own save.
+fn saved_time(unix_ms: u64) -> Option<String> {
+    let stamp = crate::time_compat::local_date_time(unix_ms)?;
+    Some(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        stamp.year(),
+        u8::from(stamp.month()),
+        stamp.day(),
+        stamp.hour(),
+        stamp.minute()
+    ))
 }

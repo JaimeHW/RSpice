@@ -185,6 +185,11 @@ pub struct View {
     pub file_path: Option<PathBuf>,
     /// Whether view has unsaved changes
     pub modified: bool,
+    /// When a save last wrote a change to the view, in milliseconds since
+    /// the epoch. Like the unsaved-changes mark it is no part of the view's
+    /// content: recording it makes nothing dirty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_at: Option<u64>,
     /// View-specific metadata
     pub metadata: HashMap<String, String>,
 }
@@ -196,6 +201,7 @@ impl Default for View {
             view_type: ViewType::Schematic,
             file_path: None,
             modified: false,
+            saved_at: None,
             metadata: HashMap::new(),
         }
     }

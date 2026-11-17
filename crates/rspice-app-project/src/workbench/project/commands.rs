@@ -56,26 +56,38 @@ pub enum ProjectCommand {
     Library(LibraryCommand),
 }
 
-/// The Library page's operations, as commands: rename, copy, delete and
-/// where used act on the row the page's keyboard last worked in; publish,
-/// restore and the audit history on the project's libraries.
+/// The Library page's operations, as commands: rename, copy, move, delete,
+/// where used, open read-only and properties act on the row the page's
+/// keyboard last worked in, or on the library, cell or view the command
+/// names; publish, restore and the audit history on the project's
+/// libraries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryCommand {
     Rename,
     CopyCell,
+    CopyLibrary,
+    CopyView,
+    MoveCell,
     Delete,
     WhereUsed,
+    OpenReadOnly,
+    Properties,
     Publish,
     Restore,
     AuditHistory,
 }
 
 impl LibraryCommand {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 12] = [
         Self::Rename,
         Self::CopyCell,
+        Self::CopyLibrary,
+        Self::CopyView,
+        Self::MoveCell,
         Self::Delete,
         Self::WhereUsed,
+        Self::OpenReadOnly,
+        Self::Properties,
         Self::Publish,
         Self::Restore,
         Self::AuditHistory,
@@ -158,7 +170,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 34] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -183,8 +195,13 @@ impl ProjectCommand {
         Self::CheckAndSave,
         Self::Library(LibraryCommand::Rename),
         Self::Library(LibraryCommand::CopyCell),
+        Self::Library(LibraryCommand::CopyLibrary),
+        Self::Library(LibraryCommand::CopyView),
+        Self::Library(LibraryCommand::MoveCell),
         Self::Library(LibraryCommand::Delete),
         Self::Library(LibraryCommand::WhereUsed),
+        Self::Library(LibraryCommand::OpenReadOnly),
+        Self::Library(LibraryCommand::Properties),
         Self::Library(LibraryCommand::Publish),
         Self::Library(LibraryCommand::Restore),
         Self::Library(LibraryCommand::AuditHistory),
@@ -220,6 +237,13 @@ impl ProjectCommand {
             Self::CheckAndSave => CommandKey::new("check-and-save"),
             Self::Library(LibraryCommand::Rename) => CommandKey::new("library-rename"),
             Self::Library(LibraryCommand::CopyCell) => CommandKey::new("library-copy-cell"),
+            Self::Library(LibraryCommand::CopyLibrary) => CommandKey::new("library-copy-library"),
+            Self::Library(LibraryCommand::CopyView) => CommandKey::new("library-copy-view"),
+            Self::Library(LibraryCommand::MoveCell) => CommandKey::new("library-move-cell"),
+            Self::Library(LibraryCommand::OpenReadOnly) => {
+                CommandKey::new("library-open-read-only")
+            }
+            Self::Library(LibraryCommand::Properties) => CommandKey::new("library-properties"),
             Self::Library(LibraryCommand::Delete) => CommandKey::new("library-delete"),
             Self::Library(LibraryCommand::WhereUsed) => CommandKey::new("library-where-used"),
             Self::Library(LibraryCommand::Publish) => CommandKey::new("publish-project"),
@@ -315,6 +339,11 @@ impl ProjectCommand {
                 match command {
                     LibraryCommand::Rename => "Rename library, cell or view\u{2026}",
                     LibraryCommand::CopyCell => "Copy cell\u{2026}",
+                    LibraryCommand::CopyLibrary => "Copy library\u{2026}",
+                    LibraryCommand::CopyView => "Copy view\u{2026}",
+                    LibraryCommand::MoveCell => "Move cell\u{2026}",
+                    LibraryCommand::OpenReadOnly => "Open view read-only",
+                    LibraryCommand::Properties => "Library or cell properties\u{2026}",
                     LibraryCommand::Delete => "Delete library, cell or view\u{2026}",
                     LibraryCommand::WhereUsed => "Where used\u{2026}",
                     LibraryCommand::Publish => "Publish project\u{2026}",
@@ -350,6 +379,9 @@ impl ProjectCommand {
 pub enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
+    /// Open a schematic, testbench or symbol in Design as a reference that
+    /// refuses edits.
+    OpenViewReadOnly(CellViewRef),
     /// Open the project's root schematic in Design, then check it when the
     /// check can run there.
     OpenRootAndCheck(CellViewRef),

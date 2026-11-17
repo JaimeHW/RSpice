@@ -259,18 +259,19 @@ impl Model {
         dst_library: &str,
         new_name: &str,
     ) -> (Result<usize, String>, Option<String>) {
-        let copy = match self.cell_to_copy(src_library, cell, dst_library, new_name) {
-            Ok(copy) => copy,
-            Err(error) => return (Err(error), None),
-        };
-        let prompt = self.sync_active_schematic_to_workspace();
-        let outcome = self.copy_cell_into(copy, src_library, cell, dst_library, new_name);
-        (outcome, prompt)
+        let (outcome, prompt) = self.copy_cell_hierarchy(
+            src_library,
+            cell,
+            dst_library,
+            new_name,
+            super::HierarchyCopy::default(),
+        );
+        (outcome.map(|(_, views)| views), prompt)
     }
 
     /// The cell [`Self::copy_cell`] copies, refusing a copy the destination
     /// library cannot take.
-    fn cell_to_copy(
+    pub(super) fn cell_to_copy(
         &self,
         src_library: &str,
         cell: &str,
@@ -303,94 +304,6 @@ impl Model {
             ));
         }
         Ok(copy)
-    }
-
-    /// Copy `copy`, the cell [`Self::cell_to_copy`] answered, and everything
-    /// it owns into the destination library as one project transaction.
-    fn copy_cell_into(
-        &mut self,
-        mut copy: crate::state::Cell,
-        src_library: &str,
-        cell: &str,
-        dst_library: &str,
-        new_name: &str,
-    ) -> Result<usize, String> {
-        let mut candidate_sources = self.workspace.content.project_sources.clone();
-        let copied_source_ids = candidate_sources
-            .clone_cell_view_bundles(src_library, cell, dst_library, new_name)
-            .map_err(|error| {
-                format!("Could not copy the cell's project source bundles: {error}")
-            })?;
-        let mut candidate_design_management = self.workspace.content.design_management.clone();
-        let copied_sheet_catalogs = candidate_design_management
-            .copy_cell_sheet_catalogs(src_library, cell, dst_library, new_name)
-            .map_err(|error| format!("Could not copy the cell's sheet-catalog ownership: {error}"))?
-            .copied_sheet_catalogs;
-        let candidate_layouts = self
-            .workspace
-            .content
-            .prepare_copy_physical_layout_cell_documents(src_library, cell, dst_library, new_name)
-            .map_err(|error| format!("Could not copy the cell's physical layouts: {error}"))?;
-        let project_mutation = self.preflight_project_library_mutation(
-            crate::state::ProjectLibraryMutation::CopyCell {
-                source_library: src_library.to_owned(),
-                source_cell: cell.to_owned(),
-                target_library: dst_library.to_owned(),
-                target_cell: new_name.to_owned(),
-            },
-        )?;
-
-        copy.name = new_name.to_owned();
-        // A copied model-bound symbol is a symbol of its own: it names its
-        // new place and carries its own binding.
-        let binding_id = rspice_design::model_bound_symbol::model_bound_binding_id(
-            self.workspace.content.project.id(),
-            dst_library,
-            new_name,
-        );
-        rspice_design::model_bound_symbol::restamp_model_bound_identity(
-            &mut copy,
-            dst_library,
-            Some(&binding_id),
-        );
-        let view_names: Vec<String> = copy.views.keys().cloned().collect();
-        let view_count = view_names.len();
-        self.library_manager
-            .edit_library(dst_library)
-            .ok_or_else(|| format!("Library '{dst_library}' disappeared during the copy"))?
-            .add_cell(copy);
-
-        // The drawn content lives in the workspace buffers, keyed
-        // "library/cell/view" — a copy without it would be a lie. The
-        // validation journal is the one thing that does not travel: it records
-        // that *this* document was reviewed and signed off at a revision, and
-        // a copy has been reviewed by nobody. It starts its own history.
-        for view in view_names {
-            let old_key = CellViewRef::new(src_library, cell, view.as_str()).key();
-            let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
-            if let Some(buffer) = self
-                .workspace
-                .schematic_editor(&old_key)
-                .map(|source| source.copy_without_validated_revisions())
-            {
-                self.workspace.insert_schematic_editor(new_key, buffer);
-            }
-        }
-        self.workspace
-            .content
-            .commit_prepared_physical_layout_catalog(candidate_layouts);
-
-        if !copied_source_ids.is_empty() {
-            self.workspace.content.project_sources = candidate_sources;
-            self.workspace.content.project_sources_dirty = true;
-        }
-        if copied_sheet_catalogs > 0 {
-            self.workspace.content.design_management = candidate_design_management;
-        }
-        self.publish_project_library_mutation(project_mutation);
-
-        self.library_manager.select_cell(dst_library, new_name);
-        Ok(view_count)
     }
 
     /// Rename a cell and remap everything that pointed at it: view buffers,

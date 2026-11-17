@@ -339,7 +339,13 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             app.execute_command_key(ShellCommand::ConfigurationSets.key())
         }
         ProjectRequest::OpenView(reference, view_type) => {
-            app.state.open_workspace_view(reference);
+            app.state.open_workspace_view(reference.clone());
+            // Opened from the project, a view is opened to edit, though it
+            // was last open as a read-only reference.
+            let content = &mut app.state.model.workspace.content;
+            if content.active_view == reference {
+                content.set_active_read_only_reference(false);
+            }
             // Source views are cell views too: Design shows a Verilog-A module's
             // editor and states what a SPICE or Verilog view is bound to.
             let workspace = match view_type {
@@ -350,6 +356,14 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 _ => Workspace::Design,
             };
             app.execute_command_key(ShellCommand::OpenWorkspace(workspace).key());
+        }
+        ProjectRequest::OpenViewReadOnly(reference) => {
+            app.state.open_workspace_view(reference.clone());
+            let content = &mut app.state.model.workspace.content;
+            if content.active_view == reference {
+                content.set_active_read_only_reference(true);
+            }
+            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
         }
         ProjectRequest::SaveMigrationCopy => {
             let saved = app.state.save_project_as();

@@ -92,7 +92,7 @@ fn the_open_built_in_library_is_what_the_inspector_describes() {
     }
     for row in [
         "View type",
-        "Source",
+        "Location",
         "State",
         "Checks",
         "Used by",

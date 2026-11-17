@@ -1300,6 +1300,22 @@ impl AppState {
         Ok(remapped)
     }
 
+    /// [`Model::move_cell`], then what it left.
+    #[cfg(test)]
+    pub(crate) fn move_cell(
+        &mut self,
+        library: &str,
+        cell: &str,
+        target_library: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let (remapped, pruned) = self
+            .model
+            .move_cell(library, cell, target_library, new_name)?;
+        apply_workspace_pruned(self, pruned);
+        Ok(remapped)
+    }
+
     /// [`Model::rename_view`], then what it left.
     #[cfg(test)]
     pub(crate) fn rename_view(

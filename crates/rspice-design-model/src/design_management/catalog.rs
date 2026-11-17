@@ -482,12 +482,51 @@ impl DesignManagementCatalog {
         destination_library: &str,
         destination_cell: &str,
     ) -> Result<DesignManagementCopyReceipt, DesignManagementError> {
+        self.copy_sheet_catalogs(
+            (source_library, source_cell, None),
+            (destination_library, destination_cell, None),
+        )
+    }
+
+    /// Copy the sheet catalog one view owns into a newly copied view, as
+    /// [`Self::copy_cell_sheet_catalogs`] copies a cell's.
+    pub fn copy_view_sheet_catalog(
+        &mut self,
+        (source_library, source_cell, source_view): (&str, &str, &str),
+        (destination_library, destination_cell, destination_view): (&str, &str, &str),
+    ) -> Result<DesignManagementCopyReceipt, DesignManagementError> {
+        self.copy_sheet_catalogs(
+            (source_library, source_cell, Some(source_view)),
+            (
+                destination_library,
+                destination_cell,
+                Some(destination_view),
+            ),
+        )
+    }
+
+    /// Copy the sheet catalogs a cell owns, or with a view the one that view
+    /// owns, onto the destination cell, or that view of it.
+    fn copy_sheet_catalogs(
+        &mut self,
+        (source_library, source_cell, source_view): (&str, &str, Option<&str>),
+        (destination_library, destination_cell, destination_view): (&str, &str, Option<&str>),
+    ) -> Result<DesignManagementCopyReceipt, DesignManagementError> {
         self.validate()?;
         let source_library = canonical_cell_view_segment("library", source_library)?;
         let source_cell = canonical_cell_view_segment("cell", source_cell)?;
+        let source_view = source_view
+            .map(|view| canonical_cell_view_segment("view", view))
+            .transpose()?;
         let destination_library = canonical_cell_view_segment("library", destination_library)?;
         let destination_cell = canonical_cell_view_segment("cell", destination_cell)?;
-        if source_library == destination_library && source_cell == destination_cell {
+        let destination_view = destination_view
+            .map(|view| canonical_cell_view_segment("view", view))
+            .transpose()?;
+        if source_library == destination_library
+            && source_cell == destination_cell
+            && source_view == destination_view
+        {
             return Err(DesignManagementError::NoChanges(
                 "design management cell copy",
             ));
@@ -498,9 +537,13 @@ impl DesignManagementCatalog {
             .iter()
             .filter_map(|(key, catalog)| {
                 let [key_library, key_cell, key_view] = cell_view_key_segments(key).ok()?;
-                (key_library == source_library && key_cell == source_cell).then(|| {
+                (key_library == source_library
+                    && key_cell == source_cell
+                    && source_view.as_ref().is_none_or(|view| *view == key_view))
+                .then(|| {
+                    let view = destination_view.as_deref().unwrap_or(key_view);
                     (
-                        format!("{destination_library}/{destination_cell}/{key_view}"),
+                        format!("{destination_library}/{destination_cell}/{view}"),
                         catalog.clone(),
                     )
                 })
@@ -652,11 +695,23 @@ impl DesignManagementCatalog {
         old_cell: &str,
         new_cell: &str,
     ) -> Result<DesignManagementOwnershipReceipt, DesignManagementError> {
+        self.move_cell_sheet_catalogs((library, old_cell), (library, new_cell))
+    }
+
+    /// Atomically remap every owned view of one cell moved to another
+    /// library, under its name there. Stable identities remain unchanged, as
+    /// through a rename.
+    pub fn move_cell_sheet_catalogs(
+        &mut self,
+        (old_library, old_cell): (&str, &str),
+        (new_library, new_cell): (&str, &str),
+    ) -> Result<DesignManagementOwnershipReceipt, DesignManagementError> {
         self.validate()?;
-        let library = canonical_cell_view_segment("library", library)?;
+        let old_library = canonical_cell_view_segment("library", old_library)?;
+        let new_library = canonical_cell_view_segment("library", new_library)?;
         let old_cell = canonical_cell_view_segment("cell", old_cell)?;
         let new_cell = canonical_cell_view_segment("cell", new_cell)?;
-        if old_cell == new_cell {
+        if (&old_library, &old_cell) == (&new_library, &new_cell) {
             return Err(DesignManagementError::NoChanges(
                 "design management cell ownership",
             ));
@@ -666,8 +721,8 @@ impl DesignManagementCatalog {
             .keys()
             .filter_map(|key| {
                 let [key_library, key_cell, key_view] = cell_view_key_segments(key).ok()?;
-                (key_library == library && key_cell == old_cell)
-                    .then(|| (key.clone(), format!("{library}/{new_cell}/{key_view}")))
+                (key_library == old_library && key_cell == old_cell)
+                    .then(|| (key.clone(), format!("{new_library}/{new_cell}/{key_view}")))
             })
             .collect::<Vec<_>>();
         let old_keys = matching
@@ -701,14 +756,17 @@ impl DesignManagementCatalog {
         }
         let remapped_variant_objects = remap_variant_object_owners(
             &mut candidate.variants,
-            &library,
+            &old_library,
             &old_cell,
-            &library,
+            &new_library,
             &new_cell,
         )?;
-        let remapped_annotation_objects = candidate
-            .annotation
-            .remap_object_owners(&library, &old_cell, &library, &new_cell)?;
+        let remapped_annotation_objects = candidate.annotation.remap_object_owners(
+            &old_library,
+            &old_cell,
+            &new_library,
+            &new_cell,
+        )?;
         if old_keys.is_empty() && remapped_variant_objects == 0 && remapped_annotation_objects == 0
         {
             return Ok(DesignManagementOwnershipReceipt {

@@ -25,6 +25,7 @@ mod library_deletion;
 mod library_inspector;
 mod library_keyboard;
 mod library_page;
+mod library_transfers;
 mod library_undo;
 mod new_cell;
 mod new_project;

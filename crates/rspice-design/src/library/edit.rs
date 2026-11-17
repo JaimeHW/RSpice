@@ -30,6 +30,31 @@ impl<'a> LibraryEdit<'a> {
         self.library.add_cell(cell);
     }
 
+    /// Say what the library is for; an empty description says nothing.
+    pub fn set_description(&mut self, description: &str) {
+        let description = description.trim();
+        if description.is_empty() {
+            self.library.metadata.remove(super::LIBRARY_DESCRIPTION);
+        } else {
+            self.library
+                .metadata
+                .insert(super::LIBRARY_DESCRIPTION.to_owned(), description.to_owned());
+        }
+    }
+
+    /// Make the library refuse changes, or take them again.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.library.read_only = read_only;
+    }
+
+    /// Say what one of the library's cells is for.
+    pub fn set_cell_description(&mut self, cell: &str, description: &str) -> Option<()> {
+        description
+            .trim()
+            .clone_into(&mut self.library.get_cell_mut(cell)?.description);
+        Some(())
+    }
+
     pub fn remove_cell(&mut self, name: &str) -> bool {
         self.library.remove_cell(name)
     }

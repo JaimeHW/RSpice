@@ -257,6 +257,23 @@ impl ProjectLibraries {
 
     /// Strip runtime-only view presentation from a serialization clone while
     /// preserving the exact governed catalog revision.
+    /// Record that a save wrote a change to one view.
+    pub fn record_view_saved_runtime(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        at: u64,
+    ) -> bool {
+        self.catalog
+            .record_view_saved_runtime(library, cell, view, at)
+    }
+
+    /// Record that a save wrote every view of every writable library.
+    pub fn record_writable_views_saved_runtime(&mut self, at: u64) {
+        self.catalog.record_writable_views_saved_runtime(at);
+    }
+
     pub fn sanitize_views_for_persistence(&mut self) {
         self.catalog.sanitize_views_for_persistence();
     }

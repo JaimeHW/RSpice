@@ -11,6 +11,12 @@ impl SchematicState {
         self.design.rename_cell_bindings(library, cell, new_name)
     }
 
+    /// Bind every placement of the cell `from` names to the cell `to` names,
+    /// each keeping its view.
+    pub fn rebind_cell_bindings(&mut self, from: (&str, &str), to: (&str, &str)) -> usize {
+        self.design.rebind_cell_bindings(from, to)
+    }
+
     pub fn rename_view_bindings(
         &mut self,
         library: &str,

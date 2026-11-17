@@ -20,6 +20,12 @@ pub enum ProjectLibraryMutation {
     DeleteLibrary {
         library: String,
     },
+    /// A library copied whole under a new name: every cell, view and source
+    /// it holds.
+    CopyLibrary {
+        source_library: String,
+        target_library: String,
+    },
     CreateCell {
         library: String,
         cell: String,
@@ -39,6 +45,30 @@ pub enum ProjectLibraryMutation {
         library: String,
         from_cell: String,
         to_cell: String,
+    },
+    /// A cell moved to another library, under its name there; whatever
+    /// placed or named it follows.
+    MoveCell {
+        source_library: String,
+        source_cell: String,
+        target_library: String,
+        target_cell: String,
+    },
+    /// One view copied into a cell, under its name there.
+    CopyView {
+        source_library: String,
+        source_cell: String,
+        source_view: String,
+        target_library: String,
+        target_cell: String,
+        target_view: String,
+    },
+    /// The properties of a library or, with `cell`, of one of its cells:
+    /// a description, or whether the library takes changes.
+    EditProperties {
+        library: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell: Option<String>,
     },
     RenameView {
         library: String,
@@ -77,6 +107,10 @@ impl ProjectLibraryMutation {
             Self::CreateLibrary { .. } => "library creation",
             Self::RenameLibrary { .. } => "library rename",
             Self::DeleteLibrary { .. } => "library deletion",
+            Self::CopyLibrary { .. } => "library copy",
+            Self::MoveCell { .. } => "cell move",
+            Self::CopyView { .. } => "view copy",
+            Self::EditProperties { .. } => "properties change",
             Self::CreateCell { .. } => "cell creation",
             Self::CreateView { .. } => "view creation",
             Self::CopyCell { .. } => "cell copy",
@@ -106,9 +140,49 @@ impl ProjectLibraryMutation {
                     _ => operation.validate(),
                 });
             }
-            Self::CreateLibrary { library } | Self::DeleteLibrary { library } => {
-                &[("library", library)]
-            }
+            Self::CreateLibrary { library }
+            | Self::DeleteLibrary { library }
+            | Self::EditProperties {
+                library,
+                cell: None,
+            } => &[("library", library)],
+            Self::EditProperties {
+                library,
+                cell: Some(cell),
+            } => &[("library", library), ("cell", cell)],
+            Self::CopyLibrary {
+                source_library,
+                target_library,
+            } => &[
+                ("source_library", source_library),
+                ("target_library", target_library),
+            ],
+            Self::MoveCell {
+                source_library,
+                source_cell,
+                target_library,
+                target_cell,
+            } => &[
+                ("source_library", source_library),
+                ("source_cell", source_cell),
+                ("target_library", target_library),
+                ("target_cell", target_cell),
+            ],
+            Self::CopyView {
+                source_library,
+                source_cell,
+                source_view,
+                target_library,
+                target_cell,
+                target_view,
+            } => &[
+                ("source_library", source_library),
+                ("source_cell", source_cell),
+                ("source_view", source_view),
+                ("target_library", target_library),
+                ("target_cell", target_cell),
+                ("target_view", target_view),
+            ],
             Self::RenameLibrary {
                 from_library,
                 to_library,
@@ -211,6 +285,35 @@ impl ProjectLibraryMutation {
                 == canonical_cell_view_owner_key(library, to_cell, "") =>
             {
                 Err("cell rename source and target identities are equal".to_owned())
+            }
+            Self::CopyLibrary {
+                source_library,
+                target_library,
+            } if canonical_cell_view_owner_key(source_library, "", "")
+                == canonical_cell_view_owner_key(target_library, "", "") =>
+            {
+                Err("library copy source and target identities are equal".to_owned())
+            }
+            Self::MoveCell {
+                source_library,
+                target_library,
+                ..
+            } if canonical_cell_view_owner_key(source_library, "", "")
+                == canonical_cell_view_owner_key(target_library, "", "") =>
+            {
+                Err("a cell moves to another library; within one it is renamed".to_owned())
+            }
+            Self::CopyView {
+                source_library,
+                source_cell,
+                source_view,
+                target_library,
+                target_cell,
+                target_view,
+            } if canonical_cell_view_owner_key(source_library, source_cell, source_view)
+                == canonical_cell_view_owner_key(target_library, target_cell, target_view) =>
+            {
+                Err("view copy source and target identities are equal".to_owned())
             }
             Self::RollbackPublication { publication_id, .. } if publication_id.is_nil() => {
                 Err("library publication rollback identity must not be nil".to_owned())

@@ -973,6 +973,7 @@ pub fn save_native(
 
     let result = (|| {
         record_saved_symbol_revisions(state, scope);
+        record_saved_view_times(state, scope);
         let working = snapshot(state)?;
         let candidate = match scope {
             SaveScope::AllDocuments => working,
@@ -1131,30 +1132,7 @@ pub fn take_finished_results_save(
 fn record_saved_symbol_revisions(state: &mut dyn LifecycleSourceMut, scope: SaveScope) {
     let saved: Vec<CellViewRef> = {
         let view = state.lifecycle_view();
-        if view
-            .platform
-            .project_lifecycle
-            .authority
-            .accepted()
-            .is_none()
-        {
-            view.model.writable_symbol_views()
-        } else {
-            let documents = match scope {
-                SaveScope::AllDocuments => dirty_documents_fresh(&view),
-                SaveScope::ActiveDocument if active_document_is_dirty_fresh(&view) => {
-                    vec![active_document(&view)]
-                }
-                SaveScope::ActiveDocument => Vec::new(),
-            };
-            documents
-                .into_iter()
-                .filter_map(|document| match document {
-                    ProjectDocumentId::CellView(reference) => Some(reference),
-                    _ => None,
-                })
-                .collect()
-        }
+        changed_cell_views(&view, scope).unwrap_or_else(|| view.model.writable_symbol_views())
     };
     if saved.is_empty() {
         return;
@@ -1171,6 +1149,59 @@ fn record_saved_symbol_revisions(state: &mut dyn LifecycleSourceMut, scope: Save
                     reference.display_path()
                 ),
             );
+        }
+    }
+}
+
+/// The cell views a save of `scope` writes with a change, or `None` for a
+/// project never saved, every view of which is new to its file.
+fn changed_cell_views(view: &LifecycleView<'_>, scope: SaveScope) -> Option<Vec<CellViewRef>> {
+    if view
+        .platform
+        .project_lifecycle
+        .authority
+        .accepted()
+        .is_none()
+    {
+        return None;
+    }
+    let documents = match scope {
+        SaveScope::AllDocuments => dirty_documents_fresh(view),
+        SaveScope::ActiveDocument if active_document_is_dirty_fresh(view) => {
+            vec![active_document(view)]
+        }
+        SaveScope::ActiveDocument => Vec::new(),
+    };
+    Some(
+        documents
+            .into_iter()
+            .filter_map(|document| match document {
+                ProjectDocumentId::CellView(reference) => Some(reference),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+/// Stamp each view a save writes with a change with the time of the save,
+/// which the Library page's inspector states: every view of a writable
+/// library on a project's first save, else each changed one. The stamp is
+/// no part of any document's content, so it makes nothing dirty.
+fn record_saved_view_times(state: &mut dyn LifecycleSourceMut, scope: SaveScope) {
+    let saved = changed_cell_views(&state.lifecycle_view(), scope);
+    let now = rspice_app_state::state::stimulus_library::now_unix_ms();
+    let libraries = &mut state.lifecycle_parts().model.library_manager;
+    match saved {
+        None => libraries.record_writable_views_saved_runtime(now),
+        Some(saved) => {
+            for reference in saved {
+                libraries.record_view_saved_runtime(
+                    &reference.library,
+                    &reference.cell,
+                    &reference.view,
+                    now,
+                );
+            }
         }
     }
 }
@@ -1244,6 +1275,7 @@ pub fn prepare_browser_save(
     let result = (|| {
         if !project_copy {
             record_saved_symbol_revisions(state, scope);
+            record_saved_view_times(state, scope);
         }
         let working = snapshot(state)?;
         let candidate = if project_copy || scope == SaveScope::AllDocuments {

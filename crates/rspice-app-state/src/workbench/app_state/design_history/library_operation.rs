@@ -836,6 +836,33 @@ fn reversal(operation: &ProjectLibraryMutation) -> Option<ProjectLibraryMutation
     Some(match operation.clone() {
         Operation::CreateLibrary { library } => Operation::DeleteLibrary { library },
         Operation::DeleteLibrary { library } => Operation::CreateLibrary { library },
+        Operation::CopyLibrary { target_library, .. } => Operation::DeleteLibrary {
+            library: target_library,
+        },
+        Operation::MoveCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        } => Operation::MoveCell {
+            source_library: target_library,
+            source_cell: target_cell,
+            target_library: source_library,
+            target_cell: source_cell,
+        },
+        Operation::CopyView {
+            target_library,
+            target_cell,
+            target_view,
+            ..
+        } => Operation::DeleteView {
+            library: target_library,
+            cell: target_cell,
+            view: target_view,
+        },
+        // What the properties were is the step's to put back; the audit
+        // records that they changed again.
+        Operation::EditProperties { library, cell } => Operation::EditProperties { library, cell },
         Operation::RenameLibrary {
             from_library,
             to_library,
@@ -906,6 +933,34 @@ fn describe(operation: &ProjectLibraryMutation) -> String {
     match operation {
         Operation::CreateLibrary { library } => format!("create library {library}"),
         Operation::DeleteLibrary { library } => format!("delete library {library}"),
+        Operation::CopyLibrary {
+            source_library,
+            target_library,
+        } => format!("copy library {source_library} to {target_library}"),
+        Operation::MoveCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        } => format!("move cell {source_library}/{source_cell} to {target_library}/{target_cell}"),
+        Operation::CopyView {
+            source_library,
+            source_cell,
+            source_view,
+            target_library,
+            target_cell,
+            target_view,
+        } => format!(
+            "copy view {source_library}/{source_cell}/{source_view} to {target_library}/{target_cell}/{target_view}"
+        ),
+        Operation::EditProperties {
+            library,
+            cell: None,
+        } => format!("edit properties of library {library}"),
+        Operation::EditProperties {
+            library,
+            cell: Some(cell),
+        } => format!("edit properties of cell {library}/{cell}"),
         Operation::RenameLibrary {
             from_library,
             to_library,
@@ -950,6 +1005,21 @@ fn describe(operation: &ProjectLibraryMutation) -> String {
 /// of one kind in one library, else each operation's own name in turn.
 fn describe_batch(operations: &[ProjectLibraryMutation]) -> String {
     use ProjectLibraryMutation as Operation;
+    // A copy of a cell with the cells it instantiates is one copy: the
+    // first is the cell asked for, the rest go with it.
+    if let [first @ Operation::CopyCell { .. }, rest @ ..] = operations
+        && !rest.is_empty()
+        && rest
+            .iter()
+            .all(|operation| matches!(operation, Operation::CopyCell { .. }))
+    {
+        return format!(
+            "{} with the {} {} it instantiates",
+            describe(first),
+            rest.len(),
+            if rest.len() == 1 { "cell" } else { "cells" }
+        );
+    }
     let libraries = operations
         .iter()
         .map(|operation| match operation {

@@ -1,6 +1,7 @@
-//! Copy Cell and Rename Cell — small modals on the dialog primitive
-//! The forms are one field
-//! deep; the semantics live in `Model::copy_cell` / `rename_cell`.
+//! Copy Cell and Rename Cell: Copy Cell on the command form, with the
+//! cells the copied cell instantiates when asked, Rename Cell on the dialog
+//! primitive; the semantics live in `Model::copy_cell_hierarchy` and
+//! `Model::rename_cell`.
 
 use egui::Context;
 
@@ -12,10 +13,10 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row, value_row};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, input_row, kv_row};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
-use crate::workbench::app_state::model::WorkspacePruned;
+use crate::workbench::app_state::model::{HierarchyCopy, WorkspacePruned};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
@@ -62,6 +63,8 @@ impl ProjectState {
         self.copy_cell_source_cell = cell.to_owned();
         self.copy_cell_target_library = target;
         self.copy_cell_name = format!("{cell}_copy");
+        self.copy_cell_include_children = false;
+        self.copy_cell_repoint = true;
         self.copy_cell_error = None;
         self.copy_cell_library_revision = model.library_manager.revision();
         self.copy_cell_dialog = true;
@@ -142,9 +145,10 @@ impl ProjectState {
     }
 }
 
-/// Copy the cell the dialog names, stating on the status bar what the copy's
-/// drawing sync had to say.
-fn commit_copy_cell_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<usize, String> {
+/// Copy the cell the dialog names, with the cells it instantiates when the
+/// form asks, stating on the status bar what the copy's drawing sync had to
+/// say. Returns the cells and the views copied.
+fn commit_copy_cell_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<(usize, usize), String> {
     if cx.model.library_manager.revision() != cx.state.copy_cell_library_revision {
         return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
     }
@@ -161,9 +165,13 @@ fn commit_copy_cell_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<usize, Str
     let source_library = cx.state.copy_cell_source_library.clone();
     let source_cell = cx.state.copy_cell_source_cell.clone();
     let target = cx.state.copy_cell_target_library.clone();
-    let (outcome, prompt) = cx
-        .model
-        .copy_cell(&source_library, &source_cell, &target, &name);
+    let hierarchy = HierarchyCopy {
+        include_children: cx.state.copy_cell_include_children,
+        repoint: cx.state.copy_cell_repoint,
+    };
+    let (outcome, prompt) =
+        cx.model
+            .copy_cell_hierarchy(&source_library, &source_cell, &target, &name, hierarchy);
     if let Some(prompt) = prompt {
         cx.wb.prompt(prompt);
     }
@@ -176,7 +184,7 @@ fn commit_copy_builtin_model(
     cx: &mut Cx<'_, ProjectFeature>,
     registry_name: &str,
     name: &str,
-) -> Result<usize, String> {
+) -> Result<(usize, usize), String> {
     let builtin = builtin_veriloga_model(registry_name)
         .ok_or_else(|| format!("'{registry_name}' is not a built-in model."))?;
     let target = cx.state.copy_cell_target_library.clone();
@@ -197,7 +205,7 @@ fn commit_copy_builtin_model(
         .library_manager
         .select_view(&reference.library, &reference.cell, &reference.view);
     cx.state.builtin_models.open = false;
-    Ok(1)
+    Ok((1, 1))
 }
 
 /// Make `reference` a Verilog-A cell from a built-in model's source: the same
@@ -301,11 +309,7 @@ impl ProjectFeature {
         if !cx.state.copy_cell_dialog {
             return;
         }
-
-        let mut should_close = false;
-        let mut should_copy = false;
-
-        let lib_names: Vec<String> = cx
+        let targets: Vec<String> = cx
             .model
             .library_manager
             .libraries_sorted()
@@ -313,7 +317,7 @@ impl ProjectFeature {
             .filter(|lib| !lib.read_only)
             .map(|lib| lib.name.clone())
             .collect();
-
+        let builtin = cx.state.copy_cell_builtin_model.is_some();
         let view_count = cx
             .model
             .library_manager
@@ -321,111 +325,106 @@ impl ProjectFeature {
             .and_then(|lib| lib.get_cell(&cx.state.copy_cell_source_cell))
             .map(|cell| cell.views.len())
             .unwrap_or(0);
-        let hint = if cx.state.copy_cell_builtin_model.is_some() {
-            "copies the model's source and its includes into an editable cell".to_owned()
+        let content = if builtin {
+            "The model's source and its includes, as an editable cell.".to_owned()
         } else {
-            format!("copies all {view_count} views and their content")
+            format!("All {view_count} views and their content.")
         };
         let catalog_current =
             cx.model.library_manager.revision() == cx.state.copy_cell_library_revision;
-        if !catalog_current {
-            cx.state.copy_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
-        }
-
+        let error = (!catalog_current)
+            .then(|| LIBRARY_CATALOG_STALE_MESSAGE.to_owned())
+            .or_else(|| cx.state.copy_cell_error.clone());
         let dialogs = &mut *cx.state;
         let source = format!(
-            "{} / {}",
+            "{}/{}",
             dialogs.copy_cell_source_library, dialogs.copy_cell_source_cell
         );
-        let choice = Dialog::new("Copy cell", "Copy")
-            .description(
+        let mut edited = false;
+        let choice = CommandForm::new("Copy cell", "Copy")
+            .describe(
                 "Copy every view and its content from the selected cell into a writable library under a new name.",
             )
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
-            .hint(&hint)
-            .primary_enabled(catalog_current && !dialogs.copy_cell_name.trim().is_empty())
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                let t = Tokens::get(ui.ctx());
-                let c = t.color;
-
-                value_row(ui, "Source", &source);
-
-                // Target library — writable only.
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), t.metrics.row_h),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        let (label_rect, _) = ui.allocate_exact_size(
-                            egui::vec2(92.0, t.metrics.row_h),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().text(
-                            egui::pos2(label_rect.left(), label_rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            "To library",
-                            theme::sans(tokens::FS_1, FontWeight::Regular),
-                            c.text_dim,
-                        );
-                        crate::ui::widgets::Combo::from_id_salt("copy_cell_target_combo")
-                            .selected_text(&dialogs.copy_cell_target_library)
-                            .width(ui.available_width())
-                            .show_ui(ui, |ui| {
-                                for name in &lib_names {
-                                    ui.selectable_value(
-                                        &mut dialogs.copy_cell_target_library,
-                                        name.clone(),
-                                        name,
-                                    );
-                                }
-                            });
-                    },
-                );
-
-                input_row(ui, "New name", &mut dialogs.copy_cell_name);
-
-                if let Some(error) = dialogs.copy_cell_error.clone() {
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.err),
-                    );
+            .primary_enabled(
+                catalog_current && !dialogs.copy_cell_name.trim().is_empty() && !targets.is_empty(),
+            )
+            .status(error.as_deref().map_or(Ok(None), Err))
+            .show(ctx, |rows| {
+                rows.value_mono("Source", &source);
+                rows.derived(&content);
+                if let Some(index) = rows.select(
+                    "To library",
+                    "copy-cell-target",
+                    &dialogs.copy_cell_target_library,
+                    &targets,
+                ) {
+                    dialogs.copy_cell_target_library.clone_from(&targets[index]);
+                    edited = true;
                 }
+                let name = egui::Id::new("copy-cell-name");
+                edited |= rows
+                    .text("New name", name, &mut dialogs.copy_cell_name, "")
+                    .changed();
+                if !builtin {
+                    edited |= rows.checks(
+                        "Hierarchy",
+                        &mut [(
+                            "Include the cells it instantiates",
+                            &mut dialogs.copy_cell_include_children,
+                        )],
+                    );
+                    if dialogs.copy_cell_include_children {
+                        edited |= rows.checks(
+                            "Instances",
+                            &mut [(
+                                "Point at the copied cells",
+                                &mut dialogs.copy_cell_repoint,
+                            )],
+                        );
+                    }
+                }
+                Some(name)
             });
-
-        match choice {
-            DialogChoice::Primary => should_copy = true,
-            DialogChoice::Ghost | DialogChoice::Cancelled => should_close = true,
-            DialogChoice::Secondary | DialogChoice::None => {}
+        // A refusal belongs to what it refused; an edited form has not been
+        // refused yet.
+        if edited && catalog_current {
+            cx.state.copy_cell_error = None;
         }
-
-        if should_copy {
-            let source_cell = cx.state.copy_cell_source_cell.clone();
-            let target = cx.state.copy_cell_target_library.clone();
-            let name = cx.state.copy_cell_name.trim().to_owned();
-            let builtin = cx.state.copy_cell_builtin_model.is_some();
-            match commit_copy_cell_dialog(cx) {
-                Ok(views) => {
-                    cx.model.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        if builtin {
-                            format!("Copied '{source_cell}' to '{target}/{name}'; compile it before use.")
-                        } else {
-                            format!("Copied '{source_cell}' to '{target}/{name}' ({views} views).")
-                        },
-                    );
-                    cx.state.copy_cell_error = None;
-                    should_close = true;
+        let close = match choice {
+            DialogChoice::Primary => {
+                let source_cell = cx.state.copy_cell_source_cell.clone();
+                let target = cx.state.copy_cell_target_library.clone();
+                let name = cx.state.copy_cell_name.trim().to_owned();
+                match commit_copy_cell_dialog(cx) {
+                    Ok((cells, views)) => {
+                        cx.model.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            if builtin {
+                                format!(
+                                    "Copied '{source_cell}' to '{target}/{name}'; compile it before use."
+                                )
+                            } else if cells > 1 {
+                                format!(
+                                    "Copied '{source_cell}' to '{target}/{name}' with {} cells it instantiates ({views} views).",
+                                    cells - 1
+                                )
+                            } else {
+                                format!("Copied '{source_cell}' to '{target}/{name}' ({views} views).")
+                            },
+                        );
+                        true
+                    }
+                    Err(error) => {
+                        cx.state.copy_cell_error = Some(error);
+                        false
+                    }
                 }
-                Err(error) => cx.state.copy_cell_error = Some(error),
             }
-        }
-
-        if should_close {
+            DialogChoice::Ghost | DialogChoice::Cancelled => true,
+            DialogChoice::Secondary | DialogChoice::None => false,
+        };
+        if close {
             let dialogs = &mut *cx.state;
             dialogs.copy_cell_dialog = false;
             dialogs.copy_cell_name.clear();

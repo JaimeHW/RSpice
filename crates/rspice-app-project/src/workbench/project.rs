@@ -159,6 +159,16 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         render: ProjectFeature::process_rename_cell_dialog,
     },
     FeatureDialog {
+        key: DialogKey("project.library_transfer"),
+        is_open: |project| project.library_transfer.is_open(),
+        render: ProjectFeature::process_library_transfer_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.library_properties"),
+        is_open: |project| project.library_properties.is_open(),
+        render: ProjectFeature::process_library_properties_dialog,
+    },
+    FeatureDialog {
         key: DialogKey("project.library_deletion_review"),
         is_open: |project| project.library_deletion_review.target.is_some(),
         render: ProjectFeature::process_library_deletion_review_dialog,

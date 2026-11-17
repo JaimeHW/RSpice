@@ -692,6 +692,43 @@ impl PhysicalLayoutDocument {
         Ok(candidate)
     }
 
+    /// The document with every reference to `from_library`/`from_cell`, its
+    /// owner and the masters it places, naming `to_library`/`to_cell`
+    /// instead: a cell moved to another library, or a copied layout taking
+    /// up the copies of the cells it places.
+    pub fn rebind_cell_references(
+        &self,
+        (from_library, from_cell): (&str, &str),
+        (to_library, to_cell): (&str, &str),
+    ) -> Result<Self, LayoutDocumentError> {
+        self.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = false;
+        let mut rebind = |reference: &mut CellViewRef| {
+            if reference.library == from_library && reference.cell == from_cell {
+                to_library.clone_into(&mut reference.library);
+                to_cell.clone_into(&mut reference.cell);
+                changed = true;
+            }
+        };
+        rebind(&mut candidate.owner);
+        for instance in candidate.instances.values_mut() {
+            rebind(&mut instance.master);
+        }
+        if changed {
+            candidate.revision =
+                candidate
+                    .revision
+                    .next()
+                    .map_err(|error| LayoutDocumentError::Invalid {
+                        path: "revision".to_owned(),
+                        message: error.to_string(),
+                    })?;
+        }
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
     pub fn rename_library_references(
         &self,
         source_library: &str,

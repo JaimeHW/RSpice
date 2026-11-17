@@ -30,6 +30,9 @@ pub struct Library {
 /// apart from its identifier.
 pub const LIBRARY_DISPLAY_NAME: &str = "display_name";
 
+/// The metadata key of what a library is for, in its author's words.
+pub const LIBRARY_DESCRIPTION: &str = "description";
+
 impl Library {
     /// The name a reader sees: the library's display name where it carries
     /// one, its identifier otherwise.
@@ -37,6 +40,14 @@ impl Library {
         self.metadata
             .get(LIBRARY_DISPLAY_NAME)
             .map_or(self.name.as_str(), String::as_str)
+    }
+
+    /// What the library is for, in its author's words; empty when it says
+    /// nothing.
+    pub fn description(&self) -> &str {
+        self.metadata
+            .get(LIBRARY_DESCRIPTION)
+            .map_or("", String::as_str)
     }
 
     /// Create a new library

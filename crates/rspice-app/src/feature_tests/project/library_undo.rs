@@ -1,5 +1,6 @@
-//! Library operations as steps of the one Undo: each create, copy, rename
-//! and delete, at library, cell and view level, undoes as one step that puts
+//! Library operations as steps of the one Undo: each create, copy, move,
+//! rename, delete and properties edit, at library, cell and view level, and
+//! a cell copied with the cells it instantiates, undoes as one step that puts
 //! the saved project, the tabs and the drawing in front back exactly as
 //! they stood, redoes to exactly what it made, and leaves the steps taken
 //! before it undoable.
@@ -493,6 +494,60 @@ fn copying_a_cell_undoes_as_one_step() {
 }
 
 #[test]
+fn copying_a_cell_with_the_cells_it_instantiates_undoes_as_one_step() {
+    one_step(app_with_parts(), "copying a cell's hierarchy", |app| {
+        let hierarchy = rspice_app_state::workbench::app_state::model::HierarchyCopy {
+            include_children: true,
+            repoint: true,
+        };
+        let (outcome, _) = app
+            .state
+            .model
+            .copy_cell_hierarchy("parts", "amp", "scratch", "amp", hierarchy);
+        assert_eq!(outcome.map(|(cells, _)| cells), Ok(2), "amp and leaf");
+    });
+}
+
+#[test]
+fn copying_a_library_undoes_as_one_step() {
+    one_step(app_with_parts(), "copying a library", |app| {
+        let (outcome, _) = app.state.model.copy_library("parts", "parts_copy");
+        assert_eq!(outcome, Ok(3));
+    });
+}
+
+#[test]
+fn moving_a_cell_undoes_as_one_step() {
+    one_step(app_with_parts(), "moving a cell", |app| {
+        app.state
+            .move_cell("parts", "leaf", "scratch", "leaf")
+            .expect("the cell is moved");
+    });
+}
+
+#[test]
+fn editing_library_and_cell_properties_undoes_as_one_step() {
+    one_step(app_with_parts(), "describing a library", |app| {
+        app.state
+            .model
+            .edit_library_properties("parts", "Parts the top places", false)
+            .expect("the library is described");
+    });
+    one_step(app_with_parts(), "making a library read-only", |app| {
+        app.state
+            .model
+            .edit_library_properties("scratch", "", true)
+            .expect("the library is made read-only");
+    });
+    one_step(app_with_parts(), "describing a cell", |app| {
+        app.state
+            .model
+            .edit_cell_properties("parts", "amp", "The first stage")
+            .expect("the cell is described");
+    });
+}
+
+#[test]
 fn renaming_a_cell_undoes_as_one_step() {
     one_step(app_with_parts(), "renaming a cell", |app| {
         app.state
@@ -540,6 +595,17 @@ fn renaming_a_view_undoes_as_one_step() {
         app.state
             .rename_view("parts", "amp", "model", "behaviour")
             .expect("the view is renamed");
+    });
+}
+
+#[test]
+fn copying_a_view_undoes_as_one_step() {
+    one_step(app_with_parts(), "copying a view", |app| {
+        let (outcome, _) = app.state.model.copy_view(
+            &CellViewRef::new("parts", "amp", "schematic"),
+            &CellViewRef::new("scratch", "amp", "schematic"),
+        );
+        outcome.expect("the view is copied into a new cell");
     });
 }
 

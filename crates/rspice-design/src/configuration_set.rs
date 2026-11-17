@@ -445,6 +445,36 @@ impl ConfigurationSetCatalog {
         })
     }
 
+    /// Remap configuration roots and cell bindings as part of a cell moving
+    /// to another library, under its name there.
+    pub fn move_cell_roots(
+        &mut self,
+        (from_library, from_cell): (&str, &str),
+        (to_library, to_cell): (&str, &str),
+    ) -> Result<usize, ConfigurationSetError> {
+        self.remap_definitions(|definition| {
+            let names_cell = |library: &str, cell: &str| {
+                library.eq_ignore_ascii_case(from_library) && cell.eq_ignore_ascii_case(from_cell)
+            };
+            let root = &mut definition.root;
+            let mut changed = false;
+            if names_cell(&root.library, &root.cell) {
+                to_library.clone_into(&mut root.library);
+                to_cell.clone_into(&mut root.cell);
+                changed = true;
+            }
+            changed
+                | remap_cell_bindings(
+                    &mut definition.cell_bindings,
+                    |binding| names_cell(&binding.library, &binding.cell),
+                    |binding| {
+                        to_library.clone_into(&mut binding.library);
+                        to_cell.clone_into(&mut binding.cell);
+                    },
+                )
+        })
+    }
+
     /// Remap configuration roots and cell bindings as part of a library
     /// rename.
     pub fn rename_library_roots(
