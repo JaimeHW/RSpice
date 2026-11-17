@@ -844,7 +844,6 @@ impl SimulationController {
     /// The identity of the state the run is prepared from is retained with
     /// it, and the frame that dispatches it checks that identity, as it checks
     /// a Run press's.
-    /// Automation prepares through [`Self::prepare_run_set_for_evidence`].
     pub fn prepare_run_set_for_preflight(
         &mut self,
         state: &impl RunHost,
@@ -863,26 +862,6 @@ impl SimulationController {
         Ok(metadata)
     }
 
-    /// [`Self::prepare_run_set_for_preflight`], for a workflow that publishes
-    /// the results of the run it dispatches: beside the run's metadata, what
-    /// the run was prepared from, shared with the retained run. The dispatch
-    /// spends the retained run; the workflow keeps these inputs past it, and
-    /// publishes only while [`super::PreparedRunSetInputs::still_current`]
-    /// holds.
-    pub fn prepare_run_set_for_evidence(
-        &mut self,
-        state: &impl RunHost,
-    ) -> Result<(PreparedRunMetadata, super::PreparedRunSetInputs), PreparationError> {
-        let metadata = self.prepare_run_set_for_preflight(state)?;
-        let inputs = self
-            .retained_run_inputs
-            .as_ref()
-            .zip(self.run_authorization.retained_snapshot())
-            .and_then(|(inputs, snapshot)| super::PreparedRunSetInputs::of(inputs, snapshot))
-            .ok_or_else(super::run_inputs::unaccounted_run)?;
-        Ok((metadata, inputs))
-    }
-
     /// Retain `snapshot` for dispatch, replacing whatever was retained, with
     /// what it was prepared from, which its dispatch checks.
     pub(super) fn retain_prepared_run(
@@ -893,7 +872,7 @@ impl SimulationController {
         self.retained_run_generation = self.retained_run_generation.wrapping_add(1);
         self.retained_run_inputs = None;
         self.run_authorization.retain(snapshot)?;
-        self.retained_run_inputs = Some(std::sync::Arc::new(inputs));
+        self.retained_run_inputs = Some(inputs);
         Ok(())
     }
 
@@ -1204,9 +1183,9 @@ impl SimulationController {
             })
     }
 
-    /// Validate and consume an explicitly retained preflight snapshot. Run,
-    /// collaborative approval and Automation all prepare through an
-    /// owning workflow before they request dispatch; the controller never
+    /// Validate and consume an explicitly retained preflight snapshot. Run
+    /// and collaborative approval both prepare through an owning workflow
+    /// before they request dispatch; the controller never
     /// manufactures hidden authorization at this final boundary.
     ///
     /// A run set or a manual deck dispatches the very snapshot its

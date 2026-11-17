@@ -21,18 +21,9 @@
 //! file-backed source is routed to. [`RunInputIdentity`] names the session
 //! part, in the cheapest exact form each input has, and only what the run's
 //! kind reads; the host part is read again from what the preparation recorded
-//! about it. Automation prepares in its own frame from the live session, and
-//! retains the identity of the state it prepared from, so its runs are held
-//! to the same check.
-//!
-//! Automation also publishes evidence from the run it dispatched, and only
-//! while the session still holds what that run was prepared from. It used to
-//! decide so by preparing the whole run again and comparing digests, seconds
-//! of the frame on a large design, each frame it waited on the dispatch and
-//! again when it published, and a second judgement of currency that could
-//! disagree with the dispatch's. It now keeps [`PreparedRunSetInputs`], the
-//! very inputs its run was retained with, past the dispatch that spends them,
-//! and asks of them the question the dispatch asks.
+//! about it. A run prepared in the frame from the live session retains the
+//! identity of the state it was prepared from, so it is held to the same
+//! check.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -979,8 +970,7 @@ impl SourceFileAnswers {
 }
 
 /// What a retained run was prepared from, held beside it until it is
-/// dispatched or dropped, and by a workflow that keeps it longer; see
-/// [`PreparedRunSetInputs`].
+/// dispatched or dropped.
 pub(super) struct RetainedRunInputs {
     pub(super) identity: RunInputIdentity,
     pub(super) source_files: SourceFileAnswers,
@@ -1047,78 +1037,6 @@ impl RetainedRunInputs {
             );
         }
         Ok(())
-    }
-}
-
-/// What a run set was prepared from, kept past its dispatch by the workflow
-/// that publishes the run's results.
-///
-/// Dispatch spends the retained run and what it was prepared from. Automation
-/// publishes the evidence of the run it dispatched only while the session
-/// still holds what that run was prepared from: it asks on each frame it
-/// waits for the dispatch, and again when it publishes. These are the inputs
-/// the run was retained with, shared, not a second capture, and the question
-/// asked of them is the one its dispatch asks, refused in the same words. The
-/// two cannot disagree, and neither prepares anything.
-#[derive(Clone)]
-pub struct PreparedRunSetInputs {
-    inputs: Arc<RetainedRunInputs>,
-    /// The host sources the run's includes were read from, as they were read.
-    sealed_source_dependencies: Arc<[rspice_core::netlist::ResolvedIncludeDependency]>,
-}
-
-impl PreparedRunSetInputs {
-    /// What the run set `snapshot` was retained with; `None` when `inputs`
-    /// are not a run set's, or not `snapshot`'s.
-    pub(super) fn of(
-        inputs: &Arc<RetainedRunInputs>,
-        snapshot: &PreparedRunSnapshot,
-    ) -> Option<Self> {
-        (snapshot.intent() == SimulationRunIntent::SimulateRunSet
-            && inputs.identity.describes(snapshot))
-        .then(|| Self {
-            inputs: Arc::clone(inputs),
-            sealed_source_dependencies: snapshot.sealed_source_dependencies().into(),
-        })
-    }
-
-    /// Refuse unless nothing the run set was prepared from has moved, as its
-    /// dispatch refuses it, whether or not it has been dispatched since.
-    /// Nothing is prepared.
-    pub fn still_current(&self, state: &impl RunHost) -> Result<(), PreparationError> {
-        self.inputs.refused_if_moved(
-            state.model(),
-            self.inputs.identity.run_set_moved_in(state),
-            &self.sealed_source_dependencies,
-        )
-    }
-}
-
-impl std::fmt::Debug for PreparedRunSetInputs {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("PreparedRunSetInputs")
-            .field(
-                "sealed_source_dependencies",
-                &self.sealed_source_dependencies.len(),
-            )
-            .finish_non_exhaustive()
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl PreparedRunSetInputs {
-    /// What a run set prepared from `state` would be retained with, for a
-    /// test that builds a workflow's dispatch record and prepares no run. It
-    /// holds no host file.
-    pub fn of_unprepared(state: &impl RunHost) -> Self {
-        Self {
-            inputs: Arc::new(RetainedRunInputs {
-                identity: RunInputIdentity::of_run_set(state),
-                source_files: SourceFileAnswers::default(),
-            }),
-            sealed_source_dependencies: Arc::from([]),
-        }
     }
 }
 

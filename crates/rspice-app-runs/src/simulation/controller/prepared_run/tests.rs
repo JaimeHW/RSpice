@@ -775,52 +775,6 @@ fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
         .expect("the setup holds what it held");
 }
 
-/// The evidence check a governed caller keeps outlives the dispatch that
-/// spends the retained run: unedited, the inputs stay current after it and
-/// nothing is prepared to say so; a PVT change made while the run is in flight
-/// expires them, named as the dispatch names it.
-#[test]
-fn governed_snapshot_check_rejects_in_flight_pvt_change() {
-    let mut state = runnable_state();
-    let mut controller = SimulationController::new();
-    let (_, inputs) = controller
-        .prepare_run_set_for_evidence(&state)
-        .expect("preflight");
-    thread_preparations::take();
-
-    inputs
-        .still_current(&state)
-        .expect("unchanged contract remains current");
-    controller
-        .consume_snapshot_for_dispatch(&state)
-        .expect("the unchanged run dispatches");
-    inputs
-        .still_current(&state)
-        .expect("the dispatch spends the retained run, not what it was prepared from");
-    assert!(
-        thread_preparations::take().is_empty(),
-        "the evidence check prepares nothing"
-    );
-
-    state
-        .model
-        .sim_setup
-        .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
-        .expect("physical temperature");
-    let error = inputs
-        .still_current(&state)
-        .expect_err("PVT mutation must invalidate evidence authority");
-    assert_eq!(error.stage(), PreparationStage::Authorization);
-    assert_eq!(
-        error.message(),
-        format!(
-            "{} · the simulation setup changed",
-            crate::simulation::controller::run_inputs::DESIGN_CHANGED_SINCE_CHECK
-        )
-    );
-    assert!(thread_preparations::take().is_empty());
-}
-
 #[test]
 fn manual_include_without_origin_fails_closed() {
     let mut state = RunTestHost::default();

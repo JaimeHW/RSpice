@@ -336,45 +336,23 @@ impl RSpiceApp {
             .snapshot_digest
     }
 
-    /// Prepare and queue a run as Automation does, in this frame and from
-    /// the live session. Returns the digest it prepared, and what Automation
-    /// keeps of what the run was prepared from for its evidence check.
-    fn queued_as_automation_queues(
-        &mut self,
-    ) -> (
-        rspice_app_state::product::ContentDigest,
-        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
-    ) {
+    /// Prepare and queue a run in this frame, from the live session, rather
+    /// than on the preflight worker. Returns the digest it prepared.
+    fn queued_from_this_frame(&mut self) -> rspice_app_state::product::ContentDigest {
         use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
 
         self.invalidate_simulation_preflight();
-        let (prepared, inputs) = self
+        let prepared = self
             .simulation_controller
-            .prepare_run_set_for_evidence(&self.state)
+            .prepare_run_set_for_preflight(&self.state)
             .expect("the design prepares");
         self.state.request_run_set_simulation();
         assert_eq!(
             thread_preparations::take(),
             [rspice_simulation::execution::SimulationRunIntent::SimulateRunSet],
-            "Automation prepares its run in its own frame"
+            "the run is prepared in this frame"
         );
-        (prepared.snapshot_digest, inputs)
-    }
-
-    /// Automation's evidence check, with the preparations it ran.
-    fn evidence_check(
-        &self,
-        inputs: &rspice_app_runs::simulation::controller::PreparedRunSetInputs,
-    ) -> (
-        Result<(), rspice_simulation::execution::PreparationError>,
-        Vec<rspice_simulation::execution::SimulationRunIntent>,
-    ) {
-        use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
-
-        let earlier = thread_preparations::take();
-        assert!(earlier.is_empty(), "{earlier:?}");
-        let verdict = inputs.still_current(&self.state);
-        (verdict, thread_preparations::take())
+        prepared.snapshot_digest
     }
 
     /// Let the run a dispatch started finish, as the frames after it would.
@@ -590,14 +568,14 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
     assert_refused_for(&app, "the devices or results the operating point reports");
 }
 
-/// Automation prepares its run in its own frame, from the live session, and
-/// queues it; the frame that dispatches it checks it as it checks a run a
-/// Run press prepared. Unchanged, the run Automation prepared is the run that
-/// starts, and nothing is prepared again; edited, it is refused.
+/// A run prepared in its own frame, from the live session, and queued is
+/// checked by the frame that dispatches it as a run a Run press prepared is.
+/// Unchanged, it is the run that starts, and nothing is prepared again;
+/// edited, it is refused.
 #[test]
-fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
+fn a_run_prepared_in_the_frame_is_checked_at_dispatch_as_a_run_press_is() {
     let mut unchanged = inverter_over_a_run_set();
-    let (authorized, _) = unchanged.queued_as_automation_queues();
+    let authorized = unchanged.queued_from_this_frame();
     assert!(unchanged.dispatch_frame().is_empty());
     assert_eq!(
         unchanged
@@ -610,12 +588,12 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
             .and_then(|run| run.prepared_receipt())
             .map(|receipt| receipt.prepared_snapshot_digest()),
         Some(authorized),
-        "the run is the snapshot Automation prepared"
+        "the run is the snapshot the frame prepared"
     );
     unchanged.stop_the_run();
 
     let mut edited = inverter_over_a_run_set();
-    edited.queued_as_automation_queues();
+    edited.queued_from_this_frame();
     edited
         .state
         .model
@@ -639,45 +617,6 @@ fn rc_lowpass() -> RSpiceApp {
         &mut app.state.model.schematic,
     );
     app
-}
-
-/// Automation checks its evidence is still the design's on each frame it
-/// waits for the dispatch and again when it publishes. On an unedited design
-/// the check passes at each of those frames, before the dispatch, while the
-/// run is in flight and once it has finished, and prepares nothing: the run
-/// Automation dispatched does not expire the evidence it produces.
-#[test]
-fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
-    let mut app = rc_lowpass();
-    let (authorized, inputs) = app.queued_as_automation_queues();
-
-    let (before_dispatch, prepared) = app.evidence_check(&inputs);
-    assert_eq!(before_dispatch, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
-
-    assert!(app.dispatch_frame().is_empty());
-    let (in_flight, prepared) = app.evidence_check(&inputs);
-    assert_eq!(in_flight, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
-
-    app.finish_the_run();
-    let run = app
-        .state
-        .model
-        .simulation
-        .retained
-        .runs
-        .first()
-        .expect("the run is retained");
-    assert!(run.success, "{:?}", run.analyses);
-    assert_eq!(
-        run.prepared_receipt()
-            .map(|receipt| receipt.prepared_snapshot_digest()),
-        Some(authorized)
-    );
-    let (at_publication, prepared) = app.evidence_check(&inputs);
-    assert_eq!(at_publication, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
 }
 
 /// Edit the plan's transient as `edit` does.
@@ -708,14 +647,8 @@ pub(super) fn edit_the_transient(
 
 impl RSpiceApp {
     /// Run the RC lowpass's transient to 20 µs, capturing a checkpoint every
-    /// 10 µs, as Automation runs it. Returns the inputs Automation kept and
-    /// the digest of the last checkpoint the run captured.
-    fn ran_capturing_checkpoints(
-        &mut self,
-    ) -> (
-        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
-        rspice_app_state::product::ContentDigest,
-    ) {
+    /// 10 µs. Returns the digest of the last checkpoint the run captured.
+    fn ran_capturing_checkpoints(&mut self) -> rspice_app_state::product::ContentDigest {
         edit_the_transient(&mut self.state, |draft| {
             draft.stop = "20u".to_owned();
             draft.step = "100n".to_owned();
@@ -727,7 +660,7 @@ impl RSpiceApp {
                 },
             );
         });
-        let (_, inputs) = self.queued_as_automation_queues();
+        self.queued_from_this_frame();
         assert!(self.dispatch_frame().is_empty());
         self.finish_the_run();
         let run = self
@@ -739,65 +672,39 @@ impl RSpiceApp {
             .first()
             .expect("the run is retained");
         assert!(run.success, "{:?}", run.analyses);
-        let image = run
-            .analyses
+        run.analyses
             .iter()
             .find_map(|analysis| analysis.transient_checkpoint.as_ref())
             .expect("the run captured a checkpoint")
-            .digest();
-        (inputs, image)
+            .digest()
     }
 
     /// Run the RC lowpass's transient as [`Self::ran_capturing_checkpoints`]
-    /// does, then queue, as Automation queues it, the transient resuming from
-    /// the checkpoint that run captured at 20 µs and running on to 40 µs.
-    /// Returns the digest Automation prepared and the inputs it kept.
-    fn queued_resuming_from_a_checkpoint(
-        &mut self,
-    ) -> (
-        rspice_app_state::product::ContentDigest,
-        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
-    ) {
-        let (_, image) = self.ran_capturing_checkpoints();
+    /// does, then queue the transient resuming from the checkpoint that run
+    /// captured at 20 µs and running on to 40 µs. Returns the digest prepared.
+    fn queued_resuming_from_a_checkpoint(&mut self) -> rspice_app_state::product::ContentDigest {
+        let image = self.ran_capturing_checkpoints();
         edit_the_transient(&mut self.state, |draft| {
             draft.stop = "40u".to_owned();
             if let Some(checkpoint) = draft.checkpoint.as_mut() {
                 checkpoint.resume = vec![image];
             }
         });
-        self.queued_as_automation_queues()
+        self.queued_from_this_frame()
     }
 }
 
-/// A transient that captures checkpoints and resumes from none reads no
-/// retained run. The run Automation dispatched, which the history holds from
-/// the dispatch on, therefore does not expire its evidence, though the
-/// history has moved under it.
-#[test]
-fn a_transient_capturing_checkpoints_does_not_expire_its_own_evidence() {
-    let mut app = rc_lowpass();
-    let (inputs, _) = app.ran_capturing_checkpoints();
-
-    let (at_publication, prepared) = app.evidence_check(&inputs);
-    assert_eq!(at_publication, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
-}
-
 /// A transient that resumes from a checkpoint reads the run that holds it,
-/// and nothing else of the history. The run Automation dispatches joins the
-/// history beside that run, from the dispatch on, and captures checkpoints of
-/// its own; what the transient resumes from is unchanged, so its evidence
-/// stands while the run is in flight and when it publishes.
+/// and nothing else of the history. The run it dispatches joins the history
+/// beside that run and captures checkpoints of its own.
 #[test]
-fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
+fn a_run_resuming_from_a_checkpoint_joins_the_run_it_resumes_from() {
     let mut app = rc_lowpass();
-    let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
+    let authorized = app.queued_resuming_from_a_checkpoint();
 
     assert!(app.dispatch_frame().is_empty());
-    let (in_flight, prepared) = app.evidence_check(&inputs);
-    assert_eq!(in_flight, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
-
+    app.finish_the_run();
+    let runs = &app.state.model.simulation.retained.runs;
     app.finish_the_run();
     let runs = &app.state.model.simulation.retained.runs;
     assert_eq!(runs.len(), 2, "the run joins the one it resumes from");
@@ -815,23 +722,15 @@ fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
             .any(|analysis| analysis.transient_checkpoint.is_some()),
         "the resumed run captures a checkpoint of its own"
     );
-    let (at_publication, prepared) = app.evidence_check(&inputs);
-    assert_eq!(at_publication, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
 }
 
 /// A run added to the history that holds nothing the transient resumes from
-/// changes nothing it reads: Automation's evidence stands, and the dispatch
-/// starts the run Automation prepared.
+/// changes nothing it reads: the dispatch starts the run the frame prepared.
 #[test]
 fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
     let mut app = rc_lowpass();
-    let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
+    let authorized = app.queued_resuming_from_a_checkpoint();
     app.state.model.simulation.start_run();
-
-    let (verdict, prepared) = app.evidence_check(&inputs);
-    assert_eq!(verdict, Ok(()));
-    assert!(prepared.is_empty(), "{prepared:?}");
 
     assert!(app.dispatch_frame().is_empty());
     assert_eq!(
@@ -844,7 +743,7 @@ fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
             .and_then(|run| run.prepared_receipt())
             .map(|receipt| receipt.prepared_snapshot_digest()),
         Some(authorized),
-        "the run is the snapshot Automation prepared"
+        "the run is the snapshot the frame prepared"
     );
     app.stop_the_run();
 }
@@ -853,11 +752,10 @@ fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
 /// replacing it with a run whose transient no longer carries the prepared
 /// provenance a checkpoint is resumed against, as a result read from a file
 /// does not, leaves a checkpoint that cannot be resumed. Either way what the
-/// transient resumes from has changed: Automation's evidence check and the
-/// dispatch of the run it queued refuse it alike, in the same words, and
-/// nothing is prepared to find it.
+/// transient resumes from has changed: the dispatch of the run it queued
+/// refuses it, naming what moved, and nothing is prepared to find it.
 #[test]
-fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_evidence_alike() {
+fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_the_dispatch() {
     /// An edit of the history, beside its name.
     type Edit = (&'static str, fn(&mut AppState));
     let edits: [Edit; 2] = [
@@ -874,19 +772,10 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_
     ];
     for (edited, edit) in edits {
         let mut app = rc_lowpass();
-        let (_, inputs) = app.queued_resuming_from_a_checkpoint();
-        assert_eq!(app.evidence_check(&inputs).0, Ok(()), "{edited}");
+        app.queued_resuming_from_a_checkpoint();
         edit(&mut app.state);
         let retained = app.state.model.simulation.retained.runs.len();
 
-        let (verdict, prepared) = app.evidence_check(&inputs);
-        assert!(prepared.is_empty(), "{edited}: {prepared:?}");
-        let evidence = verdict.expect_err(edited);
-        assert_eq!(
-            evidence.message(),
-            format!("{DESIGN_CHANGED} · the retained runs a checkpoint resumes from changed"),
-            "{edited}"
-        );
         assert!(app.dispatch_frame().is_empty(), "{edited}");
 
         assert!(
@@ -902,50 +791,21 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_
             app.state.model.simulation.execution.status, DESIGN_CHANGED,
             "{edited}"
         );
+        let stated =
+            format!("{DESIGN_CHANGED} · the retained runs a checkpoint resumes from changed");
         assert_eq!(
             app.state.prompt_text(),
-            Some(evidence.to_string().as_str()),
-            "{edited}: the evidence check and the dispatch name it alike"
+            Some(stated.as_str()),
+            "{edited}: the dispatch names what moved"
         );
     }
 }
 
-/// An edit made while Automation's run is in flight expires its evidence, and
-/// the check names the input that moved in the words a dispatch refused for
-/// it uses. Nothing is prepared to find it.
+/// A run prepared in the frame is refused at its dispatch for an edit to
+/// the design, the model library or the simulation setup, naming the input
+/// that moved, as a checked run is.
 #[test]
-fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
-    let mut app = inverter_over_a_run_set();
-    let (_, inputs) = app.queued_as_automation_queues();
-    assert!(app.dispatch_frame().is_empty());
-    assert!(
-        !app.state.model.simulation.retained.runs.is_empty(),
-        "the dispatch starts the run"
-    );
-
-    app.state.model.schematic.document_mut_for_test().components[0]
-        .value
-        .push('0');
-    let (verdict, prepared) = app.evidence_check(&inputs);
-
-    assert!(prepared.is_empty(), "{prepared:?}");
-    let error = verdict.expect_err("the edited design is not the one the run solves");
-    assert_eq!(
-        error.stage(),
-        rspice_simulation::execution::PreparationStage::Authorization
-    );
-    assert_eq!(
-        error.message(),
-        format!("{DESIGN_CHANGED} · the design changed")
-    );
-    app.stop_the_run();
-}
-
-/// For the same edit, Automation's evidence check and the dispatch of the
-/// run it queued refuse alike, in the same words: the evidence check is the
-/// dispatch's own question, not a second judgement of the design.
-#[test]
-fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
+fn an_edit_after_the_frame_prepared_the_run_refuses_its_dispatch() {
     /// An edit, beside the input a refusal names it by.
     type Edit = (&'static str, fn(&mut AppState));
     let edits: [Edit; 3] = [
@@ -973,20 +833,11 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
     ];
     for (moved, edit) in edits {
         let mut app = inverter_over_a_run_set();
-        let (_, inputs) = app.queued_as_automation_queues();
+        app.queued_from_this_frame();
         edit(&mut app.state);
 
-        let (verdict, prepared) = app.evidence_check(&inputs);
-        assert!(prepared.is_empty(), "{moved}: {prepared:?}");
-        let evidence = verdict.expect_err(moved).to_string();
         assert!(app.dispatch_frame().is_empty(), "{moved}");
-
         assert_refused_for(&app, moved);
-        assert_eq!(
-            app.state.prompt_text(),
-            Some(evidence.as_str()),
-            "the evidence check and the dispatch name {moved} alike"
-        );
     }
 }
 
