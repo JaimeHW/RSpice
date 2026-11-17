@@ -505,6 +505,10 @@ pub struct TableResponse {
     /// The row a twist click, Left or Right asked to open (true) or close
     /// (false); the page shows or hides its children.
     pub expand: Option<(usize, bool)>,
+    /// Left (-1) or Right (1) while the table has the keyboard, when the key
+    /// neither opens, closes nor moves within it: a page whose lists stand
+    /// side by side, as a column browser's do, moves to the neighbouring one.
+    pub across: Option<isize>,
 }
 
 /// What a table is drawn as, and announced as.
@@ -545,6 +549,8 @@ pub struct DataTable<'a> {
     /// take under a coarse pointer; none elsewhere.
     lead_gutter: f32,
     kind: Kind,
+    /// The table takes the keyboard this frame.
+    focus: bool,
 }
 
 /// Where the body is seen from this frame, in screen points: the viewport's
@@ -755,6 +761,7 @@ impl<'a> DataTable<'a> {
             multi: false,
             lead_gutter: 0.0,
             kind: Kind::Grid,
+            focus: false,
         }
     }
 
@@ -839,6 +846,14 @@ impl<'a> DataTable<'a> {
     /// their level and, for a row with a twist, whether it is open.
     pub fn tree(mut self) -> Self {
         self.kind = Kind::Tree;
+        self
+    }
+
+    /// Take the keyboard this frame, as a column browser's list does when
+    /// the reader moves into it from its neighbour. Only a table with state
+    /// holds the keyboard.
+    pub fn focus(mut self, take: bool) -> Self {
+        self.focus = take;
         self
     }
 
@@ -1093,7 +1108,7 @@ impl<'a> DataTable<'a> {
                         response.selection_changed |= state.select_only(lead);
                         reveal = Some(row);
                     }
-                    TreeStep::Stay => {}
+                    TreeStep::Stay => response.across = Some(by),
                 }
             }
             if let (Some(by), true) = (keys.across, self.cell_selection)
@@ -1394,7 +1409,7 @@ impl<'a> DataTable<'a> {
             );
             // Taken after the focus target has been seen, so a press that
             // lands on a row is not read as a press elsewhere.
-            if take_focus {
+            if take_focus || self.focus {
                 ui.memory_mut(|memory| memory.request_focus(table_id));
             }
         }

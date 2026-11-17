@@ -130,6 +130,8 @@ struct Picker {
     keys: Vec<RowKey>,
     state: TableState,
     multi: bool,
+    /// The list is asked to take the keyboard.
+    focus: bool,
     /// The input's clock, which every frame advances.
     time: f64,
 }
@@ -143,8 +145,18 @@ impl Picker {
             keys: NAMES.iter().map(|name| RowKey::from(*name)).collect(),
             state: TableState::default(),
             multi,
+            focus: false,
             time: ctx.input(|input| input.time),
         }
+    }
+
+    /// One frame over `events` in which the list is asked to take the
+    /// keyboard.
+    fn pass_focused(&mut self, events: Vec<Event>) -> TableResponse {
+        self.focus = true;
+        let response = self.frame(events, Modifiers::NONE);
+        self.focus = false;
+        response
     }
 
     /// One frame over `events` with `modifiers` held, `pause` seconds after
@@ -170,13 +182,15 @@ impl Picker {
             keys,
             state,
             multi,
+            focus,
             ..
         } = self;
         let mut response = TableResponse::default();
         let (output, geometry) = pass(ctx, input, |ui| {
             let mut table = DataTable::new("picker", columns, NAMES.len())
                 .state(state)
-                .keys(keys);
+                .keys(keys)
+                .focus(*focus);
             if *multi {
                 table = table.multi_select();
             }
@@ -470,6 +484,36 @@ fn enter_f2_and_delete_are_reported_for_the_page_to_act_on() {
             Some(1),
             "{metric}: a double-click runs the row"
         );
+    }
+}
+
+/// A list asked to take the keyboard has it without a press, and Left and
+/// Right, which have nowhere to go in a flat list, are reported for the page
+/// to move to the neighbouring list.
+#[test]
+fn a_list_takes_the_keyboard_when_asked_and_reports_left_and_right() {
+    for (metric, ctx) in metrics() {
+        let mut list = Picker::new(&ctx, false);
+        list.state.select(2, Some(RowKey::from(NAMES[2])));
+        let response = list.frame(vec![key(Key::ArrowRight, Modifiers::NONE)], Modifiers::NONE);
+        assert!(
+            !response.focused,
+            "{metric}: nothing gave the list the keyboard"
+        );
+        assert_eq!(response.across, None, "{metric}");
+
+        let _ = list.pass_focused(Vec::new());
+        let response = list.frame(vec![key(Key::ArrowRight, Modifiers::NONE)], Modifiers::NONE);
+        assert!(response.focused, "{metric}: the list holds the keyboard");
+        assert_eq!(response.across, Some(1), "{metric}: Right");
+        let response = list.key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(response.across, Some(-1), "{metric}: Left");
+        let response = list.key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(
+            response.across, None,
+            "{metric}: Down moves within the list"
+        );
+        assert_eq!(list.state.selected_rows(), vec![3], "{metric}");
     }
 }
 
