@@ -19,6 +19,7 @@
 
 mod cells;
 mod libraries;
+mod project_root;
 
 use super::Model;
 use crate::state::workspace::{DeclaredModule, hdl_view, place_veriloga_view};

@@ -500,6 +500,18 @@ impl ProjectCloudPublicationBinding {
     }
 }
 
+/// What the user owns of a project's descriptor and edits as its
+/// properties: its name and description, the top cell runs start from when
+/// no configuration is used for runs, and the ordered include search chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectProperties {
+    pub name: String,
+    pub description: String,
+    pub root_library: String,
+    pub top_cell: String,
+    pub include_search_paths: Vec<PathBuf>,
+}
+
 /// Metadata for the active RSpice project.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectDescriptor {
@@ -1348,6 +1360,57 @@ impl ProjectDescriptor {
         Ok(next_revision)
     }
 
+    /// The fields the user owns and edits as the project's properties.
+    #[must_use]
+    pub fn properties(&self) -> ProjectProperties {
+        ProjectProperties {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            root_library: self.root_library.clone(),
+            top_cell: self.top_cell.clone(),
+            include_search_paths: self.include_search_paths.clone(),
+        }
+    }
+
+    /// Replace the project's properties as one fail-closed logical
+    /// transaction: every field is checked before any is written, and the
+    /// revision advances once. Properties equal to the current ones are
+    /// refused, so a transaction always has a revision of its own.
+    ///
+    /// Whether the top cell exists is the catalog's to say; the descriptor
+    /// only holds that one is named.
+    pub fn replace_properties(
+        &mut self,
+        properties: ProjectProperties,
+    ) -> Result<ObjectRevision, ProjectDescriptorError> {
+        Self::validate_name(&properties.name)?;
+        if properties.root_library.trim().is_empty() {
+            return Err(ProjectDescriptorError::RequiredField("root_library"));
+        }
+        if properties.top_cell.trim().is_empty() {
+            return Err(ProjectDescriptorError::RequiredField("top_cell"));
+        }
+        Self::validate_include_search_paths(&properties.include_search_paths)?;
+        if properties == self.properties() {
+            return Err(ProjectDescriptorError::NoOpPropertiesChange);
+        }
+        let next_revision = self.revision.next()?;
+        let ProjectProperties {
+            name,
+            description,
+            root_library,
+            top_cell,
+            include_search_paths,
+        } = properties;
+        self.name = name;
+        self.description = description;
+        self.root_library = root_library;
+        self.top_cell = top_cell;
+        self.include_search_paths = include_search_paths;
+        self.revision = next_revision;
+        Ok(next_revision)
+    }
+
     pub fn set_path(&mut self, path: PathBuf) {
         // The first save may supply a useful name for an otherwise untitled
         // project. Reopening or moving a named project must not silently
@@ -1426,6 +1489,8 @@ pub enum ProjectDescriptorError {
     TechnologyConflictsWithPhysicalLayout { owner: String },
     #[error("technology change is identical to the current project binding")]
     NoOpTechnologyChange,
+    #[error("project properties are identical to the current ones")]
+    NoOpPropertiesChange,
     #[error(
         "technology checkpoint captured project revision {checkpoint}, but the current revision is {current}"
     )]

@@ -543,3 +543,45 @@ fn a_chain_rejects_an_empty_or_repeated_entry() {
     ));
     assert!(project.include_search_paths().is_empty());
 }
+
+/// The properties are written whole or not at all, with one revision, and a
+/// change that changes nothing is refused rather than spending a revision.
+#[test]
+fn properties_are_replaced_whole_with_one_revision() {
+    let mut project = ProjectDescriptor::new("amp", "user", "top");
+    let revision = project.revision();
+    let mut edited = project.properties();
+    edited.name = "amp_v2".to_owned();
+    edited.description = "Two-stage amplifier".to_owned();
+    edited.top_cell = "bias".to_owned();
+    edited.include_search_paths = vec![PathBuf::from("models")];
+
+    let published = project
+        .replace_properties(edited.clone())
+        .expect("valid properties are accepted");
+    assert_eq!(published, revision.next().unwrap());
+    assert_eq!(project.revision(), published);
+    assert_eq!(project.properties(), edited);
+    assert_eq!(project.name(), "amp_v2");
+    assert_eq!(project.top_cell, "bias");
+
+    assert!(matches!(
+        project.replace_properties(edited.clone()),
+        Err(ProjectDescriptorError::NoOpPropertiesChange)
+    ));
+    let mut invalid = edited.clone();
+    invalid.description = "kept only with a valid name".to_owned();
+    invalid.name = " amp".to_owned();
+    assert!(matches!(
+        project.replace_properties(invalid),
+        Err(ProjectDescriptorError::SurroundingWhitespace)
+    ));
+    let mut no_top = edited.clone();
+    no_top.top_cell = " ".to_owned();
+    assert!(matches!(
+        project.replace_properties(no_top),
+        Err(ProjectDescriptorError::RequiredField("top_cell"))
+    ));
+    assert_eq!(project.properties(), edited, "a refusal writes nothing");
+    assert_eq!(project.revision(), published);
+}
