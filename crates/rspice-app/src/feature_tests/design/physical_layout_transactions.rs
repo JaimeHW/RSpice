@@ -1,5 +1,6 @@
-//! Copying and renaming cells, libraries and views carries their physical layouts, run
-//! through the whole application.
+//! Copying and renaming cells, libraries and views carries their physical layouts, and
+//! creating and editing a layout are steps of the one Undo, run through the whole
+//! application.
 
 use super::{state_with_populated_user_library, state_with_work_cell};
 use rspice_app_state::state::{
@@ -235,5 +236,105 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
             .expect("the layout is addressable under the new view identity")
             .owner(),
         &moved
+    );
+}
+
+/// Creating a Layout view's physical document and each edit to it are steps
+/// of the one Undo, behind the library step taken before them: Undo takes
+/// the shape back, then the document, then the library, and Redo makes each
+/// again in turn.
+#[test]
+fn creating_and_editing_a_layout_are_steps_of_the_one_undo() {
+    use rspice_app_state::product::ObjectRevision;
+    use rspice_app_state::state::{
+        LayoutGeometry, LayoutLayerPurpose, LayoutShape, PhysicalLayoutDocument,
+    };
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    let state = &mut app.state;
+    state.provision_test_project_technology_contract();
+    let owner = CellViewRef::new("user", "top", "layout");
+    state
+        .model
+        .library_manager
+        .get_library_mut("user")
+        .expect("the project's library")
+        .get_or_create_cell("top")
+        .add_view(View::new("layout", ViewType::Layout));
+    state
+        .model
+        .workspace
+        .open_view(owner.clone(), ViewType::Layout);
+    state.open_project_session();
+    state
+        .model
+        .create_library("extra")
+        .expect("the library is created");
+    let start = state
+        .model
+        .initialize_physical_layout_document(owner.clone())
+        .expect("the layout is created");
+    let shape = LayoutObjectId::new();
+    state
+        .model
+        .apply_physical_layout_transaction(
+            &owner,
+            start,
+            &[LayoutEdit::InsertShape {
+                id: shape,
+                value: LayoutShape {
+                    layer_purpose: LayoutLayerPurpose::try_new("metal1", "drawing").unwrap(),
+                    geometry: LayoutGeometry::Rectangle {
+                        lower_left: LayoutPoint::new(0, 0),
+                        upper_right: LayoutPoint::new(100, 200),
+                    },
+                    net: None,
+                    properties: std::collections::BTreeMap::new(),
+                },
+            }],
+        )
+        .expect("the shape is drawn");
+
+    let layout = |app: &crate::workbench::RSpiceApp| -> Option<(ObjectRevision, usize)> {
+        app.state
+            .model
+            .workspace
+            .content
+            .physical_layout_document(&owner)
+            .map(|document: &PhysicalLayoutDocument| (document.revision(), document.shapes().len()))
+    };
+    let extra = |app: &crate::workbench::RSpiceApp| {
+        app.state
+            .model
+            .library_manager
+            .get_library("extra")
+            .is_some()
+    };
+    let drawn = layout(&app);
+    assert_eq!(drawn.map(|(_, shapes)| shapes), Some(1));
+
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(layout(&app), Some((start, 0)), "Undo takes the shape back");
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(layout(&app), None, "then the layout");
+    assert!(extra(&app), "the library step stands behind them");
+    app.execute_command_key(ids::UNDO);
+    assert!(!extra(&app), "and undoes in its turn");
+
+    for _ in 0..3 {
+        app.execute_command_key(ids::REDO);
+    }
+    assert!(extra(&app));
+    assert_eq!(layout(&app), drawn, "Redo makes each again");
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .any(|open| open.reference == owner && open.dirty),
+        "the layout's tab is unsaved"
     );
 }

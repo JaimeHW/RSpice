@@ -1,5 +1,6 @@
 //! The open project's authoritative physical-layout documents: the one
-//! way a Layout view gains one, and the one way an edit reaches it.
+//! way a Layout view gains one, and the one way an edit reaches it, each
+//! one step of the one Undo.
 
 use super::Model;
 
@@ -73,7 +74,11 @@ impl Model {
             open.dirty = true;
         }
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.clear_project_design_history();
+        self.record_physical_layout_edit(
+            &owner,
+            None,
+            format!("create the layout of {}", owner.display_path()),
+        );
         Ok(revision)
     }
 
@@ -143,6 +148,7 @@ impl Model {
                 owner.display_path()
             ));
         }
+        let before = document.clone();
         let revision = document
             .apply_transaction(expected_revision, edits)
             .map_err(|error| format!("Physical-layout transaction failed: {error}"))?;
@@ -191,7 +197,11 @@ impl Model {
             open.dirty = true;
         }
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.clear_project_design_history();
+        self.record_physical_layout_edit(
+            owner,
+            Some(before),
+            format!("edit the layout of {}", owner.display_path()),
+        );
         Ok(revision)
     }
 }
