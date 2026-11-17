@@ -764,7 +764,7 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
 
 /// A save that wrote the sheet a symbol's pin move rewired says so in the
 /// status line, the symbol first and then the sheet, each by the name its
-/// tab shows. A save that wrote the symbol alone says nothing of sheets.
+/// tab shows. A save that wrote the symbol alone names the project alone.
 #[test]
 fn a_save_that_writes_the_rewired_sheet_names_both_in_the_status_line() {
     use rspice_app_project::workbench::project::commands::ProjectCommand;
@@ -785,10 +785,20 @@ fn a_save_that_writes_the_rewired_sheet_names_both_in_the_status_line() {
         .app
         .execute_command_key(ProjectCommand::Save.key());
     let alone = fixture.replay.frames(vec![]);
-    assert!(
-        !prompt(&alone).starts_with("Saved"),
-        "the symbol alone was saved: {:?}",
-        prompt(&alone)
+    let project = fixture
+        .replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .name()
+        .to_owned();
+    assert_eq!(
+        prompt(&alone),
+        format!("Saved {project}"),
+        "the symbol alone was saved, and no sheet is named"
     );
 
     fixture.drag(Point::new(60, 70), Point::new(60, 100));

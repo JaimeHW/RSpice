@@ -48,6 +48,10 @@ pub(super) fn populated_session() -> AppState {
         .model
         .workspace
         .save_active_schematic(&state.model.schematic);
+    // The library browser's selection: a new session's is the drawing's
+    // view, so this one stops at its cell.
+    state.model.library_manager.select_cell("user", "top");
+    assert_eq!(state.model.library_manager.selected_view, None);
 
     // The plan, through the isolated execution context: an operating point
     // ahead of the transient, and a project-owned model.
