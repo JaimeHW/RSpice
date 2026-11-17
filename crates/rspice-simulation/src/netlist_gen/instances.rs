@@ -67,6 +67,9 @@ impl<'a> NetlistGenerator<'a> {
     }
 
     pub(super) fn generate_instances(&mut self) {
+        // A line a card writes beside itself, such as a sense source or a
+        // value parameter, belongs to the cell view and to no component.
+        self.lines.set_origin(self.cell_origin());
         self.lines.push("* Circuit netlist".to_string());
 
         for component in &self.schematic.components {
@@ -79,16 +82,33 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             if let Some(line) = self.generate_instance_line(component) {
-                self.lines.push(line);
+                let nets = std::mem::take(&mut self.card_nets);
+                let origin = self.component_origin(component, nets);
+                self.lines.push_for(line, origin);
             }
         }
 
-        for line in self.collect_transformer_lines() {
-            self.lines.push(line);
+        for (component, lines, nets) in self.collect_transformer_lines() {
+            let origin = self.component_origin(&component, nets);
+            for line in lines {
+                self.lines.push_for(line, origin.clone());
+            }
         }
 
-        for line in self.collect_coupling_lines() {
-            self.lines.push(line);
+        for (component, element, line) in self.collect_coupling_lines() {
+            let origin = match self
+                .schematic
+                .components
+                .iter()
+                .find(|candidate| candidate.id == component)
+            {
+                Some(component) => WrittenLine {
+                    element: Some(element),
+                    ..self.component_origin(component, Vec::new())
+                },
+                None => self.cell_origin(),
+            };
+            self.lines.push_for(line, origin);
         }
     }
 
@@ -101,6 +121,7 @@ impl<'a> NetlistGenerator<'a> {
             .collect();
         let terminal_points = terminals.iter().map(|(_, pos)| *pos).collect::<Vec<_>>();
         let instance_name = self.instance_name(component);
+        self.card_nets.clone_from(&node_names);
 
         match component.kind {
             // Two-terminal passive components: X name node+ node- value [params]
@@ -826,6 +847,7 @@ impl<'a> NetlistGenerator<'a> {
                 // One drawn terminal may carry many conductors, so the emitted
                 // node list is per conductor from here on.
                 let node_names = self.vector_terminal_nodes(terminal_order, &terminal_points);
+                self.card_nets.clone_from(&node_names);
 
                 // A schematic master is named by the deck's one master index —
                 // never by the binding, which does not know which of several

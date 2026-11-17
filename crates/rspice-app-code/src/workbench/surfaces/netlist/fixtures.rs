@@ -20,7 +20,7 @@ pub fn retain_generated(
     let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
     let source = source.to_owned();
     let (document, owned) =
-        generation::publish_generated_document(model, netlist, input_digest, source.clone())
+        generation::publish_generated_document(model, netlist, input_digest, source.clone(), &[])
             .expect("canonical generated fixture");
     model.netlist_artifacts.generated_source = source;
     model.netlist_artifacts.generated_document = Some(document);

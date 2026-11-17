@@ -169,6 +169,7 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
                 &cx.state.netlist,
                 input_digest,
                 generated.source,
+                &generated.line_map,
             ) {
                 Ok((generated_document, owned_document)) => {
                     if let (Some(previous), Some(current)) = (
@@ -244,13 +245,14 @@ pub(super) fn publish_generated_document(
     netlist: &NetlistDocumentState,
     input_digest: crate::product::ContentDigest,
     source: String,
+    line_map: &[rspice_simulation::netlist_gen::WrittenLine],
 ) -> Result<(NetlistDocument, Option<NetlistDocument>), String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
         GenerationInput::new(model.workspace.content.project.revision(), input_digest),
     )
     .map_err(|error| error.to_string())?;
-    let source_map = generated_source_map(model, &source)?;
+    let source_map = generated_source_map(model, &source, line_map)?;
     let dependencies = generated_project_source_dependencies(model, &source)?;
     let artifact =
         GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
@@ -458,149 +460,41 @@ fn compiler_dependency_locator(
     project_bundle_locator(source_key, &dependency.logical_path)
 }
 
+/// The netlist's line map as the netlist document keeps it: each line's cell
+/// view, the component its card writes, and the nets it connects, as the
+/// generator recorded them while writing the line. A line no cell view writes
+/// belongs to the design's own netlist.
 fn generated_source_map(
     model: &Model,
     source: &str,
+    line_map: &[rspice_simulation::netlist_gen::WrittenLine],
 ) -> Result<Vec<GeneratedSourceMapEntry>, String> {
-    let top = model.workspace.content.active_view.clone();
-    let mut current = top.clone();
-    let mut entries = Vec::with_capacity(source.lines().count());
-
-    for (index, line) in source.lines().enumerate() {
-        let trimmed = line.trim();
-        let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-        if tokens
-            .first()
-            .is_some_and(|head| head.eq_ignore_ascii_case(".subckt"))
-            && let Some(cell) = tokens.get(1)
-        {
-            current = model
-                .workspace
-                .content
-                .schematic_buffers
-                .keys()
-                .find_map(|key| {
-                    let mut segments = key.split('/');
-                    let library = segments.next()?;
-                    let candidate_cell = segments.next()?;
-                    let view = segments.next()?;
-                    (candidate_cell.eq_ignore_ascii_case(cell))
-                        .then(|| crate::state::CellViewRef::new(library, candidate_cell, view))
-                })
-                .unwrap_or_else(|| {
-                    crate::state::CellViewRef::new(&top.library, *cell, "schematic")
-                });
-        }
-
-        let (instance_identity, component_identity) = source_line_component(model, &current, line)
-            .map_or((None, None), |(instance, component)| {
-                (Some(instance), Some(component))
-            });
-        entries.push(
-            GeneratedSourceMapEntry::try_new(
+    let root = model.workspace.content.simulation_root_reference();
+    source
+        .lines()
+        .enumerate()
+        .map(|(index, _)| {
+            let written = line_map.get(index);
+            let view = written
+                .and_then(|written| written.cell_view.as_ref())
+                .unwrap_or(&root);
+            let entry = GeneratedSourceMapEntry::try_new(
                 index + 1,
-                format!("{}/{}", current.library, current.cell),
-                current.key(),
-                instance_identity,
-                component_identity,
+                format!("{}/{}", view.library, view.cell),
+                view.key(),
+                written.and_then(|written| written.element.clone()),
+                written
+                    .and_then(|written| written.component)
+                    .map(|component| {
+                        GeneratedSourceMapEntry::component_identity_for(&view.key(), component)
+                    }),
             )
-            .map_err(|error| error.to_string())?,
-        );
-
-        if tokens
-            .first()
-            .is_some_and(|head| head.eq_ignore_ascii_case(".ends"))
-        {
-            current.clone_from(&top);
-        }
-    }
-    Ok(entries)
-}
-
-fn source_line_component(
-    model: &Model,
-    reference: &crate::state::CellViewRef,
-    line: &str,
-) -> Option<(String, String)> {
-    let mut tokens = line.split_whitespace();
-    let token = tokens.next()?;
-    if token.starts_with(['.', '*']) {
-        return None;
-    }
-    let named = tokens.next();
-    let schematic = model
-        .workspace
-        .content
-        .schematic_buffers
-        .get(&reference.key())?;
-    schematic
-        .document()
-        .components
-        .iter()
-        .find_map(|component| {
-            // A card is headed by the element it writes, which is the
-            // component's written name: a limited `E1` heads its card `B1`.
-            // A keyword-headed card names it after the keyword: a memristor
-            // is written `YMEMRISTOR MR1`.
-            let written = component.written_element_name();
-            let head = match component.kind.element_keyword() {
-                Some(keyword) if token.eq_ignore_ascii_case(keyword) => named?,
-                Some(_) => return None,
-                None => token,
-            };
-            head.eq_ignore_ascii_case(&written).then(|| {
-                let identity =
-                    GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
-                (written, identity)
-            })
+            .map_err(|error| error.to_string())?;
+            Ok(entry.with_nets(
+                written
+                    .map(|written| written.nets.clone())
+                    .unwrap_or_default(),
+            ))
         })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{Component, ComponentType, Point, SchematicState};
-    use crate::workbench::code::tests::harness;
-
-    /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a
-    /// keyword-headed card names its element after the keyword.
-    #[test]
-    fn a_keyword_headed_card_names_the_component_after_its_keyword() {
-        let mut harness = harness();
-        let view = harness.model.workspace.content.active_view.key();
-        let mut schematic = SchematicState::default();
-        schematic.document_mut_for_test().components.extend([
-            Component::new(4, ComponentType::Memristor, Point::origin()).with_name_value("MR1", ""),
-            Component::new(5, ComponentType::Resistor, Point::new(200, 0))
-                .with_name_value("R1", "1k"),
-        ]);
-        let (design, _) = schematic.into_parts();
-        harness
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .insert(view.clone(), design);
-
-        let entries = generated_source_map(
-            &harness.model,
-            "* title\nYMEMRISTOR MR1 a 0 mem_MR1\nR1 a 0 1k\nYMEMRISTOR R1 a 0 m\n",
-        )
-        .expect("source map");
-
-        let mapped = |line: usize| {
-            (
-                entries[line].instance_identity().map(str::to_owned),
-                entries[line].component_identity().map(str::to_owned),
-            )
-        };
-        let component = |id| Some(GeneratedSourceMapEntry::component_identity_for(&view, id));
-        assert_eq!(mapped(1), (Some("MR1".to_owned()), component(4)));
-        assert_eq!(mapped(2), (Some("R1".to_owned()), component(5)));
-        assert_eq!(
-            mapped(3),
-            (None, None),
-            "a keyword card names no component of another kind"
-        );
-    }
+        .collect()
 }

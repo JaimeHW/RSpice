@@ -163,17 +163,17 @@ impl<'a> NetlistGenerator<'a> {
     pub(super) fn hoist_veriloga_directives(&mut self) {
         let mut directives =
             std::collections::BTreeMap::<String, (Option<String>, Option<String>, String)>::new();
-        let mut retained: Vec<String> = Vec::with_capacity(self.lines.len());
-        for line in self.lines.drain(..) {
+        let mut retained = Vec::with_capacity(self.lines.len());
+        for (line, written_for) in self.lines.take_pairs() {
             let Some((path, model)) = parse_veriloga_directive(&line) else {
-                retained.push(line);
+                retained.push((line, written_for));
                 continue;
             };
             // The comment naming the design object travels with its source.
             let origin = retained
                 .last()
-                .is_some_and(|previous| is_veriloga_origin_comment(previous))
-                .then(|| retained.pop())
+                .is_some_and(|(previous, _)| is_veriloga_origin_comment(previous))
+                .then(|| retained.pop().map(|(comment, _)| comment))
                 .flatten();
             let model_key = model.as_deref().map(str::to_ascii_lowercase);
             match directives.get(&path) {
@@ -197,13 +197,15 @@ impl<'a> NetlistGenerator<'a> {
         }
         remove_empty_library_include_sections(&mut retained);
         if directives.is_empty() {
-            self.lines = retained;
+            self.lines.set_pairs(retained);
             return;
         }
         let insertion = retained
             .iter()
-            .position(String::is_empty)
+            .position(|(line, _)| line.is_empty())
             .map_or(retained.len(), |index| index + 1);
+        // The sources are deck-wide: they belong to the design's own netlist.
+        let written_for = self.cell_origin();
         let mut section = Vec::with_capacity(directives.len() * 2 + 2);
         section.push("* Verilog-A sources".to_owned());
         section.extend(
@@ -212,8 +214,11 @@ impl<'a> NetlistGenerator<'a> {
                 .flat_map(|(_, origin, line)| origin.into_iter().chain([line])),
         );
         section.push(String::new());
-        retained.splice(insertion..insertion, section);
-        self.lines = retained;
+        retained.splice(
+            insertion..insertion,
+            section.into_iter().map(|line| (line, written_for.clone())),
+        );
+        self.lines.set_pairs(retained);
     }
 }
 
@@ -279,17 +284,17 @@ fn take_token(input: &str) -> Option<(&str, &str)> {
     (end > 0).then_some((&input[..end], &input[end..]))
 }
 
-fn remove_empty_library_include_sections(lines: &mut Vec<String>) {
+fn remove_empty_library_include_sections(lines: &mut Vec<(String, WrittenLine)>) {
     let mut index = 0;
     while index < lines.len() {
-        if lines[index].trim() != "* Library includes" {
+        if lines[index].0.trim() != "* Library includes" {
             index += 1;
             continue;
         }
         let end = (index + 1..lines.len())
-            .find(|candidate| lines[*candidate].is_empty())
+            .find(|candidate| lines[*candidate].0.is_empty())
             .unwrap_or(lines.len());
-        let has_include = lines[index + 1..end].iter().any(|line| {
+        let has_include = lines[index + 1..end].iter().any(|(line, _)| {
             let command = line.split_whitespace().next().unwrap_or_default();
             matches!(
                 command.to_ascii_lowercase().as_str(),
@@ -350,7 +355,7 @@ mod tests {
             &schematic,
             crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
         );
-        generator.lines = vec![
+        generator.lines = WrittenLines::from(vec![
             "* RSpice Netlist".to_owned(),
             String::new(),
             "* Library includes".to_owned(),
@@ -361,7 +366,7 @@ mod tests {
             ".veriloga \"__rspice_project__/exact/model.va\" OWNED".to_owned(),
             String::new(),
             ".ends child".to_owned(),
-        ];
+        ]);
 
         generator.hoist_veriloga_directives();
 
@@ -504,7 +509,7 @@ mod tests {
             &schematic,
             crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
         );
-        generator.lines = vec![
+        generator.lines = WrittenLines::from(vec![
             "* RSpice Netlist".to_owned(),
             String::new(),
             "* Library includes".to_owned(),
@@ -517,7 +522,7 @@ mod tests {
             ".VERILOGA \"models/ota.va\" ota_1".to_owned(),
             String::new(),
             ".ends child".to_owned(),
-        ];
+        ]);
 
         generator.hoist_veriloga_directives();
 
@@ -540,12 +545,12 @@ mod tests {
             &schematic,
             crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
         );
-        generator.lines = vec![
+        generator.lines = WrittenLines::from(vec![
             "* RSpice Netlist".to_owned(),
             String::new(),
             ".veriloga \"models/device core.va\" first".to_owned(),
             ".veriloga \"models/device core.va\" second".to_owned(),
-        ];
+        ]);
 
         generator.hoist_veriloga_directives();
 

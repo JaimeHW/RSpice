@@ -398,6 +398,9 @@ pub struct GeneratedSourceMapEntry {
     view_identity: String,
     instance_identity: Option<String>,
     component_identity: Option<String>,
+    /// The nets the line's card connects, as the netlist names them.
+    #[serde(default)]
+    nets: Vec<String>,
 }
 
 impl GeneratedSourceMapEntry {
@@ -419,9 +422,17 @@ impl GeneratedSourceMapEntry {
             view_identity: view_identity.into(),
             instance_identity,
             component_identity,
+            nets: Vec::new(),
         };
         value.validate_identity()?;
         Ok(value)
+    }
+
+    /// The entry, saying which nets the line's card connects.
+    #[must_use]
+    pub fn with_nets(mut self, nets: Vec<String>) -> Self {
+        self.nets = nets;
+        self
     }
 
     fn validate_identity(&self) -> Result<(), DocumentError> {
@@ -459,6 +470,12 @@ impl GeneratedSourceMapEntry {
     #[must_use]
     pub fn component_identity(&self) -> Option<&str> {
         self.component_identity.as_deref()
+    }
+
+    /// The nets the line's card connects, as the netlist names them.
+    #[must_use]
+    pub fn nets(&self) -> &[String] {
+        &self.nets
     }
 
     /// The identity the generator writes for one schematic component.

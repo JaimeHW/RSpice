@@ -153,6 +153,8 @@ fn publish_generated_source(
 pub struct GeneratedNetlist {
     pub source: String,
     pub warnings: Vec<String>,
+    /// What each line of `source` was written for, one entry per line.
+    pub line_map: Vec<rspice_simulation::netlist_gen::WrittenLine>,
 }
 
 /// The shell's `build_menu_netlist`, over the model.
@@ -233,13 +235,37 @@ pub fn build_menu_netlist_in(
     let spice_netlist = model
         .workspace
         .content
-        .bind_generated_netlist_provenance(generation.netlist);
+        .bind_generated_netlist_provenance(generation.netlist.clone());
     let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(model, &spice_netlist)
         .map_err(|error| vec![error.to_string()])?;
+    let line_map = carry_line_map(&generation.netlist, generation.line_map, &spice_netlist);
     Ok(GeneratedNetlist {
         source: spice_netlist,
         warnings: generation.warnings,
+        line_map,
     })
+}
+
+/// The generator's line map carried onto the netlist it became.
+///
+/// The provenance comments and the plan's measurements are only ever inserted
+/// between the generator's lines, so each of those keeps what it was written
+/// for, and an inserted line is written for nothing.
+fn carry_line_map(
+    written: &str,
+    map: Vec<rspice_simulation::netlist_gen::WrittenLine>,
+    netlist: &str,
+) -> Vec<rspice_simulation::netlist_gen::WrittenLine> {
+    let mut written = written.split('\n').zip(map).peekable();
+    netlist
+        .split('\n')
+        .map(|line| match written.peek() {
+            Some((text, _)) if *text == line => {
+                written.next().map(|(_, origin)| origin).unwrap_or_default()
+            }
+            _ => rspice_simulation::netlist_gen::WrittenLine::default(),
+        })
+        .collect()
 }
 
 /// One Console line for a deck the reader asked for that could not be written:

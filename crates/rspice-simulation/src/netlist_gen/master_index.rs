@@ -348,6 +348,7 @@ impl<'a> MasterIndex<'a> {
                 draft.schematic,
                 hierarchy,
                 draft.representative.clone(),
+                draft.reference.clone(),
                 Rc::clone(index),
                 source_data,
             );
@@ -387,18 +388,19 @@ impl<'a> MasterIndex<'a> {
                     .map(|warning| format!("in master {name} ({context}): {warning}")),
             );
 
-            emission.blocks.push(String::new());
-            emission.blocks.push(format!(
-                ".subckt {name} {}{parameters}",
-                draft.formals.join(" ")
-            ));
-            emission.blocks.extend(
-                nested
-                    .take_lines()
-                    .into_iter()
-                    .filter(|line| line != "* Circuit netlist" && !line.is_empty()),
+            let header = nested.cell_origin();
+            emission.blocks.push_for(String::new(), header.clone());
+            emission.blocks.push_for(
+                format!(".subckt {name} {}{parameters}", draft.formals.join(" ")),
+                WrittenLine {
+                    nets: draft.formals.clone(),
+                    ..header.clone()
+                },
             );
-            emission.blocks.push(format!(".ends {name}"));
+            let mut body = nested.take_lines();
+            body.retain(|line| line != "* Circuit netlist" && !line.is_empty());
+            emission.blocks.append(body);
+            emission.blocks.push_for(format!(".ends {name}"), header);
         }
         emission
     }
@@ -453,7 +455,7 @@ impl<'a> MasterIndex<'a> {
 /// Everything one emission pass produces.
 #[derive(Debug, Default)]
 pub(super) struct MasterEmission {
-    pub(super) blocks: Vec<String>,
+    pub(super) blocks: WrittenLines,
     pub(super) defects: Vec<NetlistDefect>,
     pub(super) errors: Vec<String>,
     pub(super) warnings: Vec<String>,

@@ -45,6 +45,7 @@ mod formatting;
 mod functional_tests;
 mod header;
 mod instances;
+mod line_map;
 mod magnetics;
 mod master_index;
 mod models;
@@ -56,6 +57,8 @@ mod vector_nets;
 mod xspice;
 
 pub use instances::independent_source_card;
+pub use line_map::WrittenLine;
+use line_map::WrittenLines;
 pub use master_index::{EmissionRow, NetlistDefect};
 use master_index::{MasterIndex, validate_occurrence_interface};
 pub use rspice_design::connectivity::Net;
@@ -101,6 +104,9 @@ pub struct NetlistResult {
     /// in the deck. This is what lets a receipt name the executed hierarchy
     /// without re-deriving it from the netlist text.
     pub emission_map: Vec<EmissionRow>,
+
+    /// What each line of `netlist` was written for, one entry per line.
+    pub line_map: Vec<WrittenLine>,
 }
 
 /// What one generation pass learned about the design it netlisted. The one
@@ -174,8 +180,9 @@ pub fn generate_netlist_hierarchical_with_variables(
             return result;
         }
     };
-    NetlistGenerator::with_hierarchy(schematic, hierarchy, *source_data)
-        .finish(analysis_lines, &parameter_lines)
+    let mut generator = NetlistGenerator::with_hierarchy(schematic, hierarchy, *source_data);
+    generator.cell_view = Some(context.active_cell.clone());
+    generator.finish(analysis_lines, &parameter_lines)
 }
 
 /// Canonical parameter lines sorted by case-insensitive SPICE identifier.
@@ -237,7 +244,7 @@ impl NetlistGenerator<'_> {
         let schematic = self.schematic;
         let generator = &mut self;
 
-        let netlist =
+        let (netlist, line_map) =
             generator.generate_with_analysis_and_parameters(analysis_lines, parameter_lines);
 
         // Build the nets map from the generator's data
@@ -279,6 +286,7 @@ impl NetlistGenerator<'_> {
             errors: generator.errors().to_vec(),
             defects: generator.defects.clone(),
             emission_map: generator.emission_map.clone(),
+            line_map,
         }
     }
 }
@@ -307,8 +315,12 @@ pub struct NetlistGenerator<'a> {
     /// each vector terminal joined.
     vector_nets: rspice_design::schematic::bus::VectorConnectivity,
 
-    /// Generated netlist lines
-    lines: Vec<String>,
+    /// Generated netlist lines, each with what it was written for.
+    lines: WrittenLines,
+    /// The cell view this generator writes the netlist of, when it is known.
+    cell_view: Option<CellViewRef>,
+    /// The nets the card being written connects, in pin order.
+    card_nets: Vec<String>,
 
     /// Model definitions needed
     models: BTreeMap<String, String>,
@@ -350,7 +362,9 @@ impl<'a> NetlistGenerator<'a> {
             point_to_net: HashMap::new(),
             ground_net: None,
             vector_nets: Default::default(),
-            lines: Vec::new(),
+            lines: WrittenLines::default(),
+            cell_view: None,
+            card_nets: Vec::new(),
             models: BTreeMap::new(),
             subcircuits: Vec::new(),
             warnings: Vec::new(),
@@ -382,10 +396,12 @@ impl<'a> NetlistGenerator<'a> {
         schematic: &'a SchematicDocument,
         hierarchy: &'a HierarchySource<'a>,
         hierarchy_path: InstancePath,
+        master: CellViewRef,
         masters: std::rc::Rc<MasterIndex<'a>>,
         source_data: NetlistSourceData<'a>,
     ) -> Self {
         let mut generator = Self::with_hierarchy(schematic, hierarchy, source_data);
+        generator.cell_view = Some(master);
         generator.hierarchy_path = hierarchy_path;
         generator.masters = Some(masters);
         generator
@@ -422,8 +438,28 @@ impl<'a> NetlistGenerator<'a> {
     }
 
     /// Consume the generated lines (subcircuit-body assembly).
-    pub(self) fn take_lines(&mut self) -> Vec<String> {
+    pub(self) fn take_lines(&mut self) -> WrittenLines {
         std::mem::take(&mut self.lines)
+    }
+
+    /// What a line of this cell view's netlist that no component writes is
+    /// written for.
+    fn cell_origin(&self) -> WrittenLine {
+        WrittenLine {
+            cell_view: self.cell_view.clone(),
+            ..WrittenLine::default()
+        }
+    }
+
+    /// What `component`'s card is written for, given the nets it connects.
+    fn component_origin(&self, component: &Component, nets: Vec<String>) -> WrittenLine {
+        WrittenLine {
+            cell_view: self.cell_view.clone(),
+            component: Some(component.id),
+            element: Some(component.written_element_name()),
+            instance: self.child_hierarchy_path(component).ok(),
+            nets,
+        }
     }
 
     /// Generate the netlist body with no analysis or parameter cards.
@@ -431,7 +467,7 @@ impl<'a> NetlistGenerator<'a> {
     /// both; the generator's own tests use this bare form.
     #[cfg(test)]
     pub fn generate(&mut self) -> String {
-        self.generate_with_analysis_and_parameters(&[], &[])
+        self.generate_with_analysis_and_parameters(&[], &[]).0
     }
 
     fn reset_generation_state(&mut self) {
@@ -463,8 +499,9 @@ impl<'a> NetlistGenerator<'a> {
         &mut self,
         analysis_lines: &[String],
         parameter_lines: &[String],
-    ) -> String {
+    ) -> (String, Vec<WrittenLine>) {
         self.reset_generation_state();
+        self.lines.set_origin(self.cell_origin());
         let valid_parameters = self.validate_instance_parameters();
 
         // Phase 1: Adopt the design's one connectivity extraction — geometry,
@@ -479,7 +516,7 @@ impl<'a> NetlistGenerator<'a> {
                 "* Generation stopped: correct the reported parameter text errors.".to_owned(),
             );
             self.lines.push(".end".to_owned());
-            return self.lines.join("\n");
+            return self.lines.deck();
         }
 
         // Phase 3b: Emit typed project parameters before any instance or
@@ -508,7 +545,9 @@ impl<'a> NetlistGenerator<'a> {
         // publish each exact identity once before any subcircuit definition.
         self.hoist_veriloga_directives();
 
-        // Phase 7: Add analysis commands (if requested)
+        // Phase 7: Add analysis commands (if requested). They belong to the
+        // deck, not to a cell view.
+        self.lines.set_origin(WrittenLine::default());
         if !analysis_lines.is_empty() {
             self.lines.push(String::new());
             self.lines.push("* Analysis commands".to_string());
@@ -521,7 +560,7 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.push(String::new());
         self.lines.push(".end".to_string());
 
-        self.lines.join("\n")
+        self.lines.deck()
     }
 }
 
@@ -616,7 +655,19 @@ mod tests {
 
     fn library_with_authored_amp_symbol() -> (LibraryCatalog, HashMap<String, Schematic>) {
         let mut libraries = LibraryCatalog::default();
-        let mut library = Library::new("work");
+        let mut buffers = HashMap::new();
+        add_authored_amp(&mut libraries, &mut buffers, "work");
+        (libraries, buffers)
+    }
+
+    /// Cell `amp` in `library_name`: a symbol with IN and OUT pins and a
+    /// schematic holding the two ports.
+    fn add_authored_amp(
+        libraries: &mut LibraryCatalog,
+        buffers: &mut HashMap<String, Schematic>,
+        library_name: &str,
+    ) {
+        let mut library = Library::new(library_name);
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("schematic", ViewType::Schematic));
 
@@ -635,7 +686,6 @@ mod tests {
         library.add_cell(cell);
         libraries.add_library(library);
 
-        let mut buffers = HashMap::new();
         let mut master = Schematic::default();
         for (idx, name) in ["IN", "OUT"].iter().enumerate() {
             let id = master.add_component(
@@ -651,8 +701,10 @@ mod tests {
                 .expect("port component")
                 .value = (*name).to_owned();
         }
-        buffers.insert(CellViewRef::new("work", "amp", "schematic").key(), master);
-        (libraries, buffers)
+        buffers.insert(
+            CellViewRef::new(library_name, "amp", "schematic").key(),
+            master,
+        );
     }
 
     fn authored_amp_instance() -> Component {
@@ -715,6 +767,135 @@ mod tests {
                 ".param ANALYSIS_ONLY=4.00000000000000000e4",
                 ".param ZLOAD=2.00000000000000000e4",
             ]
+        );
+    }
+
+    /// One resistor named `name` placed in the `amp` schematic of `library`.
+    fn place_resistor_in_amp(
+        buffers: &mut HashMap<String, Schematic>,
+        library: &str,
+        name: &str,
+    ) -> u64 {
+        let master = buffers
+            .get_mut(&CellViewRef::new(library, "amp", "schematic").key())
+            .expect("amp schematic");
+        let id = master.add_component(
+            ComponentType::Resistor,
+            crate::netlist_gen::test_placement(Point::new(200, 200)),
+            None,
+        );
+        let component = master
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("placed resistor");
+        component.name = name.to_owned();
+        component.value = "1k".to_owned();
+        id
+    }
+
+    #[test]
+    fn every_written_line_says_which_cell_view_component_and_nets_it_was_written_for() {
+        let mut libraries = LibraryCatalog::default();
+        let mut buffers = HashMap::new();
+        add_authored_amp(&mut libraries, &mut buffers, "work");
+        add_authored_amp(&mut libraries, &mut buffers, "lab");
+        let work_load = place_resistor_in_amp(&mut buffers, "work", "R5");
+        let lab_load = place_resistor_in_amp(&mut buffers, "lab", "R6");
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+
+        let mut schematic = Schematic::default();
+        let mut work_amp = authored_amp_instance();
+        work_amp.name = "XA".to_owned();
+        let mut lab_binding = LibraryCellInstance::new("lab", "amp", "schematic");
+        lab_binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        let mut lab_amp = Component::new(2, ComponentType::CellInstance, Point::new(400, 50))
+            .with_library_cell(lab_binding);
+        lab_amp.name = "XB".to_owned();
+        schematic.document_mut_for_test().components.extend([
+            work_amp,
+            lab_amp,
+            Component::new(3, ComponentType::Resistor, Point::new(0, 300))
+                .with_name_value("R1", "2k"),
+        ]);
+        let top = CellViewRef::new("user", "top", "schematic");
+        let mut generator = NetlistGenerator::with_hierarchy(
+            &schematic,
+            &hierarchy,
+            NetlistSourceData::new(&FixtureSourceFiles),
+        );
+        generator.cell_view = Some(top.clone());
+        let result = generator.finish(&[".op".to_owned()], &[]);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let lines = result.netlist.split('\n').collect::<Vec<_>>();
+        assert_eq!(result.line_map.len(), lines.len());
+
+        let written_for = |element: &str| {
+            let at = result
+                .line_map
+                .iter()
+                .position(|line| line.element.as_deref() == Some(element))
+                .unwrap_or_else(|| panic!("no line for {element}:\n{}", result.netlist));
+            (lines[at], &result.line_map[at])
+        };
+
+        // Two cells of one name in two libraries: each body line names its own.
+        let (card, line) = written_for("R5");
+        assert!(card.starts_with("R5 "), "{card}");
+        assert_eq!(
+            line.cell_view,
+            Some(CellViewRef::new("work", "amp", "schematic"))
+        );
+        assert_eq!(line.component, Some(work_load));
+        let (card, line) = written_for("R6");
+        assert!(card.starts_with("R6 "), "{card}");
+        assert_eq!(
+            line.cell_view,
+            Some(CellViewRef::new("lab", "amp", "schematic"))
+        );
+        assert_eq!(line.component, Some(lab_load));
+
+        // A hierarchical instance is the design's own card, at its path.
+        let (card, line) = written_for("XB");
+        assert_eq!(line.cell_view, Some(top.clone()));
+        assert_eq!(line.component, Some(2));
+        assert_eq!(
+            line.instance,
+            Some(InstancePath::root().child("XB").expect("instance path"))
+        );
+        let fields = card.split_whitespace().collect::<Vec<_>>();
+        assert_eq!(line.nets.len(), 2, "{card}");
+        assert_eq!(
+            fields[1..3],
+            line.nets.iter().map(String::as_str).collect::<Vec<_>>()[..]
+        );
+
+        // A net: a card's nets are the nodes it writes.
+        let (card, line) = written_for("R1");
+        let fields = card.split_whitespace().collect::<Vec<_>>();
+        assert_eq!(line.nets, [fields[1], fields[2]]);
+
+        // A body's header names its master's cell view and its ports.
+        let headers = lines
+            .iter()
+            .zip(&result.line_map)
+            .filter(|(text, _)| text.starts_with(".subckt"))
+            .map(|(_, line)| line.cell_view.clone())
+            .collect::<Vec<_>>();
+        assert!(headers.contains(&Some(CellViewRef::new("work", "amp", "schematic"))));
+        assert!(headers.contains(&Some(CellViewRef::new("lab", "amp", "schematic"))));
+        assert_eq!(headers.len(), 2);
+        let analysis = lines
+            .iter()
+            .position(|text| *text == ".op")
+            .expect("analysis");
+        assert_eq!(
+            result.line_map[analysis].cell_view, None,
+            "an analysis card is the deck's"
         );
     }
 

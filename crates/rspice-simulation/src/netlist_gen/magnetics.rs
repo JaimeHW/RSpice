@@ -9,7 +9,10 @@ use super::*;
 use rspice_design::schematic::component::{TransformerCards, coupling_cards};
 
 impl<'a> NetlistGenerator<'a> {
-    pub(super) fn collect_transformer_lines(&mut self) -> Vec<String> {
+    /// Each transformer's cards, with the nets its windings connect.
+    pub(super) fn collect_transformer_lines(
+        &mut self,
+    ) -> Vec<(Component, Vec<String>, Vec<String>)> {
         let mut lines = Vec::new();
         for component in self.schematic.components.clone() {
             if component.kind != ComponentType::Transformer {
@@ -17,7 +20,12 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             if let Some(transformer_lines) = self.transformer_instance_lines(&component) {
-                lines.extend(transformer_lines);
+                let nets = component
+                    .terminal_positions()
+                    .iter()
+                    .map(|(_, position)| self.get_node_name(*position))
+                    .collect();
+                lines.push((component, transformer_lines, nets));
             }
         }
         lines
@@ -194,7 +202,9 @@ impl<'a> NetlistGenerator<'a> {
 
     /// The mutual-inductance cards the cellview's couplings ask for, as
     /// [`coupling_cards`] decides them; each coupling it refuses is an error.
-    pub(super) fn collect_coupling_lines(&mut self) -> Vec<String> {
+    /// Each coupling card, with the component it is written for and the
+    /// element it writes.
+    pub(super) fn collect_coupling_lines(&mut self) -> Vec<(u64, String, String)> {
         let couplings = coupling_cards(&self.schematic.components);
         self.errors
             .extend(couplings.refusals.iter().map(ToString::to_string));
@@ -202,11 +212,15 @@ impl<'a> NetlistGenerator<'a> {
             .cards
             .into_iter()
             .map(|card| {
-                format!(
-                    "{} {} {}",
-                    card.name,
-                    card.windings.join(" "),
-                    card.coefficient
+                (
+                    card.component,
+                    card.name.clone(),
+                    format!(
+                        "{} {} {}",
+                        card.name,
+                        card.windings.join(" "),
+                        card.coefficient
+                    ),
                 )
             })
             .collect()

@@ -27,7 +27,7 @@ impl<'a> NetlistGenerator<'a> {
         self.record_defects(emission.defects);
         if !emission.blocks.is_empty() {
             self.lines.push("* Cell definitions".to_owned());
-            self.lines.extend(emission.blocks);
+            self.lines.append(emission.blocks);
             self.lines.push(String::new());
         }
     }
