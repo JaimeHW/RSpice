@@ -424,7 +424,7 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 38] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::ImportNetlist,
