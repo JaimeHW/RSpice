@@ -416,3 +416,91 @@ fn a_transient_without_a_print_step_estimates_its_store_from_its_maximum_step() 
     assert!(warning.contains("about 33915 bytes"), "{warning}");
     assert_eq!(super::space_warning(u64::MAX, 1_000), None);
 }
+
+/// A `D(node)` or `E(node)` column a cursor samples from its event trace is the projection's,
+/// value for value: a change a last bit after a row's time counts at that row, a level holds
+/// to the next change, an unknown level reads 0.5, and a real value reads 0.0 before its first
+/// change.
+#[test]
+fn an_event_column_samples_its_trace_as_the_projection_does() {
+    use rspice_core::analysis::transient::{
+        DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint, TransientResult,
+    };
+    use rspice_core::execution::{HeldEvents, ProjectionValues, transient_projection_signals};
+    use rspice_core::xspice::DigitalValue;
+
+    let time = vec![0.0, 1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9];
+    let digital = |time, value| DigitalTracePoint { time, value };
+    let real = |time, value| RealTracePoint { time, value };
+    let result = TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
+        voltage_impulses: None,
+        current_impulses: None,
+        step_sizes: vec![0.0; time.len()],
+        time,
+        voltages: Vec::new(),
+        branch_currents: Vec::new(),
+        num_nodes: 0,
+        node_names: Vec::new(),
+        branch_names: Vec::new(),
+        digital_traces: vec![DigitalTrace {
+            node_name: "q".to_owned(),
+            points: vec![
+                digital(0.5e-9, DigitalValue::one()),
+                digital(2.0e-9 + 5.0e-19, DigitalValue::zero()),
+                digital(3.5e-9, DigitalValue::unknown()),
+                digital(3.6e-9, DigitalValue::one()),
+            ],
+            hdl_time_precision: None,
+        }],
+        digital_buses: Vec::new(),
+        real_traces: vec![RealTrace {
+            node_name: "r".to_owned(),
+            points: vec![real(1.5e-9, 2.5), real(4.0e-9, -1.0), real(9.0e-9, 7.0)],
+        }],
+        hdl_sources: Vec::new(),
+        event_only_nodes: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+        fft_results: Vec::new(),
+    };
+    let events = HeldEvents {
+        digital: &result.digital_traces,
+        real: &result.real_traces,
+    };
+    let projected = transient_projection_signals(&result).expect("the result projects");
+    for (name, column) in [
+        ("D(q)", super::Column::Digital(0)),
+        ("E(r)", super::Column::Real(0)),
+    ] {
+        assert_eq!(super::event_column(&result, name), Some(column));
+        let signal = projected
+            .iter()
+            .find(|signal| signal.descriptor().display_name() == name)
+            .expect("the projection has the column");
+        let ProjectionValues::Real(expected) = signal.values() else {
+            panic!("{name} is a real column");
+        };
+        let mut cursor = super::EventCursor::open(&events, column).expect("an event column");
+        let sampled = result
+            .time
+            .iter()
+            .map(|&time| cursor.at(time))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("samples");
+        assert_eq!(
+            sampled
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            "{name}"
+        );
+    }
+    assert_eq!(super::event_column(&result, "D(r)"), None);
+    assert_eq!(super::event_column(&result, "V(q)"), None);
+}

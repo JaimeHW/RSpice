@@ -23,7 +23,7 @@ use rspice_core::engine::{
     TransientEnd, TransientFourierResult, TransientPostResults, TransientResult,
     TransientStartupMode, TransientState,
 };
-use rspice_core::execution::{EventPoints, EventSource, HeldEvents};
+use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
 use rspice_core::netlist::{AnalysisCommand, OutputDirectiveKind};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_core::xspice::DigitalValue;
@@ -514,8 +514,9 @@ impl StoredTransient {
     ///
     /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, prints
     /// no table of its own, keeps every accepted step, and asks for a rawfile, a delimited
-    /// table, an event dump or nothing; when every output signal is one of the store's columns,
-    /// value for value, or, for an event dump, a column sampled from an event trace; and when its `.MEASURE TRAN` statements, if any, read only the store's
+    /// table, HDF5, an event dump or nothing; when every output signal is one of the store's
+    /// columns, value for value, or a column sampled from an event trace (`D(node)`,
+    /// `E(node)`); and when its `.MEASURE TRAN` statements, if any, read only the store's
     /// columns in forms measured in one pass over the rows. The signals are checked by
     /// projecting the first chunk exactly as the whole run would be, and the statements by
     /// planning them against the same chunk; they are then measured from the store.
@@ -568,15 +569,24 @@ impl StoredTransient {
             .next()
             .map_or(0, |span| span.1);
         self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
-        // An event dump writes no table, so a column sampled from an event trace need not be
-        // one of the store's.
+        // A column sampled from an event trace reads the run's event histories; an event dump
+        // writes no table, so it reads them alone.
         let event_dump = ctx.output.is_some() && matches!(ctx.format, OutputFormat::Vcd);
-        let events = if event_dump {
+        let events = if event_dump
+            || !self.shell.digital_traces.is_empty()
+            || !self.shell.real_traces.is_empty()
+        {
             Some(self.rows.events(&self.shell)?)
         } else {
             None
         };
-        let plan = probe_plan(ctx, &self.shell, &self.rows.targets, events.as_ref());
+        let plan = probe_plan(
+            ctx,
+            &self.shell,
+            &self.rows.targets,
+            events.as_ref(),
+            event_dump,
+        );
         drop(events);
         let plan = plan.and_then(|plan| {
             let Some(mut plan) = plan else {
@@ -1167,24 +1177,43 @@ impl EventSource for RunEvents<'_> {
 pub(super) struct StreamPlan {
     /// Named and typed as the in-memory projection names them, without samples.
     pub(super) signals: Vec<ScalarSignal>,
-    /// Each signal's value slot in the store; none for an event dump, which reads no rows.
-    slots: Vec<usize>,
+    /// Where each signal's values come from; none for an event dump, which reads no rows.
+    columns: Vec<Column>,
     /// The deck's `.MEASURE TRAN` results, measured from the store; `None` when it has none.
     pub(super) measurements: Option<Vec<MeasureResult>>,
 }
 
-/// Project the probe rows in `shell` and keep the plan only when every projected signal is a
-/// store column under its own name with its own values.
-///
-/// For an event dump, which writes no table, `events` holds the run's event histories, and a
-/// signal may instead be a column sampled from one (`D(node)`, `E(node)`): the in-memory route
-/// only checks those columns' values finite, which a digital level always is, and a real event
-/// value is wherever every one of them is. The plan then reads no rows, and has no slots.
+impl StreamPlan {
+    /// Whether a column is sampled from an event trace, so that reading the rows reads the
+    /// run's event histories too.
+    pub(super) fn reads_events(&self) -> bool {
+        self.columns
+            .iter()
+            .any(|column| !matches!(column, Column::Slot(_)))
+    }
+}
+
+/// Where one output column's values come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Column {
+    /// A value slot of the store.
+    Slot(usize),
+    /// The digital event trace at this index among the result's, sampled onto the rows as its
+    /// `D(node)` column.
+    Digital(usize),
+    /// The real event trace at this index among the result's, sampled as its `E(node)` column.
+    Real(usize),
+}
+
+/// Project the probe rows in `shell` and keep the plan only when [`plan_columns`] finds every
+/// projected signal's values. For an event dump, which writes no table, the plan reads no rows
+/// and has no columns.
 fn probe_plan(
     ctx: &RunContext<'_>,
     shell: &TransientResult,
     targets: &[SlotTarget],
     events: Option<&RunEvents<'_>>,
+    event_dump: bool,
 ) -> Result<Option<StreamPlan>, CliError> {
     let Ok(mut signals) = crate::commands::run_signals::transient_export_signals(
         ctx.netlist,
@@ -1195,64 +1224,177 @@ fn probe_plan(
         // The run read back whole reports the same failure the in-memory run would.
         return Ok(None);
     };
-    let Some(signal_slots) = signal_slots(shell, targets, &signals) else {
+    let events = events.map(|events| events as &dyn EventSource);
+    let Some(mut columns) = plan_columns(shell, targets, &signals, events) else {
         return Ok(None);
     };
-    let event_columns: std::collections::HashSet<String> = match events {
-        Some(_) => shell
-            .digital_traces
-            .iter()
-            .map(|trace| format!("D({})", trace.node_name))
-            .collect(),
-        None => std::collections::HashSet::new(),
-    };
-    let real_columns: std::collections::HashSet<String> = match events {
-        Some(_) => shell
-            .real_traces
-            .iter()
-            .map(|trace| format!("E({})", trace.node_name))
-            .collect(),
-        None => std::collections::HashSet::new(),
-    };
-    let mut real_checked = false;
-    let mut slots = Vec::with_capacity(signals.len());
-    for (signal, slot) in signals.iter_mut().zip(signal_slots) {
-        let Some(slot) = slot else {
-            if event_columns.contains(&signal.display_name) {
-                signal.values = Vec::new();
-                continue;
-            }
-            if let Some(events) = events
-                && real_columns.contains(&signal.display_name)
-            {
-                if !real_checked {
-                    if !real_events_finite(events, shell.real_traces.len()) {
-                        return Ok(None);
-                    }
-                    real_checked = true;
-                }
-                signal.values = Vec::new();
-                continue;
-            }
-            return Ok(None);
-        };
+    for signal in &mut signals {
         signal.values = Vec::new();
-        slots.push(slot);
     }
-    if events.is_some() {
-        slots.clear();
+    if event_dump {
+        columns.clear();
     }
     Ok(Some(StreamPlan {
         signals,
-        slots,
+        columns,
         measurements: None,
     }))
+}
+
+/// Where each of `signals`, projected from the rows `shell` holds, reads its values over the
+/// whole run: the store column the projection names it after, holding its values bit for bit
+/// on those rows, or, given the run's `events`, the event trace its `D(node)` or `E(node)`
+/// column is sampled from, as [`EventCursor`] samples it. `None` when a signal is neither.
+///
+/// A digital level is always finite, and a real event value is wherever every one of them is,
+/// which this checks, as the in-memory route checks every column; `None` when one is not.
+pub(crate) fn plan_columns(
+    shell: &TransientResult,
+    targets: &[SlotTarget],
+    signals: &[ScalarSignal],
+    events: Option<&dyn EventSource>,
+) -> Option<Vec<Column>> {
+    let slots = signal_slots(shell, targets, signals)?;
+    let mut real_checked = false;
+    let mut columns = Vec::with_capacity(signals.len());
+    for (signal, slot) in signals.iter().zip(slots) {
+        if let Some(slot) = slot {
+            columns.push(Column::Slot(slot));
+            continue;
+        }
+        let unplanned = |why: &str| {
+            log::debug!("{} is read back whole: {why}", signal.display_name);
+            None
+        };
+        let Some(events) = events else {
+            return unplanned("it is no store column");
+        };
+        let Some(column) = event_column(shell, &signal.display_name) else {
+            return unplanned("it is neither a store column nor an event trace's");
+        };
+        if matches!(column, Column::Real(_)) && !real_checked {
+            if !real_events_finite(events, shell.real_traces.len()) {
+                return unplanned("a real event value is not finite");
+            }
+            real_checked = true;
+        }
+        columns.push(column);
+    }
+    Some(columns)
+}
+
+/// The event trace a signal of `shell`'s projection is sampled from, by the name the
+/// projection gives its column: `D(node)` for a digital trace, `E(node)` for a real one. `None`
+/// for any other name, or one two traces give.
+fn event_column(shell: &TransientResult, name: &str) -> Option<Column> {
+    fn node<'n>(name: &'n str, prefix: &str) -> Option<&'n str> {
+        name.strip_prefix(prefix)?.strip_suffix(')')
+    }
+    fn only(mut found: impl Iterator<Item = usize>) -> Option<usize> {
+        let index = found.next()?;
+        found.next().is_none().then_some(index)
+    }
+    if let Some(node) = node(name, "D(") {
+        return only(
+            shell
+                .digital_traces
+                .iter()
+                .enumerate()
+                .filter(|(_, trace)| trace.node_name == node)
+                .map(|(index, _)| index),
+        )
+        .map(Column::Digital);
+    }
+    let node = node(name, "E(")?;
+    only(
+        shell
+            .real_traces
+            .iter()
+            .enumerate()
+            .filter(|(_, trace)| trace.node_name == node)
+            .map(|(index, _)| index),
+    )
+    .map(Column::Real)
+}
+
+/// The projection's allowance for an event that lands on a row's time but for its last bit.
+const EVENT_TIME_EPSILON: f64 = 1.0e-18;
+
+/// A digital level as its `D(node)` column reads it.
+fn digital_level(value: DigitalValue) -> f64 {
+    match value.to_bool() {
+        Some(false) => 0.0,
+        Some(true) => 1.0,
+        None => 0.5,
+    }
+}
+
+/// One event trace sampled onto rows of ascending time, as the result's projection samples it:
+/// a row reads the last change at or before its time, within the projection's last-bit
+/// allowance; a digital level reads 0, 1 or 0.5 (its unknown level before the first change),
+/// and a real value itself (0.0 before the first change).
+struct EventCursor<'e> {
+    points: EventCursorPoints<'e>,
+    value: f64,
+    /// The time of the last row sampled.
+    time: f64,
+}
+
+enum EventCursorPoints<'e> {
+    Digital(std::iter::Peekable<EventPoints<'e, DigitalValue>>),
+    Real(std::iter::Peekable<EventPoints<'e, f64>>),
+}
+
+impl<'e> EventCursor<'e> {
+    /// A cursor at the start of `column`'s trace in `events`; `None` for a store slot.
+    fn open(events: &'e dyn EventSource, column: Column) -> Option<Self> {
+        let (points, value) = match column {
+            Column::Digital(index) => (
+                EventCursorPoints::Digital(events.digital(index).peekable()),
+                digital_level(DigitalValue::default()),
+            ),
+            Column::Real(index) => (EventCursorPoints::Real(events.real(index).peekable()), 0.0),
+            Column::Slot(_) => return None,
+        };
+        Some(Self {
+            points,
+            value,
+            time: f64::NEG_INFINITY,
+        })
+    }
+
+    /// The value at a row at `time`, no earlier than the last row sampled.
+    fn at(&mut self, time: f64) -> Result<f64, EventProjectionError> {
+        self.time = time;
+        let limit = time + EVENT_TIME_EPSILON;
+        match &mut self.points {
+            EventCursorPoints::Digital(points) => {
+                while let Some(point) = points.next_if(|point| due(point, limit)) {
+                    self.value = digital_level(point?.1);
+                }
+            }
+            EventCursorPoints::Real(points) => {
+                while let Some(point) = points.next_if(|point| due(point, limit)) {
+                    self.value = point?.1;
+                }
+            }
+        }
+        Ok(self.value)
+    }
+}
+
+/// Whether a row whose time `limit` allows reads `point`: a change no later, or a failure.
+fn due<T>(point: &Result<(f64, T), EventProjectionError>, limit: f64) -> bool {
+    match point {
+        Ok((change, _)) => *change <= limit,
+        Err(_) => true,
+    }
 }
 
 /// Each of `signals`' value slot in the store: the store column `shell`'s projection names it
 /// after, holding the signal's own values, bit for bit, on the rows `shell` holds; `None` for a
 /// signal that is no store column. `None` overall when `shell` has no projection.
-pub(crate) fn signal_slots(
+fn signal_slots(
     shell: &TransientResult,
     targets: &[SlotTarget],
     signals: &[ScalarSignal],
@@ -1292,7 +1434,7 @@ pub(crate) fn signal_slots(
 }
 
 /// Whether every value of the `traces` real event traces in `events` reads as finite.
-fn real_events_finite(events: &RunEvents<'_>, traces: usize) -> bool {
+fn real_events_finite(events: &dyn EventSource, traces: usize) -> bool {
     (0..traces).all(|trace| {
         events
             .real(trace)
@@ -1535,9 +1677,21 @@ impl StoredRows {
         Ok((time, step_sizes, rows))
     }
 
-    /// A reader of rows `first ..` for `plan`'s signals, chunk by chunk.
-    pub(super) fn cursor<'r>(&'r mut self, plan: &'r StreamPlan, first: u64) -> RowCursor<'r> {
-        RowCursor::over(&self.store.dir, &mut self.reader, &plan.slots, first)
+    /// A reader of rows `first ..` for `plan`'s signals, chunk by chunk, with the run's event
+    /// histories in `events` when the plan reads an event column.
+    pub(super) fn cursor<'r>(
+        &'r mut self,
+        plan: &'r StreamPlan,
+        first: u64,
+        events: Option<&'r dyn EventSource>,
+    ) -> RowCursor<'r> {
+        RowCursor::over(
+            &self.store.dir,
+            &mut self.reader,
+            &plan.columns,
+            events,
+            first,
+        )
     }
 
     /// Leave the store beside `output` as `<stem>.rsr/`, replacing an earlier run's store there,
@@ -1560,19 +1714,25 @@ impl StoredRows {
     }
 }
 
-/// Reads the values of an output's rows from the store a chunk at a time, decoding each column of
-/// a chunk once, when it is first asked for. An error or a non-finite value is recorded rather
-/// than returned, since a table writer asks for numbers, and checked once the table is written.
+/// Reads the values of an output's rows a chunk at a time: a store column from the store, each
+/// column of a chunk decoded once, when it is first asked for, and an event trace's column
+/// sampled onto the rows' times as they are read. An error or a non-finite value is recorded
+/// rather than returned, since a table writer asks for numbers, and checked once the table is
+/// written.
 pub(crate) struct RowCursor<'r> {
     dir: &'r Path,
     reader: &'r mut SegmentReader<FileIo>,
-    slots: &'r [usize],
+    columns: &'r [Column],
+    events: Option<&'r dyn EventSource>,
     spans: Vec<(u64, usize)>,
     first: u64,
     chunk: Option<usize>,
     x: Option<Vec<f64>>,
-    columns: Vec<Option<Vec<f64>>>,
+    values: Vec<Option<Vec<f64>>>,
+    /// Each event column's place in its trace, where it has one.
+    cursors: Vec<Option<EventCursor<'r>>>,
     error: Option<StoreError>,
+    event_error: Option<EventProjectionError>,
     non_finite: bool,
 }
 
@@ -1586,24 +1746,28 @@ pub(super) enum ColumnStop {
 
 impl<'r> RowCursor<'r> {
     /// A cursor over rows `first..` of the store in `dir` that `reader` reads, whose output
-    /// signal `n` (variable `n + 1`) is value slot `slots[n]`.
+    /// signal `n` (variable `n + 1`) is `columns[n]`, an event trace's read from `events`.
     pub(crate) fn over(
         dir: &'r Path,
         reader: &'r mut SegmentReader<FileIo>,
-        slots: &'r [usize],
+        columns: &'r [Column],
+        events: Option<&'r dyn EventSource>,
         first: u64,
     ) -> Self {
         let spans = reader.chunk_spans().collect();
         Self {
             dir,
             reader,
-            slots,
+            columns,
+            events,
             spans,
             first,
             chunk: None,
             x: None,
-            columns: vec![None; slots.len()],
+            values: vec![None; columns.len()],
+            cursors: columns.iter().map(|_| None).collect(),
             error: None,
+            event_error: None,
             non_finite: false,
         }
     }
@@ -1623,37 +1787,62 @@ impl<'r> RowCursor<'r> {
             _ => self.load(row),
         };
         let offset = (row - self.spans[chunk].0) as usize;
-        let value = if variable == 0 {
-            if self.x.is_none() {
-                let mut x = Vec::new();
-                if let Err(error) = self.reader.read_chunk_x(chunk, &mut x) {
-                    self.error.get_or_insert(error);
+        let value = match variable.checked_sub(1) {
+            None => self.time(chunk, offset),
+            Some(column) => match self.columns.get(column).copied() {
+                Some(Column::Slot(slot)) => {
+                    if self.values[column].is_none() {
+                        let mut values = Vec::new();
+                        if let Err(error) = self.reader.read_chunk_slot(chunk, slot, &mut values) {
+                            self.error.get_or_insert(error);
+                        }
+                        self.values[column] = Some(values);
+                    }
+                    self.values[column]
+                        .as_ref()
+                        .and_then(|values| values.get(offset))
+                        .copied()
                 }
-                self.x = Some(x);
-            }
-            self.x.as_ref().and_then(|x| x.get(offset)).copied()
-        } else {
-            let column = variable - 1;
-            if self.columns[column].is_none() {
-                let mut values = Vec::new();
-                if let Err(error) =
-                    self.reader
-                        .read_chunk_slot(chunk, self.slots[column], &mut values)
-                {
-                    self.error.get_or_insert(error);
-                }
-                self.columns[column] = Some(values);
-            }
-            self.columns[column]
-                .as_ref()
-                .and_then(|values| values.get(offset))
-                .copied()
+                Some(event) => self
+                    .time(chunk, offset)
+                    .and_then(|time| self.event_value(column, event, time)),
+                None => None,
+            },
         };
         let value = value.unwrap_or(f64::NAN);
         if !value.is_finite() {
             self.non_finite = true;
         }
         value
+    }
+
+    /// The time of row `offset` of chunk `chunk`, the chunk the cursor holds.
+    fn time(&mut self, chunk: usize, offset: usize) -> Option<f64> {
+        if self.x.is_none() {
+            let mut x = Vec::new();
+            if let Err(error) = self.reader.read_chunk_x(chunk, &mut x) {
+                self.error.get_or_insert(error);
+            }
+            self.x = Some(x);
+        }
+        self.x.as_ref().and_then(|x| x.get(offset)).copied()
+    }
+
+    /// Event column `column`, `event`'s trace, at a row at `time`: read on from the last row
+    /// it read, or from the trace's start when this row is earlier.
+    fn event_value(&mut self, column: usize, event: Column, time: f64) -> Option<f64> {
+        let events = self.events?;
+        let cursor = self.cursors.get_mut(column)?;
+        if cursor.as_ref().is_none_or(|cursor| time < cursor.time) {
+            *cursor = EventCursor::open(events, event);
+        }
+        match cursor.as_mut()?.at(time) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.event_error.get_or_insert(error);
+                None
+            }
+        }
     }
 
     /// Write variable `variable` (as [`Self::value`] numbers it) of output rows `0..rows` to
@@ -1669,8 +1858,8 @@ impl<'r> RowCursor<'r> {
         for row in 0..rows {
             let value = self.value(row, variable);
             if !value.is_finite() {
-                return Err(match self.error.take() {
-                    Some(error) => ColumnStop::Failed(store_error(self.dir, error)),
+                return Err(match self.failure(path) {
+                    Some(error) => ColumnStop::Failed(error),
                     None => ColumnStop::NonFinite(row),
                 });
             }
@@ -1691,14 +1880,27 @@ impl<'r> RowCursor<'r> {
             .min(self.spans.len().saturating_sub(1));
         self.chunk = Some(chunk);
         self.x = None;
-        self.columns.iter_mut().for_each(|column| *column = None);
+        self.values.iter_mut().for_each(|column| *column = None);
         chunk
     }
 
+    /// The read that failed, if one did: of the store, or of an event history, which names the
+    /// output it was being written to.
+    fn failure(&mut self, path: &Path) -> Option<CliError> {
+        if let Some(error) = self.error.take() {
+            return Some(store_error(self.dir, error));
+        }
+        self.event_error
+            .take()
+            .map(|error| CliError::ConversionError {
+                message: format!("{}: {error}", path.display()),
+            })
+    }
+
     /// Fail when a read failed or a value was not finite, as a table that held them would.
-    pub(crate) fn finish(self, path: &Path) -> Result<(), CliError> {
-        if let Some(error) = self.error {
-            return Err(store_error(self.dir, error));
+    pub(crate) fn finish(mut self, path: &Path) -> Result<(), CliError> {
+        if let Some(error) = self.failure(path) {
+            return Err(error);
         }
         if self.non_finite {
             return Err(crate::commands::export_table::invalid_samples(path));

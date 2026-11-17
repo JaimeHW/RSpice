@@ -1657,7 +1657,17 @@ fn finish_transient_products(
                                           can address"
                                     .to_owned(),
                             })?;
-                        let mut cursor = stored.rows.cursor(plan, first);
+                        let column_events = plan
+                            .reads_events()
+                            .then(|| stored.rows.events(result))
+                            .transpose()?;
+                        let mut cursor = stored.rows.cursor(
+                            plan,
+                            first,
+                            column_events
+                                .as_ref()
+                                .map(|events| events as &dyn rspice_core::execution::EventSource),
+                        );
                         table.write_streamed_to(
                             writer,
                             &output_path,
@@ -1685,7 +1695,17 @@ fn finish_transient_products(
                         let names = std::iter::once("time")
                             .chain(signals.iter().map(|signal| signal.display_name.as_str()))
                             .collect::<Vec<_>>();
-                        let mut cursor = stored.rows.cursor(plan, first);
+                        let column_events = plan
+                            .reads_events()
+                            .then(|| stored.rows.events(result))
+                            .transpose()?;
+                        let mut cursor = stored.rows.cursor(
+                            plan,
+                            first,
+                            column_events
+                                .as_ref()
+                                .map(|events| events as &dyn rspice_core::execution::EventSource),
+                        );
                         crate::hdf5::write_streamed_transient_to_writer(
                             writer,
                             data,

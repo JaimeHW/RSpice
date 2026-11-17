@@ -9,11 +9,13 @@
 use std::path::{Path, PathBuf};
 
 use rspice_core::analysis::transient::TransientResult;
+use rspice_core::execution::HeldEvents;
 use rspice_results::stored_transient::{StoreEvents, StoredTransientRun, fill_rows};
 use rspice_results_store::{FileIo, SegmentReader, StoreDir, StoreError};
 
 use crate::cli::{CliError, ConvertArgs, InputFormat, NumericBound, OutputFormat};
 use crate::commands::export_table::{ExportTable, scalar_table};
+use crate::commands::run::{Column, RowCursor, plan_columns};
 use crate::commands::run_signals::ScalarSignal;
 use crate::commands::waveform_io::{MIN_RESULT_SAMPLES, conversion_error};
 
@@ -86,9 +88,9 @@ pub(crate) fn load_table(
 
 /// Convert a store as [`load_table`]'s table converts, reading it a chunk at a time, to a
 /// rawfile or a delimited table. `Ok(false)` when it cannot, and the whole table converts
-/// instead: another target, a column that is not one of the store's (an event trace sampled on
-/// the rows), a selection the table refuses, a time or a value the table refuses as not finite,
-/// fewer rows than a table holds, or a range that keeps more than one run of rows.
+/// instead: another target, a column that is neither one of the store's nor sampled from an
+/// event trace, a selection the table refuses, a time or a value the table refuses as not
+/// finite, fewer rows than a table holds, or a range that keeps more than one run of rows.
 pub(crate) fn convert_streamed(
     args: &ConvertArgs,
     limits: rspice_core::ResourceLimits,
@@ -121,9 +123,12 @@ pub(crate) fn convert_streamed(
     let Ok(mut signals) = signals(path, &shell, limits) else {
         return Ok(false);
     };
-    let Some(slots) = crate::commands::run::signal_slots(&shell, &targets, &signals)
-        .and_then(|slots| slots.into_iter().collect::<Option<Vec<usize>>>())
-    else {
+    // A mixed run's `D(node)` and `E(node)` columns are sampled from its event histories.
+    let events = HeldEvents {
+        digital: &shell.digital_traces,
+        real: &shell.real_traces,
+    };
+    let Some(columns) = plan_columns(&shell, &targets, &signals, Some(&events)) else {
         return Ok(false);
     };
     for signal in &mut signals {
@@ -142,16 +147,23 @@ pub(crate) fn convert_streamed(
         .stop
         .as_ref()
         .map_or(f64::INFINITY, NumericBound::value);
+    let slots = columns
+        .iter()
+        .filter_map(|column| match column {
+            Column::Slot(slot) => Some(*slot),
+            Column::Digital(_) | Column::Real(_) => None,
+        })
+        .collect::<Vec<_>>();
     let Some((first, points)) = kept_rows(path, &mut reader, &slots, lo, hi)? else {
         return Ok(false);
     };
-    let slots: Vec<usize> = match &keep {
-        Some(keep) => slots
+    let columns: Vec<Column> = match &keep {
+        Some(keep) => columns
             .iter()
             .zip(keep)
-            .filter_map(|(&slot, &kept)| kept.then_some(slot))
+            .filter_map(|(&column, &kept)| kept.then_some(column))
             .collect(),
-        None => slots,
+        None => columns,
     };
     if let Some(keep) = keep {
         let mut keep = keep.into_iter();
@@ -166,7 +178,7 @@ pub(crate) fn convert_streamed(
     let output = args.output.as_path();
     let dir = path.to_path_buf();
     crate::commands::publish::artifact(output, |writer| {
-        let mut cursor = crate::commands::run::RowCursor::over(&dir, &mut reader, &slots, first);
+        let mut cursor = RowCursor::over(&dir, &mut reader, &columns, Some(&events), first);
         table.write_streamed_to(writer, output, args.to, points, |row, variable| {
             cursor.value(row, variable)
         })?;
