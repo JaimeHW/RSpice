@@ -256,57 +256,101 @@ pub struct ValidatedSchematicRevision {
     snapshot: ValidatedRevisionSnapshot,
 }
 
-/// Bounded semantic change counts between two validated schematic revisions.
+/// The part of a drawing a change belongs to, in the order the schematic
+/// lists its contents.
 ///
-/// Stable object identities distinguish additions/removals from edits. The
-/// comparison deliberately reports schematic-owned domains only; it never
-/// implies that project plans, models, requirements, or result manifests are
-/// part of a schematic snapshot.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ValidatedRevisionObjectDelta {
-    pub added: usize,
-    pub removed: usize,
-    pub modified: usize,
+/// The comparison reports schematic-owned domains only; it never implies
+/// that project plans, models, requirements, or result manifests are part of
+/// a schematic snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ValidatedRevisionDomain {
+    Components,
+    Wires,
+    Buses,
+    BusTaps,
+    Junctions,
+    NetLabels,
+    DesignNotes,
+    DocumentationShapes,
+    Connections,
+    DocumentSettings,
 }
 
-impl ValidatedRevisionObjectDelta {
+impl ValidatedRevisionDomain {
     #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.added == 0 && self.removed == 0 && self.modified == 0
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Components => "Components",
+            Self::Wires => "Wires",
+            Self::Buses => "Buses",
+            Self::BusTaps => "Bus taps",
+            Self::Junctions => "Junctions",
+            Self::NetLabels => "Net labels",
+            Self::DesignNotes => "Design notes",
+            Self::DocumentationShapes => "Documentation shapes",
+            Self::Connections => "Connections",
+            Self::DocumentSettings => "Document settings",
+        }
     }
 }
 
+/// What a later drawing did to an object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ValidatedRevisionChangeKind {
+    Added,
+    Changed,
+    Removed,
+}
+
+impl ValidatedRevisionChangeKind {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Added => "Added",
+            Self::Changed => "Changed",
+            Self::Removed => "Removed",
+        }
+    }
+}
+
+/// One object a later drawing adds, changes or removes, named as a reader
+/// finds it on the sheet: a component by its designator and value, a net
+/// label by its name and place, a wire by its ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedRevisionChange {
+    pub domain: ValidatedRevisionDomain,
+    pub kind: ValidatedRevisionChangeKind,
+    pub name: String,
+    /// What changed in a changed object ("value 1k → 2k, moved to (40, 0)");
+    /// empty for one added or removed.
+    pub detail: String,
+}
+
+/// What a later drawing adds, changes and removes relative to a validated
+/// revision, object by object. Stable object identities tell an edit from a
+/// removal and an addition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValidatedRevisionSemanticDelta {
-    pub components: ValidatedRevisionObjectDelta,
-    pub wires: ValidatedRevisionObjectDelta,
-    pub buses: ValidatedRevisionObjectDelta,
-    pub bus_taps: ValidatedRevisionObjectDelta,
-    pub junctions: ValidatedRevisionObjectDelta,
-    pub net_labels: ValidatedRevisionObjectDelta,
-    pub design_notes: ValidatedRevisionObjectDelta,
-    pub documentation_shapes: ValidatedRevisionObjectDelta,
-    pub connections_added: usize,
-    pub connections_removed: usize,
-    pub grid_changed: bool,
-    pub document_policy_changed: bool,
+    pub changes: Vec<ValidatedRevisionChange>,
 }
 
 impl ValidatedRevisionSemanticDelta {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.components.is_empty()
-            && self.wires.is_empty()
-            && self.buses.is_empty()
-            && self.bus_taps.is_empty()
-            && self.junctions.is_empty()
-            && self.net_labels.is_empty()
-            && self.design_notes.is_empty()
-            && self.documentation_shapes.is_empty()
-            && self.connections_added == 0
-            && self.connections_removed == 0
-            && !self.grid_changed
-            && !self.document_policy_changed
+        self.changes.is_empty()
+    }
+
+    /// How many objects of `domain` the later drawing `kind`.
+    #[must_use]
+    pub fn count(
+        &self,
+        domain: ValidatedRevisionDomain,
+        kind: ValidatedRevisionChangeKind,
+    ) -> usize {
+        self.changes
+            .iter()
+            .filter(|change| change.domain == domain && change.kind == kind)
+            .count()
     }
 }
 
@@ -385,27 +429,157 @@ impl ValidatedSchematicRevision {
         &self,
         newer: ValidatedRevisionSource<'_>,
     ) -> ValidatedRevisionSemanticDelta {
+        use ValidatedRevisionDomain as Domain;
         let older = self.snapshot.source();
-        let (connections_added, connections_removed) =
-            unordered_delta(older.connections, newer.connections);
-        ValidatedRevisionSemanticDelta {
-            components: identity_delta(older.components, newer.components, |value| value.id),
-            wires: identity_delta(older.wires, newer.wires, |value| value.id),
-            buses: identity_delta(older.buses, newer.buses, |value| value.id),
-            bus_taps: identity_delta(older.bus_taps, newer.bus_taps, |value| value.id),
-            junctions: identity_delta(older.junctions, newer.junctions, |value| value.id),
-            net_labels: identity_delta(older.net_labels, newer.net_labels, |value| value.id),
-            design_notes: identity_delta(older.design_notes, newer.design_notes, |value| value.id),
-            documentation_shapes: identity_delta(
+        let mut changes = Vec::new();
+        let mut objects = |domain, changed: Vec<(ValidatedRevisionChangeKind, String, String)>| {
+            changes.extend(changed.into_iter().map(|(kind, name, detail)| {
+                ValidatedRevisionChange {
+                    domain,
+                    kind,
+                    name,
+                    detail,
+                }
+            }));
+        };
+        objects(
+            Domain::Components,
+            object_changes(
+                older.components,
+                newer.components,
+                |value| value.id,
+                component_name,
+                component_detail,
+            ),
+        );
+        objects(
+            Domain::Wires,
+            object_changes(
+                older.wires,
+                newer.wires,
+                |value| value.id,
+                |wire| ends(&wire.points),
+                |old, new| path_detail(&old.points, &new.points),
+            ),
+        );
+        objects(
+            Domain::Buses,
+            object_changes(
+                older.buses,
+                newer.buses,
+                |value| value.id,
+                |bus| {
+                    bus.declaration
+                        .as_ref()
+                        .map_or_else(|| ends(&bus.points), ToString::to_string)
+                },
+                |old, new| {
+                    let mut parts = Vec::new();
+                    if old.declaration != new.declaration {
+                        parts.push("declaration".to_owned());
+                    }
+                    if old.points != new.points {
+                        parts.push(path_detail(&old.points, &new.points));
+                    }
+                    joined(parts)
+                },
+            ),
+        );
+        objects(
+            Domain::BusTaps,
+            object_changes(
+                older.bus_taps,
+                newer.bus_taps,
+                |value| value.id,
+                |tap| format!("{} at {}", tap.slice, at(tap.connection_point)),
+                |old, new| {
+                    let mut parts = Vec::new();
+                    if old.slice != new.slice {
+                        parts.push(format!("was {}", old.slice));
+                    }
+                    if old.connection_point != new.connection_point
+                        || old.bus_point != new.bus_point
+                    {
+                        parts.push(format!("moved from {}", at(old.connection_point)));
+                    }
+                    joined(parts)
+                },
+            ),
+        );
+        objects(
+            Domain::Junctions,
+            object_changes(
+                older.junctions,
+                newer.junctions,
+                |value| value.id,
+                |junction| at(junction.pos),
+                |old, _| format!("moved from {}", at(old.pos)),
+            ),
+        );
+        objects(
+            Domain::NetLabels,
+            object_changes(
+                older.net_labels,
+                newer.net_labels,
+                |value| value.id,
+                |label| format!("{} at {}", label.name, at(label.pos)),
+                |old, new| {
+                    let mut parts = Vec::new();
+                    if old.name != new.name {
+                        parts.push(format!("renamed from {}", old.name));
+                    }
+                    if old.pos != new.pos {
+                        parts.push(format!("moved from {}", at(old.pos)));
+                    }
+                    joined(parts)
+                },
+            ),
+        );
+        objects(
+            Domain::DesignNotes,
+            object_changes(
+                older.design_notes,
+                newer.design_notes,
+                |value| value.id,
+                |note| {
+                    let first = note.text.lines().next().unwrap_or_default().trim();
+                    if first.is_empty() {
+                        note.kind.label().to_owned()
+                    } else {
+                        quoted(first)
+                    }
+                },
+                |old, new| {
+                    let mut parts = Vec::new();
+                    if old.text != new.text {
+                        parts.push("text edited".to_owned());
+                    }
+                    if old.pos != new.pos {
+                        parts.push(format!("moved from {}", at(old.pos)));
+                    }
+                    joined(parts)
+                },
+            ),
+        );
+        objects(
+            Domain::DocumentationShapes,
+            object_changes(
                 older.documentation_shapes,
                 newer.documentation_shapes,
                 |value| value.id,
+                |shape| shape.kind().label().to_owned(),
+                |old, new| {
+                    let mut parts = Vec::new();
+                    if old.geometry != new.geometry {
+                        parts.push("redrawn".to_owned());
+                    }
+                    joined(parts)
+                },
             ),
-            connections_added,
-            connections_removed,
-            grid_changed: older.grid_size != newer.grid_size,
-            document_policy_changed: older.document_policy != newer.document_policy,
-        }
+        );
+        objects(Domain::Connections, connection_changes(&older, &newer));
+        objects(Domain::DocumentSettings, settings_changes(&older, &newer));
+        ValidatedRevisionSemanticDelta { changes }
     }
 
     fn computed_revision_digest(&self) -> Result<ContentDigest, ValidatedRevisionError> {
@@ -704,37 +878,231 @@ pub enum ValidatedRevisionError {
     Serialization(String),
 }
 
-fn identity_delta<T, F>(older: &[T], newer: &[T], identity: F) -> ValidatedRevisionObjectDelta
-where
-    T: PartialEq,
-    F: Fn(&T) -> u64,
-{
-    let mut delta = ValidatedRevisionObjectDelta::default();
-    for old in older {
-        match newer.iter().find(|new| identity(new) == identity(old)) {
-            None => delta.removed += 1,
-            Some(new) if new != old => delta.modified += 1,
+/// The objects of one domain a later drawing adds, changes and removes,
+/// matched by their stable identities, each named by `name` and a changed
+/// one's change said by `detail`: removals in the older drawing's order,
+/// then additions and changes in the newer one's.
+fn object_changes<T: PartialEq>(
+    older: &[T],
+    newer: &[T],
+    identity: impl Fn(&T) -> u64,
+    name: impl Fn(&T) -> String,
+    detail: impl Fn(&T, &T) -> String,
+) -> Vec<(ValidatedRevisionChangeKind, String, String)> {
+    use ValidatedRevisionChangeKind as Kind;
+    let mut changes = older
+        .iter()
+        .filter(|old| !newer.iter().any(|new| identity(new) == identity(old)))
+        .map(|old| (Kind::Removed, name(old), String::new()))
+        .collect::<Vec<_>>();
+    for new in newer {
+        match older.iter().find(|old| identity(old) == identity(new)) {
+            None => changes.push((Kind::Added, name(new), String::new())),
+            Some(old) if old != new => changes.push((Kind::Changed, name(new), detail(old, new))),
             Some(_) => {}
         }
     }
-    for new in newer {
-        if !older.iter().any(|old| identity(old) == identity(new)) {
-            delta.added += 1;
-        }
-    }
-    delta
+    changes
 }
 
-fn unordered_delta<T: PartialEq>(older: &[T], newer: &[T]) -> (usize, usize) {
-    let added = newer
+/// A component as the sheet labels it: its designator, or its kind while it
+/// has none, and its value.
+fn component_name(component: &Component) -> String {
+    let named = component_designator(component);
+    match component.value.trim() {
+        "" => named,
+        value => format!("{named} ({value})"),
+    }
+}
+
+fn component_detail(old: &Component, new: &Component) -> String {
+    let mut parts = Vec::new();
+    if old.kind != new.kind {
+        parts.push(format!("was a {}", old.kind.display_name()));
+    }
+    if old.name != new.name {
+        parts.push(format!("renamed from {}", component_designator(old)));
+    }
+    if old.value != new.value {
+        let shown = |value: &str| match value.trim() {
+            "" => "none".to_owned(),
+            value => value.to_owned(),
+        };
+        parts.push(format!(
+            "value {} \u{2192} {}",
+            shown(&old.value),
+            shown(&new.value)
+        ));
+    }
+    if old.params != new.params {
+        parts.push("parameters edited".to_owned());
+    }
+    if old.pos != new.pos {
+        parts.push(format!("moved from {}", at(old.pos)));
+    }
+    if old.rotation != new.rotation {
+        parts.push("rotated".to_owned());
+    }
+    joined(parts)
+}
+
+/// The connections between wires and component terminals a later drawing
+/// makes and breaks, each named by the terminal and where the wire meets it.
+fn connection_changes(
+    older: &ValidatedRevisionSource<'_>,
+    newer: &ValidatedRevisionSource<'_>,
+) -> Vec<(ValidatedRevisionChangeKind, String, String)> {
+    let named = |source: &ValidatedRevisionSource<'_>, connection: &WireConnection| {
+        let component = source
+            .components
+            .iter()
+            .find(|component| component.id == connection.component_id)
+            .map_or_else(|| "A component".to_owned(), component_designator);
+        let point = source
+            .wires
+            .iter()
+            .find(|wire| wire.id == connection.wire_id)
+            .and_then(|wire| wire.points.get(connection.point_index));
+        match point {
+            Some(point) => format!(
+                "{component} terminal {} at {}",
+                connection.terminal_name,
+                at(*point)
+            ),
+            None => format!("{component} terminal {}", connection.terminal_name),
+        }
+    };
+    let broken = older
+        .connections
         .iter()
-        .filter(|candidate| !older.contains(candidate))
-        .count();
-    let removed = older
+        .filter(|connection| !newer.connections.contains(connection))
+        .map(|connection| {
+            (
+                ValidatedRevisionChangeKind::Removed,
+                named(older, connection),
+                String::new(),
+            )
+        });
+    let made = newer
+        .connections
         .iter()
-        .filter(|candidate| !newer.contains(candidate))
-        .count();
-    (added, removed)
+        .filter(|connection| !older.connections.contains(connection))
+        .map(|connection| {
+            (
+                ValidatedRevisionChangeKind::Added,
+                named(newer, connection),
+                String::new(),
+            )
+        });
+    broken.chain(made).collect()
+}
+
+/// A component's designator, or its kind while it has none.
+fn component_designator(component: &Component) -> String {
+    match component.name.trim() {
+        "" => component.kind.display_name().to_owned(),
+        designator => designator.to_owned(),
+    }
+}
+
+/// The document's grid and each of its policies a later drawing changes.
+fn settings_changes(
+    older: &ValidatedRevisionSource<'_>,
+    newer: &ValidatedRevisionSource<'_>,
+) -> Vec<(ValidatedRevisionChangeKind, String, String)> {
+    let mut changes = Vec::new();
+    if older.grid_size != newer.grid_size {
+        changes.push((
+            ValidatedRevisionChangeKind::Changed,
+            "Grid size".to_owned(),
+            format!("{} \u{2192} {}", older.grid_size, newer.grid_size),
+        ));
+    }
+    let (old, new) = (&older.document_policy, &newer.document_policy);
+    for (setting, changed) in [
+        ("Grid pitch", old.grid_pitch != new.grid_pitch),
+        ("Wire junctions", old.wire_junctions != new.wire_junctions),
+        (
+            "Selection crossing",
+            old.selection_crossing != new.selection_crossing,
+        ),
+        ("Net naming", old.net_naming != new.net_naming),
+        (
+            "Property commit",
+            old.property_commit != new.property_commit,
+        ),
+        (
+            "Operating point annotations",
+            old.operating_point_annotations != new.operating_point_annotations,
+        ),
+        (
+            "Page size",
+            old.page_size != new.page_size || old.custom_page_size != new.custom_page_size,
+        ),
+        (
+            "Page orientation",
+            old.page_orientation != new.page_orientation,
+        ),
+    ] {
+        if changed {
+            changes.push((
+                ValidatedRevisionChangeKind::Changed,
+                setting.to_owned(),
+                String::new(),
+            ));
+        }
+    }
+    changes
+}
+
+/// A grid point as the sheet's coordinates write it.
+fn at(point: rspice_design_model::Point) -> String {
+    format!("({}, {})", point.x, point.y)
+}
+
+/// A wire's or a bus's run, by its ends.
+fn ends(points: &[rspice_design_model::Point]) -> String {
+    match (points.first(), points.last()) {
+        (Some(first), Some(last)) => format!("{} to {}", at(*first), at(*last)),
+        _ => "No points".to_owned(),
+    }
+}
+
+/// How a run changed: its ends moved, or it took another way between them.
+fn path_detail(old: &[rspice_design_model::Point], new: &[rspice_design_model::Point]) -> String {
+    if old.first() == new.first() && old.last() == new.last() {
+        if old == new {
+            joined(Vec::new())
+        } else {
+            "rerouted".to_owned()
+        }
+    } else {
+        format!("was {}", ends(old))
+    }
+}
+
+/// The first line of a note in quotation marks, cut at a word when long.
+fn quoted(text: &str) -> String {
+    const LONGEST: usize = 48;
+    if text.chars().count() <= LONGEST {
+        return format!("\u{201c}{text}\u{201d}");
+    }
+    let cut = text.chars().take(LONGEST).collect::<String>();
+    let cut = cut
+        .rsplit_once(' ')
+        .map_or(cut.as_str(), |(head, _)| head)
+        .trim_end();
+    format!("\u{201c}{cut}\u{2026}\u{201d}")
+}
+
+/// A changed object's changes in a list; what changed in an object none of
+/// the named properties of which did.
+fn joined(parts: Vec<String>) -> String {
+    if parts.is_empty() {
+        "other properties".to_owned()
+    } else {
+        parts.join(", ")
+    }
 }
 
 fn validate_project_id(project_id: &str) -> Result<(), ValidatedRevisionError> {

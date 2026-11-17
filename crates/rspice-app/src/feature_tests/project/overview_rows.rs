@@ -241,10 +241,11 @@ fn each_activity_row_opens_what_it_names() {
     click_announced(&ctx, &mut app, settled, &row);
     let history = &app.state.project.project_revision_history;
     assert!(history.open);
-    let selected = history.selected();
-    assert_eq!(selected.len(), 1, "{selected:?}");
+    let selected = history
+        .selected()
+        .expect("the history stands on the revision");
     assert!(
-        selected[0].ends_with(&revisions[0].as_uuid().to_string()),
+        selected.ends_with(&revisions[0].as_uuid().to_string()),
         "{selected:?}"
     );
 

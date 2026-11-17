@@ -4,28 +4,34 @@
 //! plans, model/PDK bindings, and governed design-management receipts expose
 //! their retained identities and metadata without inventing missing actors,
 //! timestamps, or restoration authority.
+//!
+//! The dialog lists every record above a divider the reader drags, and the
+//! selected record below it: what changed since a revision, named object by
+//! object, or what a record keeps, with Restore and the choice of what to
+//! compare it with. On a phone the list takes the whole body and a tapped
+//! record opens on a page of its own.
 
 use std::sync::Arc;
 
-use egui::{Color32, Context, Frame, RichText, Stroke, TextEdit, Ui};
+use egui::{Color32, Context, Frame, Id, Margin, Painter, RichText, TextEdit, Ui};
 
 use crate::product::ContentDigest;
 use crate::state::model_library::ModelSourceAuthority;
 use crate::state::{
-    CellViewRef, ValidatedRevisionJournal, ValidatedRevisionObjectDelta,
-    ValidatedRevisionSemanticDelta, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
-    ViewType,
+    CellViewRef, ValidatedRevisionChange, ValidatedRevisionJournal, ValidatedRevisionSemanticDelta,
+    ValidatedSchematicRevision, ValidatedSchematicRevisionId, ViewType,
 };
+use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::table::{
-    CELL_PAD, Cell, Column, DataTable, LineHeights, RowKey, SortKey, TABLE_EDGE_INSET,
+    CELL_PAD, Cell, Column, DataTable, Group, LineHeights, RowKey, SortKey, TABLE_EDGE_INSET,
+    TableResponse, TableState,
 };
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
-    text_field,
+    Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
+    DialogTransactionTone, band_header, select, text_field,
 };
-use crate::workbench::design_system::section_header;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::project_revision_history::{
@@ -34,14 +40,20 @@ use crate::workbench::app::dialogs::project_revision_history::{
     ProjectRevisionHistoryDialogState, ShownRows,
 };
 use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::docks::{apply_splitter_step, hold_panel_height, surface_splitter};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::state::workbench_session::WidthClass;
 
 const TITLE: &str = "Project revision and audit history";
-/// A fact the record's owner does not keep: left blank, as an empty cell,
-/// rather than stated in every row of a column that has nothing to say.
-const NOT_RETAINED: &str = "";
+/// What a cell says, on hover over its absent mark, when the record's owner
+/// keeps no such fact.
+const NOT_RECORDED: &str = "Not recorded";
+/// Between the parts of a list in one cell.
+const SEPARATOR: &str = " \u{b7} ";
+/// The split between the record list and the selected record.
+const SPLIT_ID: &str = "workbench.project.revision_history.split";
 
 impl ProjectAuditRow {
     fn matches_query(&self, query: &str) -> bool {
@@ -60,11 +72,12 @@ impl ProjectAuditRow {
     }
 }
 
-/// The retained metadata two records of one family differ in.
+/// The retained facts two records of one kind differ in.
 impl ProjectAuditComparison {
     fn between(first: &ProjectAuditRow, second: &ProjectAuditRow) -> Self {
         let mut fields = Vec::new();
         comparison_field(&mut fields, "Revision", &first.revision, &second.revision);
+        comparison_field(&mut fields, "Time", &first.time, &second.time);
         comparison_field(&mut fields, "Actor", &first.actor, &second.actor);
         comparison_field(&mut fields, "Change", &first.change, &second.change);
         comparison_field(
@@ -74,21 +87,8 @@ impl ProjectAuditComparison {
             &second.affected_evidence,
         );
         comparison_field(&mut fields, "Status", &first.status, &second.status);
-        Self {
-            label: format!("{} \u{2192} {}", first.revision, second.revision),
-            fields,
-        }
+        Self { fields }
     }
-}
-
-/// What the body asked for this frame, carried out once it has drawn.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum HistoryAction {
-    #[default]
-    None,
-    Compare,
-    CompareWithCurrent,
-    Restore,
 }
 
 pub(crate) fn open_project_revision_history(
@@ -160,8 +160,8 @@ pub(crate) fn open_project_revision_history_on(
 }
 
 impl ProjectFeature {
-    /// Draw Project revision history while it is open, and carry out what
-    /// its body asked for: a comparison or a restore.
+    /// Draw Project revision history while it is open, and carry out the
+    /// restore its body asked for.
     pub(in crate::workbench) fn render_project_revision_history_dialog(
         cx: &mut Cx<'_, Self>,
         ctx: &Context,
@@ -175,17 +175,18 @@ impl ProjectFeature {
         // A project open read-only restores nothing. A read-only view
         // refuses only its own revisions, which the selection's note says.
         let project_read_only = cx.model.safe_mode.project_read_only();
-        let mut body_scroll_offset = cx.state.project_revision_history.body_scroll_offset;
+        // The list takes whatever height the surface has and scrolls inside
+        // it; nothing else in the body scrolls.
         let mut dialog = Dialog::new(TITLE, "Close")
             .description(
-                "Inspect saved project revisions, what changed, and the audit history of schematics, simulations, models, and other records.",
+                "Inspect saved project revisions, what changed since each, and the audit history of schematics, simulations, models, and other records.",
             )
             .size(DialogSize::SimulationWorkflow)
-            .initial_height(610.0)
-            .overlay_scrollbar()
+            .fill_available_height()
+            .flush_body()
+            .manual_body_scroll()
             .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .body_scroll_offset(&mut body_scroll_offset);
+            .initial_focus(DialogInitialFocus::BodyControl);
         let transaction_error = cx
             .state
             .project_revision_history
@@ -208,20 +209,23 @@ impl ProjectFeature {
         // Why nothing can be restored, which the band over the body says.
         let blocked = stale
             .or_else(|| project_read_only.then(|| "The project is open read-only.".to_owned()));
+        let phone = WidthClass::for_width(ctx.content_rect().width()) == WidthClass::Phone;
 
-        let mut action = HistoryAction::None;
+        let mut restore = false;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = revision_history_body(
+            restore = revision_history_body(
                 ui,
                 &rows,
                 cx.model,
                 blocked.as_deref(),
+                phone,
                 &mut cx.state.project_revision_history,
             );
             None
         });
-        cx.state.project_revision_history.body_scroll_offset = body_scroll_offset;
-        handle_revision_history_action(cx, action, &rows);
+        if restore {
+            restore_selected_revision(cx, &rows);
+        }
         if matches!(
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
@@ -231,81 +235,106 @@ impl ProjectFeature {
     }
 }
 
-fn handle_revision_history_action(
-    cx: &mut Cx<'_, ProjectFeature>,
-    action: HistoryAction,
-    rows: &[ProjectAuditRow],
-) {
-    match action {
-        HistoryAction::None => {}
-        HistoryAction::Compare => {
-            compare_selected_revisions(&mut cx.state.project_revision_history, cx.model, rows);
-        }
-        HistoryAction::CompareWithCurrent => {
-            compare_with_current(&mut cx.state.project_revision_history, cx.model, rows);
-        }
-        HistoryAction::Restore => restore_selected_revision(cx, rows),
-    }
-}
-
-/// The selected rows, in the order the table lists them.
-fn selected_rows<'a>(
+/// The selected row, while the history stands on one it lists.
+fn selected_row<'a>(
     dialog: &ProjectRevisionHistoryDialogState,
     rows: &'a [ProjectAuditRow],
-) -> Vec<&'a ProjectAuditRow> {
-    dialog
-        .selected()
-        .iter()
-        .filter_map(|key| rows.iter().find(|row| row.key == *key))
-        .collect()
+) -> Option<&'a ProjectAuditRow> {
+    let key = dialog.selected()?;
+    rows.iter().find(|row| row.key == key)
 }
 
-fn compare_selected_revisions(
+/// Work the selected record's comparison out again when the selection, the
+/// record it is compared with or the rows it was worked from moved. A
+/// record newly selected is compared with the design as it stands when it
+/// is a schematic revision, and with nothing otherwise.
+fn refresh_comparison(
     dialog: &mut ProjectRevisionHistoryDialogState,
     model: &Model,
     rows: &[ProjectAuditRow],
 ) {
-    let selected = dialog.selected();
-    if selected.len() != 2 {
-        dialog.error = Some("Select exactly two retained records to compare.".to_owned());
-        return;
-    }
-    let Some(first) = rows.iter().find(|row| row.key == selected[0]) else {
-        dialog.error = Some("The first selected record no longer exists.".to_owned());
+    let Some(row) = selected_row(dialog, rows) else {
+        dialog.compare_with = None;
+        dialog.comparison = None;
+        dialog.compared = None;
         return;
     };
-    let Some(second) = rows.iter().find(|row| row.key == selected[1]) else {
-        dialog.error = Some("The second selected record no longer exists.".to_owned());
-        return;
-    };
-    if first.kind != second.kind {
-        dialog.error = Some(
-            "Semantic comparison requires two records from the same project-artifact family."
-                .to_owned(),
-        );
+    let moved_on = dialog
+        .compared
+        .as_ref()
+        .is_some_and(|(compared, _)| *compared != row.key);
+    let gone = dialog
+        .compare_with
+        .as_ref()
+        .is_some_and(|other| !rows.iter().any(|candidate| candidate.key == *other));
+    if moved_on || gone {
+        dialog.compare_with = None;
+    }
+    let wanted = (row.key.clone(), dialog.compare_with.clone());
+    if dialog.compared.as_ref() == Some(&wanted) {
         return;
     }
+    let other = wanted
+        .1
+        .as_ref()
+        .and_then(|other| rows.iter().find(|candidate| candidate.key == *other));
+    dialog.comparison = comparison_of(row, other, model);
+    dialog.changes = TableState::default();
+    dialog.compared = Some(wanted);
+}
 
-    let comparison = match (first.schematic_revision, second.schematic_revision) {
-        (Some(first_id), Some(second_id)) => {
-            let Some(first_record) = find_project_schematic_revision(model, first_id) else {
-                dialog.error =
-                    Some("The first selected schematic revision no longer exists.".to_owned());
-                return;
+/// What `row` is compared with `other`, or with the design as it stands
+/// when `other` is none and `row` is a schematic revision; none for any
+/// other record compared with nothing.
+fn comparison_of(
+    row: &ProjectAuditRow,
+    other: Option<&ProjectAuditRow>,
+    model: &Model,
+) -> Option<ProjectRevisionComparison> {
+    let Some(id) = row.schematic_revision else {
+        return other.map(|other| {
+            ProjectRevisionComparison::RetainedMetadata(ProjectAuditComparison::between(row, other))
+        });
+    };
+    let path = row
+        .view
+        .as_ref()
+        .map(CellViewRef::display_path)
+        .unwrap_or_default();
+    Some(match other {
+        None => match changes_since(row, model) {
+            Ok((record, delta)) => ProjectRevisionComparison::Schematic {
+                title: "Changes to the current design",
+                sides: format!(
+                    "From revision {} to the current design of {path}.",
+                    revision_label(record)
+                ),
+                delta,
+                with_current: true,
+            },
+            Err(error) => ProjectRevisionComparison::Unavailable(error.to_owned()),
+        },
+        Some(other) => {
+            let records = (
+                find_project_schematic_revision(model, id),
+                other
+                    .schematic_revision
+                    .and_then(|other| find_project_schematic_revision(model, other)),
+            );
+            let (Some(first), Some(second)) = records else {
+                return Some(ProjectRevisionComparison::Unavailable(
+                    "The revision compared with no longer exists.".to_owned(),
+                ));
             };
-            let Some(second_record) = find_project_schematic_revision(model, second_id) else {
-                dialog.error =
-                    Some("The second selected schematic revision no longer exists.".to_owned());
-                return;
-            };
-            let (older, newer) = if first_record.sequence() <= second_record.sequence() {
-                (first_record, second_record)
+            let (older, newer) = if first.sequence() <= second.sequence() {
+                (first, second)
             } else {
-                (second_record, first_record)
+                (second, first)
             };
             ProjectRevisionComparison::Schematic {
-                label: format!(
-                    "{} \u{2192} {}",
+                title: "Changes between two revisions",
+                sides: format!(
+                    "From revision {} to revision {}, in {path}.",
                     revision_label(older),
                     revision_label(newer)
                 ),
@@ -313,50 +342,22 @@ fn compare_selected_revisions(
                 with_current: false,
             }
         }
-        (None, None) => ProjectRevisionComparison::RetainedMetadata(
-            ProjectAuditComparison::between(first, second),
-        ),
-        _ => {
-            dialog.error = Some(
-                "The selected records do not expose compatible semantic identities.".to_owned(),
-            );
-            return;
-        }
-    };
-    dialog.comparison = Some(comparison);
-    dialog.error = None;
+    })
 }
 
-/// Compare the one selected schematic revision with its view's drawing as
-/// it stands: the open schematic's, or the one the project keeps for a view
-/// that is not in front.
-fn compare_with_current(
-    dialog: &mut ProjectRevisionHistoryDialogState,
-    model: &Model,
-    rows: &[ProjectAuditRow],
-) {
-    match changes_since(&selected_rows(dialog, rows), model) {
-        Ok((revision, delta)) => {
-            dialog.comparison = Some(ProjectRevisionComparison::Schematic {
-                label: format!("{revision} \u{2192} current design"),
-                delta,
-                with_current: true,
-            });
-            dialog.error = None;
-        }
-        Err(error) => dialog.error = Some(error.to_owned()),
-    }
-}
-
-/// The selected revision, as a comparison's heading names it, and what
-/// changed in its view's drawing since it was recorded.
-fn changes_since(
-    selected: &[&ProjectAuditRow],
-    model: &Model,
-) -> Result<(String, ValidatedRevisionSemanticDelta), &'static str> {
-    let [row] = selected else {
-        return Err("Select one schematic revision to compare with the current design.");
-    };
+/// The revision `row` names, and what changed in its view's drawing since
+/// it was recorded: the open schematic's, or the one the project keeps for
+/// a view that is not in front.
+fn changes_since<'a>(
+    row: &ProjectAuditRow,
+    model: &'a Model,
+) -> Result<
+    (
+        &'a ValidatedSchematicRevision,
+        ValidatedRevisionSemanticDelta,
+    ),
+    &'static str,
+> {
     let (Some(id), Some(view)) = (row.schematic_revision, row.view.as_ref()) else {
         return Err(NOT_A_DRAWING);
     };
@@ -377,15 +378,47 @@ fn changes_since(
             .ok_or("The selected revision's view is no longer in the project.")?
             .semantic_delta_since(record)
     };
-    Ok((revision_label(record), delta))
+    Ok((record, delta))
+}
+
+/// The records `row` may be compared with, after the comparison it starts
+/// with: for a schematic revision the design as it stands and then the
+/// other revisions of its view, for any other record nothing and then the
+/// other records of its kind; each as the choice names it.
+fn compare_choices<'a>(
+    row: &ProjectAuditRow,
+    rows: &'a [ProjectAuditRow],
+) -> (&'static str, Vec<(&'a ProjectAuditRow, String)>) {
+    let others = rows
+        .iter()
+        .filter(|other| {
+            other.key != row.key
+                && other.kind == row.kind
+                && (row.schematic_revision.is_none() || other.view == row.view)
+        })
+        .map(|other| {
+            let named = if other.time.is_empty() {
+                format!("{}{SEPARATOR}{}", other.revision, other.change)
+            } else {
+                format!("{} ({})", other.revision, other.time)
+            };
+            (other, named)
+        })
+        .collect();
+    let first = if row.schematic_revision.is_some() {
+        "Current design"
+    } else {
+        "No comparison"
+    };
+    (first, others)
 }
 
 /// Restore the one selected schematic revision: in place when its view is
 /// in front, and otherwise once the view it opens is.
 fn restore_selected_revision(cx: &mut Cx<'_, ProjectFeature>, rows: &[ProjectAuditRow]) {
-    let target = match selected_rows(&cx.state.project_revision_history, rows)[..] {
-        [row] => restore_target(row, cx.model),
-        _ => Err("Select exactly one validated schematic revision to restore.".to_owned()),
+    let target = match selected_row(&cx.state.project_revision_history, rows) {
+        Some(row) => restore_target(row, cx.model),
+        None => Err("Select a validated schematic revision to restore.".to_owned()),
     };
     let result = match target {
         Ok((revision, None)) => restore_in_place(cx, revision).map(|()| true),
@@ -525,244 +558,247 @@ fn history_authority_error(
         .err()
 }
 
-/// What the selection allows, and why not where it does not: the restore,
-/// with the view it opens first; a comparison with the current design; a
-/// comparison of two records.
-struct Offer {
-    restore: Result<(ValidatedSchematicRevisionId, Option<CellViewRef>), String>,
-    current: Result<(), String>,
-    compare: Result<(), String>,
+fn find_project_schematic_revision(
+    model: &Model,
+    id: ValidatedSchematicRevisionId,
+) -> Option<&ValidatedSchematicRevision> {
+    model
+        .schematic
+        .document()
+        .validated_revisions
+        .records()
+        .iter()
+        .find(|record| record.id() == id)
+        .or_else(|| {
+            model
+                .workspace
+                .content
+                .schematic_buffers
+                .values()
+                .flat_map(|schematic| schematic.document().validated_revisions.records())
+                .find(|record| record.id() == id)
+        })
 }
 
-impl Offer {
-    fn of(selected: &[&ProjectAuditRow], model: &Model, touch: bool) -> Self {
-        let restore = match selected {
-            [] => Err("Select a schematic revision to restore it.".to_owned()),
-            [row] => restore_target(row, model),
-            _ => Err("Restore takes one revision.".to_owned()),
-        };
-        let current = match selected {
-            [] => {
-                Err("Select a schematic revision to compare it with the current design.".to_owned())
-            }
-            [row] if row.schematic_revision.is_some() => Ok(()),
-            [_] => Err(NOT_A_DRAWING.to_owned()),
-            _ => Err("Compare with current takes one revision.".to_owned()),
-        };
-        let compare = match selected {
-            [] => Err("Select two records to compare them.".to_owned()),
-            [_] => Err(second_record_hint(touch).to_owned()),
-            [first, second] if first.kind != second.kind => {
-                Err("Compare takes two records of one kind.".to_owned())
-            }
-            [_, _] => Ok(()),
-            more => Err(format!(
-                "Compare takes two records; {} are selected.",
-                more.len()
-            )),
-        };
-        Self {
-            restore,
-            current,
-            compare,
-        }
-    }
-}
-
-/// How the reader adds a second record to the selection, which a finger
-/// does by the mark before the row and a mouse by Ctrl.
-fn second_record_hint(touch: bool) -> &'static str {
-    if touch {
-        "Tap the mark before a second record to compare the two."
-    } else {
-        "Ctrl+click a second record to compare the two."
-    }
-}
-
-/// The sentence under the actions: how to choose what they act on, why
-/// Restore cannot act on what is chosen, which view it opens first, and,
-/// while it asks for confirmation, what it replaces.
-fn selection_note(
-    selected: &[&ProjectAuditRow],
-    offer: &Offer,
+/// The sentence under Restore: why it cannot act on the selected revision,
+/// which view it opens first, and, while it asks for confirmation, what it
+/// replaces. Nothing while the band over the body says why nothing can be
+/// restored, or while Restore has nothing to add.
+fn restore_note(
+    row: &ProjectAuditRow,
+    restore: &Result<(ValidatedSchematicRevisionId, Option<CellViewRef>), String>,
     confirming: bool,
     blocked: bool,
-    touch: bool,
-) -> String {
-    match selected {
-        [] if touch => "Tap a schematic revision to restore it or to compare it with the current design; tap the marks before two records to compare them.".to_owned(),
-        [] => "Select a schematic revision to restore it or to compare it with the current design; Ctrl+click a second record to compare the two.".to_owned(),
-        [row] => {
-            let when = if row.time.is_empty() {
-                String::new()
-            } else {
-                format!(" of {}", row.time)
-            };
-            let restore = match &offer.restore {
-                // The band over the body says why.
-                _ if blocked => None,
-                Ok((_, Some(view))) if confirming => {
-                    return format!(
-                        "Restore opens {} and replaces its drawing with revision {}{when}. Undo takes it back.",
-                        view.display_path(),
-                        row.revision
-                    );
-                }
-                Ok((_, None)) if confirming => {
-                    return format!(
-                        "Restore replaces the drawing of {} with revision {}{when}. Undo takes it back.",
-                        row.view.as_ref().map(CellViewRef::display_path).unwrap_or_default(),
-                        row.revision
-                    );
-                }
-                Ok((_, Some(view))) => Some(format!("Restore opens {} first.", view.display_path())),
-                Ok((_, None)) => None,
-                Err(reason) => Some(reason.clone()),
-            };
-            restore
-                .into_iter()
-                .chain([second_record_hint(touch).to_owned()])
-                .collect::<Vec<_>>()
-                .join(" ")
-        }
-        _ => ["Restore and Compare with current take one record.".to_owned()]
-            .into_iter()
-            .chain(offer.compare.clone().err())
-            .collect::<Vec<_>>()
-            .join(" "),
+) -> Option<String> {
+    let when = if row.time.is_empty() {
+        String::new()
+    } else {
+        format!(" of {}", row.time)
+    };
+    match restore {
+        _ if blocked => None,
+        Ok((_, Some(view))) if confirming => Some(format!(
+            "Restore opens {} and replaces its drawing with revision {}{when}. Undo takes it back.",
+            view.display_path(),
+            row.revision
+        )),
+        Ok((_, None)) if confirming => Some(format!(
+            "Restore replaces the drawing of {} with revision {}{when}. Undo takes it back.",
+            row.view
+                .as_ref()
+                .map(CellViewRef::display_path)
+                .unwrap_or_default(),
+            row.revision
+        )),
+        Ok((_, Some(view))) => Some(format!("Restore opens {} first.", view.display_path())),
+        Ok((_, None)) => None,
+        Err(reason) => Some(reason.clone()),
     }
 }
 
-/// The height the table may take before its rows scroll.
-const TABLE_MAX_HEIGHT: f32 = 286.0;
 /// The room the table's sort mark takes beside a column's head.
 const SORT_MARK_ROOM: f32 = 11.0;
 
+/// The history's body: the filter and the search pinned at the top, the
+/// records under them, and the selected record below a divider the reader
+/// drags. On a phone the records take the whole body, and a tapped record
+/// opens on a page of its own with Back. Returns whether the reader
+/// confirmed a restore.
 fn revision_history_body(
     ui: &mut Ui,
     rows: &[ProjectAuditRow],
     model: &Model,
     blocked: Option<&str>,
+    phone: bool,
     dialog: &mut ProjectRevisionHistoryDialogState,
-) -> HistoryAction {
-    let t = Tokens::get(ui.ctx());
-    let touch = t.metrics.is_touch();
-    let mut action = HistoryAction::None;
-    // The filter and the search on one row, on the body's inset with
-    // everything under it.
-    ui.horizontal(|ui| {
-        let filter_options = ProjectRevisionArtifactFilter::ALL
-            .iter()
-            .map(|filter| filter.label().to_owned())
-            .collect::<Vec<_>>();
-        if let Some(index) = select(
-            ui,
-            "project-revision-artifact-filter",
-            "Project artifact filter",
-            dialog.artifact_filter.label(),
-            &filter_options,
-            180.0,
-        ) {
-            dialog.artifact_filter = ProjectRevisionArtifactFilter::ALL[index];
-            dialog.comparison = None;
+) -> bool {
+    if phone && dialog.record_page && selected_row(dialog, rows).is_some() {
+        if inset(ui, |ui| {
+            Button::new("Back")
+                .icon(Icon::ChevronLeft)
+                .show(ui)
+                .clicked()
+        }) {
+            dialog.record_page = false;
             dialog.restore_confirmation = false;
+            dialog.reveal = true;
         }
-        let width = ui.available_width().max(120.0);
-        text_field(
-            ui,
-            TextEdit::singleline(&mut dialog.query)
-                .hint_text("Revision, actor, artifact, or message\u{2026}"),
-            width,
-        );
-    });
-
+        return record_pane(ui, rows, model, blocked, dialog);
+    }
+    dialog.record_page = false;
+    filter_row(ui, dialog);
     refresh_shown(ui, dialog, rows);
-    let shown = dialog.shown.clone();
-    if shown.rows.is_empty() {
-        // Nothing shown is selected: the actions act on what the table
-        // lists.
-        dialog.table.selection = None;
-        dialog.table.others.clear();
-        Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(Stroke::new(1.0, t.color.border_strong))
-            .inner_margin(egui::Margin::symmetric(8, 4))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.add_space(24.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        RichText::new(if dialog.query.trim().is_empty() {
-                            format!(
-                                "No retained {} records in this project",
-                                dialog.artifact_filter.label().to_ascii_lowercase()
-                            )
-                        } else {
-                            "No retained records match this search".to_owned()
-                        })
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
-                    );
-                });
-                ui.add_space(24.0);
-            });
-    } else {
-        let response = history_table(ui, rows, &shown, dialog);
-        if response.selection_changed {
-            dialog.comparison = None;
-            dialog.restore_confirmation = false;
-            dialog.error = None;
+    if phone {
+        let height = ui.available_height();
+        let response = history_list(ui, rows, dialog, height);
+        if response.clicked.is_some() || response.activate.is_some() {
+            dialog.record_page = true;
         }
-        // Enter, or a double click, on a schematic revision shows what
-        // changed since it.
-        if let Some(row) = response.activate
-            && rows[shown.rows[row]].schematic_revision.is_some()
-        {
-            action = HistoryAction::CompareWithCurrent;
-        }
+        return false;
     }
 
-    let selected = selected_rows(dialog, rows);
-    let offer = Offer::of(&selected, model, touch);
-    if let pressed @ (HistoryAction::Compare
-    | HistoryAction::CompareWithCurrent
-    | HistoryAction::Restore) = action_buttons(ui, dialog, &offer, blocked)
-    {
-        action = pressed;
-    }
-    let confirming = dialog.restore_confirmation && offer.restore.is_ok() && blocked.is_none();
-    let note = selection_note(&selected, &offer, confirming, blocked.is_some(), touch);
-    ui.add(egui::Label::new(RichText::new(note).color(t.color.text_dim)).wrap());
-
-    if let Some(comparison) = dialog.comparison.as_ref() {
-        revision_comparison(ui, comparison);
-    }
-    action
-}
-
-/// The history table: every column any record fills, each as wide as its
-/// widest words while the table fits, and several rows selectable for a
-/// comparison, by Ctrl or by the mark a finger finds before each row.
-fn history_table(
-    ui: &mut Ui,
-    rows: &[ProjectAuditRow],
-    shown: &ShownRows,
-    dialog: &mut ProjectRevisionHistoryDialogState,
-) -> crate::ui::widgets::table::TableResponse {
+    // The list over the selected record, split where the reader dragged it
+    // or evenly, each side keeping room for its head and a few rows.
     let t = Tokens::get(ui.ctx());
     let line = LineHeights::grid(&t);
-    // What the columns share: the table's width, less the scroll bar when
-    // its rows overflow and the room the selection marks take before the
-    // first column under a finger.
+    let room = ui.available_height();
+    let least_list = line.head + 3.0 * line.row;
+    let least_record = crate::ui::panels::PANEL_SECTION_H
+        + 2.0 * DIALOG_BODY_INSET
+        + t.metrics.ctl_h
+        + line.head
+        + 2.0 * line.row;
+    let most_list = (room - least_record).max(least_list);
+    let range = least_list..=most_list;
+    let held = dialog
+        .list_height
+        .unwrap_or(room / 2.0)
+        .clamp(least_list, most_list);
+    let split = Id::new(SPLIT_ID);
+    hold_panel_height(ui.ctx(), split, held);
+    let shown = egui::Panel::top(split)
+        .frame(Frame::NONE)
+        .show_separator_line(true)
+        .resizable(true)
+        .default_size(held)
+        .size_range(range.clone())
+        .show(ui, |ui| {
+            let response = history_list(ui, rows, dialog, ui.available_height());
+            // Claimed whole, so the size egui keeps is the one dragged to.
+            ui.expand_to_include_rect(ui.max_rect());
+            response
+        });
+    let (dragged, keys) = surface_splitter(
+        ui.ctx(),
+        split,
+        "Resize the record list",
+        held,
+        range,
+        line.row,
+    );
+    if dragged {
+        dialog.list_height = Some(shown.response.rect.height().clamp(least_list, most_list));
+        dialog.reveal = true;
+    }
+    if let Some(action) = keys {
+        dialog.list_height = apply_splitter_step(held, action, line.row)
+            .map(|height| height.clamp(least_list, most_list));
+        dialog.reveal = true;
+        ui.ctx().request_repaint();
+    }
+    record_pane(ui, rows, model, blocked, dialog)
+}
+
+/// `contents` inset from the body's edges as the dialog's own rows are.
+fn inset<R>(ui: &mut Ui, contents: impl FnOnce(&mut Ui) -> R) -> R {
+    Frame::NONE
+        .inner_margin(Margin::same(DIALOG_BODY_INSET as i8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = DIALOG_BODY_INSET / 2.0;
+            contents(ui)
+        })
+        .inner
+}
+
+/// Words that explain, in the dimmed register, wrapped to the room.
+fn note(ui: &mut Ui, words: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add(
+        egui::Label::new(
+            RichText::new(words)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .wrap(),
+    );
+}
+
+/// The artifact filter and the search on one row, inset.
+fn filter_row(ui: &mut Ui, dialog: &mut ProjectRevisionHistoryDialogState) {
+    inset(ui, |ui| {
+        ui.horizontal(|ui| {
+            let filter_options = ProjectRevisionArtifactFilter::ALL
+                .iter()
+                .map(|filter| filter.label().to_owned())
+                .collect::<Vec<_>>();
+            if let Some(index) = select(
+                ui,
+                "project-revision-artifact-filter",
+                "Project artifact filter",
+                dialog.artifact_filter.label(),
+                &filter_options,
+                180.0,
+            ) {
+                dialog.artifact_filter = ProjectRevisionArtifactFilter::ALL[index];
+                dialog.restore_confirmation = false;
+            }
+            let width = ui.available_width().max(120.0);
+            text_field(
+                ui,
+                TextEdit::singleline(&mut dialog.query)
+                    .hint_text("Revision, actor, artifact, or message\u{2026}"),
+                width,
+            );
+        });
+    });
+}
+
+/// The record list, `height` tall: every column any record fills, each as
+/// wide as its widest words while the list fits, newest first, one record
+/// selected. Its rows scroll inside it under a frozen head.
+fn history_list(
+    ui: &mut Ui,
+    rows: &[ProjectAuditRow],
+    dialog: &mut ProjectRevisionHistoryDialogState,
+    height: f32,
+) -> TableResponse {
+    let shown = dialog.shown.clone();
+    if shown.rows.is_empty() {
+        // Nothing shown is selected: the record below is one the list shows.
+        dialog.table.selection = None;
+        dialog.table.others.clear();
+        let words = if dialog.query.trim().is_empty() {
+            format!(
+                "No retained {} records in this project.",
+                dialog.artifact_filter.label().to_ascii_lowercase()
+            )
+        } else {
+            "No retained records match this search.".to_owned()
+        };
+        inset(ui, |ui| note(ui, &words));
+        return TableResponse::default();
+    }
+    let t = Tokens::get(ui.ctx());
+    let line = LineHeights::grid(&t);
+    // What the columns share: the list's width, less the scroll bar when
+    // its rows overflow.
     let mut room = ui
         .available_rect_before_wrap()
         .intersect(ui.clip_rect())
         .width();
-    if line.head + line.row * shown.rows.len() as f32 > TABLE_MAX_HEIGHT + 0.5 {
+    if line.head + line.row * shown.rows.len() as f32 > height + 0.5 {
         room -= ui.spacing().scroll.allocated_width();
-    }
-    if t.metrics.is_touch() {
-        room -= t.metrics.touch_target() - TABLE_EDGE_INSET;
     }
     let whole = shown
         .columns
@@ -776,114 +812,387 @@ fn history_table(
         .zip(&widths)
         .map(|(&column, &width)| Column::words(COLUMNS[column], width))
         .collect::<Vec<_>>();
-    DataTable::new(
+    // Frozen through the revision, so what a row is stays put while the
+    // rest scroll under it; a phone's keeps its time beside it.
+    let frozen = shown
+        .columns
+        .iter()
+        .position(|&column| column == REVISION)
+        .map_or(1, |place| place + 1);
+    let pinned = shown.columns.iter().position(|&column| column == TIME);
+    let reveal = std::mem::take(&mut dialog.reveal);
+    let mut table = DataTable::new(
         "workbench.project.revision_history",
         &columns,
         shown.rows.len(),
     )
     .state(&mut dialog.table)
     .keys(&shown.keys)
-    .multi_select()
-    .freeze(1)
-    .max_height(TABLE_MAX_HEIGHT)
-    .show(ui, |index| {
+    .freeze(frozen)
+    .max_height(height)
+    .reveal_selection(reveal);
+    if let Some(pinned) = pinned {
+        table = table.pin_when_narrow(pinned);
+    }
+    let response = table.show(ui, |index| {
         row_cells(&rows[shown.rows[index]], &shown.columns)
-    })
+    });
+    if response.selection_changed || response.clicked.is_some() {
+        dialog.restore_confirmation &= !response.selection_changed;
+        dialog.error = None;
+    }
+    response
 }
 
-/// Restore, the two comparisons, and while Restore asks for confirmation,
-/// its Cancel: in one row where they fit, one above another, as wide as the
-/// body, where they do not. A control that cannot act says why on hover;
-/// the note under them says it for a finger.
-fn action_buttons(
+/// The pads either side of the words of the column at `place` of `last + 1`:
+/// the panel inset at the table's outer edges, the cell pad between.
+fn edge_pads(place: usize, last: usize) -> f32 {
+    let lead = if place == 0 {
+        TABLE_EDGE_INSET
+    } else {
+        CELL_PAD
+    };
+    let trail = if place == last {
+        TABLE_EDGE_INSET
+    } else {
+        CELL_PAD
+    };
+    lead + trail
+}
+
+/// The selected record below the divider, or on a phone's page of its own:
+/// what it is compared with and Restore, then the comparison, which scrolls
+/// inside the room left. Returns whether the reader confirmed a restore.
+fn record_pane(
     ui: &mut Ui,
-    dialog: &mut ProjectRevisionHistoryDialogState,
-    offer: &Offer,
+    rows: &[ProjectAuditRow],
+    model: &Model,
     blocked: Option<&str>,
-) -> HistoryAction {
+    dialog: &mut ProjectRevisionHistoryDialogState,
+) -> bool {
+    refresh_comparison(dialog, model, rows);
+    let Some(row) = selected_row(dialog, rows) else {
+        band_header(ui, "No record selected", None);
+        inset(ui, |ui| {
+            note(
+                ui,
+                "Select a revision to see what changed since it and to restore it, or another record to see what it keeps.",
+            );
+        });
+        return false;
+    };
+    let comparison = dialog.comparison.clone();
+    let (title, meta) = match &comparison {
+        Some(ProjectRevisionComparison::Schematic { title, delta, .. }) => (
+            (*title).to_owned(),
+            (!delta.is_empty()).then(|| counted(delta.changes.len(), "change", "changes")),
+        ),
+        Some(ProjectRevisionComparison::RetainedMetadata(compared)) => (
+            "Differences from the record compared".to_owned(),
+            (!compared.fields.is_empty())
+                .then(|| counted(compared.fields.len(), "difference", "differences")),
+        ),
+        Some(ProjectRevisionComparison::Unavailable(_)) => {
+            ("Comparison unavailable".to_owned(), None)
+        }
+        None => (format!("{} record", row.kind.label()), None),
+    };
+    band_header(ui, &title, meta.as_deref());
+    let restore = inset(ui, |ui| {
+        if let Some(ProjectRevisionComparison::Schematic { sides, .. }) = &comparison {
+            note(ui, sides);
+        }
+        record_controls(ui, row, rows, model, blocked, dialog)
+    });
+    match &comparison {
+        Some(ProjectRevisionComparison::Schematic {
+            delta,
+            with_current,
+            ..
+        }) => {
+            if delta.is_empty() {
+                inset(ui, |ui| {
+                    note(
+                        ui,
+                        if *with_current {
+                            "Nothing differs: the current design is this revision's drawing."
+                        } else {
+                            "Nothing differs: both revisions keep the same drawing."
+                        },
+                    );
+                });
+            } else {
+                named_changes(ui, delta, &mut dialog.changes);
+            }
+        }
+        Some(ProjectRevisionComparison::RetainedMetadata(compared)) => {
+            if compared.fields.is_empty() {
+                inset(ui, |ui| {
+                    note(ui, "Nothing differs: both records keep the same facts.");
+                });
+            } else {
+                facts_table(
+                    ui,
+                    "workbench.project.revision_history.differences",
+                    &["Fact", "This record", "Compared record"],
+                    compared
+                        .fields
+                        .iter()
+                        .map(|(field, first, second)| vec![*field, first.as_str(), second.as_str()])
+                        .collect(),
+                );
+            }
+        }
+        Some(ProjectRevisionComparison::Unavailable(reason)) => {
+            inset(ui, |ui| note(ui, reason));
+        }
+        None => facts_table(
+            ui,
+            "workbench.project.revision_history.record",
+            &["Fact", "Value"],
+            record_facts(row),
+        ),
+    }
+    restore
+}
+
+/// What the selected record is compared with, and Restore with its
+/// confirmation, in one row where they fit and one above the other where
+/// they do not; then why Restore cannot act, or what it is about to do. A
+/// record that keeps no drawing has no Restore, and one with nothing of its
+/// kind to compare with no choice.
+fn record_controls(
+    ui: &mut Ui,
+    row: &ProjectAuditRow,
+    rows: &[ProjectAuditRow],
+    model: &Model,
+    blocked: Option<&str>,
+    dialog: &mut ProjectRevisionHistoryDialogState,
+) -> bool {
     #[derive(Clone, Copy)]
     enum Press {
         Restore,
         Confirm,
         Cancel,
-        Current,
-        Compare,
     }
-    let restore = match (blocked, &offer.restore) {
-        (Some(reason), _) => Err(reason),
-        (None, Ok(_)) => Ok(()),
-        (None, Err(reason)) => Err(reason.as_str()),
+    let (first, others) = compare_choices(row, rows);
+    let drawn = row.schematic_revision.is_some();
+    let restore = match blocked {
+        Some(reason) => Err(reason.to_owned()),
+        None => restore_target(row, model),
     };
     let confirming = dialog.restore_confirmation && restore.is_ok();
-    let mut buttons: Vec<(&str, Result<(), &str>, bool, Press)> = if confirming {
+    let buttons: Vec<(&str, Result<(), &str>, Press)> = if !drawn {
+        Vec::new()
+    } else if confirming {
         vec![
-            ("Confirm restore", Ok(()), true, Press::Confirm),
-            ("Cancel", Ok(()), false, Press::Cancel),
+            ("Confirm restore", Ok(()), Press::Confirm),
+            ("Cancel", Ok(()), Press::Cancel),
         ]
     } else {
-        vec![("Restore selected\u{2026}", restore, false, Press::Restore)]
+        vec![(
+            "Restore\u{2026}",
+            restore.as_ref().map(|_| ()).map_err(String::as_str),
+            Press::Restore,
+        )]
     };
-    buttons.push((
-        "Compare with current",
-        offer.current.as_ref().map(|_| ()).map_err(String::as_str),
-        false,
-        Press::Current,
-    ));
-    buttons.push((
-        "Compare selected",
-        offer.compare.as_ref().map(|_| ()).map_err(String::as_str),
-        false,
-        Press::Compare,
-    ));
+    let choosing = drawn || !others.is_empty();
+    let options = std::iter::once(first.to_owned())
+        .chain(others.iter().map(|(_, named)| named.clone()))
+        .collect::<Vec<_>>();
+    let chosen = dialog
+        .compare_with
+        .as_ref()
+        .and_then(|key| others.iter().position(|(other, _)| other.key == *key))
+        .map_or(0, |place| place + 1);
+
+    let t = Tokens::get(ui.ctx());
     let spacing = ui.spacing().item_spacing.x;
-    let natural = buttons
+    let label = "Compare with";
+    let label_width = words_width(ui.painter(), label, false);
+    let select_width = options
         .iter()
-        .map(|(label, _, destructive, _)| {
-            Button::new(label)
-                .destructive(*destructive)
-                .measured_width(ui)
-        })
+        .map(|option| words_width(ui.painter(), option, false))
+        .fold(0.0, f32::max)
+        + 2.0 * CELL_PAD
+        + t.metrics.ctl_h;
+    let buttons_width = buttons
+        .iter()
+        .map(|(words, _, _)| Button::new(words).measured_width(ui))
         .sum::<f32>()
-        + spacing * (buttons.len() - 1) as f32;
+        + spacing * buttons.len().saturating_sub(1) as f32;
     let width = ui.available_width();
-    let stacked = natural > width;
-    let mut pressed = None;
-    let show = |ui: &mut Ui| {
-        for (label, gate, destructive, press) in &buttons {
-            let mut button = Button::new(label)
-                .enabled(gate.is_ok())
-                .destructive(*destructive);
-            if stacked {
-                button = button.min_width(width);
-            }
-            let response = button.show(ui);
-            if response.clicked() {
-                pressed = Some(*press);
-            }
-            if let Err(reason) = gate {
-                let _ = response.on_disabled_hover_text(*reason);
-            }
-        }
-    };
-    if stacked {
-        ui.vertical(show);
+    let choice_width = if choosing {
+        label_width + spacing + select_width
     } else {
-        ui.horizontal(show);
+        0.0
+    };
+    let one_row = choice_width + spacing + buttons_width <= width;
+
+    let mut picked = None;
+    let mut pressed = None;
+    let mut choice = |ui: &mut Ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(label)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            let room = (ui.available_width()).max(1.0);
+            picked = select(
+                ui,
+                "project-revision-compare-with",
+                label,
+                &options[chosen],
+                &options,
+                select_width.min(room),
+            );
+        });
+    };
+    let mut actions = |ui: &mut Ui| {
+        ui.horizontal(|ui| {
+            for (words, gate, press) in &buttons {
+                let response = Button::new(words).enabled(gate.is_ok()).show(ui);
+                if response.clicked() {
+                    pressed = Some(*press);
+                }
+                if let Err(reason) = gate {
+                    let _ = response.on_disabled_hover_text(*reason);
+                }
+            }
+        });
+    };
+    if one_row {
+        ui.horizontal(|ui| {
+            if choosing {
+                choice(ui);
+            }
+            if !buttons.is_empty() {
+                // Restore sits at the row's trailing edge.
+                ui.add_space((ui.available_width() - buttons_width).max(0.0));
+                actions(ui);
+            }
+        });
+    } else {
+        if choosing {
+            choice(ui);
+        }
+        if !buttons.is_empty() {
+            actions(ui);
+        }
+    }
+    if let Some(place) = picked {
+        dialog.compare_with = place
+            .checked_sub(1)
+            .and_then(|place| others.get(place))
+            .map(|(other, _)| other.key.clone());
+    }
+    if drawn && let Some(words) = restore_note(row, &restore, confirming, blocked.is_some()) {
+        note(ui, &words);
     }
     match pressed {
         Some(Press::Restore) => {
             dialog.restore_confirmation = true;
-            HistoryAction::None
+            false
         }
-        Some(Press::Confirm) => HistoryAction::Restore,
+        Some(Press::Confirm) => true,
         Some(Press::Cancel) => {
             dialog.restore_confirmation = false;
-            HistoryAction::None
+            false
         }
-        Some(Press::Current) => HistoryAction::CompareWithCurrent,
-        Some(Press::Compare) => HistoryAction::Compare,
-        None => HistoryAction::None,
+        None => false,
     }
+}
+
+/// What changed between two drawings, object by object, grouped by the
+/// part of the drawing it is in: only the parts that changed, each group's
+/// head counting its rows. The table runs edge to edge and scrolls inside
+/// the room left.
+fn named_changes(ui: &mut Ui, delta: &ValidatedRevisionSemanticDelta, state: &mut TableState) {
+    let mut changes = delta.changes.iter().collect::<Vec<_>>();
+    changes.sort_by_key(|change| (change.domain, change.kind));
+    let mut groups = Vec::new();
+    for (index, change) in changes.iter().enumerate() {
+        if index == 0 || changes[index - 1].domain != change.domain {
+            groups.push(Group::new(change.domain.label(), index));
+        }
+    }
+    let kinds = ["Added", "Changed", "Removed"].map(|words| (words, false));
+    let kind_width = fixed_width(ui, "Change", kinds, TABLE_EDGE_INSET, CELL_PAD) + SORT_MARK_ROOM;
+    let height = ui.available_height();
+    let columns = [
+        Column::words("Change", kind_width),
+        Column::name("Object", LEAST_CUT_WIDTH),
+    ];
+    let _ = DataTable::new(
+        "workbench.project.revision_history.changes",
+        &columns,
+        changes.len(),
+    )
+    .state(state)
+    .groups(&groups)
+    .max_height(height)
+    .show(ui, |index| {
+        let change = changes[index];
+        vec![
+            Cell::text(change.kind.label()),
+            Cell::text(object_words(change)),
+        ]
+    });
+}
+
+/// A changed object as its row states it: its name, and for a changed one
+/// what changed in it.
+fn object_words(change: &ValidatedRevisionChange) -> String {
+    if change.detail.is_empty() {
+        change.name.clone()
+    } else {
+        format!("{}: {}", change.name, change.detail)
+    }
+}
+
+/// A table of facts: a first column naming each and the rest flexible, each
+/// value cut at a word with the whole of it on hover, edge to edge and
+/// scrolling inside the room left. A fact a record does not keep is the
+/// absent mark.
+fn facts_table(ui: &mut Ui, id: &str, heads: &[&str], rows: Vec<Vec<&str>>) {
+    let names = rows.iter().map(|row| (row[0], false));
+    let name_width = fixed_width(ui, heads[0], names, TABLE_EDGE_INSET, CELL_PAD) + SORT_MARK_ROOM;
+    let columns = std::iter::once(Column::words(heads[0], name_width))
+        .chain(
+            heads[1..]
+                .iter()
+                .map(|head| Column::name(*head, LEAST_CUT_WIDTH)),
+        )
+        .collect::<Vec<_>>();
+    let height = ui.available_height();
+    let _ = DataTable::new(id, &columns, rows.len())
+        .max_height(height)
+        .show(ui, |index| {
+            let row = &rows[index];
+            std::iter::once(Cell::text(row[0]))
+                .chain(row[1..].iter().map(|value| {
+                    if value.is_empty() {
+                        Cell::absent().hint(NOT_RECORDED)
+                    } else {
+                        Cell::text(*value)
+                    }
+                }))
+                .collect()
+        });
+}
+
+/// What a record keeps, fact by fact, for its own table.
+fn record_facts(row: &ProjectAuditRow) -> Vec<Vec<&str>> {
+    vec![
+        vec!["Kind", row.kind.label()],
+        vec!["Revision", &row.revision],
+        vec!["Time", &row.time],
+        vec!["Actor", &row.actor],
+        vec!["Change", &row.change],
+        vec!["Affected records", &row.affected_evidence],
+        vec!["Status", &row.status],
+    ]
 }
 
 /// The rows the artifact filter and the search let through, by their place
@@ -900,8 +1209,8 @@ fn visible_rows(
         .collect()
 }
 
-/// Work out what the table shows again when the rows, the filter or the
-/// search moved since it last was.
+/// Work out what the list shows again when the rows, the filter or the
+/// search moved since it last was, and bring the selection back into view.
 fn refresh_shown(
     ui: &Ui,
     dialog: &mut ProjectRevisionHistoryDialogState,
@@ -939,10 +1248,12 @@ fn refresh_shown(
         columns: columns.into(),
         natural: natural.into(),
     };
+    dialog.reveal = true;
 }
 
 /// The rows the dialog keeps, built again only when what they were built
-/// from has moved since.
+/// from has moved since; the selected record's comparison is worked out
+/// again with them.
 fn kept_audit_rows(
     dialog: &mut ProjectRevisionHistoryDialogState,
     model: &Model,
@@ -957,6 +1268,7 @@ fn kept_audit_rows(
     if dialog.rows_source != Some(source) {
         dialog.rows = project_audit_rows(model).into();
         dialog.rows_source = Some(source);
+        dialog.compared = None;
     }
     Arc::clone(&dialog.rows)
 }
@@ -976,7 +1288,6 @@ fn project_audit_rows(model: &Model) -> Vec<ProjectAuditRow> {
         &model.schematic.document().validated_revisions,
         || design.validated_design_content_digest().ok(),
         Some(active),
-        true,
     );
     let mut retained_schematics = model
         .workspace
@@ -992,35 +1303,12 @@ fn project_audit_rows(model: &Model) -> Vec<ProjectAuditRow> {
             &schematic.document().validated_revisions,
             || schematic.validated_design_content_digest().ok(),
             CellViewRef::from_key(key),
-            false,
         );
     }
     append_simulation_plan_rows(&mut rows, model);
     append_model_and_pdk_rows(&mut rows, model);
     append_governed_rows(&mut rows, model);
     rows
-}
-
-fn find_project_schematic_revision(
-    model: &Model,
-    id: ValidatedSchematicRevisionId,
-) -> Option<&ValidatedSchematicRevision> {
-    model
-        .schematic
-        .document()
-        .validated_revisions
-        .records()
-        .iter()
-        .find(|record| record.id() == id)
-        .or_else(|| {
-            model
-                .workspace
-                .content
-                .schematic_buffers
-                .values()
-                .flat_map(|schematic| schematic.document().validated_revisions.records())
-                .find(|record| record.id() == id)
-        })
 }
 
 /// One row per revision of `view`'s journal, newest first. `drawn` is the
@@ -1031,20 +1319,21 @@ fn append_schematic_rows(
     journal: &ValidatedRevisionJournal,
     drawn: impl FnOnce() -> Option<ContentDigest>,
     view: Option<CellViewRef>,
-    active_view: bool,
 ) {
     if journal.records().is_empty() {
         return;
     }
     let drawn = drawn();
-    let latest = journal.records().last().map(ValidatedSchematicRevision::id);
     for record in journal.records().iter().rev() {
-        let status = if record.is_accepted_baseline() {
-            "accepted"
-        } else if active_view && Some(record.id()) == latest {
-            "working"
+        let current = drawn == Some(record.design_content_digest());
+        // The drawing as it stands is this revision's: what the reader most
+        // needs to know of it, before which kind of revision it is.
+        let status = if current {
+            "Current"
+        } else if record.is_accepted_baseline() {
+            "Accepted"
         } else {
-            "validated"
+            "Validated"
         };
         let made = record.created_unix_ms();
         rows.push(ProjectAuditRow {
@@ -1064,7 +1353,7 @@ fn append_schematic_rows(
             status: status.to_owned(),
             schematic_revision: Some(record.id()),
             view: view.clone(),
-            current: drawn == Some(record.design_content_digest()),
+            current,
         });
     }
 }
@@ -1102,31 +1391,24 @@ fn simulation_plan_row(
 ) -> ProjectAuditRow {
     let lineage_evidence = match (lineage.source_plan_id(), lineage.source_revision()) {
         (Some(source), Some(source_revision)) => {
-            format!("cloned from {source} @ {}", source_revision.get())
+            format!("Cloned from {source} at revision {}", source_revision.get())
         }
-        _ => "root plan".to_owned(),
+        _ => "Root plan".to_owned(),
     };
     ProjectAuditRow {
         key: format!("simulation-plan:{id}:{revision}"),
         kind: ProjectAuditArtifactKind::SimulationPlan,
         revision,
-        time: NOT_RETAINED.to_owned(),
+        time: String::new(),
         made_unix_ms: None,
         age: String::new(),
-        actor: NOT_RETAINED.to_owned(),
-        change: format!(
-            "{} \u{00b7} {name}",
-            if active { "Active" } else { "Retained" }
-        ),
+        actor: String::new(),
+        change: name.to_owned(),
         affected_evidence: format!(
-            "{analysis_count} {} \u{00b7} {lineage_evidence}",
-            if analysis_count == 1 {
-                "analysis"
-            } else {
-                "analyses"
-            }
+            "{}{SEPARATOR}{lineage_evidence}",
+            counted(analysis_count, "analysis", "analyses")
         ),
-        status: if active { "working" } else { "retained" }.to_owned(),
+        status: if active { "Active" } else { "Retained" }.to_owned(),
         schematic_revision: None,
         view: None,
         current: false,
@@ -1145,18 +1427,26 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             key: format!("technology-binding:{}:{}", binding.model_library(), digest),
             kind: ProjectAuditArtifactKind::ModelOrPdk,
             revision: digest,
-            time: NOT_RETAINED.to_owned(),
+            time: String::new(),
             made_unix_ms: None,
             age: String::new(),
             actor: "Project metadata transaction".to_owned(),
-            change: format!("Attached technology \u{00b7} {}", binding.display_label()),
-            affected_evidence: format!(
-                "{} models \u{00b7} {} pinned sources \u{00b7} {} process sections",
-                binding.model_count(),
-                binding.source_closure().len(),
-                binding.process_sections().len()
-            ),
-            status: "attached".to_owned(),
+            change: format!("Attached technology {}", binding.display_label()),
+            affected_evidence: [
+                counted(binding.model_count(), "model", "models"),
+                counted(
+                    binding.source_closure().len(),
+                    "pinned source",
+                    "pinned sources",
+                ),
+                counted(
+                    binding.process_sections().len(),
+                    "process section",
+                    "process sections",
+                ),
+            ]
+            .join(SEPARATOR),
+            status: "Attached".to_owned(),
             schematic_revision: None,
             view: None,
             current: false,
@@ -1171,9 +1461,9 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
                 digest,
             } => (
                 revision.get().to_string(),
-                "pinned",
+                "Pinned",
                 format!(
-                    "project source {source_id} \u{00b7} {}",
+                    "Project source {source_id}{SEPARATOR}{}",
                     short_text(&digest.to_string())
                 ),
             ),
@@ -1191,53 +1481,56 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
                 match root_digest {
                     Some(digest) => (
                         digest.clone(),
-                        "pinned",
-                        format!("external source \u{00b7} root digest {digest}"),
+                        "Pinned",
+                        format!("External source{SEPARATOR}root digest {digest}"),
                     ),
                     None => (
-                        "unversioned".to_owned(),
-                        "unpinned",
-                        "external source has no accepted closure".to_owned(),
+                        "Unversioned".to_owned(),
+                        "Not pinned",
+                        "External source with no accepted closure".to_owned(),
                     ),
                 }
             }
             ModelSourceAuthority::RetainedImport { source_id, digest } => (
                 short_text(&digest.to_string()),
-                "pinned",
+                "Pinned",
                 format!(
-                    "retained import {source_id} \u{00b7} root digest {}",
+                    "Retained import {source_id}{SEPARATOR}root digest {}",
                     short_text(&digest.to_string())
                 ),
             ),
             ModelSourceAuthority::BuiltIn => (
-                nonempty_or(&library.version, "built-in"),
-                "built-in",
-                "signed application catalog".to_owned(),
+                nonempty_or(&library.version, "Built-in"),
+                "Built-in",
+                "Signed application catalog".to_owned(),
             ),
         };
         rows.push(ProjectAuditRow {
             key: format!("model-library:{}:{revision}", library.name),
             kind: ProjectAuditArtifactKind::ModelOrPdk,
             revision,
-            time: NOT_RETAINED.to_owned(),
+            time: String::new(),
             made_unix_ms: None,
             age: String::new(),
             actor: authority,
-            change: format!(
-                "Model library \u{00b7} {}{}",
-                library.name,
-                if library.pdk_name.trim().is_empty() {
-                    String::new()
-                } else {
-                    format!(" \u{00b7} {}", library.pdk_name)
-                }
-            ),
-            affected_evidence: format!(
-                "{} models \u{00b7} {} corners \u{00b7} {} pinned sources",
-                library.model_count(),
-                library.corner_count(),
-                library.source_closure.len()
-            ),
+            change: if library.pdk_name.trim().is_empty() {
+                format!("Model library {}", library.name)
+            } else {
+                format!(
+                    "Model library {}{SEPARATOR}{}",
+                    library.name, library.pdk_name
+                )
+            },
+            affected_evidence: [
+                counted(library.model_count(), "model", "models"),
+                counted(library.corner_count(), "corner", "corners"),
+                counted(
+                    library.source_closure.len(),
+                    "pinned source",
+                    "pinned sources",
+                ),
+            ]
+            .join(SEPARATOR),
             status: status.to_owned(),
             schematic_revision: None,
             view: None,
@@ -1253,18 +1546,24 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             key: format!("annotation-journal:{}", entry.id()),
             kind: ProjectAuditArtifactKind::GovernedRecord,
             revision: entry.sequence().to_string(),
-            time: NOT_RETAINED.to_owned(),
+            time: String::new(),
             made_unix_ms: None,
             age: String::new(),
             actor: "Annotation policy transaction".to_owned(),
-            change: format!("Committed annotation policy r{}", entry.policy_revision()),
-            affected_evidence: format!(
-                "{} mappings \u{00b7} policy {} \u{00b7} receipt {}",
-                entry.mappings().len(),
-                short_text(&entry.policy_digest().to_string()),
-                short_text(&entry.semantic_digest().to_string())
+            change: format!(
+                "Committed annotation policy revision {}",
+                entry.policy_revision()
             ),
-            status: "committed".to_owned(),
+            affected_evidence: [
+                counted(entry.mappings().len(), "mapping", "mappings"),
+                format!("policy {}", short_text(&entry.policy_digest().to_string())),
+                format!(
+                    "receipt {}",
+                    short_text(&entry.semantic_digest().to_string())
+                ),
+            ]
+            .join(SEPARATOR),
+            status: "Committed".to_owned(),
             schematic_revision: None,
             view: None,
             current: false,
@@ -1275,21 +1574,28 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             key: format!("hierarchy-audit:{}", receipt.id()),
             kind: ProjectAuditArtifactKind::GovernedRecord,
             revision: receipt.sequence().to_string(),
-            time: NOT_RETAINED.to_owned(),
+            time: String::new(),
             made_unix_ms: None,
             age: String::new(),
             actor: "Hierarchy audit transaction".to_owned(),
             change: "Hierarchy audit receipt".to_owned(),
-            affected_evidence: format!(
-                "{} resolved subjects \u{00b7} {} findings \u{00b7} receipt {}",
-                receipt.resolved_subjects(),
-                receipt.findings().len(),
-                short_text(&receipt.semantic_digest().to_string())
-            ),
+            affected_evidence: [
+                counted(
+                    receipt.resolved_subjects(),
+                    "resolved subject",
+                    "resolved subjects",
+                ),
+                counted(receipt.findings().len(), "finding", "findings"),
+                format!(
+                    "receipt {}",
+                    short_text(&receipt.semantic_digest().to_string())
+                ),
+            ]
+            .join(SEPARATOR),
             status: if receipt.passed() {
-                "passed"
+                "Passed"
             } else {
-                "findings"
+                "Has findings"
             }
             .to_owned(),
             schematic_revision: None,
@@ -1299,149 +1605,9 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
     }
 }
 
-fn revision_comparison(ui: &mut Ui, comparison: &ProjectRevisionComparison) {
-    match comparison {
-        ProjectRevisionComparison::Schematic {
-            label,
-            delta,
-            with_current,
-        } => {
-            semantic_comparison(ui, delta, Some(label), *with_current);
-        }
-        ProjectRevisionComparison::RetainedMetadata(comparison) => {
-            section_header(ui, "Retained metadata comparison", Some(&comparison.label));
-            if comparison.fields.is_empty() {
-                ui.label("The selected retained records expose identical metadata.");
-                return;
-            }
-            let fields = comparison
-                .fields
-                .iter()
-                .map(|(field, _, _)| (*field, false));
-            let columns = [
-                Column::words(
-                    "Field",
-                    fixed_width(ui, "Field", fields, TABLE_EDGE_INSET, CELL_PAD),
-                ),
-                Column::name("First", LEAST_CUT_WIDTH),
-                Column::name("Second", LEAST_CUT_WIDTH),
-            ];
-            comparison_table(
-                ui,
-                "workbench.project.revision_history.metadata_comparison",
-                &columns,
-                comparison.fields.len(),
-                |index| {
-                    let (field, first, second) = &comparison.fields[index];
-                    vec![
-                        Cell::text(*field),
-                        Cell::number(first),
-                        Cell::number(second),
-                    ]
-                },
-            );
-        }
-    }
-}
-
-/// A comparison's table, every row of it: the dialog's body scrolls past it.
-/// Given only the room left under the history, it scrolled inside that room
-/// and the dialog, sized to what it held, never grew to show it.
-fn comparison_table(
-    ui: &mut Ui,
-    id: &str,
-    columns: &[Column],
-    rows: usize,
-    row_at: impl FnMut(usize) -> Vec<Cell>,
-) {
-    let line = LineHeights::grid(&Tokens::get(ui.ctx()));
-    let tall = line.head + line.row * rows as f32;
-    ui.allocate_ui(egui::vec2(ui.available_width(), tall), |ui| {
-        let _ = DataTable::new(id, columns, rows)
-            .max_height(tall)
-            .show(ui, row_at);
-    });
-}
-
-/// What changed between two drawings, domain by domain, on the history's
-/// own table: the domain's name taking the width, its counts to the right.
-fn semantic_comparison(
-    ui: &mut Ui,
-    delta: &ValidatedRevisionSemanticDelta,
-    label: Option<&str>,
-    with_current: bool,
-) {
-    section_header(ui, "Semantic comparison", label);
-    if delta.is_empty() {
-        ui.label(if with_current {
-            "The current design matches this revision."
-        } else {
-            "The selected validated revisions contain identical schematic semantics."
-        });
-        return;
-    }
-    let counts = |object: ValidatedRevisionObjectDelta| {
-        [object.added, object.removed, object.modified].map(|count| Cell::number(count.to_string()))
-    };
-    let policy = if delta.grid_changed || delta.document_policy_changed {
-        Cell::text("changed")
-    } else {
-        Cell::absent()
-    };
-    let lines = [
-        ("Components", counts(delta.components)),
-        ("Wires", counts(delta.wires)),
-        ("Buses", counts(delta.buses)),
-        ("Bus taps", counts(delta.bus_taps)),
-        ("Junctions", counts(delta.junctions)),
-        ("Net labels", counts(delta.net_labels)),
-        ("Design notes", counts(delta.design_notes)),
-        ("Documentation shapes", counts(delta.documentation_shapes)),
-        (
-            "Connections",
-            [
-                Cell::number(delta.connections_added.to_string()),
-                Cell::number(delta.connections_removed.to_string()),
-                Cell::absent(),
-            ],
-        ),
-        ("Document policy", [Cell::absent(), Cell::absent(), policy]),
-    ];
-    let domains = lines.iter().map(|(domain, _)| (*domain, false));
-    let mut columns = vec![Column::name(
-        "Domain",
-        fixed_width(ui, "Domain", domains, TABLE_EDGE_INSET, CELL_PAD),
-    )];
-    for (place, head) in ["Added", "Removed", "Modified"].into_iter().enumerate() {
-        let words = lines
-            .iter()
-            .map(|(_, cells)| (cells[place].text.as_str(), true));
-        let trail = if place == 2 {
-            TABLE_EDGE_INSET
-        } else {
-            CELL_PAD
-        };
-        columns.push(Column::number(
-            head,
-            fixed_width(ui, head, words, CELL_PAD, trail),
-        ));
-    }
-    comparison_table(
-        ui,
-        "workbench.project.revision_history.semantic_comparison",
-        &columns,
-        lines.len(),
-        |index| {
-            let (domain, cells) = &lines[index];
-            std::iter::once(Cell::text(*domain))
-                .chain(cells.iter().cloned())
-                .collect()
-        },
-    );
-}
-
-/// The history table's columns, in order.
-const COLUMNS: [&str; 6] = [
+/// The history list's columns, in order, by their places below.
+const COLUMNS: [&str; 7] = [
+    "Kind",
     "Revision",
     "Time",
     "Actor",
@@ -1449,50 +1615,64 @@ const COLUMNS: [&str; 6] = [
     "Affected records",
     "Status",
 ];
+const KIND: usize = 0;
+const REVISION: usize = 1;
+const TIME: usize = 2;
 /// The columns whose identifiers and times are set in mono.
-const MONO_COLUMNS: [bool; 6] = [true, true, false, false, false, false];
-/// The columns a table too wide for its room never cuts: the revision, when
-/// it was made and its status are read whole or not at all.
-const WHOLE_COLUMNS: [bool; 6] = [true, true, false, false, false, true];
-/// The narrowest a column with too much to say is cut to. A table that
+const MONO_COLUMNS: [bool; 7] = [false, true, true, false, false, false, false];
+/// The columns a list too wide for its room never cuts: what a record is,
+/// when it was made and its status are read whole or not at all.
+const WHOLE_COLUMNS: [bool; 7] = [true, true, true, false, false, false, true];
+/// The narrowest a column with too much to say is cut to. A list that
 /// cannot fit with its widest columns cut that far keeps every column whole
-/// and scrolls sideways under its first one, as on a phone.
+/// and scrolls sideways under its first ones, as on a phone.
 const LEAST_CUT_WIDTH: f32 = 96.0;
 
 /// One row's text in column `column` of [`COLUMNS`].
 fn row_text(row: &ProjectAuditRow, column: usize) -> &str {
     match column {
-        0 => &row.revision,
-        1 => &row.time,
-        2 => &row.actor,
-        3 => &row.change,
-        4 => &row.affected_evidence,
+        KIND => row.kind.label(),
+        REVISION => &row.revision,
+        TIME => &row.time,
+        3 => &row.actor,
+        4 => &row.change,
+        5 => &row.affected_evidence,
         _ => &row.status,
     }
 }
 
 /// One row's cells in the `shown` columns: identifiers and times in mono,
-/// the time with how long ago it was on hover, and sorted by the moment.
+/// the time with how long ago it was on hover and sorted by the moment, and
+/// a fact the record does not keep the absent mark. The table cuts words too
+/// long for their column at a word or a list's separator, whole on hover.
 fn row_cells(row: &ProjectAuditRow, shown: &[usize]) -> Vec<Cell> {
     shown
         .iter()
-        .map(|&column| match (column, row.made_unix_ms) {
-            (1, Some(made)) => Cell::number(&row.time)
-                .hint(&row.age)
-                .sort_by(SortKey::Number(made as f64)),
-            (1, None) => Cell::empty().sort_by(SortKey::Missing),
-            _ if MONO_COLUMNS[column] => Cell::number(row_text(row, column)),
-            _ => Cell::text(row_text(row, column)),
+        .map(|&column| {
+            let text = row_text(row, column);
+            match (column, row.made_unix_ms) {
+                (TIME, Some(made)) => Cell::number(text)
+                    .hint(&row.age)
+                    .sort_by(SortKey::Number(made as f64)),
+                _ if text.is_empty() => Cell::absent().hint(NOT_RECORDED),
+                _ if MONO_COLUMNS[column] => Cell::number(text),
+                _ => Cell::text(text),
+            }
         })
         .collect()
 }
 
-/// The columns, by index, that any of `rows` says something in. A column no
-/// row fills (times the project never retained) would be a heading over blank
-/// cells.
+/// The columns, by index, that any of `rows` says something in, and the
+/// kind of record only when the rows are of more than one kind. A column no
+/// row fills (times the project never retained) would be a heading over
+/// absent marks.
 fn shown_columns(rows: &[ProjectAuditRow]) -> Vec<usize> {
+    let mixed = rows.iter().any(|row| row.kind != rows[0].kind);
     (0..COLUMNS.len())
-        .filter(|&column| rows.iter().any(|row| !row_text(row, column).is_empty()))
+        .filter(|&column| match column {
+            KIND => mixed,
+            _ => rows.iter().any(|row| !row_text(row, column).is_empty()),
+        })
         .collect()
 }
 
@@ -1507,31 +1687,21 @@ fn natural_widths(ui: &Ui, rows: &[ProjectAuditRow], shown: &[usize]) -> Vec<f32
         .map(|(place, &column)| {
             let words = rows
                 .iter()
-                .map(|row| words_width(ui, row_text(row, column), MONO_COLUMNS[column]))
+                .map(|row| words_width(ui.painter(), row_text(row, column), MONO_COLUMNS[column]))
                 .fold(head_width(ui, COLUMNS[column]) + SORT_MARK_ROOM, f32::max);
-            let lead = if place == 0 {
-                TABLE_EDGE_INSET
-            } else {
-                CELL_PAD
-            };
-            let trail = if place == last {
-                TABLE_EDGE_INSET
-            } else {
-                CELL_PAD
-            };
-            (words + lead + trail + 2.0).ceil()
+            (words + edge_pads(place, last) + 2.0).ceil()
         })
         .collect()
 }
 
 /// How wide `text` is in a table cell's face, mono or sans.
-fn words_width(ui: &Ui, text: &str, mono: bool) -> f32 {
+fn words_width(painter: &Painter, text: &str, mono: bool) -> f32 {
     let font = if mono {
         theme::mono(tokens::FS_0, FontWeight::Regular)
     } else {
         theme::sans(tokens::FS_0, FontWeight::Regular)
     };
-    ui.painter()
+    painter
         .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER)
         .size()
         .x
@@ -1549,8 +1719,8 @@ fn head_width(ui: &Ui, head: &str) -> f32 {
         .x
 }
 
-/// How wide a comparison's column is to hold its head and `words`, each
-/// mono or not, whole, with `lead` and `trail` of padding either side.
+/// How wide a fixed column is to hold its head and `words`, each mono or
+/// not, whole, with `lead` and `trail` of padding either side.
 fn fixed_width<'a>(
     ui: &Ui,
     head: &str,
@@ -1560,7 +1730,7 @@ fn fixed_width<'a>(
 ) -> f32 {
     let widest = words
         .into_iter()
-        .map(|(text, mono)| words_width(ui, text, mono))
+        .map(|(text, mono)| words_width(ui.painter(), text, mono))
         .fold(head_width(ui, head), f32::max);
     (widest + lead + trail + 2.0).ceil()
 }
@@ -1569,10 +1739,7 @@ fn fixed_width<'a>(
 /// in proportion. Too little is taken from the widest columns alone that
 /// are not `whole`: they are cut to one common width, as wide as still
 /// fits, and every column narrower than that, or whole, keeps its whole
-/// text. Shrinking every column in proportion elided an eight-letter
-/// revision ("built-i...") beside a column of prose that could have given
-/// the room up, and cutting the widest alone elided the time a revision was
-/// made. A table that would cut a column below [`LEAST_CUT_WIDTH`] keeps its
+/// text. A list that would cut a column below [`LEAST_CUT_WIDTH`] keeps its
 /// natural widths and scrolls.
 fn fit_widths(natural: &[f32], whole: &[bool], room: f32) -> Vec<f32> {
     let total = natural.iter().sum::<f32>().max(1.0);
@@ -1634,8 +1801,8 @@ fn short_digest(record: &ValidatedSchematicRevision) -> String {
     short_text(&record.revision_digest().to_string())
 }
 
-/// A schematic revision as a comparison's heading names it: its digest and
-/// when it was made.
+/// A schematic revision as a comparison names it: its digest and when it
+/// was made.
 fn revision_label(record: &ValidatedSchematicRevision) -> String {
     format!(
         "{} ({})",
@@ -1644,7 +1811,7 @@ fn revision_label(record: &ValidatedSchematicRevision) -> String {
     )
 }
 
-/// When a record was made, as the table's Time column writes it; nothing
+/// When a record was made, as the list's Time column writes it; nothing
 /// for the unknown time zero stands for.
 fn written_time(made_unix_ms: u64) -> String {
     if made_unix_ms == 0 {
@@ -1667,6 +1834,11 @@ fn nonempty_or(value: &str, fallback: &str) -> String {
     }
 }
 
+/// `count` of a thing, named in the singular for one.
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
 fn format_revision_time(timestamp_ms: u64) -> String {
     if timestamp_ms == 0 {
         return "time unavailable".to_owned();
@@ -1684,18 +1856,26 @@ fn affected_schematic_evidence(record: &ValidatedSchematicRevision) -> String {
     let findings = record.finding_counts();
     let mut parts = vec![record.view_identity().to_owned()];
     if record.dependency_count() > 0 {
-        parts.push(format!("{} dependencies", record.dependency_count()));
+        parts.push(counted(
+            record.dependency_count(),
+            "dependency",
+            "dependencies",
+        ));
     }
     if findings.advisories > 0 {
-        parts.push(format!("{} advisories", findings.advisories));
+        parts.push(counted(
+            findings.advisories as usize,
+            "advisory",
+            "advisories",
+        ));
     }
     if findings.blockers > 0 {
-        parts.push(format!("{} blockers", findings.blockers));
+        parts.push(counted(findings.blockers as usize, "blocker", "blockers"));
     }
     if parts.len() == 1 {
         parts.push(format!("project revision {}", record.project_revision()));
     }
-    parts.join(" \u{00b7} ")
+    parts.join(SEPARATOR)
 }
 
 fn comparison_field(
@@ -1714,7 +1894,8 @@ mod tests {
     use super::*;
     use crate::product::ProjectId;
     use crate::state::{
-        ComponentType, Point, PreflightReport, ValidatedRevisionRequest, ValidationFindingCounts,
+        ComponentType, Point, PreflightReport, ValidatedRevisionChangeKind,
+        ValidatedRevisionDomain, ValidatedRevisionRequest, ValidationFindingCounts,
     };
     use crate::workbench::project::tests::harness;
 
@@ -1747,27 +1928,26 @@ mod tests {
             key: key.to_owned(),
             kind,
             revision: key.to_owned(),
-            time: NOT_RETAINED.to_owned(),
+            time: String::new(),
             made_unix_ms: None,
             age: String::new(),
-            actor: NOT_RETAINED.to_owned(),
+            actor: String::new(),
             change: change.to_owned(),
             affected_evidence: String::new(),
-            status: "retained".to_owned(),
+            status: "Retained".to_owned(),
             schematic_revision: None,
             view: None,
             current: false,
         }
     }
 
-    /// Every string the body painted, with where, after it settled at
-    /// `width`.
+    /// Every string the body painted after it settled at `width`.
     fn painted_body(
         width: f32,
         rows: &[ProjectAuditRow],
         model: &Model,
         dialog: &mut ProjectRevisionHistoryDialogState,
-    ) -> Vec<(String, egui::Rect)> {
+    ) -> Vec<String> {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut shapes = Vec::new();
@@ -1777,7 +1957,7 @@ mod tests {
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
-                            egui::vec2(width, 600.0),
+                            egui::vec2(width, 700.0),
                         )),
                         ..Default::default()
                     },
@@ -1785,7 +1965,7 @@ mod tests {
                         egui::CentralPanel::default()
                             .frame(egui::Frame::NONE)
                             .show(ctx, |ui| {
-                                let _ = revision_history_body(ui, rows, model, None, dialog);
+                                let _ = revision_history_body(ui, rows, model, None, false, dialog);
                             });
                     },
                 )
@@ -1794,13 +1974,20 @@ mod tests {
         shapes
             .iter()
             .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) => Some((
-                    text.galley.text().to_owned(),
-                    egui::Rect::from_min_size(text.pos, text.galley.size()),
-                )),
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
                 _ => None,
             })
             .collect()
+    }
+
+    /// The selected record's comparison, worked out as the dialog does.
+    fn compared(
+        dialog: &mut ProjectRevisionHistoryDialogState,
+        model: &Model,
+        rows: &[ProjectAuditRow],
+    ) -> ProjectRevisionComparison {
+        refresh_comparison(dialog, model, rows);
+        dialog.comparison.clone().expect("a comparison")
     }
 
     #[test]
@@ -1813,7 +2000,6 @@ mod tests {
             &state.document().validated_revisions,
             || None,
             None,
-            true,
         );
         let mut dialog = ProjectRevisionHistoryDialogState {
             query: "compensation".to_owned(),
@@ -1833,7 +2019,13 @@ mod tests {
         append(&mut state, "Add resistor");
         let second = state.document().validated_revisions.records()[1].clone();
         let delta = first.semantic_delta_to(&second);
-        assert_eq!(delta.components.added, 1);
+        assert_eq!(
+            delta.count(
+                ValidatedRevisionDomain::Components,
+                ValidatedRevisionChangeKind::Added
+            ),
+            1
+        );
 
         state
             .restore_validated_revision(first.id())
@@ -1869,100 +2061,12 @@ mod tests {
         );
     }
 
-    /// A table too wide for its room cuts its widest columns to one width and
-    /// leaves every narrower column whole; one with room to spare widens
-    /// every column in proportion; one that would cut a column to a sliver,
-    /// as a phone's would, keeps every column whole and scrolls.
+    /// Each revision states the date and time it was made, not an age alone;
+    /// the revision selected is compared with the design as it stands,
+    /// named by that date and time, and what changed since it is named
+    /// object by object.
     #[test]
-    fn a_table_that_cannot_fit_cuts_only_its_widest_columns() {
-        let cut = [false; 5];
-        let fitted = fit_widths(&[60.0, 120.0, 190.0, 260.0, 60.0], &cut, 600.0);
-        assert_eq!(fitted, vec![60.0, 120.0, 180.0, 180.0, 60.0]);
-        // A column read whole or not at all, the time, keeps its width
-        // however wide it is; the room comes from the prose beside it.
-        let timed = fit_widths(
-            &[60.0, 200.0, 190.0, 260.0, 60.0],
-            &[false, true, false, false, false],
-            600.0,
-        );
-        assert_eq!(timed, vec![60.0, 200.0, 140.0, 140.0, 60.0]);
-        let roomy = fit_widths(&[50.0, 150.0], &[false; 2], 400.0);
-        assert_eq!(roomy, vec![100.0, 300.0]);
-        let narrow = fit_widths(&[100.0, 200.0, 300.0], &[false; 3], 250.0);
-        assert_eq!(narrow, vec![100.0, 200.0, 300.0]);
-    }
-
-    /// The table fits the dialog's width, every column of it, with its
-    /// headings as written and nothing below it but the actions and what
-    /// they need: it used to run its last columns off the dialog behind a
-    /// horizontal scroll bar, head them in upper-case mono, fill unkept
-    /// facts with `not retained` and close on two cards explaining the
-    /// engine.
-    #[test]
-    fn the_history_table_fits_its_width_and_says_nothing_it_does_not_know() {
-        const WIDTH: f32 = 736.0;
-        let harness = harness();
-        let long = "16 models \u{b7} 0 corners \u{b7} 0 pinned sources \u{b7} more evidence";
-        let rows = vec![ProjectAuditRow {
-            revision: "built-in".to_owned(),
-            actor: "signed application catalog".to_owned(),
-            affected_evidence: long.to_owned(),
-            status: "built-in".to_owned(),
-            ..metadata_row(
-                "model-library:one",
-                ProjectAuditArtifactKind::ModelOrPdk,
-                "Model library \u{b7} RSpice Foundation",
-            )
-        }];
-        let mut dialog = ProjectRevisionHistoryDialogState {
-            open: true,
-            ..ProjectRevisionHistoryDialogState::default()
-        };
-        let texts = painted_body(WIDTH, &rows, &harness.model, &mut dialog);
-        for heading in COLUMNS {
-            // No row retained a time, so no column stands over blank cells.
-            let drawn = texts.iter().any(|(text, _)| text == heading);
-            assert_eq!(drawn, heading != "Time", "{heading:?}: {texts:?}");
-        }
-        // Every cell but the widest is stated whole; the widest alone is cut
-        // to what the dialog has left, and shows whole where it is pointed
-        // at or held.
-        for whole in (0..COLUMNS.len())
-            .map(|column| row_text(&rows[0], column))
-            .filter(|text| !text.is_empty() && *text != long)
-        {
-            assert!(
-                texts.iter().any(|(text, _)| text == whole),
-                "{whole:?} is elided: {texts:?}"
-            );
-        }
-        assert!(
-            texts.iter().any(|(text, _)| text.ends_with('\u{2026}')
-                && long.starts_with(text.trim_end_matches('\u{2026}').trim_end())),
-            "{long:?} is not cut: {texts:?}"
-        );
-        for (text, rect) in &texts {
-            assert!(
-                rect.right() <= WIDTH + 0.5,
-                "{text:?} runs past the table's edge to {}",
-                rect.right()
-            );
-            for gone in [
-                "REVISION",
-                "not retained",
-                "Semantic comparison",
-                "Results never change",
-            ] {
-                assert!(!text.contains(gone), "{text:?} is still stated");
-            }
-        }
-    }
-
-    /// Each revision states the date and time it was made in the table, not
-    /// an age alone, and a comparison names the revisions it compares by
-    /// that date and time too.
-    #[test]
-    fn a_revision_states_when_it_was_made_and_so_does_its_comparison() {
+    fn a_revision_states_when_it_was_made_and_what_changed_since() {
         let mut harness = harness();
         append(&mut harness.model.schematic, "Baseline");
         harness
@@ -1984,36 +2088,155 @@ mod tests {
         };
         let texts = painted_body(1200.0, &rows, &harness.model, &mut dialog);
         let made = crate::time_compat::utc_stamp(records[1].created_unix_ms());
+        assert!(texts.contains(&made), "{made:?} is not listed: {texts:?}");
         assert!(
-            texts.iter().any(|(text, _)| *text == made),
-            "{made:?} is not in the table: {texts:?}"
-        );
-        assert!(
-            !texts.iter().any(|(text, _)| text == "just now"),
+            !texts.iter().any(|text| text == "just now"),
             "an age stands for the time: {texts:?}"
         );
 
         // The baseline, which the resistor moved on from.
         dialog.stand_on(schematic_row_key(records[0].id()));
-        compare_with_current(&mut dialog, &harness.model, &rows);
-        let Some(ProjectRevisionComparison::Schematic { label, .. }) = &dialog.comparison else {
-            panic!("no comparison: {:?}", dialog.error);
+        let ProjectRevisionComparison::Schematic {
+            title,
+            sides,
+            delta,
+            with_current,
+        } = compared(&mut dialog, &harness.model, &rows)
+        else {
+            panic!("no drawing comparison: {:?}", dialog.comparison);
         };
+        assert!(with_current);
+        assert_eq!(title, "Changes to the current design");
         let baseline = crate::time_compat::utc_stamp(records[0].created_unix_ms());
-        assert!(label.contains(&baseline), "{label:?}");
-        // What changed is stated domain by domain, each name whole.
+        assert!(sides.contains(&baseline), "{sides:?}");
+        let added = delta
+            .changes
+            .iter()
+            .find(|change| change.kind == ValidatedRevisionChangeKind::Added)
+            .expect("the resistor is named as added");
+        assert_eq!(added.domain, ValidatedRevisionDomain::Components);
         let texts = painted_body(1200.0, &rows, &harness.model, &mut dialog);
-        for domain in ["Components", "Documentation shapes", "Document policy"] {
-            assert!(
-                texts.iter().any(|(text, _)| text == domain),
-                "{domain:?} is not stated whole: {texts:?}"
-            );
+        for said in [title, &sides, &object_words(added), "Components"] {
+            assert!(texts.iter().any(|text| text == said), "{said:?}: {texts:?}");
         }
     }
 
-    /// Restore says why it cannot act on what is selected: a record that
-    /// keeps no drawing, a revision the drawing already matches, a second
-    /// record beside the first. Nothing selected says how to choose.
+    /// A revision compared with another of its view states the changes from
+    /// the older to the newer, whichever is selected; the choice offers the
+    /// design as it stands and the view's other revisions, and no record of
+    /// another kind. Records of another kind are compared fact by fact.
+    #[test]
+    fn a_record_is_compared_with_the_one_chosen() {
+        let mut harness = harness();
+        append(&mut harness.model.schematic, "Baseline");
+        harness
+            .model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(10, 20));
+        append(&mut harness.model.schematic, "Add resistor");
+        harness
+            .model
+            .schematic
+            .add_component(ComponentType::Capacitor, Point::new(40, 20));
+        append(&mut harness.model.schematic, "Add capacitor");
+        let records = harness
+            .model
+            .schematic
+            .document()
+            .validated_revisions
+            .records()
+            .to_vec();
+        let rows = project_audit_rows(&harness.model);
+        let row = |id: ValidatedSchematicRevisionId| {
+            rows.iter()
+                .find(|row| row.key == schematic_row_key(id))
+                .unwrap()
+        };
+        let (first, others) = compare_choices(row(records[0].id()), &rows);
+        assert_eq!(first, "Current design");
+        assert_eq!(
+            others
+                .iter()
+                .map(|(other, _)| other.key.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                schematic_row_key(records[2].id()),
+                schematic_row_key(records[1].id())
+            ]
+        );
+
+        for (selected, chosen) in [(0, 2), (2, 0)] {
+            let mut dialog = ProjectRevisionHistoryDialogState::default();
+            dialog.stand_on(schematic_row_key(records[selected].id()));
+            refresh_comparison(&mut dialog, &harness.model, &rows);
+            dialog.compare_with = Some(schematic_row_key(records[chosen].id()));
+            let ProjectRevisionComparison::Schematic {
+                title,
+                sides,
+                delta,
+                with_current,
+            } = compared(&mut dialog, &harness.model, &rows)
+            else {
+                panic!("no drawing comparison: {:?}", dialog.comparison);
+            };
+            assert!(!with_current);
+            assert_eq!(title, "Changes between two revisions");
+            let older = sides
+                .find(&revision_label(&records[0]))
+                .expect("the older is named");
+            let newer = sides
+                .find(&revision_label(&records[2]))
+                .expect("the newer is named");
+            assert!(older < newer, "{sides:?}");
+            assert_eq!(
+                delta.count(
+                    ValidatedRevisionDomain::Components,
+                    ValidatedRevisionChangeKind::Added
+                ),
+                2
+            );
+            // Another selection starts again from the design as it stands.
+            dialog.stand_on(schematic_row_key(records[1].id()));
+            refresh_comparison(&mut dialog, &harness.model, &rows);
+            assert_eq!(dialog.compare_with, None);
+        }
+
+        let mut plans = [
+            metadata_row(
+                "simulation-plan:one",
+                ProjectAuditArtifactKind::SimulationPlan,
+                "Bias sweep",
+            ),
+            metadata_row(
+                "simulation-plan:two",
+                ProjectAuditArtifactKind::SimulationPlan,
+                "Bias sweep",
+            ),
+        ];
+        plans[1].status = "Active".to_owned();
+        assert_eq!(compare_choices(&plans[0], &plans).0, "No comparison");
+        assert!(comparison_of(&plans[0], None, &harness.model).is_none());
+        let Some(ProjectRevisionComparison::RetainedMetadata(facts)) =
+            comparison_of(&plans[0], Some(&plans[1]), &harness.model)
+        else {
+            panic!("the plans are not compared");
+        };
+        assert_eq!(
+            facts.fields,
+            vec![
+                (
+                    "Revision",
+                    "simulation-plan:one".to_owned(),
+                    "simulation-plan:two".to_owned()
+                ),
+                ("Status", "Retained".to_owned(), "Active".to_owned()),
+            ]
+        );
+    }
+
+    /// Restore says why it cannot act on the selected record: one that
+    /// keeps no drawing, a revision the drawing already matches; and while
+    /// it asks for confirmation, what it replaces.
     #[test]
     fn restore_states_why_it_cannot_act() {
         let mut harness = harness();
@@ -2028,41 +2251,35 @@ mod tests {
             ProjectAuditArtifactKind::SimulationPlan,
             "Active",
         );
-        let note = |selected: &[&ProjectAuditRow], touch: bool| {
-            selection_note(
-                selected,
-                &Offer::of(selected, &harness.model, touch),
-                false,
-                false,
-                touch,
-            )
-        };
         let shown = revision
             .view
             .as_ref()
             .map(CellViewRef::display_path)
             .unwrap();
         assert!(revision.current, "nothing changed since the revision");
+        let refused = restore_target(revision, &harness.model);
         assert_eq!(
-            Offer::of(&[revision], &harness.model, false).restore,
+            refused,
             Err(format!("{shown} already matches this revision."))
         );
-        assert!(note(&[revision], false).starts_with(&format!("{shown} already matches")));
         assert_eq!(
-            Offer::of(&[&plan], &harness.model, false).restore,
+            restore_note(revision, &refused, false, false),
+            Some(format!("{shown} already matches this revision."))
+        );
+        assert_eq!(restore_note(revision, &refused, false, true), None);
+        assert_eq!(
+            restore_target(&plan, &harness.model),
             Err(NOT_A_DRAWING.to_owned())
         );
-        assert!(note(&[&plan], true).starts_with(NOT_A_DRAWING));
+        let confirmed = Ok((revision.schematic_revision.unwrap(), None));
         assert!(
-            note(&[&plan], true)
-                .ends_with("Tap the mark before a second record to compare the two.")
+            restore_note(revision, &confirmed, true, false).is_some_and(|note| note.starts_with(
+                &format!(
+                    "Restore replaces the drawing of {shown} with revision {}",
+                    revision.revision
+                )
+            ))
         );
-        assert!(note(&[&plan], false).ends_with("Ctrl+click a second record to compare the two."));
-        assert_eq!(
-            note(&[revision, &plan], false),
-            "Restore and Compare with current take one record. Compare takes two records of one kind."
-        );
-        assert!(note(&[], true).starts_with("Tap a schematic revision"));
     }
 
     /// A revision of a schematic that is not in front asks the shell to open
@@ -2093,7 +2310,7 @@ mod tests {
             .expect("the other view's revision is listed");
         assert!(!row.current);
         assert_eq!(
-            Offer::of(&[row], &harness.model, true).restore,
+            restore_target(row, &harness.model),
             Ok((row.schematic_revision.unwrap(), Some(amp.clone())))
         );
         harness.state.project_revision_history = ProjectRevisionHistoryDialogState {

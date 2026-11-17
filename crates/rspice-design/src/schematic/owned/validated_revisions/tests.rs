@@ -1,5 +1,8 @@
 //! Headless validated-revision cases relocated from application state.
 use super::*;
+use crate::schematic::validated_revision::{
+    ValidatedRevisionChangeKind as Kind, ValidatedRevisionDomain as Domain,
+};
 use crate::schematic::{
     component_edit::ComponentPlacement, component_type::ComponentType,
     document_policy::NetNamingPolicy, rotation::Rotation,
@@ -124,9 +127,65 @@ fn semantic_delta_reports_stable_object_changes() {
         .find(|record| record.id() == second)
         .unwrap();
     let delta = first.semantic_delta_to(second);
-    assert_eq!(delta.components.added, 1);
-    assert_eq!(delta.components.modified, 1);
-    assert!(delta.grid_changed);
+    assert_eq!(delta.count(Domain::Components, Kind::Added), 1);
+    assert_eq!(delta.count(Domain::Components, Kind::Changed), 1);
+    assert_eq!(delta.count(Domain::DocumentSettings, Kind::Changed), 1);
+}
+
+/// A comparison names each object it reports as the sheet shows it: a
+/// component by its designator and value, with what changed in a changed
+/// one, and a setting by its name with its two values.
+#[test]
+fn a_comparison_names_what_changed() {
+    let project_id = Uuid::new_v4();
+    let mut state = Schematic::default();
+    place(&mut state, ComponentType::Resistor, Point::new(10, 10));
+    state.document.components[0].name = "R7".to_owned();
+    state.document.components[0].value = "1k".to_owned();
+    let saved = state
+        .append_validated_revision(request(&state, project_id), || Ok(1))
+        .expect("validated revision");
+    let revision = state
+        .document()
+        .validated_revisions
+        .records()
+        .iter()
+        .find(|record| record.id() == saved)
+        .unwrap()
+        .clone();
+    let grid = state.document.grid_size;
+    state.document.components[0].value = "2k".to_owned();
+    place(&mut state, ComponentType::Capacitor, Point::new(20, 10));
+    state.document.components[1].name = "C3".to_owned();
+    state.document.components[1].value = "10n".to_owned();
+    state.document.grid_size = grid * 2;
+    let named = state
+        .semantic_delta_since(&revision)
+        .changes
+        .into_iter()
+        .map(|change| (change.domain, change.kind, change.name, change.detail))
+        .collect::<Vec<_>>();
+    let expected = [
+        (
+            Domain::Components,
+            Kind::Changed,
+            "R7 (2k)".to_owned(),
+            "value 1k \u{2192} 2k".to_owned(),
+        ),
+        (
+            Domain::Components,
+            Kind::Added,
+            "C3 (10n)".to_owned(),
+            String::new(),
+        ),
+        (
+            Domain::DocumentSettings,
+            Kind::Changed,
+            "Grid size".to_owned(),
+            format!("{grid} \u{2192} {}", grid * 2),
+        ),
+    ];
+    assert_eq!(named, expected);
 }
 
 /// The drawing as it stands is compared with a revision by the rules two
@@ -146,9 +205,9 @@ fn a_drawing_is_compared_with_a_revision_it_moved_on_from() {
     state.document.components[0].value = "2k".to_owned();
     place(&mut state, ComponentType::Capacitor, Point::new(20, 10));
     let delta = state.semantic_delta_since(&revision);
-    assert_eq!(delta.components.added, 1);
-    assert_eq!(delta.components.modified, 1);
-    assert_eq!(delta.components.removed, 0);
+    assert_eq!(delta.count(Domain::Components, Kind::Added), 1);
+    assert_eq!(delta.count(Domain::Components, Kind::Changed), 1);
+    assert_eq!(delta.count(Domain::Components, Kind::Removed), 0);
 
     assert!(state.restore_validated_revision(saved).expect("restore"));
     assert!(state.semantic_delta_since(&revision).is_empty());

@@ -201,7 +201,7 @@ fn history_app() -> (RSpiceApp, [Made; 3]) {
     (app, [baseline, resistor, amplifier_review])
 }
 
-fn selected(app: &RSpiceApp) -> Vec<String> {
+fn selected(app: &RSpiceApp) -> Option<String> {
     app.state.project.project_revision_history.selected()
 }
 
@@ -209,14 +209,22 @@ fn key(made: &Made) -> String {
     format!("schematic:{}", made.id.as_uuid())
 }
 
-/// On a tablet and on a phone, a finger compares a revision with the design
-/// as it stands, adds a second revision by the mark before its row and
-/// compares the two, and restores a revision of a schematic that is not
-/// open, which opens it: no key is held and nothing is hovered. Every
-/// revision states the date and time it was made.
+/// A revision as a comparison and the choice of what to compare it with
+/// name it: its digest and when it was made.
+fn named(made: &Made) -> String {
+    format!("{} ({})", made.digest, made.stamp)
+}
+
+/// On a tablet and on a phone, a finger selects a revision and reads what
+/// changed since it, chooses another revision of its view to compare it
+/// with, and restores a revision of a schematic that is not open, which
+/// opens it: no key is held and nothing is hovered. Every revision states
+/// the date and time it was made. On the phone each record opens on a page
+/// of its own, and Back returns to the list.
 #[test]
 fn every_comparison_and_restore_is_reached_by_taps_alone() {
     for size in [TABLET, PHONE] {
+        let phone = size == PHONE;
         let ctx = offscreen();
         let (mut app, [baseline, resistor, amp]) = history_app();
         let output = settle(&ctx, &mut app, size);
@@ -229,51 +237,53 @@ fn every_comparison_and_restore_is_reached_by_taps_alone() {
             );
         }
 
-        // The baseline row, then Compare with current.
+        // The baseline: what changed since it, by name.
         let output = tap(&ctx, &mut app, size, &output, |label| {
             label.contains("Change: Baseline review")
         });
-        assert_eq!(selected(&app), vec![key(&baseline)], "{size:?}");
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Compare with current"
-        });
+        assert_eq!(selected(&app), Some(key(&baseline)), "{size:?}");
         let text = said(&output);
-        assert!(
-            text.contains(&format!(
-                "{} ({}) \u{2192} current design",
-                baseline.digest, baseline.stamp
-            )),
-            "{size:?}:\n{text}"
-        );
+        let since = format!("From revision {} to the current design", named(&baseline));
+        for stated in ["Changes to the current design", &since, "Components", "Added"] {
+            assert!(text.contains(stated), "{size:?}: {stated:?}\n{text}");
+        }
 
-        // The mark before the resistor's row adds it; Compare selected.
+        // Compared with the resistor's revision instead, chosen by taps.
+        let output = tap(&ctx, &mut app, size, &output, |label| label == "Compare with");
         let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == format!("Select {}", resistor.digest)
+            label == named(&resistor)
         });
         assert_eq!(
-            selected(&app),
-            vec![key(&resistor), key(&baseline)],
+            app.state
+                .project
+                .project_revision_history
+                .compared_with()
+                .map(str::to_owned),
+            Some(key(&resistor)),
             "{size:?}"
         );
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Compare selected"
-        });
         let text = said(&output);
-        assert!(
-            text.contains(&format!(
-                "{} ({}) \u{2192} {} ({})",
-                baseline.digest, baseline.stamp, resistor.digest, resistor.stamp
-            )),
-            "{size:?}:\n{text}"
+        let between = format!(
+            "From revision {} to revision {}",
+            named(&baseline),
+            named(&resistor)
         );
+        for stated in ["Changes between two revisions", &between] {
+            assert!(text.contains(stated), "{size:?}: {stated:?}\n{text}");
+        }
 
-        // The amplifier's revision alone, then Restore and its confirmation.
+        // The amplifier's revision, then Restore and its confirmation.
+        let output = if phone {
+            tap(&ctx, &mut app, size, &output, |label| label == "Back")
+        } else {
+            output
+        };
         let output = tap(&ctx, &mut app, size, &output, |label| {
             label.contains("Change: Amplifier review")
         });
-        assert_eq!(selected(&app), vec![key(&amp)], "{size:?}");
+        assert_eq!(selected(&app), Some(key(&amp)), "{size:?}");
         let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Restore selected\u{2026}"
+            label == "Restore\u{2026}"
         });
         let text = said(&output);
         assert!(

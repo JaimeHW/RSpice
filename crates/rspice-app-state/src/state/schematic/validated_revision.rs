@@ -1,10 +1,11 @@
 //! App coordination for validated-save history, undo and live probe preservation.
 
 pub use rspice_design::schematic::validated_revision::{
-    AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
-    ValidatedRevisionError, ValidatedRevisionJournal, ValidatedRevisionObjectDelta,
-    ValidatedRevisionRequest, ValidatedRevisionSemanticDelta, ValidatedSchematicRevision,
-    ValidatedSchematicRevisionId, ValidationFindingCounts,
+    AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionChange,
+    ValidatedRevisionChangeKind, ValidatedRevisionDependency, ValidatedRevisionDomain,
+    ValidatedRevisionError, ValidatedRevisionJournal, ValidatedRevisionRequest,
+    ValidatedRevisionSemanticDelta, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
+    ValidationFindingCounts,
 };
 
 use super::SchematicState;

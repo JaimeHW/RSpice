@@ -143,10 +143,10 @@ pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession}
 pub use tool::Tool;
 pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 pub use validated_revision::{
-    AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
-    ValidatedRevisionJournal, ValidatedRevisionObjectDelta, ValidatedRevisionRequest,
-    ValidatedRevisionSemanticDelta, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
-    ValidationFindingCounts,
+    AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionChange,
+    ValidatedRevisionChangeKind, ValidatedRevisionDependency, ValidatedRevisionDomain,
+    ValidatedRevisionJournal, ValidatedRevisionRequest, ValidatedRevisionSemanticDelta,
+    ValidatedSchematicRevision, ValidatedSchematicRevisionId, ValidationFindingCounts,
 };
 pub use vector_display::{BusNotations, bus_notations};
 pub use visibility::{

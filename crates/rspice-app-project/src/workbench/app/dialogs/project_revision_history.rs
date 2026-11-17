@@ -110,28 +110,36 @@ impl ProjectAuditArtifactKind {
         match self {
             Self::Schematic => "Schematic",
             Self::SimulationPlan => "Simulation plan",
-            Self::ModelOrPdk => "Model / PDK",
+            Self::ModelOrPdk => "Model or PDK",
             Self::GovernedRecord => "Governed record",
         }
     }
 }
 
+/// The retained facts two records of one kind differ in: each fact's name
+/// and its value in the selected record and in the one compared with it.
 #[derive(Debug, Clone)]
 pub(crate) struct ProjectAuditComparison {
-    pub(crate) label: String,
     pub(crate) fields: Vec<(&'static str, String, String)>,
 }
 
+/// What the selected record is compared with, worked out.
 #[derive(Debug, Clone)]
 pub(crate) enum ProjectRevisionComparison {
+    /// What changed in a schematic's drawing from a revision to a later
+    /// drawing.
     Schematic {
-        label: String,
+        /// What is compared, in plain words.
+        title: &'static str,
+        /// The two drawings and the view they are of, as a sentence.
+        sides: String,
         delta: ValidatedRevisionSemanticDelta,
-        /// The newer side is the view's drawing as it stands, not a
-        /// revision.
+        /// The later drawing is the view's as it stands, not a revision.
         with_current: bool,
     },
     RetainedMetadata(ProjectAuditComparison),
+    /// Why the comparison cannot be made.
+    Unavailable(String),
 }
 
 /// A restore that opened its revision's view and waits for it to be in
@@ -182,13 +190,28 @@ pub struct ProjectRevisionHistoryDialogState {
     pub(crate) query: String,
     /// The table's selection, sort and sideways scroll.
     pub(crate) table: TableState,
+    /// The record the selected one is compared with, by its key: for a
+    /// schematic revision none is the view's drawing as it stands, for any
+    /// other record none is no comparison.
+    pub(crate) compare_with: Option<String>,
     pub(crate) comparison: Option<ProjectRevisionComparison>,
+    /// The selected record and the one compared with it when the
+    /// comparison was worked out.
+    pub(crate) compared: Option<(String, Option<String>)>,
+    /// The comparison's table: its folded groups and its selection.
+    pub(crate) changes: TableState,
+    /// The height the reader dragged the record list to above its divider;
+    /// none for the even split.
+    pub(crate) list_height: Option<f32>,
+    /// On a phone, the selected record's page stands in place of the list.
+    pub(crate) record_page: bool,
+    /// Bring the selected row into view when the list next draws.
+    pub(crate) reveal: bool,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) expected_journal: ValidatedRevisionJournal,
     pub(crate) restore_confirmation: bool,
     pub(crate) pending_restore: Option<PendingRestore>,
     pub(crate) error: Option<String>,
-    pub(crate) body_scroll_offset: f32,
     /// The table's rows, built when the dialog opens and again when what
     /// they were built from moves; never on an idle frame.
     pub(crate) rows: Arc<[ProjectAuditRow]>,
@@ -203,13 +226,18 @@ impl Default for ProjectRevisionHistoryDialogState {
             artifact_filter: ProjectRevisionArtifactFilter::All,
             query: String::new(),
             table: TableState::default(),
+            compare_with: None,
             comparison: None,
+            compared: None,
+            changes: TableState::default(),
+            list_height: None,
+            record_page: false,
+            reveal: false,
             authority: None,
             expected_journal: ValidatedRevisionJournal::default(),
             restore_confirmation: false,
             pending_restore: None,
             error: None,
-            body_scroll_offset: 0.0,
             rows: Arc::from(Vec::new()),
             rows_source: None,
             shown: ShownRows::default(),
@@ -218,27 +246,24 @@ impl Default for ProjectRevisionHistoryDialogState {
 }
 
 impl ProjectRevisionHistoryDialogState {
-    /// The keys of the rows the history stands on, in the order the table
-    /// lists them.
-    pub fn selected(&self) -> Vec<String> {
-        let mut selected = self
-            .table
-            .selection
-            .iter()
-            .chain(&self.table.others)
-            .filter_map(|selection| match &selection.key {
-                Some(RowKey::Text(key)) => Some((selection.row, key.clone())),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        selected.sort_by_key(|(row, _)| *row);
-        selected.into_iter().map(|(_, key)| key).collect()
+    /// The key of the record the history stands on, when it stands on one.
+    pub fn selected(&self) -> Option<String> {
+        match self.table.selected_key() {
+            Some(RowKey::Text(key)) => Some(key.clone()),
+            _ => None,
+        }
     }
 
-    /// Stand the history on the record `key` names, alone. The table finds
+    /// The key of the record the selected one is compared with.
+    pub fn compared_with(&self) -> Option<&str> {
+        self.compare_with.as_deref()
+    }
+
+    /// Stand the history on the record `key` names, in view. The table finds
     /// its row when it next draws; a key no row carries selects nothing.
     pub(crate) fn stand_on(&mut self, key: String) {
         self.table.select(0, Some(RowKey::Text(key)));
+        self.reveal = true;
     }
 
     pub(crate) fn close(&mut self) {
