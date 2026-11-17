@@ -337,7 +337,7 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
             .validate()
             .expect_err("schematic owner must fail")
             .to_string()
-            .contains("requires a Verilog-A view")
+            .contains("requires a Verilog, Verilog-A or Verilog-AMS view")
     );
 }
 
