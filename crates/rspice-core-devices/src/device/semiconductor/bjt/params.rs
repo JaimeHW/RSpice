@@ -1925,21 +1925,15 @@ impl Bjt {
         {
             self.xrbx = v;
         }
+        // EG is the Gummel-Poon bandgap only. VBIC has no EG: LTspice 17.2.4,
+        // ngspice-46 (vbic.c) and Xyce 7.10 (ADMSvbic13.C) all leave the
+        // activation energies at their EA defaults when a VBIC card names it.
         if let Some(&v) = params.get("EG")
             && v.is_finite()
         {
             self.eg = v;
-            self.ea = v;
-            self.eaie = v;
-            self.eaic = v;
-            self.eais = v;
-            self.eane = v;
-            self.eanc = v;
-            self.eans = v;
-            self.eap = v;
         }
         // VBIC declares these activation energies without a lower bound.
-        // Explicit zero/negative values must also override an EG fallback.
         if let Some(&v) = params.get("EA")
             && v.is_finite()
         {
@@ -3390,8 +3384,6 @@ mod tests {
                 for energy in [0.0, -0.1] {
                     let mut params = vec![
                         ("LEVEL", level),
-                        ("EG", 0.8),
-                        (selected_name, energy),
                         ("IS", 1e-16),
                         ("IBEI", 2e-17),
                         ("IBCI", 3e-17),
@@ -3404,6 +3396,11 @@ mod tests {
                         ("IBENP", 1e-16),
                         ("TNOM", 27.0),
                     ];
+                    params.extend(
+                        energies
+                            .iter()
+                            .map(|&name| (name, if name == selected_name { energy } else { 0.8 })),
+                    );
                     // Non-unit emission coefficients distinguish each law's
                     // activation/exponent divisor, including the parasitic BJT.
                     params.extend([
@@ -3927,6 +3924,38 @@ mod tests {
             bjt.requested_temperature().to_bits(),
             crate::constants::celsius_to_kelvin(35.0).to_bits()
         );
+    }
+
+    /// LTspice 17.2.4, ngspice-46 and Xyce 7.10 give a VBIC card with EG=0.9
+    /// the currents of the same card without it: EG is not a VBIC parameter.
+    #[test]
+    fn vbic_activation_energies_ignore_eg() {
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            let energies = |bjt: &Bjt| {
+                [
+                    bjt.ea, bjt.eaie, bjt.eaic, bjt.eais, bjt.eane, bjt.eanc, bjt.eans, bjt.eap,
+                ]
+                .map(f64::to_bits)
+            };
+            let mut plain = model_with(&[("LEVEL", level), ("IS", 1e-16), ("IBEI", 1e-18)]);
+            let mut with_eg = model_with(&[
+                ("LEVEL", level),
+                ("IS", 1e-16),
+                ("IBEI", 1e-18),
+                ("EG", 0.9),
+            ]);
+            assert_eq!(with_eg.charge_model, BjtChargeModel::Vbic);
+            assert_eq!(energies(&with_eg), energies(&plain), "LEVEL={level}");
+            let hot = crate::constants::celsius_to_kelvin(75.0);
+            plain.set_temperature(hot);
+            with_eg.set_temperature(hot);
+            assert_eq!(with_eg.is.to_bits(), plain.is.to_bits(), "LEVEL={level}");
+            assert_eq!(
+                with_eg.ibei.to_bits(),
+                plain.ibei.to_bits(),
+                "LEVEL={level}"
+            );
+        }
     }
 
     #[test]

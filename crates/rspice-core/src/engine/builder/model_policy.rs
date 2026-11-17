@@ -951,6 +951,22 @@ pub(super) fn validate_bjt_model_level(
 
     // Parameter-based VBIC inference must agree with device construction.
     let native_vbic_model = crate::device::Bjt::uses_vbic_charge_model(params);
+    // VBIC's temperature laws take EA and its seven siblings. LTspice,
+    // ngspice and Xyce all run a VBIC card that names EG as if it did not;
+    // ngspice and Xyce say so, and so does this.
+    if native_vbic_model
+        && (params.contains_key("EG")
+            || expr_params
+                .iter()
+                .chain(string_params.iter())
+                .any(|(key, _)| key.eq_ignore_ascii_case("EG")))
+    {
+        let line =
+            format!("BJT model '{model}': EG is not a VBIC parameter: use EA. EG is ignored.");
+        if crate::log_scope::first_saying(&line) {
+            log::warn!("{line}");
+        }
+    }
     let mut temperature_parameters_given = false;
     for name in crate::device::Bjt::legacy_temperature_parameter_names() {
         let authored = params.contains_key(name)

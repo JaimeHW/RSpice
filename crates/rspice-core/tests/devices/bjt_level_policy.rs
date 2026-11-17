@@ -8,6 +8,8 @@ use rspice_core::NoAbort;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{ElementKind, Netlist};
 
+use super::log_capture;
+
 const VBIC13_TEST_VBBE: f64 = 2.0;
 const VBIC13_TEST_NBBE: f64 = 5.0;
 const VBIC13_TEST_IBBE: f64 = 1e-9;
@@ -113,6 +115,40 @@ fn vbic_nonpositive_activation_energies_match_xyce710_dc_and_ac() {
             }
         }
     }
+}
+
+/// EG is not a VBIC parameter. At 75 C, LTspice 17.2.4 gives this card
+/// I(Rc) = 3.14205e-05 A with and without EG=0.9 and ngspice-46 gives
+/// I(Vcc) = -3.142383164e-05 A for both (Xyce 7.10 has no VBIC EG either);
+/// EA=0.9 moves them to 9.72864e-06 and -9.728973696e-06 A.
+#[test]
+fn vbic_runs_eg_as_the_references_do_and_says_to_use_ea() {
+    let deck = |extra: &str| {
+        format!(
+            "* vbic EG at 75C\n\
+             .model qn npn level=4 is=1e-16 ibei=1e-18 cje=1p cjc=0.5p vef=50 xis=3 {extra}\n\
+             vcc vcc 0 5\nrc vcc c 1k\nvb b 0 0.6\nq1 c b 0 qn\n.temp 75\n.op\n.end\n"
+        )
+    };
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let current = |extra: &str| branch_current_with_config(&deck(extra), "vcc", config.clone());
+    let (with_eg, warnings) =
+        log_capture::lines_logged(log::LevelFilter::Warn, || current("eg=0.9"));
+    let advice = "BJT model 'QN': EG is not a VBIC parameter: use EA. EG is ignored.";
+    assert_eq!(
+        warnings.iter().filter(|line| *line == advice).count(),
+        1,
+        "{warnings:?}"
+    );
+    let plain = current("");
+    assert_eq!(with_eg.to_bits(), plain.to_bits());
+    assert_rel_close("no EA", plain, -3.142383164e-05, 1e-6);
+    let (ea, warnings) = log_capture::lines_logged(log::LevelFilter::Warn, || current("ea=0.9"));
+    assert!(
+        !warnings.iter().any(|line| line.contains("EG")),
+        "{warnings:?}"
+    );
+    assert_rel_close("EA=0.9", ea, -9.728973696e-06, 1e-6);
 }
 
 #[test]
