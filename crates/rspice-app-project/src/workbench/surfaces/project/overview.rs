@@ -23,7 +23,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::health::{lifecycle_label, lifecycle_tone};
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::project::{ProjectFeature, open_project_revision_history, schematic_row_key};
+use crate::workbench::project::{ProjectFeature, open_project_revision_history_on};
 use crate::workbench::state::Workspace;
 
 use super::library::{LibraryIntent, apply_library_intent};
@@ -177,26 +177,12 @@ impl OverviewIntent {
                     cx.model.diagnostics.set_current_finding(finding);
                 }
             }
-            Self::OpenRevision(key) => {
-                open_project_revision_history(
-                    &mut cx.state.project_revision_history,
-                    cx.model,
-                    cx.platform,
-                );
-                // The history lists the open schematic's revisions; one of
-                // another cell's opens the history on its newest.
-                let listed = cx
-                    .model
-                    .schematic
-                    .document()
-                    .validated_revisions
-                    .records()
-                    .iter()
-                    .any(|record| schematic_row_key(record.id()) == key);
-                if listed && cx.state.project_revision_history.open {
-                    cx.state.project_revision_history.selected = vec![key];
-                }
-            }
+            Self::OpenRevision(key) => open_project_revision_history_on(
+                &mut cx.state.project_revision_history,
+                cx.model,
+                cx.platform,
+                key,
+            ),
             Self::OpenCheckpoint(checkpoint) => {
                 cx.execute(ProjectCommand::Page(ProjectPage::Recovery).key());
                 cx.state.project_checkpoint_selection = Some(checkpoint);
