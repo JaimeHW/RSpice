@@ -117,3 +117,47 @@ oracle = "O5"
 abs_db = 1e-4
 abs_deg = 1e-3
 why = "corpus O5 rule: the testbench held at its t = 0 output, the readers removed; same equations and solver"
+
+# sh: a timer sample-and-hold rung (net/sh_slew.va). The 0.1 V/us ramp is
+# sampled at t_k = 0.5 us + k us, and the output slews at 1 V/us from the
+# previous sample to the new one, 0.1 V in 0.1 us. A sample seen before its
+# instant moves the output early: by the whole 0.1 V when slew() takes the
+# new target over the preceding step, by 1 V/us times that step when it
+# leads one step. The output is piecewise linear in time and exact at every
+# accepted point; the timer's instant is dated to the 1 ps time precision,
+# 1e-6 V at 1 V/us, and 1e-5 V allows ten of that.
+[[q]]
+id = "sh_start"
+analysis = "tran"
+variants = ["sh"]
+kind = "interp_at"
+signal = "v(out)"
+times = { start = 1.5e-6, step = 1e-6, count = 8 }
+oracle = "O6"
+expect = "c08::sh"
+abs = 1e-5
+why = "at each sample instant the output still holds the previous sample (derivation above)"
+
+[[q]]
+id = "sh_slew"
+analysis = "tran"
+variants = ["sh"]
+kind = "interp_at"
+signal = "v(out)"
+times = { start = 1.55e-6, step = 1e-6, count = 8 }
+oracle = "O6"
+expect = "c08::sh"
+abs = 1e-5
+why = "50 ns into each slew the output is halfway, previous sample + 0.05 V (derivation above)"
+
+[[q]]
+id = "sh_hold"
+analysis = "tran"
+variants = ["sh"]
+kind = "interp_at"
+signal = "v(out)"
+times = { start = 2.0e-6, step = 1e-6, count = 8 }
+oracle = "O6"
+expect = "c08::sh"
+abs = 1e-5
+why = "half a period after each sample the output holds it, 0.1 V/us times its instant (derivation above)"

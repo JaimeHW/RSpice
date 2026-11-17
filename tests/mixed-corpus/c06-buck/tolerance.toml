@@ -498,3 +498,46 @@ expect = "c06::ilmean"
 abs = 3e-3
 why = "charge balance does not depend on L or C"
 insensitive_time = "per-trial levels over many switching periods: the output's mean, its peak-to-peak ripple and the inductor's mean current; a stretch moves when they are read, not how large they are"
+
+# tmr: the timer twin (net/tmr_rc.vams), a mixed module. A timer at 500 us sets s = V(in) =
+# 1 V; V(a) <+ s drives 1 kOhm into 100 nF, so v(ca) = 1 − exp(−(t − 500 us)
+# / 100 us) after it, and V(b) <+ idt(1e4·s) rises 0.01 V/us from it. A
+# sample seen over the step before its instant leads both by that step:
+# 1 us moves v(ca) 3.7e-3 at 600 us and v(b) by 0.01 V. The trapezoidal
+# solve at 1 us steps errs (h/τ)²/12 ≈ 1e-5 relative, and reading between
+# accepted points adds h²/(8τ²) ≈ 1.3e-5: 1e-4 V allows several of each.
+[[q]]
+id = "tmr_rc"
+analysis = "tran"
+variants = ["tmr"]
+kind = "interp_at"
+signal = "v(ca)"
+times = { start = 5.0e-4, step = 5.0e-5, count = 9 }
+oracle = "O6"
+expect = "c06::tmr_rc"
+abs = 1e-4
+why = "the RC from the timer's instant: 1 − exp(−(t − 500 us)/100 us) (derivation above)"
+
+[[q]]
+id = "tmr_dig"
+analysis = "tran"
+variants = ["tmr"]
+kind = "interp_at"
+signal = "v(cc)"
+times = { start = 5.0e-4, step = 5.0e-5, count = 9 }
+oracle = "O6"
+expect = "c06::tmr_rc"
+abs = 1e-4
+why = "the control: the same RC stepped by a digital reg at 500 us (derivation above)"
+
+[[q]]
+id = "tmr_idt"
+analysis = "tran"
+variants = ["tmr"]
+kind = "interp_at"
+signal = "v(b)"
+times = { start = 5.0e-4, step = 5.0e-5, count = 9 }
+oracle = "O6"
+expect = "c06::tmr_idt"
+abs = 1e-4
+why = "idt(1e4·s) from the timer's instant: 0.01 V/us·(t − 500 us) (derivation above)"

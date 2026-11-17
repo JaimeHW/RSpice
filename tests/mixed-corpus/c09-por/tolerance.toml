@@ -245,3 +245,114 @@ oracle = "O6"
 expect = "c09::rstn"
 abs = 1.0e-3
 why = "time never advances in an operating point, so rst_n keeps its initial 0"
+
+# p3ramp: straight ramps through the authored A/D's fixed 1.65 V threshold
+# (net/por_ramp.cir), so each converter edge is at th/k on its ramp. The A/D
+# dates its edge at the above() crossing, located to the 1 ps timescale
+# precision, and the D/A drives por_n through 20 ohm with no delay: 1 ns is
+# the step that lands the D/A's change, three orders below the 2 us
+# between the nearest two edges. A body that reads V(a) >= th at the
+# crossing itself sees the threshold exactly, and the falling edge never
+# comes.
+[[q]]
+id = "ramp_por"
+analysis = "tran"
+variants = ["p3ramp"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "rise"
+window = [0.0, 2.0e-4]
+oracle = "O6"
+expect = "c09::ramp_por"
+abs = 1.0e-9
+why = "hi crosses 1.65 V rising at 50 us (3.3 V over 100 us): por_n rises there (derivation above)"
+
+[[q]]
+id = "ramp_bo"
+analysis = "tran"
+variants = ["p3ramp"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "fall"
+window = [2.0e-4, 3.2e-4]
+oracle = "O6"
+expect = "c09::ramp_por"
+abs = 1.0e-9
+why = "lo_n crosses 1.65 V falling at 306 us (3.3 V over 12 us): por_n falls there (derivation above)"
+
+[[q]]
+id = "ramp_por2"
+analysis = "tran"
+variants = ["p3ramp"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "rise"
+window = [3.2e-4, 5.0e-4]
+oracle = "O6"
+expect = "c09::ramp_por"
+abs = 1.0e-9
+why = "hi crosses 1.65 V rising at 325 us (3.3 V over 10 us): por_n rises again there (derivation above)"
+
+# chk: a Verilog-A checker (net/hi_check.va) dates hi's crossings of 1.65 V
+# with cross() events on the straight ramp of net/por_ramp.cir, and holds the
+# latest date in each direction in microseconds: rising at 50 and 325 us,
+# falling at 305 us (th/k on each segment). cross() is given a 1 ps time
+# tolerance, which reads 1e-6 in microseconds; a crossing dated at the step
+# past it, 10 ns on the deck's step cap, reads 1e-2.
+[[q]]
+id = "chk_rise"
+analysis = "tran"
+variants = ["chk"]
+kind = "interp_at"
+signal = "v(tr)"
+times = { start = 1.0e-4, step = 1.0e-4, count = 4 }
+oracle = "O6"
+expect = "c09::check_rise"
+abs = 1.0e-6
+why = "hi rises through 1.65 V at 50 and 325 us; the checker holds the latest date (derivation above)"
+
+[[q]]
+id = "chk_fall"
+analysis = "tran"
+variants = ["chk"]
+kind = "interp_at"
+signal = "v(tf)"
+times = { start = 1.0e-4, step = 1.0e-4, count = 4 }
+oracle = "O6"
+expect = "c09::check_fall"
+abs = 1.0e-6
+why = "hi falls through 1.65 V at 305 us; -1 before it (derivation above)"
+
+# aramp: hi's straight ramp into a Verilog-AMS input through the default
+# A/D at vcc/2 = 1.65 V (net/a2d_dates.vams), which holds $realtime at the
+# latest rise and fall in microseconds: rising through vthi at 50 and 325
+# us, falling through vtlo at 305 us (th/k on each segment). $realtime is
+# kept to the 1 ps time precision, 1e-6 in microseconds. ft is read after
+# the fall: the input's initial x -> 0 at time 0 is itself a negedge (IEEE
+# 1364 9.7.2), so before 305 us ft holds 0, not -1.
+[[q]]
+id = "aramp_rise"
+analysis = "tran"
+variants = ["aramp"]
+kind = "interp_at"
+signal = "v(rt)"
+times = { start = 1.0e-4, step = 1.0e-4, count = 4 }
+oracle = "O6"
+expect = "c09::check_rise"
+abs = 1.0e-6
+why = "the default A/D's rises at th/k: 50 and 325 us (derivation above)"
+
+[[q]]
+id = "aramp_fall"
+analysis = "tran"
+variants = ["aramp"]
+kind = "interp_at"
+signal = "v(ft)"
+times = { start = 3.5e-4, step = 5.0e-5, count = 3 }
+oracle = "O6"
+expect = "c09::check_fall"
+abs = 1.0e-6
+why = "the default A/D's fall at th/k: 305 us (derivation above)"

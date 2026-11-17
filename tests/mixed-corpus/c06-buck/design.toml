@@ -36,7 +36,7 @@ families = ["spice", "vams-digital", "vams-analog"]
 # its nanosecond gate edges; mc-tran 4.4 s native).
 [[analysis]]
 id = "tran"
-variants = ["vdig", "vams", "p3", "vsup"]
+variants = ["vdig", "vams", "p3", "vsup", "tmr"]
 oracles = ["O6", "O2", "O1"]
 timeout_s = 195
 
@@ -52,3 +52,9 @@ id = "mc-tran"
 variants = ["vdig", "vams"]
 oracles = ["O6", "O2"]
 timeout_s = 25
+
+# tmr: the timer twin, a mixed module whose analog timer sample drives an RC
+# and an idt() (net/tmr_rc.vams).
+[[variant]]
+name = "tmr"
+families = ["spice", "vams-digital", "vams-analog"]

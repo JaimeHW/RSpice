@@ -11,6 +11,9 @@ wr	tran	worker	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-
 sv	tran	interp	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 sv	tran	native	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
 sv	tran	worker	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
+sh	tran	interp	pass	sh_start (O6) [5] |a−e|=7.772e-16 allowed 1.000e-5 (a=5.500000e-1, e=5.500000e-1)
+sh	tran	native	pass	sh_start (O6) [5] |a−e|=7.772e-16 allowed 1.000e-5 (a=5.500000e-1, e=5.500000e-1)
+sh	tran	worker	pass	sh_start (O6) [5] |a−e|=7.772e-16 allowed 1.000e-5 (a=5.500000e-1, e=5.500000e-1)
 tr	ac	interp	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
 tr	ac	native	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
 tr	ac	worker	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°

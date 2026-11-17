@@ -24,12 +24,17 @@ families = ["vams-digital", "vams-analog", "wreal"]
 name = "sv"
 families = ["vams-digital", "vams-analog", "sv-rnm"]
 
+# sh: a timer sample-and-hold rung whose sampled value drives slew().
+[[variant]]
+name = "sh"
+families = ["va-runtime"]
+
 # Budgets are about five times the slower route's measured case time (tran:
 # tr 30 s interp, 19 s native; ac 0.2 s and its O5 run 0.6 s, floored at
 # 10 s).
 [[analysis]]
 id = "tran"
-variants = ["tr", "va", "wr", "sv"]
+variants = ["tr", "va", "wr", "sv", "sh"]
 oracles = ["O6", "O7"]
 timeout_s = 150
 

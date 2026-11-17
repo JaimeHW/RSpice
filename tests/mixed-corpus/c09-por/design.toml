@@ -21,11 +21,17 @@ families = ["spice", "xspice", "vams-digital", "vams-analog"]
 name = "live"
 families = ["spice", "xspice", "vams-digital"]
 
+# p3ramp: p3's authored connect modules reading straight ramps through a
+# fixed threshold (net/por_ramp.cir), rising and falling.
+[[variant]]
+name = "p3ramp"
+families = ["spice", "xspice", "vams-digital", "vams-analog"]
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["base", "p3", "live"]
+variants = ["base", "p3", "live", "p3ramp", "chk", "aramp"]
 oracles = ["O6"]
 timeout_s = 50
 
@@ -49,3 +55,15 @@ id = "dc-restart"
 variants = ["base", "p3", "live"]
 oracles = ["O6"]
 timeout_s = 30
+
+# chk: the base controller on straight ramps, with a Verilog-A cross()
+# checker dating hi's crossings of vcc/2 (net/hi_check.va).
+[[variant]]
+name = "chk"
+families = ["spice", "xspice", "vams-digital", "va-runtime"]
+
+# aramp: a straight ramp into a Verilog-AMS input through the default A/D,
+# rising and falling (net/a2d_dates.vams).
+[[variant]]
+name = "aramp"
+families = ["spice", "vams-digital", "vams-analog"]

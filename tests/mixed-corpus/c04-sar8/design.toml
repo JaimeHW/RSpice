@@ -39,7 +39,7 @@ families = ["spice", "va-runtime", "vams-digital"]
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "ports", "split", "vcd", "vec"]
+variants = ["full", "ports", "split", "vcd", "vec", "mon"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 520
 
@@ -67,3 +67,9 @@ id = "mc-tran"
 variants = ["full", "ports"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 310
+
+# mon: C4's comparator on a sine, counted through the default A/D by a
+# posedge block that drives a D/A and by a cross() on the same node.
+[[variant]]
+name = "mon"
+families = ["spice", "va-runtime", "vams-digital", "vams-analog"]
