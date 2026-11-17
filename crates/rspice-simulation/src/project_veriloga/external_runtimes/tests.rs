@@ -76,6 +76,7 @@ fn a_compiled_pdk_source_still_refuses_changed_bytes() {
 /// A preparation that must not wait stops at a source another thread is
 /// compiling, and `compiling` holds on its thread until that compile ends.
 /// The preparation after that compiles the source as before.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_preparation_that_must_not_wait_stops_at_a_source_still_compiling() {
     let sealed = sealed_pdk("a_preparation_that_must_not_wait_stops_at_a_source_still_compiling");
