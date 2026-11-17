@@ -226,6 +226,28 @@ enum Kind {
         grid_size: usize,
         window: MeasureWindow,
     },
+    /// Xyce's `ERR`, `ERR1` and `ERR2`: one sum over the window's points.
+    ErrorFunction {
+        measured: Operand,
+        comparison: Operand,
+        norm: ErrorFunctionNorm,
+        window: MeasureWindow,
+        ymin: Value,
+        ymax: Value,
+    },
+    /// Xyce's file-backed `ERROR`: the signal's Akima interpolant at each value of a reference
+    /// axis that never falls, read as the rows reach it.
+    FileError {
+        signal: Operand,
+        norm: FileErrorNorm,
+        reference: Arc<FileErrorColumns>,
+    },
+}
+
+/// The axis and values of a file-backed `ERROR`'s reference.
+struct FileErrorColumns {
+    axis: Vec<Value>,
+    values: Vec<Value>,
 }
 
 impl Kind {
@@ -241,7 +263,13 @@ impl Kind {
             | Kind::Extrema { signal, .. }
             | Kind::At { signal, .. }
             | Kind::OnOff { signal, .. }
-            | Kind::Fourier { signal, .. } => vec![signal],
+            | Kind::Fourier { signal, .. }
+            | Kind::FileError { signal, .. } => vec![signal],
+            Kind::ErrorFunction {
+                measured,
+                comparison,
+                ..
+            } => vec![measured, comparison],
             Kind::When {
                 reads, left, right, ..
             } => {
@@ -551,6 +579,58 @@ pub(super) fn plan(
             grid_size: *grid_size,
             window: window(*from, *to, *td, *minval),
         },
+        MeasureType::ErrorFunction {
+            measured,
+            comparison,
+            norm,
+            from,
+            to,
+            minval,
+            ymin,
+            ymax,
+            ..
+        } => {
+            if !minval.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
+                Kind::Fixed(MeasureResult::failed(
+                    &statement.name,
+                    "ERR limits must be finite",
+                ))
+            } else {
+                Kind::ErrorFunction {
+                    measured: column(measured)?,
+                    comparison: column(comparison)?,
+                    norm: *norm,
+                    window: window(*from, *to, None, *minval),
+                    ymin: *ymin,
+                    ymax: *ymax,
+                }
+            }
+        }
+        MeasureType::FileError {
+            signal,
+            file,
+            norm,
+            independent_column,
+            dependent_column,
+        } => {
+            let signal = column(signal)?;
+            match file_error_reference_columns(
+                file.path(),
+                file.contents(),
+                *independent_column,
+                *dependent_column,
+            ) {
+                Err(error) => Kind::Fixed(MeasureResult::failed(&statement.name, &error)),
+                // A reference axis that never falls is read in its order as the rows reach each
+                // value; a NaN in it is not ordered, so the run is read back whole.
+                Ok((axis, _)) if axis.iter().any(|value| value.is_nan()) => return None,
+                Ok((axis, values)) => Kind::FileError {
+                    signal,
+                    norm: *norm,
+                    reference: Arc::new(FileErrorColumns { axis, values }),
+                },
+            }
+        }
         _ => return None,
     };
     Some(Spec {
@@ -734,6 +814,10 @@ impl TranMeasureStream {
                 .iter()
                 .any(|statement| matches!(statement.measure_type, MeasureType::Equation { .. }))
         {
+            log::debug!(
+                "the .MEASURE TRAN statements are measured in memory: the run has impulses or a \
+                 statement is a continuous equation"
+            );
             return Ok(None);
         }
         let hook = Arc::new(StreamedStatements::Plan(Mutex::new(vec![
@@ -761,6 +845,10 @@ impl TranMeasureStream {
                 continue;
             }
             let Some(spec) = spec else {
+                log::debug!(
+                    "{} is measured in memory: it has no streamed form",
+                    statement.name
+                );
                 return Ok(None);
             };
             if let Some(name) = &spec.earlier {
@@ -804,6 +892,10 @@ impl TranMeasureStream {
                     statement_live_dependencies(statement, &netlist.params).is_disjoint(&measured)
                 });
                 if !derivable || reads_other_rows(name) {
+                    log::debug!(
+                        "{} is measured in memory: {name} reads other rows or a running result",
+                        statement.name
+                    );
                     return Ok(None);
                 }
                 let place = match derived.iter().position(|(_, known)| known == name) {
@@ -1083,6 +1175,12 @@ enum Measure {
     LegacyDelay(Box<LegacyDelayState>),
     OnOff(OnOffState),
     Fourier(FourierState),
+    ErrorFunction {
+        measured: Operand,
+        comparison: Operand,
+        accumulator: ErrorFunctionAccumulator,
+    },
+    FileError(Box<FileErrorState>),
 }
 
 struct WindowState {
@@ -1463,6 +1561,43 @@ impl Measure {
                 off,
                 accumulator: OnOffAccumulator::default(),
             }),
+            Kind::ErrorFunction {
+                measured,
+                comparison,
+                norm,
+                window,
+                ymin,
+                ymax,
+            } => {
+                // A transient's axis, as [`MeasureEngine::measurement_window_bounds`] reads it.
+                let (lower, upper) = MeasureEngine::window_bounds(
+                    axis.first_step_rises.unwrap_or(true),
+                    window.from,
+                    window.to,
+                );
+                Self::ErrorFunction {
+                    measured,
+                    comparison,
+                    accumulator: ErrorFunctionAccumulator::new(
+                        norm,
+                        lower,
+                        upper,
+                        window.minval,
+                        ymin,
+                        ymax,
+                    ),
+                }
+            }
+            Kind::FileError {
+                signal,
+                norm,
+                ref reference,
+            } => Self::FileError(Box::new(FileErrorState::open(
+                signal,
+                norm,
+                Arc::clone(reference),
+                axis,
+            ))),
             Kind::Fourier {
                 signal,
                 at,
@@ -1542,6 +1677,15 @@ impl Measure {
                     state.values.push(state.signal.value(x, row));
                 }
             }
+            Self::ErrorFunction {
+                measured,
+                comparison,
+                accumulator,
+            } => accumulator.push(x, measured.value(x, row), comparison.value(x, row)),
+            Self::FileError(state) => {
+                let value = state.signal.value(x, row);
+                state.push(x, value);
+            }
         }
     }
 
@@ -1594,6 +1738,11 @@ impl Measure {
             ) {
                 Some(thd) => MeasureResult::success(name, thd),
                 None => MeasureResult::failed(name, "the window holds less than one period of AT"),
+            },
+            Self::ErrorFunction { accumulator, .. } => accumulator.result(name),
+            Self::FileError(state) => match state.finish() {
+                Ok(value) => MeasureResult::success(name, value),
+                Err(error) => MeasureResult::failed(name, &error),
             },
         })
     }
@@ -1996,3 +2145,197 @@ impl ClauseState {
 
 #[cfg(test)]
 mod tests;
+
+/// The rows an Akima cubic reads around its interval: two before its first row, the interval's
+/// two, and two after.
+const AKIMA_ROWS: usize = 6;
+
+/// A file-backed `ERROR` read as the rows pass, as [`file_error_interpolated`] reads the whole
+/// run. An interval's Akima cubic needs the five data slopes around it, so a reference value is
+/// evaluated once the third row past its interval's first row is read, or once the rows end,
+/// where the slopes past the last row are extrapolated. An axis too short to have both ends'
+/// slopes, or one that does not rise, is kept whole and interpolated as the in-memory measure
+/// does.
+struct FileErrorState {
+    signal: Operand,
+    norm: FileErrorNorm,
+    reference: Arc<FileErrorColumns>,
+    rows: FileErrorRows,
+}
+
+enum FileErrorRows {
+    Whole {
+        axis: Vec<Value>,
+        values: Vec<Value>,
+    },
+    Streamed(AkimaStream),
+}
+
+struct AkimaStream {
+    /// Rows read.
+    count: usize,
+    /// The last [`AKIMA_ROWS`] rows, each at its index modulo that.
+    recent: [(Value, Value); AKIMA_ROWS],
+    /// The data slopes of the first two intervals, which the slopes before the first row are
+    /// extrapolated from.
+    first_slopes: [Value; 2],
+    /// Whether a row repeats the axis value before it: no interpolant is defined over that.
+    repeated: bool,
+    /// The first reference value the rows have not passed.
+    next: usize,
+    /// The reference values placed in an interval but not evaluated yet, each with its
+    /// interval's first row, in the reference's order.
+    placed: VecDeque<(usize, usize)>,
+    norms: FileErrorNorms,
+}
+
+impl FileErrorState {
+    fn open(
+        signal: Operand,
+        norm: FileErrorNorm,
+        reference: Arc<FileErrorColumns>,
+        axis: &AxisFacts,
+    ) -> Self {
+        let rows = if axis.count >= 3 && axis.nondecreasing && !axis.non_finite {
+            FileErrorRows::Streamed(AkimaStream {
+                count: 0,
+                recent: [(0.0, 0.0); AKIMA_ROWS],
+                first_slopes: [0.0; 2],
+                repeated: false,
+                next: 0,
+                placed: VecDeque::new(),
+                norms: FileErrorNorms::default(),
+            })
+        } else {
+            FileErrorRows::Whole {
+                axis: Vec::new(),
+                values: Vec::new(),
+            }
+        };
+        Self {
+            signal,
+            norm,
+            reference,
+            rows,
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, x: Value, value: Value) {
+        match &mut self.rows {
+            FileErrorRows::Whole { axis, values } => {
+                axis.push(x);
+                values.push(value);
+            }
+            FileErrorRows::Streamed(stream) => stream.push(x, value, &self.reference),
+        }
+    }
+
+    fn finish(self) -> Result<Value, String> {
+        let reference = &*self.reference;
+        match self.rows {
+            FileErrorRows::Whole { axis, values } => file_error_interpolated(
+                &axis,
+                &values,
+                &reference.axis,
+                &reference.values,
+                self.norm,
+            ),
+            FileErrorRows::Streamed(mut stream) => {
+                if stream.repeated {
+                    return Err(
+                        "non-DC ERROR simulation axis must be strictly monotonic".to_string()
+                    );
+                }
+                let rows = stream.count;
+                while let Some((place, interval)) = stream.placed.pop_front() {
+                    let value = stream.cubic(interval, reference.axis[place], Some(rows));
+                    stream.norms.push(value, reference.values[place]);
+                }
+                // A value at or past the last row reads the last interval's cubic.
+                for place in stream.next..reference.axis.len() {
+                    let value = stream.cubic(rows - 2, reference.axis[place], Some(rows));
+                    stream.norms.push(value, reference.values[place]);
+                }
+                Ok(stream.norms.value(self.norm))
+            }
+        }
+    }
+}
+
+impl AkimaStream {
+    #[inline]
+    fn row(&self, index: usize) -> (Value, Value) {
+        self.recent[index % AKIMA_ROWS]
+    }
+
+    /// The data slope of the interval from row `index` to the next.
+    #[inline]
+    fn data_slope(&self, index: usize) -> Value {
+        let (x0, y0) = self.row(index);
+        let (x1, y1) = self.row(index + 1);
+        (y1 - y0) / (x1 - x0)
+    }
+
+    #[inline]
+    fn push(&mut self, x: Value, value: Value, reference: &FileErrorColumns) {
+        let index = self.count;
+        if index > 0 && self.row(index - 1).0 == x {
+            self.repeated = true;
+        }
+        self.recent[index % AKIMA_ROWS] = (x, value);
+        self.count += 1;
+        if index == 1 || index == 2 {
+            self.first_slopes[index - 1] = self.data_slope(index - 1);
+        }
+        // A value below this row reads the interval that ends here (the first one, below the
+        // first row), as the in-memory search places it.
+        while reference
+            .axis
+            .get(self.next)
+            .is_some_and(|&target| target < x)
+        {
+            self.placed.push_back((self.next, index.saturating_sub(1)));
+            self.next += 1;
+        }
+        while let Some(&(place, interval)) = self.placed.front() {
+            if interval + 3 > index {
+                break;
+            }
+            self.placed.pop_front();
+            let value = self.cubic(interval, reference.axis[place], None);
+            self.norms.push(value, reference.values[place]);
+        }
+    }
+
+    /// The Akima cubic of the interval from row `interval` at `target`, the slopes past the last
+    /// row extrapolated once the rows end at `rows`.
+    fn cubic(&self, interval: usize, target: Value, rows: Option<usize>) -> Value {
+        let slope = |offset: isize| -> Value {
+            let index = interval as isize + offset;
+            if index < 0 {
+                let (one, two) = akima_end_slopes(self.first_slopes[0], self.first_slopes[1]);
+                return if index == -1 { one } else { two };
+            }
+            let index = index as usize;
+            if let Some(rows) = rows
+                && index + 1 >= rows
+            {
+                let (one, two) =
+                    akima_end_slopes(self.data_slope(rows - 2), self.data_slope(rows - 3));
+                return if index + 1 == rows { one } else { two };
+            }
+            self.data_slope(index)
+        };
+        let slopes = [slope(-2), slope(-1), slope(0), slope(1), slope(2)];
+        let start = akima_derivative([slopes[0], slopes[1], slopes[2], slopes[3]]);
+        let end = akima_derivative([slopes[1], slopes[2], slopes[3], slopes[4]]);
+        let (x0, y0) = self.row(interval);
+        let (x1, _) = self.row(interval + 1);
+        akima_cubic(
+            y0,
+            akima_coefficients(slopes[2], x1 - x0, start, end),
+            target - x0,
+        )
+    }
+}

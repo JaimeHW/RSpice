@@ -768,6 +768,145 @@ fn strictly_monotonic_direction(axis: &[Value]) -> Result<bool, String> {
     Ok(ascending)
 }
 
+/// The reference axis and values a non-DC file-backed ERROR compares with: the
+/// `INDEPVARCOL` and `DEPVARCOL` columns of its file, the axis non-negative and
+/// never falling.
+pub(super) fn file_error_reference_columns(
+    file: &str,
+    reference_data: Option<&str>,
+    independent_column: Option<isize>,
+    dependent_column: usize,
+) -> Result<(Vec<Value>, Vec<Value>), String> {
+    let Some(independent_column) = independent_column else {
+        return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
+    };
+    let Ok(independent_column) = usize::try_from(independent_column) else {
+        return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
+    };
+    if independent_column == dependent_column {
+        return Err("non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values".to_string());
+    }
+    let comparison = match super::measure_file::read_error_comparison_columns(
+        file,
+        reference_data,
+        Some(independent_column),
+        dependent_column,
+    ) {
+        Ok(columns) => columns,
+        Err(error) => {
+            return Err(format!(
+                "could not load ERROR comparison file '{file}': {error}"
+            ));
+        }
+    };
+    let reference_axis = comparison
+        .independent
+        .expect("requested ERROR independent column must be returned");
+    if reference_axis.first().is_some_and(|value| *value < 0.0)
+        || reference_axis
+            .windows(2)
+            .any(|window| window[1] < window[0])
+    {
+        return Err(
+            "non-DC ERROR comparison axis must be monotonically increasing and non-negative"
+                .to_string(),
+        );
+    }
+    Ok((reference_axis, comparison.dependent))
+}
+
+/// A non-DC file-backed ERROR's norm: the simulated waveform's Akima
+/// interpolant at each reference axis value against the reference there.
+pub(super) fn file_error_interpolated(
+    axis: &[Value],
+    signal: &[Value],
+    reference_axis: &[Value],
+    reference: &[Value],
+    norm: FileErrorNorm,
+) -> Result<Value, String> {
+    let interpolator = AkimaInterpolator::new(axis, signal)?;
+    let mut norms = FileErrorNorms::default();
+    for (&reference_axis_value, &reference) in reference_axis.iter().zip(reference) {
+        norms.push(interpolator.evaluate(reference_axis_value), reference);
+    }
+    Ok(norms.value(norm))
+}
+
+/// The L1, L2 and infinity norms of a file-backed ERROR's differences, one
+/// pair at a time in the reference's order.
+#[derive(Default)]
+pub(super) struct FileErrorNorms {
+    l1: Value,
+    l1_compensation: Value,
+    l2: Value,
+    infinity: Value,
+}
+
+impl FileErrorNorms {
+    #[inline]
+    pub(super) fn push(&mut self, simulated: Value, reference: Value) {
+        let difference = simulated - reference;
+        let magnitude = difference.abs();
+        self.infinity = self.infinity.max(magnitude);
+        // Neumaier-compensated L1 and hypot-folded L2 preserve useful
+        // precision and avoid intermediate square overflow/underflow.
+        let next_l1 = self.l1 + magnitude;
+        if self.l1.abs() >= magnitude {
+            self.l1_compensation += (self.l1 - next_l1) + magnitude;
+        } else {
+            self.l1_compensation += (magnitude - next_l1) + self.l1;
+        }
+        self.l1 = next_l1;
+        self.l2 = self.l2.hypot(difference);
+    }
+
+    pub(super) fn value(&self, norm: FileErrorNorm) -> Value {
+        match norm {
+            FileErrorNorm::Infinity => self.infinity,
+            FileErrorNorm::L1 => self.l1 + self.l1_compensation,
+            FileErrorNorm::L2 => self.l2,
+        }
+    }
+}
+
+/// The two slopes Akima extrapolates past an end of the data from the
+/// nearest data slope and the next one in: one interval out, then two.
+#[inline]
+pub(super) fn akima_end_slopes(nearest: Value, next: Value) -> (Value, Value) {
+    (2.0 * nearest - next, 3.0 * nearest - 2.0 * next)
+}
+
+/// Akima's derivative at a point from the four slopes around it, the two
+/// below it first.
+#[inline]
+pub(super) fn akima_derivative(slopes: [Value; 4]) -> Value {
+    let upper_weight = (slopes[3] - slopes[2]).abs();
+    let lower_weight = (slopes[1] - slopes[0]).abs();
+    if upper_weight + lower_weight == 0.0 {
+        0.5 * (slopes[1] + slopes[2])
+    } else {
+        (upper_weight * slopes[1] + lower_weight * slopes[2]) / (upper_weight + lower_weight)
+    }
+}
+
+/// The cubic's coefficients over an interval `dx` wide with data slope
+/// `slope` and Akima derivatives `start` and `end` at its ends.
+#[inline]
+pub(super) fn akima_coefficients(slope: Value, dx: Value, start: Value, end: Value) -> [Value; 3] {
+    [
+        start,
+        (3.0 * slope - 2.0 * start - end) / dx,
+        (start + end - 2.0 * slope) / (dx * dx),
+    ]
+}
+
+/// The cubic of an interval starting at `value`, `delta` along it.
+#[inline]
+pub(super) fn akima_cubic(value: Value, coefficients: [Value; 3], delta: Value) -> Value {
+    let [p1, p2, p3] = coefficients;
+    value + delta * (p1 + delta * (p2 + p3 * delta))
+}
+
 struct AkimaInterpolator {
     axis: Vec<Value>,
     signal: Vec<Value>,
@@ -791,21 +930,17 @@ impl AkimaInterpolator {
             slopes[index + 2] =
                 (signal[index + 1] - signal[index]) / (axis[index + 1] - axis[index]);
         }
-        slopes[0] = 3.0 * slopes[2] - 2.0 * slopes[3];
-        slopes[1] = 2.0 * slopes[2] - slopes[3];
-        slopes[size + 1] = 2.0 * slopes[size] - slopes[size - 1];
-        slopes[size + 2] = 3.0 * slopes[size] - 2.0 * slopes[size - 1];
+        (slopes[1], slopes[0]) = akima_end_slopes(slopes[2], slopes[3]);
+        (slopes[size + 1], slopes[size + 2]) = akima_end_slopes(slopes[size], slopes[size - 1]);
 
         let derivatives = (0..size)
             .map(|index| {
-                let upper_weight = (slopes[index + 3] - slopes[index + 2]).abs();
-                let lower_weight = (slopes[index + 1] - slopes[index]).abs();
-                if upper_weight + lower_weight == 0.0 {
-                    0.5 * (slopes[index + 1] + slopes[index + 2])
-                } else {
-                    (upper_weight * slopes[index + 1] + lower_weight * slopes[index + 2])
-                        / (upper_weight + lower_weight)
-                }
+                akima_derivative([
+                    slopes[index],
+                    slopes[index + 1],
+                    slopes[index + 2],
+                    slopes[index + 3],
+                ])
             })
             .collect::<Vec<_>>();
         let mut p1 = vec![0.0; size];
@@ -813,11 +948,12 @@ impl AkimaInterpolator {
         let mut p3 = vec![0.0; size];
         for index in 0..size.saturating_sub(1) {
             let dx = axis[index + 1] - axis[index];
-            p1[index] = derivatives[index];
-            p2[index] =
-                (3.0 * slopes[index + 2] - 2.0 * derivatives[index] - derivatives[index + 1]) / dx;
-            p3[index] =
-                (derivatives[index] + derivatives[index + 1] - 2.0 * slopes[index + 2]) / (dx * dx);
+            [p1[index], p2[index], p3[index]] = akima_coefficients(
+                slopes[index + 2],
+                dx,
+                derivatives[index],
+                derivatives[index + 1],
+            );
         }
         Ok(Self {
             axis,
@@ -843,8 +979,11 @@ impl AkimaInterpolator {
             }
         }
         let delta = target - self.axis[lower];
-        self.signal[lower]
-            + delta * (self.p1[lower] + delta * (self.p2[lower] + self.p3[lower] * delta))
+        akima_cubic(
+            self.signal[lower],
+            [self.p1[lower], self.p2[lower], self.p3[lower]],
+            delta,
+        )
     }
 }
 
@@ -1558,99 +1697,39 @@ impl MeasureEngine {
         let Some(signal) = lookup_signal(signals, signal_name) else {
             return Err(format!("Signal '{signal_name}' not found"));
         };
-        let pairs = if analysis.eq_ignore_ascii_case("DC") {
-            let comparison = match super::measure_file::read_error_comparison_column(
+        if !analysis.eq_ignore_ascii_case("DC") {
+            let (reference_axis, reference) = file_error_reference_columns(
                 file,
                 reference_data,
+                independent_column,
                 dependent_column,
-            ) {
-                Ok(values) => values,
-                Err(error) => {
-                    return Err(format!(
-                        "could not load ERROR comparison file '{file}': {error}"
-                    ));
-                }
-            };
-            if signal.len() < comparison.len() {
+            )?;
+            return file_error_interpolated(axis, signal, &reference_axis, &reference, norm);
+        }
+        let comparison = match super::measure_file::read_error_comparison_column(
+            file,
+            reference_data,
+            dependent_column,
+        ) {
+            Ok(values) => values,
+            Err(error) => {
                 return Err(format!(
-                    "ERROR comparison has {} rows but the simulation produced only {} accepted points",
-                    comparison.len(),
-                    signal.len()
+                    "could not load ERROR comparison file '{file}': {error}"
                 ));
             }
-            signal.iter().copied().zip(comparison).collect::<Vec<_>>()
-        } else {
-            let Some(independent_column) = independent_column else {
-                return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
-            };
-            let Ok(independent_column) = usize::try_from(independent_column) else {
-                return Err("non-DC ERROR requires a non-negative INDEPVARCOL".to_string());
-            };
-            if independent_column == dependent_column {
-                return Err(
-                    "non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values".to_string(),
-                );
-            }
-            let comparison = match super::measure_file::read_error_comparison_columns(
-                file,
-                reference_data,
-                Some(independent_column),
-                dependent_column,
-            ) {
-                Ok(columns) => columns,
-                Err(error) => {
-                    return Err(format!(
-                        "could not load ERROR comparison file '{file}': {error}"
-                    ));
-                }
-            };
-            let reference_axis = comparison
-                .independent
-                .expect("requested ERROR independent column must be returned");
-            if reference_axis.first().is_some_and(|value| *value < 0.0)
-                || reference_axis
-                    .windows(2)
-                    .any(|window| window[1] < window[0])
-            {
-                return Err(
-                    "non-DC ERROR comparison axis must be monotonically increasing and non-negative"
-                        .to_string(),
-                );
-            }
-            let interpolator = AkimaInterpolator::new(axis, signal)?;
-            reference_axis
-                .into_iter()
-                .zip(comparison.dependent)
-                .map(|(reference_axis_value, reference)| {
-                    (interpolator.evaluate(reference_axis_value), reference)
-                })
-                .collect()
         };
-
-        let mut l1 = 0.0;
-        let mut l1_compensation = 0.0;
-        let mut l2: Value = 0.0;
-        let mut infinity: Value = 0.0;
-        for (simulated, reference) in pairs {
-            let difference = simulated - reference;
-            let magnitude = difference.abs();
-            infinity = infinity.max(magnitude);
-            // Neumaier-compensated L1 and hypot-folded L2 preserve useful
-            // precision and avoid intermediate square overflow/underflow.
-            let next_l1 = l1 + magnitude;
-            if l1.abs() >= magnitude {
-                l1_compensation += (l1 - next_l1) + magnitude;
-            } else {
-                l1_compensation += (magnitude - next_l1) + l1;
-            }
-            l1 = next_l1;
-            l2 = l2.hypot(difference);
+        if signal.len() < comparison.len() {
+            return Err(format!(
+                "ERROR comparison has {} rows but the simulation produced only {} accepted points",
+                comparison.len(),
+                signal.len()
+            ));
         }
-        Ok(match norm {
-            FileErrorNorm::Infinity => infinity,
-            FileErrorNorm::L1 => l1 + l1_compensation,
-            FileErrorNorm::L2 => l2,
-        })
+        let mut norms = FileErrorNorms::default();
+        for (&simulated, reference) in signal.iter().zip(comparison) {
+            norms.push(simulated, reference);
+        }
+        Ok(norms.value(norm))
     }
 
     fn eval_delay(
@@ -2000,46 +2079,13 @@ impl MeasureEngine {
         } else {
             Self::measurement_window_bounds(axis, from, to)
         };
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        let mut window_active = false;
+        let mut accumulator = ErrorFunctionAccumulator::new(norm, lower, upper, minval, ymin, ymax);
         for ((&axis_value, &measured_value), &comparison_value) in
             axis.iter().zip(measured).zip(comparison)
         {
-            if !axis_in_error_window(axis_value, lower, upper, minval) {
-                continue;
-            }
-            window_active = true;
-            let magnitude = measured_value.abs();
-            let ymin_tolerance = ymin.abs() * 1.0e-12;
-            let ymax_tolerance = ymax.abs() * 1.0e-12;
-            if !(magnitude >= ymin - ymin_tolerance && magnitude <= ymax + ymax_tolerance) {
-                continue;
-            }
-            let denominator = magnitude.max(minval);
-            let relative_error = (measured_value - comparison_value) / denominator;
-            sum += match norm {
-                ErrorFunctionNorm::RootMeanSquare => relative_error * relative_error,
-                ErrorFunctionNorm::MeanAbsolute => relative_error.abs(),
-            };
-            count += 1;
+            accumulator.push(axis_value, measured_value, comparison_value);
         }
-        if count == 0 {
-            return if window_active {
-                // Xyce initializes ERR on entry to the axis window, then its
-                // zero-sample getter computes 0/0. Preserve that computed NaN
-                // distinctly from a window that was never entered.
-                MeasureResult::success(name, Value::NAN)
-            } else {
-                MeasureResult::failed(name, "ERR window contains no points")
-            };
-        }
-        let mean = sum / count as Value;
-        let result = match norm {
-            ErrorFunctionNorm::RootMeanSquare => mean.sqrt(),
-            ErrorFunctionNorm::MeanAbsolute => mean,
-        };
-        MeasureResult::success(name, result)
+        accumulator.result(name)
     }
 
     fn eval_avg(
@@ -3464,6 +3510,86 @@ pub(crate) fn legacy_delay_accepts_sample(
 
 fn delay_td_accepts_modern_event(axis: Value, td: Option<Value>, minval: Value) -> bool {
     td.is_none_or(|td| axis > td * (1.0 - minval))
+}
+
+/// Xyce's `ERR`, `ERR1` and `ERR2` over the accepted points, one at a time
+/// (`ErrorFunctions::updateTran` and `Err1`/`Err2::updateErrVars`,
+/// N_IO_MeasureErrorFunctions.C): each point in the axis window whose measured
+/// magnitude lies within `[YMIN, YMAX]` adds its error relative to
+/// `max(|measured|, MINVAL)`.
+pub(super) struct ErrorFunctionAccumulator {
+    norm: ErrorFunctionNorm,
+    lower: Value,
+    upper: Value,
+    minval: Value,
+    ymin: Value,
+    ymax: Value,
+    sum: Value,
+    count: usize,
+    window_active: bool,
+}
+
+impl ErrorFunctionAccumulator {
+    pub(super) fn new(
+        norm: ErrorFunctionNorm,
+        lower: Value,
+        upper: Value,
+        minval: Value,
+        ymin: Value,
+        ymax: Value,
+    ) -> Self {
+        Self {
+            norm,
+            lower,
+            upper,
+            minval,
+            ymin,
+            ymax,
+            sum: 0.0,
+            count: 0,
+            window_active: false,
+        }
+    }
+
+    #[inline]
+    pub(super) fn push(&mut self, axis: Value, measured: Value, comparison: Value) {
+        if !axis_in_error_window(axis, self.lower, self.upper, self.minval) {
+            return;
+        }
+        self.window_active = true;
+        let magnitude = measured.abs();
+        let ymin_tolerance = self.ymin.abs() * 1.0e-12;
+        let ymax_tolerance = self.ymax.abs() * 1.0e-12;
+        if !(magnitude >= self.ymin - ymin_tolerance && magnitude <= self.ymax + ymax_tolerance) {
+            return;
+        }
+        let denominator = magnitude.max(self.minval);
+        let relative_error = (measured - comparison) / denominator;
+        self.sum += match self.norm {
+            ErrorFunctionNorm::RootMeanSquare => relative_error * relative_error,
+            ErrorFunctionNorm::MeanAbsolute => relative_error.abs(),
+        };
+        self.count += 1;
+    }
+
+    pub(super) fn result(&self, name: &str) -> MeasureResult {
+        if self.count == 0 {
+            return if self.window_active {
+                // Xyce initializes ERR on entry to the axis window, then its
+                // zero-sample getter computes 0/0. Preserve that computed NaN
+                // distinctly from a window that was never entered.
+                MeasureResult::success(name, Value::NAN)
+            } else {
+                MeasureResult::failed(name, "ERR window contains no points")
+            };
+        }
+        let mean = self.sum / self.count as Value;
+        let result = match self.norm {
+            ErrorFunctionNorm::RootMeanSquare => mean.sqrt(),
+            ErrorFunctionNorm::MeanAbsolute => mean,
+        };
+        MeasureResult::success(name, result)
+    }
 }
 
 fn axis_in_error_window(axis: Value, lower: Value, upper: Value, minval: Value) -> bool {

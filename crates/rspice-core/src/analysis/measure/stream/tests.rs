@@ -375,3 +375,87 @@ fn a_statement_of_event_operands_alone_is_measured_on_the_run_s_span() {
         assert_same(&streamed, &in_memory);
     }
 }
+
+/// `run(points)` without its repeated instant, so its axis rises strictly.
+fn rising(points: usize) -> TransientResult {
+    let run = run(points);
+    let Some(repeat) = run.time.windows(2).position(|pair| pair[0] == pair[1]) else {
+        return run;
+    };
+    let mut rising = run.clone();
+    let drop = |values: &mut Vec<Value>| {
+        values.remove(repeat + 1);
+    };
+    drop(&mut rising.time);
+    drop(&mut rising.step_sizes);
+    for column in rising
+        .voltages
+        .iter_mut()
+        .chain(&mut rising.branch_currents)
+    {
+        drop(column);
+    }
+    rising
+}
+
+/// The ERR family and a file-backed ERROR over `run`, the reference written beside the test.
+fn error_deck(reference: &std::path::Path) -> Netlist {
+    let file = reference.display();
+    deck(&format!(
+        ".meas tran e0 ERR V(out) V(in)
+.meas tran e1 ERR1 V(out) V(in) FROM=0.2 TO=0.7
+.meas tran e2 ERR2 V(in) V(out) MINVAL=0.3 YMIN=0.1 YMAX=0.9
+.meas tran e3 ERR1 I(V1) V(out) FROM=3 TO=4
+.meas tran e4 ERR V(out) V(in) YMIN=5
+.meas tran e5 ERR2 V(out) I(V1) TO=0.45
+.meas tran f1 ERROR V(out) FILE={file} COMP_FUNCTION=L1NORM INDEPVARCOL=0 DEPVARCOL=1
+.meas tran f2 ERROR V(in) FILE={file} COMP_FUNCTION=L2NORM INDEPVARCOL=0 DEPVARCOL=2
+.meas tran f3 ERROR I(V1) FILE={file} COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1
+.meas tran f4 ERROR V(out) FILE={file} INDEPVARCOL=1 DEPVARCOL=1"
+    ))
+}
+
+#[test]
+fn error_functions_and_file_errors_measure_what_the_run_in_memory_measures_to_the_bit() {
+    let reference =
+        std::env::temp_dir().join(format!("rspice_stream_error_{}.csv", std::process::id()));
+    // Values below the first row, inside the first and last intervals, on rows, repeated, and
+    // past the last row.
+    let mut text = String::from("TIME,V(1),V(2)\n");
+    for (index, time) in [
+        0.0, 1.0e-5, 4.0e-4, 0.001, 0.25, 0.25, 0.5, 0.75, 0.9, 0.97, 0.999, 1.2, 3.0,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        text.push_str(&format!(
+            "{time:e},{:e},{:e}\n",
+            0.1 * index as Value - 0.4,
+            (index as Value * 0.7).sin()
+        ));
+    }
+    std::fs::write(&reference, text).unwrap();
+    let netlist = error_deck(&reference);
+    for points in [2, 3, 4, 5, 6, 7, 8, 9, 2_000] {
+        for (strict, run) in [(true, rising(points)), (false, run(points))] {
+            let in_memory =
+                evaluate_tran_measurements_with_abort(&netlist, &run, &NoAbort).unwrap();
+            if points == 2_000 {
+                let finite = |names: &[&str]| {
+                    in_memory
+                        .iter()
+                        .filter(|result| names.contains(&result.name.as_str()))
+                        .all(|result| result.value.is_some_and(Value::is_finite))
+                };
+                assert!(finite(&["E0", "E1", "E2", "E5"]), "{in_memory:#?}");
+                // An interpolant is defined only over an axis that rises strictly.
+                assert_eq!(finite(&["F1", "F2", "F3"]), strict, "{in_memory:#?}");
+            }
+            for chunk in [1, 2, 3, 7, 500, 2_000] {
+                let streamed = streamed(&netlist, &run, chunk).expect("every statement streams");
+                assert_same(&streamed, &in_memory);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&reference);
+}
