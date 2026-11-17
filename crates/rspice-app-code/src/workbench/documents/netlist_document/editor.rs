@@ -29,7 +29,7 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
 use crate::workbench::MessageId;
 use crate::workbench::code::commands::NetlistEditorRequest;
-use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
+use crate::workbench::documents::text_editor_commands::show_go_to_line;
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use super::{
@@ -159,6 +159,15 @@ pub fn show(
         .flatten()
         .map(|line| line.saturating_sub(1));
 
+    // How the engine reads the shown text decides its comments and the
+    // marker Toggle comment writes.
+    let shown_source = super::dialect::shown_source_in(model, netlist).unwrap_or_default();
+    let comments_id = editor_id.with("source-comments");
+    let mut source_comments = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<highlight::SourceComments>(comments_id))
+        .unwrap_or_default();
+
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `model`.
     let mut buffer = std::mem::take(&mut model.simulation.source.netlist_content);
@@ -234,14 +243,15 @@ pub fn show(
             &mut buffer,
             revision,
             editable,
-            EditorSyntax::Spice,
+            shown_source.syntax(),
             requested_line,
             &style,
             |ui, row, font| {
                 let job = if diff_document {
                     highlight::diff_layout_job(row.text, font, &c)
                 } else {
-                    highlight::layout_job(row.text, font, &c, &[])
+                    let comments = source_comments.on_row(row, &shown_source);
+                    highlight::layout_job(row.text, &comments, font, &c, &[])
                 };
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             },
@@ -286,6 +296,8 @@ pub fn show(
             screen_position: output.caret_anchor,
         };
     }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(comments_id, source_comments));
 
     let now = ui.input(|input| input.time);
     netlist.cursor_line = cursor_line;

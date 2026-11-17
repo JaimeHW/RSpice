@@ -1905,6 +1905,15 @@ fn insert_smart_newline(model: &mut TextDocumentModel, syntax: EditorSyntax) -> 
                         )
                     })
                 }
+                EditorSyntax::Spectre => {
+                    trimmed.ends_with('{')
+                        || trimmed.split_ascii_whitespace().next().is_some_and(|head| {
+                            matches!(
+                                head.to_ascii_lowercase().as_str(),
+                                "subckt" | "inline" | "section"
+                            )
+                        })
+                }
                 EditorSyntax::Toml => false,
             };
             format!(
@@ -2112,6 +2121,9 @@ fn discover_fold_regions(model: &TextDocumentModel, syntax: EditorSyntax) -> Vec
                 (".if", ".endif"),
             ],
         ),
+        EditorSyntax::Spectre => {
+            delimited_fold_regions(model, &[("subckt", "ends"), ("section", "endsection")])
+        }
         EditorSyntax::VerilogA => veriloga_fold_regions(model),
     }
 }

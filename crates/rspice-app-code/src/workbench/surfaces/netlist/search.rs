@@ -9,6 +9,7 @@
 
 use egui::Ui;
 use std::ops::Range;
+use std::path::Path;
 
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use crate::workbench::code::CodeFeature;
@@ -528,58 +529,48 @@ fn find_document_matches(
         .search_byte_range
         .clone()
         .unwrap_or(0..document.source.len());
+    // Read once, and only when a match has to be told from a comment.
+    let comments = std::cell::OnceCell::new();
     crate::state::find_all_in_source_range_bounded_filter(
         document.source,
         range,
         query,
         options,
         limit,
-        |found| include_comments || !source_offset_is_comment(document.source, found.start),
+        |found| {
+            include_comments
+                || !in_comment(
+                    comments.get_or_init(|| {
+                        rspice_core::netlist::comment_ranges(
+                            document.source,
+                            document.source_kind(),
+                        )
+                    }),
+                    found.start,
+                )
+        },
     )
 }
 
-fn source_offset_is_comment(source: &str, offset: usize) -> bool {
-    let line_start = source[..offset.min(source.len())]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    let line_end = source[offset.min(source.len())..]
-        .find('\n')
-        .map_or(source.len(), |index| offset.min(source.len()) + index);
-    let line = &source[line_start..line_end];
-    let match_in_line = offset.saturating_sub(line_start);
-    let trimmed = line.trim_start();
-    if trimmed.starts_with('*') || trimmed.starts_with(';') || trimmed.starts_with("//") {
-        return true;
-    }
+/// Whether `offset` falls in one of `comments`, which are in order.
+fn in_comment(comments: &[Range<usize>], offset: usize) -> bool {
+    let after = comments.partition_point(|comment| comment.end <= offset);
+    comments
+        .get(after)
+        .is_some_and(|comment| comment.contains(&offset))
+}
 
-    let mut single_quote = false;
-    let mut double_quote = false;
-    let mut escaped = false;
-    for (index, character) in line.char_indices() {
-        if index >= match_in_line {
-            break;
-        }
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match character {
-            '\\' if single_quote || double_quote => escaped = true,
-            '\'' if !double_quote => single_quote = !single_quote,
-            '"' if !single_quote => double_quote = !double_quote,
-            ';' | '$' if !single_quote && !double_quote => return true,
-            _ => {}
+impl NetlistSearchDocument<'_> {
+    /// How the engine reads the document: an include from its locator, a deck
+    /// from its file name.
+    fn source_kind(&self) -> rspice_core::netlist::SourceKind {
+        match self.dependency_identity {
+            Some(identity) => {
+                rspice_core::netlist::SourceKind::of(Path::new(identity), self.source, false)
+            }
+            None => rspice_core::netlist::SourceKind::of(Path::new(&self.label), self.source, true),
         }
     }
-    if !single_quote
-        && !double_quote
-        && line
-            .get(match_in_line..)
-            .is_some_and(|tail| tail.starts_with(';') || tail.starts_with('$'))
-    {
-        return true;
-    }
-    false
 }
 
 pub fn find_replace_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
@@ -1070,5 +1061,47 @@ mod tests {
             true,
         );
         assert_eq!(with_comments.matches.len(), 4);
+    }
+
+    /// Lines found in `source`, read as the deck `label`, without comments
+    /// and with them.
+    fn found_lines(label: &str, source: &str, query: &str) -> (Vec<usize>, Vec<usize>) {
+        let documents = [NetlistSearchDocument {
+            active_document: ActiveNetlistDocument::OwnedSource,
+            deck_id: None,
+            dependency_identity: None,
+            editable: true,
+            label: label.to_owned(),
+            source,
+            search_byte_range: None,
+        }];
+        let lines = |include_comments| {
+            scan_documents(
+                &documents,
+                query,
+                crate::state::FindOptions::default(),
+                include_comments,
+            )
+            .matches
+            .iter()
+            .map(|found| found.found.line())
+            .collect::<Vec<_>>()
+        };
+        (lines(false), lines(true))
+    }
+
+    #[test]
+    fn a_pspice_net_name_is_code_and_a_spectre_block_comment_is_not() {
+        let pspice = "PSpice export\nR1 $N_0001 0 1k $load N_0001\nC1 $N_0001 0 1p\n";
+        assert_eq!(
+            found_lines("amp.cir", pspice, "N_0001"),
+            (vec![2, 3], vec![2, 2, 3])
+        );
+
+        let spectre = "/* gain\n   gain */ r1 (a b) resistor r=gain // gain\n";
+        assert_eq!(
+            found_lines("amp.scs", spectre, "gain"),
+            (vec![2], vec![1, 2, 2, 2])
+        );
     }
 }

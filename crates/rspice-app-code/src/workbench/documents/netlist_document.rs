@@ -26,6 +26,7 @@ mod comparison;
 mod completion;
 mod deck_transaction;
 pub(crate) mod diagnostics;
+pub(crate) mod dialect;
 mod editor;
 mod executed_deck;
 mod highlight;

@@ -3,24 +3,141 @@
 //! Token classes follow the design's instrument-panel reading order:
 //! element names neutral, nodes dim, values bright (trace blue),
 //! dot-commands accent, comments faint, model names pink, `{expressions}`
-//! green. Lines carrying a parse diagnostic are underlined in the error
-//! color — same source of truth as the gutter pip and the bottom strip.
+//! green. What is a comment is the engine's to say: a stretch is faint
+//! exactly when the parser reads no card from it. Lines carrying a parse
+//! diagnostic are underlined in the error color — same source of truth as
+//! the gutter pip and the bottom strip.
+
+use std::ops::Range;
+use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Stroke};
+use rspice_core::netlist::{SourceKind, comment_ranges, comment_start, is_spectre_source};
 
 use crate::ui::palette::Palette;
 
 use super::DiagnosticSeverity;
+use super::dialect::ShownSource;
 use super::param_scan::{expression_end, run_end};
 use crate::state::netlist_diagnostics::Diagnostic;
+use crate::workbench::documents::text_document_model::TextDocumentModel;
+use crate::workbench::documents::virtual_text_editor::LayoutRow;
 
 /// Mockup contract: 11-point editor text at a 1.55 line-height.
 const EDITOR_LINE_HEIGHT: f32 = 17.05;
 
-/// Build the highlighted layout job for the whole buffer. The job's text
-/// must equal `text` exactly — `TextEdit` maps cursor positions onto it.
-pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnostic]) -> LayoutJob {
+/// Where the comments of the shown source are. A SPICE line's are read from
+/// the line alone; a source the Spectre front end reads is read whole, once
+/// per revision of its text, since a block comment carries from line to line.
+#[derive(Clone, Default)]
+pub(crate) struct SourceComments {
+    /// The document revision and length, and the source, the reading is of.
+    read: Option<((u64, usize), ShownSource)>,
+    kind: Option<SourceKind>,
+    /// Each line's comments, for a source the Spectre front end reads.
+    by_line: Option<Arc<[Vec<Range<usize>>]>>,
+}
+
+impl SourceComments {
+    /// The comments on the stretch of a line `row` shows, as byte ranges of
+    /// `row.text`, for the document read from `source`.
+    pub(crate) fn on_row(
+        &mut self,
+        row: &LayoutRow<'_>,
+        source: &ShownSource,
+    ) -> Vec<Range<usize>> {
+        let document = row.document;
+        let key = (document.revision(), document.len_chars());
+        if self
+            .read
+            .as_ref()
+            .is_none_or(|(read, read_source)| *read != key || read_source != source)
+        {
+            self.read_whole(document, source);
+            self.read = Some((key, source.clone()));
+        }
+        let line = document
+            .line_content_char_range(row.logical_line)
+            .map(|range| document.text_range(range))
+            .unwrap_or_default();
+        let on_line = self.on_line(row.logical_line, &line);
+        let start = line
+            .char_indices()
+            .nth(row.first_column)
+            .map_or(line.len(), |(index, _)| index);
+        if !line[start..].starts_with(row.text) {
+            // The row is not the line this frame read: read it alone rather
+            // than mark the wrong text.
+            return self
+                .kind
+                .and_then(|kind| comment_start(row.text, kind))
+                .map(|at| vec![at..row.text.len()])
+                .unwrap_or_default();
+        }
+        let end = start + row.text.len();
+        on_line
+            .into_iter()
+            .filter(|range| range.start < end && range.end > start)
+            .map(|range| range.start.max(start) - start..range.end.min(end) - start)
+            .collect()
+    }
+
+    fn read_whole(&mut self, document: &TextDocumentModel, source: &ShownSource) {
+        let text = document.to_source();
+        let kind = source.kind(&text);
+        self.kind = Some(kind);
+        self.by_line = is_spectre_source(&source.path, &text).then(|| {
+            let mut by_line = vec![Vec::new(); text.split('\n').count()];
+            let mut line_start = 0;
+            let mut lines = by_line.iter_mut().zip(text.split('\n'));
+            let mut current = lines.next();
+            for range in comment_ranges(&text, kind) {
+                while let Some((ranges, line)) = current.as_mut() {
+                    if range.start <= line_start + line.len() {
+                        ranges.push(range.start - line_start..range.end - line_start);
+                        break;
+                    }
+                    line_start += line.len() + 1;
+                    current = lines.next();
+                }
+            }
+            by_line.into()
+        });
+    }
+
+    /// The comments on line `index`, whose text is `line`, as byte ranges of
+    /// the line.
+    fn on_line(&self, index: usize, line: &str) -> Vec<Range<usize>> {
+        if let Some(by_line) = &self.by_line {
+            return by_line
+                .get(index)
+                .into_iter()
+                .flatten()
+                .filter(|range| range.end <= line.len())
+                .cloned()
+                .collect();
+        }
+        match self.kind {
+            Some(SourceKind::DeckRoot) if index == 0 => vec![0..line.len()],
+            Some(kind) => comment_start(line, kind)
+                .map(|at| vec![at..line.len()])
+                .unwrap_or_default(),
+            None => Vec::new(),
+        }
+    }
+}
+
+/// Build the highlighted layout job for `text`, whose comments are at
+/// `comments` (byte ranges of `text`, in order). The job's text must equal
+/// `text` exactly — `TextEdit` maps cursor positions onto it.
+pub fn layout_job(
+    text: &str,
+    comments: &[Range<usize>],
+    font: FontId,
+    c: &Palette,
+    diagnostics: &[Diagnostic],
+) -> LayoutJob {
     let mut job = LayoutJob {
         break_on_newline: true,
         ..Default::default()
@@ -30,7 +147,16 @@ pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnost
     let segments: Vec<&str> = text.split('\n').collect();
     let last = segments.len().saturating_sub(1);
     let mut line_start = 0usize;
+    let mut comments = comments.iter().peekable();
     for (line_idx, line) in segments.iter().enumerate() {
+        let line_end = line_start + line.len();
+        let mut line_comments = Vec::new();
+        while let Some(range) = comments.next_if(|range| range.start <= line_end) {
+            line_comments.push(
+                range.start.clamp(line_start, line_end) - line_start
+                    ..range.end.clamp(line_start, line_end) - line_start,
+            );
+        }
         let line_fallback = line_only_severity(diagnostics, line_idx);
         let mut next_offset = line_start;
         let style = DiagnosticStyle {
@@ -47,7 +173,7 @@ pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnost
             next_offset += span.len();
             append_diagnostic_span(job, span, span_start, color, &style);
         };
-        highlight_line(&mut job, line, c, &mut push);
+        highlight_line(&mut job, line, &line_comments, c, &mut push);
         if line_idx != last {
             // The newline itself carries no visible style.
             job.append(
@@ -205,25 +331,37 @@ fn severity_stroke(severity: DiagnosticSeverity, c: &Palette) -> Stroke {
     Stroke::new(1.0, color)
 }
 
-/// Append one line's tokens to the job.
+/// Append one line's tokens to the job, its `comments` (byte ranges of the
+/// line, in order) faint.
 fn highlight_line(
     job: &mut LayoutJob,
     line: &str,
+    comments: &[Range<usize>],
     c: &Palette,
     push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
 ) {
-    let trimmed = line.trim_start();
+    let mut at = 0;
+    for comment in comments {
+        highlight_code(job, &line[at..comment.start], at == 0, c, push);
+        push(job, &line[comment.clone()], c.text_faint);
+        at = comment.end;
+    }
+    highlight_code(job, &line[at..], at == 0, c, push);
+}
 
-    // Whole-line comment.
-    if trimmed.starts_with('*') {
-        push(job, line, c.text_faint);
+/// Append the tokens of code on a line, which opens the card when
+/// `opens_line`.
+fn highlight_code(
+    job: &mut LayoutJob,
+    code: &str,
+    opens_line: bool,
+    c: &Palette,
+    push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
+) {
+    if !opens_line {
+        highlight_fields(job, code, c, push, false);
         return;
     }
-
-    // Inline comment split (`;` or ` $`).
-    let comment_at = find_inline_comment(line);
-    let (code, comment) = line.split_at(comment_at.unwrap_or(line.len()));
-
     let code_trimmed = code.trim_start();
     let lead_len = code.len() - code_trimmed.len();
     push(job, &code[..lead_len], c.text);
@@ -237,8 +375,6 @@ fn highlight_line(
         // Element line: refdes neutral-bright, then nodes/values.
         highlight_fields(job, code_trimmed, c, push, true);
     }
-
-    push(job, comment, c.text_faint);
 }
 
 /// Dot-command line: the command accent, `.model` names pink, the rest
@@ -383,26 +519,6 @@ fn was_preceded_by_assign(text: &str, start: usize) -> bool {
         .is_some_and(|ch| ch == '=')
 }
 
-/// Position of an inline comment (`;` anywhere, or ` $` after whitespace).
-fn find_inline_comment(line: &str) -> Option<usize> {
-    let semicolon = line.find(';');
-    let dollar = line
-        .char_indices()
-        .find(|(i, ch)| {
-            *ch == '$'
-                && *i > 0
-                && line[..*i]
-                    .chars()
-                    .next_back()
-                    .is_some_and(|prev| prev.is_whitespace())
-        })
-        .map(|(i, _)| i);
-    match (semicolon, dollar) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
@@ -442,6 +558,7 @@ mod tests {
 
         let job = layout_job(
             text,
+            &[],
             FontId::monospace(12.0),
             &INSTRUMENT_DARK,
             &[diagnostic],
@@ -457,6 +574,7 @@ mod tests {
 
         let job = layout_job(
             text,
+            &[],
             FontId::monospace(12.0),
             &INSTRUMENT_DARK,
             &[diagnostic],
@@ -482,8 +600,15 @@ mod tests {
             .collect()
     }
 
+    /// `text` laid out as an include's lines, with no title.
     fn highlight(text: &str) -> LayoutJob {
-        layout_job(text, FontId::monospace(12.0), &INSTRUMENT_DARK, &[])
+        layout_job(
+            text,
+            &comment_ranges(text, SourceKind::Included),
+            FontId::monospace(12.0),
+            &INSTRUMENT_DARK,
+            &[],
+        )
     }
 
     #[test]
@@ -561,5 +686,122 @@ mod tests {
                 ("'Å'", c.warn),
             ]
         );
+    }
+
+    /// The colour of each token of the row the editor draws for `line` of
+    /// `text`, from `first_column`, read from `path` as the root deck when
+    /// `root`.
+    fn row_tokens(
+        text: &str,
+        path: &str,
+        root: bool,
+        line: usize,
+        first_column: usize,
+    ) -> Vec<(String, Color32)> {
+        let document = TextDocumentModel::from_source(text);
+        let whole = document
+            .line_content_char_range(line)
+            .map(|range| document.text_range(range))
+            .expect("the line exists");
+        let start = whole
+            .char_indices()
+            .nth(first_column)
+            .map_or(whole.len(), |(index, _)| index);
+        let row = LayoutRow {
+            text: &whole[start..],
+            logical_line: line,
+            first_column,
+            document: &document,
+        };
+        let source = ShownSource {
+            path: path.into(),
+            root,
+        };
+        let comments = SourceComments::default().on_row(&row, &source);
+        let job = layout_job(
+            row.text,
+            &comments,
+            FontId::monospace(12.0),
+            &INSTRUMENT_DARK,
+            &[],
+        );
+        tokens(&job)
+            .into_iter()
+            .map(|(token, colour)| (token.to_owned(), colour))
+            .collect()
+    }
+
+    /// The text of the row drawn faint as a comment, or as the title.
+    fn faint(tokens: &[(String, Color32)]) -> Vec<&str> {
+        tokens
+            .iter()
+            .filter(|(token, colour)| *colour == INSTRUMENT_DARK.text_faint && token != "=")
+            .map(|(token, _)| token.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_spice_deck_is_faint_exactly_where_the_engine_reads_no_card() {
+        let c = &INSTRUMENT_DARK;
+        let deck = "PSpice export\n\
+                    R1 $N_0001 $G_DPWR 1k $load\n\
+                    V1 1 0 'a;b' ; note\n\
+                    C1 1 0 1p // x\n\
+                    # hash\n";
+        assert_eq!(
+            faint(&row_tokens(deck, "amp.cir", true, 0, 0)),
+            ["PSpice export"]
+        );
+        let card = row_tokens(deck, "amp.cir", true, 1, 0);
+        assert!(
+            card.contains(&("$N_0001".to_owned(), c.traces[2])),
+            "{card:?}"
+        );
+        assert!(
+            card.contains(&("$G_DPWR".to_owned(), c.traces[2])),
+            "{card:?}"
+        );
+        assert_eq!(faint(&card), ["$load"]);
+        let quoted = row_tokens(deck, "amp.cir", true, 2, 0);
+        assert!(quoted.contains(&("'a;b'".to_owned(), c.warn)), "{quoted:?}");
+        assert_eq!(faint(&quoted), ["; note"]);
+        assert_eq!(faint(&row_tokens(deck, "amp.cir", true, 3, 0)), ["// x"]);
+        assert_eq!(faint(&row_tokens(deck, "amp.cir", true, 4, 0)), ["# hash"]);
+        // An include has no title: its first line is a card.
+        assert!(faint(&row_tokens(deck, "amp.cir", false, 0, 0)).is_empty());
+    }
+
+    #[test]
+    fn a_row_scrolled_past_a_comments_start_stays_faint() {
+        let deck = "title\nR1 a b 1k ; a long note\n";
+        assert_eq!(
+            faint(&row_tokens(deck, "amp.cir", true, 1, 14)),
+            ["long note"]
+        );
+    }
+
+    #[test]
+    fn a_spectre_deck_colours_its_block_and_line_comments() {
+        let c = &INSTRUMENT_DARK;
+        let deck = "// opamp testbench\n\
+                    /* bias\n   r1 (a b) resistor r=1k\n\
+                    */ c1 (a 0) capacitor c=1p // load\n\
+                    * star\n";
+        assert_eq!(
+            faint(&row_tokens(deck, "amp.scs", true, 0, 0)),
+            ["// opamp testbench"]
+        );
+        assert_eq!(faint(&row_tokens(deck, "amp.scs", true, 1, 0)), ["/* bias"]);
+        assert_eq!(
+            faint(&row_tokens(deck, "amp.scs", true, 2, 0)),
+            ["   r1 (a b) resistor r=1k"]
+        );
+        let closing = row_tokens(deck, "amp.scs", true, 3, 0);
+        assert_eq!(faint(&closing), ["*/", "// load"]);
+        assert!(
+            closing.contains(&("c1".to_owned(), c.traces[2])),
+            "{closing:?}"
+        );
+        assert_eq!(faint(&row_tokens(deck, "amp.scs", true, 4, 0)), ["* star"]);
     }
 }

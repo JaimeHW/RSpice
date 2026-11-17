@@ -30,6 +30,8 @@ struct GoToLineState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditorSyntax {
     Spice,
+    /// A source the engine reads as Spectre from its first line.
+    Spectre,
     VerilogA,
     Python,
     Yaml,
@@ -40,14 +42,14 @@ impl EditorSyntax {
     pub(crate) const fn indentation(self) -> &'static str {
         match self {
             Self::Yaml => "  ",
-            Self::Spice | Self::VerilogA | Self::Python | Self::Toml => "    ",
+            Self::Spice | Self::Spectre | Self::VerilogA | Self::Python | Self::Toml => "    ",
         }
     }
 
     const fn comment(self) -> &'static str {
         match self {
             Self::Spice => "* ",
-            Self::VerilogA => "// ",
+            Self::Spectre | Self::VerilogA => "// ",
             Self::Python | Self::Yaml | Self::Toml => "# ",
         }
     }

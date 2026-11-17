@@ -1370,3 +1370,64 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
     let _ = frame(&mut harness, vec![up]);
     assert_eq!(context.memory(|memory| memory.focused()), None);
 }
+
+/// A deck drawn in the editor as its own file `path`, editable, after `frames`
+/// frames in which `each` runs first.
+fn drawn_deck(
+    path: &str,
+    source: &str,
+    frames: usize,
+    mut each: impl FnMut(usize, &egui::Context, egui::Id),
+) -> CodeHarness {
+    let mut harness = harness();
+    harness.model.workspace.content.netlist_source = Some(source.to_owned());
+    harness.model.workspace.content.netlist_source_path = Some(PathBuf::from(path));
+    harness.model.simulation.source.netlist_content = source.to_owned();
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.state.netlist.active_document_initialized = true;
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    for frame in 0..frames {
+        let _ = context.clone().run_ui(input.clone(), |ui| {
+            let editor_id = editor_id_in(&harness.model, &harness.state.netlist);
+            each(frame, ui.ctx(), editor_id);
+            show_state(ui, &mut harness);
+        });
+    }
+    harness
+}
+
+/// Toggle comment writes the marker of the language the deck is written in:
+/// `//` in a `.scs` file, `*` in a SPICE deck.
+#[test]
+fn toggle_comment_writes_the_decks_own_comment_marker() {
+    let source = "simulator lang=spectre\nr1 (a b) resistor r=1k\n";
+    for (path, marker) in [("amp.scs", "// "), ("amp.cir", "* ")] {
+        let harness = drawn_deck(path, source, 3, |frame, context, editor_id| {
+            if frame == 1 {
+                crate::workbench::documents::text_editor_commands::queue_caret_char_index(
+                    context, editor_id, 0,
+                );
+            }
+            if frame == 2 {
+                crate::workbench::documents::text_editor_commands::queue_structural_command(
+                    context,
+                    editor_id,
+                    crate::workbench::framework::requests::StructuralCommand::ToggleComment,
+                );
+            }
+        });
+        assert_eq!(
+            harness.model.simulation.source.netlist_content,
+            format!("{marker}{source}"),
+            "{path}"
+        );
+    }
+}
