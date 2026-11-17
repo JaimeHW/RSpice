@@ -1,47 +1,19 @@
 //! Models & sections > Add library > From file…, worked from the window: a
 //! model file the project has never held is imported and bound to the plan
 //! in one gesture, its row names the file and the section it runs, and the
-//! run reads the card of the section the row picks. A file that holds no
-//! model library is refused on the page by name.
-
-use std::path::PathBuf;
+//! run reads the card of the section the row picks. A model file that cannot
+//! be read is refused on the page by name.
 
 use egui::accesskit::Role;
 use rspice_app_state::state::SimulationRun;
 
-use crate::feature_tests::engineer::Engineer;
+use crate::feature_tests::engineer::{Engineer, Scratch};
 
 /// One diode card in two process sections, its saturation current a hundred
 /// times larger in `ff`.
 const SECTIONED: &str = "* One diode in two process sections.\n\
                          .lib tt\n.model dx d(is=1e-14)\n.endl tt\n\
                          .lib ff\n.model dx d(is=1e-12)\n.endl ff\n";
-
-/// A file of its own under the system's scratch directory, removed with its
-/// directory when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str, text: &str) -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "rspice-model-file-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&directory).expect("a scratch directory");
-        let file = directory.join(name);
-        std::fs::write(&file, text).expect("the model file is written");
-        Self(file)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        if let Some(directory) = self.0.parent() {
-            let _ = std::fs::remove_dir_all(directory);
-        }
-    }
-}
 
 /// V(`node`) held at `time`.
 fn held_at(run: &SimulationRun, node: &str, time: f64) -> f64 {

@@ -423,6 +423,41 @@ impl Engineer {
         self.press(page, Role::MenuItem);
     }
 
+    /// The design variable `name` given `value` on Design variables: Add
+    /// variable, its name and expression, a dimensionless quantity, and
+    /// Create variable.
+    pub(super) fn variable(&mut self, name: &str, value: &str) {
+        self.setup_page("Design variables");
+        self.press("Add variable\u{2026}", Role::Button);
+        self.press("Name", Role::TextInput);
+        self.type_text(name);
+        self.press("Expression", Role::TextInput);
+        self.type_text(value);
+        self.press("Quantity", Role::ComboBox);
+        self.press("Dimensionless", Role::ListBoxOption);
+        self.press("Create variable", Role::Button);
+        let model = &self.replay.app.state.model;
+        let plan = model.sim_setup.analysis_plan.as_ref().expect("a plan").id();
+        let created = model.workspace.content.plan_data(plan).is_some_and(|data| {
+            data.design_variables
+                .iter()
+                .any(|variable| variable.name == name && variable.expression == value)
+        });
+        assert!(created, "{name} = {value} is a design variable");
+    }
+
+    /// The run's own connect rules on the Connect rules page: run_rules
+    /// selected, which starts from the shipped default set, and each of
+    /// `module`'s `cells` typed into its column.
+    pub(super) fn run_connect_rules(&mut self, module: &str, cells: &[(&str, &str)]) {
+        self.setup_page("Connect rules");
+        self.press("Connect rules \u{b7} CONNECTRULES choices", Role::Button);
+        self.press("run_rules", Role::ListBoxOption);
+        for (column, text) in cells {
+            self.field(&format!("{module} {column}"), text);
+        }
+    }
+
     /// Simulate > Setup > Models & sections > Add library > From file…, the
     /// picker answered with `file`. The library the file became, once the
     /// plan binds it, or what the page says instead.
@@ -617,6 +652,32 @@ impl Engineer {
         let _ = std::fs::remove_file(PathBuf::from(lock));
         assert!(loaded, "the project reopens");
         reopened
+    }
+}
+
+/// A file of its own under the system's scratch directory, removed with its
+/// directory when dropped: a model file an engineer has on disk.
+pub(super) struct Scratch(pub(super) PathBuf);
+
+impl Scratch {
+    pub(super) fn new(name: &str, text: &str) -> Self {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-engineer-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        let file = directory.join(name);
+        std::fs::write(&file, text).expect("the file is written");
+        Self(file)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if let Some(directory) = self.0.parent() {
+            let _ = std::fs::remove_dir_all(directory);
+        }
     }
 }
 

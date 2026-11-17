@@ -12,7 +12,7 @@ use rspice_app_runs::simulation::controller::test_execution::run_manual_batch_at
 use rspice_app_state::state::{AnalysisResultPayload, SimulationRun};
 use rspice_results::run::SimulationRunLifecycle;
 
-use crate::feature_tests::engineer::{Engineer, RUN_LIMIT, kept, pin};
+use crate::feature_tests::engineer::{Engineer, RUN_LIMIT, Scratch, kept, pin};
 
 /// A corpus file, by its path under `tests/mixed-corpus`.
 fn corpus(relative: &str) -> PathBuf {
@@ -366,5 +366,365 @@ mod c04 {
         );
         assert!((tconv - 9e-7).abs() <= TCONV_ABS, "tconv {tconv:e}");
         assert_eq!(kept(&e.reopened(), TCONV), tconv, "tconv reopens as kept");
+    }
+}
+
+/// C6, the digitally controlled buck converter (`tests/mixed-corpus/c06-buck`,
+/// variant `vsup`): the controller as a Verilog-AMS view; the body diode's
+/// card added from a model file on Models & sections; the power stage, the
+/// gates and the sagging drive supply on the top sheet; and the gate drives'
+/// converter supplied from the `vdrv` net on the Connect rules page, as the
+/// `gate_drive` block the deck selects states it.
+mod c06 {
+    use egui::accesskit::Role;
+
+    use super::*;
+
+    /// vss (O6): the regulated output, the controller's target code over its
+    /// 512 codes per volt, as V(vout)'s mean over 400-500 us, to 6 mV.
+    const VSS: f64 = 922.0 / 512.0;
+    const VSS_WINDOW: (f64, f64) = (4e-4, 5e-4);
+    const VSS_ABS: f64 = 6e-3;
+
+    /// vss as the calculator writes it.
+    const VSS_MEAN: &str = "avg(V(vout), 400u, 500u)";
+
+    /// The run stops where vss's window does: the cell's other quantities lie
+    /// past it, and the 1.6 ms the corpus runs costs a debug build minutes.
+    const STOP: &str = "500u";
+
+    /// tau_r and tau_f's tolerance in the corpus: 0.3 ns.
+    const EDGE_ABS: f64 = 3e-10;
+
+    /// The stage's body-diode card, as the corpus states it.
+    fn body_diode() -> String {
+        corpus_text("c06-buck/net/stage.cir")
+            .lines()
+            .find(|line| line.starts_with(".model dbody"))
+            .expect("the stage's body-diode card")
+            .to_owned()
+    }
+
+    /// An analog trace's samples, by its node.
+    fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
+        let wave = run
+            .analyses
+            .iter()
+            .flat_map(|analysis| &analysis.waveforms)
+            .find(|wave| {
+                wave.name.eq_ignore_ascii_case(node)
+                    || wave.name.eq_ignore_ascii_case(&format!("V({node})"))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "no V({node}) in the run: {:?}",
+                    run.analyses
+                        .iter()
+                        .flat_map(|analysis| &analysis.waveforms)
+                        .map(|wave| &wave.name)
+                        .collect::<Vec<_>>()
+                )
+            });
+        (&wave.x, &wave.y)
+    }
+
+    /// The trace's mean over `window`, its samples joined by straight lines,
+    /// as the corpus measures a window mean.
+    fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
+        let (x, y) = trace(run, node);
+        let at = |time: f64| {
+            let index = x.partition_point(|t| *t < time).clamp(1, x.len() - 1);
+            let (t0, t1) = (x[index - 1], x[index]);
+            y[index - 1] + (y[index] - y[index - 1]) * (time - t0) / (t1 - t0)
+        };
+        let mut points = vec![(window.0, at(window.0))];
+        points.extend(
+            x.iter()
+                .zip(y)
+                .filter(|(t, _)| **t > window.0 && **t < window.1)
+                .map(|(t, v)| (*t, *v)),
+        );
+        points.push((window.1, at(window.1)));
+        let area: f64 = points
+            .windows(2)
+            .map(|pair| (pair[1].0 - pair[0].0) * (pair[0].1 + pair[1].1) / 2.0)
+            .sum();
+        area / (window.1 - window.0)
+    }
+
+    /// When the trace first crosses `level` inside `window`, rising or
+    /// falling, its samples joined by straight lines.
+    fn crossing(
+        run: &SimulationRun,
+        node: &str,
+        level: f64,
+        rising: bool,
+        window: (f64, f64),
+    ) -> f64 {
+        let (x, y) = trace(run, node);
+        (1..x.len())
+            .filter(|index| x[*index] >= window.0 && x[*index - 1] <= window.1)
+            .find_map(|index| {
+                let (before, after) = (y[index - 1] - level, y[index] - level);
+                let crosses = if rising {
+                    before < 0.0 && after >= 0.0
+                } else {
+                    before > 0.0 && after <= 0.0
+                };
+                crosses
+                    .then(|| x[index - 1] + (x[index] - x[index - 1]) * before / (before - after))
+            })
+            .unwrap_or_else(|| panic!("V({node}) never crosses {level} in {window:?}"))
+    }
+
+    /// The buck drawn from New project to its results: the regulated output
+    /// is the corpus's vss, and the calculator's measure of it is kept
+    /// through a save and a reopen; the gates' drive is the deck's.
+    #[test]
+    fn c6_drawn_through_the_application_regulates_and_drives_its_gates_as_its_deck() {
+        // The deck route needs nothing drawn: it runs while the engineer
+        // draws.
+        let deck = std::thread::spawn(|| deck_route("c06-buck/deck/vsup.tran.cir", "50n", STOP));
+        let models = Scratch::new("stage-models.lib", &body_diode());
+        let mut engineer = Engineer::new_project("buck");
+        engineer.module(
+            "buck_ctrl",
+            "Verilog-AMS",
+            &corpus_text("c06-buck/net/buck_ctrl_vsup.vams"),
+        );
+        let e = &mut engineer;
+        assert_eq!(
+            e.add_model_file(&models.0),
+            Ok("stage-models".to_owned()),
+            "the body diode's card binds"
+        );
+        e.variable("lv", "22u");
+        e.variable("cv", "4.7u");
+        e.variable("vcc", "5");
+        // The run's own connect rules: the d2a converter supplied from the
+        // vdrv net and driving through 10 and 5 ohms.
+        e.run_connect_rules(
+            "d2a",
+            &[("Supply", "vdrv"), ("R high", "10"), ("R low", "5")],
+        );
+        e.top_sheet();
+
+        let part = |e: &mut Engineer, query, row, at, fields: &[(&str, &str)], nets: &[&str]| {
+            let pins = e.place(query, row, at, fields);
+            e.connect(&pins, nets);
+        };
+        let switch = |e: &mut Engineer, at, name: &str, model: [&str; 4], nets: &[&str]| {
+            part(
+                e,
+                "V-Switch",
+                "V-Switch (S)",
+                at,
+                &[
+                    ("Instance", name),
+                    ("Threshold voltage, V", model[0]),
+                    ("Hysteresis voltage, V", model[1]),
+                    ("On resistance, Ω", model[2]),
+                    ("Off resistance, Ω", model[3]),
+                ],
+                nets,
+            );
+        };
+        let two = |e: &mut Engineer, query, row, at, name: &str, value: &str, nets: &[&str]| {
+            part(
+                e,
+                query,
+                row,
+                at,
+                &[("Instance", name), ("Value", value)],
+                nets,
+            );
+        };
+        let pwl = |e: &mut Engineer, at, name: &str, table: &str, net: &str| {
+            let value = format!("PWL({table})");
+            two(
+                e,
+                "pwl",
+                "PWL Voltage Source",
+                at,
+                name,
+                &value,
+                &[net, "0"],
+            );
+        };
+
+        // The power stage along the top, left to right.
+        let power = ["2.5", "0.1", "20m", "1e9"];
+        two(
+            e,
+            "voltage source",
+            "Voltage Source",
+            (100, 100),
+            "vin",
+            "5",
+            &["vin", "0"],
+        );
+        switch(e, (250, 100), "shs", power, &["vin", "sw", "ghs", "0"]);
+        switch(e, (400, 100), "sls", power, &["sw", "0", "gls", "0"]);
+        two(
+            e,
+            "diode",
+            "Diode",
+            (550, 100),
+            "dls",
+            "dbody",
+            &["0", "sw"],
+        );
+        two(
+            e,
+            "inductor",
+            "Inductor",
+            (700, 100),
+            "lbuck",
+            "{lv}",
+            &["sw", "lx"],
+        );
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (850, 100),
+            "rdcr",
+            "20m",
+            &["lx", "vout"],
+        );
+        two(
+            e,
+            "capacitor",
+            "Capacitor",
+            (1000, 100),
+            "cout",
+            "{cv}",
+            &["vout", "ce"],
+        );
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (1150, 100),
+            "resr",
+            "10m",
+            &["ce", "0"],
+        );
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (1300, 100),
+            "rload",
+            "2",
+            &["vout", "0"],
+        );
+        // The load step: a switch, driven by its own step source, adds a
+        // second 2 ohm load at 500 us.
+        let step = ["0.5", "0.1", "1m", "1e9"];
+        switch(e, (100, 300), "sload", step, &["vout", "lo2", "gstep", "0"]);
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (250, 300),
+            "rload2",
+            "2",
+            &["lo2", "0"],
+        );
+        pwl(e, (400, 300), "vstep", "0 0 500u 0 500.01u 1", "gstep");
+
+        // The gate drive below: the drives' supply, sagging from 5 V to
+        // 3.5 V and recovering, the two 1 nF gates, and the controller.
+        pwl(
+            e,
+            (550, 300),
+            "vdrv",
+            "0 5 1.0m 5 1.1m 3.5 1.3m 3.5 1.4m 5",
+            "vdrv",
+        );
+        two(
+            e,
+            "capacitor",
+            "Capacitor",
+            (700, 300),
+            "cghs",
+            "1n",
+            &["ghs", "0"],
+        );
+        two(
+            e,
+            "capacitor",
+            "Capacitor",
+            (850, 300),
+            "cgls",
+            "1n",
+            &["gls", "0"],
+        );
+        let controller = e.place(
+            "buck_ctrl",
+            "buck_ctrl",
+            (1100, 500),
+            &[("Instance", "xctrl")],
+        );
+        e.label(pin(&controller, "fb"), "vout");
+        e.label(pin(&controller, "hs"), "ghs");
+        e.label(pin(&controller, "ls"), "gls");
+
+        // Every accepted point kept: the automatic set keeps each node on the
+        // transient's step grid, 50 ns apart, which no 10 ns gate edge
+        // survives.
+        e.setup_page("Save, streaming & retention policy");
+        e.press("Plan output selection mode", Role::ComboBox);
+        e.press("Save all", Role::ListBoxOption);
+        e.transient("50n", STOP);
+        let designed = e.run();
+        let deck = deck.join().expect("the deck route");
+
+        // vss: the corpus's own window, value and tolerance, over the result
+        // and as the calculator measures it.
+        let app = mean(&designed, "vout", VSS_WINDOW);
+        assert!(
+            (app - VSS).abs() <= VSS_ABS,
+            "V(vout) over {VSS_WINDOW:?}: {app}, the deck's {}",
+            mean(&deck, "vout", VSS_WINDOW)
+        );
+        let measured = e.measure(VSS_MEAN);
+        assert!(
+            (measured - VSS).abs() <= VSS_ABS,
+            "{VSS_MEAN} {measured}, the deck's {}",
+            mean(&deck, "vout", VSS_WINDOW)
+        );
+
+        // In for tau_r, tau_f and vgate at 900 us, past this run: the settled
+        // period at 400 us, where vdrv is the same 5 V, held to the deck
+        // route over the same span at their tolerances. Each gate's edge
+        // through 1 - 1/e of its drive and down to 1/e of it, and the
+        // high-side gate 14 ticks into the period, where it holds V(vdrv).
+        // Their sagged twins at 1.2 ms have no stand-in before 500 us.
+        let period = 400e-6;
+        let window = (period, period + 2e-6);
+        for (node, level, rising) in [("ghs", 3.160_602_8, true), ("gls", 1.839_397_2, false)] {
+            let (app, reference) = (
+                crossing(&designed, node, level, rising, window),
+                crossing(&deck, node, level, rising, window),
+            );
+            assert!(
+                (app - reference).abs() <= EDGE_ABS,
+                "V({node}) through {level}: {app:e}, the deck's {reference:e}"
+            );
+        }
+        let held = period + 14.0 * 31.25e-9;
+        let (app, reference) = (held_at(&designed, "ghs", held), held_at(&deck, "ghs", held));
+        assert!(
+            (app - reference).abs() <= 1e-3 * reference.abs(),
+            "V(ghs) at {held:e}: {app}, the deck's {reference}"
+        );
+
+        assert_eq!(
+            kept(&e.reopened(), VSS_MEAN),
+            measured,
+            "vss reopens as kept"
+        );
     }
 }
