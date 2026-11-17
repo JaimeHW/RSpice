@@ -91,6 +91,44 @@ fn a_streamed_output_is_byte_identical_to_the_same_run_read_back_into_memory() {
     }
 }
 
+/// A `.PRINT` card chooses a delimited table's columns and names them as it spells them. They
+/// are the store's own columns, so the table is written from the store, byte for byte the
+/// table of the run read back whole.
+#[test]
+fn a_printed_table_is_written_from_the_store() {
+    let dir = test_dir("results-store-printed");
+    let body = RC.trim_end_matches(".end\n");
+    let print = ".print tran v(out) i(v1)\n";
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    let mut tables = Vec::new();
+    for (twin, extra) in [("streamed", ""), ("read-back", read_back)] {
+        let deck = dir.join(format!("{twin}.cir"));
+        std::fs::write(&deck, format!("{body}{print}{extra}.end\n")).unwrap();
+        let out = dir.join(format!("{twin}.csv"));
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "-f",
+            "csv",
+            "-o",
+            out.to_str().unwrap(),
+            "--log-level",
+            "debug",
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{twin}: {stderr}"
+        );
+        tables.push(std::fs::read_to_string(&out).unwrap());
+    }
+    assert!(tables[0].starts_with("time,v(out),i(v1)"), "{}", tables[0]);
+    assert!(tables[0].lines().count() > 300);
+    assert_eq!(tables[0], tables[1]);
+}
+
 #[test]
 fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
     let dir = test_dir("results-store-measured");

@@ -24,7 +24,7 @@ use rspice_core::engine::{
     TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
-use rspice_core::netlist::{AnalysisCommand, OutputDirectiveKind};
+use rspice_core::netlist::{AnalysisCommand, OutputAnalysisKind};
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_core::xspice::DigitalValue;
 use rspice_results::stored_transient::{
@@ -512,8 +512,8 @@ impl StoredTransient {
     /// How the outputs can read this run straight from its store, or `None` when they need it in
     /// memory.
     ///
-    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, prints
-    /// no table of its own, keeps every accepted step, and asks for a rawfile, a delimited
+    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, writes
+    /// no Xyce `.prn` table, keeps every accepted step, and asks for a rawfile, a delimited
     /// table, HDF5, an event dump or nothing; when every output signal is one of the store's
     /// columns, value for value, or a column sampled from an event trace (`D(node)`,
     /// `E(node)`); and when its `.MEASURE TRAN` statements, if any, read only the store's
@@ -536,12 +536,8 @@ impl StoredTransient {
                     | OutputFormat::Hdf5
                     | OutputFormat::Vcd
             );
-        let prints = netlist.output_requests.iter().any(|request| {
-            matches!(
-                request.directive,
-                OutputDirectiveKind::Print | OutputDirectiveKind::Plot
-            )
-        });
+        // Xyce's `.prn` table of a `.PRINT TRAN` card is built whole.
+        let prints = super::xyce_files::prints(ctx, OutputAnalysisKind::Tran);
         let every_step = netlist.options.output_time_points.is_empty()
             && netlist.options.output_interval_schedule.is_none();
         let rows = self.rows.rows();
@@ -553,7 +549,7 @@ impl StoredTransient {
         } else if !ctx.engine.transient_rows_are_whole(netlist) {
             Some("its rows are not the run's whole trajectory")
         } else if prints {
-            Some("it has .PRINT or .PLOT cards")
+            Some("it writes a .PRINT TRAN table to a .prn file")
         } else if !every_step {
             Some("it prints on an output schedule")
         } else if netlist
@@ -1417,7 +1413,9 @@ fn signal_slots(
 ) -> Option<Vec<Option<usize>>> {
     let column = |target: SlotTarget| stream_column(shell, target);
     let inventory = rspice_core::execution::transient_projection_signals(shell).ok()?;
-    let mut by_name: std::collections::HashMap<&str, Option<usize>> =
+    // A `.PRINT` operand names its column as the card spells it (`v(out)` for `V(out)`), so a
+    // name is matched without case, and one two columns share is no column's.
+    let mut by_name: std::collections::HashMap<String, Option<usize>> =
         std::collections::HashMap::new();
     for signal in &inventory {
         let rspice_core::execution::ProjectionValues::Real(values) = signal.values() else {
@@ -1427,7 +1425,7 @@ fn signal_slots(
             .iter()
             .position(|&target| column(target).map(|c| c.as_ptr()) == Some(values.as_ptr()));
         by_name
-            .entry(signal.descriptor().display_name())
+            .entry(signal.descriptor().display_name().to_ascii_uppercase())
             .and_modify(|seen| *seen = None)
             .or_insert(slot);
     }
@@ -1435,7 +1433,7 @@ fn signal_slots(
         signals
             .iter()
             .map(|signal| {
-                let slot = (*by_name.get(signal.display_name.as_str())?)?;
+                let slot = (*by_name.get(&signal.display_name.to_ascii_uppercase())?)?;
                 let values = column(*targets.get(slot)?)?;
                 let same = signal.values.len() == values.len()
                     && signal

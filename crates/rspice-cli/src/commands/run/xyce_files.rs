@@ -150,6 +150,14 @@ pub(super) fn writes_files(ctx: &RunContext<'_>) -> bool {
         && !crate::commands::is_stdin(&ctx.args.input)
 }
 
+/// Whether this run writes a `.PRINT` table of `kind` to a file.
+pub(super) fn prints(ctx: &RunContext<'_>, kind: OutputAnalysisKind) -> bool {
+    writes_files(ctx)
+        && ctx.netlist.output_requests.iter().any(|request| {
+            request.directive == OutputDirectiveKind::Print && request.analysis == Some(kind)
+        })
+}
+
 /// The `.STEP` coordinate a context runs, counted from 0, as Xyce numbers its
 /// measure files; a run without `.STEP` is coordinate 0.
 fn step(ctx: &RunContext<'_>) -> usize {
