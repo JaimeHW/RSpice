@@ -677,6 +677,42 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
         "Ends the simulation once the current time step is done.",
     ),
     (
+        "$stop",
+        Some("[level]"),
+        "Stops the simulation once the current time step is done.",
+    ),
+    (
+        "$fatal",
+        Some("[level], [format, arg…]"),
+        "Reports a fatal error and ends the simulation once the current time step is done.",
+    ),
+    (
+        "$debug",
+        Some("format, [arg…]"),
+        "Prints formatted text at every evaluation of the equations.",
+    ),
+    (
+        "$fdisplay",
+        Some("fd, format, [arg…]"),
+        "Writes formatted text and a line break to a file.",
+    ),
+    (
+        "$fwrite",
+        Some("fd, format, [arg…]"),
+        "Writes formatted text without a line break to a file.",
+    ),
+    (
+        "$fstrobe",
+        Some("fd, format, [arg…]"),
+        "Writes formatted text to a file once the time step is accepted.",
+    ),
+    (
+        "$fmonitor",
+        Some("fd, format, [arg…]"),
+        "Writes formatted text to a file whenever one of its arguments changes.",
+    ),
+    ("$fclose", Some("fd"), "Closes a file."),
+    (
         "$bound_step",
         Some("max_step"),
         "Limits the next time step to max_step seconds.",
