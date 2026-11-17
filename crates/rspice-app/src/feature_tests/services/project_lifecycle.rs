@@ -29,9 +29,11 @@ mod registry {
 
 mod durable_content;
 mod fingerprint_cache;
+mod idle_frames;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_evidence;
 mod result_cache;
+mod working_subjects;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn insert_ac_analysis(state: &mut AppState) -> rspice_app_state::product::AnalysisInstanceId {
