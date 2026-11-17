@@ -72,7 +72,7 @@ impl SourceComments {
             return self
                 .kind
                 .and_then(|kind| comment_start(row.text, kind))
-                .map(|at| vec![at..row.text.len()])
+                .map(|at| std::iter::once(at..row.text.len()).collect())
                 .unwrap_or_default();
         }
         let end = start + row.text.len();
@@ -119,9 +119,9 @@ impl SourceComments {
                 .collect();
         }
         match self.kind {
-            Some(SourceKind::DeckRoot) if index == 0 => vec![0..line.len()],
+            Some(SourceKind::DeckRoot) if index == 0 => std::iter::once(0..line.len()).collect(),
             Some(kind) => comment_start(line, kind)
-                .map(|at| vec![at..line.len()])
+                .map(|at| std::iter::once(at..line.len()).collect())
                 .unwrap_or_default(),
             None => Vec::new(),
         }
