@@ -383,11 +383,15 @@ clause 7 (discipline resolution, `connect_mode` auto-insertion, `resolveto`
 with `exclude`, and `merged`/`split` segmentation), with the detail resolution
 mode of Annex F.2.2 refused by name rather than approximated. A boundary
 inside one HDL design, a net joining a discrete port and an analog port of
-two instances in the hierarchy, gets no automatic connect module: it is
-refused by name, and works once the net is brought out to a deck node or an
-instance of an ordinary converter module (one discrete and one electrical
-port) joins the two. A `connectmodule` itself is inserted only by the
-`connectrules`; instantiating one by name in a design is refused.
+two instances in the hierarchy, converts as a boundary at a deck node does:
+the discrete port keeps its own signal on the net's circuit node
+(`<instance>.<net>`), where the deck's connect rules, converters and supplies
+apply, one scalar bit at a time. A net the enclosing module's own statements
+drive or read is discrete there, and an analog child port on it is refused by
+name; bring it out to a deck node, or join the two sides through an instance
+of an ordinary converter module (one discrete and one electrical port). A
+`connectmodule` itself is inserted only by the `connectrules`; instantiating
+one by name in a design is refused.
 
 Digital and mixed runs export to VCD with `rspice run --format vcd`, one wire
 per digital node and one N-bit vector per declared bus (`--expand-buses` writes
