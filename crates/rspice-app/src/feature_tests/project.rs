@@ -26,6 +26,7 @@ mod project_workflow;
 mod publication;
 mod rails;
 mod recovery_comparison;
+mod recovery_frames;
 mod steps;
 mod surface;
 
