@@ -4166,9 +4166,12 @@ endmodule
                 FusedKernelHarness::for_source_with_plan(source, "static_dae_events", postfix);
             harness.reset();
             let value = harness.stamp_value_export(0);
+            // The timer, the crossing and `above` at 0.5 take effect at that
+            // instant: the point solves their left limit, and only the final
+            // step (10.0) and the initial step (1.0) are in its equations.
             for (time, voltage, initial, final_step, expected) in [
                 (0.0, -1.0, true, false, -1.0),
-                (0.5, 1.0, false, true, 11113.0),
+                (0.5, 1.0, false, true, 13.0),
             ] {
                 let context = harness.store.data_mut().context_mut();
                 context.analysis_type = 2;
