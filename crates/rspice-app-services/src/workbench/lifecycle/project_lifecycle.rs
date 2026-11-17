@@ -13,8 +13,8 @@ mod result_cache;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::{
     start_browser_checkpoint_delete, start_browser_checkpoint_list,
-    start_browser_checkpoint_manifest_update, start_browser_checkpoint_publish,
-    start_browser_checkpoint_read,
+    start_browser_checkpoint_manifest_update, start_browser_checkpoint_prune,
+    start_browser_checkpoint_publish, start_browser_checkpoint_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_project::persistence::native::DestinationAuthority;
@@ -1573,6 +1573,21 @@ fn adopt_successful_save(
     post_save_registry: registry::DocumentRegistry,
 ) {
     let state = &mut host.lifecycle_parts();
+    // The project's checkpoints follow it from where it was saved before,
+    // and the saved version this save replaces, when it changes it, is kept.
+    // Both are read before the save becomes the accepted one.
+    #[cfg(not(target_arch = "wasm32"))]
+    let previous_path = state.model.workspace.content.project.path.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let saved_digest = |binding: &PersistenceBinding| binding.accepted_digest;
+    #[cfg(target_arch = "wasm32")]
+    let saved_digest = |binding: &PersistenceBinding| binding.browser_receipt().accepted_digest;
+    let replaced = state
+        .platform
+        .project_lifecycle
+        .binding()
+        .filter(|previous| saved_digest(previous) != saved_digest(&binding))
+        .and_then(|_| state.platform.project_lifecycle.accepted_snapshot().ok());
     rebase_pending_operation_dirty_state(state, &candidate, scope);
     // The save wrote each symbol it covers with its pins named as they are
     // now, so those names are the ones Revert to saved returns to.
@@ -1649,6 +1664,25 @@ fn adopt_successful_save(
         .authority
         .adopt_registry(post_save_registry);
     apply_registry_dirty_flags(state);
+    let saved_everything = scope == SaveScope::AllDocuments;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Err(error) = crate::workbench::lifecycle::project_checkpoint::after_save(
+        state.model,
+        previous_path.as_deref(),
+        replaced.as_ref(),
+        saved_everything,
+    ) {
+        state.model.report_warning(
+            "Checkpoints not updated",
+            format!("The project was saved, but {error}."),
+        );
+    }
+    #[cfg(target_arch = "wasm32")]
+    crate::workbench::lifecycle::project_checkpoint::start_after_save(
+        state.model,
+        replaced.as_ref(),
+        saved_everything,
+    );
     report_design_checks_after_save(host);
 }
 

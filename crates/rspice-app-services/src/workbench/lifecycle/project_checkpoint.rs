@@ -15,6 +15,8 @@ use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use crate::io::ProjectSnapshot;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::io::durable_file::ExpectedContent;
 use crate::product::ContentDigest;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::LifecycleSourceMut;
@@ -84,7 +86,7 @@ impl CheckpointRetention {
         match self {
             Self::UntilDeleted => "Until you delete it",
             Self::UntilNextSave => "Until the next save",
-            Self::WithinBudget => "Within the automatic budget",
+            Self::WithinBudget => "While it fits the automatic space",
         }
     }
 }
@@ -512,7 +514,7 @@ pub fn start_create(
         snapshot_key,
         serialized.into_bytes(),
         manifest_json,
-        move |stored| browser_retention_removals(stored, budget),
+        move |stored| browser_retention_removals(stored, budget, false),
         move |result| {
             complete(result.and_then(|()| {
                 summary_from_manifest(
@@ -741,6 +743,204 @@ pub fn budget_label(bytes: u64) -> String {
     }
 }
 
+/// What the reader changes about a checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckpointEdit {
+    /// Write this note on it, or clear it.
+    Note(Option<String>),
+    /// Keep it until the reader deletes it, or let retention have it again.
+    Pin(bool),
+}
+
+/// The manifest in `stored` with `edit` made, when it is still the one
+/// `summary` was listed from.
+fn edited_manifest(
+    summary: &ProjectCheckpointSummary,
+    stored: &[u8],
+    edit: &CheckpointEdit,
+) -> Result<ProjectCheckpointManifest, String> {
+    let mut manifest = serde_json::from_slice::<ProjectCheckpointManifest>(stored)
+        .map_err(|error| format!("checkpoint manifest is invalid: {error}"))?;
+    if manifest.checkpoint_id != summary.checkpoint_id
+        || manifest.snapshot_digest != summary.snapshot_digest
+    {
+        return Err("the checkpoint changed on disk after it was listed".to_owned());
+    }
+    match edit {
+        CheckpointEdit::Note(note) => manifest.note.clone_from(note),
+        CheckpointEdit::Pin(pinned) => manifest.pinned = *pinned,
+    }
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+/// Make `edit` to the checkpoint's manifest, in place of the bytes it was
+/// read from.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn edit(summary: &ProjectCheckpointSummary, edit: &CheckpointEdit) -> Result<(), String> {
+    let ProjectCheckpointLocator::Native { manifest: path, .. } = &summary.locator;
+    let stored = std::fs::read(path)
+        .map_err(|error| format!("checkpoint manifest could not be read: {error}"))?;
+    let manifest = edited_manifest(summary, &stored, edit)?;
+    let mut bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("project checkpoint manifest serialization failed: {error}"))?;
+    bytes.push(b'\n');
+    publish_private_file(
+        path,
+        ExpectedContent::Digest(Sha256::digest(&stored).into()),
+        &bytes,
+    )
+    .map_err(|error| format!("checkpoint manifest could not be written: {error}"))
+}
+
+/// Delete a checkpoint: its manifest first, so it is no longer listed, then
+/// its snapshot.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn delete(summary: &ProjectCheckpointSummary) -> Result<(), String> {
+    let ProjectCheckpointLocator::Native { manifest, snapshot } = &summary.locator;
+    let mut failures = Vec::new();
+    remove_artifacts([manifest, snapshot], &mut failures);
+    joined(failures)
+}
+
+/// Delete the files an artifact that failed verification was found as.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn delete_set_aside(artifact: &ProjectCheckpointQuarantine) -> Result<(), String> {
+    let mut failures = Vec::new();
+    remove_artifacts(&artifact.artifacts, &mut failures);
+    joined(failures)
+}
+
+/// Bring the project's checkpoints up to a save that has been written.
+///
+/// `model` is the project as saved, `previous_path` where it was saved before
+/// (none for a first save) and `replaced` the saved version this save wrote
+/// over, when the save changed it. The checkpoints kept for the old place
+/// follow the project: moved out of the application's data folder on a first
+/// save, copied when the old file is still there. The replaced version is
+/// kept as a "Before save" checkpoint. A save of every document leaves no
+/// unsaved work, so the autosave that held it goes. Returns what could not
+/// be done; the save stands either way.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn after_save(
+    model: &Model,
+    previous_path: Option<&Path>,
+    replaced: Option<&ProjectSnapshot>,
+    saved_everything: bool,
+) -> Result<(), String> {
+    let project_id = model.workspace.content.project.id().to_string();
+    let directory = checkpoint_directory(model)?;
+    let mut failures = Vec::new();
+    // A folder that cannot be named (no application data folder) never
+    // received a checkpoint, so there is nothing to bring from it.
+    if let Ok(previous) = directory_for(previous_path, &project_id)
+        && previous != directory
+        && let Err(error) = carry(&previous, &directory, &project_id, previous_path.is_none())
+    {
+        failures.push(format!(
+            "its checkpoints were not all brought beside it: {error}"
+        ));
+    }
+    if let Some(replaced) = replaced {
+        let kept = crate::time_compat::checked_unix_time_ms()
+            .map_err(|error| format!("the time could not be read: {error}"))
+            .and_then(|now| seal_checkpoint(replaced, ProjectCheckpointReason::Save, now))
+            .and_then(|(manifest, serialized)| {
+                publish_native(&directory, &manifest, serialized.as_bytes())
+            });
+        if let Err(error) = kept {
+            failures.push(format!("the version it replaced was not kept: {error}"));
+        }
+    }
+    if saved_everything {
+        match list_directory(&directory, &project_id) {
+            Ok(catalog) => {
+                for checkpoint in catalog
+                    .checkpoints
+                    .iter()
+                    .filter(|checkpoint| checkpoint.reason == ProjectCheckpointReason::Autosave)
+                {
+                    let ProjectCheckpointLocator::Native { manifest, snapshot } =
+                        &checkpoint.locator;
+                    remove_artifacts([manifest, snapshot], &mut failures);
+                }
+            }
+            Err(error) => failures.push(error),
+        }
+    }
+    if let Err(error) = prune_retention(&directory, &project_id, budget_bytes(model)) {
+        failures.push(format!("older checkpoints were not all removed: {error}"));
+    }
+    joined(failures)
+}
+
+/// Copy the project's checkpoints in `from` into `to`, each snapshot before
+/// its manifest so a checkpoint is never listed before its bytes are there,
+/// and when `remove` is set delete each from `from` once its copy is in
+/// place. A checkpoint whose bytes no longer match its manifest stays where
+/// it is.
+#[cfg(not(target_arch = "wasm32"))]
+fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), String> {
+    let catalog = list_directory(from, project_id)?;
+    if catalog.checkpoints.is_empty() {
+        return Ok(());
+    }
+    prepare_directory(to)?;
+    let mut failures = Vec::new();
+    for checkpoint in &catalog.checkpoints {
+        let ProjectCheckpointLocator::Native { manifest, snapshot } = &checkpoint.locator;
+        let copied = (|| {
+            let bytes = read_snapshot_bytes(checkpoint)?;
+            if bytes.len() as u64 != checkpoint.snapshot_byte_len
+                || digest(&bytes) != checkpoint.snapshot_digest
+            {
+                return Err("its bytes do not match its integrity manifest".to_owned());
+            }
+            let manifest_bytes = std::fs::read(manifest)
+                .map_err(|error| format!("its manifest could not be read: {error}"))?;
+            let (Some(snapshot_name), Some(manifest_name)) =
+                (snapshot.file_name(), manifest.file_name())
+            else {
+                return Err("its files have no names".to_owned());
+            };
+            let target_manifest = to.join(manifest_name);
+            if target_manifest.exists() {
+                return Ok(());
+            }
+            let target_snapshot = to.join(snapshot_name);
+            if !target_snapshot.exists() {
+                publish_private_file(&target_snapshot, ExpectedContent::Missing, &bytes)
+                    .map_err(|error| format!("its snapshot could not be copied: {error}"))?;
+            }
+            publish_private_file(&target_manifest, ExpectedContent::Missing, &manifest_bytes)
+                .map_err(|error| format!("its manifest could not be copied: {error}"))
+        })();
+        match copied {
+            Ok(()) if remove => remove_artifacts([manifest, snapshot], &mut failures),
+            Ok(()) => {}
+            Err(error) => {
+                failures.push(format!("checkpoint {}: {error}", checkpoint.checkpoint_id))
+            }
+        }
+    }
+    crate::io::durable_file::sync_parent_of(&to.join("checkpoint"))
+        .map_err(|error| format!("the checkpoint folder could not be synchronized: {error}"))?;
+    if remove {
+        // Only an emptied folder goes; anything set aside in it stays.
+        let _ = std::fs::remove_dir(from);
+    }
+    joined(failures)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn joined(failures: Vec<String>) -> Result<(), String> {
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
 /// The disk space the checkpoints in `checkpoints` that the budget governs
 /// take up.
 pub fn budget_use(checkpoints: &[ProjectCheckpointSummary]) -> u64 {
@@ -835,12 +1035,9 @@ impl Drop for UnsavedCheckpointRoot {
     }
 }
 
+/// Create the checkpoint folder, private to its owner.
 #[cfg(not(target_arch = "wasm32"))]
-fn publish_native(
-    directory: &Path,
-    manifest: &ProjectCheckpointManifest,
-    bytes: &[u8],
-) -> Result<ProjectCheckpointSummary, String> {
+fn prepare_directory(directory: &Path) -> Result<(), String> {
     std::fs::create_dir_all(directory).map_err(|error| {
         format!(
             "project checkpoint directory '{}' could not be created: {error}",
@@ -859,13 +1056,23 @@ fn publish_native(
             },
         )?;
     }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_native(
+    directory: &Path,
+    manifest: &ProjectCheckpointManifest,
+    bytes: &[u8],
+) -> Result<ProjectCheckpointSummary, String> {
+    prepare_directory(directory)?;
     let snapshot = directory.join(&manifest.snapshot_name);
     let manifest_path = directory.join(format!("{}{}", manifest.checkpoint_id, MANIFEST_SUFFIX));
     if snapshot.exists() || manifest_path.exists() {
         return Err("project checkpoint identity collision; no state was changed".to_owned());
     }
 
-    publish_private_file(&snapshot, bytes)
+    publish_private_file(&snapshot, ExpectedContent::Missing, bytes)
         .map_err(|error| format!("project checkpoint snapshot publication failed: {error}"))?;
     let observed = std::fs::read(&snapshot)
         .map_err(|error| format!("project checkpoint snapshot verification failed: {error}"))?;
@@ -877,7 +1084,7 @@ fn publish_native(
     let mut manifest_bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("project checkpoint manifest serialization failed: {error}"))?;
     manifest_bytes.push(b'\n');
-    publish_private_file(&manifest_path, &manifest_bytes)
+    publish_private_file(&manifest_path, ExpectedContent::Missing, &manifest_bytes)
         .map_err(|error| format!("project checkpoint manifest publication failed: {error}"))?;
     crate::io::durable_file::sync_parent_of(&manifest_path)
         .map_err(|error| format!("project checkpoint directory sync failed: {error}"))?;
@@ -891,26 +1098,21 @@ fn publish_native(
     )
 }
 
+/// Publish `bytes` at `path` while it holds what `expected` says, readable by
+/// its owner only.
 #[cfg(not(target_arch = "wasm32"))]
 fn publish_private_file(
     path: &Path,
+    expected: ExpectedContent,
     bytes: &[u8],
 ) -> Result<(), crate::io::durable_file::CompareExchangeError> {
     #[cfg(unix)]
     {
-        crate::io::durable_file::compare_exchange_bytes_owner_only(
-            path,
-            crate::io::durable_file::ExpectedContent::Missing,
-            bytes,
-        )
+        crate::io::durable_file::compare_exchange_bytes_owner_only(path, expected, bytes)
     }
     #[cfg(not(unix))]
     {
-        crate::io::durable_file::compare_exchange_bytes(
-            path,
-            crate::io::durable_file::ExpectedContent::Missing,
-            bytes,
-        )
+        crate::io::durable_file::compare_exchange_bytes(path, expected, bytes)
     }
 }
 
@@ -1054,11 +1256,7 @@ fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Res
         // The results only this checkpoint kept go with it.
         let _ = std::fs::remove_dir_all(rspice_formats::project_results::segment_folder(snapshot));
     }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("; "))
-    }
+    joined(failures)
 }
 
 /// Remove each file, the manifest first so a checkpoint stops being listed
@@ -1075,10 +1273,19 @@ fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a PathBuf>, failures: 
 }
 
 /// The manifest keys among `stored`, the project's manifests by key, whose
-/// checkpoints retention removes. A manifest that cannot be read is left
-/// where it is: the page lists it as set aside.
+/// checkpoints retention removes, every autosave first when `drop_autosaves`
+/// is set. A manifest that cannot be read is left where it is: the page lists
+/// it as set aside.
 #[cfg(target_arch = "wasm32")]
-fn browser_retention_removals(stored: Vec<(String, Option<String>)>, budget: u64) -> Vec<String> {
+fn browser_retention_removals(
+    stored: Vec<(String, Option<String>)>,
+    budget: u64,
+    drop_autosaves: bool,
+) -> Vec<String> {
+    let manifest_key = |checkpoint: &ProjectCheckpointSummary| {
+        let ProjectCheckpointLocator::Browser { manifest_key, .. } = &checkpoint.locator;
+        manifest_key.clone()
+    };
     let mut checkpoints = stored
         .into_iter()
         .filter_map(|(manifest_key, text)| {
@@ -1097,14 +1304,22 @@ fn browser_retention_removals(stored: Vec<(String, Option<String>)>, budget: u64
         })
         .collect::<Vec<_>>();
     sort_newest_first(&mut checkpoints);
-    retention_removals(&checkpoints, budget)
-        .into_iter()
-        .map(|index| {
-            let ProjectCheckpointLocator::Browser { manifest_key, .. } =
-                &checkpoints[index].locator;
-            manifest_key.clone()
-        })
-        .collect()
+    let mut removals = Vec::new();
+    if drop_autosaves {
+        checkpoints.retain(|checkpoint| {
+            let autosave = checkpoint.reason == ProjectCheckpointReason::Autosave;
+            if autosave {
+                removals.push(manifest_key(checkpoint));
+            }
+            !autosave
+        });
+    }
+    removals.extend(
+        retention_removals(&checkpoints, budget)
+            .into_iter()
+            .map(|index| manifest_key(&checkpoints[index])),
+    );
+    removals
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1276,6 +1491,152 @@ pub fn start_recovery_copy_bytes(
             }));
         },
     );
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// The browser store's changes that finish after the frame that started
+    /// them, with no page waiting on them: how many have finished, and what
+    /// each that failed could not do.
+    static BROWSER_STORE_CHANGES: std::cell::RefCell<(u64, Vec<String>)> =
+        const { std::cell::RefCell::new((0, Vec::new())) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn note_browser_store_change(failure: Option<String>) {
+    BROWSER_STORE_CHANGES.with(|changes| {
+        let mut changes = changes.borrow_mut();
+        changes.0 = changes.0.wrapping_add(1);
+        changes.1.extend(failure);
+    });
+}
+
+/// How many changes to the browser store have finished on their own; the
+/// Recovery page lists again when the count moves.
+#[cfg(target_arch = "wasm32")]
+pub fn browser_store_changes() -> u64 {
+    BROWSER_STORE_CHANGES.with(|changes| changes.borrow().0)
+}
+
+/// What the browser store's own changes could not do, once.
+#[cfg(target_arch = "wasm32")]
+pub fn take_browser_store_failures() -> Vec<String> {
+    BROWSER_STORE_CHANGES.with(|changes| std::mem::take(&mut changes.borrow_mut().1))
+}
+
+/// Make `edit` to the checkpoint's stored manifest, while it is still the
+/// one the checkpoint was listed from.
+#[cfg(target_arch = "wasm32")]
+pub fn start_edit(
+    summary: &ProjectCheckpointSummary,
+    edit: CheckpointEdit,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    let ProjectCheckpointLocator::Browser { manifest_key, .. } = &summary.locator;
+    let listed = summary.clone();
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_manifest_update(
+        manifest_key.clone(),
+        move |stored| {
+            let stored = stored.ok_or_else(|| "the checkpoint is no longer stored".to_owned())?;
+            let manifest = edited_manifest(&listed, stored.as_bytes(), &edit)?;
+            serde_json::to_string(&manifest).map_err(|error| {
+                format!("project checkpoint manifest serialization failed: {error}")
+            })
+        },
+        complete,
+    );
+}
+
+/// Delete a checkpoint: its manifest first, so it is no longer listed, then
+/// its snapshot.
+#[cfg(target_arch = "wasm32")]
+pub fn start_delete(
+    summary: &ProjectCheckpointSummary,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    let ProjectCheckpointLocator::Browser {
+        manifest_key,
+        snapshot_key,
+    } = &summary.locator;
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_delete(
+        vec![manifest_key.clone(), snapshot_key.clone()],
+        complete,
+    );
+}
+
+/// Delete the records an artifact that failed verification was found as.
+#[cfg(target_arch = "wasm32")]
+pub fn start_delete_set_aside(
+    artifact: &ProjectCheckpointQuarantine,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_delete(
+        artifact.artifact_keys.clone(),
+        complete,
+    );
+}
+
+/// Bring the browser store up to a save that has been written: the version
+/// it replaced, when it changed one, is kept as a "Before save" checkpoint;
+/// a save of every document removes the autosave; retention runs. The store
+/// finishes after this returns, and what it could not do is taken with
+/// [`take_browser_store_failures`].
+#[cfg(target_arch = "wasm32")]
+pub fn start_after_save(model: &Model, replaced: Option<&ProjectSnapshot>, saved_everything: bool) {
+    let project_id = model.workspace.content.project.id().to_string();
+    let budget = budget_bytes(model);
+    let prefix = browser_project_prefix(&project_id);
+    let removals = move |stored| browser_retention_removals(stored, budget, saved_everything);
+    let sealed = replaced.map(|replaced| {
+        crate::time_compat::checked_unix_time_ms()
+            .map_err(|error| format!("the time could not be read: {error}"))
+            .and_then(|now| seal_checkpoint(replaced, ProjectCheckpointReason::Save, now))
+            .and_then(|(manifest, serialized)| {
+                serde_json::to_string(&manifest)
+                    .map(|manifest_json| (manifest, serialized, manifest_json))
+                    .map_err(|error| {
+                        format!("project checkpoint manifest serialization failed: {error}")
+                    })
+            })
+    });
+    match sealed {
+        Some(Ok((manifest, serialized, manifest_json))) => {
+            let (manifest_key, snapshot_key) = browser_keys(&manifest);
+            crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_publish(
+                prefix,
+                manifest_key,
+                snapshot_key,
+                serialized.into_bytes(),
+                manifest_json,
+                removals,
+                |result| {
+                    note_browser_store_change(
+                        result
+                            .err()
+                            .map(|error| format!("the version it replaced was not kept: {error}")),
+                    );
+                },
+            );
+        }
+        sealed => {
+            if let Some(Err(error)) = sealed {
+                note_browser_store_change(Some(format!(
+                    "the version it replaced was not kept: {error}"
+                )));
+            }
+            crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_prune(
+                prefix,
+                removals,
+                |result| {
+                    note_browser_store_change(
+                        result.err().map(|error| {
+                            format!("older checkpoints were not all removed: {error}")
+                        }),
+                    );
+                },
+            );
+        }
+    }
 }
 
 #[cfg(test)]

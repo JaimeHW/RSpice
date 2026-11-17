@@ -791,22 +791,8 @@ pub(crate) fn start_browser_checkpoint_publish(
 
             // Retention runs only after the new manifest is committed and
             // read back; the store decides what it keeps from the manifests.
-            let retention = async {
-                let mut stored = Vec::new();
-                for key in indexed_db_matching_keys(&project_prefix, ".manifest").await? {
-                    let text = indexed_db_get(&key).await?.and_then(|value| value.as_string());
-                    stored.push((key, text));
-                }
-                for key in retention_removals(stored) {
-                    indexed_db_delete(&key).await?;
-                    if let Some(stem) = key.strip_suffix(".manifest") {
-                        indexed_db_delete(&format!("{stem}.snapshot")).await?;
-                    }
-                }
-                Ok::<(), String>(())
-            }
-            .await;
-            if let Err(error) = retention {
+            if let Err(error) = prune_browser_checkpoints(&project_prefix, retention_removals).await
+            {
                 log::warn!(
                     "Browser project checkpoint committed, but retention cleanup was incomplete: {error}"
                 );
@@ -815,6 +801,41 @@ pub(crate) fn start_browser_checkpoint_publish(
         }
         .await;
         complete(result);
+    });
+}
+
+/// Remove the checkpoints `removals` picks from the project's manifests by
+/// key, each manifest before its snapshot.
+#[cfg(target_arch = "wasm32")]
+async fn prune_browser_checkpoints(
+    project_prefix: &str,
+    removals: impl FnOnce(Vec<(String, Option<String>)>) -> Vec<String>,
+) -> Result<(), String> {
+    let mut stored = Vec::new();
+    for key in indexed_db_matching_keys(project_prefix, ".manifest").await? {
+        let text = indexed_db_get(&key)
+            .await?
+            .and_then(|value| value.as_string());
+        stored.push((key, text));
+    }
+    for key in removals(stored) {
+        indexed_db_delete(&key).await?;
+        if let Some(stem) = key.strip_suffix(".manifest") {
+            indexed_db_delete(&format!("{stem}.snapshot")).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Remove the checkpoints `removals` picks, with no new one published.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_prune(
+    project_prefix: String,
+    removals: impl FnOnce(Vec<(String, Option<String>)>) -> Vec<String> + 'static,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        complete(prune_browser_checkpoints(&project_prefix, removals).await);
     });
 }
 
