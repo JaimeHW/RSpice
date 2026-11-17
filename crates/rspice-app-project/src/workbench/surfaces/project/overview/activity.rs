@@ -65,23 +65,44 @@ fn activity_table(
     // The detail column ends with a run's engine, so a narrow table gives the
     // engine up first; the elapsed time has a column of its own. A time and a
     // duration are never cut: their columns are as wide as the widest one.
+    // A card too narrow for every column's least width gives up whole
+    // columns from its right, the detail and then the elapsed time, rather
+    // than scrolling sideways with its edge through a word; a detail given
+    // up is its operation's hint.
     let (when, elapsed) = fitted_widths(ui, operations, snapshot.now_ms);
     let columns = [
         Column::words("When", when),
-        Column::name("Operation", 150.0),
+        Column::name("Operation", OPERATION_LEAST_WIDTH),
         Column::number("Elapsed", elapsed),
-        Column::name("Detail", 120.0),
+        Column::name("Detail", DETAIL_LEAST_WIDTH),
     ];
+    let least = [when, OPERATION_LEAST_WIDTH, elapsed, DETAIL_LEAST_WIDTH];
+    let room_wide = ui.available_width();
+    let shown = (2..=least.len())
+        .rev()
+        .find(|&count| least[..count].iter().sum::<f32>() <= room_wide)
+        .unwrap_or(2);
     let response = DataTable::new(
         "workbench.project.overview.activity",
-        &columns,
+        &columns[..shown],
         operations.len(),
     )
     .state(state)
     .freeze(1)
     .pin_when_narrow(1)
     .max_height(room)
-    .show(ui, |index| row_cells(&operations[index], snapshot.now_ms));
+    .show(ui, |index| {
+        let mut cells = row_cells(&operations[index], snapshot.now_ms);
+        let detail = &operations[index].detail;
+        if shown < cells.len() {
+            cells.truncate(shown);
+            if !detail.is_empty() {
+                let operation = cells.remove(1).hint(detail);
+                cells.insert(1, operation);
+            }
+        }
+        cells
+    });
     response
         .activate
         .or(response.clicked)
@@ -113,6 +134,10 @@ fn row_cells(operation: &OperationSnapshot, now_ms: u64) -> Vec<Cell> {
 /// The least a fitted column is made: room for its head and the sort mark
 /// beside it.
 const FITTED_HEAD_WIDTH: f32 = 72.0;
+/// The least the Operation and Detail columns are made: a card narrower
+/// than every column at its least gives up a column.
+const OPERATION_LEAST_WIDTH: f32 = 150.0;
+const DETAIL_LEAST_WIDTH: f32 = 120.0;
 
 /// How wide the When and Elapsed columns are made: each as wide as the
 /// widest value it shows, with the room the table leaves either side of a
