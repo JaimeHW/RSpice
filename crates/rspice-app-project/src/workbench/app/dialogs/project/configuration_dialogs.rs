@@ -140,6 +140,9 @@ pub struct ConfigurationDialogState {
     /// Opening, creating or importing another project, closing this one, or
     /// exiting, waiting for the edits not applied to be applied or discarded.
     pub leaving: Option<Leaving>,
+    /// The reader answered the question about edits not applied that New
+    /// and Clone ask before they open; reset whenever a dialog opens.
+    edits_answered: bool,
 }
 
 impl ConfigurationDialogState {
@@ -201,6 +204,55 @@ pub fn open_configuration_dialog(
     };
     dialogs.open = Some(dialog);
     dialogs.refusal = None;
+    dialogs.edits_answered = false;
+}
+
+/// What the answer to the question New and Clone ask about edits not
+/// applied leaves to do.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EditsBeforeDialog {
+    /// Show the dialog: nothing to ask, or the reader answered.
+    ShowDialog,
+    /// Keep asking: not answered yet.
+    Ask,
+    /// Apply the edits, then show the dialog.
+    ApplyThenShow,
+    /// The reader cancelled: the dialog closes and the edits stay.
+    Cancel,
+}
+
+/// New and Clone make another configuration and put it in front, which
+/// drops the edits not applied to the one there now: ask first, as picking
+/// another configuration does. Discard leaves the edits until the new
+/// configuration is made, so cancelling the dialog after it loses nothing.
+pub fn answer_edits_before_dialog(
+    dialogs: &mut ConfigurationDialogState,
+    configuration: &ConfigurationPageState,
+    catalog: &ConfigurationSetCatalog,
+    choice: DialogChoice,
+) -> EditsBeforeDialog {
+    let asks = matches!(
+        dialogs.open,
+        Some(ConfigurationDialog::New { .. } | ConfigurationDialog::Clone { .. })
+    );
+    if !asks || dialogs.edits_answered || !configuration.is_dirty(catalog) {
+        return EditsBeforeDialog::ShowDialog;
+    }
+    match choice {
+        DialogChoice::None => EditsBeforeDialog::Ask,
+        DialogChoice::Primary => {
+            dialogs.edits_answered = true;
+            EditsBeforeDialog::ApplyThenShow
+        }
+        DialogChoice::Secondary => {
+            dialogs.edits_answered = true;
+            EditsBeforeDialog::ShowDialog
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialogs.close();
+            EditsBeforeDialog::Cancel
+        }
+    }
 }
 
 fn name_id() -> Id {
@@ -314,6 +366,30 @@ pub fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx
                 parts.configuration.pending_selection = None;
             }
             DialogChoice::None => {}
+        }
+        return;
+    }
+    let catalog = &parts.model.workspace.content.configuration_sets;
+    let asked = answer_edits_before_dialog(
+        parts.dialogs,
+        parts.configuration,
+        catalog,
+        DialogChoice::None,
+    );
+    if asked == EditsBeforeDialog::Ask {
+        let choice =
+            edits_prompt(ctx, parts.configuration, parts.model).unwrap_or(DialogChoice::None);
+        let catalog = &parts.model.workspace.content.configuration_sets;
+        match answer_edits_before_dialog(parts.dialogs, parts.configuration, catalog, choice) {
+            EditsBeforeDialog::ApplyThenShow => {
+                if let Err(refusal) = commit(parts, ConfigurationTransaction::Apply) {
+                    // A refused apply stays on the page, saying why; the
+                    // edits are still there, so nothing new is made.
+                    parts.configuration.refusal = Some(refusal);
+                    parts.dialogs.close();
+                }
+            }
+            EditsBeforeDialog::Ask | EditsBeforeDialog::ShowDialog | EditsBeforeDialog::Cancel => {}
         }
         return;
     }

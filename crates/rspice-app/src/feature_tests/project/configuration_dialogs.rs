@@ -8,8 +8,9 @@ use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::session::project_transactions::go_on_leaving;
 use rspice_app_project::workbench::app::dialogs::project::configuration::delete_refusal;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
-    ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, Leaving,
-    LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
+    ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, EditsBeforeDialog,
+    Leaving, LeavingAnswer, answer_edits_before_dialog, answer_leaving, open_configuration_dialog,
+    render_configuration_dialog,
 };
 use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
@@ -391,4 +392,102 @@ fn going_on_leaving_handed_to_the_shell_ends_where_it_went_on_in_place() {
             "handed {handed}"
         );
     }
+}
+
+/// Clone takes what was applied; with edits in front that are not, it asks
+/// first, and Apply puts them into the configuration the clone copies.
+#[test]
+fn clone_asks_about_unapplied_edits_and_apply_carries_them_into_the_copy() {
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::Clone(id),
+    );
+    let words = announced(&mut app);
+    assert!(
+        words
+            .iter()
+            .any(|word| word.contains("Apply your edits to Reference hierarchy?")),
+        "the question comes before the Clone dialog: {words:#?}"
+    );
+
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    press(&mut app, &ctx, &[]);
+    press(&mut app, &ctx, &[egui::Key::Enter]);
+
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    assert_eq!(
+        catalog.find(id).unwrap().executable_view_policy(),
+        ["schematic", "spice"],
+        "Apply committed the edits"
+    );
+    assert!(
+        matches!(
+            app.state.project.configuration_dialog.open,
+            Some(ConfigurationDialog::Clone { .. })
+        ),
+        "the Clone dialog follows the answer"
+    );
+    let words = announced(&mut app);
+    assert!(
+        !words
+            .iter()
+            .any(|word| word.contains("Apply your edits to")),
+        "answered once, the question is not asked again: {words:#?}"
+    );
+}
+
+/// New with edits in front: Cancel closes the dialog and keeps the edits;
+/// Discard shows the dialog and still keeps them until a configuration is made.
+#[test]
+fn new_configuration_never_drops_unapplied_edits_without_an_answer() {
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let committed = app.state.model.workspace.content.configuration_sets.clone();
+
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::New,
+    );
+    let ask = |app: &mut RSpiceApp, choice| {
+        answer_edits_before_dialog(
+            &mut app.state.project.configuration_dialog,
+            &app.state.project.configuration,
+            &committed,
+            choice,
+        )
+    };
+    assert_eq!(ask(&mut app, DialogChoice::None), EditsBeforeDialog::Ask);
+    assert_eq!(
+        ask(&mut app, DialogChoice::Ghost),
+        EditsBeforeDialog::Cancel
+    );
+    assert!(app.state.project.configuration_dialog.open.is_none());
+    assert!(app.state.project.configuration.is_dirty(&committed));
+
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::New,
+    );
+    assert_eq!(
+        ask(&mut app, DialogChoice::Secondary),
+        EditsBeforeDialog::ShowDialog
+    );
+    assert!(matches!(
+        app.state.project.configuration_dialog.open,
+        Some(ConfigurationDialog::New { .. })
+    ));
+    assert!(
+        app.state.project.configuration.is_dirty(&committed),
+        "the edits stay until the new configuration is made"
+    );
+    assert_eq!(
+        ask(&mut app, DialogChoice::None),
+        EditsBeforeDialog::ShowDialog
+    );
 }
