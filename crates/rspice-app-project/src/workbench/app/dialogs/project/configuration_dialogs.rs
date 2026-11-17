@@ -5,7 +5,7 @@
 //! are the transactions that add one to the project, name one, or take one
 //! away; each commits through the configuration transactions.
 
-use egui::{Context, Id, TextEdit, Ui};
+use egui::{Context, Id, Ui};
 
 use crate::services::recent_files::RecentKind;
 use crate::state::{
@@ -13,16 +13,12 @@ use crate::state::{
     ConfigurationSetDefinition, ConfigurationSetId, DEFAULT_STOP_VIEW_TYPES, InstancePath,
     UnresolvedBindingPolicy, ViewType, default_view_search_order,
 };
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, field_label,
-    kv_row, select, switch_row,
-};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, DialogTransactionTone};
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::dialogs::project::configuration::{
     Committed, ConfigurationTransaction, commit_configuration, delete_refusal,
     finish_configuration_check,
 };
-use crate::workbench::app::dialogs::review_primitives::text_edit_field;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::configuration_state::{
@@ -571,53 +567,46 @@ fn new_dialog(
     // A top cell that places no instance is its own DUT.
     let dut = default_dut_path(&model.workspace, &model.schematic, top)
         .unwrap_or_else(|| InstancePath::root().to_string());
-    let problem = refusal;
-    let mut dialog = Dialog::new("New configuration", "Create")
-        .description(
+    // One form down one label column in the body face: the lists a start
+    // brings are words under the pick that brings them, wrapped whole.
+    let choice = CommandForm::new("New configuration", "Create")
+        .describe(
             "A configuration picks the top cell, the view list and stop list, and the \
                  bindings netlisting follows.",
         )
-        .size(DialogSize::CommandForm)
-        .overlay_scrollbar()
-        .ghost("Cancel")
         .primary_enabled(write_allowed && !name.trim().is_empty())
-        .initial_focus(DialogInitialFocus::Control(name_id()));
-    if let Some(problem) = problem.as_deref() {
-        dialog = dialog.transaction_state(
-            DialogTransactionTone::Error,
-            "The configuration cannot be created",
-            problem,
-        );
-    }
-    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
-        name_field(ui, name, write_allowed);
-        let labels = StartFrom::ALL.map(|start| start.label().to_owned());
-        if let Some(index) = picker(ui, "Start from", start.label(), &labels, write_allowed) {
-            *start = StartFrom::ALL[index];
-        }
-        let top_labels = choices
-            .iter()
-            .map(CellViewRef::display_path)
-            .collect::<Vec<_>>();
-        if let Some(index) = picker(
-            ui,
-            "Top cell",
-            &top.display_path(),
-            &top_labels,
-            write_allowed,
-        ) {
-            *top = choices[index].clone();
-        }
-        let (views, stops) = start.lists();
-        kv_row(ui, "View list", &views.join(", then "));
-        kv_row(ui, "Stop list", &stops.join(", "));
-        kv_row(ui, "DUT instance", &dut);
-        ui.add_enabled_ui(write_allowed, |ui| {
-            switch_row(ui, "Use for runs", use_for_runs);
+        .fields_enabled(write_allowed)
+        .status(refusal.as_deref().map_or(Ok(None), Err))
+        .show(ctx, |rows| {
+            rows.text_sans("Name", name_id(), name, "Configuration name");
+            let labels = StartFrom::ALL.map(|start| start.label().to_owned());
+            if let Some(index) = rows.select(
+                "Start from",
+                "configuration-dialog-start-from",
+                start.label(),
+                &labels,
+            ) {
+                *start = StartFrom::ALL[index];
+            }
+            let (views, stops) = start.lists();
+            rows.derived(&format!("View list: {}", views.join(", then ")));
+            rows.derived(&format!("Stop list: {}", stops.join(", ")));
+            let top_labels = choices
+                .iter()
+                .map(CellViewRef::display_path)
+                .collect::<Vec<_>>();
+            if let Some(index) = rows.select(
+                "Top cell",
+                "configuration-dialog-top-cell",
+                &top.display_path(),
+                &top_labels,
+            ) {
+                *top = choices[index].clone();
+            }
+            rows.value("DUT instance", &dut);
+            rows.checks("Runs", &mut [("Use for runs", use_for_runs)]);
+            Some(name_id())
         });
-        Some(name_id())
-    });
     let (executable_view_policy, stop_views) = start.lists();
     let transaction = ConfigurationTransaction::Create {
         definition: Box::new(ConfigurationSetDefinition {
@@ -677,54 +666,38 @@ fn name_dialog(
         ) => name.trim().is_empty(),
         _ => true,
     };
-    let mut dialog = Dialog::new(title, primary)
-        .description(&description)
-        .size(DialogSize::CommandForm)
-        .overlay_scrollbar()
-        .ghost("Cancel")
+    let choice = CommandForm::new(title, primary)
+        .describe(&description)
         .primary_enabled(write_allowed && !name_empty)
-        .initial_focus(DialogInitialFocus::Control(name_id()));
-    if let Some(refusal) = refusal.as_deref() {
-        dialog = dialog.transaction_state(
-            DialogTransactionTone::Error,
-            if primary == "Clone" {
-                "The configuration cannot be cloned"
-            } else {
-                "The configuration cannot be renamed"
-            },
-            refusal,
-        );
-    }
-    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
-        kv_row(ui, "Configuration", &source_name);
-        match dialog_state.open.as_mut() {
-            Some(ConfigurationDialog::Clone {
-                source,
-                name,
-                use_for_runs,
-            }) => {
-                name_field(ui, name, write_allowed);
-                ui.add_enabled_ui(write_allowed, |ui| {
-                    switch_row(ui, "Use for runs", use_for_runs);
-                });
-                transaction = Some(ConfigurationTransaction::Clone {
-                    source: *source,
-                    name: name.trim().to_owned(),
-                    use_for_runs: *use_for_runs,
-                });
+        .fields_enabled(write_allowed)
+        .status(refusal.as_deref().map_or(Ok(None), Err))
+        .show(ctx, |rows| {
+            rows.value("Configuration", &source_name);
+            match dialog_state.open.as_mut() {
+                Some(ConfigurationDialog::Clone {
+                    source,
+                    name,
+                    use_for_runs,
+                }) => {
+                    rows.text_sans("Name", name_id(), name, "Configuration name");
+                    rows.checks("Runs", &mut [("Use for runs", use_for_runs)]);
+                    transaction = Some(ConfigurationTransaction::Clone {
+                        source: *source,
+                        name: name.trim().to_owned(),
+                        use_for_runs: *use_for_runs,
+                    });
+                }
+                Some(ConfigurationDialog::Rename { id, name }) => {
+                    rows.text_sans("Name", name_id(), name, "Configuration name");
+                    transaction = Some(ConfigurationTransaction::Rename {
+                        id: *id,
+                        name: name.trim().to_owned(),
+                    });
+                }
+                _ => {}
             }
-            Some(ConfigurationDialog::Rename { id, name }) => {
-                name_field(ui, name, write_allowed);
-                transaction = Some(ConfigurationTransaction::Rename {
-                    id: *id,
-                    name: name.trim().to_owned(),
-                });
-            }
-            _ => {}
-        }
-        Some(name_id())
-    });
+            Some(name_id())
+        });
     (choice, transaction)
 }
 
@@ -856,42 +829,6 @@ fn revert_dialog(
         .destructive()
         .ghost("Keep editing")
         .show(ctx, |ui| consequence_text(ui, &consequence))
-}
-
-fn name_field(ui: &mut Ui, name: &mut String, write_allowed: bool) {
-    ui.add_enabled_ui(write_allowed, |ui| {
-        text_edit_field(
-            ui,
-            "Name",
-            TextEdit::singleline(name).id(name_id()),
-            None,
-            "Configuration name",
-        );
-    });
-}
-
-/// A labelled dropdown; the picked index, if one was picked this frame.
-fn picker(
-    ui: &mut Ui,
-    label: &str,
-    current: &str,
-    options: &[String],
-    enabled: bool,
-) -> Option<usize> {
-    field_label(ui, label, |ui| {
-        ui.add_enabled_ui(enabled, |ui| {
-            let width = ui.available_width();
-            select(
-                ui,
-                &format!("configuration-dialog-{label}"),
-                label,
-                current,
-                options,
-                width,
-            )
-        })
-        .inner
-    })
 }
 
 /// The schematic and testbench views a new configuration can take as its
