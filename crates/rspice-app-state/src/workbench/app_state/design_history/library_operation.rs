@@ -237,12 +237,22 @@ impl LibraryOperationRecord {
         effects: &mut HistoryEffects,
     ) -> Result<(), String> {
         let crossing = self.prepare_crossing(state, forward)?;
+        // What the reader left standing is what the next crossing back
+        // returns to: the tabs as they are now, those opened since the
+        // step was recorded included, and the library selection.
+        let standing = (Tabs::capture(state), selection(&state.library_manager));
         let (making, tabs_leaving, tabs_making) = if forward {
             (&self.after, &self.tabs_before, &self.tabs_after)
         } else {
             (&self.before, &self.tabs_after, &self.tabs_before)
         };
         crossing.commit(state, making, tabs_leaving, tabs_making, effects);
+        let (left, tabs_left) = if forward {
+            (&mut self.before, &mut self.tabs_before)
+        } else {
+            (&mut self.after, &mut self.tabs_after)
+        };
+        (*tabs_left, left.selection) = standing;
         Ok(())
     }
 }

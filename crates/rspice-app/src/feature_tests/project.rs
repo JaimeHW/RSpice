@@ -22,6 +22,7 @@ mod library_configuration_frames;
 mod library_deletion;
 mod library_inspector;
 mod library_page;
+mod library_undo;
 mod new_cell;
 mod new_project;
 mod new_project_fields;
