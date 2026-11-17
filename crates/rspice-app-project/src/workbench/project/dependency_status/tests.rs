@@ -75,6 +75,23 @@ fn rows_list_design_then_model_libraries_by_name_without_regard_to_case() {
     assert!(listed.contains(&(DependencyKind::Model, "shared")));
 }
 
+/// A canonical Windows path is shown as the reader wrote it; a device path,
+/// which has no other spelling, keeps its prefix.
+#[test]
+fn a_path_is_shown_without_the_prefix_canonicalising_adds() {
+    for (stored, shown) in [
+        (r"\\?\C:\models\tt.lib", r"C:\models\tt.lib"),
+        (r"\\?\UNC\server\share\tt.lib", r"\\server\share\tt.lib"),
+        (
+            r"\\?\GLOBALROOT\Device\tt.lib",
+            r"\\?\GLOBALROOT\Device\tt.lib",
+        ),
+        ("/models/tt.lib", "/models/tt.lib"),
+    ] {
+        assert_eq!(shown_path(std::path::Path::new(stored)), shown);
+    }
+}
+
 /// A selection naming no library of the project is replaced by the first
 /// row shown; one naming a library is kept, even under a filter.
 #[test]

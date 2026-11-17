@@ -16,6 +16,7 @@
 
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
@@ -40,6 +41,15 @@ impl DependencyKind {
         match self {
             Self::Design => "Design library",
             Self::Model => "Model library",
+        }
+    }
+
+    /// The word for the catalogue under a "Type" heading, which says the
+    /// rest.
+    pub const fn kind_word(self) -> &'static str {
+        match self {
+            Self::Design => "Design",
+            Self::Model => "Model",
         }
     }
 }
@@ -158,7 +168,7 @@ fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus 
             label: "Not found",
             detail: Some(format!(
                 "{} cannot be read{}",
-                first.path.display(),
+                file_name(&first.path),
                 more(unread.len())
             )),
         };
@@ -169,7 +179,7 @@ fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus 
             label: "Changed",
             detail: Some(format!(
                 "{} \u{00b7} attached {} \u{00b7} now {}{}",
-                first.path.display(),
+                file_name(&first.path),
                 first.pinned,
                 first.on_disk.as_deref().unwrap_or(UNSET),
                 more(findings.len())
@@ -182,6 +192,32 @@ fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus 
         "In project"
     };
     LibraryStatus::neutral(label, Some(source_files(files)))
+}
+
+/// The file a finding is about, by name: the library's source row beside it
+/// gives the whole path.
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || shown_path(path),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
+/// A path as the reader knows it. Canonicalising a Windows drive path adds
+/// the verbatim `\\?\` prefix, which is no part of the name they gave it.
+fn shown_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return text;
+    };
+    if let Some(share) = rest.strip_prefix(r"UNC\") {
+        return format!(r"\\{share}");
+    }
+    let drive = rest.as_bytes();
+    if drive.first().is_some_and(u8::is_ascii_alphabetic) && drive.get(1) == Some(&b':') {
+        return rest.to_owned();
+    }
+    text
 }
 
 fn source_files(count: usize) -> String {
@@ -296,10 +332,10 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
                 status: library_status(model, &key),
                 library: key,
                 version: nonempty_or_unset(&library.technology),
-                source: library.path.as_ref().map_or_else(
-                    || "Project file".to_owned(),
-                    |path| path.display().to_string(),
-                ),
+                source: library
+                    .path
+                    .as_deref()
+                    .map_or_else(|| "Project file".to_owned(), shown_path),
                 digest: UNSET.to_owned(),
             }
         });
@@ -315,8 +351,8 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
                 version: nonempty_or_unset(&library.version),
                 source: library
                     .root_path
-                    .as_ref()
-                    .map_or_else(|| UNSET.to_owned(), |path| path.display().to_string()),
+                    .as_deref()
+                    .map_or_else(|| UNSET.to_owned(), shown_path),
                 digest: library
                     .source_closure
                     .iter()

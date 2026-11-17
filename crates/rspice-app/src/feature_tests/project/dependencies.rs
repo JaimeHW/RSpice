@@ -78,7 +78,7 @@ fn table_row<'a>(
         .filter(|(label, ..)| {
             let (_, words) = severity(label);
             let cells: Vec<_> = words.split(", ").collect();
-            cells.len() >= 5 && cells[0] == name && cells[1] == kind
+            cells.len() >= 4 && cells[0] == name && cells[1] == kind
         })
         .collect()
 }
@@ -87,8 +87,8 @@ fn table_row<'a>(
 /// frame after it was selected.
 fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 3] {
     let kind = match library.kind {
-        rspice_app_project::workbench::project::DependencyKind::Design => "Design library",
-        rspice_app_project::workbench::project::DependencyKind::Model => "Model library",
+        rspice_app_project::workbench::project::DependencyKind::Design => "Design",
+        rspice_app_project::workbench::project::DependencyKind::Model => "Model",
     };
     app.state.project.project_dependency_selection = Some(library.clone());
     let ctx = offscreen();
@@ -392,8 +392,8 @@ fn a_design_and_a_model_library_of_one_name_are_selected_apart() {
     let selected: Vec<_> = rail.iter().filter(|(.., selected)| *selected).collect();
     assert_eq!(selected.len(), 1, "one rail row is selected: {rail:?}");
     assert!(selected[0].0.ends_with("Built in"), "{selected:?}");
-    let design = table_row(&nodes, "shared", "Design library");
-    let model = table_row(&nodes, "shared", "Model library");
+    let design = table_row(&nodes, "shared", "Design");
+    let model = table_row(&nodes, "shared", "Model");
     assert!(!design[0].3 && model[0].3, "{design:?} {model:?}");
     let text = painted(&output);
     assert!(text.contains("Model library"), "{text}");
@@ -418,13 +418,13 @@ fn the_rail_and_the_table_share_one_filter_and_lose_it_with_the_project() {
     app_frame(&ctx, app, Vec::new());
     let nodes = announced(&app_frame(&ctx, app, Vec::new()));
     let found_rail = rail_row(&nodes, &libraries.found);
-    let found_table = table_row(&nodes, &libraries.found, "Model library");
+    let found_table = table_row(&nodes, &libraries.found, "Model");
     assert!(
         found_rail.is_empty() && found_table.is_empty(),
         "the filter hides it in both"
     );
     assert_eq!(rail_row(&nodes, &name).len(), 1);
-    assert_eq!(table_row(&nodes, &name, "Model library").len(), 1);
+    assert_eq!(table_row(&nodes, &name, "Model").len(), 1);
 
     crate::workbench::app_state::services_access::reset_for_new_project(&mut app.state);
     assert_eq!(

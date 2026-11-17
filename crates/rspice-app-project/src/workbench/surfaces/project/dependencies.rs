@@ -31,13 +31,14 @@ const DEPENDENCY_MIN_PANE_HEIGHT: f32 = 260.0;
 const DEPENDENCY_ACTION_BAR_PAD: i8 = 6;
 
 const LEDGER_COLUMNS: [&str; 6] = ["Library", "Type", "Version", "Source", "Digest", "Status"];
-const LEDGER_FRACTIONS: [f32; 6] = [0.24, 0.14, 0.09, 0.26, 0.11, 0.16];
+const LEDGER_FRACTIONS: [f32; 6] = [0.20, 0.10, 0.11, 0.21, 0.13, 0.25];
 /// Version and digest are identities rather than prose, so both take the mono
 /// face and stay comparable down the column.
 const LEDGER_MONO_COLUMNS: [usize; 2] = [2, 4];
-const LEDGER_COMPACT_COLUMNS: [&str; 5] = ["Library", "Type", "Version", "Source", "Status"];
-const LEDGER_COMPACT_FRACTIONS: [f32; 5] = [0.26, 0.15, 0.14, 0.24, 0.21];
-const LEDGER_COMPACT_MONO_COLUMNS: [usize; 1] = [2];
+/// A narrow table keeps what tells libraries apart and what to act on: the
+/// version and digest are in the row's hover and the inspector.
+const LEDGER_COMPACT_COLUMNS: [&str; 4] = ["Library", "Type", "Source", "Status"];
+const LEDGER_COMPACT_FRACTIONS: [f32; 4] = [0.29, 0.15, 0.26, 0.30];
 
 #[derive(Debug, Clone, Serialize)]
 struct DependencyManifest {
@@ -144,8 +145,10 @@ fn dependency_action_bar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
             // A `Frame` shrinks to its content, and an action bar that stops
             // short of the pane edge reads as a floating box.
             ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+            // A narrow pane takes its buttons onto a second line rather than
+            // running the last one over the divider into the next pane.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 content(ui);
             });
         });
@@ -438,12 +441,17 @@ fn ledger_row(
         cx.state.project_dependency_selection.as_ref() == Some(&row.library),
     );
     let problem = row.status.mark.problem();
+    // The file, by name: a path elided at its end shows only the folders
+    // every row shares. The hover and the inspector give the whole path.
+    let source = std::path::Path::new(&row.source)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&row.source);
     let response = if compact {
         let cells = [
             row.library.name.as_str(),
-            row.library.kind.label(),
-            row.version.as_str(),
-            row.source.as_str(),
+            row.library.kind.kind_word(),
+            source,
             row.status.label,
         ];
         workspace_table_row(
@@ -452,17 +460,17 @@ fn ledger_row(
             cells,
             LEDGER_COMPACT_FRACTIONS,
             kind,
-            &LEDGER_COMPACT_MONO_COLUMNS,
+            &[],
             &unset_columns(&cells),
-            problem.map(|problem| (4, problem)),
+            problem.map(|problem| (3, problem)),
         )
         .0
     } else {
         let cells = [
             row.library.name.as_str(),
-            row.library.kind.label(),
+            row.library.kind.kind_word(),
             row.version.as_str(),
-            row.source.as_str(),
+            source,
             row.digest.as_str(),
             row.status.label,
         ];
@@ -480,10 +488,16 @@ fn ledger_row(
     };
     // What the status has to add has no column of its own; the row carries
     // it, as the inspector does under the status.
-    let hover = match row.status.detail.as_deref() {
-        Some(detail) => format!("{}\n{}", row.library.name, detail),
-        None => format!("{}\n{}", row.library.name, row.source),
-    };
+    let mut hover = format!("{}\n{}", row.library.name, row.source);
+    for (label, value) in [("Version", &row.version), ("Digest", &row.digest)] {
+        if value != UNSET {
+            hover.push_str(&format!("\n{label} {value}"));
+        }
+    }
+    if let Some(detail) = row.status.detail.as_deref() {
+        hover.push('\n');
+        hover.push_str(detail);
+    }
     response.on_hover_text(hover).clicked()
 }
 
