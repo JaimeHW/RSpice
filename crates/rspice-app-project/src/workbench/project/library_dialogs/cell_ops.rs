@@ -11,9 +11,7 @@ use crate::state::{
     CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
     ProjectSourceLanguage, ProjectSourceOwner,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{HierarchyCopy, WorkspacePruned};
@@ -450,30 +448,22 @@ impl ProjectFeature {
         }
         let dialogs = &mut *cx.state;
         let source = format!(
-            "{} / {}",
+            "{}/{}",
             dialogs.rename_cell_library, dialogs.rename_cell_current
         );
-        let choice = Dialog::new("Rename cell", "Rename")
-            .description("Open tabs and every placed instance follow the new name.")
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
+        let error = dialogs.rename_cell_error.clone();
+        let name_id = egui::Id::new("library.rename-cell.name");
+        // One form in the body face, as Copy and Move are: the cell where
+        // their source stands, the name where their names do, and a refusal
+        // beside Rename.
+        let choice = CommandForm::new("Rename cell", "Rename")
+            .describe("Open tabs and every placed instance follow the new name.")
             .primary_enabled(catalog_current && !dialogs.rename_cell_name.trim().is_empty())
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                let t = Tokens::get(ui.ctx());
-                let c = t.color;
-
-                kv_row(ui, "Cell", &source);
-                input_row(ui, "New name", &mut dialogs.rename_cell_name);
-
-                if let Some(error) = dialogs.rename_cell_error.clone() {
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.err),
-                    );
-                }
+            .status(error.as_deref().map_or(Ok(None), Err))
+            .show(ctx, |rows| {
+                rows.value("Cell", &source);
+                rows.text_sans("New name", name_id, &mut dialogs.rename_cell_name, "");
+                Some(name_id)
             });
 
         match choice {

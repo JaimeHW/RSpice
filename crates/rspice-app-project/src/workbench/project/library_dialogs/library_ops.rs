@@ -12,7 +12,7 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, input_row, kv_row};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{LibraryRemoval, WorkspacePruned};
@@ -301,20 +301,18 @@ impl ProjectFeature {
         }
         let dialogs = &mut *cx.state;
         let current = dialogs.rename_library_current.clone();
-        let choice = Dialog::new("Rename library", "Rename")
-            .description(
+        let error = dialogs.rename_library_error.clone();
+        let name_id = egui::Id::new("library.rename-library.name");
+        let choice = CommandForm::new("Rename library", "Rename")
+            .describe(
                 "Open tabs, every placed instance, the library's source files and the project's top cell follow the new name.",
             )
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
             .primary_enabled(catalog_current && !dialogs.rename_library_name.trim().is_empty())
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                kv_row(ui, "Library", &current);
-                input_row(ui, "New name", &mut dialogs.rename_library_name);
-                if let Some(error) = dialogs.rename_library_error.clone() {
-                    error_label(ui, &error);
-                }
+            .status(error.as_deref().map_or(Ok(None), Err))
+            .show(ctx, |rows| {
+                rows.value("Library", &current);
+                rows.text_sans("New name", name_id, &mut dialogs.rename_library_name, "");
+                Some(name_id)
             });
 
         match choice {
