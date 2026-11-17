@@ -3460,8 +3460,8 @@ fn a_call_to_an_undeclared_function_is_an_unknown_function() {
 fn system_names_are_unsupported_when_standard_and_unknown_otherwise() {
     for (body, expected) in [
         (
-            "analog begin $debug(\"x\"); I(p, n) <+ V(p, n); end",
-            "Unsupported feature: system task '$debug' is not supported in analog code",
+            "analog begin $fflush(1); I(p, n) <+ V(p, n); end",
+            "Unsupported feature: system task '$fflush' is not supported in analog code",
         ),
         (
             "analog begin $foobar(1); I(p, n) <+ V(p, n); end",
@@ -3472,8 +3472,8 @@ fn system_names_are_unsupported_when_standard_and_unknown_otherwise() {
             "Unknown system function: '$foobar'",
         ),
         (
-            "integer fd;\nanalog begin fd = $fopen(\"log.txt\"); I(p, n) <+ V(p, n); end",
-            "Unsupported feature: system function '$fopen' is not supported in analog code",
+            "integer c;\nanalog begin c = $fgetc(1); I(p, n) <+ V(p, n); end",
+            "Unsupported feature: system function '$fgetc' is not supported in analog code",
         ),
     ] {
         let diagnostic = analyze(&module_src(body)).expect_err(body).to_string();
