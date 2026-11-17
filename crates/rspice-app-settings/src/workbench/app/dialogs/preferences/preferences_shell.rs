@@ -481,25 +481,25 @@ pub(super) fn unmount(ctx: &Context) {
     let modal_layer = egui::LayerId::new(Order::Foreground, area_id);
     let focus_state =
         ctx.data_mut(|data| data.remove_temp::<PreferencesFocusState>(area_id.with("focus-state")));
-
+    // Every pass Preferences was drawn keeps a session, and egui lets go of
+    // a control that is not drawn, so with no session nothing of it holds
+    // the keyboard. Reading the focused control's response would answer a
+    // click as one made elsewhere and take the keyboard from whatever the
+    // click just gave it to, so it is read only when there is a session.
+    let Some(focus_state) = focus_state else {
+        return;
+    };
     let current_focus = ctx.memory(|memory| memory.focused());
     let focused_in_preferences = current_focus.is_some_and(|focused| {
         ctx.read_response(focused)
             .is_some_and(|response| response.layer_id == modal_layer)
     });
-    if focus_state.is_none() && !focused_in_preferences {
-        return;
-    }
     Popup::close_all(ctx);
-    let prior_focus = focus_state
-        .and_then(|state| state.prior_focus)
-        .filter(|prior| {
-            ctx.read_response(*prior).is_some_and(|response| {
-                response.layer_id != modal_layer
-                    && response.enabled()
-                    && response.sense.is_focusable()
-            })
-        });
+    let prior_focus = focus_state.prior_focus.filter(|prior| {
+        ctx.read_response(*prior).is_some_and(|response| {
+            response.layer_id != modal_layer && response.enabled() && response.sense.is_focusable()
+        })
+    });
 
     ctx.memory_mut(|memory| {
         if focused_in_preferences && let Some(current_focus) = current_focus {
@@ -1922,6 +1922,48 @@ mod tests {
 
         assert!(Popup::is_id_open(&ctx, popup_id));
         Popup::close_id(&ctx, popup_id);
+    }
+
+    /// With no Preferences session, the frame's unmount leaves the keyboard
+    /// where a click just put it: on a table that takes it when a row of it
+    /// is clicked.
+    #[test]
+    fn unmount_without_a_session_leaves_the_keyboard_where_a_click_put_it() {
+        let ctx = Context::default();
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 100.0));
+        let at = rect.center();
+        let table = Id::new("table");
+        let pass = |events: Vec<egui::Event>| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    // accessibility-pointer-shim: test-only stand-in for a
+                    // table row, which the table announces itself.
+                    let row = ui.interact(rect, Id::new("row"), egui::Sense::click());
+                    // accessibility-pointer-shim: test-only stand-in for the
+                    // table's one keyboard stop.
+                    let _ = ui.interact(rect, table, egui::Sense::focusable_noninteractive());
+                    if row.clicked() {
+                        ui.memory_mut(|memory| memory.request_focus(table));
+                    }
+                    unmount(ui.ctx());
+                },
+            );
+        };
+        let edge = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // A first pass lays the row out, so the press finds it.
+        pass(Vec::new());
+        pass(vec![egui::Event::PointerMoved(at), edge(true)]);
+        pass(vec![edge(false)]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(table));
     }
 
     /// The rail, in order, and grouped so that each group is contiguous —
