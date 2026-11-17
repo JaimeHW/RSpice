@@ -151,22 +151,46 @@ fn tab_header(
             }
         }
     };
+    let adds = tab == ConfigurationTab::Instances && editable;
     // A control tall, and the room around it, so the band holds its controls
-    // at every density.
-    let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width().max(1.0), t.metrics.ctl_h + 6.0),
-        Sense::hover(),
-    );
+    // at every density. Where the switch, the count, the action and the
+    // least filter do not fit on one row, the action and the filter take a
+    // second.
+    let width = ui.available_width().max(1.0);
+    let row_height = t.metrics.ctl_h + 6.0;
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let segments = ["Instances", "Cells"]
+        .iter()
+        .map(|label| {
+            (text_width(ui, label, &theme::sans(tokens::FS_1, FontWeight::Medium)) + 16.0).max(54.0)
+        })
+        .sum::<f32>();
+    let add_width = if adds {
+        Button::new("Add pattern binding").measured_width(ui) + 10.0
+    } else {
+        0.0
+    };
+    let one_row = 16.0
+        + segments
+        + 10.0
+        + text_width(ui, &meta, &meta_font)
+        + 10.0
+        + add_width
+        + FILTER_MIN_WIDTH
+        <= width;
+    let rows = if one_row { 1.0 } else { 2.0 };
+    let (rect, _) = ui.allocate_exact_size(vec2(width, row_height * rows), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, t.color.border_strong),
     );
+    let first = Rect::from_min_size(rect.min, vec2(width, row_height));
     let mut action = None;
     ui.scope_builder(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(8.0, 3.0)))
+            .max_rect(first.shrink2(vec2(8.0, 3.0)))
             .layout(Layout::left_to_right(Align::Center)),
         |ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
@@ -189,27 +213,58 @@ fn tab_header(
             }
             ui.label(
                 egui::RichText::new(&meta)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .font(meta_font.clone())
                     .color(t.color.text_faint),
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (filter, name) = match tab {
-                    ConfigurationTab::Instances => {
-                        (&mut page.instances_table.filter, "Filter instances")
-                    }
-                    ConfigurationTab::Cells => (&mut page.cells_table.filter, "Filter cells"),
-                };
-                filter_field(ui, filter, name);
-                if tab == ConfigurationTab::Instances
-                    && editable
-                    && Button::new("Add pattern binding").show(ui).clicked()
-                {
-                    action = Some(TableAction::AddPattern);
-                }
-            });
+            if one_row {
+                filter_and_add(ui, page, tab, adds, &mut action);
+            }
         },
     );
+    if !one_row {
+        let second = Rect::from_min_size(first.left_bottom(), vec2(width, row_height));
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(second.shrink2(vec2(8.0, 3.0)))
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                filter_and_add(ui, page, tab, adds, &mut action);
+            },
+        );
+    }
     action
+}
+
+/// The least the filter field is made before the band takes a second row.
+const FILTER_MIN_WIDTH: f32 = 120.0;
+
+fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+        .size()
+        .x
+}
+
+/// The filter at the band's right end, and the action that adds a pattern
+/// binding before it.
+fn filter_and_add(
+    ui: &mut Ui,
+    page: &mut ConfigurationPageState,
+    tab: ConfigurationTab,
+    adds: bool,
+    action: &mut Option<TableAction>,
+) {
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let (filter, name) = match tab {
+            ConfigurationTab::Instances => (&mut page.instances_table.filter, "Filter instances"),
+            ConfigurationTab::Cells => (&mut page.cells_table.filter, "Filter cells"),
+        };
+        filter_field(ui, filter, name);
+        if adds && Button::new("Add pattern binding").show(ui).clicked() {
+            *action = Some(TableAction::AddPattern);
+        }
+    });
 }
 
 /// The field that keeps only the rows whose words contain what it holds.
@@ -218,7 +273,11 @@ fn filter_field(ui: &mut Ui, filter: &mut String, name: &str) {
     // egui fades the body tone for a hint; the palette's tertiary text keeps
     // its contrast on the field.
     let restored = ui.visuals_mut().weak_text_color.replace(t.color.text_faint);
-    let width = FILTER_WIDTH.min(ui.available_width() * 0.4).max(80.0);
+    // On a row of its own beside one button it takes what the button leaves.
+    let width = FILTER_WIDTH
+        .min(ui.available_width() * 0.4)
+        .max(FILTER_MIN_WIDTH.min(ui.available_width()))
+        .max(1.0);
     let field = ui.add_sized(
         [width, t.metrics.ctl_h],
         egui::TextEdit::singleline(filter)

@@ -15,7 +15,7 @@ use crate::ui::widgets::{
 const LABEL_WIDTH: f32 = 112.0;
 /// A grid row is a control tall plus the room around it, so it grows with
 /// the controls under a finger.
-const ROW_PAD: f32 = 4.0;
+pub(super) const ROW_PAD: f32 = 4.0;
 const PICKER_WIDTH: f32 = 300.0;
 /// From this width the five rows sit in two columns.
 const TWO_COLUMN_WIDTH: f32 = 760.0;
