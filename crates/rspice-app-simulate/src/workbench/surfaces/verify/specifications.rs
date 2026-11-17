@@ -35,12 +35,12 @@ use crate::workbench::state::{
 use super::specification_edit::{
     definition_index, edit_specifications, limit_spelling, limit_text, parse_limit, set_limit,
 };
-use super::table::{
-    Cell, CellEditor, Column, DataTable, EditOutcome, Group, RowKey, SortKey, TABLE_EDGE_INSET,
-    Verdict,
-};
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
+use super::verdict::{Verdict, VerdictCell};
 use super::{difference_text, format_bound, format_value, record_action, verification_plan_id};
+use crate::ui::widgets::table::{
+    Cell, CellEditor, Column, DataTable, EditOutcome, Group, RowKey, SortKey, TABLE_EDGE_INSET,
+};
 
 const TABLE_ID: &str = "verify.specifications";
 const MENU_W: f32 = 240.0;
@@ -267,7 +267,7 @@ fn table(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, view: &SheetView, menu_o
         .groups(&view.groups)
         .freeze(1);
     if let Some(status) = view.column(Col::Status) {
-        table = table.verdict(status);
+        table = table.pin_when_narrow(status);
     }
     let response = table
         .cell_selection()
@@ -717,7 +717,7 @@ fn sheet_csv(view: &SheetView, filter: &str) -> String {
     let mut lines = vec![
         view.columns
             .iter()
-            .map(|col| field(&col.column().head))
+            .map(|col| field(col.column().head()))
             .collect::<Vec<_>>()
             .join(","),
     ];

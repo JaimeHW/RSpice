@@ -1,10 +1,10 @@
-//! What a Verify table remembers between frames, held by the page that draws
-//! it, and the order its rows are shown in.
+//! What a table remembers between frames, held by the page that draws it,
+//! and the order its rows are shown in.
 //!
 //! The page keeps one [`TableState`] in its session state and hands it to the
 //! table each frame. The selection names a row by its index in the page's own
 //! row order and, when the page keys its rows, by that key too: a sort moves
-//! where a row is shown, never its index, and a refreshed run may reorder the
+//! where a row is shown, never its index, and refreshed data may reorder the
 //! rows, so the key is what finds the selected row again.
 //!
 //! The shown order is worked out here, with no painting: the rows the filter

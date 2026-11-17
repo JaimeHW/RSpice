@@ -41,6 +41,7 @@ mod segmented;
 mod select;
 mod status_mark;
 mod switch;
+pub mod table;
 mod toast;
 mod tree;
 mod view_switch;
@@ -64,6 +65,7 @@ pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, mono_input_with_unit, switch_row,
     text_field, value_row,
 };
+pub use measurement_table::measurement_table;
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
@@ -81,7 +83,6 @@ pub use status_mark::{
     paint_problem_mark, paint_status_mark, problem_line,
 };
 pub use switch::{SWITCH_WIDTH, paint_switch};
-pub use measurement_table::measurement_table;
 pub use toast::{
     MirroredEntry, NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts,
 };

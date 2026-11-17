@@ -1,12 +1,12 @@
-//! The one result table every Verify page reads its rows in.
+//! The one table every page reads its rows in.
 //!
-//! It is the grid of an ADE results view, not a card: 24 px heads and rows,
+//! It is the grid of an ADE results view, not a card: dense heads and rows,
 //! heads as written (sentence case, no tracking), names in sans, numbers in
 //! mono and right-aligned so their digits line up, hairlines between rows and
-//! columns. The only colour in a row is a verdict cell's — a failure in the
-//! error tone, a value near its limit in the warning tone, a pass neutral — and
-//! the accent wash of the row the reader selected. A problem the reader must
-//! notice in a cell is a mark in front of neutral words, never coloured words.
+//! columns. The only colour in a row is a toned cell's — an error in the error
+//! tone, a caution in the warning tone — and the accent wash of the rows the
+//! reader selected. A problem the reader must notice in a cell is a mark in
+//! front of neutral words, never coloured words.
 //!
 //! The first column's words start on the panel inset and the last column's end
 //! on it, so a table's text lines up with the toolbar title above it. Columns
@@ -33,10 +33,10 @@ use std::collections::BTreeSet;
 
 use egui::{Key, Modifiers, Rect, Sense, Ui, pos2, vec2};
 
-use crate::ui::theme;
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{Problem, paint_problem_mark};
-use crate::workbench::design_system::elide_text;
+use crate::panels::elide_text;
+use crate::theme;
+use crate::tokens::Tokens;
+use crate::widgets::{Problem, paint_problem_mark};
 
 pub use geometry::Span;
 pub use state::{Group, RowKey, Selection, Sort, SortDirection, SortKey, TableState};
@@ -45,21 +45,26 @@ use geometry::Columns;
 use state::{Line, Step, arrange, step};
 
 /// Height of a table's head band, and of each band row over it.
-pub(super) const TABLE_HEAD_H: f32 = 24.0;
+pub const TABLE_HEAD_H: f32 = 24.0;
 /// Height of one table row.
-pub(super) const TABLE_ROW_H: f32 = 24.0;
+pub const TABLE_ROW_H: f32 = 24.0;
 /// Where the first column's words start and the last column's end: the panel
 /// inset, so a table's text lines up with the toolbar title over it.
-pub(super) const TABLE_EDGE_INSET: f32 = crate::workbench::design_system::PANEL_INSET;
+pub const TABLE_EDGE_INSET: f32 = crate::panels::PANEL_INSET;
 /// Space between a cell's words and the rule on either side of it.
 const CELL_PAD: f32 = 8.0;
+/// The widest a table reads the way a phone does: the width the
+/// application's own layout turns to bottom navigation at. A table no wider
+/// than this freezes its first column only, and shows its pinned column
+/// beside it.
+const NARROW_W: f32 = 560.0;
 /// A problem mark in a cell, and the advance from its left edge to the words:
 /// the kit's own, so a marked cell matches every other marked line.
-use crate::ui::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
+use crate::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
 /// The head and row heights: 24 px under a fine pointer, the touch target the
 /// preferences ask for under a coarse one.
-pub(super) fn line_heights(t: &Tokens) -> (f32, f32) {
+pub fn line_heights(t: &Tokens) -> (f32, f32) {
     if t.metrics.is_touch() {
         let target = t.metrics.touch_target();
         (target, target)
@@ -70,7 +75,7 @@ pub(super) fn line_heights(t: &Tokens) -> (f32, f32) {
 
 /// Which edge of its cell a column's words sit on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Align {
+pub enum Align {
     Left,
     Right,
 }
@@ -78,15 +83,15 @@ pub(super) enum Align {
 /// One column: its head, how wide it is, and where its words sit.
 #[derive(Debug, Clone)]
 pub struct Column {
-    pub(super) head: String,
+    head: String,
     /// What the head stands for, shown when the pointer rests on it.
-    pub(super) tooltip: Option<String>,
+    tooltip: Option<String>,
     /// The column's width, or its least width when it takes a share of what
     /// the fixed columns leave.
     width: f32,
     /// Share of the spare width; zero for a fixed column.
     flex: f32,
-    pub(super) align: Align,
+    align: Align,
     /// A head click sorts by this column.
     sortable: bool,
 }
@@ -104,24 +109,36 @@ impl Column {
     }
 
     /// A column of names that takes the width the fixed columns leave.
-    pub(super) fn name(head: impl Into<String>, min_width: f32) -> Self {
+    pub fn name(head: impl Into<String>, min_width: f32) -> Self {
         Self::with(head, min_width, 1.0, Align::Left)
     }
 
     /// A fixed-width column of right-aligned numbers, and of limits, which
     /// are numbers the values beside them are read against.
-    pub(super) fn number(head: impl Into<String>, width: f32) -> Self {
+    pub fn number(head: impl Into<String>, width: f32) -> Self {
         Self::with(head, width, 0.0, Align::Right)
     }
 
-    /// A fixed-width column of left-aligned words: a verdict, a rule.
-    pub(super) fn words(head: impl Into<String>, width: f32) -> Self {
+    /// A fixed-width column of left-aligned words: a status, a rule.
+    pub fn words(head: impl Into<String>, width: f32) -> Self {
         Self::with(head, width, 0.0, Align::Left)
     }
 
-    pub(super) fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
+    pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
         self.tooltip = Some(tooltip.into());
         self
+    }
+
+    /// The same column with its words on `align`'s edge: a flexible column
+    /// of numbers, say, that shares the spare width with its siblings.
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// The words over the column.
+    pub fn head(&self) -> &str {
+        &self.head
     }
 
     /// A head click leaves the rows' order alone.
@@ -135,7 +152,7 @@ impl Column {
 /// width, the spare shared among the flexible ones by their share. When the
 /// fixed widths and the flexible minimums exceed `available`, every column
 /// keeps its least width and the table scrolls sideways.
-pub(super) fn column_widths(columns: &[Column], available: f32) -> Vec<f32> {
+fn column_widths(columns: &[Column], available: f32) -> Vec<f32> {
     let least: f32 = columns.iter().map(|column| column.width).sum();
     let shares: f32 = columns.iter().map(|column| column.flex).sum();
     let spare = (available - least).max(0.0);
@@ -158,33 +175,25 @@ pub(super) fn column_widths(columns: &[Column], available: f32) -> Vec<f32> {
     widths
 }
 
-/// A result's judgment of one value.
+/// The tone a judged cell's words are inked in, which is also what a sort by
+/// its column orders it by.
 ///
-/// A failure is painted in the error tone and a value near its limit in the
-/// warning tone. A pass is neutral: success is the absence of a problem.
+/// An error is painted in the error tone and a caution in the warning tone.
+/// A neutral judgement is plain: success is the absence of a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    Pass,
-    Near,
-    Fail,
+pub enum Tone {
+    Neutral,
+    Caution,
+    Error,
 }
 
-impl Verdict {
-    /// The word a pass/fail column states.
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Pass => "Pass",
-            Self::Near => "Near",
-            Self::Fail => "Fail",
-        }
-    }
-
+impl Tone {
     /// How bad it is, for a status sort: the higher, the worse.
     pub const fn severity(self) -> u8 {
         match self {
-            Self::Pass => 0,
-            Self::Near => 1,
-            Self::Fail => 3,
+            Self::Neutral => 0,
+            Self::Caution => 1,
+            Self::Error => 2,
         }
     }
 }
@@ -195,7 +204,7 @@ enum Ink {
     Plain,
     /// The metadata register: a value the run does not hold.
     Faint,
-    Verdict(Verdict),
+    Toned(Tone),
     /// A problem's mark in front of neutral words.
     Problem(Problem),
 }
@@ -203,7 +212,7 @@ enum Ink {
 /// One cell's words and how they are set.
 #[derive(Debug, Clone)]
 pub struct Cell {
-    pub(super) text: String,
+    pub text: String,
     mono: bool,
     ink: Ink,
     /// The cell answers a click by opening for entry.
@@ -227,49 +236,45 @@ impl Cell {
     }
 
     /// Words in sans.
-    pub(super) fn text(text: impl Into<String>) -> Self {
+    pub fn text(text: impl Into<String>) -> Self {
         Self::with(text, false, Ink::Plain)
     }
 
     /// A number in mono.
-    pub(super) fn number(text: impl Into<String>) -> Self {
+    pub fn number(text: impl Into<String>) -> Self {
         Self::with(text, true, Ink::Plain)
     }
 
     /// A value the run does not hold: an em dash in the faint register.
-    pub(super) fn absent() -> Self {
+    pub fn absent() -> Self {
         Self::with("\u{2014}", true, Ink::Faint)
     }
 
     /// Nothing at all: a cell a row has no business filling.
-    pub(super) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self::text("")
     }
 
-    /// The same words, judged: coloured only when the verdict is not a pass.
-    pub(super) fn judged(mut self, verdict: Verdict) -> Self {
-        self.ink = Ink::Verdict(verdict);
+    /// The same words, judged: coloured only when the tone is not neutral,
+    /// and sorted by the tone's severity.
+    pub fn toned(mut self, tone: Tone) -> Self {
+        self.ink = Ink::Toned(tone);
         self
     }
 
-    /// A pass/fail column's word for `verdict`.
-    pub(super) fn verdict(verdict: Verdict) -> Self {
-        Self::text(verdict.label()).judged(verdict)
-    }
-
     /// Neutral words behind a problem's mark.
-    pub(super) fn problem(text: impl Into<String>, problem: Problem) -> Self {
+    pub fn problem(text: impl Into<String>, problem: Problem) -> Self {
         Self::with(text, false, Ink::Problem(problem))
     }
 
     /// The same words, opened for entry by a click.
-    pub(super) fn editable(mut self) -> Self {
+    pub fn editable(mut self) -> Self {
         self.editable = true;
         self
     }
 
     /// The same words, saying `hint` when the pointer rests on them.
-    pub(super) fn hint(mut self, hint: impl Into<String>) -> Self {
+    pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
     }
@@ -288,7 +293,7 @@ impl Cell {
             return key.clone();
         }
         match self.ink {
-            Ink::Verdict(verdict) => SortKey::Status(verdict.severity()),
+            Ink::Toned(tone) => SortKey::Status(tone.severity()),
             Ink::Faint => SortKey::Missing,
             _ if self.text.trim().is_empty() => SortKey::Missing,
             _ => SortKey::Text(self.text.clone()),
@@ -303,12 +308,12 @@ impl Cell {
 
 /// The one cell open for entry: where it is and what has been typed.
 pub struct CellEditor<'a> {
-    pub(super) row: usize,
-    pub(super) column: usize,
-    pub(super) text: &'a mut String,
+    pub row: usize,
+    pub column: usize,
+    pub text: &'a mut String,
     /// Set on the frame the cell opens: the field takes the keyboard, with
     /// its words selected so the first keystroke replaces them.
-    pub(super) focus: bool,
+    pub focus: bool,
 }
 
 /// How an open cell was closed.
@@ -340,12 +345,12 @@ pub struct ContextRequest {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TableResponse {
     /// The row the reader clicked.
-    pub(super) clicked: Option<usize>,
+    pub clicked: Option<usize>,
     /// The editable cell the reader opened, by a click, Enter, F2 or Tab, as
     /// (row, column).
-    pub(super) edit: Option<(usize, usize)>,
+    pub edit: Option<(usize, usize)>,
     /// How the open cell was closed this frame, if it was.
-    pub(super) edited: Option<EditOutcome>,
+    pub edited: Option<EditOutcome>,
     /// The row, and the cell, the reader double-clicked.
     pub double_clicked: Option<CellRef>,
     /// The reader asked for a row's context menu.
@@ -361,10 +366,11 @@ pub struct TableResponse {
 pub struct DataTable<'a> {
     id: &'a str,
     /// The columns in the order they show, which is the page's order unless a
-    /// phone moved the verdict forward.
+    /// narrow table moved its pinned column forward.
     columns: Cow<'a, [Column]>,
-    /// The column that states each row's verdict, in the page's order.
-    verdict: Option<usize>,
+    /// The column a narrow table shows directly after the first, in the
+    /// page's order.
+    pinned: Option<usize>,
     /// The page's column under each shown column, when they differ.
     order: Option<Vec<usize>>,
     rows: usize,
@@ -525,11 +531,11 @@ impl<'f> Rows<'f> {
 }
 
 impl<'a> DataTable<'a> {
-    pub(super) fn new(id: &'a str, columns: &'a [Column], rows: usize) -> Self {
+    pub fn new(id: &'a str, columns: &'a [Column], rows: usize) -> Self {
         Self {
             id,
             columns: Cow::Borrowed(columns),
-            verdict: None,
+            pinned: None,
             order: None,
             rows,
             selected: None,
@@ -546,13 +552,13 @@ impl<'a> DataTable<'a> {
     }
 
     /// The cell open for entry, painted as a field in its place.
-    pub(super) fn editing(mut self, editor: Option<CellEditor<'a>>) -> Self {
+    pub fn editing(mut self, editor: Option<CellEditor<'a>>) -> Self {
         self.editor = editor;
         self
     }
 
     /// The tallest the table may be, head included; its rows scroll inside.
-    pub(super) fn max_height(mut self, max_height: f32) -> Self {
+    pub fn max_height(mut self, max_height: f32) -> Self {
         self.max_height = max_height;
         self
     }
@@ -579,12 +585,12 @@ impl<'a> DataTable<'a> {
         self
     }
 
-    /// Column `column` states each row's verdict. On a phone it shows
-    /// directly after the first column and stays put with it while the rest
-    /// scroll, so the reader learns what failed without scrolling sideways.
-    /// A table with bands keeps its order: its spans name runs of columns.
-    pub fn verdict(mut self, column: usize) -> Self {
-        self.verdict = Some(column);
+    /// On a narrow table, column `column` shows directly after the first
+    /// column and stays put with it while the rest scroll, so the reader
+    /// reads what matters most about a row without scrolling sideways. A
+    /// table with bands keeps its order: its spans name runs of columns.
+    pub fn pin_when_narrow(mut self, column: usize) -> Self {
+        self.pinned = Some(column);
         self
     }
 
@@ -606,7 +612,7 @@ impl<'a> DataTable<'a> {
         self
     }
 
-    pub(super) fn show(
+    pub fn show(
         mut self,
         ui: &mut Ui,
         mut row_at: impl FnMut(usize) -> Vec<Cell>,
@@ -620,14 +626,17 @@ impl<'a> DataTable<'a> {
             state.follow_keys(keys);
         }
 
-        // A phone moves the verdict beside the first column. Everything below
-        // works in the shown order; the page's memory and the response speak
-        // the page's, so they are turned on the way in and back on the way out.
-        let phone = super::phone_width(ui.ctx());
+        // A narrow table moves its pinned column beside the first. Everything
+        // below works in the shown order; the page's memory and the response
+        // speak the page's, so they are turned on the way in and back on the
+        // way out.
+        let visible = ui.available_rect_before_wrap().intersect(ui.clip_rect());
+        let available = visible.width().max(1.0);
+        let narrow = available <= NARROW_W;
         self.order = self
-            .verdict
-            .filter(|_| phone && self.bands.is_empty())
-            .and_then(|verdict| verdict_order(self.columns.len(), verdict));
+            .pinned
+            .filter(|_| narrow && self.bands.is_empty())
+            .and_then(|pinned| pinned_order(self.columns.len(), pinned));
         if let Some(order) = self.order.clone() {
             self.columns = Cow::Owned(
                 order
@@ -708,8 +717,6 @@ impl<'a> DataTable<'a> {
             .collect::<Vec<_>>();
 
         // Where the columns go.
-        let visible = ui.available_rect_before_wrap().intersect(ui.clip_rect());
-        let available = visible.width().max(1.0);
         let bands_h = TABLE_HEAD_H * self.bands.len() as f32;
         let body_max = (self.max_height - bands_h - head_h).max(row_h);
         let lines_h = row_h * lines.len() as f32;
@@ -721,9 +728,9 @@ impl<'a> DataTable<'a> {
         let viewport_w = (available - bar).max(1.0);
         let least: f32 = self.columns.iter().map(|column| column.width).sum();
         let scrolls_x = least > viewport_w + 0.5;
-        // A phone-width window holds the first column only, and the verdict
+        // A narrow table holds the first column only, and the pinned one
         // beside it: a wider freeze leaves the values a sliver, or none.
-        let frozen = if phone {
+        let frozen = if narrow {
             self.frozen.min(1) + usize::from(self.order.is_some())
         } else {
             self.frozen
@@ -1159,14 +1166,14 @@ impl<'a> DataTable<'a> {
     }
 }
 
-/// The page's columns in the order a phone shows them, the verdict directly
-/// after the first: the page's column under each shown one. None when the
-/// verdict names no column past the first.
-fn verdict_order(columns: usize, verdict: usize) -> Option<Vec<usize>> {
-    (verdict > 0 && verdict < columns).then(|| {
+/// The page's columns in the order a narrow table shows them, the pinned one
+/// directly after the first: the page's column under each shown one. None
+/// when the pin names no column past the first.
+fn pinned_order(columns: usize, pinned: usize) -> Option<Vec<usize>> {
+    (pinned > 0 && pinned < columns).then(|| {
         std::iter::once(0)
-            .chain(std::iter::once(verdict))
-            .chain((1..columns).filter(|column| *column != verdict))
+            .chain(std::iter::once(pinned))
+            .chain((1..columns).filter(|column| *column != pinned))
             .collect()
     })
 }

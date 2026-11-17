@@ -9,8 +9,8 @@ use super::super::raster::{
     PageGeometry, VerifyStage, page_input, page_pass, refresh_verification, seed_corner,
     seed_run_set,
 };
-use super::super::table::{Selection, Sort, SortDirection};
 use super::*;
+use crate::ui::widgets::table::{Selection, Sort, SortDirection};
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::test_host::SimulateTestHost;
 

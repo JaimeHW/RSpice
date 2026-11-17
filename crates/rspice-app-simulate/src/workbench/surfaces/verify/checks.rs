@@ -13,9 +13,10 @@ use rspice_core::config::{HdlPoint, HdlSeverity};
 use rspice_core::netlist::AssertAnalysis;
 use rspice_results::verification::{AssertionOutcome, Check, CheckRow, CheckStatus, Checks};
 
-use super::table::{Cell, Column, ContextRequest, DataTable, RowKey, SortKey, Verdict};
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, action_menu, empty_line};
+use super::verdict::{Verdict, VerdictCell};
 use super::*;
+use crate::ui::widgets::table::{Cell, Column, ContextRequest, DataTable, RowKey, SortKey};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::{RevealExecutedDeck, SoaCheckRef};
 use crate::workbench::state::CheckRowOrder;
@@ -90,7 +91,7 @@ pub(super) fn checks_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .state(&mut session.checks_table)
         .keys(&order.keys)
         .freeze(1)
-        .verdict(columns.len() - 1)
+        .pin_when_narrow(columns.len() - 1)
         .max_height(ui.available_height())
         .show(ui, |index| {
             row_cells(checks, &checks.rows[order.rows[index]], several_points)

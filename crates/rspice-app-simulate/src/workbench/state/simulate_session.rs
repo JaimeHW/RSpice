@@ -161,7 +161,7 @@ pub struct VerificationSessionState {
     /// The Specifications view's table: its selection, sort, scroll and
     /// filter. Review state only.
     #[serde(skip)]
-    pub specifications_table: crate::workbench::surfaces::verify::table::TableState,
+    pub specifications_table: crate::ui::widgets::table::TableState,
     /// The Specifications cell open for entry. Transient: a name or a limit
     /// is the plan's only once it is applied.
     #[serde(skip)]
@@ -175,7 +175,7 @@ pub struct VerificationSessionState {
     pub specification_draft: Option<SpecificationInspectorDraft>,
     /// The Corners table's selected cell, sort and sideways scroll.
     #[serde(skip)]
-    pub corners_table: crate::workbench::surfaces::verify::table::TableState,
+    pub corners_table: crate::ui::widgets::table::TableState,
     /// Corners lists the points as rows and the specifications as columns.
     #[serde(default)]
     pub corners_transposed: bool,
@@ -185,17 +185,17 @@ pub struct VerificationSessionState {
     pub corners_failing_only: bool,
     /// The Monte Carlo table's selected specification, sort and scroll.
     #[serde(skip)]
-    pub monte_carlo_table: crate::workbench::surfaces::verify::table::TableState,
+    pub monte_carlo_table: crate::ui::widgets::table::TableState,
     /// The selected specification's failing trials: the selected trial.
     #[serde(skip)]
-    pub monte_carlo_trials_table: crate::workbench::surfaces::verify::table::TableState,
+    pub monte_carlo_trials_table: crate::ui::widgets::table::TableState,
     /// The point the Monte Carlo view states its trials at, by its place in
     /// the run's points; `None` states every point's trials together.
     #[serde(skip)]
     pub monte_carlo_point: Option<usize>,
     /// The Checks view's table: its selection, sort and sideways scroll.
     #[serde(skip)]
-    pub checks_table: crate::workbench::surfaces::verify::table::TableState,
+    pub checks_table: crate::ui::widgets::table::TableState,
     /// The Checks view leaves out the checks that passed or only informed.
     #[serde(skip)]
     pub checks_violations_only: bool,
@@ -204,7 +204,7 @@ pub struct VerificationSessionState {
     pub checks_rows: CheckRowOrder,
     /// The Reference view's table: its selection, sort and sideways scroll.
     #[serde(skip)]
-    pub reference_table: crate::workbench::surfaces::verify::table::TableState,
+    pub reference_table: crate::ui::widgets::table::TableState,
     /// The Reference view's tolerance cell open for entry. Transient: a
     /// tolerance is the plan's only once it is entered.
     #[serde(skip)]
@@ -227,7 +227,7 @@ pub struct CheckRowOrder {
     pub rows: Vec<usize>,
     /// Each shown row's key: what the check is, so a selection outlives the
     /// run's checks being read again.
-    pub keys: Vec<crate::workbench::surfaces::verify::table::RowKey>,
+    pub keys: Vec<crate::ui::widgets::table::RowKey>,
 }
 
 /// Local presentation state for the canonical Jobs manager. Selection uses

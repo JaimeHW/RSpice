@@ -25,12 +25,13 @@ use rspice_results::yield_analysis::{DistributionStats, monte_carlo_provenance};
 use super::super::super::state::YieldLimitDraft;
 use super::corners::{Evidence, FactSection, limit_text, open_in_results, point_name};
 use super::histogram::{Bound, Side, histogram_model, paint_histogram};
-use super::table::{
-    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
-    TABLE_HEAD_H, TABLE_ROW_H, TableState, Verdict,
-};
 use super::toolbar::{PageToolbar, RunChoice, Summary, empty_line};
+use super::verdict::{Verdict, VerdictCell};
 use super::*;
+use crate::ui::widgets::table::{
+    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
+    TABLE_HEAD_H, TABLE_ROW_H, TableState,
+};
 use crate::workbench::simulate::commands::SimulateCommand;
 
 /// The share of the body the table may take before its rows scroll; the

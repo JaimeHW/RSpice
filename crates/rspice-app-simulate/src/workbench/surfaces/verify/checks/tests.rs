@@ -149,7 +149,7 @@ fn a_run_of_several_points_names_each_rows_point() {
     assert_eq!(
         columns
             .iter()
-            .map(|column| column.head.as_str())
+            .map(|column| column.head())
             .collect::<Vec<_>>(),
         [
             "Target", "Check", "Observed", "Limit", "Margin", "When", "Duration", "Point", "Status"

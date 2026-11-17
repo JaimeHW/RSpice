@@ -1,4 +1,4 @@
-//! The Verify table's behaviour, measured: what it selects, sorts, folds and
+//! The shared table's behaviour, measured: what it selects, sorts, folds and
 //! filters, how the keyboard moves it, and where its heads, spans and cells
 //! land as it scrolls. Geometry comes from the probes the table publishes in
 //! test builds, never from pixels.
@@ -11,14 +11,14 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 use super::geometry::Columns;
 use super::state::{Line, Step, arrange, step};
 use super::*;
-use crate::workbench::surfaces::verify::raster::{PageGeometry, page_pass};
+use crate::probe::{Geometry as PageGeometry, pass as page_pass};
 
 const WIDTH: f32 = 1100.0;
 const HEIGHT: f32 = 720.0;
 
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx
 }
 
@@ -80,11 +80,11 @@ fn named_row(row: usize) -> Vec<Cell> {
     vec![
         Cell::text(format!("Row {row}")),
         Cell::number(format!("{row}.0")).sort_by(SortKey::Number(row as f64)),
-        Cell::verdict(if row.is_multiple_of(3) {
-            Verdict::Fail
+        if row.is_multiple_of(3) {
+            Cell::text("Fail").toned(Tone::Error)
         } else {
-            Verdict::Pass
-        }),
+            Cell::text("Pass").toned(Tone::Neutral)
+        },
     ]
 }
 
@@ -411,7 +411,7 @@ fn a_head_click_sorts_stably_a_status_worst_first_and_the_third_restores_the_ord
     assert_eq!(
         shown(&geometry, 7),
         vec![0, 3, 6, 1, 2, 4, 5],
-        "failures first, each verdict in the page's order"
+        "errors first, each tone in the page's order"
     );
     assert_eq!(
         table.state.sort,
@@ -473,9 +473,9 @@ fn sort_keys_put_missing_values_last_either_way() {
         assert_eq!(nan.order(&one, direction), Greater);
         assert_eq!(one.order(&missing, direction), Less);
     }
-    let fail = SortKey::Status(Verdict::Fail.severity());
-    let near = SortKey::Status(Verdict::Near.severity());
-    assert_eq!(fail.order(&near, SortDirection::Ascending), Less);
+    let error = SortKey::Status(Tone::Error.severity());
+    let caution = SortKey::Status(Tone::Caution.severity());
+    assert_eq!(error.order(&caution, SortDirection::Ascending), Less);
     assert_eq!(
         SortKey::Text("alpha".into())
             .order(&SortKey::Text("Beta".into()), SortDirection::Ascending),
@@ -484,8 +484,8 @@ fn sort_keys_put_missing_values_last_either_way() {
     );
     assert_eq!(Cell::absent().sort_key(), SortKey::Missing);
     assert_eq!(
-        Cell::verdict(Verdict::Fail).sort_key(),
-        SortKey::Status(Verdict::Fail.severity())
+        Cell::text("Fail").toned(Tone::Error).sort_key(),
+        SortKey::Status(Tone::Error.severity())
     );
 }
 
@@ -820,10 +820,10 @@ fn frozen_columns_keep_their_place_while_the_rest_scroll_under_them() {
     assert_eq!(cell(&after, 1).right(), 240.0);
 }
 
-/// A phone-width window holds the first column only, so the values keep room
-/// beside it.
+/// A table as narrow as a phone holds the first column only, so the values
+/// keep room beside it.
 #[test]
-fn a_phone_width_window_holds_the_first_column_only() {
+fn a_narrow_table_holds_the_first_column_only() {
     let ctx = context();
     let columns = wide_columns(12, 120.0);
     let mut state = TableState::default();
@@ -845,19 +845,19 @@ fn a_phone_width_window_holds_the_first_column_only() {
     assert_eq!(
         cell(&after, 1).left(),
         cell(&before, 1).left() - 100.0,
-        "the second column, which a wider window holds, scrolls"
+        "the second column, which a wider table holds, scrolls"
     );
 }
 
-/// On a phone the verdict column shows directly after the first and stays
-/// put with it while the values scroll; the page's memory and the response
-/// still name columns in the page's order. A wider window keeps the order.
+/// A narrow table shows its pinned column directly after the first and keeps
+/// it put with it while the values scroll; the page's memory and the response
+/// still name columns in the page's order. A wider table keeps the order.
 #[test]
-fn a_phone_keeps_the_verdict_beside_the_first_column() {
+fn a_narrow_table_keeps_its_pinned_column_beside_the_first() {
     let ctx = context();
     let mut columns = wide_columns(8, 120.0);
     columns.push(Column::words("Status", 80.0));
-    let verdict = columns.len() - 1;
+    let pinned = columns.len() - 1;
     let mut state = TableState::default();
     state.sort = Some(Sort {
         column: 3,
@@ -865,29 +865,35 @@ fn a_phone_keeps_the_verdict_beside_the_first_column() {
     });
     let draw = |state: &mut TableState, width: f32, events: Vec<Event>| {
         frame(&ctx, width, events, |ui| {
-            DataTable::new("verdict", &columns, 3)
+            DataTable::new("pinned", &columns, 3)
                 .state(state)
                 .freeze(1)
-                .verdict(verdict)
+                .pin_when_narrow(pinned)
                 .cell_selection()
                 .show(ui, wide_row(9))
         })
     };
     let (_, before, _) = draw(&mut state, 390.0, Vec::new());
     let name = head(&before, 0);
-    let status = before.one("table.verdict").expect("the verdict's head");
-    assert_eq!(status, head(&before, verdict));
-    assert_eq!(status.left(), name.right(), "the verdict follows the name");
+    let status = before
+        .one("table.pinned")
+        .expect("the pinned column's head");
+    assert_eq!(status, head(&before, pinned));
+    assert_eq!(
+        status.left(),
+        name.right(),
+        "the pinned column follows the name"
+    );
     assert!(
         status.right() <= 390.0,
-        "the verdict is in view: {status:?}"
+        "the pinned column is in view: {status:?}"
     );
     assert!(head(&before, 1).left() >= status.right());
 
     state.scroll_x = 200.0;
     let (_, after, _) = draw(&mut state, 390.0, Vec::new());
-    assert_eq!(head(&after, verdict), status, "the verdict stays put");
-    assert_eq!(cell(&after, verdict).x_range(), status.x_range());
+    assert_eq!(head(&after, pinned), status, "the pinned column stays put");
+    assert_eq!(cell(&after, pinned).x_range(), status.x_range());
     assert_eq!(
         state.sort.map(|sort| sort.column),
         Some(3),
@@ -897,19 +903,39 @@ fn a_phone_keeps_the_verdict_beside_the_first_column() {
     let (response, _, _) = draw(
         &mut state,
         390.0,
-        press(cell(&after, verdict).center(), PointerButton::Secondary),
+        press(cell(&after, pinned).center(), PointerButton::Secondary),
     );
     assert_eq!(
         response.context_menu.map(|menu| menu.cell.column),
-        Some(Some(verdict)),
-        "a press on the verdict names the page's verdict column"
+        Some(Some(pinned)),
+        "a press on the pinned column names the page's column"
     );
-    assert_eq!(state.selected_column(), Some(verdict));
+    assert_eq!(state.selected_column(), Some(pinned));
 
     let (_, desktop, _) = draw(&mut state, WIDTH, Vec::new());
     assert!(
-        head(&desktop, verdict).left() > head(&desktop, 7).left(),
-        "a wider window keeps the page's order"
+        head(&desktop, pinned).left() > head(&desktop, 7).left(),
+        "a wider table keeps the page's order"
+    );
+
+    // Narrowness is the table's own width: one in a phone-wide column of a
+    // wide window pins too.
+    let (_, column, _) = frame(&ctx, WIDTH, Vec::new(), |ui| {
+        let rect = egui::Rect::from_min_size(ui.max_rect().min, vec2(390.0, HEIGHT));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            DataTable::new("pinned", &columns, 3)
+                .state(&mut state)
+                .freeze(1)
+                .pin_when_narrow(pinned)
+                .cell_selection()
+                .show(ui, wide_row(9))
+        })
+        .inner
+    });
+    assert_eq!(
+        head(&column, pinned).left(),
+        head(&column, 0).right(),
+        "a phone-wide table in a wide window pins its column"
     );
 }
 
@@ -1038,7 +1064,7 @@ fn the_visible_columns_follow_the_scroll() {
 #[test]
 fn touch_rows_and_heads_take_the_preferred_target() {
     let ctx = context();
-    crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
+    crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
     let columns = named_columns();
     let (_, geometry, _) = frame(&ctx, WIDTH, Vec::new(), |ui| {
         DataTable::new("touch", &columns, 3).show(ui, named_row)

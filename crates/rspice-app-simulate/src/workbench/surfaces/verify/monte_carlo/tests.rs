@@ -10,8 +10,8 @@ use super::super::raster::{
     PageGeometry, VerifyStage, page_input, page_pass, refresh_verification, seed_monte_carlo,
     seed_monte_carlo_at_two_points, seed_monte_carlo_over_different_trials,
 };
-use super::super::table::Selection;
 use super::*;
+use crate::ui::widgets::table::Selection;
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::test_host::SimulateTestHost;
 

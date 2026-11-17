@@ -28,29 +28,14 @@ use rspice_simulation_contract::analysis_kind::AnalysisKind;
 pub const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
 
-/// Rects the Verify widgets published this pass, by what they are.
-#[derive(Debug, Clone, Default)]
-struct Probes(Vec<(String, Rect)>);
-
-fn probes_id() -> egui::Id {
-    egui::Id::new("workbench.verify.raster.probes")
-}
-
-/// Publish where one element landed, for the geometry report.
+/// Publish where one element landed, for the geometry report: into the
+/// kit's report, which the shared table publishes its rows and heads into.
 pub(super) fn probe(ui: &egui::Ui, key: &str, rect: Rect) {
-    ui.ctx().data_mut(|data| {
-        data.get_temp_mut_or_default::<Probes>(probes_id())
-            .0
-            .push((key.to_owned(), rect));
-    });
+    rspice_ui_kit::probe::probe(ui, key, rect);
 }
 
 fn take_probes(ctx: &egui::Context) -> Vec<(String, Rect)> {
-    ctx.data_mut(|data| {
-        let probes = data.get_temp::<Probes>(probes_id()).unwrap_or_default();
-        data.remove::<Probes>(probes_id());
-        probes.0
-    })
+    rspice_ui_kit::probe::take(ctx)
 }
 
 /// Where one page's elements landed on its last pass.

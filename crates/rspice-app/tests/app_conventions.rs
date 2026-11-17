@@ -1756,7 +1756,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/surfaces/simulate/plan_manager.rs", "raster"),
             ("workbench/surfaces/simulate/plan_manager.rs", "records"),
             ("workbench/surfaces/verify.rs", "raster"),
-            ("workbench/surfaces/verify.rs", "table"),
             ("workbench/surfaces/verify.rs", "toolbar"),
         ],
     ),

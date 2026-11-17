@@ -15,8 +15,8 @@ pub(crate) mod reference;
 mod regression_contract;
 pub(crate) mod specification_edit;
 pub(crate) mod specifications;
-pub mod table;
 pub mod toolbar;
+mod verdict;
 
 use egui::Ui;
 use sha2::{Digest as _, Sha256};

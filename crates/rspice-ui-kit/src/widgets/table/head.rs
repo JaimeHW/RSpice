@@ -9,9 +9,9 @@
 
 use egui::{Rect, Sense, Ui, pos2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::workbench::design_system::elide_text;
+use crate::panels::elide_text;
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 use super::geometry::Columns;
 use super::{
@@ -70,7 +70,7 @@ impl DataTable<'_> {
         }
         let rect = Rect::from_x_y_ranges(block.x_range(), block.bottom() - height..=block.bottom());
         #[cfg(any(test, feature = "test-support"))]
-        super::super::raster::probe(ui, "table.head", rect);
+        crate::probe::probe(ui, "table.head", rect);
         if !ui.is_rect_visible(rect) {
             return None;
         }
@@ -85,9 +85,9 @@ impl DataTable<'_> {
             #[cfg(any(test, feature = "test-support"))]
             {
                 let page = self.page_column(index);
-                super::super::raster::probe(ui, &format!("table.head.{page}"), cell);
-                if self.verdict == Some(page) {
-                    super::super::raster::probe(ui, "table.verdict", cell);
+                crate::probe::probe(ui, &format!("table.head.{page}"), cell);
+                if self.pinned == Some(page) {
+                    crate::probe::probe(ui, "table.pinned", cell);
                 }
             }
             let sorts = sortable && column.sortable;
@@ -205,7 +205,7 @@ impl DataTable<'_> {
         let t = Tokens::get(ui.ctx());
         let row = Rect::from_x_y_ranges(view.left..=view.left + view.width, y);
         #[cfg(any(test, feature = "test-support"))]
-        super::super::raster::probe(ui, "table.band", row);
+        crate::probe::probe(ui, "table.band", row);
         if !ui.is_rect_visible(row) {
             return;
         }
@@ -227,7 +227,7 @@ impl DataTable<'_> {
                 row.y_range(),
             );
             #[cfg(any(test, feature = "test-support"))]
-            super::super::raster::probe(ui, &format!("table.span.{band}"), extent);
+            crate::probe::probe(ui, &format!("table.span.{band}"), extent);
             painter.vline(extent.left(), extent.y_range(), stroke);
             painter.vline(extent.right(), extent.y_range(), stroke);
             painter.hline(extent.x_range(), extent.bottom() - 0.5, stroke);
@@ -260,7 +260,7 @@ impl DataTable<'_> {
                 let _ = label.on_hover_text(&span.label);
             }
             #[cfg(any(test, feature = "test-support"))]
-            super::super::raster::probe(ui, &format!("table.span.{band}.label"), landed);
+            crate::probe::probe(ui, &format!("table.span.{band}.label"), landed);
             painter.galley(landed.min, galley, t.color.text_dim);
         }
     }

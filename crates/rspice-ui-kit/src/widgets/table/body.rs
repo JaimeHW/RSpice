@@ -7,15 +7,15 @@
 
 use egui::{Key, Modifiers, Rect, Sense, Ui, pos2, vec2};
 
-use crate::ui::icons::Icon;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::workbench::design_system::elide_text;
+use crate::icons::Icon;
+use crate::panels::elide_text;
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 use super::geometry::Columns;
 use super::{
-    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, TABLE_EDGE_INSET,
-    Verdict, View, Words, paint_words,
+    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, TABLE_EDGE_INSET, Tone,
+    View, Words, paint_words,
 };
 
 /// Side of the fold mark in front of a group's label.
@@ -103,10 +103,10 @@ impl DataTable<'_> {
         });
         #[cfg(any(test, feature = "test-support"))]
         {
-            super::super::raster::probe(ui, "table.row", rect);
-            super::super::raster::probe(ui, &format!("table.line.{index}"), rect);
+            crate::probe::probe(ui, "table.row", rect);
+            crate::probe::probe(ui, &format!("table.line.{index}"), rect);
             if selected {
-                super::super::raster::probe(ui, "table.selected", rect);
+                crate::probe::probe(ui, "table.selected", rect);
             }
         }
         let pressed_column = response
@@ -153,7 +153,7 @@ impl DataTable<'_> {
             let (cell_rect, region) = view.cell(geometry, column_index, y);
             let clip = region.intersect(ui.clip_rect());
             #[cfg(any(test, feature = "test-support"))]
-            super::super::raster::probe(
+            crate::probe::probe(
                 ui,
                 &format!("table.cell.{}", self.page_column(column_index)),
                 cell_rect,
@@ -221,10 +221,10 @@ impl DataTable<'_> {
                 theme::sans(tokens::FS_0, FontWeight::Regular)
             };
             let (color, problem) = match cell.ink {
-                Ink::Plain | Ink::Verdict(Verdict::Pass) => (t.color.text, None),
+                Ink::Plain | Ink::Toned(Tone::Neutral) => (t.color.text, None),
                 Ink::Faint => (t.color.text_faint, None),
-                Ink::Verdict(Verdict::Near) => (t.color.warn, None),
-                Ink::Verdict(Verdict::Fail) => (t.color.err, None),
+                Ink::Toned(Tone::Caution) => (t.color.warn, None),
+                Ink::Toned(Tone::Error) => (t.color.err, None),
                 Ink::Problem(problem) => (t.color.text_dim, Some(problem)),
             };
             let _painted = paint_words(
@@ -244,7 +244,7 @@ impl DataTable<'_> {
             if let Some(text) = _painted
                 && column.align == Align::Right
             {
-                super::super::raster::probe(
+                crate::probe::probe(
                     ui,
                     &format!("table.right.{}.{}", self.id, self.page_column(column_index)),
                     text,
@@ -255,7 +255,7 @@ impl DataTable<'_> {
             // is marked by its row alone.
             if selected_column == Some(column_index) && cell.editable {
                 #[cfg(any(test, feature = "test-support"))]
-                super::super::raster::probe(ui, "table.cell_box", cell_rect);
+                crate::probe::probe(ui, "table.cell_box", cell_rect);
                 ui.painter().with_clip_rect(clip).rect_stroke(
                     cell_rect.shrink(0.5),
                     0.0,
@@ -317,7 +317,7 @@ impl DataTable<'_> {
         };
         let field = cell.shrink(1.0);
         #[cfg(any(test, feature = "test-support"))]
-        super::super::raster::probe(ui, "table.edit", field);
+        crate::probe::probe(ui, "table.edit", field);
         let mut place = ui.new_child(egui::UiBuilder::new().max_rect(field));
         place.set_clip_rect(clip);
         let response = place.put(
@@ -390,7 +390,7 @@ impl DataTable<'_> {
             node.set_expanded(!folded);
         });
         #[cfg(any(test, feature = "test-support"))]
-        super::super::raster::probe(ui, &format!("table.group.{label}"), rect);
+        crate::probe::probe(ui, &format!("table.group.{label}"), rect);
         if ui.is_rect_visible(rect) {
             let shown = Rect::from_x_y_ranges(view.left..=view.left + view.width, rect.y_range());
             let painter = ui.painter().with_clip_rect(shown.intersect(ui.clip_rect()));

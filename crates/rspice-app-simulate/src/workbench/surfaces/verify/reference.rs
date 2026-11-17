@@ -21,12 +21,13 @@ use crate::state::{
 use crate::workbench::state::{ReferenceToleranceDraft, RegressionComparisonReceipt};
 
 use super::checks::row_menu;
-use super::table::{
-    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
-    TABLE_HEAD_H, TABLE_ROW_H, Verdict,
-};
 use super::toolbar::{PageToolbar, RunChoice, RunRole, Summary, ToolbarAction, empty_line};
+use super::verdict::{Verdict, VerdictCell};
 use super::*;
+use crate::ui::widgets::table::{
+    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
+    TABLE_HEAD_H, TABLE_ROW_H,
+};
 
 /// Least and greatest height of the overlay under the table.
 const DETAIL_MIN_H: f32 = 220.0;
@@ -481,7 +482,7 @@ pub(super) fn reference_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .state(&mut session.reference_table)
         .keys(&comparison.keys)
         .freeze(1)
-        .verdict(RESULT_COLUMN)
+        .pin_when_narrow(RESULT_COLUMN)
         .editing(editor)
         .max_height((body - detail - 1.0).max(TABLE_HEAD_H + TABLE_ROW_H))
         .show(ui, |index| row_cells(&rows[index]));

@@ -22,7 +22,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark, select};
 use crate::workbench::design_system::elide_text;
 
-use super::table::TABLE_EDGE_INSET;
+use crate::ui::widgets::table::TABLE_EDGE_INSET;
 
 #[cfg(test)]
 mod tests;

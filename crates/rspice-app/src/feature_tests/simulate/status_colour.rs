@@ -242,12 +242,21 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
             "surfaces/verify/reference.rs",
             "surfaces/verify/regression_contract.rs",
             "surfaces/verify/checks.rs",
-            "surfaces/verify/table.rs",
-            "surfaces/verify/table/body.rs",
-            "surfaces/verify/table/geometry.rs",
-            "surfaces/verify/table/head.rs",
-            "surfaces/verify/table/state.rs",
             "surfaces/verify/toolbar.rs",
+            "surfaces/verify/verdict.rs",
+        ],
+        &["status_dot"],
+    ),
+    (
+        // The kit's shared table, which the Verify pages draw in: a toned
+        // cell's words are the only colour in a row.
+        "Shared table",
+        &[
+            "widgets/table.rs",
+            "widgets/table/body.rs",
+            "widgets/table/geometry.rs",
+            "widgets/table/head.rs",
+            "widgets/table/state.rs",
         ],
         &["status_dot"],
     ),
@@ -295,6 +304,7 @@ fn no_surface_paints_a_status_in_colour() {
     let code = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src/workbench");
     let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src/workbench");
     let design = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-design/src/workbench");
+    let kit = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-ui-kit/src");
     let mut sites = Vec::new();
     for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
         for file in files {
@@ -309,6 +319,7 @@ fn no_surface_paints_a_status_in_colour() {
                 code.join(file),
                 project.join(file),
                 design.join(file),
+                kit.join(file),
             ]
             .into_iter()
             .find(|path| path.is_file())

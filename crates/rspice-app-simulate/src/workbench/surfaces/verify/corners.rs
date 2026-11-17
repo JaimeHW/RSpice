@@ -19,10 +19,13 @@ use rspice_results::verification::{
     Cell as SheetCell, CellStatus, Point, PointAxis, PointSource, Row, RowStatus, Sheet,
 };
 
-use super::table::{Cell, Column, DataTable, RowKey, Selection, SortKey, Span, Verdict};
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
+use super::verdict::{Verdict, VerdictCell};
 use super::*;
 use crate::state::FamilyMemberId;
+use crate::ui::widgets::table::{
+    Align, Cell, Column, DataTable, RowKey, Selection, SortKey, Span, TableState,
+};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::SetFamilyFilter;
 use crate::workbench::simulate::commands::SimulateCommand;
@@ -884,18 +887,11 @@ fn cell_text_width(ui: &Ui, words: &str) -> f32 {
 /// leave equally with its siblings, so two specifications turned into
 /// columns stay as wide as each other instead of the last taking the rest.
 fn shared_value_column(head: &str, width: f32) -> Column {
-    let mut column = Column::name(head, width);
-    column.align = super::table::Align::Right;
-    column
+    Column::name(head, width).align(Align::Right)
 }
 
 /// Specifications down, points across.
-fn plain_table(
-    ui: &mut Ui,
-    sheet: &Sheet,
-    rows: &[usize],
-    state: &mut super::table::TableState,
-) -> Asked {
+fn plain_table(ui: &mut Ui, sheet: &Sheet, rows: &[usize], state: &mut TableState) -> Asked {
     let heads = point_heads(sheet);
     let mut columns = vec![
         Column::name("Specification", 160.0),
@@ -949,12 +945,7 @@ fn plain_table(
 }
 
 /// Points down, specifications across.
-fn transposed_table(
-    ui: &mut Ui,
-    sheet: &Sheet,
-    points: &[usize],
-    state: &mut super::table::TableState,
-) -> Asked {
+fn transposed_table(ui: &mut Ui, sheet: &Sheet, points: &[usize], state: &mut TableState) -> Asked {
     let leading = transposed_leading(sheet);
     let last_axis = sheet.axes.len().saturating_sub(1);
     // The last axis's column carries the nominal mark, so it is as wide as

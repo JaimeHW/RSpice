@@ -12,6 +12,8 @@ pub mod panels;
 #[cfg(feature = "plot")]
 pub mod plot;
 #[cfg(any(test, feature = "test-support"))]
+pub mod probe;
+#[cfg(any(test, feature = "test-support"))]
 pub mod raster;
 pub mod text;
 pub mod theme;

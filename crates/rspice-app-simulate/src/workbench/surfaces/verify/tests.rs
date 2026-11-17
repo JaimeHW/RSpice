@@ -1038,7 +1038,7 @@ fn a_phone_keeps_every_tables_verdict_in_view() {
         };
         let before = pass(&mut harness);
         let name = before.one("table.head.0").expect("the name's head");
-        let verdict = before.one("table.verdict").expect("the verdict's head");
+        let verdict = before.one("table.pinned").expect("the verdict's head");
         assert_eq!(verdict.left(), name.right(), "{page:?}: after the name");
         assert!(
             verdict.right() <= phone.x,
@@ -1054,7 +1054,7 @@ fn a_phone_keeps_every_tables_verdict_in_view() {
         table.scroll_x = 120.0;
         let after = pass(&mut harness);
         assert_eq!(
-            after.one("table.verdict"),
+            after.one("table.pinned"),
             Some(verdict),
             "{page:?}: the verdict stays put as the values scroll"
         );
