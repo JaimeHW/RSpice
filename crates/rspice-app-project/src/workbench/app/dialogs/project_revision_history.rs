@@ -3,8 +3,43 @@
 //! and the authority a restore is checked against. The dialog itself
 //! draws in the project feature's context.
 
-use crate::state::{ValidatedRevisionJournal, ValidatedRevisionSemanticDelta};
+use std::sync::Arc;
+
+use crate::state::{
+    ValidatedRevisionJournal, ValidatedRevisionSemanticDelta, ValidatedSchematicRevisionId,
+};
 use crate::workbench::app::SchematicEditAuthority;
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread built the history table's rows.
+    pub static AUDIT_ROW_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One row of the history table: a retained record as the dialog shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectAuditRow {
+    pub(crate) key: String,
+    pub(crate) kind: ProjectAuditArtifactKind,
+    pub(crate) revision: String,
+    pub(crate) time: String,
+    pub(crate) actor: String,
+    pub(crate) change: String,
+    pub(crate) affected_evidence: String,
+    pub(crate) status: String,
+    pub(crate) schematic_revision: Option<ValidatedSchematicRevisionId>,
+    pub(crate) restorable_schematic_revision: Option<ValidatedSchematicRevisionId>,
+}
+
+/// What the rows were built from. The dialog is modal, so the one record
+/// that moves while it is open is the active schematic's journal, which a
+/// restore extends; the project revision covers a governed change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProjectAuditRowsSource {
+    pub(crate) journal_len: usize,
+    pub(crate) journal_head: Option<ValidatedSchematicRevisionId>,
+    pub(crate) project_revision: u64,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ProjectRevisionArtifactFilter {
@@ -94,6 +129,10 @@ pub struct ProjectRevisionHistoryDialogState {
     pub(crate) restore_confirmation: bool,
     pub(crate) error: Option<String>,
     pub(crate) body_scroll_offset: f32,
+    /// The table's rows, built when the dialog opens and again when what
+    /// they were built from moves; never on an idle frame.
+    pub(crate) rows: Arc<[ProjectAuditRow]>,
+    pub(crate) rows_source: Option<ProjectAuditRowsSource>,
 }
 
 impl Default for ProjectRevisionHistoryDialogState {
@@ -109,6 +148,8 @@ impl Default for ProjectRevisionHistoryDialogState {
             restore_confirmation: false,
             error: None,
             body_scroll_offset: 0.0,
+            rows: Arc::from(Vec::new()),
+            rows_source: None,
         }
     }
 }

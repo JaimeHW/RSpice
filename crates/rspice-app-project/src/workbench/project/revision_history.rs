@@ -22,8 +22,8 @@ use crate::workbench::design_system::section_header;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::project_revision_history::{
-    ProjectAuditArtifactKind, ProjectAuditComparison, ProjectRevisionArtifactFilter,
-    ProjectRevisionComparison, ProjectRevisionHistoryDialogState,
+    ProjectAuditArtifactKind, ProjectAuditComparison, ProjectAuditRow, ProjectAuditRowsSource,
+    ProjectRevisionArtifactFilter, ProjectRevisionComparison, ProjectRevisionHistoryDialogState,
 };
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::Cx;
@@ -33,20 +33,6 @@ const TITLE: &str = "Project revision and audit history";
 /// A fact the record's owner does not keep: left blank, as an empty cell,
 /// rather than stated in every row of a column that has nothing to say.
 const NOT_RETAINED: &str = "";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProjectAuditRow {
-    key: String,
-    kind: ProjectAuditArtifactKind,
-    revision: String,
-    time: String,
-    actor: String,
-    change: String,
-    affected_evidence: String,
-    status: String,
-    schematic_revision: Option<ValidatedSchematicRevisionId>,
-    restorable_schematic_revision: Option<ValidatedSchematicRevisionId>,
-}
 
 impl ProjectAuditRow {
     fn matches_query(&self, query: &str) -> bool {
@@ -143,7 +129,7 @@ impl ProjectFeature {
         if !cx.state.project_revision_history.open {
             return;
         }
-        let rows = project_audit_rows(cx.model);
+        let rows = kept_audit_rows(&mut cx.state.project_revision_history, cx.model);
         retain_existing_revision_selection(&mut cx.state.project_revision_history, &rows);
         let stale = history_authority_error(&cx.state.project_revision_history, cx.model);
         let write_allowed = !cx.model.schematic.session.read_only
@@ -346,6 +332,7 @@ fn restore_selected_revision(cx: &mut Cx<'_, ProjectFeature>, rows: &[ProjectAud
             dialog.restore_confirmation = false;
             // The restored design is on the canvas behind the dialog.
             dialog.error = None;
+            dialog.rows_source = None;
         }
         Err(error) => {
             let dialog = &mut cx.state.project_revision_history;
@@ -567,7 +554,29 @@ fn visible_rows<'a>(
         .collect()
 }
 
+/// The rows the dialog keeps, built again only when what they were built
+/// from has moved since.
+fn kept_audit_rows(
+    dialog: &mut ProjectRevisionHistoryDialogState,
+    model: &Model,
+) -> std::sync::Arc<[ProjectAuditRow]> {
+    let journal = &model.schematic.document().validated_revisions;
+    let source = ProjectAuditRowsSource {
+        journal_len: journal.records().len(),
+        journal_head: journal.records().last().map(ValidatedSchematicRevision::id),
+        project_revision: model.workspace.content.project.revision().get(),
+    };
+    if dialog.rows_source != Some(source) {
+        dialog.rows = project_audit_rows(model).into();
+        dialog.rows_source = Some(source);
+    }
+    std::sync::Arc::clone(&dialog.rows)
+}
+
 fn project_audit_rows(model: &Model) -> Vec<ProjectAuditRow> {
+    #[cfg(any(test, feature = "test-support"))]
+    crate::workbench::app::dialogs::project_revision_history::AUDIT_ROW_BUILDS
+        .with(|builds| builds.set(builds.get() + 1));
     let mut rows = Vec::new();
     append_schematic_rows(
         &mut rows,
