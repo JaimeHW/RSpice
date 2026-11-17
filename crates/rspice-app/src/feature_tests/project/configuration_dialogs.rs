@@ -151,6 +151,34 @@ fn a_first_configuration_is_used_for_runs_and_a_clone_follows_its_source() {
     ));
 }
 
+/// A configuration needs no DUT: on a top cell that places no instance, New
+/// binds the top cell itself and Create is offered.
+#[test]
+fn new_configuration_on_a_top_cell_that_places_nothing_binds_the_top_cell() {
+    let mut app = RSpiceApp::test_instance();
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::New,
+    );
+    if let Some(ConfigurationDialog::New { use_for_runs, .. }) =
+        &mut app.state.project.configuration_dialog.open
+    {
+        *use_for_runs = false;
+    }
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+
+    press(&mut app, &ctx, &[]);
+    press(&mut app, &ctx, &[egui::Key::Enter]);
+
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let [created] = catalog.configurations() else {
+        panic!("Create made one configuration");
+    };
+    assert_eq!(created.definition().dut_path, "/");
+}
+
 #[test]
 fn deleting_what_runs_use_says_why_it_cannot() {
     let (mut app, id) = reference_app();
@@ -186,6 +214,8 @@ fn leaving(app: &RSpiceApp) -> Option<&Leaving> {
 
 /// One frame of the configuration dialogs with `keys` pressed, and what
 /// they raised answered as they return, as the frame's dialog step does.
+/// A check the press started is waited for, frame by frame, as the reader's
+/// screen would go on painting while it runs.
 fn press(app: &mut RSpiceApp, ctx: &egui::Context, keys: &[egui::Key]) {
     let events = keys
         .iter()
@@ -197,6 +227,19 @@ fn press(app: &mut RSpiceApp, ctx: &egui::Context, keys: &[egui::Key]) {
             modifiers: egui::Modifiers::NONE,
         })
         .collect();
+    dialog_frame(app, ctx, events);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while app.state.project.configuration.is_checking() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the check never answered"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        dialog_frame(app, ctx, Vec::new());
+    }
+}
+
+fn dialog_frame(app: &mut RSpiceApp, ctx: &egui::Context, events: Vec<egui::Event>) {
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -326,7 +369,10 @@ fn applying_before_leaving_commits_the_edits_and_keeps_the_recent_project_asked_
 #[test]
 fn a_refused_apply_before_leaving_stays_on_the_configuration_page() {
     let (mut app, id) = reference_app();
-    edit_views(&mut app, id, &["schematic"], &["extracted"]);
+    // The edits hold, but the design no longer netlists: the check that
+    // runs off the frame refuses them, and the refusal is what follows.
+    super::configuration_transactions::break_the_netlist(&mut app);
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
     let committed = app.state.model.workspace.content.configuration_sets.clone();
     app.state.project.project_page = ProjectPage::Overview;
     assert!(hold_for_configuration_edits(
@@ -354,7 +400,8 @@ fn a_refused_apply_before_leaving_stays_on_the_configuration_page() {
             .configuration
             .refusal
             .as_deref()
-            .is_some_and(|refusal| refusal.starts_with("Cannot apply Reference hierarchy")),
+            .is_some_and(|refusal| refusal
+                .starts_with("Cannot apply Reference hierarchy: the netlist does not generate")),
         "{:?}",
         app.state.project.configuration.refusal
     );

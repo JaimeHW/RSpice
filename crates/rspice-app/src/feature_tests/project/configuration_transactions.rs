@@ -2,17 +2,31 @@
 //! refuse, delete, clone and rename against the runs the simulation
 //! controller would start.
 
+use std::time::{Duration, Instant};
+
 use crate::workbench::app::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::project::configuration::{
-    ConfigurationTransaction, commit_configuration, delete_refusal,
+    Committed, ConfigurationTransaction, commit_configuration, delete_refusal,
+    finish_configuration_check,
 };
 use rspice_app_project::workbench::project::configuration_state::ConfigurationSelection;
-use rspice_app_state::state::{ConfigurationSetDefinition, ConfigurationSetId};
+use rspice_app_state::state::{
+    ComponentType, ConfigurationSetDefinition, ConfigurationSetId, Point,
+};
 
+/// Commit `transaction` and, when it hands runs a configuration, land it as
+/// the frames after its check answers would.
 fn commit_configuration_transaction(
     app: &mut RSpiceApp,
     transaction: ConfigurationTransaction,
 ) -> Result<(), String> {
+    match commit(app, transaction)? {
+        Committed::Done => Ok(()),
+        Committed::Checking => check_answer(app),
+    }
+}
+
+fn commit(app: &mut RSpiceApp, transaction: ConfigurationTransaction) -> Result<Committed, String> {
     commit_configuration(
         &mut app.state.project.configuration,
         &mut app.state.model,
@@ -20,6 +34,43 @@ fn commit_configuration_transaction(
         &mut app.simulation_controller,
         transaction,
     )
+}
+
+/// What the running check answers, landed.
+fn check_answer(app: &mut RSpiceApp) -> Result<(), String> {
+    let ctx = egui::Context::default();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some(answer) = finish_configuration_check(
+            &mut app.state.project.configuration,
+            &mut app.state.model,
+            &mut app.state.runs,
+            &mut app.simulation_controller,
+            &ctx,
+        ) {
+            return answer;
+        }
+        assert!(
+            app.state.project.configuration.is_checking(),
+            "the check stopped without an answer"
+        );
+        assert!(Instant::now() < deadline, "the check never answered");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Place a part whose parameters name one twice: the design still projects,
+/// but no netlist generates from it.
+pub(super) fn break_the_netlist(app: &mut RSpiceApp) {
+    let schematic = &mut app.state.model.schematic;
+    let part = schematic.add_component(ComponentType::Resistor, Point::new(2_000, 2_000));
+    schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == part)
+        .expect("the placed part")
+        .params = "r=1k r=2k".to_owned();
 }
 
 #[test]
@@ -115,21 +166,28 @@ fn apply_commits_the_edits_against_the_revision_they_started_from() {
     );
 }
 
+/// An edit the configuration could not store is refused where it is made,
+/// so it never reaches the edits Apply would commit.
 #[test]
-fn a_refused_apply_leaves_the_project_untouched() {
+fn an_edit_the_configuration_cannot_hold_leaves_the_project_untouched() {
     let (mut app, id) = reference_app();
     let before = app.state.model.workspace.content.configuration_sets.clone();
     let project_revision = app.state.model.workspace.content.project.revision();
-    edit_views(&mut app, id, &["schematic"], &["extracted"]);
 
-    let refusal = commit_configuration_transaction(&mut app, ConfigurationTransaction::Apply)
-        .expect_err("a stop view outside the view list is refused");
+    let taken = app
+        .state
+        .project
+        .configuration
+        .edit(&before, id, |definition| {
+            definition.executable_view_policy = vec!["schematic".to_owned()];
+            definition.stop_views = vec!["extracted".to_owned()];
+        });
 
+    assert!(!taken, "a stop view outside the view list is refused");
     assert_eq!(
-        refusal,
-        concat!(
-            "Cannot apply Reference hierarchy: Stop list: extracted is not in its view list. ",
-            "Add it to the view list or remove the stop."
+        app.state.project.configuration.refusal.as_deref(),
+        Some(
+            "Stop list: extracted is not in its view list. Add it to the view list or remove the stop."
         )
     );
     assert_eq!(app.state.model.workspace.content.configuration_sets, before);
@@ -137,7 +195,136 @@ fn a_refused_apply_leaves_the_project_untouched() {
         app.state.model.workspace.content.project.revision(),
         project_revision
     );
-    assert!(app.state.project.configuration.is_dirty(&before));
+    assert!(!app.state.project.configuration.is_dirty(&before));
+}
+
+/// Apply on the configuration runs use is checked off the frame: nothing
+/// lands while the check runs, and its refusal is the answer it gives.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_apply_the_check_refuses_is_refused_when_the_check_answers() {
+    use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
+
+    let (mut app, id) = reference_app();
+    break_the_netlist(&mut app);
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let before = app.state.model.workspace.content.configuration_sets.clone();
+    let project_revision = app.state.model.workspace.content.project.revision();
+    let hold = CheckpointJobHold::default();
+    app.state.project.configuration.check_hold = Some(hold.clone());
+
+    assert_eq!(
+        commit(&mut app, ConfigurationTransaction::Apply),
+        Ok(Committed::Checking)
+    );
+    assert!(app.state.project.configuration.is_checking());
+    assert_eq!(
+        app.state.model.workspace.content.configuration_sets, before,
+        "nothing lands while the check runs"
+    );
+    hold.release();
+    let refusal = check_answer(&mut app).expect_err("a netlist that does not generate");
+
+    assert!(
+        refusal.starts_with("Cannot apply Reference hierarchy: the netlist does not generate: "),
+        "{refusal}"
+    );
+    assert!(refusal.contains("assigned more than once"), "{refusal}");
+    assert!(!app.state.project.configuration.is_checking());
+    assert_eq!(app.state.model.workspace.content.configuration_sets, before);
+    assert_eq!(
+        app.state.model.workspace.content.project.revision(),
+        project_revision
+    );
+    assert!(
+        app.state.project.configuration.is_dirty(&before),
+        "the edits survive"
+    );
+}
+
+/// An edit made while Apply is checked stops the check: it was of the edits
+/// before it, so nothing lands, and the newer edits wait for Apply again.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_edit_stops_the_check_of_the_edits_before_it() {
+    use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
+
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let before = app.state.model.workspace.content.configuration_sets.clone();
+    let hold = CheckpointJobHold::default();
+    app.state.project.configuration.check_hold = Some(hold.clone());
+    assert_eq!(
+        commit(&mut app, ConfigurationTransaction::Apply),
+        Ok(Committed::Checking)
+    );
+
+    edit_views(&mut app, id, &["schematic", "extracted"], &[]);
+    assert!(
+        !app.state.project.configuration.is_checking(),
+        "the edit stopped the check"
+    );
+    hold.release();
+    let ctx = egui::Context::default();
+    assert_eq!(
+        finish_configuration_check(
+            &mut app.state.project.configuration,
+            &mut app.state.model,
+            &mut app.state.runs,
+            &mut app.simulation_controller,
+            &ctx,
+        ),
+        None
+    );
+    assert_eq!(app.state.model.workspace.content.configuration_sets, before);
+    assert_eq!(
+        app.state
+            .project
+            .configuration
+            .definition(&before, id)
+            .unwrap()
+            .executable_view_policy,
+        ["schematic", "extracted"],
+        "the newer edits wait for Apply"
+    );
+}
+
+/// A check lands only on the catalog it was made against: a change made
+/// elsewhere while it ran is never overwritten.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_check_lands_only_on_the_configurations_it_was_made_against() {
+    use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
+
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let hold = CheckpointJobHold::default();
+    app.state.project.configuration.check_hold = Some(hold.clone());
+    assert_eq!(
+        commit(&mut app, ConfigurationTransaction::Apply),
+        Ok(Committed::Checking)
+    );
+    let mut elsewhere = (*app.state.model.workspace.content.configuration_sets).clone();
+    elsewhere
+        .create(definition_from(&app, id, "Made elsewhere"))
+        .unwrap();
+    app.state
+        .model
+        .workspace
+        .content
+        .replace_configuration_sets(elsewhere.clone())
+        .unwrap();
+    hold.release();
+
+    let refusal = check_answer(&mut app).expect_err("the catalog changed under the check");
+    assert_eq!(
+        refusal,
+        "Cannot apply Reference hierarchy: the configurations changed while it was checked. Try again."
+    );
+    assert_eq!(
+        *app.state.model.workspace.content.configuration_sets,
+        elsewhere
+    );
 }
 
 /// An apply that leaves an instance without a view names the cell and

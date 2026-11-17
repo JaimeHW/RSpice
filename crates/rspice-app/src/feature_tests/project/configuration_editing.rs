@@ -1,21 +1,31 @@
 //! Editing a configuration on the Configuration page through whole
 //! application frames: what the inspector inherits and keeps, which entries
-//! are refused where they are made, and how the tables state a binding's
-//! list.
+//! are refused where they are made, how the tables state a binding's list,
+//! and how Apply, Use for runs, Revert and Delete answer.
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::time::{Duration, Instant};
+
+use egui::accesskit::Role;
 use egui::{Context, Modifiers, Pos2, pos2};
 
 use super::recovery_frames::{app_frame, offscreen};
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
+use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
+use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
+    ConfigurationDialogRequest, open_configuration_dialog,
+};
 use rspice_app_project::workbench::project::configuration_state::{
-    ConfigurationRow, ConfigurationTab, instance_binding, set_cell_view,
+    ConfigurationRow, ConfigurationSelection, ConfigurationTab, instance_binding, set_cell_view,
 };
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_state::state::{ConfigurationCellBinding, ConfigurationPlatform};
+use rspice_app_state::state::{
+    ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetId,
+};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// The reference project on Project > Configuration, the configuration it
 /// runs with in front.
@@ -27,11 +37,13 @@ fn page_app() -> RSpiceApp {
     app
 }
 
-/// One announced control: its role, name, value and centre.
+/// One announced control: its role, name, value, whether it is offered,
+/// and its centre.
 struct Node {
-    role: egui::accesskit::Role,
+    role: Role,
     label: String,
     value: String,
+    disabled: bool,
     at: Option<Pos2>,
 }
 
@@ -47,6 +59,7 @@ fn nodes(output: &egui::FullOutput) -> Vec<Node> {
             role: node.role(),
             label: node.label().unwrap_or_default().to_owned(),
             value: node.value().unwrap_or_default().to_owned(),
+            disabled: node.is_disabled(),
             at: node.bounds().map(|bounds| {
                 pos2(
                     ((bounds.x0 + bounds.x1) / 2.0) as f32,
@@ -76,7 +89,7 @@ fn click(
     ctx: &Context,
     app: &mut RSpiceApp,
     output: &egui::FullOutput,
-    role: egui::accesskit::Role,
+    role: Role,
     named: impl Fn(&str) -> bool,
 ) -> egui::FullOutput {
     let all = nodes(output);
@@ -93,6 +106,27 @@ fn click(
                     .collect::<Vec<_>>()
             )
         });
+    press_at(ctx, app, at)
+}
+
+/// Press the button named `name` that sits lowest on the screen: the one
+/// in the dialog over the page, where the page has one of the same name.
+fn click_lowest(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    output: &egui::FullOutput,
+    name: &str,
+) -> egui::FullOutput {
+    let at = nodes(output)
+        .into_iter()
+        .filter(|node| node.role == Role::Button && node.label == name)
+        .filter_map(|node| node.at)
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap_or_else(|| panic!("no {name:?} button"));
+    press_at(ctx, app, at)
+}
+
+fn press_at(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutput {
     settle(
         ctx,
         app,
@@ -122,9 +156,51 @@ fn pick(
     label: &str,
     option: &str,
 ) -> egui::FullOutput {
-    use egui::accesskit::Role;
     let open = click(ctx, app, output, Role::ComboBox, |name| name == label);
     click(ctx, app, &open, Role::ListBoxOption, |name| name == option)
+}
+
+/// Whether the button `output` announced as `name` is drawn but not offered.
+fn disabled(output: &egui::FullOutput, name: &str) -> bool {
+    nodes(output)
+        .iter()
+        .any(|node| node.role == Role::Button && node.label == name && node.disabled)
+}
+
+/// Paint until no check runs, as the reader's screen would while one does.
+fn paint_until_checked(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        app_frame(ctx, app, Vec::new());
+        if !app.state.project.configuration.is_checking() {
+            return settle(ctx, app, Vec::new());
+        }
+        assert!(Instant::now() < deadline, "the check never answered");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A second configuration made from the one runs use, under `name`, with
+/// `change` made to it; runs keep using the first.
+fn second_configuration(
+    app: &mut RSpiceApp,
+    name: &str,
+    change: impl FnOnce(&mut ConfigurationSetDefinition),
+) -> ConfigurationSetId {
+    let mut catalog = (*app.state.model.workspace.content.configuration_sets).clone();
+    let active = catalog.active_configuration_id().unwrap();
+    let mut definition = catalog.find(active).unwrap().definition().clone();
+    definition.name = name.to_owned();
+    change(&mut definition);
+    let id = catalog.create(definition).unwrap();
+    catalog.activate(active).unwrap();
+    app.state
+        .model
+        .workspace
+        .content
+        .replace_configuration_sets(catalog)
+        .unwrap();
+    id
 }
 
 fn select_row(app: &mut RSpiceApp, row: ConfigurationRow) {
@@ -224,14 +300,16 @@ fn inheriting_the_view_list_keeps_the_rest_of_the_binding() {
 fn an_invalid_entry_is_refused_at_its_field_and_the_tables_stay() {
     let ctx = offscreen();
     let mut app = page_app();
-    select_row(&mut app, ConfigurationRow::Instance("/X1".to_owned()));
     let output = settle(&ctx, &mut app, Vec::new());
+    assert!(says(&output, "View list 1: schematic"));
     assert!(
         !nodes(&output)
             .iter()
             .any(|node| node.label == "Remove schematic from View list"),
         "the global view list's only view cannot be removed"
     );
+    select_row(&mut app, ConfigurationRow::Instance("/X1".to_owned()));
+    settle(&ctx, &mut app, Vec::new());
     let field = egui::Id::new(("configuration-field", "instance-/X1-section"));
     ctx.memory_mut(|memory| memory.request_focus(field));
     app_frame(&ctx, &mut app, Vec::new());
@@ -264,7 +342,7 @@ fn an_invalid_entry_is_refused_at_its_field_and_the_tables_stay() {
     assert!(
         nodes(&output)
             .iter()
-            .any(|node| node.label.contains(&refusal)),
+            .any(|node| node.label.contains(&refusal) || node.value.contains(&refusal)),
         "{refusal:?} is said at the field"
     );
     assert!(says(
@@ -333,4 +411,274 @@ fn the_inspector_states_the_name_and_rename_is_the_one_way_to_change_it() {
         |name| name == "More configuration actions",
     );
     assert!(says(&menu, "Rename\u{2026}"));
+}
+
+/// The band says when the edits are not applied, and Use for runs on a
+/// configuration with edits uses what the tables show: it applies them.
+#[test]
+fn use_for_runs_applies_the_edits_it_was_pressed_over() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    let second = second_configuration(&mut app, "Second", |_| {});
+    app.state
+        .project
+        .configuration
+        .select(ConfigurationSelection::Configuration(second));
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    assert!(
+        app.state
+            .project
+            .configuration
+            .edit(&catalog, second, |definition| {
+                definition.executable_view_policy =
+                    vec!["schematic".to_owned(), "spice".to_owned()];
+            })
+    );
+    let output = settle(&ctx, &mut app, Vec::new());
+    assert!(says(&output, "Edits not applied"));
+
+    click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Use for runs"
+    });
+    let output = paint_until_checked(&ctx, &mut app);
+
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    assert_eq!(catalog.active_configuration_id(), Some(second));
+    assert_eq!(
+        catalog.find(second).unwrap().executable_view_policy(),
+        ["schematic", "spice"],
+        "the edits were applied first"
+    );
+    assert!(says(&output, "Used for runs"));
+    assert!(!says(&output, "Edits not applied"));
+}
+
+/// While Apply is checked the band says so and offers neither Apply nor Use
+/// for runs. An edit made meanwhile stops the check; the next Apply lands.
+#[test]
+fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    edit(&mut app, |definition| {
+        definition.executable_view_policy = vec!["schematic".to_owned(), "spice".to_owned()];
+    });
+    let before = app.state.model.workspace.content.configuration_sets.clone();
+    let hold = CheckpointJobHold::default();
+    app.state.project.configuration.check_hold = Some(hold.clone());
+    let output = settle(&ctx, &mut app, Vec::new());
+
+    let output = click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Apply"
+    });
+    assert!(
+        says(&output, "Checking\u{2026}"),
+        "the band says it is checking"
+    );
+    assert!(
+        disabled(&output, "Apply"),
+        "Apply is locked while it is checked"
+    );
+    assert_eq!(app.state.model.workspace.content.configuration_sets, before);
+
+    edit(&mut app, |definition| {
+        definition.dut_path = "/X2".to_owned()
+    });
+    let output = settle(&ctx, &mut app, Vec::new());
+    assert!(
+        !says(&output, "Checking\u{2026}"),
+        "the edit stopped the check"
+    );
+    assert!(says(&output, "Edits not applied"));
+    hold.release();
+    settle(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        app.state.model.workspace.content.configuration_sets, before,
+        "a stopped check lands nothing"
+    );
+
+    app.state.project.configuration.check_hold = None;
+    click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Apply"
+    });
+    let output = paint_until_checked(&ctx, &mut app);
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let id = catalog.active_configuration_id().unwrap();
+    let applied = catalog.find(id).unwrap();
+    assert_eq!(applied.executable_view_policy(), ["schematic", "spice"]);
+    assert_eq!(applied.definition().dut_path, "/X2");
+    assert!(!says(&output, "Edits not applied"));
+}
+
+/// Revert asks before it drops the edits: Keep editing keeps them.
+#[test]
+fn revert_asks_before_it_drops_the_edits() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    edit(&mut app, |definition| {
+        definition.dut_path = "/X2".to_owned()
+    });
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    let output = settle(&ctx, &mut app, Vec::new());
+
+    let asked = click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Revert"
+    });
+    assert!(
+        nodes(&asked)
+            .iter()
+            .any(|node| node.label == "Revert the edits to Reference hierarchy?"),
+        "Revert asks first"
+    );
+    assert!(app.state.project.configuration.is_dirty(&catalog));
+    let kept = click(&ctx, &mut app, &asked, Role::Button, |name| {
+        name == "Keep editing"
+    });
+    assert!(
+        app.state.project.configuration.is_dirty(&catalog),
+        "Keep editing keeps them"
+    );
+
+    let asked = click(&ctx, &mut app, &kept, Role::Button, |name| name == "Revert");
+    click_lowest(&ctx, &mut app, &asked, "Revert");
+    assert!(
+        !app.state.project.configuration.is_dirty(&catalog),
+        "Revert drops them"
+    );
+}
+
+/// Model section offers the sections of the technology the project
+/// attaches, and picking one binds it.
+#[test]
+fn model_section_offers_the_attached_technology_sections() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    app.state
+        .model
+        .provision_test_project_technology_with_project_models(sectioned_models());
+    let sections = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .expect("a technology is attached")
+        .process_sections()
+        .to_vec();
+    let section = sections
+        .last()
+        .expect("the technology has sections")
+        .clone();
+    select_row(&mut app, ConfigurationRow::Instance("/X1".to_owned()));
+    let output = settle(&ctx, &mut app, Vec::new());
+
+    pick(&ctx, &mut app, &output, "Technology sections", &section);
+
+    let definition = shown(&app);
+    assert_eq!(
+        instance_binding(&definition, "/X1")
+            .expect("a binding of its own")
+            .model_section
+            .as_deref(),
+        Some(section.as_str())
+    );
+}
+
+/// The DUT instance is optional: its picker offers the top cell itself and
+/// the instances the top cell places.
+#[test]
+fn the_dut_picker_offers_the_top_cell_and_its_instances() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    let output = settle(&ctx, &mut app, Vec::new());
+    let open = click(&ctx, &mut app, &output, Role::ComboBox, |name| {
+        name == "DUT instance"
+    });
+    let offered = nodes(&open)
+        .into_iter()
+        .filter(|node| node.role == Role::ListBoxOption)
+        .map(|node| node.label)
+        .collect::<Vec<_>>();
+    assert!(offered.iter().any(|path| path == "/"), "{offered:?}");
+    assert!(offered.iter().any(|path| path == "/X1"), "{offered:?}");
+    assert!(
+        offered.iter().all(|path| path.matches('/').count() <= 1),
+        "only the top cell's own instances: {offered:?}"
+    );
+
+    click(&ctx, &mut app, &open, Role::ListBoxOption, |name| {
+        name == "/"
+    });
+    assert_eq!(shown(&app).dut_path, "/");
+}
+
+/// Delete names every binding that leaves with the configuration, cell
+/// bindings too, says it once, and is one step of Undo.
+#[test]
+fn delete_counts_every_binding_and_undo_brings_the_configuration_back() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    let spare = second_configuration(&mut app, "Spare", |definition| {
+        definition.cell_bindings.push(ConfigurationCellBinding {
+            library: "user".to_owned(),
+            cell: "amp".to_owned(),
+            executable_views: vec!["schematic".to_owned()],
+            stop_view: None,
+        });
+    });
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::Delete(spare),
+    );
+    let output = settle(&ctx, &mut app, Vec::new());
+    let consequence = "Spare, its 1 instance binding and its 1 cell binding leave the project. \
+                       Runs that used it before are not affected, and Undo brings it back.";
+    let said = announced(&output)
+        .iter()
+        .filter(|text| text.contains(consequence))
+        .count();
+    assert_eq!(said, 1, "the consequence is said once");
+
+    click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Delete"
+    });
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    assert!(catalog.find(spare).is_none(), "Delete took it away");
+
+    assert!(app.command_key_enabled(ids::UNDO));
+    app.execute_command_key(ids::UNDO);
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let back = catalog.find(spare).expect("Undo brought it back");
+    assert_eq!(back.cell_bindings().len(), 1);
+}
+
+/// Every name, value and description one frame announced.
+fn announced(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .flat_map(|(_, node)| {
+            [node.label(), node.value(), node.description()]
+                .into_iter()
+                .flatten()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// A model library with one section per process corner.
+fn sectioned_models() -> Vec<u8> {
+    let mut text = String::new();
+    for process in ["TT", "SS", "FF", "SF", "FS"] {
+        text.push_str(&format!(
+            ".lib {process}\n.model nch nmos level=1\n.model pch pmos level=1\n.endl {process}\n"
+        ));
+    }
+    text.into_bytes()
 }

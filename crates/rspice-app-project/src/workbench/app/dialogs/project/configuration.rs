@@ -5,7 +5,10 @@
 //! here, so each change to the catalog is validated the one way: a
 //! configuration that runs are about to use must project, keep its
 //! connectivity valid, generate a netlist and seal its sources before the
-//! catalog changes.
+//! catalog changes. The projection is taken on the frame; the rest runs off
+//! it, and the change lands on the first frame after the check answers.
+
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
@@ -18,6 +21,7 @@ use crate::workbench::project::configuration_state::{
 };
 use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_simulation::netlist_preparation::dependencies;
 
 /// One change to the project's configuration catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,12 +50,30 @@ pub enum ConfigurationTransaction {
     Delete(ConfigurationSetId),
 }
 
-/// The catalog a transaction produces, the line the log records, and the
-/// configuration the page shows afterwards.
+/// What a committed transaction did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Committed {
+    /// The catalog changed, or the transaction changed nothing.
+    Done,
+    /// It hands runs a configuration, which is being checked off the frame:
+    /// it lands, or is refused, when the check answers.
+    Checking,
+}
+
+/// The catalog a transaction produces, the line the log records and the
+/// step Undo names it by, the configuration the page shows afterwards,
+/// whether it carries the page's edits, which then stop being edits, and,
+/// when runs are to use what it produces, the words a refused check starts
+/// with.
+#[derive(Debug, Clone)]
 struct Prepared {
     candidate: ConfigurationSetCatalog,
     message: String,
+    step: String,
     select: Option<ConfigurationSelection>,
+    applies_draft: bool,
+    renamed: Option<(ConfigurationSetId, String)>,
+    check: Option<String>,
 }
 
 impl Prepared {
@@ -59,7 +81,11 @@ impl Prepared {
         Self {
             candidate,
             message,
+            step: String::new(),
             select: None,
+            applies_draft: false,
+            renamed: None,
+            check: None,
         }
     }
 }
@@ -68,29 +94,89 @@ impl Prepared {
 /// page, the model and the run tier a committed change voids, then drop every
 /// run preparation the old catalog authorised. The error is the refusal, in
 /// words a reader can act on; the catalog is untouched when there is one.
+///
+/// A transaction that hands runs a configuration lands only once the check
+/// that runs could execute with it answers, which
+/// [`finish_configuration_check`] takes on a later frame.
 pub fn commit_configuration(
     page: &mut ConfigurationPageState,
     model: &mut Model,
     runs: &mut RunsState,
     run_controller: &mut SimulationController,
     transaction: ConfigurationTransaction,
-) -> Result<(), String> {
+) -> Result<Committed, String> {
+    if page.is_checking() {
+        return Err(
+            "A configuration is still being checked. Wait for the check to finish.".to_owned(),
+        );
+    }
     let applies_draft = transaction == ConfigurationTransaction::Apply;
     let renamed = match &transaction {
         ConfigurationTransaction::Rename { id, name } => Some((*id, name.clone())),
         _ => None,
     };
-    let Some(prepared) = prepare(page, model, transaction)? else {
+    let step = step_description(page, model, &transaction);
+    let Some(mut prepared) = prepare(page, model, transaction)? else {
         if applies_draft {
             page.revert();
         }
-        return Ok(());
+        return Ok(Committed::Done);
     };
-    publish(model, prepared.candidate)?;
-    if applies_draft {
+    prepared.applies_draft |= applies_draft;
+    prepared.renamed = renamed;
+    prepared.step = step;
+    let Some(refused) = prepared.check.clone() else {
+        land(page, model, runs, run_controller, prepared)?;
+        return Ok(Committed::Done);
+    };
+    let input =
+        check_input(model, &prepared.candidate).map_err(|error| format!("{refused}: {error}"))?;
+    let base = (*model.workspace.content.configuration_sets).clone();
+    let check = ConfigurationCheck::start(page, prepared, base, input);
+    page.check = Some(check);
+    Ok(Committed::Checking)
+}
+
+/// Land the transaction waiting on its check once the check has answered:
+/// the answer, once, or `None` while the check runs or when nothing waits on
+/// one. `ctx` is asked for a frame when the answer comes in.
+pub fn finish_configuration_check(
+    page: &mut ConfigurationPageState,
+    model: &mut Model,
+    runs: &mut RunsState,
+    run_controller: &mut SimulationController,
+    ctx: &egui::Context,
+) -> Option<Result<(), String>> {
+    let answer = page.check.as_ref()?.answer(ctx)?;
+    let ConfigurationCheck { prepared, base, .. } = page.check.take()?;
+    let refused = prepared.check.clone().unwrap_or_default();
+    let current: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
+    if *current != base {
+        return Some(Err(format!(
+            "{refused}: the configurations changed while it was checked. Try again."
+        )));
+    }
+    Some(
+        answer
+            .map_err(|error| format!("{refused}: {error}"))
+            .and_then(|()| land(page, model, runs, run_controller, prepared)),
+    )
+}
+
+/// Publish what `prepared` produces and carry out what it leaves the page to
+/// do, then drop every run preparation the old catalog authorised.
+fn land(
+    page: &mut ConfigurationPageState,
+    model: &mut Model,
+    runs: &mut RunsState,
+    run_controller: &mut SimulationController,
+    prepared: Prepared,
+) -> Result<(), String> {
+    publish(model, prepared.candidate, prepared.step)?;
+    if prepared.applies_draft {
         page.revert();
     }
-    if let Some((id, name)) = renamed
+    if let Some((id, name)) = prepared.renamed
         && let Some(revision) = model
             .workspace
             .content
@@ -103,12 +189,78 @@ pub fn commit_configuration(
     if let Some(selection) = prepared.select {
         page.select(selection);
     }
-    let message = prepared.message;
     // The next two calls are what RSpiceApp::invalidate_simulation_preflight does.
     runs.preflight.invalidate();
     run_controller.clear_prepared_run();
-    model.record(LogSeverity::Info, LogSource::Studio, message);
+    model.record(LogSeverity::Info, LogSource::Studio, prepared.message);
     Ok(())
+}
+
+/// A transaction that hands runs a configuration, waiting on the check that
+/// runs could execute with it. The check runs off the frame, so the page
+/// goes on painting while it does.
+#[derive(Debug, Clone)]
+pub struct ConfigurationCheck {
+    prepared: Prepared,
+    /// The catalog the transaction was made against. It lands on that one
+    /// only, so a change made meanwhile is never overwritten.
+    base: ConfigurationSetCatalog,
+    slot: Arc<Mutex<CheckSlot>>,
+}
+
+/// Where the check leaves its answer, and the frame waiting on it.
+#[derive(Debug, Default)]
+struct CheckSlot {
+    answer: Option<Result<(), String>>,
+    waiting: Option<egui::Context>,
+}
+
+impl ConfigurationCheck {
+    fn start(
+        page: &ConfigurationPageState,
+        prepared: Prepared,
+        base: ConfigurationSetCatalog,
+        input: CheckInput,
+    ) -> Self {
+        let slot = Arc::new(Mutex::new(CheckSlot::default()));
+        let answered = Arc::clone(&slot);
+        #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+        let hold = page.check_hold.clone();
+        #[cfg(not(all(any(test, feature = "test-support"), not(target_arch = "wasm32"))))]
+        let _ = page;
+        rspice_app_services::workbench::platform::spawn_or_inline(move || {
+            #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+            if let Some(hold) = hold {
+                hold.wait();
+            }
+            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(input)))
+                .unwrap_or_else(|_| Err("the check stopped unexpectedly.".to_owned()));
+            let waiting = {
+                let mut slot = answered.lock().unwrap_or_else(PoisonError::into_inner);
+                slot.answer = Some(answer);
+                slot.waiting.take()
+            };
+            if let Some(ctx) = waiting {
+                ctx.request_repaint();
+            }
+        });
+        Self {
+            prepared,
+            base,
+            slot,
+        }
+    }
+
+    /// The answer, once, if it is in; otherwise `ctx` is asked for a frame
+    /// when it is.
+    fn answer(&self, ctx: &egui::Context) -> Option<Result<(), String>> {
+        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let answer = slot.answer.take();
+        if answer.is_none() {
+            slot.waiting = Some(ctx.clone());
+        }
+        answer
+    }
 }
 
 /// What `transaction` produces, or `None` when it changes nothing.
@@ -138,20 +290,41 @@ fn prepare(
             let selected = current
                 .find(id)
                 .ok_or_else(|| "That configuration was deleted. Pick another one.".to_owned())?;
-            if current.active_configuration_id() == Some(id) {
+            // The page's edits to it go with it: the reader pressed Use for
+            // runs over tables that show them, so runs use what was shown.
+            let draft = page
+                .draft()
+                .filter(|draft| draft.id == id && page.is_dirty(current));
+            if current.active_configuration_id() == Some(id) && draft.is_none() {
                 return Ok(None);
             }
             let name = selected.name().to_owned();
             let mut candidate = current.clone();
+            if let Some(draft) = draft {
+                match candidate.update(id, draft.base_revision, draft.definition.clone()) {
+                    Ok(_) | Err(ConfigurationSetError::NoChanges(_)) => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "Cannot use {name} for runs: {}",
+                            plain_refusal(&error)
+                        ));
+                    }
+                }
+            }
             candidate
                 .activate(id)
                 .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
-            validate_candidate_configuration(model, &candidate)
-                .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
-            Ok(Some(Prepared::new(
+            let mut prepared = Prepared::new(
                 candidate,
-                format!("Runs now use {name}."),
-            )))
+                if draft.is_some() {
+                    format!("Applied the edits to {name}; runs now use it.")
+                } else {
+                    format!("Runs now use {name}.")
+                },
+            );
+            prepared.applies_draft = draft.is_some();
+            prepared.check = Some(format!("Cannot use {name} for runs"));
+            Ok(Some(prepared))
         }
         ConfigurationTransaction::Apply => {
             let Some(draft) = page.draft() else {
@@ -174,16 +347,16 @@ fn prepare(
                     return Err(format!("Cannot apply {name}: {}", plain_refusal(&error)));
                 }
             }
+            let mut prepared = Prepared::new(
+                candidate,
+                format!("Applied the edits to {}.", draft.definition.name),
+            );
             // Runs read the configuration they use the moment it changes, so
             // only that one has to prove it still netlists.
             if current.active_configuration_id() == Some(draft.id) {
-                validate_candidate_configuration(model, &candidate)
-                    .map_err(|error| format!("Cannot apply {name}: {error}"))?;
+                prepared.check = Some(format!("Cannot apply {name}"));
             }
-            Ok(Some(Prepared::new(
-                candidate,
-                format!("Applied the edits to {}.", draft.definition.name),
-            )))
+            Ok(Some(prepared))
         }
         ConfigurationTransaction::Create {
             definition,
@@ -194,15 +367,7 @@ fn prepare(
             let id = candidate
                 .create(*definition)
                 .map_err(|error| format!("Cannot create {name}: {}", plain_refusal(&error)))?;
-            added(
-                model,
-                current,
-                candidate,
-                id,
-                &name,
-                use_for_runs,
-                "Created",
-            )
+            added(current, candidate, id, &name, use_for_runs, "Created")
         }
         ConfigurationTransaction::Clone {
             source,
@@ -228,7 +393,7 @@ fn prepare(
                         plain_refusal(&error)
                     )
                 })?;
-            added(model, current, candidate, id, &name, use_for_runs, "Cloned")
+            added(current, candidate, id, &name, use_for_runs, "Cloned")
         }
         ConfigurationTransaction::Rename { id, name } => {
             let committed = current
@@ -277,7 +442,6 @@ pub fn delete_refusal(name: &str) -> String {
 /// Finish adding configuration `id` to `candidate`: runs use it when asked,
 /// and otherwise keep what they used before it was added, whichever that was.
 fn added(
-    model: &Model,
     current: &ConfigurationSetCatalog,
     mut candidate: ConfigurationSetCatalog,
     id: ConfigurationSetId,
@@ -289,8 +453,6 @@ fn added(
         candidate
             .activate(id)
             .map_err(|error| format!("Cannot use {name} for runs: {}", plain_refusal(&error)))?;
-        validate_candidate_configuration(model, &candidate)
-            .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
         format!("{verb} {name}; runs now use it.")
     } else {
         match current.active_configuration_id() {
@@ -300,35 +462,78 @@ fn added(
         .map_err(|error| format!("Cannot add {name}: {}", plain_refusal(&error)))?;
         format!("{verb} {name}.")
     };
-    Ok(Some(Prepared {
-        candidate,
-        message,
-        select: Some(ConfigurationSelection::Configuration(id)),
-    }))
+    let mut prepared = Prepared::new(candidate, message);
+    prepared.select = Some(ConfigurationSelection::Configuration(id));
+    prepared.check = use_for_runs.then(|| format!("Cannot use {name} for runs"));
+    Ok(Some(prepared))
 }
 
-/// Replace the catalog and the project revision as one transaction; the
-/// generated netlist's input identity no longer describes the catalog.
-fn publish(model: &mut Model, candidate: ConfigurationSetCatalog) -> Result<(), String> {
-    model
-        .workspace
-        .content
-        .replace_configuration_sets(candidate)
-        .map_err(|error| error.to_string())?;
-    model.netlist_artifacts.current_generation_input_digest = None;
-    Ok(())
-}
-
-/// Whether runs could execute with `catalog`: its configuration projects,
-/// the project's connectivity holds, a netlist generates, and every source
-/// it names seals. Each failure says which of the four failed.
-///
-/// The project is read where it stands with `catalog` in place of its own;
-/// nothing of it is copied, and its own projection is not displaced.
-pub(in crate::workbench) fn validate_candidate_configuration(
-    model: &Model,
-    catalog: &ConfigurationSetCatalog,
+/// Replace the catalog and the project revision as one transaction, one
+/// step of Undo named by what it did; the generated netlist's input identity
+/// no longer describes the catalog.
+fn publish(
+    model: &mut Model,
+    candidate: ConfigurationSetCatalog,
+    step: String,
 ) -> Result<(), String> {
+    model.publish_configuration_sets(candidate, step)
+}
+
+/// What `transaction` does, as Undo and Redo name it.
+fn step_description(
+    page: &ConfigurationPageState,
+    model: &Model,
+    transaction: &ConfigurationTransaction,
+) -> String {
+    let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
+    let name = |id: ConfigurationSetId| {
+        catalog
+            .find(id)
+            .map_or_else(String::new, |configuration| configuration.name().to_owned())
+    };
+    match transaction {
+        ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default) => {
+            "use Default for runs".to_owned()
+        }
+        ConfigurationTransaction::UseForRuns(ConfigurationSelection::Configuration(id)) => {
+            format!("use {} for runs", name(*id))
+        }
+        ConfigurationTransaction::Apply => format!(
+            "apply edits to {}",
+            page.draft()
+                .map_or_else(String::new, |draft| name(draft.id))
+        ),
+        ConfigurationTransaction::Create { definition, .. } => {
+            format!("create configuration {}", definition.name.trim())
+        }
+        ConfigurationTransaction::Clone {
+            source, name: copy, ..
+        } => {
+            format!("clone {} as {}", name(*source), copy.trim())
+        }
+        ConfigurationTransaction::Rename { id, name: renamed } => {
+            format!("rename {} to {}", name(*id), renamed.trim())
+        }
+        ConfigurationTransaction::Delete(id) => format!("delete configuration {}", name(*id)),
+    }
+}
+
+/// What the check of a catalog reads, taken on the frame and owned, so the
+/// rest of the check can run off it: the design projected with the catalog
+/// in place of the project's own, the libraries it binds, where its includes
+/// are searched for and, in the browser, the sources sealed for it.
+struct CheckInput {
+    projection: rspice_design::projection::ConfigurationExecutionProjection,
+    libraries: rspice_design::library::LibraryCatalog,
+    include_search: rspice_simulation::netlist_preparation::IncludeSearchChain,
+    #[cfg(target_arch = "wasm32")]
+    sealed: rspice_simulation::model_sources::SealedModelExecutionSources,
+}
+
+/// Project the design with `catalog` in place of the project's own. The
+/// project is read where it stands; nothing of it is copied but the
+/// libraries the netlist binds, and its own projection is not displaced.
+fn check_input(model: &Model, catalog: &ConfigurationSetCatalog) -> Result<CheckInput, String> {
     let workspace = &model.workspace;
     let candidate = rspice_design::stamped::Stamped::new(catalog.clone());
     let projection = workspace
@@ -348,6 +553,24 @@ pub(in crate::workbench) fn validate_candidate_configuration(
             }
             error => error.to_string(),
         })?;
+    Ok(CheckInput {
+        projection,
+        libraries: model.library_manager.catalog().clone(),
+        include_search: model.include_search_chain(),
+        #[cfg(target_arch = "wasm32")]
+        sealed: rspice_simulation::model_sources::seal_catalog_execution_sources(
+            model.model_library_manager.catalog(),
+            model.model_library_manager.resolution_records(),
+        )
+        .map_err(|error| format!("a source it includes cannot be read: {error}"))?,
+    })
+}
+
+/// Whether runs could execute with the projected design: the project's
+/// connectivity holds, a netlist generates, and every source it includes
+/// reads. Each failure says which of the three failed.
+fn check(input: CheckInput) -> Result<(), String> {
+    let projection = &input.projection;
     projection
         .connectivity()
         .validate()
@@ -356,8 +579,8 @@ pub(in crate::workbench) fn validate_candidate_configuration(
         .root_schematic()
         .ok_or_else(|| "its top cell has no schematic open in the project.".to_owned())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        model.library_manager.catalog(),
-        &projection,
+        &input.libraries,
+        projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
         root,
@@ -373,17 +596,20 @@ pub(in crate::workbench) fn validate_candidate_configuration(
             generated.errors.join("; ")
         ));
     }
-    let generated = rspice_design::netlist_document::bind_generated_netlist_provenance(
-        &workspace.content.design_management,
-        &candidate,
-        generated.netlist,
-    );
-    rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
-        &generated,
+    dependencies::expand_generated_dependencies_with_sealed_sources(
+        &generated.netlist,
         root.current_file(),
-        &model.include_search_chain(),
-        model.model_library_manager.catalog(),
-        model.model_library_manager.resolution_records(),
+        &input.include_search,
+        {
+            #[cfg(target_arch = "wasm32")]
+            {
+                Some(&input.sealed)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                None
+            }
+        },
     )
     .map_err(|error| format!("a source it includes cannot be read: {error}"))?;
     Ok(())

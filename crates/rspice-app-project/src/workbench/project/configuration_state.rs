@@ -20,6 +20,7 @@ use crate::state::{
     ConfigurationSetOverride, InstancePath, InstancePathPattern, LibraryManager, ProjectWorkspace,
     SchematicState, ViewType, default_view_search_order,
 };
+use crate::workbench::app::dialogs::project::configuration::ConfigurationCheck;
 
 /// The view-to-use choice that keeps the view list an instance or a cell
 /// inherits.
@@ -125,6 +126,12 @@ pub struct ConfigurationPageState {
     /// edits it resolved without comparing them.
     draft_revision: u64,
     resolution: ResolutionCache,
+    /// The Apply or Use for runs waiting on the check that runs could
+    /// execute with what it commits.
+    pub(crate) check: Option<ConfigurationCheck>,
+    /// Holds each check started from here until the test releases it.
+    #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+    pub check_hold: Option<crate::workbench::app::dialogs::project::CheckpointJobHold>,
 }
 
 impl ConfigurationPageState {
@@ -264,9 +271,17 @@ impl ConfigurationPageState {
         }
     }
 
+    /// Every change to the edits goes through here. A check running for an
+    /// Apply or a Use for runs stops: it was of the edits before this one.
     fn set_draft(&mut self, draft: Option<ConfigurationDraft>) {
         self.draft = draft;
         self.draft_revision += 1;
+        self.check = None;
+    }
+
+    /// Whether an Apply or a Use for runs waits on its check.
+    pub fn is_checking(&self) -> bool {
+        self.check.is_some()
     }
 
     /// Drop the edits; the page shows what the project holds again.
@@ -447,8 +462,8 @@ pub(crate) struct ConfigurationTables {
     /// not one of them, and their labels.
     pub(crate) top_cell_choices: Vec<CellViewRef>,
     pub(crate) top_cell_labels: Vec<String>,
-    /// The DUT picker's choices: every instance below the root, the shown DUT
-    /// first when it is not one of them.
+    /// The DUT picker's choices: the top cell itself, `/`, then the
+    /// instances it places, the shown DUT first when it is not one of them.
     pub(crate) dut_choices: Vec<String>,
     /// Whether the shown DUT is an instance of the design.
     pub(crate) dut_in_design: bool,
@@ -638,7 +653,7 @@ impl ConfigurationTables {
         let mut top_cell_choices = top_cells;
         let mut dut_choices = instances
             .iter()
-            .filter(|row| row.depth > 0)
+            .filter(|row| row.depth <= 1)
             .map(|row| row.path.clone())
             .collect::<Vec<_>>();
         let mut dut_in_design = false;

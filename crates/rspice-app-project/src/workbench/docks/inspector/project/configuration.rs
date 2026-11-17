@@ -22,12 +22,14 @@ use crate::workbench::project::configuration_state::{
 
 const NO_STOP: &str = "None";
 
-/// The text fields' state for one frame: what is being typed, and the text a
+/// The text fields' state for one frame: what is being typed, the text a
 /// field committed this frame, by field, so a refused commit can be put back
-/// into the field that made it.
+/// into the field that made it, and the model sections the attached
+/// technology offers the Model section field.
 struct Fields {
     buffer: Option<FieldEdit>,
     committed: Option<(String, String)>,
+    sections: Vec<String>,
 }
 
 /// What the inspector asked for this frame.
@@ -63,6 +65,14 @@ pub fn project_configuration(
     let mut fields = Fields {
         buffer: shown.field_edit.clone(),
         committed: None,
+        sections: model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .map_or_else(Vec::new, |technology| {
+                technology.process_sections().to_vec()
+            }),
     };
     let definition = match selection {
         ConfigurationSelection::Configuration(id) => shown.definition(catalog, id),
@@ -97,10 +107,15 @@ pub fn project_configuration(
                 &mut fields,
             )
         }),
-        None => match definition {
-            Some(definition) => configuration(ui, model, selection, definition),
-            None => default_facts(ui, model),
-        },
+        None => {
+            // While an Apply or a Use for runs is checked, neither is
+            // offered again.
+            let runs_allowed = !model.safe_mode.project_read_only() && !shown.is_checking();
+            match definition {
+                Some(definition) => configuration(ui, model, selection, definition, runs_allowed),
+                None => default_facts(ui, model, runs_allowed),
+            }
+        }
     };
     page.field_edit = fields.buffer;
     let taken = match action? {
@@ -167,7 +182,7 @@ fn edit(
 }
 
 /// The built-in Default's facts.
-fn default_facts(ui: &mut Ui, model: &Model) -> Option<InspectorAction> {
+fn default_facts(ui: &mut Ui, model: &Model, runs_allowed: bool) -> Option<InspectorAction> {
     let project = &model.workspace.content.project;
     let catalog = &model.workspace.content.configuration_sets;
     property_row(ui, "Name", "Default");
@@ -191,22 +206,22 @@ fn default_facts(ui: &mut Ui, model: &Model) -> Option<InspectorAction> {
             .join(", "),
     );
     property_row(ui, "Unresolved cells", "Stop the netlist");
-    used_for_runs_row(ui, model, ConfigurationSelection::Default, catalog)
+    used_for_runs_row(ui, ConfigurationSelection::Default, catalog, runs_allowed)
 }
 
 /// "Used for runs" as a fact, or the action that makes it one.
 fn used_for_runs_row(
     ui: &mut Ui,
-    model: &Model,
     selection: ConfigurationSelection,
     catalog: &crate::state::ConfigurationSetCatalog,
+    runs_allowed: bool,
 ) -> Option<InspectorAction> {
     if used_for_runs(catalog, selection) {
         property_row(ui, "Used for runs", "Yes");
         return None;
     }
     property_row(ui, "Used for runs", "No");
-    action_button(ui, "Use for runs", !model.safe_mode.project_read_only())
+    action_button(ui, "Use for runs", runs_allowed)
         .then_some(InspectorAction::UseForRuns(selection))
 }
 
@@ -229,6 +244,7 @@ fn configuration(
     model: &Model,
     selection: ConfigurationSelection,
     definition: &ConfigurationSetDefinition,
+    runs_allowed: bool,
 ) -> Option<InspectorAction> {
     let catalog = &model.workspace.content.configuration_sets;
     property_row(ui, "Name", &definition.name);
@@ -244,7 +260,7 @@ fn configuration(
         "Cell bindings",
         &definition.cell_bindings.len().to_string(),
     );
-    used_for_runs_row(ui, model, selection, catalog)
+    used_for_runs_row(ui, selection, catalog, runs_allowed)
 }
 
 /// One instance: what it resolved to, and its own binding. While the shown
@@ -429,6 +445,7 @@ fn cell_facts(
     let mut unused = Fields {
         buffer: None,
         committed: None,
+        sections: Vec::new(),
     };
     let change = binding_fields(
         ui,
@@ -464,10 +481,15 @@ fn pattern_binding(
     editable: bool,
     fields: &mut Fields,
 ) -> Option<InspectorAction> {
-    let binding = definition
+    // Reverting can take away a pattern binding the edits added: the
+    // inspector then goes back to the configuration rather than to nothing.
+    let Some(binding) = definition
         .overrides
         .iter()
-        .find(|binding| binding.instance_path == pattern)?;
+        .find(|binding| binding.instance_path == pattern)
+    else {
+        return Some(InspectorAction::Deselect);
+    };
     section_header(ui, "Pattern binding", None);
     let mut change = committed_text(
         ui,
@@ -569,19 +591,41 @@ fn binding_fields(
         ));
     }
 
-    if let Some(current) = fields.section
-        && let Some(section) = committed_text(
+    if let Some(current) = fields.section {
+        if let Some(section) = committed_text(
             ui,
             text,
             &format!("{key}-section"),
             "Model section",
             current,
             editable,
-        )
-    {
-        change = Some(BindingChange::ModelSection(
-            (!section.trim().is_empty()).then_some(section),
-        ));
+        ) {
+            change = Some(BindingChange::ModelSection(
+                (!section.trim().is_empty()).then_some(section),
+            ));
+        }
+        // The attached technology's sections, offered beside the field: a
+        // typo is the commonest wrong section, and the field still takes a
+        // section the technology does not list.
+        if editable && !text.sections.is_empty() {
+            let offered = text.sections.clone();
+            let shown = if offered.iter().any(|section| section == current) {
+                current
+            } else {
+                "Pick a section"
+            };
+            if let Some(index) = choice_row(
+                ui,
+                &format!("{key}-sections"),
+                "Technology sections",
+                shown,
+                &offered,
+                true,
+            ) && offered[index] != current
+            {
+                change = Some(BindingChange::ModelSection(Some(offered[index].clone())));
+            }
+        }
     }
 
     let Some(platforms) = fields.platforms else {

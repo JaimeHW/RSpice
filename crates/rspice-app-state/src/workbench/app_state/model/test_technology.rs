@@ -9,12 +9,17 @@
 use super::Model;
 use crate::state::pdk_config::PdkAdministrativeAuthority;
 
+/// The project model library every contract binds unless a test names its
+/// own: one model and no sections.
+const PROJECT_MODELS: &[u8] = b".model nmos_project_demo nmos level=1 vto=0.55";
+
 impl Model {
     /// Provision one fully authenticated model-source and PDK contract
     /// for tests whose subject requires a successful governed simulation.
     pub fn provision_test_project_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
             crate::state::pdk_config::pdk_technology_test_fixture(),
+            PROJECT_MODELS.to_vec(),
         );
     }
 
@@ -22,6 +27,16 @@ impl Model {
     pub fn provision_test_project_technology_with_models(&mut self, models: Vec<u8>) {
         self.provision_test_project_technology_fixture(
             crate::state::pdk_config::pdk_technology_test_fixture_with_models(models),
+            PROJECT_MODELS.to_vec(),
+        );
+    }
+
+    /// The same contract, with `models` as the project's model library, so
+    /// the technology offers the sections `models` holds.
+    pub fn provision_test_project_technology_with_project_models(&mut self, models: Vec<u8>) {
+        self.provision_test_project_technology_fixture(
+            crate::state::pdk_config::pdk_technology_test_fixture(),
+            models,
         );
     }
 
@@ -29,6 +44,7 @@ impl Model {
     pub fn provision_test_project_veriloga_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
             crate::state::pdk_config::pdk_veriloga_technology_test_fixture(),
+            PROJECT_MODELS.to_vec(),
         );
     }
 
@@ -36,12 +52,14 @@ impl Model {
     pub fn provision_test_project_symbol_technology_contract(&mut self) {
         self.provision_test_project_technology_fixture(
             crate::state::pdk_config::pdk_symbol_technology_test_fixture(),
+            PROJECT_MODELS.to_vec(),
         );
     }
 
     fn provision_test_project_technology_fixture(
         &mut self,
         (archive, administrative_authority): (Vec<u8>, PdkAdministrativeAuthority),
+        project_models: Vec<u8>,
     ) {
         self.pdk_config
             .technology_registry
@@ -55,11 +73,7 @@ impl Model {
 
         let library_name = self
             .model_library_manager
-            .load_library_bytes(
-                "demo180-test.lib",
-                b".model nmos_project_demo nmos level=1 vto=0.55".to_vec(),
-                None,
-            )
+            .load_library_bytes("demo180-test.lib", project_models, None)
             .expect("authenticated retained test model imports");
         let library = self
             .model_library_manager

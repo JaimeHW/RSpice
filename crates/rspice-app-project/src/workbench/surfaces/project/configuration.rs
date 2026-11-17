@@ -51,7 +51,15 @@ pub fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         Some(ToolbarIntent::Apply) => {
             ProjectFeature::commit_configuration(cx, ConfigurationTransaction::Apply)
         }
-        Some(ToolbarIntent::Revert) => cx.state.configuration.revert(),
+        Some(ToolbarIntent::Revert) => {
+            if let ConfigurationSelection::Configuration(id) = selection {
+                open_configuration_dialog(
+                    &mut cx.state.configuration_dialog,
+                    cx.model,
+                    ConfigurationDialogRequest::Revert(id),
+                );
+            }
+        }
         Some(ToolbarIntent::Open(request)) => {
             open_configuration_dialog(&mut cx.state.configuration_dialog, cx.model, request)
         }
@@ -77,6 +85,8 @@ fn toolbar(
     let name = selection_name(cx, selection);
     let write_allowed = !cx.model.safe_mode.project_read_only();
     let dirty = resolution.tables.dirty;
+    // While an Apply or a Use for runs is checked, neither is offered again.
+    let checking = cx.state.configuration.is_checking();
     let status = binding_status(resolution);
     let mut intent = None;
     let shown = egui::Frame::new()
@@ -101,15 +111,28 @@ fn toolbar(
                                 .color(t.color.text_dim),
                         );
                     } else if Button::new("Use for runs")
-                        .enabled(write_allowed)
+                        .enabled(write_allowed && !checking)
                         .show(ui)
                         .clicked()
                     {
                         intent = Some(ToolbarIntent::UseForRuns(selection));
                     }
+                    // Runs use what was applied; the tables show the edits.
+                    let edits = if checking {
+                        Some("Checking\u{2026}")
+                    } else {
+                        dirty.then_some("Edits not applied")
+                    };
+                    if let Some(edits) = edits {
+                        ui.label(
+                            egui::RichText::new(edits)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        );
+                    }
                     if selection != ConfigurationSelection::Default {
                         if Button::new("Apply")
-                            .enabled(write_allowed && dirty)
+                            .enabled(write_allowed && dirty && !checking)
                             .show(ui)
                             .clicked()
                         {
