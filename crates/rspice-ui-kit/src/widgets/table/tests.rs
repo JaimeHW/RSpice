@@ -858,11 +858,13 @@ fn a_narrow_table_keeps_its_pinned_column_beside_the_first() {
     let mut columns = wide_columns(8, 120.0);
     columns.push(Column::words("Status", 80.0));
     let pinned = columns.len() - 1;
-    let mut state = TableState::default();
-    state.sort = Some(Sort {
-        column: 3,
-        direction: SortDirection::Descending,
-    });
+    let mut state = TableState {
+        sort: Some(Sort {
+            column: 3,
+            direction: SortDirection::Descending,
+        }),
+        ..TableState::default()
+    };
     let draw = |state: &mut TableState, width: f32, events: Vec<Event>| {
         frame(&ctx, width, events, |ui| {
             DataTable::new("pinned", &columns, 3)
