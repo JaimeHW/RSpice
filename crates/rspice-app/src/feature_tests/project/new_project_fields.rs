@@ -62,7 +62,7 @@ fn the_name_offered_is_one_the_location_does_not_hold() {
 }
 
 /// Each field says why it refuses what it holds, and Create waits on the
-/// first refusal in the dialog's order, which the footer states.
+/// first refusal in the dialog's order. The footer leaves it to the field.
 #[test]
 fn each_field_says_why_it_refuses_what_it_holds() {
     let mut dialog = opened();
@@ -108,16 +108,30 @@ fn each_field_says_why_it_refuses_what_it_holds() {
             );
         }
         assert_eq!(edited.creatable(), Err(refusal.to_owned()));
-        assert_eq!(edited.footer().as_deref(), Some(refusal));
+        assert_eq!(edited.footer(), None, "{field:?} says it under itself");
     }
 
     dialog.name.clear();
     dialog.top_cell.clear();
     assert_eq!(
-        dialog.footer().as_deref(),
-        Some("Type a project name."),
+        dialog.creatable(),
+        Err("Type a project name.".to_owned()),
         "the first refusal in the dialog's order"
     );
+}
+
+/// The footer speaks only for what no field shows: a create that was
+/// refused for a reason none of the fields gives.
+#[test]
+fn the_footer_states_only_a_refusal_no_field_shows() {
+    let mut dialog = opened();
+    let unshown = "The folder could not be made: access is denied.".to_owned();
+    dialog.error = Some(unshown.clone());
+    assert_eq!(dialog.footer(), Some(unshown));
+
+    dialog.name.clear();
+    dialog.error = Some("Type a project name.".to_owned());
+    assert_eq!(dialog.footer(), None, "the Name field says it already");
 }
 
 /// The location is refused when it cannot take the project's folder: not
@@ -171,7 +185,9 @@ fn a_refused_name_is_one_sentence_naming_its_field_once() {
     ] {
         dialog.name = name.to_owned();
         dialog.library = library.to_owned();
-        let refusal = dialog.footer().expect("a filled, invalid field refuses");
+        let refusal = dialog
+            .creatable()
+            .expect_err("a filled, invalid field refuses");
         assert_eq!(dialog.params().validate(), Err(refusal.clone()));
         refusals.push(refusal);
     }

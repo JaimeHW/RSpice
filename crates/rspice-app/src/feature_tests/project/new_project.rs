@@ -212,6 +212,7 @@ mod written_at_creation {
         use crate::feature_tests::replay::Replay;
         use egui::accesskit::Role;
         use egui::{Key, Modifiers};
+        use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectField;
 
         let mut replay = Replay::new();
         let before = replay.app.state.model.workspace.content.project.id();
@@ -225,7 +226,12 @@ mod written_at_creation {
         replay.key(Key::Enter, Modifiers::NONE);
         let dialog = &replay.app.state.project.new_project;
         assert!(dialog.open, "Enter waits on the empty name");
-        assert_eq!(dialog.footer().as_deref(), Some("Type a project name."));
+        assert_eq!(
+            dialog.refusal(NewProjectField::Name).as_deref(),
+            Some("Type a project name."),
+            "the Name field says why"
+        );
+        assert_eq!(dialog.footer(), None, "and the footer does not repeat it");
 
         replay.type_text("Discarded");
         replay.key(Key::Escape, Modifiers::NONE);

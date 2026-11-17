@@ -164,10 +164,16 @@ impl NewProjectDialogState {
         self.params().validate()
     }
 
-    /// What the footer says: why Create cannot go ahead, or why the last
-    /// create was refused. Nothing while Create can go ahead.
+    /// What the footer says: why the last create was refused, when no field
+    /// says it already. Every field states its own refusal under itself and
+    /// the disabled Create says "not yet", so the footer repeating one is
+    /// clutter; it speaks only for what no field shows.
     pub fn footer(&self) -> Option<String> {
-        self.creatable().err().or_else(|| self.error.clone())
+        let error = self.error.as_ref()?;
+        let shown = NewProjectField::ALL
+            .into_iter()
+            .any(|field| self.refusal(field).as_ref() == Some(error));
+        (!shown).then(|| error.clone())
     }
 
     /// Ask the file system about the location and the project's folder when
