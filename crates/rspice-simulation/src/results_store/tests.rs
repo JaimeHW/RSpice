@@ -98,7 +98,7 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
         writer.push_row(row as f64, &[row as f64 * 0.5]).unwrap();
     }
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io.into_file()).unwrap();
     assert!(
         reader.chunk_spans().len() > 2,
         "the rows span several chunks"

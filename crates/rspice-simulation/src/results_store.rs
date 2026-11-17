@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use rspice_results::waveform::ColumnSource;
-use rspice_results_store::{FileIo, SegmentReader, StoreError};
+use rspice_results_store::{FileIo, SegmentIo, SegmentReader, StoreError};
 
 /// The folder under the system's temporary folder that holds every process's stores.
 const STORES_FOLDER: &str = "rspice-results";
@@ -172,15 +172,52 @@ pub(crate) fn free_space(segment: &Path) -> rspice_results_store::FreeSpace {
 }
 
 /// A new segment file in this process's store folder.
-pub(crate) fn create_segment() -> Result<(PathBuf, FileIo), String> {
+pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
     let stores = process_stores()?;
     let path = stores.dir.join(format!(
         "transient-{}.rsr",
         NEXT_SEGMENT.fetch_add(1, Ordering::Relaxed)
     ));
     FileIo::create(&path)
-        .map(|io| (path.clone(), io))
+        .map(|io| (path.clone(), TemporaryIo(io)))
         .map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// A segment of this process's store folder, as its run writes it.
+///
+/// Nothing reads the segment once this process ends: the last waveform that reads it deletes
+/// it, and the sweep deletes it when the process dies first. So it is never made durable, where a
+/// segment in general is synced when its run ends (on macOS a full flush of the drive's cache,
+/// which waits for every other process's writes too). A run kept with a project is made durable
+/// when the project is saved.
+pub(crate) struct TemporaryIo(FileIo);
+
+impl TemporaryIo {
+    pub(crate) fn into_file(self) -> FileIo {
+        self.0
+    }
+}
+
+impl SegmentIo for TemporaryIo {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.0.read_at(offset, buf)
+    }
+
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+        self.0.write_at(offset, data)
+    }
+
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.0.truncate(len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        self.0.size()
+    }
 }
 
 /// A finished segment its waveforms read from, deleted with the last of them.

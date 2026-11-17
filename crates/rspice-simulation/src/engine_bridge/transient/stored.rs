@@ -152,7 +152,7 @@ impl EngineBridge {
             }
         };
         let reader = match inner.into_io() {
-            Some(io) => SegmentReader::open(io.into_inner()),
+            Some(io) => SegmentReader::open(io.into_inner().into_file()),
             None => FileIo::open(&path)
                 .map_err(StoreError::from)
                 .and_then(SegmentReader::open),
