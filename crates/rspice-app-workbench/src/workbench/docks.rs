@@ -163,6 +163,44 @@ pub fn apply_splitter_step(value: f32, action: SplitterKeyboardAction, step: f32
     }
 }
 
+/// Hold the resizable top or bottom panel `panel` that a surface splits
+/// itself with at the `height` the surface keeps for it, as the docks hold
+/// theirs: egui's remembered size gives way to it unless the two match.
+pub fn hold_panel_height(ctx: &Context, panel: Id, height: f32) {
+    let cached = PanelState::load(ctx, panel).map(|state| state.outer_rect.height());
+    if panel_cache_is_stale(cached, height, true) {
+        ctx.data_mut(|data| data.remove::<PanelState>(panel));
+    }
+}
+
+/// The splitter under the resizable top panel `panel` that a surface splits
+/// itself with, announced as a splitter named `label` at `height` within
+/// `range` and keyed as the console's is: whether the reader drags it this
+/// frame, and the step the up and down arrows, Home or a double click ask
+/// of it.
+pub fn surface_splitter(
+    ctx: &Context,
+    panel: Id,
+    label: &'static str,
+    height: f32,
+    range: std::ops::RangeInclusive<f32>,
+    step: f32,
+) -> (bool, Option<SplitterKeyboardAction>) {
+    let Some(response) = ctx.read_response(panel.with("__resize")) else {
+        return (false, None);
+    };
+    expose_splitter_accessibility(
+        ctx,
+        &response,
+        label,
+        height,
+        *range.start(),
+        *range.end(),
+        step,
+    );
+    (response.dragged(), vertical_splitter_action(ctx, &response))
+}
+
 fn expose_splitter_accessibility(
     ctx: &Context,
     response: &Response,

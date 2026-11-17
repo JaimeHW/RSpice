@@ -545,6 +545,29 @@ impl DialogLayout {
         }
     }
 
+    /// The tallest a surface of `size` may be in `screen`: the whole height
+    /// where a narrow layout runs edge to edge, and otherwise the height less
+    /// the vertical margins, no taller than the size's desktop ceiling on a
+    /// desktop.
+    fn tallest(size: DialogSize, screen: Rect) -> f32 {
+        let spec = size.spec();
+        let narrow = screen.width() <= spec.narrow_max_width;
+        if narrow && spec.edge_to_edge_narrow {
+            return screen.height().max(1.0);
+        }
+        let inset = if narrow {
+            spec.narrow_vertical_inset
+        } else {
+            spec.vertical_inset
+        };
+        let viewport = (screen.height() - inset).max(1.0);
+        if narrow {
+            viewport
+        } else {
+            viewport.min(spec.max_height)
+        }
+    }
+
     fn fills_surface_height(self, fixed_height: Option<f32>) -> bool {
         self.fill_height || fixed_height.is_some()
     }
@@ -873,6 +896,7 @@ pub struct Dialog<'a> {
     initial_focus: DialogInitialFocus,
     initial_height: Option<f32>,
     fixed_height: Option<f32>,
+    fill_available_height: bool,
     content_width: Option<f32>,
 }
 
@@ -906,6 +930,7 @@ impl<'a> Dialog<'a> {
             initial_focus: DialogInitialFocus::Container,
             initial_height: None,
             fixed_height: None,
+            fill_available_height: false,
             content_width: None,
         }
     }
@@ -929,6 +954,17 @@ impl<'a> Dialog<'a> {
     /// available viewport height, and overflowing body content remains scrollable.
     pub fn fixed_height(mut self, height: f32) -> Self {
         self.fixed_height = height.is_finite().then(|| height.max(1.0));
+        self
+    }
+
+    /// Hold the surface at the tallest its size allows in this viewport: its
+    /// desktop ceiling, less where the window is shorter than that and its
+    /// margins, and the whole viewport where a narrow layout runs edge to
+    /// edge. For a manager whose list takes whatever height it is given and
+    /// scrolls inside it, so the surface never answers to how many rows
+    /// there are.
+    pub fn fill_available_height(mut self) -> Self {
+        self.fill_available_height = true;
         self
     }
 
@@ -1154,7 +1190,11 @@ impl<'a> Dialog<'a> {
         let id = Id::new(("rspice.dialog", self.title.as_str()));
         let measured_height_id =
             id.with(("measured-surface-height", self.transaction_state.is_some()));
-        let measured_height = self.fixed_height.or_else(|| {
+        let fixed_height = self.fixed_height.or_else(|| {
+            self.fill_available_height
+                .then(|| DialogLayout::tallest(self.size, screen))
+        });
+        let measured_height = fixed_height.or_else(|| {
             ctx.data(|data| data.get_temp::<f32>(measured_height_id))
                 .or(self.initial_height)
         });
@@ -1168,7 +1208,7 @@ impl<'a> Dialog<'a> {
         // initial measurement hint. Its surface and body viewport must retain
         // the resolved height while body content scrolls beneath the fixed
         // footer, including when the requested height is clamped to the screen.
-        let fill_surface_height = layout.fills_surface_height(self.fixed_height);
+        let fill_surface_height = layout.fills_surface_height(fixed_height);
         // The side of a finger-sized control, when this dialog is laid out for
         // one: the theme's own touch target, so a raised Accessibility target
         // reaches the close button and the footer actions too. A theme in
@@ -1472,7 +1512,7 @@ impl<'a> Dialog<'a> {
             card = Some(surface_output.response.rect);
         });
 
-        if self.fixed_height.is_none()
+        if fixed_height.is_none()
             && !layout.fill_height
             && let Some(height) = rendered_surface_height
         {
