@@ -21,7 +21,9 @@ use crate::state::SimulationRunLifecycle;
 use crate::ui::accessibility::{counted, finding_counts};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState, SlotFacts};
-use crate::workbench::project::dependency_status::{dependency_rows, technology_status};
+use crate::workbench::project::dependency_status::{
+    dependency_rows, shown_path, technology_status,
+};
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
@@ -483,7 +485,9 @@ pub fn unsaved_work(
 /// Where the project file is, as the lifecycle bound it: the file a desktop
 /// save wrote, or the browser storage a browser save wrote. `None` before
 /// the project is first saved. A browser save clears the file path, so the
-/// path alone would read "not saved" for a project that is.
+/// path alone would read "not saved" for a project that is. A desktop path
+/// is named as the reader knows it, without the verbatim prefix Windows
+/// adds to a canonical one.
 pub fn location(model: &Model, platform: &PlatformState) -> Option<String> {
     let Some(binding) = platform.project_lifecycle.binding() else {
         return model
@@ -491,13 +495,13 @@ pub fn location(model: &Model, platform: &PlatformState) -> Option<String> {
             .content
             .project
             .path
-            .as_ref()
-            .map(|path| path.display().to_string());
+            .as_deref()
+            .map(shown_path);
     };
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        Some(binding.canonical_path.display().to_string())
+        Some(shown_path(&binding.canonical_path))
     }
     #[cfg(target_arch = "wasm32")]
     {

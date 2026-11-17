@@ -205,7 +205,7 @@ fn file_name(path: &Path) -> String {
 
 /// A path as the reader knows it. Canonicalising a Windows drive path adds
 /// the verbatim `\\?\` prefix, which is no part of the name they gave it.
-fn shown_path(path: &Path) -> String {
+pub(crate) fn shown_path(path: &Path) -> String {
     let text = path.display().to_string();
     let Some(rest) = text.strip_prefix(r"\\?\") else {
         return text;
