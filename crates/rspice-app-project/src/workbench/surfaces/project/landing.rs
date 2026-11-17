@@ -604,7 +604,8 @@ fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<
             row_action = Some(strip_action);
         }
     }
-    (finish_row(ui, row, response, rect), row_action)
+    theme::paint_focus_ring(ui, &response, rect);
+    (finish_row(ui, row, response), row_action)
 }
 
 /// A table row: name, path elided in the middle, the date it was last
@@ -650,8 +651,8 @@ fn recent_table_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<Re
             row_action = Some(strip_action);
         }
     }
-    let rect = response.rect;
-    (finish_row(ui, row, response, rect), row_action)
+    theme::paint_focus_ring(ui, &response, response.rect);
+    (finish_row(ui, row, response), row_action)
 }
 
 /// "missing", with its mark, ending at `right`.
@@ -675,8 +676,8 @@ fn missing_word(ui: &Ui, right: egui::Pos2) {
 }
 
 /// What every recent row says to assistive technology and on hover or
-/// long-press.
-fn finish_row(ui: &Ui, row: &RecentProjectRow, response: Response, rect: Rect) -> Response {
+/// long-press. Each row paints its own focus ring before this.
+fn finish_row(ui: &Ui, row: &RecentProjectRow, response: Response) -> Response {
     response.widget_info(|| {
         WidgetInfo::labeled(
             WidgetType::Button,
@@ -691,7 +692,6 @@ fn finish_row(ui: &Ui, row: &RecentProjectRow, response: Response, rect: Rect) -
             format!("{}; {}", row.location, row.last_opened)
         });
     });
-    theme::paint_focus_ring(ui, &response, rect);
     recent_rows::hover_and_long_press(ui, response, &recent_rows::full_text(&row.recent))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
