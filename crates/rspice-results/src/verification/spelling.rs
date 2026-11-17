@@ -5,15 +5,25 @@
 //! A value is four significant digits with an SI prefix where its unit takes
 //! one; a limit is the bound its author wrote, without padding zeros; a
 //! difference from a value, a margin or a change, sits at that value's
-//! resolution in its notation.
+//! resolution in its notation, prefixed only where the value is. A prefix
+//! letter never stands alone where a unit would be: half of a unitless
+//! number is `0.5`, never `500 m`, which reads as metres.
 
 use crate::number_format::{fmt_si_bound, fmt_si_significant, fmt_significant};
 use crate::specification::SpecificationComparison;
 
 /// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
 /// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
+/// No unit takes none either, since a prefix with nothing after it reads as
+/// a unit of its own.
 fn takes_si_prefix(unit: &str) -> bool {
-    !(unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
+    !(unit.is_empty() || unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
+}
+
+/// Whether [`format_value`] prints `value` with an SI prefix: `1.160 mA` is,
+/// `12.60 V` and `12.60` are not.
+fn prefixed(value: f64, unit: &str) -> bool {
+    takes_si_prefix(unit) && !format_value(value, unit).ends_with(&format!(" {unit}"))
 }
 
 /// `number` followed by `unit`, or alone when there is no unit.
@@ -95,8 +105,9 @@ fn last_digit_decade(value: f64) -> i32 {
 /// A difference taken from `of` — a margin to a limit, a change from a
 /// reference — in the notation of the values beside it and at their
 /// resolution: rounded to the last digit `of` is printed with, no more
-/// significant digits than a value, and signed either way. A margin of
-/// -0.6 dB from 39.40 dB reads `-0.60 dB`, and 40 µA from 1.160 mA `+40 µA`.
+/// significant digits than a value, prefixed only where `of` is, and signed
+/// either way. A margin of -0.6 dB from 39.40 dB reads `-0.60 dB`, a change
+/// of -0.5 from 12.60 `-0.50`, and 40 µA from 1.160 mA `+40 µA`.
 #[must_use]
 pub fn difference_text(difference: f64, of: f64, unit: &str) -> String {
     let decade = last_digit_decade(of);
@@ -128,7 +139,7 @@ pub fn difference_text(difference: f64, of: f64, unit: &str) -> String {
     let digits = (steps.abs().log10().floor() as usize + 1).min(4);
     let rounded = shifted(steps, decade);
     let sign = if rounded > 0.0 { "+" } else { "" };
-    let text = if takes_si_prefix(unit) {
+    let text = if prefixed(of, unit) {
         fmt_si_significant(rounded, unit, digits)
     } else {
         with_unit(&fmt_significant(rounded, digits, ""), unit)

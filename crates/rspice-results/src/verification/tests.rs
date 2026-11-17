@@ -2,6 +2,7 @@
 
 mod checks;
 mod sheet;
+mod spelling;
 mod statistics;
 
 use rspice_vocabulary::product::{

@@ -487,3 +487,17 @@ fn the_reference_view_is_one_table_and_the_selected_waveform() {
     }
     assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
 }
+
+/// A change between unitless values is spelled as they are: overshoot from
+/// 12.60 to 12.10 moves by `-0.50`, never `-500 m`, which reads as metres.
+#[test]
+fn a_unitless_change_is_spelled_as_its_values_are() {
+    let mut harness = compared();
+    draw(&mut harness);
+    let texts = row_cells(row(&harness, "overshoot"))
+        .iter()
+        .take(4)
+        .map(|cell| cell.text.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["overshoot", "12.60", "12.10", "-0.50"]);
+}
