@@ -305,6 +305,10 @@ fn safe_mode_over_a_clean_project_starts_at_once() {
     assert!(!app.state.platform.project_lifecycle.is_open());
 }
 
+/// Texts with the rects they stand in.
+#[cfg(not(target_arch = "wasm32"))]
+type Placed = Vec<(String, Rect)>;
+
 /// One launcher frame through the shell: the strings it painted with their
 /// rects, and every control's bounds by its accessible label.
 #[cfg(not(target_arch = "wasm32"))]
@@ -312,7 +316,7 @@ fn launcher_frame(
     ctx: &Context,
     app: &mut RSpiceApp,
     events: Vec<egui::Event>,
-) -> (Vec<(String, Rect)>, Vec<(String, Rect)>) {
+) -> (Placed, Placed) {
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
