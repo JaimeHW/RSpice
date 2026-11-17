@@ -1105,6 +1105,9 @@ impl Model {
         }
         self.restore_stranded_placements(std::mem::take(&mut record.stranded));
         record.stranded = self.repair_placements_stranded_since(&cells_before);
+        if let ProjectDesignBody::LibraryOperation(operation) = &record.body {
+            operation.restore_selection(self, forward);
+        }
         record.header.restamp();
         let description = record.body.description().to_owned();
         if forward {

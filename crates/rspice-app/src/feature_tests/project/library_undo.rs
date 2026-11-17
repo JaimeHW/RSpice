@@ -4,6 +4,8 @@
 //! they stood, redoes to exactly what it made, and leaves the steps taken
 //! before it undoable.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde_json::Value;
 
 use crate::workbench::RSpiceApp;
@@ -118,17 +120,25 @@ fn app_with_parts() -> RSpiceApp {
         .insert_bundle(bundle)
         .expect("a unique source owner");
 
+    // As just saved: no drawing differs from the project file.
+    state.model.workspace.mark_all_clean();
+    state.model.schematic.session.is_dirty = false;
     state.open_project_session();
     state.workbench.activate(Workspace::Project);
     app
 }
 
 /// What a library operation and its Undo are held to: the project as Save
-/// writes it, the tabs with the one in front, and the drawing the editor
-/// shows.
+/// writes it, every drawing it holds, the tabs with the one in front, and
+/// the drawing the editor shows. Which tabs are marked unsaved is held
+/// apart: a drawing an Undo puts back is unsaved, since the file may hold
+/// the version the operation left.
 struct Standing {
     saved: Value,
-    tabs: String,
+    drawings: BTreeMap<String, Value>,
+    tabs: Value,
+    open: BTreeSet<String>,
+    unsaved: BTreeSet<String>,
     editor: Value,
 }
 
@@ -142,15 +152,59 @@ impl Standing {
         let mut saved = serde_json::from_str(&text).expect("the project file is JSON");
         forget_counters(&mut saved);
         let content = &app.state.model.workspace.content;
+        let front = content.active_schematic_reference().key();
+        let drawings = content
+            .schematic_buffers
+            .iter()
+            .map(|(key, stored)| {
+                let document = if *key == front {
+                    app.state.model.schematic.document()
+                } else {
+                    stored.document()
+                };
+                let document = serde_json::to_value(document).expect("the drawing is written");
+                (key.clone(), document)
+            })
+            .collect();
+        let mut tabs = serde_json::json!({
+            "open": content.open_views,
+            "front": content.active_view,
+        });
+        if let Some(Value::Array(open)) = tabs.get_mut("open") {
+            for tab in open {
+                if let Value::Object(fields) = tab {
+                    fields.remove("dirty");
+                }
+            }
+        }
         Self {
             saved,
-            tabs: format!(
-                "{:?} in front {:?}",
-                content.open_views, content.active_view
-            ),
+            drawings,
+            tabs,
+            open: content
+                .open_views
+                .iter()
+                .map(|open| open.reference.key())
+                .collect(),
+            unsaved: content
+                .open_views
+                .iter()
+                .filter(|open| open.dirty)
+                .map(|open| open.reference.key())
+                .collect(),
             editor: serde_json::to_value(app.state.model.schematic.document())
                 .expect("the drawing in front is written"),
         }
+    }
+
+    /// The drawings that are not the same in `self` and `other`.
+    fn rewritten(&self, other: &Self) -> BTreeSet<String> {
+        self.drawings
+            .keys()
+            .chain(other.drawings.keys())
+            .filter(|key| self.drawings.get(*key) != other.drawings.get(*key))
+            .cloned()
+            .collect()
     }
 
     /// Every place where `self` is not `expected`, by path.
@@ -158,8 +212,9 @@ impl Standing {
         let mut found = Vec::new();
         differences(&expected.saved, &self.saved, "file", &mut found);
         differences(&expected.editor, &self.editor, "editor", &mut found);
-        if self.tabs != expected.tabs {
-            found.push(format!("tabs: {} where {}", self.tabs, expected.tabs));
+        differences(&expected.tabs, &self.tabs, "tabs", &mut found);
+        for key in self.rewritten(expected) {
+            found.push(format!("drawing {key}"));
         }
         found
     }
@@ -255,10 +310,22 @@ fn one_step(mut app: RSpiceApp, description: &str, operation: impl FnOnce(&mut R
         "the catalog {description} undid to reuses an earlier stamp"
     );
     stamps.push(undone);
-    let found = Standing::of(&app).differences(&before);
+    let undone = Standing::of(&app);
+    let found = undone.differences(&before);
     assert!(
         found.is_empty(),
         "Undo of {description} left these unlike before: {found:#?}"
+    );
+    let rewritten = after.rewritten(&before);
+    assert_eq!(
+        undone.unsaved,
+        before
+            .unsaved
+            .iter()
+            .chain(rewritten.intersection(&before.open))
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        "Undo of {description} marks unsaved exactly the open drawings it put back"
     );
     assert!(
         !app.state.model.can_undo_project_design(),

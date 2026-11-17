@@ -230,6 +230,18 @@ impl LibraryOperationRecord {
             .map_err(|error| format!("The {} step cannot be {verb}: {error}", self.description))
     }
 
+    /// Select in the library browser what the side the crossing made had
+    /// selected. Taking up the drawing in front selects that drawing's view,
+    /// so this follows it.
+    pub(super) fn restore_selection(&self, state: &mut Model, forward: bool) {
+        let side = if forward { &self.after } else { &self.before };
+        let [library, cell, view] = side.selection.clone();
+        let libraries = &mut state.library_manager;
+        libraries.selected_library = library;
+        libraries.selected_cell = cell;
+        libraries.selected_view = view;
+    }
+
     pub(super) fn apply(
         &mut self,
         state: &mut Model,
@@ -378,19 +390,24 @@ impl Crossing {
             .library_manager
             .replace_catalog_from_snapshot(&self.libraries)
             .expect("the catalog revision was reserved with the receipt");
+        // A drawing put back is unsaved: the project file may hold the
+        // version the step left.
         for (key, drawing) in &side.drawings {
             match drawing {
                 Drawing::Absent => {
                     state.workspace.remove_schematic_editor(key);
                 }
                 Drawing::Whole(drawing) => {
+                    let mut drawing = (**drawing).clone();
+                    drawing.session.is_dirty = true;
                     state
                         .workspace
-                        .insert_schematic_editor(key.clone(), (**drawing).clone());
+                        .insert_schematic_editor(key.clone(), drawing);
                 }
                 Drawing::Content(snapshot) => {
                     if let Some(mut stored) = state.workspace.schematic_editor_mut(key) {
                         stored.editor.apply_snapshot(snapshot);
+                        stored.editor.session.is_dirty = true;
                     }
                 }
             }
@@ -428,11 +445,16 @@ impl Crossing {
             project.root_library.clone_from(library);
             project.top_cell.clone_from(cell);
         }
-        let active = state.workspace.content.active_schematic_reference().key();
-        if let Some(drawing) = state.workspace.clone_schematic_editor(&active) {
+        // The editor takes up the drawing in front only when the crossing
+        // put back that drawing or brought another to the front; otherwise
+        // what it shows, and how, is left as it is.
+        let front = state.workspace.content.active_schematic_reference().key();
+        if (front != active || side.drawings.contains_key(&front))
+            && let Some(drawing) = state.workspace.clone_schematic_editor(&front)
+        {
             state.schematic = drawing;
+            effects.restore_active_schematic = true;
         }
-        effects.restore_active_schematic = true;
 
         state
             .workspace
