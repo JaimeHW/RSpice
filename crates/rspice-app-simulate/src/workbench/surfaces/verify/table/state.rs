@@ -150,6 +150,21 @@ impl TableState {
         };
     }
 
+    /// Name the sorted and the selected column by `to`'s numbering, as a
+    /// table whose columns show in another order than the page's does; a
+    /// column `to` has no place for is dropped.
+    pub(super) fn remap_columns(&mut self, to: impl Fn(usize) -> Option<usize>) {
+        self.sort = self.sort.and_then(|sort| {
+            Some(Sort {
+                column: to(sort.column)?,
+                ..sort
+            })
+        });
+        if let Some(selection) = self.selection.as_mut() {
+            selection.column = selection.column.and_then(&to);
+        }
+    }
+
     /// Fold the group labelled `label`, or open it again.
     pub(super) fn toggle_fold(&mut self, label: &str) {
         if !self.folded.remove(label) {

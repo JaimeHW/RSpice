@@ -481,6 +481,7 @@ pub(super) fn reference_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .state(&mut session.reference_table)
         .keys(&comparison.keys)
         .freeze(1)
+        .verdict(RESULT_COLUMN)
         .editing(editor)
         .max_height((body - detail - 1.0).max(TABLE_HEAD_H + TABLE_ROW_H))
         .show(ui, |index| row_cells(&rows[index]));
@@ -671,6 +672,9 @@ fn export(cx: &mut Cx<'_, SimulateFeature>) -> Result<(), String> {
     export_regression_ci(cx, &junit, &tap);
     Ok(())
 }
+
+/// The Result column, the verdict of each row.
+const RESULT_COLUMN: usize = 6;
 
 fn reference_columns() -> [Column; 7] {
     [

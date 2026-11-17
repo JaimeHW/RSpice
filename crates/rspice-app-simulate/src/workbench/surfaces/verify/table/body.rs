@@ -153,7 +153,11 @@ impl DataTable<'_> {
             let (cell_rect, region) = view.cell(geometry, column_index, y);
             let clip = region.intersect(ui.clip_rect());
             #[cfg(any(test, feature = "test-support"))]
-            super::super::raster::probe(ui, &format!("table.cell.{column_index}"), cell_rect);
+            super::super::raster::probe(
+                ui,
+                &format!("table.cell.{}", self.page_column(column_index)),
+                cell_rect,
+            );
             if column_index > 0 {
                 ui.painter().with_clip_rect(clip).vline(
                     cell_rect.left(),

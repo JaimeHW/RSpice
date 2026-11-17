@@ -996,3 +996,67 @@ fn corner_app() -> FeatureHarness<SimulateFeature> {
     seed_corner(&mut harness.model);
     harness
 }
+
+/// On a phone every table that states a verdict keeps it in view: it sits
+/// directly after the name, inside the window, and stays put while the values
+/// scroll sideways under it.
+#[test]
+fn a_phone_keeps_every_tables_verdict_in_view() {
+    use super::raster::{page_pass, seed_reference, seed_soa};
+    let phone = egui::vec2(390.0, 844.0);
+    for page in [
+        VerificationPage::Specifications,
+        VerificationPage::Checks,
+        VerificationPage::Reference,
+    ] {
+        let mut harness = SimulateTestHost::harness();
+        match page {
+            VerificationPage::Checks => seed_soa(&mut harness.model),
+            VerificationPage::Reference => seed_reference(&mut harness.model),
+            _ => seed_corner(&mut harness.model),
+        }
+        harness
+            .wb
+            .activate(crate::workbench::state::Workspace::Verify);
+        harness.state.verification_page = page;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let pass = |harness: &mut FeatureHarness<SimulateFeature>| {
+            let mut geometry = super::raster::PageGeometry::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, phone)),
+                    ..Default::default()
+                };
+                geometry = page_pass(&ctx, input, |ui| {
+                    super::raster::refresh_verification(&mut harness.model);
+                    super::show(ui, &mut harness.cx());
+                })
+                .1;
+            }
+            geometry
+        };
+        let before = pass(&mut harness);
+        let name = before.one("table.head.0").expect("the name's head");
+        let verdict = before.one("table.verdict").expect("the verdict's head");
+        assert_eq!(verdict.left(), name.right(), "{page:?}: after the name");
+        assert!(
+            verdict.right() <= phone.x,
+            "{page:?}: the verdict is in view, {verdict:?}"
+        );
+        let table = match page {
+            VerificationPage::Specifications => {
+                &mut harness.state.verification.specifications_table
+            }
+            VerificationPage::Checks => &mut harness.state.verification.checks_table,
+            _ => &mut harness.state.verification.reference_table,
+        };
+        table.scroll_x = 120.0;
+        let after = pass(&mut harness);
+        assert_eq!(
+            after.one("table.verdict"),
+            Some(verdict),
+            "{page:?}: the verdict stays put as the values scroll"
+        );
+    }
+}

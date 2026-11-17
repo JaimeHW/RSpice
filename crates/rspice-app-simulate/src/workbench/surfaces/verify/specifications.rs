@@ -261,11 +261,15 @@ fn table(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, view: &SheetView, menu_o
             focus: std::mem::take(&mut draft.focus),
         })
     });
-    let response = DataTable::new(TABLE_ID, &columns, view.rows.len())
+    let mut table = DataTable::new(TABLE_ID, &columns, view.rows.len())
         .state(&mut cx.state.verification.specifications_table)
         .keys(&view.keys)
         .groups(&view.groups)
-        .freeze(1)
+        .freeze(1);
+    if let Some(status) = view.column(Col::Status) {
+        table = table.verdict(status);
+    }
+    let response = table
         .cell_selection()
         .max_height(ui.available_height())
         .editing(editor)

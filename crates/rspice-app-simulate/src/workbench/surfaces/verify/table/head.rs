@@ -83,7 +83,13 @@ impl DataTable<'_> {
             let (cell, region) = view.cell(geometry, index, rect.y_range());
             let clip = region.intersect(ui.clip_rect());
             #[cfg(any(test, feature = "test-support"))]
-            super::super::raster::probe(ui, &format!("table.head.{index}"), cell);
+            {
+                let page = self.page_column(index);
+                super::super::raster::probe(ui, &format!("table.head.{page}"), cell);
+                if self.verdict == Some(page) {
+                    super::super::raster::probe(ui, "table.verdict", cell);
+                }
+            }
             let sorts = sortable && column.sortable;
             let direction = sort
                 .filter(|sort| sort.column == index)

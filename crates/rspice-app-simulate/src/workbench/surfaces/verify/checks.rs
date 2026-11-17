@@ -90,6 +90,7 @@ pub(super) fn checks_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .state(&mut session.checks_table)
         .keys(&order.keys)
         .freeze(1)
+        .verdict(columns.len() - 1)
         .max_height(ui.available_height())
         .show(ui, |index| {
             row_cells(checks, &checks.rows[order.rows[index]], several_points)

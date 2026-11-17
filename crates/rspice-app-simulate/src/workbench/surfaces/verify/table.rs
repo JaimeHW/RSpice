@@ -27,6 +27,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
@@ -358,7 +359,13 @@ pub struct TableResponse {
 /// One table: its columns, its rows, and where it may grow.
 pub struct DataTable<'a> {
     id: &'a str,
-    columns: &'a [Column],
+    /// The columns in the order they show, which is the page's order unless a
+    /// phone moved the verdict forward.
+    columns: Cow<'a, [Column]>,
+    /// The column that states each row's verdict, in the page's order.
+    verdict: Option<usize>,
+    /// The page's column under each shown column, when they differ.
+    order: Option<Vec<usize>>,
     rows: usize,
     selected: Option<usize>,
     clickable: bool,
@@ -520,7 +527,9 @@ impl<'a> DataTable<'a> {
     pub(super) fn new(id: &'a str, columns: &'a [Column], rows: usize) -> Self {
         Self {
             id,
-            columns,
+            columns: Cow::Borrowed(columns),
+            verdict: None,
+            order: None,
             rows,
             selected: None,
             clickable: false,
@@ -569,6 +578,15 @@ impl<'a> DataTable<'a> {
         self
     }
 
+    /// Column `column` states each row's verdict. On a phone it shows
+    /// directly after the first column and stays put with it while the rest
+    /// scroll, so the reader learns what failed without scrolling sideways.
+    /// A table with bands keeps its order: its spans name runs of columns.
+    pub fn verdict(mut self, column: usize) -> Self {
+        self.verdict = Some(column);
+        self
+    }
+
     /// Band rows over the head, top first, each a list of spans.
     pub fn bands(mut self, bands: &'a [Vec<Span>]) -> Self {
         self.bands = bands;
@@ -600,7 +618,39 @@ impl<'a> DataTable<'a> {
         if let (Some(state), Some(keys)) = (state.as_deref_mut(), self.keys) {
             state.follow_keys(keys);
         }
-        let mut rows = Rows::new(self.rows, &mut row_at);
+
+        // A phone moves the verdict beside the first column. Everything below
+        // works in the shown order; the page's memory and the response speak
+        // the page's, so they are turned on the way in and back on the way out.
+        let phone = super::phone_width(ui.ctx());
+        self.order = self
+            .verdict
+            .filter(|_| phone && self.bands.is_empty())
+            .and_then(|verdict| verdict_order(self.columns.len(), verdict));
+        if let Some(order) = self.order.clone() {
+            self.columns = Cow::Owned(
+                order
+                    .iter()
+                    .map(|column| self.columns[*column].clone())
+                    .collect(),
+            );
+            let shown = |column: usize| order.iter().position(|page| *page == column);
+            if let Some(state) = state.as_deref_mut() {
+                state.remap_columns(shown);
+            }
+            if let Some(editor) = editor.as_mut() {
+                editor.column = shown(editor.column).unwrap_or(editor.column);
+            }
+        }
+        let order = self.order.clone();
+        let mut shown_row = move |row: usize| {
+            let cells = row_at(row);
+            match &order {
+                Some(order) => in_order(cells, order),
+                None => cells,
+            }
+        };
+        let mut rows = Rows::new(self.rows, &mut shown_row);
 
         // Which rows show, in what order.
         let filter = state
@@ -670,15 +720,15 @@ impl<'a> DataTable<'a> {
         let viewport_w = (available - bar).max(1.0);
         let least: f32 = self.columns.iter().map(|column| column.width).sum();
         let scrolls_x = least > viewport_w + 0.5;
-        // A phone-width window holds the first column only: a wider freeze
-        // leaves the values a sliver beside it, or none at all.
-        let frozen = if super::phone_width(ui.ctx()) {
-            self.frozen.min(1)
+        // A phone-width window holds the first column only, and the verdict
+        // beside it: a wider freeze leaves the values a sliver, or none.
+        let frozen = if phone {
+            self.frozen.min(1) + usize::from(self.order.is_some())
         } else {
             self.frozen
         };
         let geometry = Columns::new(
-            column_widths(self.columns, viewport_w.max(least)),
+            column_widths(&self.columns, viewport_w.max(least)),
             frozen,
             viewport_w,
         );
@@ -933,6 +983,24 @@ impl<'a> DataTable<'a> {
                 egui::Stroke::new(1.0, t.color.border_strong),
             );
         }
+        if self.order.is_some() {
+            let page = |column: usize| self.page_column(column);
+            if let Some(state) = state.as_deref_mut() {
+                state.remap_columns(|column| Some(page(column)));
+            }
+            if let Some((_, column)) = response.edit.as_mut() {
+                *column = page(*column);
+            }
+            for cell in [
+                response.double_clicked.as_mut(),
+                response.context_menu.as_mut().map(|menu| &mut menu.cell),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                cell.column = cell.column.map(page);
+            }
+        }
         if state.is_some() {
             self.focus_target(
                 ui,
@@ -1062,6 +1130,14 @@ impl<'a> DataTable<'a> {
         format!("{heads}\n{values}")
     }
 
+    /// The page's column under shown column `column`.
+    fn page_column(&self, column: usize) -> usize {
+        self.order
+            .as_ref()
+            .and_then(|order| order.get(column).copied())
+            .unwrap_or(column)
+    }
+
     /// The horizontal span a column's words may occupy: the cell less its
     /// padding, with the table's outer columns held to the panel inset.
     fn text_span(&self, column: usize, cell: Rect) -> egui::Rangef {
@@ -1080,6 +1156,32 @@ impl<'a> DataTable<'a> {
             (cell.right() - right).max(cell.left() + left),
         )
     }
+}
+
+/// The page's columns in the order a phone shows them, the verdict directly
+/// after the first: the page's column under each shown one. None when the
+/// verdict names no column past the first.
+fn verdict_order(columns: usize, verdict: usize) -> Option<Vec<usize>> {
+    (verdict > 0 && verdict < columns).then(|| {
+        std::iter::once(0)
+            .chain(std::iter::once(verdict))
+            .chain((1..columns).filter(|column| *column != verdict))
+            .collect()
+    })
+}
+
+/// A row's cells in the shown order; a cell the row leaves out stays empty.
+fn in_order(cells: Vec<Cell>, order: &[usize]) -> Vec<Cell> {
+    let mut cells = cells.into_iter().map(Some).collect::<Vec<_>>();
+    order
+        .iter()
+        .map(|column| {
+            cells
+                .get_mut(*column)
+                .and_then(Option::take)
+                .unwrap_or_else(Cell::empty)
+        })
+        .collect()
 }
 
 /// How one cell's words are set.

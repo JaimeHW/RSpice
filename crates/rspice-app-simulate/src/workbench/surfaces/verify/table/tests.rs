@@ -849,6 +849,70 @@ fn a_phone_width_window_holds_the_first_column_only() {
     );
 }
 
+/// On a phone the verdict column shows directly after the first and stays
+/// put with it while the values scroll; the page's memory and the response
+/// still name columns in the page's order. A wider window keeps the order.
+#[test]
+fn a_phone_keeps_the_verdict_beside_the_first_column() {
+    let ctx = context();
+    let mut columns = wide_columns(8, 120.0);
+    columns.push(Column::words("Status", 80.0));
+    let verdict = columns.len() - 1;
+    let mut state = TableState::default();
+    state.sort = Some(Sort {
+        column: 3,
+        direction: SortDirection::Descending,
+    });
+    let draw = |state: &mut TableState, width: f32, events: Vec<Event>| {
+        frame(&ctx, width, events, |ui| {
+            DataTable::new("verdict", &columns, 3)
+                .state(state)
+                .freeze(1)
+                .verdict(verdict)
+                .cell_selection()
+                .show(ui, wide_row(9))
+        })
+    };
+    let (_, before, _) = draw(&mut state, 390.0, Vec::new());
+    let name = head(&before, 0);
+    let status = before.one("table.verdict").expect("the verdict's head");
+    assert_eq!(status, head(&before, verdict));
+    assert_eq!(status.left(), name.right(), "the verdict follows the name");
+    assert!(
+        status.right() <= 390.0,
+        "the verdict is in view: {status:?}"
+    );
+    assert!(head(&before, 1).left() >= status.right());
+
+    state.scroll_x = 200.0;
+    let (_, after, _) = draw(&mut state, 390.0, Vec::new());
+    assert_eq!(head(&after, verdict), status, "the verdict stays put");
+    assert_eq!(cell(&after, verdict).x_range(), status.x_range());
+    assert_eq!(
+        state.sort.map(|sort| sort.column),
+        Some(3),
+        "the sort names the page's column"
+    );
+
+    let (response, _, _) = draw(
+        &mut state,
+        390.0,
+        press(cell(&after, verdict).center(), PointerButton::Secondary),
+    );
+    assert_eq!(
+        response.context_menu.map(|menu| menu.cell.column),
+        Some(Some(verdict)),
+        "a press on the verdict names the page's verdict column"
+    );
+    assert_eq!(state.selected_column(), Some(verdict));
+
+    let (_, desktop, _) = draw(&mut state, WIDTH, Vec::new());
+    assert!(
+        head(&desktop, verdict).left() > head(&desktop, 7).left(),
+        "a wider window keeps the page's order"
+    );
+}
+
 #[test]
 fn a_span_names_its_run_once_centred_and_keeps_to_its_columns_as_they_scroll() {
     let ctx = context();
