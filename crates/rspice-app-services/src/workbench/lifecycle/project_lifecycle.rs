@@ -92,6 +92,8 @@ pub enum ProjectCloseDestination {
     /// Joining a live session: the same landing, where this install then
     /// waits for the session host's project snapshot.
     LiveMirror,
+    /// Safe mode, started with these options once the project has closed.
+    SafeMode(crate::state::write_policy::LocalSafeModeOptions),
 }
 
 #[derive(Debug, Clone, Default)]

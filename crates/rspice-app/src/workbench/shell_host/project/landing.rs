@@ -6,6 +6,7 @@ use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::surfaces::project::landing::{LandingAction, landing};
+use rspice_app_project::workbench::tools::project_launcher::recent_rows::RecentRowAction;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// The landing, drawn in the project feature's context, with what the reader
@@ -24,7 +25,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
+pub(crate) fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
     match action {
         LandingAction::NewProject => app.execute_command_key(ProjectCommand::NewProject.key()),
         LandingAction::OpenProject => app.execute_command_key(ProjectCommand::OpenProject.key()),
@@ -41,6 +42,12 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
                 app.execute_command_key(ProjectCommand::OpenProject.key());
             }
         }
+        LandingAction::Recent(RecentRowAction::Locate(recent)) => {
+            if let Some(located) = app.pick_located_recent(&recent) {
+                app.open_recent_file(located);
+            }
+        }
+        LandingAction::Recent(row_action) => app.edit_recent_row(&row_action),
         LandingAction::ReviewRecovery => {
             rspice_app_project::workbench::project::open_project_launcher(
                 &mut app.state.project,

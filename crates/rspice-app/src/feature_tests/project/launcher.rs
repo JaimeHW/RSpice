@@ -5,6 +5,7 @@
 use egui::{Context, Rect, Vec2, vec2};
 
 use crate::workbench::RSpiceApp;
+use crate::workbench::session::project_transactions::{SafeModeStart, start_local_safe_mode};
 use crate::workbench::shell_host::project::launcher::dismiss_launcher;
 use crate::workbench::shell_host::project::launcher::show;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
@@ -215,6 +216,95 @@ fn launcher_header_names_the_product_and_states_safe_mode_only_while_active() {
     }
 }
 
+/// Starting safe mode over a project with unsaved work asks first, with the
+/// close review Close project uses, and keeps the project open until the
+/// review answers. Cancel leaves everything as it was; Don't save starts
+/// safe mode on the no-project landing.
+#[test]
+fn safe_mode_over_unsaved_work_goes_through_the_close_review() {
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
+    use rspice_app_state::state::write_policy::LocalSafeModeOptions;
+    use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .workspace
+        .content
+        .project
+        .rename("edited")
+        .expect("valid name");
+    rspice_app_project::workbench::project::open_project_launcher(
+        &mut app.state.project,
+        &mut app.state.workbench,
+        &mut app.state.platform,
+    );
+    let options = LocalSafeModeOptions::default();
+
+    assert_eq!(
+        start_local_safe_mode(&mut app.state, options),
+        Ok(SafeModeStart::AwaitingReview)
+    );
+    let Some(ProjectReviewRequest::CloseProject(destination)) =
+        app.state.workbench.project_review_dialog.request.clone()
+    else {
+        panic!("the close review is asked for");
+    };
+    assert_eq!(destination, ProjectCloseDestination::SafeMode(options));
+    assert!(!app.state.model.safe_mode.active);
+    assert!(app.state.platform.project_lifecycle.is_open());
+    assert_eq!(app.state.model.workspace.content.project.name(), "edited");
+
+    // Cancel: the review closes and nothing else moves.
+    app.state.workbench.project_review_dialog.close();
+    assert!(!app.state.model.safe_mode.active);
+    assert!(app.state.platform.project_lifecycle.is_open());
+
+    // Don't save: the review's discard starts safe mode.
+    assert_eq!(
+        start_local_safe_mode(&mut app.state, options),
+        Ok(SafeModeStart::AwaitingReview)
+    );
+    app.state.workbench.project_review_dialog.close();
+    assert!(app.state.close_project_discard(destination));
+    assert!(app.state.model.safe_mode.active);
+    assert!(!app.state.platform.project_lifecycle.is_open());
+    assert_eq!(app.state.workbench.workspace, Workspace::Project);
+    assert!(!app.state.project.project_launcher_open);
+}
+
+/// The Recovery page's way to Safe mode says where it goes.
+#[test]
+fn the_recovery_page_names_its_way_to_safe_mode() {
+    let painted = painted_launcher_page(vec2(1280.0, 800.0), false, ProjectLauncherPage::Recovery);
+    assert!(
+        painted.iter().any(|(text, _)| text == "Safe mode\u{2026}"),
+        "{painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|(text, _)| text == "Recovery options"),
+        "{painted:?}"
+    );
+}
+
+/// A project with nothing unsaved closes and safe mode starts at once.
+#[test]
+fn safe_mode_over_a_clean_project_starts_at_once() {
+    let mut app = RSpiceApp::test_instance();
+    assert!(app.state.closing_loses_nothing());
+
+    assert_eq!(
+        start_local_safe_mode(
+            &mut app.state,
+            rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
+        ),
+        Ok(SafeModeStart::Started)
+    );
+    assert!(app.state.model.safe_mode.active);
+    assert!(app.state.workbench.project_review_dialog.request.is_none());
+    assert!(!app.state.platform.project_lifecycle.is_open());
+}
+
 /// The Safe mode page states its launch scope in one line under a plain
 /// title, and never offers to start safe mode while it is already on.
 #[test]
@@ -228,12 +318,16 @@ fn safe_mode_page_heading_is_one_title_and_its_start_is_truthful() {
             assert!(shows("Changes apply to this launch only."), "{context}");
             assert_eq!(shows("Safe mode active"), active, "{context}");
             assert_eq!(shows("Start RSpice in safe mode"), !active, "{context}");
+            assert!(shows("Do not reopen prior documents"), "{context}");
             for (text, _) in &painted {
                 for retired in [
                     "STARTUP ISOLATION",
                     "Start with optional subsystems disabled",
                     "Safe mode is active for this launch",
                     "crash isolation",
+                    // Options nothing enforces are not offered.
+                    "Disable third-party extensions",
+                    "Disable GPU acceleration",
                 ] {
                     assert!(!text.contains(retired), "{retired:?} painted; {context}");
                 }

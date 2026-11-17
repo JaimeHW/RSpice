@@ -215,8 +215,7 @@ fn the_launcher_builds_its_project_list_once_per_change() {
         path: std::path::PathBuf::from(path),
         opened_at_unix_ms: 0,
         pinned: false,
-        owner: None,
-        tags: Vec::new(),
+        missing: false,
     };
     app.state.platform.recent_files = vec![
         recent("C:/work/amplifier.rspiceproj"),

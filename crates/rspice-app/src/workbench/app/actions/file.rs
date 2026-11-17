@@ -4,6 +4,7 @@
 //! flow that runs first when the current document has unsaved changes.
 
 use crate::workbench::app::RSpiceApp;
+use rspice_app_project::workbench::tools::project_launcher::recent_rows::RecentRowAction;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::{
     ConfirmationAction, ConfirmationResponse,
@@ -330,12 +331,92 @@ impl RSpiceApp {
         }
     }
 
+    /// Whether `path`'s file is there to open. A file that is gone marks its
+    /// recent row missing and says so in a notice; the row stays, so the
+    /// reader can locate the file or remove the row, and a drive that comes
+    /// back opens it again.
+    pub(crate) fn found_recent_file(&mut self, path: &std::path::Path) -> bool {
+        use rspice_app_services::services::recent_files::mark_missing;
+
+        // A browser recent is reopened through the file picker, not a path.
+        if cfg!(target_arch = "wasm32") || path.exists() {
+            mark_missing(&mut self.state.platform.recent_files, path, false);
+            return true;
+        }
+        mark_missing(&mut self.state.platform.recent_files, path, true);
+        let name = path.file_stem().map_or_else(
+            || path.display().to_string(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        self.state.report_failure(
+            format!("Could not open {name}"),
+            format!(
+                "{} was not found. Locate the file, or remove it from the recent list.",
+                path.display()
+            ),
+        );
+        false
+    }
+
+    /// Pin, unpin or remove a recent row. Locate… is the shell's, since it
+    /// asks for a file: [`Self::pick_located_recent`].
+    pub(crate) fn edit_recent_row(&mut self, action: &RecentRowAction) {
+        use rspice_app_services::services::recent_files::toggle_pin;
+        match action {
+            RecentRowAction::TogglePin(path) => {
+                toggle_pin(&mut self.state.platform.recent_files, path);
+            }
+            RecentRowAction::Remove(path) => {
+                self.state
+                    .platform
+                    .recent_files
+                    .retain(|recent| &recent.path != path);
+            }
+            RecentRowAction::Locate(_) => {}
+        }
+    }
+
+    /// Point `from`'s recent row at `to`, where the reader found the file.
+    /// Returns the row as it now stands, to open.
+    pub(crate) fn locate_recent_file(
+        &mut self,
+        from: &std::path::Path,
+        to: &std::path::Path,
+    ) -> Option<rspice_app_services::services::recent_files::RecentFile> {
+        rspice_app_services::services::recent_files::relocate(
+            &mut self.state.platform.recent_files,
+            from,
+            to,
+        )
+    }
+
+    /// Ask where `recent`'s file went and point its row there. `None` when
+    /// the reader cancels, and always in the browser, which has no paths.
+    pub(crate) fn pick_located_recent(
+        &mut self,
+        recent: &rspice_app_services::services::recent_files::RecentFile,
+    ) -> Option<rspice_app_services::services::recent_files::RecentFile> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let to = rspice_app_services::io::project_io::show_open_project_dialog().ok()?;
+            self.locate_recent_file(&recent.path, &to)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = recent;
+            None
+        }
+    }
+
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
     pub(crate) fn open_recent_file(
         &mut self,
         recent: rspice_app_services::services::recent_files::RecentFile,
     ) {
+        if !self.found_recent_file(&recent.path) {
+            return;
+        }
         if recent.kind == rspice_app_services::services::recent_files::RecentKind::Project
             && crate::workbench::app::project_transactions::hold_for_configuration_edits(
                 &mut self.state,
@@ -359,9 +440,9 @@ impl RSpiceApp {
         }
     }
 
-    /// Internal: actually open a recent file (after any confirmation).
-    /// Entries whose file vanished are dropped from the list with a Console
-    /// line instead of failing silently.
+    /// Internal: actually open a recent file (after any confirmation). A
+    /// file that went while the reader was asked is reported as one that
+    /// was gone before.
     fn do_open_recent(
         &mut self,
         path: std::path::PathBuf,
@@ -369,16 +450,7 @@ impl RSpiceApp {
     ) {
         use rspice_app_services::services::recent_files::RecentKind;
 
-        if !path.exists() {
-            self.state.platform.recent_files.retain(|r| r.path != path);
-            self.state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!(
-                    "Could not open {}: the file no longer exists.",
-                    path.display()
-                ),
-            );
+        if !self.found_recent_file(&path) {
             return;
         }
 

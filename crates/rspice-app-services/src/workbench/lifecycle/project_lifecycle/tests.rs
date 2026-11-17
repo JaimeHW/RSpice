@@ -110,8 +110,6 @@ fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() 
     let mut state = ServicesHost::default();
     state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
-            disable_third_party_extensions: false,
-            disable_gpu_acceleration: false,
             isolate_prior_documents: false,
             reset_layout: false,
             open_project_read_only: true,

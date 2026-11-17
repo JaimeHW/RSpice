@@ -76,7 +76,7 @@ impl Default for PlatformState {
 
 /// Record a file in the recent-files list (most recent first, deduped,
 /// capped at Projects and files ▸ Recent projects listed). A file already
-/// listed keeps its pin, owner and tags.
+/// listed keeps its pin.
 pub fn remember_recent_file(
     model: &Model,
     platform: &mut PlatformState,
@@ -95,9 +95,8 @@ pub fn remember_recent_file(
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX),
-        pinned: previous.as_ref().is_some_and(|recent| recent.pinned),
-        owner: previous.as_ref().and_then(|recent| recent.owner.clone()),
-        tags: previous.map_or_else(Vec::new, |recent| recent.tags),
+        pinned: previous.is_some_and(|recent| recent.pinned),
+        missing: false,
     };
     platform
         .recent_files
@@ -110,11 +109,15 @@ pub fn remember_recent_file(
 /// projects listed keeps, so lowering it shortens the start page's list at
 /// once. The count is of projects, the only kind that list shows: schematics
 /// are capped at the same count on their own, so opening them never pushes a
-/// project off the page.
+/// project off the page. A pinned entry is the reader's to remove: it is
+/// kept and not counted.
 pub fn trim_recent_files(model: &Model, platform: &mut PlatformState) {
     let listed = model.preferences.recent_files_listed();
     let (mut projects, mut schematics) = (0, 0);
     platform.recent_files.retain(|recent| {
+        if recent.pinned {
+            return true;
+        }
         let kept = match recent.kind {
             RecentKind::Project => &mut projects,
             RecentKind::Schematic => &mut schematics,

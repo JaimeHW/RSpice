@@ -1629,8 +1629,7 @@ fn open_recent_lists_the_recent_files_newest_first_then_all_projects() {
         path: std::path::PathBuf::from(path),
         opened_at_unix_ms: 0,
         pinned: false,
-        owner: None,
-        tags: Vec::new(),
+        missing: false,
     };
     let mut app = title_test_app();
     app.state.platform.recent_files = vec![

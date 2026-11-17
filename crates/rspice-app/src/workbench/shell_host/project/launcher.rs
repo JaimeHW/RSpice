@@ -4,10 +4,11 @@ use egui::{Context, Popup};
 use std::path::Path;
 
 use crate::workbench::app_state::services_access::open_comparison;
-use crate::workbench::session::project_transactions::start_local_safe_mode;
+use crate::workbench::session::project_transactions::{SafeModeStart, start_local_safe_mode};
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
+use rspice_app_project::workbench::tools::project_launcher::recent_rows::RecentRowAction;
 use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_TOUCH_MAX_WIDTH, LauncherAction, LauncherControlHeightOverride, LauncherPass,
     launcher, restore_launcher_focus, show_discard_confirmation,
@@ -140,10 +141,20 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 dismiss_launcher(app);
                 app.execute_command_key(ids::OPEN_NETLIST);
             }
+            // A file that is gone keeps the launcher open on its marked row.
             LauncherAction::Open(recent) => {
-                dismiss_launcher(app);
-                app.open_recent_file(recent);
+                if app.found_recent_file(&recent.path) {
+                    dismiss_launcher(app);
+                    app.open_recent_file(recent);
+                }
             }
+            LauncherAction::Recent(RecentRowAction::Locate(recent)) => {
+                if let Some(located) = app.pick_located_recent(&recent) {
+                    dismiss_launcher(app);
+                    app.open_recent_file(located);
+                }
+            }
+            LauncherAction::Recent(row_action) => app.edit_recent_row(&row_action),
             LauncherAction::Page(page) => {
                 app.state.project.project_launcher_page = page;
                 if page == ProjectLauncherPage::Recovery {
@@ -172,9 +183,12 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     }
                 }
             }
+            // The close review, when the open project needs one, stands over
+            // the workbench, not under the launcher.
             LauncherAction::StartSafeMode(options) => {
                 match start_local_safe_mode(&mut app.state, options) {
-                    Ok(()) => app.state.project.project_launcher_open = false,
+                    Ok(SafeModeStart::Started) => app.state.project.project_launcher_open = false,
+                    Ok(SafeModeStart::AwaitingReview) => dismiss_launcher(app),
                     Err(error) => app.state.platform.recovery_catalog.warning(error),
                 }
             }

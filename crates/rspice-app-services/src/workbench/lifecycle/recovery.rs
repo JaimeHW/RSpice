@@ -966,19 +966,13 @@ pub fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String, Strin
 }
 
 /// Refuse a safe-mode start this launch cannot honour: one already started,
-/// one isolating nothing, or one asking for a renderer that cannot change now.
+/// or one isolating nothing.
 pub fn check_safe_mode_start(model: &Model, options: LocalSafeModeOptions) -> Result<(), String> {
     if model.safe_mode.active {
         return Err("Safe mode is already active for this launch".to_owned());
     }
     if !options.has_effect() {
         return Err("Select at least one safe-mode isolation option".to_owned());
-    }
-    if options.disable_gpu_acceleration && !software_rendering_supported() {
-        return Err(
-            "Software rendering cannot be selected after this platform renderer has started"
-                .to_owned(),
-        );
     }
     Ok(())
 }
@@ -999,12 +993,6 @@ pub fn activate_safe_mode(
 /// Say which isolations safe mode enforces for this launch.
 pub fn record_safe_mode_started(model: &mut Model, options: LocalSafeModeOptions) {
     let mut enforced = Vec::new();
-    if options.disable_third_party_extensions {
-        enforced.push("third-party extensions disabled");
-    }
-    if options.disable_gpu_acceleration {
-        enforced.push("software rendering");
-    }
     if options.isolate_prior_documents {
         enforced.push("prior documents isolated");
     }
@@ -1022,13 +1010,6 @@ pub fn record_safe_mode_started(model: &mut Model, options: LocalSafeModeOptions
             enforced.join(", ")
         ),
     );
-}
-
-/// eframe chooses its adapter before the application and launcher are created.
-/// A live switch is therefore unavailable until the native relaunch path can
-/// select and verify a CPU adapter before constructing `RSpiceApp`.
-pub const fn software_rendering_supported() -> bool {
-    false
 }
 
 pub const fn diagnostics_folder_supported() -> bool {
@@ -1272,8 +1253,6 @@ mod tests {
     fn safe_mode_requires_a_real_local_effect() {
         assert!(
             !LocalSafeModeOptions {
-                disable_third_party_extensions: false,
-                disable_gpu_acceleration: false,
                 isolate_prior_documents: false,
                 reset_layout: false,
                 open_project_read_only: false,

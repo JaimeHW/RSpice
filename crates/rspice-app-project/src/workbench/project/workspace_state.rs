@@ -16,42 +16,35 @@ pub enum ProjectLauncherSort {
     #[default]
     LastOpened,
     Name,
-    Owner,
 }
 
 impl ProjectLauncherSort {
+    pub const ALL: [Self; 2] = [Self::LastOpened, Self::Name];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::LastOpened => "Last opened",
             Self::Name => "Name",
-            Self::Owner => "Owner",
         }
     }
 }
 
-/// Project groups backed by durable recent-project metadata.
-///
-/// Recovery has its own complete launcher page and governed templates are not
-/// exposed until a template-package service exists, so neither is represented
-/// as a decorative filter here.
+/// Which recent projects the launcher and the landing list: every one, or
+/// only those the reader pinned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProjectLauncherFilter {
     #[default]
     All,
-    Recent,
     Pinned,
-    Shared,
 }
 
 impl ProjectLauncherFilter {
-    pub const ALL: [Self; 4] = [Self::All, Self::Recent, Self::Pinned, Self::Shared];
+    pub const ALL: [Self; 2] = [Self::All, Self::Pinned];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Recent => "Recent",
             Self::Pinned => "Pinned",
-            Self::Shared => "Shared",
         }
     }
 }

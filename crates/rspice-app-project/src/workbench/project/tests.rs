@@ -57,7 +57,7 @@ fn new_cell_command_captures_exact_library_catalog_revision() {
 #[test]
 fn all_projects_opens_the_launcher_on_every_project() {
     let mut harness = harness();
-    harness.state.project_launcher_filter = ProjectLauncherFilter::Recent;
+    harness.state.project_launcher_filter = ProjectLauncherFilter::Pinned;
     harness.state.project_launcher_open = false;
     let _ = harness.wb.outbox.take::<FocusProjectLauncherSearch>();
 

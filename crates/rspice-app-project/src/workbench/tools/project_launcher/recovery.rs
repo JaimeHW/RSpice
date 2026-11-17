@@ -26,8 +26,8 @@ pub(super) fn recovery_page(
         ui,
         layout,
         &[
-            ("Discard selected checkpoint…", false),
-            ("Recovery options", false),
+            ("Discard selected autosave…", false),
+            ("Safe mode\u{2026}", false),
             ("Open recovery comparison", true),
         ],
     );
@@ -158,7 +158,7 @@ pub(super) fn recovery_page(
         {
             *action = Some(LauncherAction::RequestDiscard(candidate));
         }
-        if Button::new("Recovery options").show(ui).clicked() {
+        if Button::new("Safe mode\u{2026}").show(ui).clicked() {
             *action = Some(LauncherAction::Page(ProjectLauncherPage::SafeMode));
         }
         let recoverable = selected
@@ -525,59 +525,27 @@ pub(super) fn safe_mode_page(
         .id_salt("workbench.project_launcher.safe-mode")
         .auto_shrink([false, false])
         .show(&mut body_ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.add_enabled_ui(!active, |ui| {
-                        safe_mode_option(
-                            ui,
-                            &mut cx.model
-                                .safe_mode
-                                .draft
-                                .disable_third_party_extensions,
-                            "Disable third-party extensions",
-                            "Built-in signed components remain available.",
-                            None,
-                        );
-                        safe_mode_option(
-                            ui,
-                            &mut cx.model
-                                .safe_mode
-                                .draft
-                                .disable_gpu_acceleration,
-                            "Disable GPU acceleration",
-                            "Use software rendering and conservative canvas limits.",
-                            (!software_rendering_supported()).then_some(
-                                "This renderer was selected before the launcher opened and cannot switch to a verified software adapter in this build.",
-                            ),
-                        );
-                        safe_mode_option(
-                            ui,
-                            &mut cx.model
-                                .safe_mode
-                                .draft
-                                .isolate_prior_documents,
-                            "Do not reopen prior documents",
-                            "Start in the empty workbench with project files closed.",
-                            None,
-                        );
-                        safe_mode_option(
-                            ui,
-                            &mut cx.model.safe_mode.draft.reset_layout,
-                            "Reset dock and monitor geometry",
-                            "Recover panels and windows to the primary display.",
-                            None,
-                        );
-                        safe_mode_option(
-                            ui,
-                            &mut cx.model
-                                .safe_mode
-                                .draft
-                                .open_project_read_only,
-                            "Open project read-only",
-                            "Prevent working-document writes while diagnosing content.",
-                            None,
-                        );
-                    });
-
+            ui.set_min_width(ui.available_width());
+            ui.add_enabled_ui(!active, |ui| {
+                safe_mode_option(
+                    ui,
+                    &mut cx.model.safe_mode.draft.isolate_prior_documents,
+                    "Do not reopen prior documents",
+                    "Start in the empty workbench with project files closed.",
+                );
+                safe_mode_option(
+                    ui,
+                    &mut cx.model.safe_mode.draft.reset_layout,
+                    "Reset dock and monitor geometry",
+                    "Recover panels and windows to the primary display.",
+                );
+                safe_mode_option(
+                    ui,
+                    &mut cx.model.safe_mode.draft.open_project_read_only,
+                    "Open project read-only",
+                    "Prevent working-document writes while diagnosing content.",
+                );
+            });
         });
 
     let options = cx.model.safe_mode.draft;
@@ -612,15 +580,9 @@ pub(super) fn safe_mode_page(
     });
 }
 
-pub(super) fn safe_mode_option(
-    ui: &mut Ui,
-    checked: &mut bool,
-    title: &str,
-    detail: &str,
-    unavailable_reason: Option<&str>,
-) {
+pub(super) fn safe_mode_option(ui: &mut Ui, checked: &mut bool, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
-    let enabled = ui.is_enabled() && unavailable_reason.is_none();
+    let enabled = ui.is_enabled();
     let text_color = if enabled {
         t.color.text
     } else {
@@ -692,11 +654,6 @@ pub(super) fn safe_mode_option(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(detail);
     });
-    let response = if let Some(reason) = unavailable_reason {
-        response.on_hover_text(reason)
-    } else {
-        response
-    };
     theme::paint_focus_ring(ui, &response, response.rect);
     if enabled && response_activated(ui, &response) {
         *checked = !*checked;

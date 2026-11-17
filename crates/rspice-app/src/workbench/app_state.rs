@@ -413,22 +413,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recent_project_refresh_preserves_launcher_metadata() {
+    fn recent_project_refresh_keeps_its_pin() {
         let mut state = AppState::default();
         let path = std::path::Path::new("C:/Engineering/afe.rspiceproj");
         state.remember_recent_file(RecentKind::Project, path);
         state.platform.recent_files[0].pinned = true;
-        state.platform.recent_files[0].owner = Some("Analog Design".to_owned());
-        state.platform.recent_files[0].tags = vec!["afe".to_owned(), "release".to_owned()];
         let first_timestamp = state.platform.recent_files[0].opened_at_unix_ms;
 
         state.remember_recent_file(RecentKind::Project, path);
 
         let recent = &state.platform.recent_files[0];
         assert!(recent.pinned);
-        assert_eq!(recent.owner.as_deref(), Some("Analog Design"));
-        assert_eq!(recent.tags, ["afe", "release"]);
         assert!(recent.opened_at_unix_ms >= first_timestamp);
+    }
+
+    /// A pinned project stays on the list however many others are opened
+    /// after it, and does not take one of their places.
+    #[test]
+    fn a_pinned_project_is_never_trimmed_off_the_recent_list() {
+        let mut state = AppState::default();
+        state.platform.recent_files.clear();
+        let listed = state.model.preferences.recent_files_listed();
+        let pinned = std::path::Path::new("C:/Engineering/pinned.rspiceproj");
+        state.remember_recent_file(RecentKind::Project, pinned);
+        state.platform.recent_files[0].pinned = true;
+        for index in 0..listed {
+            state.remember_recent_file(
+                RecentKind::Project,
+                &std::path::PathBuf::from(format!("C:/Engineering/{index}.rspiceproj")),
+            );
+        }
+
+        let projects = &state.platform.recent_files;
+        assert!(projects.iter().any(|recent| recent.path == pinned));
+        assert_eq!(projects.len(), listed + 1);
     }
 
     /// The list keeps as many projects as Recent projects listed asks,

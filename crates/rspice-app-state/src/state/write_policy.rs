@@ -3,13 +3,10 @@
 
 use std::collections::HashMap;
 
-/// Safe-mode controls requested for this process. Capability-gated options are
-/// rejected before activation, so every applied bit represents an enforced
-/// runtime policy rather than presentation-only state.
+/// Safe-mode controls requested for this process. Each option is one the
+/// running process enforces; an option with nothing behind it is not offered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalSafeModeOptions {
-    pub disable_third_party_extensions: bool,
-    pub disable_gpu_acceleration: bool,
     pub isolate_prior_documents: bool,
     pub reset_layout: bool,
     pub open_project_read_only: bool,
@@ -18,11 +15,6 @@ pub struct LocalSafeModeOptions {
 impl Default for LocalSafeModeOptions {
     fn default() -> Self {
         Self {
-            disable_third_party_extensions: true,
-            // eframe selects the graphics adapter before this launcher exists.
-            // The UI capability-gates this option until a software adapter can
-            // actually be selected for the current platform.
-            disable_gpu_acceleration: false,
             isolate_prior_documents: true,
             reset_layout: false,
             open_project_read_only: false,
@@ -32,11 +24,7 @@ impl Default for LocalSafeModeOptions {
 
 impl LocalSafeModeOptions {
     pub const fn has_effect(self) -> bool {
-        self.disable_third_party_extensions
-            || self.disable_gpu_acceleration
-            || self.isolate_prior_documents
-            || self.reset_layout
-            || self.open_project_read_only
+        self.isolate_prior_documents || self.reset_layout || self.open_project_read_only
     }
 }
 

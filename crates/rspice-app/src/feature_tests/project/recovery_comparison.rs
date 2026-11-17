@@ -45,8 +45,7 @@ fn listed_candidate(app: &mut RSpiceApp, schematic_path: &Path) -> RecoveryCandi
         path: schematic_path.to_path_buf(),
         opened_at_unix_ms: 0,
         pinned: false,
-        owner: None,
-        tags: Vec::new(),
+        missing: false,
     });
     app.state.platform.recovery_catalog.request_refresh();
     refresh_catalog_if_requested(

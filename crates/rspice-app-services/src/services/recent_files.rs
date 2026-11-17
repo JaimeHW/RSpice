@@ -1,5 +1,7 @@
 //! The recently opened projects and schematics the session remembers.
 
+use std::path::Path;
+
 /// What kind of document a recent-files entry points at. `.json` is a valid
 /// extension for both schematics and projects, so the kind is recorded at
 /// open/save time instead of being inferred from the path.
@@ -15,52 +17,115 @@ pub struct RecentFile {
     pub kind: RecentKind,
     pub path: std::path::PathBuf,
     /// Milliseconds since the Unix epoch when this entry most recently
-    /// became active. Legacy sessions deserialize to zero and retain their
-    /// stored list order.
+    /// became active. Zero when the time was never recorded.
     #[serde(default)]
     pub opened_at_unix_ms: u64,
-    /// User pin state for Project Launcher filtering.
+    /// Pinned by the reader: listed under Pinned and never trimmed off the
+    /// list by the Recent projects listed count.
     #[serde(default)]
     pub pinned: bool,
-    /// Governed project owner. This is never guessed from the operating-
-    /// system account when project metadata does not provide it.
-    #[serde(default)]
-    pub owner: Option<String>,
-    /// Searchable project classifications retained by the launcher.
-    #[serde(default)]
-    pub tags: Vec<String>,
+    /// An open this launch found the file gone. Runtime only: the drive may
+    /// come back, and the next open that finds the file clears it.
+    #[serde(skip)]
+    pub missing: bool,
 }
 
-impl RecentFile {
-    #[cfg(test)]
-    pub(crate) fn is_shared_project(&self) -> bool {
-        self.kind == RecentKind::Project && path_is_shared(&self.path)
+/// Pin `path`'s entry, or unpin it when it is pinned. Returns whether an
+/// entry was found.
+pub fn toggle_pin(recent_files: &mut [RecentFile], path: &Path) -> bool {
+    let Some(recent) = recent_files.iter_mut().find(|recent| recent.path == path) else {
+        return false;
+    };
+    recent.pinned = !recent.pinned;
+    true
+}
+
+/// Mark whether an open just found `path`'s file. Returns whether the mark
+/// moved.
+pub fn mark_missing(recent_files: &mut [RecentFile], path: &Path, missing: bool) -> bool {
+    let Some(recent) = recent_files.iter_mut().find(|recent| recent.path == path) else {
+        return false;
+    };
+    let moved = recent.missing != missing;
+    recent.missing = missing;
+    moved
+}
+
+/// Point `from`'s entry at `to`, where the reader found the file: it keeps
+/// its place and its pin, and an entry already listed for `to` gives way.
+/// Returns the entry as it now stands, or `None` when `from` is not listed.
+pub fn relocate(recent_files: &mut Vec<RecentFile>, from: &Path, to: &Path) -> Option<RecentFile> {
+    if from != to {
+        recent_files.retain(|recent| recent.path != to);
     }
-}
-
-#[cfg(test)]
-fn path_is_shared(path: &std::path::Path) -> bool {
-    let text = path.as_os_str().to_string_lossy();
-    text.starts_with(r"\\") || text.starts_with("//")
+    let recent = recent_files.iter_mut().find(|recent| recent.path == from)?;
+    recent.path = to.to_path_buf();
+    recent.missing = false;
+    Some(recent.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn launcher_metadata_is_backward_compatible_and_shared_paths_are_detected() {
-        let legacy = r#"{"kind":"Project","path":"C:/Engineering/afe.rspiceproj"}"#;
-        let recent: RecentFile = serde_json::from_str(legacy).expect("legacy recent entry loads");
-        assert_eq!(recent.opened_at_unix_ms, 0);
-        assert!(!recent.pinned);
-        assert!(recent.owner.is_none());
-        assert!(recent.tags.is_empty());
-        assert!(!recent.is_shared_project());
+    fn project(path: &str) -> RecentFile {
+        RecentFile {
+            kind: RecentKind::Project,
+            path: path.into(),
+            opened_at_unix_ms: 0,
+            pinned: false,
+            missing: false,
+        }
+    }
 
-        let shared: RecentFile =
-            serde_json::from_str(r#"{"kind":"Project","path":"\\\\server\\share\\rf.rspiceproj"}"#)
-                .expect("UNC recent entry loads");
-        assert!(shared.is_shared_project());
+    #[test]
+    fn a_pin_survives_the_session_and_a_missing_mark_does_not() {
+        let mut list = vec![project("C:/Engineering/afe.rspiceproj")];
+        assert!(toggle_pin(
+            &mut list,
+            Path::new("C:/Engineering/afe.rspiceproj")
+        ));
+        assert!(mark_missing(
+            &mut list,
+            Path::new("C:/Engineering/afe.rspiceproj"),
+            true
+        ));
+
+        let stored = serde_json::to_string(&list[0]).expect("serializes");
+        let restored: RecentFile = serde_json::from_str(&stored).expect("restores");
+        assert!(restored.pinned);
+        assert!(!restored.missing);
+        assert!(!stored.contains("missing"), "{stored}");
+    }
+
+    #[test]
+    fn a_located_entry_keeps_its_place_and_pin_and_replaces_a_duplicate() {
+        let mut list = vec![
+            project("C:/a.rspiceproj"),
+            project("E:/moved/b.rspiceproj"),
+            project("D:/b.rspiceproj"),
+        ];
+        list[2].pinned = true;
+        list[2].missing = true;
+
+        let located = relocate(
+            &mut list,
+            Path::new("D:/b.rspiceproj"),
+            Path::new("E:/moved/b.rspiceproj"),
+        )
+        .expect("listed");
+
+        assert_eq!(located.path, Path::new("E:/moved/b.rspiceproj"));
+        assert!(located.pinned);
+        assert!(!located.missing);
+        assert_eq!(
+            list.iter()
+                .map(|recent| recent.path.clone())
+                .collect::<Vec<_>>(),
+            [
+                std::path::PathBuf::from("C:/a.rspiceproj"),
+                std::path::PathBuf::from("E:/moved/b.rspiceproj"),
+            ]
+        );
     }
 }

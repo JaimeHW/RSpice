@@ -859,8 +859,7 @@ mod tests {
                 path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
                 opened_at_unix_ms: 1_760_000_000_000,
                 pinned: true,
-                owner: Some("Analog team".to_owned()),
-                tags: vec!["afe".to_owned()],
+                missing: false,
             });
 
         let restored = relaunch(saved_session(&mut state));

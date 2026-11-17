@@ -152,8 +152,7 @@ pub(super) fn populated_session() -> AppState {
             path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             opened_at_unix_ms: 1_760_000_000_000,
             pinned: true,
-            owner: Some("Analog team".to_owned()),
-            tags: vec!["afe".to_owned()],
+            missing: false,
         });
     state.cloud.license_key = Some("RSPICE-SESSION-FIXTURE".to_owned());
 

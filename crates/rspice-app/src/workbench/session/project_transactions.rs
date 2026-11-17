@@ -519,7 +519,16 @@ impl AppState {
     /// Close the open project without saving it, leaving the reader at
     /// `destination`. Returns whether it closed.
     pub(crate) fn close_project_discard(&mut self, destination: ProjectCloseDestination) -> bool {
-        close_project_discard(self, destination)
+        let ProjectCloseDestination::SafeMode(options) = destination else {
+            return close_project_discard(self, destination);
+        };
+        match enter_safe_mode(self, options) {
+            Ok(()) => true,
+            Err(error) => {
+                self.model.report_failure("Safe mode did not start", error);
+                false
+            }
+        }
     }
 
     /// Bind the project the restored session holds, then apply Projects and
@@ -1518,13 +1527,49 @@ pub(crate) fn request_example(state: &mut AppState, example: Example) {
     }
 }
 
+/// Whether a safe-mode request started it, or waits on the close review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SafeModeStart {
+    Started,
+    AwaitingReview,
+}
+
+/// Start safe mode with `options`. Closing a project that holds unsaved
+/// work goes through the close review first, as Close project does; safe
+/// mode starts once the review closes the project.
+pub(crate) fn start_local_safe_mode(
+    state: &mut AppState,
+    options: LocalSafeModeOptions,
+) -> Result<SafeModeStart, String> {
+    rspice_app_services::workbench::lifecycle::recovery::check_safe_mode_start(
+        &state.model,
+        options,
+    )?;
+    if options.isolate_prior_documents
+        && state.platform.project_lifecycle.is_open()
+        && !state.closing_loses_nothing()
+    {
+        let destination = ProjectCloseDestination::SafeMode(options);
+        if !crate::workbench::app::project_transactions::hold_for_configuration_edits(
+            state,
+            ConfirmationAction::CloseProject(destination),
+            None,
+        ) {
+            state
+                .workbench
+                .project_review_dialog
+                .show_close_project(destination);
+        }
+        return Ok(SafeModeStart::AwaitingReview);
+    }
+    enter_safe_mode(state, options)?;
+    Ok(SafeModeStart::Started)
+}
+
 /// Enter the safe-mode subset the current runtime can enforce. The exact
 /// pre-safe-mode session is serialized before any state is replaced and is
 /// used by AppState persistence until this process exits.
-pub(crate) fn start_local_safe_mode(
-    state: &mut crate::workbench::app_state::AppState,
-    options: LocalSafeModeOptions,
-) -> Result<(), String> {
+fn enter_safe_mode(state: &mut AppState, options: LocalSafeModeOptions) -> Result<(), String> {
     use rspice_app_services::workbench::lifecycle::recovery as services;
 
     services::check_safe_mode_start(&state.model, options)?;
