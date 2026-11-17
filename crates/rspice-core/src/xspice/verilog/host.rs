@@ -939,12 +939,6 @@ impl DigitalHost {
         self.store.connected_value(net)
     }
 
-    /// What the design's receivers of event net `net` see; see
-    /// `DigitalSignalStore::received_value`.
-    pub(crate) fn received_value(&self, net: usize) -> Option<DigitalValue> {
-        self.store.received_value(net)
-    }
-
     pub(crate) fn boundary_drive(
         &self,
         signal: DigitalSignalId,

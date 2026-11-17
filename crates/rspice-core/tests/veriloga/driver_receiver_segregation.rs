@@ -240,14 +240,75 @@ fn a_code_model_on_the_segment_feeds_the_converter_and_not_the_receivers() {
     assert_traced_as_received(&result);
 }
 
+/// [`deck`] with a buffer reading `p` into `q`.
+fn deck_with_buffer(source: &Source, options: &str) -> String {
+    deck(source, options).replace(
+        "ro o 0 1k\n",
+        "ro o 0 1k\n\
+         abuf p q buf\n\
+         .model buf d_buffer(rise_delay=1p fall_delay=1p)\n",
+    )
+}
+
+/// A code model's input on the segment is a receiver too (section 7.8.4
+/// rule 2): a buffer reading `p` sees what the design's receivers see,
+/// through both contentions, for both converters, and never the `x` the
+/// port's drive resolved with the converter's would give.
+#[test]
+fn a_code_model_input_on_the_segment_reads_what_the_design_receives() {
+    use rspice_core::xspice::DigitalState;
+    for options in ["", ".options connectrules=r\n"] {
+        let source = Source::new(&format!("{PORT}{AUTHORED}"));
+        let netlist = Netlist::parse(&deck_with_buffer(&source, options)).unwrap();
+        let result = Engine::default().run_tran(&netlist, 40e-9, 0.1e-9).unwrap();
+        let trace: Vec<_> = result
+            .digital_trace_named("q")
+            .unwrap_or_else(|| panic!("{options}: q has no digital trace"))
+            .iter()
+            .map(|point| (point.time, point.value.state))
+            .collect();
+        assert!(
+            trace
+                .iter()
+                .all(|(_, state)| matches!(state, DigitalState::Zero | DigitalState::One)),
+            "{options}: {trace:?}"
+        );
+        for (time, receives) in [
+            (5e-9, 0.0),
+            (15e-9, 0.0),
+            (22e-9, 0.0),
+            (27e-9, 1.0),
+            (35e-9, 1.0),
+        ] {
+            let state = trace
+                .iter()
+                .rev()
+                .find(|(at, _)| *at <= time)
+                .map(|(_, state)| *state);
+            let expected = if receives == 1.0 {
+                DigitalState::One
+            } else {
+                DigitalState::Zero
+            };
+            assert_eq!(state, Some(expected), "{options} q@{time}: {trace:?}");
+            let seen = received(&result, time);
+            assert!(
+                (seen - receives).abs() < 1e-6,
+                "{options} received@{time}: {seen} != {receives}"
+            );
+        }
+    }
+}
+
 /// A checkpoint taken while the port's driver and the converter disagree
 /// resumes onto the unbroken run's accepted points exactly, for both
-/// converters.
+/// converters, and the buffer reading the segment onto the unbroken run's
+/// events.
 #[test]
 fn a_segregated_net_resumes_from_a_checkpoint_in_contention_exactly() {
     for options in ["", ".options connectrules=r\n"] {
         let source = Source::new(&format!("{PORT}{AUTHORED}"));
-        let netlist = Netlist::parse(&deck(&source, options)).unwrap();
+        let netlist = Netlist::parse(&deck_with_buffer(&source, options)).unwrap();
         let engine = Engine::new(SimulationConfig::default());
         let (baseline, scheduled) = engine
             .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
@@ -293,11 +354,26 @@ fn a_segregated_net_resumes_from_a_checkpoint_in_contention_exactly() {
                 })
                 .collect::<Vec<_>>()
         };
+        let events = |result: &TransientResult| {
+            result
+                .digital_trace_named("q")
+                .expect("q has a digital trace")
+                .iter()
+                .filter(|point| point.time > saved.time)
+                .map(|point| (point.time.to_bits(), point.value))
+                .collect::<Vec<_>>()
+        };
         let expected = after(&baseline);
         assert!(
             expected.len() > 10,
             "{options}: the run continues after the seam"
         );
         assert_eq!(after(&resumed), expected, "{options}");
+        let expected = events(&baseline);
+        assert!(
+            !expected.is_empty(),
+            "{options}: the buffer's output moves after the seam"
+        );
+        assert_eq!(events(&resumed), expected, "{options}");
     }
 }

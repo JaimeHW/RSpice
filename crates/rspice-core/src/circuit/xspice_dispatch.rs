@@ -355,7 +355,9 @@ impl CircuitData {
     /// Whether an event dated `since` or later reached an instance that
     /// drives an analog output, on a net `counts` admits: whether the event
     /// activity there stepped an analog input. An event that repeats a net's
-    /// value counts too.
+    /// value counts too, and so does a change to what such an instance's
+    /// inout port reads of the net's other drivers, which on a segregated net
+    /// moves while the net's own value holds.
     #[cfg(feature = "veriloga")]
     pub(crate) fn xspice_analog_input_event_since(
         &mut self,
@@ -380,6 +382,10 @@ impl CircuitData {
             || real
                 .iter()
                 .any(|node| dated(&values.real_event_times, node))
+            || dispatch.continuous_output_instances.iter().any(|&index| {
+                self.xspice_instances[index as usize]
+                    .other_digital_drivers_dated_since(since, &counts)
+            })
     }
 
     /// Discard the cached sensitivity map.

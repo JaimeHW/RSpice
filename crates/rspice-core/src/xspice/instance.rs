@@ -2159,6 +2159,41 @@ impl XspiceInstance {
         }
     }
 
+    /// Whether what an inout port element on a net `counts` admits reads of
+    /// the net's other drivers last changed at or after `since`.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn other_digital_drivers_dated_since(
+        &self,
+        since: Value,
+        counts: &impl Fn(usize) -> bool,
+    ) -> bool {
+        let dated = |port: &str, index: usize, node: usize| {
+            counts(node)
+                && self
+                    .context
+                    .other_digital_drivers(port, index)
+                    .is_some_and(|(_, time)| time >= since)
+        };
+        self.ports
+            .iter()
+            .zip(self.connections.iter())
+            .filter(|(port, _)| port.direction == super::PortDirection::InOut)
+            .any(|(port, connection)| match connection {
+                PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => {
+                    dated(&port.name, 0, *node)
+                }
+                PortConnection::DigitalVector(nodes) => nodes
+                    .iter()
+                    .enumerate()
+                    .any(|(index, node)| dated(&port.name, index, *node)),
+                PortConnection::DigitalVectorMapped(nodes) => nodes
+                    .iter()
+                    .enumerate()
+                    .any(|(index, connection)| dated(&port.name, index, connection.node)),
+                _ => false,
+            })
+    }
+
     #[cfg(any(feature = "veriloga", test))]
     #[doc(hidden)]
     pub fn observe_other_digital_drivers(

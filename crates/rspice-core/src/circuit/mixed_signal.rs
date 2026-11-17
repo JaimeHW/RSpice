@@ -1848,11 +1848,9 @@ impl CircuitData {
 
         let mut claims: Vec<(crate::circuit::NodeId, Claim, DigitalValue)> = Vec::new();
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
-            // What the design's receivers see, which on a segregated net is
-            // the connect module's drive alone.
             claims.extend(
                 digital
-                    .received_event_values()
+                    .event_values()
                     .map(|(node, value)| (node, Claim::Resolved, value)),
             );
             // A port's deck net that a code model drives beside the port
@@ -1863,7 +1861,7 @@ impl CircuitData {
                 for host in &self.mixed_signal_hosts {
                     host.traced_port_endpoints(|deck, endpoint| {
                         if bindings.code_model_drives(endpoint)
-                            && let Some(value) = digital.received_event_value(endpoint)
+                            && let Some(value) = digital.event_value(endpoint)
                         {
                             claims.push((deck, Claim::Resolved, value));
                         }

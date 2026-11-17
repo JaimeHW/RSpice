@@ -1146,32 +1146,13 @@ impl MixedDigitalCoordinator {
         })
     }
 
-    /// What the design's receivers of the event net the circuit's event node
-    /// `node` carries see: the value it resolved to, or `None` for a node
-    /// that is not the design's; but on a net a
-    /// bidirectional connect module segregates, that module's drive alone.
-    pub(crate) fn received_event_value(&self, node: usize) -> Option<crate::xspice::DigitalValue> {
+    /// The value the event net the circuit's event node `node` carries
+    /// resolved to, or `None` for a node that is not the design's. On a net a
+    /// bidirectional connect module segregates, that is the module's drive
+    /// alone, which every receiver on the net sees.
+    pub(crate) fn event_value(&self, node: usize) -> Option<crate::xspice::DigitalValue> {
         let net = self.event_nodes.iter().position(|&event| event == node)?;
-        self.digital.received_value(net)
-    }
-
-    /// Every event net's [`Self::received_event_value`]: the values the
-    /// event trace records.
-    pub(crate) fn received_event_values(
-        &self,
-    ) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {
-        self.event_nodes
-            .iter()
-            .enumerate()
-            .map(|(index, &node)| {
-                (
-                    node,
-                    self.digital
-                        .received_value(index)
-                        .expect("elaborated event bit"),
-                )
-            })
-            .filter(|(node, _)| *node > 0)
+        self.digital.connected_value(net)
     }
 
     #[doc(hidden)]

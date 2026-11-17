@@ -80,8 +80,6 @@ impl Segregation {
 #[derive(Clone, Copy)]
 struct NetReading {
     hdl: StrengthBit,
-    /// Every driver resolved, as XSPICE resolves an event node.
-    resolved: DigitalValue,
     receivers: DigitalValue,
     drivers: DigitalValue,
 }
@@ -101,11 +99,9 @@ struct BitTopology {
 
 pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
-    /// Each net's value as XSPICE resolves an event node: every driver.
+    /// Each net's value as its receivers, the design's and XSPICE's, see it:
+    /// every driver resolved, but on a segregated net the converter's drive.
     resolved: Vec<DigitalValue>,
-    /// Each net's value as its HDL receivers see it, which the trace
-    /// records: `resolved`, but on a segregated net the converter's drive.
-    received: Vec<DigitalValue>,
     external_values: Vec<DigitalValue>,
     other_driver_values: Vec<DigitalValue>,
     pending: Vec<Option<FourStateValue>>,
@@ -119,7 +115,6 @@ impl Clone for ConnectedBits {
         let Self {
             topology,
             resolved,
-            received,
             external_values,
             other_driver_values,
             pending,
@@ -128,7 +123,6 @@ impl Clone for ConnectedBits {
         Self {
             topology: Arc::clone(topology),
             resolved: resolved.clone(),
-            received: received.clone(),
             external_values: external_values.clone(),
             other_driver_values: other_driver_values.clone(),
             pending: pending.clone(),
@@ -140,7 +134,6 @@ impl Clone for ConnectedBits {
         let Self {
             topology,
             resolved,
-            received,
             external_values,
             other_driver_values,
             pending,
@@ -149,7 +142,6 @@ impl Clone for ConnectedBits {
         let Self {
             topology: source_topology,
             resolved: source_resolved,
-            received: source_received,
             external_values: source_external_values,
             other_driver_values: source_other_driver_values,
             pending: source_pending,
@@ -157,7 +149,6 @@ impl Clone for ConnectedBits {
         } = source;
         topology.clone_from(source_topology);
         resolved.clone_from(source_resolved);
-        received.clone_from(source_received);
         external_values.clone_from(source_external_values);
         other_driver_values.clone_from(source_other_driver_values);
         pending.clone_from(source_pending);
@@ -172,14 +163,12 @@ impl ConnectedBits {
         let Self {
             topology: _,
             resolved,
-            received,
             external_values,
             other_driver_values,
             pending,
             touched,
         } = self;
         *resolved == saved.resolved
-            && *received == saved.received
             && *external_values == saved.external_values
             && *other_driver_values == saved.other_driver_values
             && *pending == saved.pending
@@ -193,7 +182,6 @@ impl ConnectedBits {
         Ok(BitCheckpoint {
             topology: super::checkpoint::fingerprint(self.topology.as_ref())?,
             resolved: self.resolved.clone(),
-            received: self.received.clone(),
             external: self.external_values.clone(),
             other_drivers: self.other_driver_values.clone(),
         })
@@ -202,7 +190,6 @@ impl ConnectedBits {
     pub(super) fn restore_checkpoint(&self, image: &BitCheckpoint) -> Result<Self, String> {
         if image.topology != super::checkpoint::fingerprint(self.topology.as_ref())?
             || image.resolved.len() != self.resolved.len()
-            || image.received.len() != self.received.len()
             || image.external.len() != self.external_values.len()
             || image.other_drivers.len() != self.other_driver_values.len()
         {
@@ -210,7 +197,6 @@ impl ConnectedBits {
         }
         let mut restored = Self::fresh(Arc::clone(&self.topology));
         restored.resolved.clone_from(&image.resolved);
-        restored.received.clone_from(&image.received);
         restored.external_values.clone_from(&image.external);
         restored
             .other_driver_values
@@ -221,7 +207,6 @@ impl ConnectedBits {
     fn fresh(topology: Arc<BitTopology>) -> Self {
         Self {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
-            received: vec![DigitalValue::high_z(); topology.nets.len()],
             external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             other_driver_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             pending: vec![None; topology.by_signal.len()],
@@ -248,7 +233,6 @@ impl ConnectedBits {
 pub(super) struct BitCheckpoint {
     topology: [u8; 32],
     resolved: Vec<DigitalValue>,
-    received: Vec<DigitalValue>,
     external: Vec<DigitalValue>,
     other_drivers: Vec<DigitalValue>,
 }
@@ -524,16 +508,6 @@ impl DigitalSignalStore {
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         let bits = self.connected.as_ref()?;
         bits.resolved
-            .get(*bits.topology.external_nets.get(net)?)
-            .copied()
-    }
-
-    /// What the HDL receivers of the caller's event net `net` see: its
-    /// [`Self::connected_value`], but on a segregated net the converter's
-    /// drive alone.
-    pub(crate) fn received_value(&self, net: usize) -> Option<DigitalValue> {
-        let bits = self.connected.as_ref()?;
-        bits.received
             .get(*bits.topology.external_nets.get(net)?)
             .copied()
     }
@@ -831,7 +805,6 @@ impl DigitalSignalStore {
                 .unwrap_or_else(|| self.connected_external_value(connected, net_index, hdl, None));
             return NetReading {
                 hdl,
-                resolved,
                 receivers: resolved,
                 drivers: resolved,
             };
@@ -855,16 +828,11 @@ impl DigitalSignalStore {
                 !converters.contains(&slot)
             })
         });
-        // XSPICE resolves an event node over every driver on it, the
-        // converter's receiving half among them; only the design's receivers
-        // are segregated. A code model reading the node, the converter's own
-        // inout port included, keeps reading it as ngspice resolves it.
-        let resolved = forced.unwrap_or_else(|| {
-            self.connected_external_value(connected, net_index, self.connected_hdl_drive(net), None)
-        });
+        // Every receiver on the segment sees the converter's drive (section
+        // 7.8.4 rule 2), a code model's input among them: the XSPICE event
+        // node carries `receivers` too.
         NetReading {
             hdl,
-            resolved,
             receivers,
             drivers,
         }
@@ -1035,8 +1003,7 @@ impl DigitalSignalStore {
         for (index, net) in connected.topology.nets.iter().enumerate() {
             members.extend(net.members.iter().copied());
             let reading = self.read_connected_net(connected, index);
-            if connected.resolved[index] != reading.resolved
-                || connected.received[index] != reading.receivers
+            if connected.resolved[index] != reading.receivers
                 || net.members.iter().any(|member| {
                     self.values[usize::from(member.signal)].bit(member.bit)
                         != hdl_bit(Self::member_reading(net, member, reading))
@@ -1077,7 +1044,7 @@ impl DigitalSignalStore {
         // section 9.3.2): a converter reading it sees the forced value, and a
         // drive from outside the design is overridden while the force lasts.
         let reading = self.read_connected_net(connected, net_index);
-        let resolved = reading.resolved;
+        let resolved = reading.receivers;
         for &slot in &topology.external_by_net[net_index] {
             if topology.other_driver_observers[slot] {
                 let value = self.observer_reading(connected, net_index, slot, reading);
@@ -1092,15 +1059,10 @@ impl DigitalSignalStore {
                 }
             }
         }
-        let received = std::mem::replace(&mut connected.received[net_index], reading.receivers);
-        if received != reading.receivers {
-            for &net in &net.external_nets {
-                self.trace_resolved_bit(net, reading.receivers);
-            }
-        }
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
         if previous != resolved {
             for &net in &net.external_nets {
+                self.trace_resolved_bit(net, resolved);
                 if topology.observed[net] {
                     self.external_changes
                         .push(ExternalNetChange::Bits(DigitalBitChange {
