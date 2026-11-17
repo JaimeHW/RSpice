@@ -9,6 +9,9 @@ use rspice_app_project::workbench::app::dialogs::project::new_project::{
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::workspace::DEFAULT_TOP_CELL;
 
+/// One edit to the fields.
+type Edit = fn(&mut NewProjectDialogState);
+
 fn opened() -> NewProjectDialogState {
     let mut state = AppState::default();
     open_new_project_dialog(&mut state);
@@ -63,7 +66,7 @@ fn the_name_offered_is_one_the_location_does_not_hold() {
 #[test]
 fn each_field_says_why_it_refuses_what_it_holds() {
     let mut dialog = opened();
-    let cases: [(NewProjectField, fn(&mut NewProjectDialogState), &str); 5] = [
+    let cases: [(NewProjectField, Edit, &str); 5] = [
         (
             NewProjectField::Name,
             |dialog| dialog.name = "  ".to_owned(),

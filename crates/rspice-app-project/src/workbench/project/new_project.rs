@@ -33,6 +33,14 @@ const LABEL_GAP: f32 = tokens::SP_5;
 /// Every label the form has; the label column is as wide as the widest.
 const LABELS: [&str; 5] = ["Name", "Location", "Library", "Top cell", "Technology"];
 
+/// What the dialog is for, told to a screen reader as it opens.
+#[cfg(not(target_arch = "wasm32"))]
+const DESCRIPTION: &str = "Create a project in a folder of its own; Create writes its file and \
+     replaces the current session.";
+#[cfg(target_arch = "wasm32")]
+const DESCRIPTION: &str = "Create a project in place of the current session; the first save asks \
+     where it is written.";
+
 impl ProjectFeature {
     /// Draw New project. Create hands the shell the creation, which replaces
     /// the session; the dialog stays open until the shell writes the outcome
@@ -48,6 +56,7 @@ impl ProjectFeature {
         // frame can never let an invalid identity through.
         let creatable = dialog.creatable().is_ok();
         let mut shell = Dialog::new("New project", "Create")
+            .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .width_from_content(DIALOG_WIDTH)
             .flush_body()
