@@ -35,6 +35,87 @@ pub(crate) struct SourceExcitation {
     pub ac_phase: Value,
     pub source_spec: Option<crate::netlist::SourceSpec>,
 }
+
+/// What a source's build recorded about its PWL table, so that no
+/// evaluation has to work it out again: the loaded data of a `PWL FILE=`
+/// source, and whether an inline table's times never decrease.
+#[derive(Debug, Clone, Default)]
+struct PwlRecord {
+    /// External files are resolved once while the circuit is built. Keeping
+    /// the loaded waveform here makes a simulation deterministic if the file
+    /// later changes and keeps filesystem and cache work out of the transient
+    /// hot path.
+    file: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
+    sorted: bool,
+}
+
+impl PwlRecord {
+    fn new(
+        spec: Option<&crate::netlist::SourceSpec>,
+        file: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
+    ) -> Self {
+        let sorted = spec
+            .and_then(inline_pwl_points)
+            .is_some_and(sorted_pwl_times);
+        Self { file, sorted }
+    }
+
+    fn snapshot(&self) -> PwlSnapshot<'_> {
+        PwlSnapshot {
+            file: self.file.as_deref(),
+            sorted: self.sorted,
+        }
+    }
+}
+
+/// A source's build-time PWL record, as one evaluation reads it.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PwlSnapshot<'a> {
+    /// The loaded data of a `PWL FILE=` source.
+    pub(crate) file: Option<&'a crate::device::pwl_file::PwlWaveform>,
+    /// The inline table's times never decrease, so a binary search finds the
+    /// segment the first-match scan finds. Unset, evaluation scans, which is
+    /// exact for every table.
+    pub(crate) sorted: bool,
+}
+
+/// The inline PWL table a source plays, under any wrapper that keeps its
+/// transient behavior.
+fn inline_pwl_points(spec: &crate::netlist::SourceSpec) -> Option<&[(Value, Value)]> {
+    use crate::netlist::SourceSpec;
+    match spec {
+        SourceSpec::Pwl { points, .. } => Some(points),
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            inline_pwl_points(inner)
+        }
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => inline_pwl_points(transient),
+        _ => None,
+    }
+}
+
+/// Whether a PWL table's times never decrease. A NaN time is not ordered.
+pub(crate) fn sorted_pwl_times(points: &[(Value, Value)]) -> bool {
+    points.windows(2).all(|pair| pair[0].0 <= pair[1].0)
+}
+
+/// The segment `(points[i], points[i + 1])` the first-match scan picks for
+/// `time`: the first with `points[i].0 <= time < points[i + 1].0`. A table
+/// whose times never decrease has at most one such segment, and a binary
+/// search finds it; any other table keeps the scan.
+#[inline]
+fn pwl_segment(points: &[(Value, Value)], time: Value, sorted: bool) -> Option<usize> {
+    if sorted {
+        debug_assert!(sorted_pwl_times(points));
+        let upper = points.partition_point(|point| point.0 <= time);
+        (upper > 0 && upper < points.len()).then(|| upper - 1)
+    } else {
+        points
+            .windows(2)
+            .position(|pair| time >= pair[0].0 && time < pair[1].0)
+    }
+}
 use std::cell::Cell;
 use std::collections::VecDeque;
 
@@ -51,12 +132,8 @@ pub struct VoltageSources {
     pub ac_phases: Vec<Value>,
     /// Full source specification for transient waveform evaluation
     pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
-    /// Circuit-owned external PWL snapshots aligned with `source_specs`.
-    ///
-    /// External files are resolved once while the circuit is built. Keeping the
-    /// loaded waveform here makes a simulation deterministic if the file later
-    /// changes and avoids filesystem/cache work in the transient hot path.
-    pwl_waveforms: Vec<Option<Arc<crate::device::pwl_file::PwlWaveform>>>,
+    /// Circuit-owned PWL records aligned with `source_specs`.
+    pwl_records: Vec<PwlRecord>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br] per source
     csc_indices: Vec<[Option<CscIndex>; 4]>,
     /// Optional transient context used to resolve source defaults.
@@ -352,7 +429,7 @@ fn pwl_waveform_cache_entry_bytes(
 }
 
 /// Methods both independent-source families share: each keeps `names`,
-/// `source_specs`, `pwl_waveforms` and `transient_context` in the same SoA
+/// `source_specs`, `pwl_records` and `transient_context` in the same SoA
 /// shape.
 macro_rules! shared_source_methods {
     () => {
@@ -445,8 +522,8 @@ macro_rules! shared_source_methods {
             self.dc_values[index] = dc_value;
             self.ac_magnitudes[index] = ac_magnitude;
             self.ac_phases[index] = ac_phase;
+            self.pwl_records[index] = PwlRecord::new(source_spec.as_ref(), pwl_waveform);
             self.source_specs[index] = source_spec;
-            self.pwl_waveforms[index] = pwl_waveform;
             true
         }
 
@@ -464,20 +541,14 @@ macro_rules! shared_source_methods {
         /// or accidentally reading a changed external waveform file.
         pub(crate) fn transient_specs_named_with_pwl(
             &self,
-        ) -> impl Iterator<
-            Item = (
-                &str,
-                &crate::netlist::SourceSpec,
-                Option<&crate::device::pwl_file::PwlWaveform>,
-            ),
-        > {
+        ) -> impl Iterator<Item = (&str, &crate::netlist::SourceSpec, PwlSnapshot<'_>)> {
             self.names
                 .iter()
                 .zip(&self.source_specs)
-                .zip(&self.pwl_waveforms)
-                .filter_map(|((name, spec), waveform)| {
+                .zip(&self.pwl_records)
+                .filter_map(|((name, spec), record)| {
                     spec.as_ref()
-                        .map(|spec| (name.as_str(), spec, waveform.as_deref()))
+                        .map(|spec| (name.as_str(), spec, record.snapshot()))
                 })
         }
     };
@@ -509,7 +580,7 @@ impl VoltageSources {
         self.ac_magnitudes.push(0.0);
         self.ac_phases.push(0.0);
         self.source_specs.push(None);
-        self.pwl_waveforms.push(None);
+        self.pwl_records.push(PwlRecord::default());
         self.csc_indices.push([None; 4]);
         self.invalidate_constraint_projection();
     }
@@ -554,8 +625,9 @@ impl VoltageSources {
         self.dc_values.push(dc_value);
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
+        self.pwl_records
+            .push(PwlRecord::new(source_spec.as_ref(), pwl_waveform));
         self.source_specs.push(source_spec);
-        self.pwl_waveforms.push(pwl_waveform);
         self.csc_indices.push([None; 4]);
         self.invalidate_constraint_projection();
     }
@@ -590,7 +662,7 @@ impl VoltageSources {
                 spec,
                 time,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
             ),
             None => self.dc_values[index],
         };
@@ -603,7 +675,7 @@ impl VoltageSources {
         self.ac_magnitudes[index] = 0.0;
         self.ac_phases[index] = 0.0;
         self.source_specs[index] = None;
-        self.pwl_waveforms[index] = None;
+        self.pwl_records[index] = PwlRecord::default();
         Some(value)
     }
 
@@ -683,7 +755,7 @@ impl VoltageSources {
             || self.ac_magnitudes.len() != source_count
             || self.ac_phases.len() != source_count
             || self.source_specs.len() != source_count
-            || self.pwl_waveforms.len() != source_count
+            || self.pwl_records.len() != source_count
             || self.csc_indices.len() != source_count
         {
             return Err(CircuitError::InvalidComponent(
@@ -858,7 +930,7 @@ impl VoltageSources {
             || self.node_neg.len() != self.names.len()
             || self.dc_values.len() != self.names.len()
             || self.source_specs.len() != self.names.len()
-            || self.pwl_waveforms.len() != self.names.len()
+            || self.pwl_records.len() != self.names.len()
             || projection
                 .constraints
                 .iter()
@@ -1108,7 +1180,7 @@ impl VoltageSources {
                 spec,
                 time,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
                 side,
             ),
             None => self.dc_values[index],
@@ -1146,7 +1218,7 @@ impl VoltageSources {
                         spec,
                         time,
                         self.transient_context,
-                        self.pwl_waveforms[index].as_deref(),
+                        self.pwl_records[index].snapshot(),
                         side,
                     );
                     value.is_finite().then_some(value)
@@ -1157,7 +1229,7 @@ impl VoltageSources {
                         time,
                         order,
                         self.transient_context,
-                        self.pwl_waveforms[index].as_deref(),
+                        self.pwl_records[index].snapshot(),
                         side,
                     )
                 }),
@@ -1171,7 +1243,7 @@ impl VoltageSources {
                     spec,
                     time,
                     self.transient_context,
-                    self.pwl_waveforms[index].as_deref(),
+                    self.pwl_records[index].snapshot(),
                 ) {
                     Some(0.0)
                 } else {
@@ -1193,7 +1265,7 @@ impl VoltageSources {
                 period,
                 order,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
             )
         })
     }
@@ -1205,7 +1277,7 @@ impl VoltageSources {
                 spec,
                 time,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
             )
         })
     }
@@ -1216,20 +1288,11 @@ impl VoltageSources {
         let context = self.transient_context;
         self.source_specs
             .iter()
-            .zip(&self.pwl_waveforms)
-            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform)))
-            .map(|(spec, waveform)| {
-                (Self::evaluate_source_at_time_with_context_and_pwl(
-                    spec,
-                    t1,
-                    context,
-                    waveform.as_deref(),
-                ) - Self::evaluate_source_at_time_with_context_and_pwl(
-                    spec,
-                    t0,
-                    context,
-                    waveform.as_deref(),
-                ))
+            .zip(&self.pwl_records)
+            .filter_map(|(spec, record)| spec.as_ref().map(|spec| (spec, record.snapshot())))
+            .map(|(spec, pwl)| {
+                (Self::evaluate_source_at_time_with_context_and_pwl(spec, t1, context, pwl)
+                    - Self::evaluate_source_at_time_with_context_and_pwl(spec, t0, context, pwl))
                 .abs()
             })
             .fold(0.0, Value::max)
@@ -1369,7 +1432,7 @@ impl VoltageSources {
                     spec,
                     time,
                     context,
-                    self.pwl_waveforms[idx].as_deref(),
+                    self.pwl_records[idx].snapshot(),
                 ) - self.dc_values[idx])
                     .abs()
             })
@@ -1834,7 +1897,12 @@ impl VoltageSources {
         time: Value,
         context: Option<TransientSourceContext>,
     ) -> Value {
-        Self::evaluate_source_at_time_with_context_and_pwl(spec, time, context, None)
+        Self::evaluate_source_at_time_with_context_and_pwl(
+            spec,
+            time,
+            context,
+            PwlSnapshot::default(),
+        )
     }
 
     #[inline]
@@ -1842,7 +1910,7 @@ impl VoltageSources {
         spec: &crate::netlist::SourceSpec,
         time: Value,
         context: Option<TransientSourceContext>,
-        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl_waveform: PwlSnapshot<'_>,
     ) -> Value {
         Self::source_time_component::<false>(spec, time, context, pwl_waveform)
     }
@@ -1875,9 +1943,10 @@ impl VoltageSources {
                     spec,
                     time,
                     self.transient_context,
-                    self.pwl_waveforms
+                    self.pwl_records
                         .get(source_index)
-                        .and_then(Option::as_deref),
+                        .map(PwlRecord::snapshot)
+                        .unwrap_or_default(),
                     side,
                 ),
                 None => dc_value,
@@ -2160,11 +2229,14 @@ impl VoltageSources {
         Some((bytes[1], *bytes.last()?, bytes.len() - 1))
     }
 
+    /// `sorted` is the source's build-time record that the table's times
+    /// never decrease ([`sorted_pwl_times`]).
     fn pwl_time_component<const DERIVATIVE: bool>(
         points: &[(Value, Value)],
         time: Value,
         delay: Value,
         repeat_from: Option<Value>,
+        sorted: bool,
     ) -> Value {
         if points.is_empty() {
             return 0.0;
@@ -2189,7 +2261,7 @@ impl VoltageSources {
             let start = start.max(points[0].0);
             let period = time - start;
             if period.is_finite() && period > 0.0 {
-                if Self::pwl_time_component::<false>(points, start, 0.0, None)
+                if Self::pwl_time_component::<false>(points, start, 0.0, None, sorted)
                     != points[points.len() - 1].1
                 {
                     return Value::NAN;
@@ -2204,24 +2276,22 @@ impl VoltageSources {
                 points[points.len() - 1].1
             };
         }
-        for window in points.windows(2) {
-            let (t1, v1) = window[0];
-            let (t2, v2) = window[1];
-            if time >= t1 && time < t2 {
-                let dt = t2 - t1;
-                if !dt.is_finite() || dt == 0.0 {
-                    return if DERIVATIVE { 0.0 } else { v1 };
-                }
-                return if DERIVATIVE {
-                    if shifted_time == points[0].0 && v1 != points[0].1 {
-                        Value::NAN
-                    } else {
-                        (v2 - v1) / dt
-                    }
-                } else {
-                    v1 + (v2 - v1) * ((time - t1) / dt)
-                };
+        if let Some(segment) = pwl_segment(points, time, sorted) {
+            let (t1, v1) = points[segment];
+            let (t2, v2) = points[segment + 1];
+            let dt = t2 - t1;
+            if !dt.is_finite() || dt == 0.0 {
+                return if DERIVATIVE { 0.0 } else { v1 };
             }
+            return if DERIVATIVE {
+                if shifted_time == points[0].0 && v1 != points[0].1 {
+                    Value::NAN
+                } else {
+                    (v2 - v1) / dt
+                }
+            } else {
+                v1 + (v2 - v1) * ((time - t1) / dt)
+            };
         }
         if DERIVATIVE {
             0.0
@@ -2244,8 +2314,8 @@ pub struct CurrentSources {
     pub ac_phases: Vec<Value>,
     /// Full source specification for transient waveform evaluation
     pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
-    /// Circuit-owned external PWL snapshots aligned with `source_specs`.
-    pwl_waveforms: Vec<Option<Arc<crate::device::pwl_file::PwlWaveform>>>,
+    /// Circuit-owned PWL records aligned with `source_specs`.
+    pwl_records: Vec<PwlRecord>,
     /// Optional transient context used to resolve source defaults.
     transient_context: Option<TransientSourceContext>,
 }
@@ -2294,7 +2364,7 @@ impl CurrentSources {
                 spec,
                 time,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
                 side,
             ),
             None => dc_value,
@@ -2338,7 +2408,7 @@ impl CurrentSources {
                         spec,
                         time,
                         self.transient_context,
-                        self.pwl_waveforms[index].as_deref(),
+                        self.pwl_records[index].snapshot(),
                         side,
                     );
                     value.is_finite().then_some(value)
@@ -2349,7 +2419,7 @@ impl CurrentSources {
                         time,
                         order,
                         self.transient_context,
-                        self.pwl_waveforms[index].as_deref(),
+                        self.pwl_records[index].snapshot(),
                         side,
                     )
                 }),
@@ -2363,7 +2433,7 @@ impl CurrentSources {
                     spec,
                     time,
                     self.transient_context,
-                    self.pwl_waveforms[index].as_deref(),
+                    self.pwl_records[index].snapshot(),
                 ) {
                     Some(0.0)
                 } else {
@@ -2390,7 +2460,7 @@ impl CurrentSources {
                 period,
                 order,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
             )
         })
     }
@@ -2403,7 +2473,7 @@ impl CurrentSources {
                 spec,
                 time,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
             )
         })
     }
@@ -2417,7 +2487,7 @@ impl CurrentSources {
                 spec,
                 period,
                 self.transient_context,
-                self.pwl_waveforms[index].as_deref(),
+                self.pwl_records[index].snapshot(),
                 true,
             )
         })
@@ -2435,7 +2505,7 @@ impl CurrentSources {
         self.ac_magnitudes.push(0.0);
         self.ac_phases.push(0.0);
         self.source_specs.push(None);
-        self.pwl_waveforms.push(None);
+        self.pwl_records.push(PwlRecord::default());
     }
 
     /// Add current source with AC and transient specification.
@@ -2473,8 +2543,9 @@ impl CurrentSources {
         self.dc_values.push(dc_value);
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
+        self.pwl_records
+            .push(PwlRecord::new(source_spec.as_ref(), pwl_waveform));
         self.source_specs.push(source_spec);
-        self.pwl_waveforms.push(pwl_waveform);
     }
 
     shared_source_methods!();
@@ -2492,7 +2563,7 @@ impl CurrentSources {
         self.ac_magnitudes[index] = 0.0;
         self.ac_phases[index] = 0.0;
         self.source_specs[index] = None;
-        self.pwl_waveforms[index] = None;
+        self.pwl_records[index] = PwlRecord::default();
         Some(value)
     }
 
@@ -2578,19 +2649,13 @@ impl CurrentSources {
         let context = self.transient_context;
         self.source_specs
             .iter()
-            .zip(&self.pwl_waveforms)
-            .filter_map(|(spec, waveform)| spec.as_ref().map(|spec| (spec, waveform)))
-            .map(|(spec, waveform)| {
+            .zip(&self.pwl_records)
+            .filter_map(|(spec, record)| spec.as_ref().map(|spec| (spec, record.snapshot())))
+            .map(|(spec, pwl)| {
                 (VoltageSources::evaluate_source_at_time_with_context_and_pwl(
-                    spec,
-                    t1,
-                    context,
-                    waveform.as_deref(),
+                    spec, t1, context, pwl,
                 ) - VoltageSources::evaluate_source_at_time_with_context_and_pwl(
-                    spec,
-                    t0,
-                    context,
-                    waveform.as_deref(),
+                    spec, t0, context, pwl,
                 ))
                 .abs()
             })
@@ -2609,7 +2674,7 @@ impl CurrentSources {
                     spec,
                     time,
                     context,
-                    self.pwl_waveforms[idx].as_deref(),
+                    self.pwl_records[idx].snapshot(),
                 ) - self.finite_dc_value(idx))
                 .abs()
             })
@@ -3803,6 +3868,143 @@ mod tests {
         sources.stamp_transient_rhs(&mut rhs, 0.5e-6);
         assert_close(rhs[0], -0.5e-3);
         assert_close(sources.max_dc_to_transient_delta(0.5e-6), 0.5e-3);
+    }
+
+    /// A table whose times never decrease is looked up by binary search. It
+    /// must pick the segment the first-match scan picks, to the bit, for
+    /// values and slopes: at and beside every knot, on repeated times, before
+    /// and after the table, after a delay and through every repeat.
+    #[test]
+    fn sorted_pwl_lookup_matches_the_first_match_scan() {
+        let tables: [&[(Value, Value)]; 4] = [
+            &[(0.0, 0.0), (1.0, 2.0), (2.0, -1.0), (3.5, 4.0)],
+            // Vertical steps, one of them three values deep, and a repeated
+            // last time.
+            &[
+                (0.0, 1.0),
+                (1.0, 2.0),
+                (1.0, 5.0),
+                (2.0, 3.0),
+                (2.0, -3.0),
+                (2.0, 7.0),
+                (3.0, 0.5),
+                (3.0, 0.5),
+            ],
+            &[(0.25, 3.0), (0.75, -2.0), (1.5, 1.0), (1.5, 6.0)],
+            &[(0.0, 2.0), (1.0e-9, 2.0)],
+        ];
+        for table in tables {
+            assert!(sorted_pwl_times(table));
+            let last = table[table.len() - 1].0;
+            let mut probes = vec![-1.0, 0.0, 0.5 * last, last, 2.0 * last, 7.3 * last];
+            for &(time, _) in table {
+                probes.extend([time, time.next_down(), time.next_up()]);
+            }
+            for pair in table.windows(2) {
+                probes.push(0.5 * (pair[0].0 + pair[1].0));
+            }
+            for delay in [0.0, 0.125] {
+                for repeat_from in [None, Some(0.0), Some(table[1].0), Some(last), Some(-1.0)] {
+                    for &probe in &probes {
+                        let shifted = probe + delay;
+                        for time in [shifted, shifted.next_down(), shifted.next_up()] {
+                            let case = format!(
+                                "{table:?} at {time:e}, delay {delay}, repeat {repeat_from:?}"
+                            );
+                            assert_eq!(
+                                VoltageSources::pwl_time_component::<false>(
+                                    table,
+                                    time,
+                                    delay,
+                                    repeat_from,
+                                    true
+                                )
+                                .to_bits(),
+                                VoltageSources::pwl_time_component::<false>(
+                                    table,
+                                    time,
+                                    delay,
+                                    repeat_from,
+                                    false
+                                )
+                                .to_bits(),
+                                "value of {case}"
+                            );
+                            assert_eq!(
+                                VoltageSources::pwl_time_component::<true>(
+                                    table,
+                                    time,
+                                    delay,
+                                    repeat_from,
+                                    true
+                                )
+                                .to_bits(),
+                                VoltageSources::pwl_time_component::<true>(
+                                    table,
+                                    time,
+                                    delay,
+                                    repeat_from,
+                                    false
+                                )
+                                .to_bits(),
+                                "slope of {case}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A source records at build whether its table's times never decrease. A
+    /// table with a decreasing time keeps the first-match scan, which gives
+    /// ngspice-46's values for `PWL(0 0 2m 1 1m 2 3m 3)`; a sorted one, under
+    /// any wrapper, takes the binary search.
+    #[test]
+    fn a_pwl_source_records_whether_its_times_never_decrease() {
+        let pwl = |points: Vec<(Value, Value)>| SourceSpec::Pwl {
+            points,
+            delay: 0.0,
+            repeat_from: None,
+        };
+        let mut sources = VoltageSources::new();
+        for (name, spec) in [
+            (
+                "v1",
+                pwl(vec![(0.0, 0.0), (2e-3, 1.0), (1e-3, 2.0), (3e-3, 3.0)]),
+            ),
+            (
+                "v2",
+                SourceSpec::DcTransient {
+                    dc_value: 0.0,
+                    transient: Box::new(pwl(vec![(0.0, 0.0), (1e-3, 1.0), (1e-3, 2.0)])),
+                },
+            ),
+        ] {
+            sources.add_with_ac_and_spec(
+                name.to_string(),
+                1,
+                0,
+                1,
+                SourceExcitation {
+                    dc_value: 0.0,
+                    ac_magnitude: 0.0,
+                    ac_phase: 0.0,
+                    source_spec: Some(spec),
+                },
+            );
+        }
+        assert!(!sources.pwl_records[0].sorted);
+        assert!(sources.pwl_records[1].sorted);
+        for (time, ngspice) in [
+            (0.5e-3, 0.25),
+            (1e-3, 0.5),
+            (1.5e-3, 0.75),
+            (2.5e-3, 2.75),
+            (3.5e-3, 3.0),
+        ] {
+            assert_close(sources.transient_value_at(0, time), ngspice);
+        }
     }
 
     #[test]

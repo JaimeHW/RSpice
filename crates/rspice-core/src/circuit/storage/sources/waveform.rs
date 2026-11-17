@@ -8,7 +8,7 @@ impl VoltageSources {
     /// derivatives remain separate; this does not certify continuity.
     pub(super) fn affine_side_higher_derivative(
         spec: &crate::netlist::SourceSpec,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
     ) -> Option<Value> {
         use crate::netlist::SourceSpec;
         match spec {
@@ -17,7 +17,7 @@ impl VoltageSources {
             | SourceSpec::DcAc { .. }
             | SourceSpec::Pulse { .. }
             | SourceSpec::Pwl { .. } => Some(0.0),
-            SourceSpec::PwlFile { .. } => pwl.map(|_| 0.0),
+            SourceSpec::PwlFile { .. } => pwl.file.map(|_| 0.0),
             SourceSpec::Distortion { inner, .. } => Self::affine_side_higher_derivative(inner, pwl),
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::AcTransient { transient, .. }
@@ -34,7 +34,7 @@ impl VoltageSources {
         period: Value,
         order: usize,
         context: Option<TransientSourceContext>,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
     ) -> bool {
         Self::periodic_waveform(spec, period, context, pwl, true)
             && (order <= 1
@@ -55,7 +55,7 @@ impl VoltageSources {
             time,
             order,
             context,
-            None,
+            PwlSnapshot::default(),
             SourceTimeSide::Published,
         )
     }
@@ -67,12 +67,12 @@ impl VoltageSources {
         time: Value,
         order: usize,
         context: Option<TransientSourceContext>,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
         side: SourceTimeSide,
     ) -> Option<Value> {
         use crate::netlist::SourceSpec;
         use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
-        if Self::constant_waveform_over_orbit(spec, time, context, None) {
+        if Self::constant_waveform_over_orbit(spec, time, context, PwlSnapshot::default()) {
             return Some(0.0);
         }
         fn multiply(a: [S; 2], b: [S; 2]) -> Option<[S; 2]> {
@@ -393,7 +393,7 @@ impl VoltageSources {
         spec: &crate::netlist::SourceSpec,
         time: Value,
         context: Option<TransientSourceContext>,
-        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl_waveform: PwlSnapshot<'_>,
     ) -> Value {
         Self::source_time_component_on_side::<DERIVATIVE>(
             spec,
@@ -409,7 +409,7 @@ impl VoltageSources {
         spec: &crate::netlist::SourceSpec,
         time: Value,
         context: Option<TransientSourceContext>,
-        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl_waveform: PwlSnapshot<'_>,
         side: SourceTimeSide,
     ) -> Value {
         use crate::netlist::SourceSpec;
@@ -661,7 +661,13 @@ impl VoltageSources {
                 if side != SourceTimeSide::Published {
                     Self::pwl_limit::<DERIVATIVE>(points, time, *delay, *repeat_from, side)
                 } else {
-                    Self::pwl_time_component::<DERIVATIVE>(points, time, *delay, *repeat_from)
+                    Self::pwl_time_component::<DERIVATIVE>(
+                        points,
+                        time,
+                        *delay,
+                        *repeat_from,
+                        pwl_waveform.sorted,
+                    )
                 }
             }
             SourceSpec::PwlFile {
@@ -673,7 +679,7 @@ impl VoltageSources {
                 delay,
                 repeat_from,
             } => {
-                if let Some(waveform) = pwl_waveform {
+                if let Some(waveform) = pwl_waveform.file {
                     if side != SourceTimeSide::Published {
                         return Self::pwl_file_limit::<DERIVATIVE>(
                             waveform,
@@ -1041,14 +1047,19 @@ mod tests {
                     0.1,
                     order,
                     None,
-                    None,
+                    PwlSnapshot::default(),
                     SourceTimeSide::LeftLimit
                 ),
                 Some(0.0)
             );
             for side in [SourceTimeSide::Published, SourceTimeSide::RightLimit] {
                 let actual = VoltageSources::higher_time_derivative_on_side(
-                    &source, 0.1, order, None, None, side,
+                    &source,
+                    0.1,
+                    order,
+                    None,
+                    PwlSnapshot::default(),
+                    side,
                 )
                 .unwrap();
                 assert!((actual - expected).abs() <= 1e-14 * expected.abs());
@@ -1078,7 +1089,12 @@ mod tests {
             (10.0, 0.0),
             (13.0, 0.6),
         ] {
-            let actual = VoltageSources::source_time_component::<true>(&pulse, time, None, None);
+            let actual = VoltageSources::source_time_component::<true>(
+                &pulse,
+                time,
+                None,
+                PwlSnapshot::default(),
+            );
             assert!((actual - expected).abs() < 1e-15, "pulse t={time}");
         }
         let sinusoid = SourceSpec::Sin {
@@ -1091,21 +1107,31 @@ mod tests {
             cycles: None,
         };
         assert_eq!(
-            VoltageSources::source_time_component::<true>(&sinusoid, 0.05, None, None),
+            VoltageSources::source_time_component::<true>(
+                &sinusoid,
+                0.05,
+                None,
+                PwlSnapshot::default()
+            ),
             0.0
         );
         let expected = 1.3
             * (std::f64::consts::TAU * 2.0 * 37.0_f64.to_radians().cos()
                 - 0.7 * 37.0_f64.to_radians().sin());
         assert!(
-            (VoltageSources::source_time_component::<true>(&sinusoid, 0.1, None, None) - expected)
+            (VoltageSources::source_time_component::<true>(
+                &sinusoid,
+                0.1,
+                None,
+                PwlSnapshot::default()
+            ) - expected)
                 .abs()
                 < 1e-14
         );
         let points = [(0.0, 0.0), (1.0, 2.0), (2.0, 0.0)];
         for (time, expected) in [(0.0, 2.0), (1.0, -2.0), (2.0, 2.0), (3.0, -2.0), (4.0, 2.0)] {
             assert_eq!(
-                VoltageSources::pwl_time_component::<true>(&points, time, 0.0, Some(0.0)),
+                VoltageSources::pwl_time_component::<true>(&points, time, 0.0, Some(0.0), true),
                 expected
             );
         }
@@ -1122,7 +1148,9 @@ mod tests {
         };
         let expected = -(0.2_f64).sqrt() * 2.0 * std::f64::consts::TAU;
         assert!(
-            (VoltageSources::source_time_component::<true>(&rf, 0.0, None, None) - expected).abs()
+            (VoltageSources::source_time_component::<true>(&rf, 0.0, None, PwlSnapshot::default())
+                - expected)
+                .abs()
                 < 1e-14
         );
     }

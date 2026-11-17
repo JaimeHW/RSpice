@@ -31,8 +31,13 @@ fn periodic_linear_points(
         && last > start
         && integral_cycles(period / (last - start))
         && (!require_continuity
-            || (VoltageSources::pwl_time_component::<false>(points, start, 0.0, None)
-                == last_value
+            || (VoltageSources::pwl_time_component::<false>(
+                points,
+                start,
+                0.0,
+                None,
+                super::sorted_pwl_times(points),
+            ) == last_value
                 && points.windows(2).all(|pair| {
                     let dt = pair[1].0 - pair[0].0;
                     dt >= 0.0
@@ -48,7 +53,7 @@ impl VoltageSources {
     pub(super) fn minimum_pss_interval(
         spec: &crate::netlist::SourceSpec,
         context: Option<TransientSourceContext>,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
     ) -> Option<Value> {
         use crate::netlist::SourceSpec;
         let minimum = |intervals: &[Value]| {
@@ -90,9 +95,9 @@ impl VoltageSources {
             SourceSpec::Pwl { points, .. } => {
                 crate::numerics::minimum_pwl_interval(points.iter().copied())
             }
-            SourceSpec::PwlFile { .. } => {
-                pwl.and_then(crate::device::pwl_file::PwlWaveform::minimum_segment_duration)
-            }
+            SourceSpec::PwlFile { .. } => pwl
+                .file
+                .and_then(crate::device::pwl_file::PwlWaveform::minimum_segment_duration),
             SourceSpec::Pat {
                 vhi,
                 vlo,
@@ -226,7 +231,7 @@ impl VoltageSources {
         spec: &crate::netlist::SourceSpec,
         period: Value,
         context: Option<TransientSourceContext>,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
     ) -> bool {
         use crate::netlist::SourceSpec;
         match spec {
@@ -291,7 +296,7 @@ impl VoltageSources {
                                     })))
                     })
             }
-            SourceSpec::PwlFile { delay, .. } => pwl.is_some() && *delay > period,
+            SourceSpec::PwlFile { delay, .. } => pwl.file.is_some() && *delay > period,
             SourceSpec::Pat {
                 vhi, vlo, delay, ..
             } => vhi == vlo || *delay > period,
@@ -324,7 +329,7 @@ impl VoltageSources {
         spec: &crate::netlist::SourceSpec,
         period: Value,
         context: Option<TransientSourceContext>,
-        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl: PwlSnapshot<'_>,
         require_continuity: bool,
     ) -> bool {
         use crate::netlist::SourceSpec;
@@ -410,7 +415,7 @@ impl VoltageSources {
                 repeat_from,
                 ..
             } => {
-                let Some(pwl) = pwl else { return false };
+                let Some(pwl) = pwl.file else { return false };
                 if *time_scale <= 0.0 || !pwl.has_finite_segment_slopes() {
                     return false;
                 }
@@ -528,7 +533,10 @@ mod tests {
                     &file_spec,
                     2.0 * scale,
                     None,
-                    Some(&file_waveform),
+                    PwlSnapshot {
+                        file: Some(&file_waveform),
+                        sorted: false,
+                    },
                     true,
                 ),
                 "scaled PWLFILE at scale={scale:e}"
@@ -542,7 +550,8 @@ mod tests {
                         &points,
                         phase * scale,
                         0.0,
-                        Some(0.0)
+                        Some(0.0),
+                        true,
                     ) - expected)
                         .abs()
                         < 1e-14
@@ -552,7 +561,8 @@ mod tests {
                         &points,
                         phase * scale,
                         0.0,
-                        Some(0.0)
+                        Some(0.0),
+                        true,
                     ) * scale
                         - slope)
                         .abs()
@@ -566,8 +576,13 @@ mod tests {
     fn pwl_interpolation_normalizes_time_before_scaling_voltage() {
         for (duration, amplitude) in [(1e-30, 1e-300), (1e30, 1e300)] {
             let points = [(0.0, 0.0), (duration, amplitude)];
-            let actual =
-                VoltageSources::pwl_time_component::<false>(&points, duration * 0.5, 0.0, None);
+            let actual = VoltageSources::pwl_time_component::<false>(
+                &points,
+                duration * 0.5,
+                0.0,
+                None,
+                true,
+            );
             assert!(
                 (actual / amplitude - 0.5).abs() < 1e-14,
                 "duration={duration:e}, amplitude={amplitude:e}, value={actual:e}"
@@ -595,17 +610,19 @@ mod tests {
             ));
             let seam = 2.0 * scale;
             assert_eq!(
-                VoltageSources::pwl_time_component::<false>(&points, seam, 0.0, Some(0.0)),
+                VoltageSources::pwl_time_component::<false>(&points, seam, 0.0, Some(0.0), true),
                 2.0
             );
             assert!(
-                VoltageSources::pwl_time_component::<true>(&points, seam, 0.0, Some(0.0)).is_nan()
+                VoltageSources::pwl_time_component::<true>(&points, seam, 0.0, Some(0.0), true)
+                    .is_nan()
             );
             let after = VoltageSources::pwl_time_component::<false>(
                 &points,
                 seam.next_up(),
                 0.0,
                 Some(0.0),
+                true,
             );
             assert!(
                 (after - 1.0).abs() < 1e-14,
@@ -616,7 +633,8 @@ mod tests {
                     &points,
                     seam.next_up(),
                     0.0,
-                    Some(0.0)
+                    Some(0.0),
+                    true,
                 ) * scale
                     - 1.0)
                     .abs()

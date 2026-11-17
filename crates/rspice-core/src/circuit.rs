@@ -23,7 +23,7 @@ pub use storage::{
     ResistorFlickerNoise, Resistors, ThermalResistorState, VoltageSources,
 };
 pub(crate) use storage::{
-    ResistorValues, SolutionDependentCompanionStep, SourceExcitation, SourceTimeBasis,
+    PwlSnapshot, ResistorValues, SolutionDependentCompanionStep, SourceExcitation, SourceTimeBasis,
     SourceTimeSide, ThermalUpdateError,
 };
 // The nonlinear device arrays are stamping machinery that no frontend names,

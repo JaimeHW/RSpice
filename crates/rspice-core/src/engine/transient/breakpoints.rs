@@ -394,7 +394,7 @@ impl Engine {
         Self::add_source_spec_breakpoints_with_pwl(
             breakpoints,
             spec,
-            None,
+            crate::circuit::PwlSnapshot::default(),
             BreakpointWindow {
                 tstop,
                 tstep_hint,
@@ -410,7 +410,7 @@ impl Engine {
     pub(super) fn add_source_spec_breakpoints_with_pwl(
         breakpoints: &mut impl SourceClockSink,
         spec: &crate::netlist::SourceSpec,
-        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+        pwl_waveform: crate::circuit::PwlSnapshot<'_>,
         window: BreakpointWindow,
         context: SourceBreakpointContext,
         abort: &dyn crate::abort_signal::AbortSignal,
@@ -675,13 +675,13 @@ impl Engine {
             } => {
                 if exact {
                     Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
-                    if pwl_waveform.is_none() {
+                    if pwl_waveform.file.is_none() {
                         return Err(SimulationError::Circuit(format!(
                             "physical source events require the circuit-owned PWL snapshot for '{path}'"
                         )));
                     }
                 }
-                match pwl_waveform {
+                match pwl_waveform.file {
                     Some(wf) => {
                         Self::add_repeating_pwl_breakpoints(
                             breakpoints,
@@ -1872,7 +1872,10 @@ mod tests {
         Engine::add_source_spec_breakpoints_with_pwl(
             &mut breakpoints,
             &spec,
-            Some(&waveform),
+            crate::circuit::PwlSnapshot {
+                file: Some(&waveform),
+                sorted: false,
+            },
             BreakpointWindow {
                 tstop: 10.0,
                 tstep_hint: 0.1,
@@ -2019,7 +2022,7 @@ mod tests {
         Engine::add_source_spec_breakpoints_with_pwl(
             &mut breakpoints,
             &spec,
-            None,
+            crate::circuit::PwlSnapshot::default(),
             BreakpointWindow {
                 tstop: 2.0,
                 tstep_hint: 0.1,

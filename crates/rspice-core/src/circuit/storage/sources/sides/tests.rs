@@ -223,8 +223,8 @@ fn physical_source_sides_preserve_file_scaling_and_reversed_repeat_orientation()
         let mut pair = sources(SourceSpec::Dc(0.0), SpiceDialect::Xyce);
         pair.0.source_specs[0] = Some(spec.clone());
         pair.1.source_specs[0] = Some(spec);
-        pair.0.pwl_waveforms[0] = Some(waveform.clone());
-        pair.1.pwl_waveforms[0] = Some(waveform);
+        pair.0.pwl_records[0].file = Some(waveform.clone());
+        pair.1.pwl_records[0].file = Some(waveform);
         check(&pair, time, expected);
     }
     for (scale, offset, expected) in [(0.1, 0.13, [23.0, 5.0]), (-0.1, 1.13, [5.0, 23.0])] {
@@ -246,8 +246,8 @@ fn physical_source_sides_preserve_file_scaling_and_reversed_repeat_orientation()
         let mut pair = sources(SourceSpec::Dc(0.0), SpiceDialect::Xyce);
         pair.0.source_specs[0] = Some(spec.clone());
         pair.1.source_specs[0] = Some(spec);
-        pair.0.pwl_waveforms[0] = Some(waveform.clone());
-        pair.1.pwl_waveforms[0] = Some(waveform);
+        pair.0.pwl_records[0].file = Some(waveform.clone());
+        pair.1.pwl_records[0].file = Some(waveform);
         for cycle in [0, 1, 3] {
             check(
                 &pair,

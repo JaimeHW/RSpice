@@ -58,8 +58,8 @@ fn file_pair(
     let mut pair = sources(SourceSpec::Dc(0.0), SpiceDialect::Xyce);
     pair.0.source_specs[0] = Some(spec.clone());
     pair.1.source_specs[0] = Some(spec);
-    pair.0.pwl_waveforms[0] = Some(waveform.clone());
-    pair.1.pwl_waveforms[0] = Some(waveform);
+    pair.0.pwl_records[0].file = Some(waveform.clone());
+    pair.1.pwl_records[0].file = Some(waveform);
     pair
 }
 
@@ -191,8 +191,8 @@ fn physical_source_clock_paths_preserve_file_holds_fractional_seams_and_scaled_r
         .unwrap()
         .with_scaling(2.0, 3.0, 0.0, 0.0),
     );
-    pair.0.pwl_waveforms[0] = Some(waveform.clone());
-    pair.1.pwl_waveforms[0] = Some(waveform);
+    pair.0.pwl_records[0].file = Some(waveform.clone());
+    pair.1.pwl_records[0].file = Some(waveform);
     slopes(&pair, 1.0, [1.5, 1.5]);
 }
 
