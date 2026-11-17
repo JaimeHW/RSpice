@@ -443,26 +443,26 @@ pub fn nav_row_indented_styled_with_metrics(
     } else {
         rect.right() - 8.0
     };
-    ui.painter()
-        .with_clip_rect(egui::Rect::from_x_y_ranges(
-            label_left..=label_right.max(label_left),
-            rect.y_range(),
-        ))
-        .text(
-            egui::pos2(label_left, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            label,
-            if mono {
-                theme::mono(label_size, FontWeight::Regular)
-            } else {
-                theme::sans(label_size, FontWeight::Regular)
-            },
-            if selected {
-                t.color.text
-            } else {
-                t.color.text_dim
-            },
-        );
+    let label_font = if mono {
+        theme::mono(label_size, FontWeight::Regular)
+    } else {
+        theme::sans(label_size, FontWeight::Regular)
+    };
+    // A name too long for the row ends in an ellipsis, so a cut name never
+    // reads as a whole one; the announcement above keeps it whole.
+    let shown =
+        crate::ui::panels::elide_text(ui, label, &label_font, (label_right - label_left).max(0.0));
+    ui.painter().text(
+        egui::pos2(label_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        label_font,
+        if selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
     if let Some(meta) = meta {
         ui.painter().text(
             egui::pos2(rect.right() - 8.0, rect.center().y),

@@ -6,7 +6,9 @@ use egui::Ui;
 use rspice_ui_kit::panels::section_header;
 
 use crate::workbench::app_state::DesignCheckStatus;
-use crate::workbench::design_system::{property_row, property_row_problem, property_row_wrapped};
+use crate::workbench::design_system::{
+    property_row, property_row_path, property_row_problem, property_row_wrapped,
+};
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::health::{self, DesignSubject};
 
@@ -59,7 +61,8 @@ pub(super) fn project_overview(
     }
 
     section_header(ui, "Project file", None);
-    property_row(
+    // A path is told apart by its end, so it is cut in the middle.
+    property_row_path(
         ui,
         "Location",
         &health::location(model, inspector.lifecycle.platform)
