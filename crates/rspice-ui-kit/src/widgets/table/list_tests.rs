@@ -24,7 +24,7 @@ const NAMES: [&str; 7] = [
 ];
 
 /// A context at each metric a list is used at, by name.
-fn metrics() -> Vec<(&'static str, egui::Context)> {
+pub(super) fn metrics() -> Vec<(&'static str, egui::Context)> {
     let compact = egui::Context::default();
     crate::Theme::default().apply(&compact);
     let relaxed = egui::Context::default();
@@ -39,7 +39,7 @@ fn metrics() -> Vec<(&'static str, egui::Context)> {
     vec![("compact", compact), ("relaxed", relaxed), ("touch", touch)]
 }
 
-fn key(key: Key, modifiers: Modifiers) -> Event {
+pub(super) fn key(key: Key, modifiers: Modifiers) -> Event {
     Event::Key {
         key,
         physical_key: None,
@@ -49,7 +49,7 @@ fn key(key: Key, modifiers: Modifiers) -> Event {
     }
 }
 
-fn press(pos: Pos2, button: PointerButton, modifiers: Modifiers) -> Vec<Event> {
+pub(super) fn press(pos: Pos2, button: PointerButton, modifiers: Modifiers) -> Vec<Event> {
     let edge = |pressed| Event::PointerButton {
         pos,
         button,

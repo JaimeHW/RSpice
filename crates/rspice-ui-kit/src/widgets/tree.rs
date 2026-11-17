@@ -7,6 +7,37 @@ use super::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem};
 use crate::theme::{self, FontWeight, mix};
 use crate::tokens::{self, Tokens};
 
+/// How far each level of a tree steps its row's words in.
+pub(crate) const TREE_INDENT: f32 = 16.0;
+/// The room a twist takes before a row's words.
+pub(crate) const TWIST_ROOM: f32 = 12.0;
+
+/// Paint a twist centred on `center`: pointing down when `expanded`, right
+/// when not. A painted triangle, since the embedded fonts carry no glyph
+/// for one.
+pub(crate) fn paint_twist(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    expanded: bool,
+    color: egui::Color32,
+) {
+    let r = 3.2;
+    let points = if expanded {
+        vec![
+            center + vec2(-r, -r * 0.5),
+            center + vec2(r, -r * 0.5),
+            center + vec2(0.0, r * 0.9),
+        ]
+    } else {
+        vec![
+            center + vec2(-r * 0.5, -r),
+            center + vec2(r * 0.9, 0.0),
+            center + vec2(-r * 0.5, r),
+        ]
+    };
+    painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
 /// What happened to a [`TreeRow`] this frame.
 pub struct TreeRowResult {
     /// The row's interaction response (click, double-click, context menu).
@@ -189,33 +220,12 @@ impl<'a> TreeRow<'a> {
             mix(c.text_dim, c.text, hover)
         };
 
-        let mut x = rect.left() + 6.0 + f32::from(self.indent) * 16.0;
+        let mut x = rect.left() + 6.0 + f32::from(self.indent) * TREE_INDENT;
         let cy = rect.center().y;
 
         if let Some(expanded) = self.twist {
-            // Painted triangle — text glyphs (▾/▸) are not covered by the
-            // embedded fonts and render as tofu boxes.
-            let center = egui::pos2(x + 4.0, cy);
-            let r = 3.2;
-            let points = if expanded {
-                vec![
-                    center + vec2(-r, -r * 0.5),
-                    center + vec2(r, -r * 0.5),
-                    center + vec2(0.0, r * 0.9),
-                ]
-            } else {
-                vec![
-                    center + vec2(-r * 0.5, -r),
-                    center + vec2(r * 0.9, 0.0),
-                    center + vec2(-r * 0.5, r),
-                ]
-            };
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                c.text_faint,
-                Stroke::NONE,
-            ));
-            x += 12.0;
+            paint_twist(painter, egui::pos2(x + 4.0, cy), expanded, c.text_faint);
+            x += TWIST_ROOM;
         }
 
         if let Some(value) = switch_value_after {

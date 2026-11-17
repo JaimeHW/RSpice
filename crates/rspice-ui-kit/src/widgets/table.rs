@@ -25,6 +25,12 @@
 //! press held still on a row asks for its menu. Words a cell cuts short show
 //! in full on hover and under that held press. A page that hands it no state
 //! gets the rows it asked for, in its own order, and reports clicks.
+//!
+//! The same table draws a plain list or a tree, for a rail or a library
+//! column: [`DataTable::list`] and [`DataTable::tree`] draw no heads, give
+//! each row the list row height under the live metrics, and announce the rows
+//! as a list's options or a tree's items. A cell may carry a leading icon, a
+//! twist and an indent; Left and Right close, open and walk a tree.
 
 mod body;
 mod geometry;
@@ -34,6 +40,8 @@ mod list_tests;
 mod state;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -41,6 +49,7 @@ use std::collections::BTreeSet;
 
 use egui::{Key, Modifiers, Rect, Sense, Ui, pos2, vec2};
 
+use crate::icons::Icon;
 use crate::panels::elide_text;
 use crate::theme;
 use crate::tokens::Tokens;
@@ -50,7 +59,7 @@ pub use geometry::Span;
 pub use state::{Group, RowKey, Selection, Sort, SortDirection, SortKey, TableState};
 
 use geometry::Columns;
-use state::{Line, Step, TYPE_AHEAD_PAUSE, arrange, step, type_ahead};
+use state::{Line, Step, TYPE_AHEAD_PAUSE, TreeStep, arrange, step, tree_step, type_ahead};
 
 /// Height of a table's head and of each band row over it at the compact
 /// density under a fine pointer, for a page that lines its own bands up with
@@ -103,6 +112,20 @@ impl LineHeights {
                 row: band,
                 band,
             }
+        }
+    }
+
+    /// A list's: no head, and each row as tall as a list row under the live
+    /// metrics, which under a coarse pointer is the touch target.
+    pub fn list(t: &Tokens) -> Self {
+        Self {
+            head: 0.0,
+            row: if t.metrics.is_touch() {
+                t.metrics.touch_target()
+            } else {
+                t.metrics.row_h
+            },
+            band: t.metrics.grid_row_h,
         }
     }
 }
@@ -255,6 +278,23 @@ pub struct Cell {
     hint: Option<String>,
     /// What a sort by its column orders it by, when not its words.
     sort: Option<SortKey>,
+    /// A mark before the words, after any twist.
+    icon: Option<Icon>,
+    /// How many levels of a tree the words step in.
+    indent: u8,
+    twist: Twist,
+}
+
+/// Whether a cell's row opens and closes in a tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Twist {
+    /// No twist, and no room for one.
+    None,
+    /// No twist, but its room: a row without children among rows with them,
+    /// whose words line up with theirs.
+    Leaf,
+    /// A twist, pointing down when the row is open.
+    Branch(bool),
 }
 
 impl Cell {
@@ -266,6 +306,9 @@ impl Cell {
             editable: false,
             hint: None,
             sort: None,
+            icon: None,
+            indent: 0,
+            twist: Twist::None,
         }
     }
 
@@ -318,6 +361,45 @@ impl Cell {
     pub fn sort_by(mut self, key: SortKey) -> Self {
         self.sort = Some(key);
         self
+    }
+
+    /// The same words behind `icon`.
+    pub fn icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// The same words stepped in `level` levels, as a tree's child is.
+    pub fn indent(mut self, level: u8) -> Self {
+        self.indent = level;
+        self
+    }
+
+    /// The same words behind a twist: the row has children, shown while
+    /// `open`. A click on the twist, and Left and Right, ask to close or
+    /// open it.
+    pub fn twist(mut self, open: bool) -> Self {
+        self.twist = Twist::Branch(open);
+        self
+    }
+
+    /// The same words behind a twist's room but no twist: a row without
+    /// children whose words line up with its siblings that have them.
+    pub fn leaf(mut self) -> Self {
+        self.twist = Twist::Leaf;
+        self
+    }
+
+    /// The row's level in a tree and, when it has children, whether they
+    /// show.
+    fn branch(&self) -> (u8, Option<bool>) {
+        (
+            self.indent,
+            match self.twist {
+                Twist::Branch(open) => Some(open),
+                Twist::None | Twist::Leaf => None,
+            },
+        )
     }
 
     /// What a sort orders this cell by: the key it was given; else a judged
@@ -403,6 +485,20 @@ pub struct TableResponse {
     /// Delete while the table has the keyboard and a row is selected: the
     /// page deletes what the selected rows name.
     pub delete: bool,
+    /// The row a twist click, Left or Right asked to open (true) or close
+    /// (false); the page shows or hides its children.
+    pub expand: Option<(usize, bool)>,
+}
+
+/// What a table is drawn as, and announced as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// Rows of cells under heads.
+    Grid,
+    /// A plain list.
+    List,
+    /// A list whose rows nest.
+    Tree,
 }
 
 /// One table: its columns, its rows, and where it may grow.
@@ -431,6 +527,7 @@ pub struct DataTable<'a> {
     /// The room before the first column's words that the selection marks
     /// take under a coarse pointer; none elsewhere.
     lead_gutter: f32,
+    kind: Kind,
 }
 
 /// Where the body is seen from this frame, in screen points: the viewport's
@@ -640,6 +737,7 @@ impl<'a> DataTable<'a> {
             cell_selection: false,
             multi: false,
             lead_gutter: 0.0,
+            kind: Kind::Grid,
         }
     }
 
@@ -713,6 +811,20 @@ impl<'a> DataTable<'a> {
         self
     }
 
+    /// Draw as a plain list: no heads and no bands, each row as tall as a
+    /// list row under the live metrics, announced as a list's options.
+    pub fn list(mut self) -> Self {
+        self.kind = Kind::List;
+        self
+    }
+
+    /// Draw as a tree: a list whose rows announce as a tree's items, with
+    /// their level and, for a row with a twist, whether it is open.
+    pub fn tree(mut self) -> Self {
+        self.kind = Kind::Tree;
+        self
+    }
+
     pub fn show(
         mut self,
         ui: &mut Ui,
@@ -723,7 +835,12 @@ impl<'a> DataTable<'a> {
             head: head_h,
             row: row_h,
             band: band_h,
-        } = LineHeights::grid(&t);
+        } = if self.kind == Kind::Grid {
+            LineHeights::grid(&t)
+        } else {
+            self.bands = &[];
+            LineHeights::list(&t)
+        };
         let mut editor = self.editor.take();
         let mut state = self.state.take();
         let mut response = TableResponse::default();
@@ -933,6 +1050,21 @@ impl<'a> DataTable<'a> {
                     reveal = Some(row);
                 }
             }
+            if let (Some(by), false) = (keys.across, self.cell_selection)
+                && let Some(lead) = state.selected_row()
+            {
+                match tree_step(&shown, lead, by, |row| {
+                    rows.get(row).first().map_or((0, None), Cell::branch)
+                }) {
+                    TreeStep::Expand(open) => response.expand = Some((lead, open)),
+                    TreeStep::Move(row) => {
+                        let lead = self.selection_at(row, None);
+                        response.selection_changed |= state.select_only(lead);
+                        reveal = Some(row);
+                    }
+                    TreeStep::Stay => {}
+                }
+            }
             if let (Some(by), true) = (keys.across, self.cell_selection)
                 && let Some(selection) = state.selection.as_mut()
                 && !self.columns.is_empty()
@@ -975,7 +1107,8 @@ impl<'a> DataTable<'a> {
                     .map(|row| self.copied_line(&named, rows.get(*row)))
                     .collect::<Vec<_>>();
                 ui.ctx().copy_text(
-                    std::iter::once(heads)
+                    heads
+                        .into_iter()
                         .chain(lines)
                         .collect::<Vec<_>>()
                         .join("\n"),
@@ -1039,6 +1172,11 @@ impl<'a> DataTable<'a> {
         let modifiers = ui.input(|input| input.modifiers);
         let mut folds = Vec::new();
         let mut take_focus = false;
+        // The table's one stop holds its rows for a reader: made before
+        // them, so they find it.
+        if state.is_some() {
+            ui.ctx().accesskit_node_builder(table_id, |_| ());
+        }
         let output = scroll.show_viewport(ui, |ui, viewport| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             ui.set_min_width(geometry.content_width());
@@ -1061,7 +1199,13 @@ impl<'a> DataTable<'a> {
                 ui.max_rect().x_range(),
                 top + first as f32 * row_h..=top + last as f32 * row_h,
             );
-            ui.scope_builder(egui::UiBuilder::new().max_rect(band), |ui| {
+            // The rows belong to the table's one keyboard stop, so a reader
+            // hears them as its rows.
+            let mut builder = egui::UiBuilder::new().max_rect(band);
+            if state.is_some() {
+                builder = builder.accessibility_parent(table_id);
+            }
+            ui.scope_builder(builder, |ui| {
                 ui.skip_ahead_auto_ids(first);
                 for line in &lines[first..last] {
                     match *line {
@@ -1149,19 +1293,21 @@ impl<'a> DataTable<'a> {
             }
         }
 
-        if let Some(column) = self.head(
-            ui,
-            head::HeadPlace {
-                block: head_block,
-                response: &head_response,
-                height: head_h,
-                band_height: band_h,
-                view,
-                geometry: &geometry,
-                sort,
-                sortable: state.is_some(),
-            },
-        ) && let Some(state) = state.as_deref_mut()
+        if self.kind == Kind::Grid
+            && let Some(column) = self.head(
+                ui,
+                head::HeadPlace {
+                    block: head_block,
+                    response: &head_response,
+                    height: head_h,
+                    band_height: band_h,
+                    view,
+                    geometry: &geometry,
+                    sort,
+                    sortable: state.is_some(),
+                },
+            )
+            && let Some(state) = state.as_deref_mut()
         {
             state.cycle_sort(column);
             memory.reveal = true;
@@ -1276,6 +1422,9 @@ impl<'a> DataTable<'a> {
             response.edit = Some((index, column));
         }
         response.edited = response.edited.or(row.edited);
+        if let Some(open) = row.twist {
+            response.expand = Some((index, open));
+        }
         if row.double_clicked {
             response.double_clicked = Some(CellRef {
                 row: index,
@@ -1334,7 +1483,12 @@ impl<'a> DataTable<'a> {
                 egui::WidgetType::Other,
                 ui.is_enabled(),
                 format!(
-                    "Table, {} rows{}",
+                    "{}, {} rows{}",
+                    match self.kind {
+                        Kind::Grid => "Table",
+                        Kind::List => "List",
+                        Kind::Tree => "Tree",
+                    },
                     self.rows,
                     match (selected, chosen) {
                         (_, 2..) => format!(", {chosen} rows selected"),
@@ -1345,7 +1499,11 @@ impl<'a> DataTable<'a> {
             )
         });
         ui.ctx().accesskit_node_builder(focus.id, |node| {
-            node.set_role(egui::accesskit::Role::Grid);
+            node.set_role(match self.kind {
+                Kind::Grid => egui::accesskit::Role::Grid,
+                Kind::List => egui::accesskit::Role::ListBox,
+                Kind::Tree => egui::accesskit::Role::Tree,
+            });
             if self.multi {
                 node.set_multiselectable();
             }
@@ -1355,9 +1513,13 @@ impl<'a> DataTable<'a> {
         }
     }
 
-    /// The columns that have a head, and their heads as one tab-separated
-    /// line: Ctrl+C copies the selected rows under it.
-    fn copied_heads(&self) -> (Vec<usize>, String) {
+    /// The columns Ctrl+C copies, and their heads as one tab-separated line
+    /// over the rows: the columns that have a head in a grid; every column,
+    /// under no head line, in a list.
+    fn copied_heads(&self) -> (Vec<usize>, Option<String>) {
+        if self.kind != Kind::Grid {
+            return ((0..self.columns.len()).collect(), None);
+        }
         let named = self
             .columns
             .iter()
@@ -1370,7 +1532,7 @@ impl<'a> DataTable<'a> {
             .map(|index| self.columns[*index].head.as_str())
             .collect::<Vec<_>>()
             .join("\t");
-        (named, heads)
+        (named, Some(heads))
     }
 
     /// One row's words under the `named` columns, tab-separated; a value the

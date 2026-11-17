@@ -3,7 +3,8 @@
 //! A row is laid out across the whole width of its columns, so it scrolls with
 //! them, and painted only where it shows: the frozen cells at their own place,
 //! the scrolled cells in view right of the freeze edge. The open cell is a
-//! field in its cell's place.
+//! field in its cell's place. A cell's indent, twist and icon stand before
+//! its words, and the open cell's field starts after them.
 
 use egui::{Key, Modifiers, Pos2, Rect, Sense, Ui, pos2, vec2};
 
@@ -11,17 +12,21 @@ use crate::icons::Icon;
 use crate::panels::elide_text;
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
+use crate::widgets::tree::{TREE_INDENT, TWIST_ROOM, paint_twist};
 
 use super::geometry::Columns;
 use super::{
-    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, TABLE_EDGE_INSET, Tone,
-    View, Words, paint_words,
+    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, Kind, TABLE_EDGE_INSET,
+    Tone, Twist, View, Words, paint_words,
 };
 
 /// Side of the fold mark in front of a group's label.
 const FOLD_MARK_SIDE: f32 = 12.0;
 /// Radius of the selection mark a coarse pointer finds before each row.
 const LEAD_MARK_RADIUS: f32 = 8.0;
+/// Side of a cell's icon, and the gap between it and the words.
+const LEAD_ICON_SIDE: f32 = 14.0;
+const LEAD_ICON_GAP: f32 = 6.0;
 
 /// Where one row goes and how it is marked.
 pub(super) struct RowPlace<'g> {
@@ -51,6 +56,9 @@ pub(super) struct RowResponse {
     pub(super) column: Option<usize>,
     /// The reader tapped the row's selection mark.
     pub(super) marked: bool,
+    /// The reader clicked the row's twist: whether the row should now be
+    /// open.
+    pub(super) twist: Option<bool>,
     /// A press held still on the row past the longest click, under a coarse
     /// pointer: when it began and where.
     pub(super) held: Option<(f64, Pos2)>,
@@ -84,16 +92,22 @@ impl DataTable<'_> {
         let (rect, response) =
             ui.allocate_exact_size(vec2(geometry.content_width(), height), sense);
         response.widget_info(|| {
+            // A grid's cell is read under its head; a list has none.
             let spoken = self
                 .columns
                 .iter()
                 .zip(cells)
                 .filter(|(_, cell)| !cell.text.is_empty())
-                .map(|(column, cell)| match cell.ink {
-                    Ink::Problem(problem) => {
-                        format!("{}: {}", column.head, problem.announce(&cell.text))
+                .map(|(column, cell)| {
+                    let words = match cell.ink {
+                        Ink::Problem(problem) => problem.announce(&cell.text),
+                        _ => cell.text.clone(),
+                    };
+                    if self.kind == Kind::Grid {
+                        format!("{}: {words}", column.head)
+                    } else {
+                        words
                     }
-                    _ => format!("{}: {}", column.head, cell.text),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -106,6 +120,26 @@ impl DataTable<'_> {
                 )
             } else {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), spoken)
+            }
+        });
+        // A grid's row, a list's option or a tree's item, selectable and
+        // saying whether it is selected; a tree's with its level and, when it
+        // has children, whether they show.
+        let (level, open) = cells.first().map_or((0, None), Cell::branch);
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(match self.kind {
+                Kind::Grid => egui::accesskit::Role::Row,
+                Kind::List => egui::accesskit::Role::ListBoxOption,
+                Kind::Tree => egui::accesskit::Role::TreeItem,
+            });
+            if self.clickable {
+                node.set_selected(selected);
+            }
+            if self.kind == Kind::Tree {
+                node.set_level(usize::from(level) + 1);
+                if let Some(open) = open {
+                    node.set_expanded(open);
+                }
             }
         });
         #[cfg(any(test, feature = "test-support"))]
@@ -132,6 +166,7 @@ impl DataTable<'_> {
             },
             column: pressed_column,
             marked: false,
+            twist: None,
             held: None,
         };
         if !ui.is_rect_visible(rect) {
@@ -180,11 +215,19 @@ impl DataTable<'_> {
                     egui::Stroke::new(1.0, t.color.border),
                 );
             }
+            let mut span = self.text_span(column_index, cell_rect);
+            let words_start = span.min;
+            if let Some(open) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span) {
+                answered.twist = Some(open);
+            }
+            // The cell after what stands before its words: where a click
+            // opens it, and where its field goes.
+            let after_lead = cell_rect.with_min_x(cell_rect.min.x + span.min - words_start);
             if let Some(open) = editor
                 .as_deref_mut()
                 .filter(|editor| editor.column == column_index)
             {
-                let (outcome, onward) = self.edit_cell(ui, index, column, cell_rect, clip, open);
+                let (outcome, onward) = self.edit_cell(ui, index, column, after_lead, clip, open);
                 answered.edited = outcome;
                 if let Some(next) =
                     onward.and_then(|onward| next_editable(cells, column_index, onward))
@@ -196,7 +239,7 @@ impl DataTable<'_> {
             let cell_id = ui.id().with((self.id, "cell", index, column_index));
             let cell_response = if cell.editable || cell.hint.is_some() {
                 let cell_response = ui.interact(
-                    cell_rect.intersect(clip),
+                    after_lead.intersect(clip),
                     cell_id,
                     if cell.editable {
                         Sense::click()
@@ -247,7 +290,7 @@ impl DataTable<'_> {
                 ui,
                 cell_rect,
                 clip,
-                self.text_span(column_index, cell_rect),
+                span,
                 Words {
                     text: &cell.text,
                     font,
@@ -324,6 +367,77 @@ impl DataTable<'_> {
             theme::paint_focus_ring(ui, &response, rect);
         }
         answered
+    }
+
+    /// Paint what stands before a cell's words, a tree's indent, its twist
+    /// and an icon, and move `span` past them. Returns, when the reader
+    /// clicked the twist, whether the row should now be open.
+    fn lead_in(
+        &self,
+        ui: &Ui,
+        index: usize,
+        cell: &Cell,
+        rect: Rect,
+        clip: Rect,
+        span: &mut egui::Rangef,
+    ) -> Option<bool> {
+        let t = Tokens::get(ui.ctx());
+        span.min += f32::from(cell.indent) * TREE_INDENT;
+        let mut toggled = None;
+        if cell.twist != Twist::None {
+            // A finger's twist is a target it can find.
+            let room = if t.metrics.is_touch() {
+                t.metrics.touch_target()
+            } else {
+                TWIST_ROOM
+            };
+            if let Twist::Branch(open) = cell.twist {
+                let target = Rect::from_x_y_ranges(span.min..=span.min + room, rect.y_range())
+                    .intersect(clip);
+                let twist = ui.interact(
+                    target,
+                    ui.id().with((self.id, "twist", index)),
+                    Sense::CLICK,
+                );
+                twist.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        format!("{} {}", if open { "Close" } else { "Open" }, cell.text),
+                    )
+                });
+                #[cfg(any(test, feature = "test-support"))]
+                crate::probe::probe(ui, &format!("table.twist.{index}"), target);
+                let ink = if twist.hovered() {
+                    t.color.text
+                } else {
+                    t.color.text_faint
+                };
+                paint_twist(
+                    &ui.painter().with_clip_rect(clip),
+                    pos2(span.min + (room - 4.0) * 0.5, rect.center().y),
+                    open,
+                    ink,
+                );
+                if twist.clicked() {
+                    toggled = Some(!open);
+                }
+            }
+            span.min += room;
+        }
+        if let Some(icon) = cell.icon {
+            icon.paint(
+                &ui.painter().with_clip_rect(clip),
+                Rect::from_center_size(
+                    pos2(span.min + LEAD_ICON_SIDE * 0.5, rect.center().y),
+                    egui::Vec2::splat(LEAD_ICON_SIDE),
+                ),
+                t.color.text_dim,
+            );
+            span.min += LEAD_ICON_SIDE + LEAD_ICON_GAP;
+        }
+        span.min = span.min.min(span.max);
+        toggled
     }
 
     /// Paint a row's selection mark, the way a coarse pointer selects

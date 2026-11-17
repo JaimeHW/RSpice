@@ -502,3 +502,44 @@ pub(super) fn step(
     };
     Some(shown[to])
 }
+
+/// What Left or Right asks of a tree's lead row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TreeStep {
+    /// Open the row (true) or close it (false).
+    Expand(bool),
+    /// Move the selection to this row.
+    Move(usize),
+    Stay,
+}
+
+/// What Left (`by` < 0) or Right does on row `lead`, among the rows `shown`
+/// in their shown order, where `branch(row)` is a row's level and, when it
+/// has a twist, whether it is open. Right opens a closed row and steps into
+/// an open one's first child; Left closes an open row and steps out of any
+/// other to its parent, the nearest row above at a lesser level.
+pub(super) fn tree_step(
+    shown: &[usize],
+    lead: usize,
+    by: isize,
+    mut branch: impl FnMut(usize) -> (u8, Option<bool>),
+) -> TreeStep {
+    let Some(at) = shown.iter().position(|row| *row == lead) else {
+        return TreeStep::Stay;
+    };
+    let (level, open) = branch(lead);
+    match (by > 0, open) {
+        (true, Some(false)) => TreeStep::Expand(true),
+        (false, Some(true)) => TreeStep::Expand(false),
+        (true, Some(true)) => shown
+            .get(at + 1)
+            .filter(|child| branch(**child).0 > level)
+            .map_or(TreeStep::Stay, |child| TreeStep::Move(*child)),
+        (true, None) => TreeStep::Stay,
+        (false, _) => shown[..at]
+            .iter()
+            .rev()
+            .find(|row| branch(**row).0 < level)
+            .map_or(TreeStep::Stay, |parent| TreeStep::Move(*parent)),
+    }
+}
