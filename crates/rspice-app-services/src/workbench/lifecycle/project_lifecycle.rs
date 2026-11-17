@@ -104,6 +104,8 @@ pub struct ProjectLifecycleState {
     pub result_cache: result_cache::ResultCache,
     /// The dirty comparison held for the working state it was made for.
     dirty_answer: dirty_answer::DirtyAnswer,
+    /// The generated netlist's input digest, held the same way.
+    netlist_input: dirty_answer::NetlistInput,
     #[cfg(target_arch = "wasm32")]
     browser_reconnect_binding: Option<PersistenceBinding>,
     #[cfg(target_arch = "wasm32")]
@@ -248,10 +250,10 @@ pub fn generated_netlist_input_digest(
     state: &dyn LifecycleSource,
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
     // Execution provenance must describe the exact live input consumed by
-    // generation, including an edit currently previewed in another window.
-    capture_snapshot(state, SnapshotContent::Current)?
-        .file
-        .generated_netlist_input_digest()
+    // generation, including an edit currently previewed in another window:
+    // the working stamp covers the editor's live drawing as well as the
+    // buffered one, so the digest held for it is that input's.
+    dirty_answer::netlist_input(&state.lifecycle_view())
 }
 
 /// Whether the project holds anything a save would keep, as held for the

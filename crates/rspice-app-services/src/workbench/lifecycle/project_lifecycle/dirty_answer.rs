@@ -7,6 +7,9 @@
 //! can drop work — save, close, quit, replacing the project — reads
 //! [`fresh`], which never trusts what is held.
 //!
+//! The generated netlist's input digest, which the Netlist page reads every
+//! frame, is held for the working stamp the same way.
+//!
 //! In debug builds and tests every held answer is checked: the project is
 //! captured again and a document whose identity moved under an unchanged
 //! stamp panics, naming it. A subject the stamp misses fails the suite; it
@@ -19,13 +22,13 @@ use rspice_app_state::workbench::app_state::model::InPlaceLayout;
 use rspice_project::SnapshotContent;
 use rspice_project::lifecycle::{DirtyBaseline, DirtyComparison};
 use rspice_project::registry::DocumentFingerprints;
-use rspice_results::result_presentation::ResultPresentation;
+use rspice_vocabulary::product::ContentDigest;
 
-use super::{LifecycleSource, LifecycleView};
+use super::{LifecycleSource, LifecycleView, ProjectLifecycleError};
 
 /// Everything a capture of the working project reads: each subject by the
 /// stamp its owner issues on every mutable access, the two with no stamp of
-/// their own by value. Equal stamps, equal working content.
+/// their own by content. Equal stamps, equal working content.
 #[derive(Debug, Clone, PartialEq)]
 struct WorkingStamp {
     /// The workspace content: every buffered schematic, the project
@@ -44,8 +47,9 @@ struct WorkingStamp {
     /// The retained results as the project persists them.
     results: u64,
     /// The Results presentation a save keeps, which its feature owns and
-    /// does not stamp.
-    presentation: ResultPresentation,
+    /// does not stamp: by its canonical encoding, as the fingerprint reads
+    /// it, so a marker moved from 0 to -0 is an edit.
+    presentation: Result<ContentDigest, String>,
     /// The symbol edited in place, which a save writes behind its sheet.
     in_place_layout: Option<InPlaceLayout>,
 }
@@ -64,7 +68,9 @@ impl WorkingStamp {
                 .project_lifecycle
                 .result_cache
                 .stamp(&model.simulation),
-            presentation: state.presentation.project_presentation(&model.simulation),
+            presentation: rspice_project::registry::digest(
+                &state.presentation.project_presentation(&model.simulation),
+            ),
             in_place_layout: model.symbol_in_place_layout.clone(),
         }
     }
@@ -205,6 +211,42 @@ fn compare(
     compared
 }
 
+/// The generated netlist's input digest held for the working stamp it was
+/// taken for. Only a digest is held: a capture that failed is taken again.
+#[derive(Debug, Clone, Default)]
+pub struct NetlistInput(RefCell<Option<(WorkingStamp, ContentDigest)>>);
+
+/// The generated netlist's input digest for the working state as it stands,
+/// taken once per stamp.
+pub(super) fn netlist_input(
+    state: &LifecycleView<'_>,
+) -> Result<ContentDigest, ProjectLifecycleError> {
+    let stamp = WorkingStamp::of(state);
+    let held = &state.platform.project_lifecycle.netlist_input.0;
+    let digest = held
+        .borrow()
+        .as_ref()
+        .filter(|(held, _)| *held == stamp)
+        .map(|(_, digest)| *digest);
+    if let Some(digest) = digest {
+        #[cfg(debug_assertions)]
+        audit_netlist_input(
+            digest,
+            &rspice_project::registry::unobserved(|| digest_netlist_input(state)),
+        );
+        return Ok(digest);
+    }
+    let digest = digest_netlist_input(state)?;
+    *held.borrow_mut() = Some((stamp, digest));
+    Ok(digest)
+}
+
+fn digest_netlist_input(state: &LifecycleView<'_>) -> Result<ContentDigest, ProjectLifecycleError> {
+    super::capture_snapshot(state, SnapshotContent::Current)?
+        .file
+        .generated_netlist_input_digest()
+}
+
 /// Run `mark`, which writes only the runtime unsaved marks — a tab's dot, a
 /// view's modified flag, the per-subject dirty flags — and keep the
 /// comparison held for the working state before it as the one for the
@@ -280,6 +322,24 @@ pub fn hold_accepted_answer(state: &dyn LifecycleSource) {
             comparison,
         }),
     });
+}
+
+/// Panic when the netlist input digest held under a stamp is not the one
+/// taken now under that same stamp.
+#[cfg(debug_assertions)]
+fn audit_netlist_input(
+    held: ContentDigest,
+    current: &Result<ContentDigest, ProjectLifecycleError>,
+) {
+    if AUDIT_SUSPENDED.with(std::cell::Cell::get) {
+        return;
+    }
+    assert!(
+        current.as_ref().is_ok_and(|current| *current == held),
+        "the generated netlist input held for this working stamp is stale: it now reads \
+         {current:?} while no stamped subject changed. Whatever was edited needs a stamp \
+         contributor."
+    );
 }
 
 /// Panic when the working content held under a stamp is not the content
