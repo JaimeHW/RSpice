@@ -42,8 +42,8 @@ pub enum LibraryIntent {
     RenameView(CellViewRef),
     DeleteView(CellViewRef),
     ShowAuditHistory,
-    PublishLibrary,
-    RollbackPublication,
+    PublishProject,
+    RestoreFromPublication,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -912,36 +912,6 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let governance_write_allowed = cx.platform.project_lifecycle.is_open()
-                        && !cx.model.safe_mode.project_read_only()
-                        && !cx.model.simulation.execution.has_active_execution();
-                    let rollback = Button::new("Rollback\u{2026}")
-                        .enabled(
-                            governance_write_allowed
-                                && !cx.model.workspace.content.project.library_publications().is_empty(),
-                        )
-                        .show(ui)
-                        .on_disabled_hover_text(if cx.model.simulation.execution.has_active_execution() {
-                            "Library rollback is unavailable while a simulation is running."
-                        } else if cx.model.safe_mode.project_read_only() {
-                            "Library rollback is unavailable while the project is read-only."
-                        } else {
-                            "No retained library publication is available to roll back."
-                        });
-                    if rollback.clicked() {
-                        intent = Some(LibraryIntent::RollbackPublication);
-                    }
-                    let publish = Button::new("Publish\u{2026}")
-                        .enabled(governance_write_allowed)
-                        .show(ui)
-                        .on_disabled_hover_text(if cx.model.simulation.execution.has_active_execution() {
-                            "Library publication is unavailable while a simulation is running."
-                        } else {
-                            "Library publication is unavailable while the project is read-only."
-                        });
-                    if publish.clicked() {
-                        intent = Some(LibraryIntent::PublishLibrary);
-                    }
                     if Button::new("Audit history\u{2026}").show(ui).clicked() {
                         intent = Some(LibraryIntent::ShowAuditHistory);
                     }
@@ -1049,41 +1019,9 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                             }
                         });
                     }
-                    ui.menu_button("Library actions", |ui| {
-                        if ui.button("New library\u{2026}").clicked() {
-                            intent = Some(LibraryIntent::NewLibrary);
-                            ui.close();
-                        }
-                        if let Some((library, read_only)) = selected_library {
-                            if ui
-                                .add_enabled(
-                                    !read_only,
-                                    egui::Button::new("Rename library\u{2026}"),
-                                )
-                                .on_disabled_hover_text(
-                                    "The selected library is read-only and cannot be renamed.",
-                                )
-                                .clicked()
-                            {
-                                intent = Some(LibraryIntent::RenameLibrary(library.clone()));
-                                ui.close();
-                            }
-                            ui.separator();
-                            if ui
-                                .add_enabled(
-                                    !read_only,
-                                    egui::Button::new("Delete library\u{2026}"),
-                                )
-                                .on_disabled_hover_text(
-                                    "The selected library is read-only and cannot be deleted.",
-                                )
-                                .clicked()
-                            {
-                                intent = Some(LibraryIntent::DeleteLibrary(library));
-                                ui.close();
-                            }
-                        }
-                    });
+                    if let Some(asked) = library_actions_menu(ui, cx, selected_library) {
+                        intent = Some(asked);
+                    }
                 });
             });
         });
@@ -1092,6 +1030,73 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
         shown.response.rect.top(),
         Stroke::new(1.0, t.color.border_strong),
     );
+    intent
+}
+
+/// Library actions: create, rename and delete a library, then the two
+/// commands over the whole project that live with them, Publish project…
+/// and Restore project from publication…, each disabled with its reason.
+/// `selected_library` is the library the page shows and whether it is
+/// read-only; the built-in library's band passes none.
+pub(super) fn library_actions_menu(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    selected_library: Option<(String, bool)>,
+) -> Option<LibraryIntent> {
+    let readiness = super::library_publication::PublicationReadiness::of(
+        cx.model,
+        cx.platform.project_lifecycle.is_open(),
+    );
+    let mut intent = None;
+    ui.menu_button("Library actions", |ui| {
+        if ui.button("New library\u{2026}").clicked() {
+            intent = Some(LibraryIntent::NewLibrary);
+            ui.close();
+        }
+        if let Some((library, read_only)) = selected_library {
+            if ui
+                .add_enabled(!read_only, egui::Button::new("Rename library\u{2026}"))
+                .on_disabled_hover_text("The library is read-only; it cannot be renamed.")
+                .clicked()
+            {
+                intent = Some(LibraryIntent::RenameLibrary(library.clone()));
+                ui.close();
+            }
+            if ui
+                .add_enabled(!read_only, egui::Button::new("Delete library\u{2026}"))
+                .on_disabled_hover_text("The library is read-only; it cannot be deleted.")
+                .clicked()
+            {
+                intent = Some(LibraryIntent::DeleteLibrary(library));
+                ui.close();
+            }
+        }
+        ui.separator();
+        let publish = readiness.publish_blocker();
+        if ui
+            .add_enabled(
+                publish.is_none(),
+                egui::Button::new("Publish project\u{2026}"),
+            )
+            .on_disabled_hover_text(publish.unwrap_or_default())
+            .clicked()
+        {
+            intent = Some(LibraryIntent::PublishProject);
+            ui.close();
+        }
+        let restore = readiness.restore_blocker();
+        if ui
+            .add_enabled(
+                restore.is_none(),
+                egui::Button::new("Restore project from publication\u{2026}"),
+            )
+            .on_disabled_hover_text(restore.unwrap_or_default())
+            .clicked()
+        {
+            intent = Some(LibraryIntent::RestoreFromPublication);
+            ui.close();
+        }
+    });
     intent
 }
 
@@ -1235,11 +1240,11 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 data.insert_temp(egui::Id::new(AUDIT_REPORT_ID), true);
             });
         }
-        LibraryIntent::PublishLibrary => {
+        LibraryIntent::PublishProject => {
             super::library_publication::open_publication(ctx, cx.model);
         }
-        LibraryIntent::RollbackPublication => {
-            super::library_publication::open_rollback(ctx, cx.model);
+        LibraryIntent::RestoreFromPublication => {
+            super::library_publication::open_restore(ctx, cx.model);
         }
     }
 }
@@ -1475,10 +1480,8 @@ fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> 
             to_view,
         } => format!("{library}/{cell}/{from_view} \u{2192} {library}/{cell}/{to_view}"),
         crate::state::ProjectLibraryMutation::RollbackPublication {
-            publication_id,
-            publication_label,
-            ..
-        } => format!("{publication_label} ({publication_id})"),
+            publication_label, ..
+        } => format!("Project restored from {publication_label}"),
     }
 }
 

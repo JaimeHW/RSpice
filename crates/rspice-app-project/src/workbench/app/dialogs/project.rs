@@ -53,7 +53,7 @@ impl ProjectCheckpointRecoveryState {
     /// the directory before the change, so it is dropped and a new one
     /// starts; a creation or comparison still reports, and a creation's
     /// listing is followed by a fresh one.
-    pub(crate) fn invalidate(&mut self) {
+    pub fn invalidate(&mut self) {
         self.initialized = false;
         self.error = None;
         #[cfg(not(target_arch = "wasm32"))]

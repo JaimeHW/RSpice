@@ -96,7 +96,7 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         },
         SurfaceId::LibraryCellviewManager => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
-            evidence_boundary: "The three-column project library browser, checked cell and view edits, a selection shared with the rest of RSpice, symbol preview, terminal and parameter-form inspection, opening the symbol editor, creating or importing model-bound symbols, form editing, edit-lock inspection, audit history, and versioned project-library publication records all work. Old or invalid symbol metadata is reported and blocks use; the workspace does not provide PCells, layout, extraction, characterization, protected IP, remote collaboration, or sign-off.",
+            evidence_boundary: "The three-column project library browser, checked cell and view edits, a selection shared with the rest of RSpice, symbol preview, terminal and parameter-form inspection, opening the symbol editor, creating or importing model-bound symbols, form editing, audit history, and publishing the project and restoring it from a publication all work. Old or invalid symbol metadata is reported and blocks use; the workspace does not provide PCells, layout, extraction, characterization, protected IP, remote collaboration, or sign-off.",
         },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui session notification panel",

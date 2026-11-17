@@ -1,5 +1,5 @@
-//! The library publication dialogs' composition over the whole
-//! application, and the publication transactions they run.
+//! The Publish project and Restore project from publication dialogs'
+//! composition over the whole application, and the transactions they run.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -8,14 +8,18 @@ use egui::Context;
 use rspice_app_project::workbench::surfaces::project::library_publication::PublicationAction;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_project::workbench::surfaces::project::library_publication::{
-    BROWSER_PUBLICATION_COMPLETIONS, BROWSER_ROLLBACK_COMPLETIONS, BrowserPublicationCompletion,
-    start_browser_rollback_picker,
+    BROWSER_PUBLICATION_COMPLETIONS, BROWSER_RESTORE_CHECKPOINTS, BROWSER_RESTORE_COMPLETIONS,
+    BrowserPublicationCompletion, BrowserRestoreCheckpoint, start_browser_restore_picker,
 };
 use rspice_app_project::workbench::surfaces::project::library_publication::{
     PROJECT_ARTIFACT_EXTENSION, PUBLICATION_DIALOG_ID, ProjectLibraryPublicationCandidate,
-    PublicationDraft, ROLLBACK_DIALOG_ID, RollbackDraft, clear_rollback_artifact,
-    publication_fields, rollback_fields, rollback_receipt_selector, safe_file_stem,
-    selected_receipt, transaction_status,
+    PublicationDraft, PublicationReadiness, RESTORE_DIALOG_ID, RestoreDraft, clear_restore_file,
+    publication_fields, remember_identity, restore_fields, restore_publication_selector,
+    safe_file_stem, selected_receipt, transaction_status,
+};
+use rspice_app_services::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    ProjectDocumentId, dirty_documents,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig;
@@ -29,10 +33,11 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
     {
         poll_browser_publication_completions(ctx, app);
-        poll_browser_rollback_completions(ctx, app);
+        poll_browser_restore_completions(ctx, app);
+        poll_browser_restore_checkpoints(ctx, app);
     }
     show_publication_dialog(ctx, app);
-    show_rollback_dialog(ctx, app);
+    show_restore_dialog(ctx, app);
 }
 
 fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
@@ -44,93 +49,56 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let live_library_revision = app.state.model.library_manager.revision();
     let stale = live_project_revision != draft.source_project_revision
         || live_library_revision != draft.source_library_revision;
-    let lifecycle_error = publication_lifecycle_error(&app.state, stale);
+    let lifecycle_error = publication_lifecycle_error(&app.state);
     let field_error = draft.field_error();
     let primary_enabled =
         !draft.busy && lifecycle_error.is_none() && field_error.is_none() && !stale;
     let choice = Dialog::new(
-        "Publish project library",
+        "Publish project",
         if draft.busy {
             "Publishing\u{2026}"
         } else {
-            "Publish durable artifact"
+            "Publish"
         },
     )
     .description(
-        "Freeze the validated project and library catalog, write that copy to disk, then record the publication in the project's history.",
+        "Write the project as it stands to a file and record the publication, so the project can be restored to it later.",
     )
     .size(DialogSize::Manager)
     .secondary("Cancel")
     .primary_enabled(primary_enabled)
     .show(ctx, |ui| {
-        property_card(ui, "Publication boundary", |ui| {
+        property_card(ui, "Project", |ui| {
             property_row(
                 ui,
                 "Project",
-                &format!(
-                    "{} \u{00b7} {}",
-                    app.state.model.workspace.content.project.display_name(),
-                    app.state.model.workspace.content.project.id()
-                ),
+                app.state.model.workspace.content.project.display_name(),
             );
             property_row(
                 ui,
-                "Captured revisions",
-                &format!(
-                    "project {} \u{00b7} library {}",
-                    draft.source_project_revision, draft.source_library_revision
-                ),
-            );
-            property_row(
-                ui,
-                "Writer contract",
-                if cfg!(target_arch = "wasm32") {
-                    "File System Access write + read-back check"
-                } else {
-                    "atomic synchronized file publication"
-                },
+                "Revision",
+                &draft.source_project_revision.to_string(),
             );
         });
         ui.add_space(8.0);
         publication_fields(ui, &mut draft);
-        ui.add_space(8.0);
-        property_card(ui, "Authority declaration", |ui| {
-            property_row(
-                ui,
-                "Identity scope",
-                "entered by the operator; no organization identity is assumed",
-            );
-            property_row(
-                ui,
-                "Commit order",
-                "prepare file \u{2192} write to disk \u{2192} record publication",
-            );
-            property_row(
-                ui,
-                "Failure behavior",
-                "cancelled, failed, stale, or download-only writes append no receipt",
-            );
-        });
         if stale {
             transaction_status(
                 ui,
-                "The project or library catalog changed after this review opened. Cancel and reopen publication.",
+                "The project changed while this dialog was open. Close it and publish again.",
                 true,
             );
-        } else if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error) {
+        } else if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error.as_deref()) {
             transaction_status(ui, error, true);
         } else if draft.busy {
-            transaction_status(
-                ui,
-                "Waiting for the browser writer. Keep this project open.",
-                false,
-            );
+            transaction_status(ui, "Waiting for the browser to save the file.", false);
         }
     });
 
     match choice {
         DialogChoice::Primary if primary_enabled => {
             draft.error = None;
+            remember_identity(ctx, &draft.actor_id, &draft.authority_id);
             #[cfg(not(target_arch = "wasm32"))]
             match publish_native(app, &draft) {
                 Ok(PublicationAction::Published(message)) => {
@@ -142,10 +110,8 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                     return;
                 }
                 Ok(PublicationAction::Cancelled) => {
-                    draft.error = Some(
-                        "Publication was cancelled; no artifact or receipt was committed."
-                            .to_owned(),
-                    );
+                    draft.error =
+                        Some("Publishing was cancelled; nothing was recorded.".to_owned());
                 }
                 Err(error) => draft.error = Some(error),
             }
@@ -169,9 +135,73 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
     ctx.data_mut(|data| data.insert_temp(id, draft));
 }
 
-fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
-    let id = egui::Id::new(ROLLBACK_DIALOG_ID);
-    let Some(mut draft) = ctx.data(|data| data.get_temp::<RollbackDraft>(id)) else {
+/// What restoring the project from `receipt` replaces in the open project:
+/// the views with unsaved changes, by name, the model libraries attached
+/// now, and the runs recorded since the publication.
+pub(crate) struct RestoreReplaces {
+    pub(crate) unsaved_views: Vec<String>,
+    pub(crate) model_libraries: usize,
+    pub(crate) newer_runs: usize,
+}
+
+pub(crate) fn restore_replaces(
+    state: &AppState,
+    receipt: &ProjectLibraryPublicationReceipt,
+) -> RestoreReplaces {
+    let published_seconds = receipt.created_unix_ms() as f64 / 1000.0;
+    RestoreReplaces {
+        unsaved_views: dirty_documents(state)
+            .into_iter()
+            .filter_map(|document| match document {
+                ProjectDocumentId::CellView(reference) => Some(reference.display_path()),
+                _ => None,
+            })
+            .collect(),
+        model_libraries: state.model.model_library_manager.library_count(),
+        newer_runs: state
+            .model
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .filter(|run| run.timestamp > published_seconds)
+            .count(),
+    }
+}
+
+fn restore_replaces_card(ui: &mut egui::Ui, replaces: &RestoreReplaces) {
+    property_card(ui, "Replaced in the open project", |ui| {
+        if replaces.unsaved_views.is_empty() {
+            property_row(ui, "Unsaved views", "None");
+        } else {
+            for view in &replaces.unsaved_views {
+                property_row(ui, "Unsaved view", view);
+            }
+        }
+        property_row(ui, "Simulation setup", "Replaced by the published setup");
+        property_row(
+            ui,
+            "Model libraries",
+            &format!(
+                "{} now, replaced by the published ones",
+                replaces.model_libraries
+            ),
+        );
+        property_row(
+            ui,
+            "Newer results",
+            &match replaces.newer_runs {
+                0 => "None".to_owned(),
+                1 => "1 run since the publication is removed".to_owned(),
+                runs => format!("{runs} runs since the publication are removed"),
+            },
+        );
+    });
+}
+
+fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
+    let id = egui::Id::new(RESTORE_DIALOG_ID);
+    let Some(mut draft) = ctx.data(|data| data.get_temp::<RestoreDraft>(id)) else {
         return;
     };
     let receipts = app
@@ -184,7 +214,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
         .to_vec();
     if receipts.is_empty() {
         ctx.data_mut(|data| {
-            data.remove::<RollbackDraft>(id);
+            data.remove::<RestoreDraft>(id);
         });
         return;
     }
@@ -196,76 +226,77 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
             .last()
             .expect("nonempty publication list")
             .publication_id();
-        clear_rollback_artifact(&mut draft);
+        clear_restore_file(&mut draft);
     }
-    let lifecycle_error = rollback_lifecycle_error(&app.state);
+    let replaces = restore_replaces(
+        &app.state,
+        selected_receipt(&receipts, draft.publication_id).expect("the publication is retained"),
+    );
+    let lifecycle_error = restore_lifecycle_error(&app.state);
     let field_error = draft.field_error();
     let primary_enabled = !draft.busy && lifecycle_error.is_none() && field_error.is_none();
-    let mut choose_artifact = false;
-    let choice = Dialog::new("Rollback library publication", "Restore publication")
-    .description(
-        "Restore one saved full-project artifact. Its digest, size, project identity, revisions, publication history, technology binding, locks, and audit record are checked again before it replaces the project.",
-    )
-    .size(DialogSize::Manager)
-    .secondary("Cancel")
-    .primary_enabled(primary_enabled)
-    .destructive()
-    .show(ctx, |ui| {
-        rollback_receipt_selector(ui, &receipts, &mut draft);
-        ui.add_space(8.0);
-        rollback_fields(ui, &mut draft);
-        ui.add_space(8.0);
-        property_card(ui, "Artifact", |ui| {
-            let selected = selected_receipt(&receipts, draft.publication_id)
-                .expect("selected publication remains retained");
-            property_row(
-                ui,
-                "Expected",
-                &format!(
-                    "{} bytes \u{00b7} {}",
-                    selected.snapshot_byte_len(),
-                    selected.snapshot_digest()
-                ),
-            );
-            property_row(
-                ui,
-                "Selected file",
-                draft.artifact_name.as_deref().unwrap_or("none"),
-            );
-            let choose = Button::new(if draft.artifact_bytes.is_some() {
-                "Replace artifact\u{2026}"
-            } else {
-                "Choose artifact\u{2026}"
-            })
-            .enabled(!draft.busy)
-            .show(ui);
-            if choose.clicked() {
-                choose_artifact = true;
+    let mut choose_file = false;
+    let choice = Dialog::new("Restore project from publication", "Restore project")
+        .description(
+            "Replace the open project with the copy saved when it was published. A checkpoint of the project as it stands is taken first, so the Recovery page can put it back.",
+        )
+        .size(DialogSize::Manager)
+        .secondary("Cancel")
+        .primary_enabled(primary_enabled)
+        .destructive()
+        .show(ctx, |ui| {
+            restore_publication_selector(ui, &receipts, &mut draft);
+            ui.add_space(8.0);
+            restore_replaces_card(ui, &replaces);
+            ui.add_space(8.0);
+            property_card(ui, "Published file", |ui| {
+                let selected = selected_receipt(&receipts, draft.publication_id)
+                    .expect("selected publication remains retained");
+                property_row(
+                    ui,
+                    "Size",
+                    &format!("{} bytes", selected.snapshot_byte_len()),
+                );
+                property_row(
+                    ui,
+                    "Chosen file",
+                    draft.artifact_name.as_deref().unwrap_or("None"),
+                );
+                let choose = Button::new(if draft.artifact_bytes.is_some() {
+                    "Choose another file\u{2026}"
+                } else {
+                    "Choose file\u{2026}"
+                })
+                .enabled(!draft.busy)
+                .show(ui);
+                if choose.clicked() {
+                    choose_file = true;
+                }
+            });
+            ui.add_space(8.0);
+            restore_fields(ui, &mut draft);
+            if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error.as_deref()) {
+                transaction_status(ui, error, true);
+            } else if draft.busy {
+                transaction_status(ui, "Waiting for the browser.", false);
             }
         });
-        if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error) {
-            transaction_status(ui, error, true);
-        } else if draft.busy {
-            transaction_status(ui, "Waiting for the browser file picker.", false);
-        }
-    });
 
-    if choose_artifact {
+    if choose_file {
         draft.error = None;
         #[cfg(not(target_arch = "wasm32"))]
-        match pick_native_rollback_artifact(app, &draft) {
+        match pick_native_restore_file(app, &draft) {
             Ok(Some((name, bytes))) => {
                 draft.artifact_name = Some(name);
                 draft.artifact_bytes = Some(bytes);
             }
             Ok(None) => {
-                draft.error =
-                    Some("Artifact selection was cancelled; no project state changed.".to_owned());
+                draft.error = Some("No file was chosen; the project is unchanged.".to_owned());
             }
             Err(error) => draft.error = Some(error),
         }
         #[cfg(target_arch = "wasm32")]
-        match start_browser_rollback_picker(ctx) {
+        match start_browser_restore_picker(ctx) {
             Ok(picker_id) => {
                 draft.busy = true;
                 draft.active_picker_id = Some(picker_id);
@@ -276,50 +307,101 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
 
     match choice {
         DialogChoice::Primary if primary_enabled => {
-            let bytes = draft
-                .artifact_bytes
-                .as_deref()
-                .expect("enabled rollback owns validated artifact");
-            match rollback_project_library_publication(
-                &mut app.state,
-                draft.publication_id,
-                bytes,
-                draft.actor_id.clone(),
-                draft.authority_id.clone(),
-                draft.reason.clone(),
-            ) {
-                Ok(()) => {
-                    app.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        format!(
-                            "Rolled the project library back to {}; the rollback is in the audit history.",
-                            draft
-                                .artifact_name
-                                .as_deref()
-                                .unwrap_or("the chosen publication")
-                        ),
-                    );
+            remember_identity(ctx, &draft.actor_id, &draft.authority_id);
+            #[cfg(not(target_arch = "wasm32"))]
+            match restore_with_checkpoint(app, &draft) {
+                Ok(message) => {
+                    app.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
                     ctx.data_mut(|data| {
-                        data.remove::<RollbackDraft>(id);
+                        data.remove::<RestoreDraft>(id);
                     });
                     return;
                 }
                 Err(error) => {
                     draft.error = Some(error);
-                    clear_rollback_artifact(&mut draft);
+                    clear_restore_file(&mut draft);
                 }
+            }
+            #[cfg(target_arch = "wasm32")]
+            match start_browser_restore_checkpoint(ctx, app, &draft) {
+                Ok(()) => {
+                    draft.busy = true;
+                    draft.error = None;
+                }
+                Err(error) => draft.error = Some(error),
             }
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
             ctx.data_mut(|data| {
-                data.remove::<RollbackDraft>(id);
+                data.remove::<RestoreDraft>(id);
             });
             return;
         }
         DialogChoice::None | DialogChoice::Ghost | DialogChoice::Primary => {}
     }
     ctx.data_mut(|data| data.insert_temp(id, draft));
+}
+
+/// Take a checkpoint of the project as it stands, then restore it from the
+/// chosen publication. No checkpoint, no restore.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn restore_with_checkpoint(
+    app: &mut RSpiceApp,
+    draft: &RestoreDraft,
+) -> Result<String, String> {
+    let bytes = draft
+        .artifact_bytes
+        .as_deref()
+        .ok_or_else(|| "Choose the published file.".to_owned())?;
+    let checkpoint = rspice_app_services::workbench::lifecycle::project_checkpoint::create(
+        &mut app.state,
+        ProjectCheckpointReason::PublicationRestore,
+    )
+    .map_err(|error| {
+        format!("The project was not restored: its checkpoint could not be taken ({error}).")
+    })?;
+    app.state.project.project_checkpoint_recovery.invalidate();
+    restore_after_checkpoint(app, draft, bytes, checkpoint.project_revision())
+}
+
+/// Restore the project from the publication `draft` names, once the
+/// checkpoint of revision `checkpoint_revision` is taken.
+fn restore_after_checkpoint(
+    app: &mut RSpiceApp,
+    draft: &RestoreDraft,
+    bytes: &[u8],
+    checkpoint_revision: u64,
+) -> Result<String, String> {
+    let label = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .iter()
+        .find(|receipt| receipt.publication_id() == draft.publication_id)
+        .map(|receipt| {
+            format!(
+                "#{:04} \u{201c}{}\u{201d}",
+                receipt.sequence(),
+                receipt.label()
+            )
+        })
+        .unwrap_or_default();
+    restore_project_from_publication(
+        &mut app.state,
+        draft.publication_id,
+        bytes,
+        draft.actor_id.trim(),
+        draft.authority_id.trim(),
+        draft.reason.trim(),
+    )?;
+    Ok(format!(
+        "Restored the project from publication {label}. The checkpoint \u{201c}{}\u{201d} on the Recovery page holds revision {checkpoint_revision} as it was.",
+        ProjectCheckpointReason::PublicationRestore.label()
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -329,13 +411,13 @@ pub(crate) fn publish_native(
 ) -> Result<PublicationAction, String> {
     if !app.export_workflow_io.saved_paths_are_reopenable() {
         return Err(
-            "The active writer cannot prove a durable reopenable publication; no receipt was committed."
+            "This build cannot save a file that can be opened again; nothing was published."
                 .to_owned(),
         );
     }
     let default_name = publication_filename(&app.state, &draft.label);
     let Some(mut path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
-        title: "Publish project library",
+        title: "Publish project",
         default_name: &default_name,
         filter_name: "RSpice project publication",
         filter_extensions: &[PROJECT_ARTIFACT_EXTENSION],
@@ -350,10 +432,10 @@ pub(crate) fn publish_native(
     let destination = app.export_workflow_io.observe_destination(&path)?;
     let candidate = prepare_project_library_publication(
         &app.state,
-        draft.label.clone(),
-        draft.actor_id.clone(),
-        draft.authority_id.clone(),
-        draft.reason.clone(),
+        draft.label.trim(),
+        draft.actor_id.trim(),
+        draft.authority_id.trim(),
+        draft.reason.trim(),
     )?;
     app.export_workflow_io.write_bytes_file_observed(
         &destination,
@@ -362,10 +444,9 @@ pub(crate) fn publish_native(
     )?;
     let receipt = commit_project_library_publication(&mut app.state, candidate)?;
     Ok(PublicationAction::Published(format!(
-        "Published the project library to {} (publication #{:04}, {} bytes).",
+        "Published the project to {} as publication #{:04}.",
         destination.path().display(),
         receipt.sequence(),
-        receipt.snapshot_byte_len()
     )))
 }
 
@@ -381,10 +462,10 @@ fn start_browser_publication(
 
     let candidate = prepare_project_library_publication(
         &app.state,
-        draft.label.clone(),
-        draft.actor_id.clone(),
-        draft.authority_id.clone(),
-        draft.reason.clone(),
+        draft.label.trim(),
+        draft.actor_id.trim(),
+        draft.authority_id.trim(),
+        draft.reason.trim(),
     )?;
     let publication_id = candidate.publication_id();
     let bytes = candidate.artifact_bytes().to_vec();
@@ -435,29 +516,29 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
                 release_browser_handle(handle_id);
                 if digest != completion.candidate.snapshot_digest() {
                     Err(
-                        "The published file did not read back as written; no receipt was committed."
+                        "The saved file did not read back as written; nothing was recorded."
                             .to_owned(),
                     )
                 } else {
-                    commit_project_library_publication(&mut app.state, completion.candidate)
-                        .map(|receipt| {
+                    commit_project_library_publication(&mut app.state, completion.candidate).map(
+                        |receipt| {
                             format!(
-                                "Published the project library to {display_name} (publication #{:04}, {} bytes).",
+                                "Published the project to {display_name} as publication #{:04}.",
                                 receipt.sequence(),
-                                receipt.snapshot_byte_len()
                             )
-                        })
+                        },
+                    )
                 }
             }
             BrowserWriteResult::Cancelled => {
-                Err("Publication was cancelled; no receipt was committed.".to_owned())
+                Err("Publishing was cancelled; nothing was recorded.".to_owned())
             }
             BrowserWriteResult::ExternalChange { .. } => Err(
-                "The chosen publication file changed before it was committed; no receipt was committed."
+                "The chosen file changed while it was being saved; nothing was recorded."
                     .to_owned(),
             ),
             BrowserWriteResult::Failed(error) => Err(format!(
-                "Publishing the project library failed: {error}. No receipt was committed."
+                "Publishing the project failed: {error}. Nothing was recorded."
             )),
         };
         match result {
@@ -497,37 +578,29 @@ fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn pick_native_rollback_artifact(
+fn pick_native_restore_file(
     app: &RSpiceApp,
-    draft: &RollbackDraft,
+    draft: &RestoreDraft,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("RSpice project publication", &[PROJECT_ARTIFACT_EXTENSION])
-        .set_title("Choose library publication artifact")
+        .set_title("Choose the published project file")
         .pick_file()
     else {
         return Ok(None);
     };
-    let metadata = std::fs::metadata(&path).map_err(|error| {
-        format!(
-            "Could not inspect publication artifact '{}': {error}",
-            path.display()
-        )
-    })?;
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("Could not read '{}': {error}", path.display()))?;
     if metadata.len() > rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES {
         return Err(format!(
-            "Publication artifact '{}' exceeds the supported {}-byte project limit",
+            "'{}' is larger than a project file can be ({} bytes).",
             path.display(),
             rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES
         ));
     }
-    let bytes = std::fs::read(&path).map_err(|error| {
-        format!(
-            "Could not read publication artifact '{}': {error}",
-            path.display()
-        )
-    })?;
-    validate_rollback_artifact(&app.state, draft.publication_id, &bytes)?;
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("Could not read '{}': {error}", path.display()))?;
+    validate_restore_file(&app.state, draft.publication_id, &bytes)?;
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -537,17 +610,17 @@ fn pick_native_rollback_artifact(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
+fn poll_browser_restore_completions(ctx: &Context, app: &mut RSpiceApp) {
     use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         BrowserOpenResult, release_browser_handle,
     };
     use sha2::Digest as _;
 
     let completions =
-        BROWSER_ROLLBACK_COMPLETIONS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+        BROWSER_RESTORE_COMPLETIONS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        let id = egui::Id::new(ROLLBACK_DIALOG_ID);
-        let mut draft = ctx.data(|data| data.get_temp::<RollbackDraft>(id));
+        let id = egui::Id::new(RESTORE_DIALOG_ID);
+        let mut draft = ctx.data(|data| data.get_temp::<RestoreDraft>(id));
         let Some(mut current) = draft.take() else {
             if let BrowserOpenResult::Opened { handle_id, .. } = completion.result {
                 release_browser_handle(handle_id);
@@ -570,7 +643,7 @@ fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
             } => {
                 release_browser_handle(handle_id);
                 let (bytes, digest) = bytes.into_parts();
-                match validate_rollback_artifact(&app.state, current.publication_id, &bytes) {
+                match validate_restore_file(&app.state, current.publication_id, &bytes) {
                     Ok(())
                         if ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into())
                             == digest =>
@@ -581,7 +654,7 @@ fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
                     }
                     Ok(()) => {
                         current.error = Some(
-                            "Browser artifact read digest was internally inconsistent; no rollback is allowed."
+                            "The browser read the file inconsistently; the project is unchanged."
                                 .to_owned(),
                         );
                     }
@@ -591,44 +664,98 @@ fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
                 }
             }
             BrowserOpenResult::Cancelled => {
-                current.error =
-                    Some("Artifact selection was cancelled; no project state changed.".to_owned());
+                current.error = Some("No file was chosen; the project is unchanged.".to_owned());
             }
             BrowserOpenResult::Failed(error) => {
-                current.error = Some(format!("Browser artifact selection failed: {error}"));
+                current.error = Some(format!("The browser could not open the file: {error}"));
             }
         }
         ctx.data_mut(|data| data.insert_temp(id, current));
     }
 }
 
-fn publication_lifecycle_error(state: &AppState, stale: bool) -> Option<&'static str> {
-    if !state.platform.project_lifecycle.is_open() {
-        Some("Open a project before publishing its library.")
-    } else if state.model.safe_mode.project_read_only() {
-        Some("Publication is unavailable while the project is open read-only.")
-    } else if state.model.simulation.execution.has_active_execution() {
-        Some("Publication is unavailable while a simulation is running.")
-    } else if stale {
-        Some("The publication review is stale.")
-    } else {
-        None
+/// Start writing the checkpoint a browser restore takes first; the restore
+/// runs when it is written.
+#[cfg(target_arch = "wasm32")]
+fn start_browser_restore_checkpoint(
+    ctx: &Context,
+    app: &RSpiceApp,
+    draft: &RestoreDraft,
+) -> Result<(), String> {
+    let publication_id = draft.publication_id;
+    let repaint = ctx.clone();
+    rspice_app_services::workbench::lifecycle::project_checkpoint::start_create(
+        &app.state,
+        ProjectCheckpointReason::PublicationRestore,
+        move |result| {
+            BROWSER_RESTORE_CHECKPOINTS.with(|queue| {
+                queue.borrow_mut().push_back(BrowserRestoreCheckpoint {
+                    publication_id,
+                    result,
+                });
+            });
+            repaint.request_repaint();
+        },
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_restore_checkpoints(ctx: &Context, app: &mut RSpiceApp) {
+    let completions =
+        BROWSER_RESTORE_CHECKPOINTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in completions {
+        let id = egui::Id::new(RESTORE_DIALOG_ID);
+        let Some(mut draft) = ctx.data(|data| data.get_temp::<RestoreDraft>(id)) else {
+            continue;
+        };
+        if !draft.busy || draft.publication_id != completion.publication_id {
+            continue;
+        }
+        draft.busy = false;
+        app.state.project.project_checkpoint_recovery.invalidate();
+        let restored = completion
+            .result
+            .map_err(|error| {
+                format!(
+                    "The project was not restored: its checkpoint could not be taken ({error})."
+                )
+            })
+            .and_then(|checkpoint| {
+                let bytes = draft
+                    .artifact_bytes
+                    .clone()
+                    .ok_or_else(|| "Choose the published file.".to_owned())?;
+                restore_after_checkpoint(app, &draft, &bytes, checkpoint.project_revision())
+            });
+        match restored {
+            Ok(message) => {
+                app.state
+                    .record(LogSeverity::Info, LogSource::Studio, message);
+                ctx.data_mut(|data| {
+                    data.remove::<RestoreDraft>(id);
+                });
+            }
+            Err(error) => {
+                draft.error = Some(error);
+                clear_restore_file(&mut draft);
+                ctx.data_mut(|data| data.insert_temp(id, draft));
+            }
+        }
     }
 }
 
-fn rollback_lifecycle_error(state: &AppState) -> Option<&'static str> {
-    if !state.platform.project_lifecycle.is_open() {
-        Some("Open the publication's project before rollback.")
-    } else if state.model.safe_mode.project_read_only() {
-        Some("Rollback is unavailable while the project is open read-only.")
-    } else if state.model.simulation.execution.has_active_execution() {
-        Some("Rollback is unavailable while a simulation is running.")
-    } else {
-        None
-    }
+fn publication_lifecycle_error(state: &AppState) -> Option<&'static str> {
+    PublicationReadiness::of(&state.model, state.platform.project_lifecycle.is_open())
+        .publish_blocker()
 }
 
-pub(crate) fn validate_rollback_artifact(
+fn restore_lifecycle_error(state: &AppState) -> Option<&'static str> {
+    PublicationReadiness::of(&state.model, state.platform.project_lifecycle.is_open())
+        .restore_blocker()
+}
+
+/// Whether `bytes` are the file publication `publication_id` recorded.
+pub(crate) fn validate_restore_file(
     state: &AppState,
     publication_id: uuid::Uuid,
     bytes: &[u8],
@@ -643,16 +770,12 @@ pub(crate) fn validate_rollback_artifact(
         .library_publications()
         .iter()
         .find(|receipt| receipt.publication_id() == publication_id)
-        .ok_or_else(|| format!("Publication {publication_id} is no longer retained"))?;
+        .ok_or_else(|| "The project no longer has that publication.".to_owned())?;
     let digest = ContentDigest::from_bytes(sha2::Sha256::digest(bytes).into());
     if bytes.len() as u64 != receipt.snapshot_byte_len() || digest != receipt.snapshot_digest() {
         return Err(format!(
-            "Selected artifact does not match publication #{:04}: expected {} bytes \u{00b7} {}, observed {} bytes \u{00b7} {}.",
-            receipt.sequence(),
-            receipt.snapshot_byte_len(),
-            receipt.snapshot_digest(),
-            bytes.len(),
-            digest
+            "The chosen file is not the file published as #{:04}.",
+            receipt.sequence()
         ));
     }
     Ok(())
@@ -677,23 +800,18 @@ pub(crate) fn prepare_project_library_publication(
     use sha2::Digest as _;
 
     if state.model.safe_mode.project_read_only() {
-        return Err(
-            "project library publication is unavailable because the project is open read-only"
-                .to_owned(),
-        );
+        return Err("The project is open read-only.".to_owned());
     }
     if state.model.simulation.execution.has_active_execution() {
-        return Err(
-            "project library publication is unavailable while a simulation is running".to_owned(),
-        );
+        return Err("A simulation is running.".to_owned());
     }
     let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(state)
-        .map_err(|error| format!("project library publication snapshot failed: {error}"))?;
+        .map_err(|error| format!("The project could not be read for publishing: {error}"))?;
     let serialized = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
-        .map_err(|error| format!("project library publication serialization failed: {error}"))?;
+        .map_err(|error| format!("The project could not be written for publishing: {error}"))?;
     let bytes = serialized.into_bytes();
     let snapshot_byte_len = u64::try_from(bytes.len())
-        .map_err(|_| "project library publication artifact is too large".to_owned())?;
+        .map_err(|_| "The project is too large to publish.".to_owned())?;
     let draft = rspice_app_state::state::workspace::ProjectLibraryPublicationDraft {
         publication_id: uuid::Uuid::new_v4(),
         label: label.into(),
@@ -714,7 +832,7 @@ pub(crate) fn prepare_project_library_publication(
     let mut descriptor_preflight = state.model.workspace.content.project.clone();
     descriptor_preflight
         .publish_library_snapshot(draft.clone())
-        .map_err(|error| format!("project library publication preflight failed: {error}"))?;
+        .map_err(|error| format!("The publication cannot be recorded: {error}"))?;
     Ok(ProjectLibraryPublicationCandidate {
         draft,
         artifact_bytes: bytes,
@@ -732,31 +850,24 @@ pub(crate) fn commit_project_library_publication(
     use sha2::Digest as _;
 
     if state.model.safe_mode.project_read_only() {
-        return Err(
-            "project library publication is unavailable because the project is open read-only"
-                .to_owned(),
-        );
+        return Err("The project is open read-only.".to_owned());
     }
     if state.model.simulation.execution.has_active_execution() {
-        return Err(
-            "project library publication is unavailable while a simulation is running".to_owned(),
-        );
+        return Err("A simulation is running.".to_owned());
     }
     if state.model.workspace.content.project.revision() != candidate.source_project_revision
         || state.model.library_manager.revision() != candidate.draft.library_revision
     {
         return Err(
-            "project library publication candidate is stale; prepare and publish a new artifact"
-                .to_owned(),
+            "The project changed while it was being published; publish it again.".to_owned(),
         );
     }
     let current_snapshot =
         rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(state)
-            .map_err(|error| format!("project library publication recheck failed: {error}"))?;
+            .map_err(|error| format!("The project could not be read again: {error}"))?;
     let current_serialized =
-        rspice_app_services::io::project_io::serialize_project_file(&current_snapshot).map_err(
-            |error| format!("project library publication recheck serialization failed: {error}"),
-        )?;
+        rspice_app_services::io::project_io::serialize_project_file(&current_snapshot)
+            .map_err(|error| format!("The project could not be written again: {error}"))?;
     let current_bytes = current_serialized.as_bytes();
     if current_bytes.len() as u64 != candidate.draft.snapshot_byte_len
         || rspice_app_state::product::ContentDigest::from_bytes(
@@ -764,8 +875,7 @@ pub(crate) fn commit_project_library_publication(
         ) != candidate.draft.snapshot_digest
     {
         return Err(
-            "project library publication content changed after the artifact was prepared"
-                .to_owned(),
+            "The project changed while it was being published; publish it again.".to_owned(),
         );
     }
     let receipt = state
@@ -774,7 +884,7 @@ pub(crate) fn commit_project_library_publication(
         .content
         .project
         .publish_library_snapshot(candidate.draft)
-        .map_err(|error| format!("project library publication failed: {error}"))?;
+        .map_err(|error| format!("The publication could not be recorded: {error}"))?;
     state.model.workspace.content.project_metadata_dirty = true;
     state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
     state
@@ -785,12 +895,12 @@ pub(crate) fn commit_project_library_publication(
     Ok(receipt)
 }
 
-/// Restore the exact complete project artifact named by an immutable
-/// library publication while preserving the current project identity,
-/// publication ledger, and intervening audit history. The rollback is one
-/// new revision; malformed, tampered, foreign, stale-authority, or
-/// technology-incompatible artifacts leave live state unchanged.
-pub(crate) fn rollback_project_library_publication(
+/// Replace the open project with the file a publication recorded, keeping
+/// the project's identity, its publications and the audit history recorded
+/// since. The restore is one new revision; a damaged, altered or foreign
+/// file, or one from before a technology change, leaves the project as it
+/// was.
+pub(crate) fn restore_project_from_publication(
     state: &mut AppState,
     publication_id: uuid::Uuid,
     artifact_bytes: &[u8],
@@ -801,15 +911,10 @@ pub(crate) fn rollback_project_library_publication(
     use sha2::Digest as _;
 
     if state.model.safe_mode.project_read_only() {
-        return Err(
-            "project library rollback is unavailable because the project is open read-only"
-                .to_owned(),
-        );
+        return Err("The project is open read-only.".to_owned());
     }
     if state.model.simulation.execution.has_active_execution() {
-        return Err(
-            "project library rollback is unavailable while a simulation is running".to_owned(),
-        );
+        return Err("A simulation is running.".to_owned());
     }
     let receipt = state
         .model
@@ -820,31 +925,29 @@ pub(crate) fn rollback_project_library_publication(
         .iter()
         .find(|receipt| receipt.publication_id() == publication_id)
         .cloned()
-        .ok_or_else(|| format!("project library publication {publication_id} is not retained"))?;
+        .ok_or_else(|| "The project no longer has that publication.".to_owned())?;
     if artifact_bytes.len() as u64 != receipt.snapshot_byte_len()
         || rspice_app_state::product::ContentDigest::from_bytes(
             sha2::Sha256::digest(artifact_bytes).into(),
         ) != receipt.snapshot_digest()
     {
-        return Err(
-            "project library rollback artifact does not match its publication receipt".to_owned(),
-        );
+        return Err(format!(
+            "The chosen file is not the file published as #{:04}.",
+            receipt.sequence()
+        ));
     }
     let artifact_text = std::str::from_utf8(artifact_bytes)
-        .map_err(|error| format!("project library rollback artifact is not UTF-8: {error}"))?;
+        .map_err(|error| format!("The published file is not a project file: {error}"))?;
     let mut artifact = rspice_app_services::io::project_io::load_project_text(artifact_text, None)
-        .map_err(|error| format!("project library rollback artifact is invalid: {error}"))?;
+        .map_err(|error| format!("The published file cannot be read: {error}"))?;
     if artifact.file.workspace.project.id() != receipt.project_id()
         || artifact.file.workspace.project.revision() != receipt.source_project_revision()
         || artifact.file.libraries.revision() != receipt.library_revision()
     {
-        return Err(
-            "project library rollback artifact identity or revision does not match its receipt"
-                .to_owned(),
-        );
+        return Err("The published file belongs to another project or revision.".to_owned());
     }
     let expected_prior_publications = usize::try_from(receipt.sequence() - 1)
-        .map_err(|_| "project library publication sequence is invalid".to_owned())?;
+        .map_err(|_| "The publication's number is not valid.".to_owned())?;
     if artifact.file.workspace.project.library_publications().len() != expected_prior_publications
         || artifact
             .file
@@ -855,16 +958,13 @@ pub(crate) fn rollback_project_library_publication(
             .map(ProjectLibraryPublicationReceipt::receipt_digest)
             != receipt.previous_receipt_digest()
     {
-        return Err(
-            "project library rollback artifact is missing publications recorded before it"
-                .to_owned(),
-        );
+        return Err("The published file lacks the publications recorded before it.".to_owned());
     }
     if artifact.file.workspace.project.technology_binding()
         != state.model.workspace.content.project.technology_binding()
     {
         return Err(
-            "project library rollback cannot undo a change to the project's technology binding"
+            "The project's technology changed after this publication; a restore cannot undo that."
                 .to_owned(),
         );
     }
@@ -882,7 +982,7 @@ pub(crate) fn rollback_project_library_publication(
     let (simulation_plan, model_library_manager, execution_warnings) =
         match artifact.file.execution_context.take() {
             Some(context) => rspice_app_services::io::restore_execution_context(context).map_err(|error| {
-                format!("project library rollback execution context is invalid: {error}")
+                format!("The published simulation setup cannot be read: {error}")
             })?,
             None => (
                 rspice_app_state::workbench::app_state::sim_setup::SimSetupState::new_with_user_preferences(
@@ -890,7 +990,7 @@ pub(crate) fn rollback_project_library_publication(
                 ),
                 rspice_app_state::workbench::workspace::default_model_library_manager(),
                 vec![
-                    "The publication predates durable simulation plans; documented defaults were restored"
+                    "The publication has no simulation setup; the default setup was restored"
                         .to_owned(),
                 ],
             ),
@@ -918,7 +1018,7 @@ pub(crate) fn rollback_project_library_publication(
         artifact.file.simulation_results,
         &mut candidate.model.simulation,
     )
-    .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;
+    .map_err(|error| format!("The published results cannot be read: {error}"))?;
     candidate.model.publish_project_library_mutation(prepared);
     candidate
         .model
@@ -926,7 +1026,7 @@ pub(crate) fn rollback_project_library_publication(
         .content
         .project
         .validate()
-        .map_err(|error| format!("project library rollback metadata is invalid: {error}"))?;
+        .map_err(|error| format!("The restored project is not valid: {error}"))?;
     state.commit_candidate(candidate);
     for warning in execution_warnings {
         state.record(

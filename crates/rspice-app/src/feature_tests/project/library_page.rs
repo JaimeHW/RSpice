@@ -9,7 +9,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::features;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
-use crate::workbench::shell_host::project::library_publication::rollback_project_library_publication;
+use crate::workbench::shell_host::project::library_publication::restore_project_from_publication;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::library::{
     AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
@@ -267,13 +267,13 @@ fn audit_history_intent_opens_the_project_library_receipt_view() {
 }
 
 #[test]
-fn publication_and_rollback_intents_open_the_governed_transactions() {
+fn publish_and_restore_intents_open_their_dialogs() {
     let mut app = RSpiceApp::test_instance();
     let ctx = egui::Context::default();
 
-    apply_and_answer(&ctx, &mut app, LibraryIntent::PublishLibrary);
+    apply_and_answer(&ctx, &mut app, LibraryIntent::PublishProject);
     assert!(super::library_publication::publication_dialog_open(&ctx));
-    assert!(!super::library_publication::rollback_dialog_open(&ctx));
+    assert!(!super::library_publication::restore_dialog_open(&ctx));
 
     let candidate = prepare_project_library_publication(
         &app.state,
@@ -285,10 +285,10 @@ fn publication_and_rollback_intents_open_the_governed_transactions() {
     .expect("publication candidate prepares");
     commit_project_library_publication(&mut app.state, candidate)
         .expect("test-owned durable boundary commits");
-    apply_and_answer(&ctx, &mut app, LibraryIntent::RollbackPublication);
+    apply_and_answer(&ctx, &mut app, LibraryIntent::RestoreFromPublication);
 
     assert!(!super::library_publication::publication_dialog_open(&ctx));
-    assert!(super::library_publication::rollback_dialog_open(&ctx));
+    assert!(super::library_publication::restore_dialog_open(&ctx));
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
     let last = tampered.last_mut().expect("nonempty publication artifact");
     *last ^= 0x01;
     let revision_before_rejection = app.state.model.workspace.content.project.revision();
-    let tampered_result = rollback_project_library_publication(
+    let tampered_result = restore_project_from_publication(
         &mut app.state,
         receipt.publication_id(),
         &tampered,
@@ -423,7 +423,7 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
         "rejected rollback must not partially replace the catalog"
     );
 
-    rollback_project_library_publication(
+    restore_project_from_publication(
         &mut app.state,
         receipt.publication_id(),
         &bytes,
@@ -530,7 +530,10 @@ fn publication_commit_rejects_intervening_catalog_change_atomically() {
     let error = commit_project_library_publication(&mut app.state, candidate)
         .expect_err("stale publication cannot commit");
 
-    assert!(error.contains("stale"));
+    assert_eq!(
+        error,
+        "The project changed while it was being published; publish it again."
+    );
     assert!(
         app.state
             .model

@@ -38,6 +38,7 @@ const BROWSER_KEY_PREFIX: &str = "rspice.project-recovery.v1";
 pub enum ProjectCheckpointReason {
     Manual,
     TechnologyAttachment,
+    PublicationRestore,
 }
 
 impl ProjectCheckpointReason {
@@ -45,6 +46,7 @@ impl ProjectCheckpointReason {
         match self {
             Self::Manual => "Manual checkpoint",
             Self::TechnologyAttachment => "Before technology attachment",
+            Self::PublicationRestore => "Before restore from publication",
         }
     }
 }

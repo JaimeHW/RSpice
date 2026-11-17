@@ -1,8 +1,9 @@
-//! End-user project-library publication and rollback transactions.
+//! Publish project and Restore project from publication: their drafts and
+//! fields.
 //!
-//! A publication receipt is committed only after the exact prepared project
-//! bytes have crossed a writer boundary that can prove a durable native write
-//! or a browser File System Access write with read-back verification. Browser
+//! A publication is recorded only after the exact prepared project bytes
+//! have crossed a writer boundary that can prove a durable native write or a
+//! browser File System Access write with read-back verification. Browser
 //! downloads are deliberately not treated as durable publication.
 
 use super::*;
@@ -13,8 +14,54 @@ use crate::state::workspace::ProjectLibraryPublicationReceipt;
 use crate::workbench::app_state::Model;
 
 pub const PUBLICATION_DIALOG_ID: &str = "workbench.project.library.publication";
-pub const ROLLBACK_DIALOG_ID: &str = "workbench.project.library.publication.rollback";
+pub const RESTORE_DIALOG_ID: &str = "workbench.project.library.publication.restore";
 pub const PROJECT_ARTIFACT_EXTENSION: &str = "rspiceproj";
+/// Who last published or restored, and who approved it, for this session:
+/// the next dialog starts from them.
+const IDENTITY_MEMORY_ID: &str = "workbench.project.library.publication.identity";
+
+#[derive(Debug, Clone, Default)]
+struct RememberedIdentity {
+    actor_id: String,
+    authority_id: String,
+}
+
+/// Keep `actor_id` and `authority_id` for the next Publish or Restore of
+/// this session.
+pub fn remember_identity(ctx: &Context, actor_id: &str, authority_id: &str) {
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(IDENTITY_MEMORY_ID),
+            RememberedIdentity {
+                actor_id: actor_id.trim().to_owned(),
+                authority_id: authority_id.trim().to_owned(),
+            },
+        );
+    });
+}
+
+fn remembered_identity(ctx: &Context) -> RememberedIdentity {
+    ctx.data(|data| data.get_temp::<RememberedIdentity>(egui::Id::new(IDENTITY_MEMORY_ID)))
+        .unwrap_or_default()
+}
+
+/// The first field of `fields` the dialog cannot record, as the reader is
+/// told it: each is required, on one line, and at most 240 characters.
+/// Spaces around a value are dropped when it is recorded.
+fn first_field_error(fields: &[(&'static str, &str)]) -> Option<String> {
+    fields.iter().find_map(|(label, value)| {
+        let value = value.trim();
+        if value.is_empty() {
+            Some(format!("Enter {label}."))
+        } else if !audit_text_valid(value) {
+            Some(format!(
+                "Shorten {label} to one line of at most 240 characters."
+            ))
+        } else {
+            None
+        }
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct PublicationDraft {
@@ -36,7 +83,7 @@ impl PublicationDraft {
             source_project_revision: model.workspace.content.project.revision().get(),
             source_library_revision: model.library_manager.revision(),
             label: format!(
-                "{}-library-r{}",
+                "{}-r{}",
                 model.workspace.content.project.name(),
                 model.workspace.content.project.revision().get()
             ),
@@ -50,36 +97,18 @@ impl PublicationDraft {
         }
     }
 
-    pub fn field_error(&self) -> Option<&'static str> {
-        for (label, value) in [
-            ("Publication label", self.label.as_str()),
-            ("Actor identity", self.actor_id.as_str()),
-            ("Authority identity", self.authority_id.as_str()),
-            ("Publication reason", self.reason.as_str()),
-        ] {
-            if !audit_text_valid(value) {
-                return Some(match label {
-                    "Publication label" => {
-                        "Publication label is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                    "Actor identity" => {
-                        "Actor identity is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                    "Authority identity" => {
-                        "Authority identity is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                    _ => {
-                        "Publication reason is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                });
-            }
-        }
-        None
+    pub fn field_error(&self) -> Option<String> {
+        first_field_error(&[
+            ("a label", &self.label),
+            ("who publishes", &self.actor_id),
+            ("who approved it", &self.authority_id),
+            ("a reason", &self.reason),
+        ])
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RollbackDraft {
+pub struct RestoreDraft {
     pub publication_id: uuid::Uuid,
     pub actor_id: String,
     pub authority_id: String,
@@ -92,12 +121,12 @@ pub struct RollbackDraft {
     pub error: Option<String>,
 }
 
-impl RollbackDraft {
-    fn new(receipt: &ProjectLibraryPublicationReceipt) -> Self {
+impl RestoreDraft {
+    fn new(receipt: &ProjectLibraryPublicationReceipt, identity: RememberedIdentity) -> Self {
         Self {
             publication_id: receipt.publication_id(),
-            actor_id: String::new(),
-            authority_id: String::new(),
+            actor_id: identity.actor_id,
+            authority_id: identity.authority_id,
             reason: String::new(),
             artifact_name: None,
             artifact_bytes: None,
@@ -108,30 +137,17 @@ impl RollbackDraft {
         }
     }
 
-    pub fn field_error(&self) -> Option<&'static str> {
-        for (label, value) in [
-            ("Actor identity", self.actor_id.as_str()),
-            ("Authority identity", self.authority_id.as_str()),
-            ("Rollback reason", self.reason.as_str()),
-        ] {
-            if !audit_text_valid(value) {
-                return Some(match label {
-                    "Actor identity" => {
-                        "Actor identity is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                    "Authority identity" => {
-                        "Authority identity is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                    _ => {
-                        "Rollback reason is required, must be trimmed, and must not exceed 240 characters."
-                    }
-                });
-            }
-        }
-        if self.artifact_bytes.is_none() {
-            return Some("Choose the saved publication artifact before rollback.");
-        }
-        None
+    pub fn field_error(&self) -> Option<String> {
+        first_field_error(&[
+            ("who restores", &self.actor_id),
+            ("who approved it", &self.authority_id),
+            ("a reason", &self.reason),
+        ])
+        .or_else(|| {
+            self.artifact_bytes
+                .is_none()
+                .then(|| "Choose the published file.".to_owned())
+        })
     }
 }
 
@@ -142,9 +158,17 @@ pub struct BrowserPublicationCompletion {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub struct BrowserRollbackCompletion {
+pub struct BrowserRestoreCompletion {
     pub picker_id: uuid::Uuid,
     pub result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
+}
+
+/// The checkpoint a browser restore takes first, once it is written.
+#[cfg(target_arch = "wasm32")]
+pub struct BrowserRestoreCheckpoint {
+    pub publication_id: uuid::Uuid,
+    pub result:
+        Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary, String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -152,22 +176,99 @@ thread_local! {
     pub static BROWSER_PUBLICATION_COMPLETIONS:
         std::cell::RefCell<std::collections::VecDeque<BrowserPublicationCompletion>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
-    pub static BROWSER_ROLLBACK_COMPLETIONS:
-        std::cell::RefCell<std::collections::VecDeque<BrowserRollbackCompletion>> =
+    pub static BROWSER_RESTORE_COMPLETIONS:
+        std::cell::RefCell<std::collections::VecDeque<BrowserRestoreCompletion>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    pub static BROWSER_RESTORE_CHECKPOINTS:
+        std::cell::RefCell<std::collections::VecDeque<BrowserRestoreCheckpoint>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
+/// Whether this build can write and read a project file the user chooses.
+/// A browser without the File System Access pickers cannot.
+pub fn file_pickers_available() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::workbench::lifecycle::project_lifecycle::browser_file_picker_supported()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        true
+    }
+}
+
+/// What the project's state is, as Publish project and Restore project from
+/// publication read it.
+#[derive(Debug, Clone, Copy)]
+pub struct PublicationReadiness {
+    pub project_open: bool,
+    pub file_pickers: bool,
+    pub read_only: bool,
+    pub simulation_running: bool,
+    pub has_publications: bool,
+}
+
+impl PublicationReadiness {
+    pub fn of(model: &Model, project_open: bool) -> Self {
+        Self {
+            project_open,
+            file_pickers: file_pickers_available(),
+            read_only: model.safe_mode.project_read_only(),
+            simulation_running: model.simulation.execution.has_active_execution(),
+            has_publications: !model
+                .workspace
+                .content
+                .project
+                .library_publications()
+                .is_empty(),
+        }
+    }
+
+    /// Why Publish project cannot run now, if it cannot.
+    pub fn publish_blocker(self) -> Option<&'static str> {
+        if !self.project_open {
+            Some("Open a project to publish it.")
+        } else if !self.file_pickers {
+            Some("This browser cannot save a file to disk; publish from the desktop app.")
+        } else if self.read_only {
+            Some("The project is open read-only.")
+        } else if self.simulation_running {
+            Some("A simulation is running.")
+        } else {
+            None
+        }
+    }
+
+    /// Why Restore project from publication cannot run now, if it cannot.
+    pub fn restore_blocker(self) -> Option<&'static str> {
+        if !self.project_open {
+            Some("Open a project to restore it from a publication.")
+        } else if !self.has_publications {
+            Some("The project has no publications to restore from.")
+        } else if !self.file_pickers {
+            Some("This browser cannot open a file from disk; restore from the desktop app.")
+        } else if self.read_only {
+            Some("The project is open read-only.")
+        } else if self.simulation_running {
+            Some("A simulation is running.")
+        } else {
+            None
+        }
+    }
+}
+
 pub fn open_publication(ctx: &Context, model: &Model) {
+    let identity = remembered_identity(ctx);
+    let mut draft = PublicationDraft::new(model);
+    draft.actor_id = identity.actor_id;
+    draft.authority_id = identity.authority_id;
     ctx.data_mut(|data| {
-        data.remove::<RollbackDraft>(egui::Id::new(ROLLBACK_DIALOG_ID));
-        data.insert_temp(
-            egui::Id::new(PUBLICATION_DIALOG_ID),
-            PublicationDraft::new(model),
-        );
+        data.remove::<RestoreDraft>(egui::Id::new(RESTORE_DIALOG_ID));
+        data.insert_temp(egui::Id::new(PUBLICATION_DIALOG_ID), draft);
     });
 }
 
-pub fn open_rollback(ctx: &Context, model: &Model) {
+pub fn open_restore(ctx: &Context, model: &Model) {
     let Some(receipt) = model
         .workspace
         .content
@@ -177,12 +278,10 @@ pub fn open_rollback(ctx: &Context, model: &Model) {
     else {
         return;
     };
+    let draft = RestoreDraft::new(receipt, remembered_identity(ctx));
     ctx.data_mut(|data| {
         data.remove::<PublicationDraft>(egui::Id::new(PUBLICATION_DIALOG_ID));
-        data.insert_temp(
-            egui::Id::new(ROLLBACK_DIALOG_ID),
-            RollbackDraft::new(receipt),
-        );
+        data.insert_temp(egui::Id::new(RESTORE_DIALOG_ID), draft);
     });
 }
 
@@ -195,68 +294,68 @@ pub fn publication_dialog_open(ctx: &Context) -> bool {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub fn rollback_dialog_open(ctx: &Context) -> bool {
+pub fn restore_dialog_open(ctx: &Context) -> bool {
     ctx.data(|data| {
-        data.get_temp::<RollbackDraft>(egui::Id::new(ROLLBACK_DIALOG_ID))
+        data.get_temp::<RestoreDraft>(egui::Id::new(RESTORE_DIALOG_ID))
             .is_some()
     })
 }
 
 pub fn publication_fields(ui: &mut Ui, draft: &mut PublicationDraft) {
-    property_card(ui, "Receipt fields", |ui| {
+    property_card(ui, "Publication", |ui| {
         transaction_field(
             ui,
             "workbench.project.library.publication.label",
-            "Publication label",
+            "Label",
             &mut draft.label,
             "analog-core-1.0.0",
         );
         transaction_field(
             ui,
             "workbench.project.library.publication.actor",
-            "Actor identity",
+            "Published by",
             &mut draft.actor_id,
-            "engineer@organization",
+            "Your name",
         );
         transaction_field(
             ui,
             "workbench.project.library.publication.authority",
-            "Authority identity",
+            "Approved by",
             &mut draft.authority_id,
-            "release-authority",
+            "Who approved it",
         );
         transaction_field(
             ui,
             "workbench.project.library.publication.reason",
             "Reason",
             &mut draft.reason,
-            "Qualified handoff",
+            "Handed to layout",
         );
     });
 }
 
-pub fn rollback_fields(ui: &mut Ui, draft: &mut RollbackDraft) {
-    property_card(ui, "Rollback receipt", |ui| {
+pub fn restore_fields(ui: &mut Ui, draft: &mut RestoreDraft) {
+    property_card(ui, "Restore", |ui| {
         transaction_field(
             ui,
-            "workbench.project.library.rollback.actor",
-            "Actor identity",
+            "workbench.project.library.restore.actor",
+            "Restored by",
             &mut draft.actor_id,
-            "engineer@organization",
+            "Your name",
         );
         transaction_field(
             ui,
-            "workbench.project.library.rollback.authority",
-            "Authority identity",
+            "workbench.project.library.restore.authority",
+            "Approved by",
             &mut draft.authority_id,
-            "release-authority",
+            "Who approved it",
         );
         transaction_field(
             ui,
-            "workbench.project.library.rollback.reason",
+            "workbench.project.library.restore.reason",
             "Reason",
             &mut draft.reason,
-            "Restore qualified handoff",
+            "Back to the layout handoff",
         );
     });
 }
@@ -292,16 +391,16 @@ fn transaction_field(
     });
 }
 
-pub fn rollback_receipt_selector(
+pub fn restore_publication_selector(
     ui: &mut Ui,
     receipts: &[ProjectLibraryPublicationReceipt],
-    draft: &mut RollbackDraft,
+    draft: &mut RestoreDraft,
 ) {
-    property_card(ui, "Retained publication", |ui| {
+    property_card(ui, "Publication", |ui| {
         let selected = selected_receipt(receipts, draft.publication_id)
-            .expect("rollback receipt is normalized before rendering");
+            .expect("the restore's publication is normalized before rendering");
         let prior = draft.publication_id;
-        crate::ui::widgets::Combo::from_id_salt("workbench.project.library.rollback.publication")
+        crate::ui::widgets::Combo::from_id_salt("workbench.project.library.restore.publication")
             .selected_text(format!(
                 "#{:04} \u{00b7} {}",
                 selected.sequence(),
@@ -318,26 +417,18 @@ pub fn rollback_receipt_selector(
                 }
             });
         if draft.publication_id != prior {
-            clear_rollback_artifact(draft);
+            clear_restore_file(draft);
         }
         let selected = selected_receipt(receipts, draft.publication_id)
-            .expect("selected rollback receipt remains retained");
+            .expect("the selected publication remains retained");
         property_row(
             ui,
-            "Publication identity",
-            &selected.publication_id().to_string(),
-        );
-        property_row(
-            ui,
-            "Source revisions",
-            &format!(
-                "project {} \u{00b7} library {}",
-                selected.source_project_revision().get(),
-                selected.library_revision()
-            ),
+            "Revision",
+            &selected.source_project_revision().get().to_string(),
         );
         property_row(ui, "Published by", selected.actor_id());
-        property_row(ui, "Authority", selected.authority_id());
+        property_row(ui, "Approved by", selected.authority_id());
+        property_row(ui, "Reason", selected.reason());
     });
 }
 
@@ -385,23 +476,23 @@ pub enum PublicationAction {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn start_browser_rollback_picker(ctx: &Context) -> Result<uuid::Uuid, String> {
+pub fn start_browser_restore_picker(ctx: &Context) -> Result<uuid::Uuid, String> {
     use crate::workbench::lifecycle::project_lifecycle::start_browser_open;
 
     let picker_id = uuid::Uuid::new_v4();
     let repaint = ctx.clone();
     start_browser_open(move |result| {
-        BROWSER_ROLLBACK_COMPLETIONS.with(|queue| {
+        BROWSER_RESTORE_COMPLETIONS.with(|queue| {
             queue
                 .borrow_mut()
-                .push_back(BrowserRollbackCompletion { picker_id, result });
+                .push_back(BrowserRestoreCompletion { picker_id, result });
         });
         repaint.request_repaint();
     })?;
     Ok(picker_id)
 }
 
-pub fn clear_rollback_artifact(draft: &mut RollbackDraft) {
+pub fn clear_restore_file(draft: &mut RestoreDraft) {
     draft.artifact_name = None;
     draft.artifact_bytes = None;
 }
@@ -420,7 +511,7 @@ pub fn safe_file_stem(value: &str) -> String {
     }
     let output = output.trim_matches(['-', '.']).to_owned();
     if output.is_empty() {
-        "project-library".to_owned()
+        "project".to_owned()
     } else {
         output
     }

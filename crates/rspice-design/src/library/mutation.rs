@@ -79,7 +79,7 @@ impl ProjectLibraryMutation {
             Self::RenameView { .. } => "view rename",
             Self::DeleteCell { .. } => "cell deletion",
             Self::DeleteView { .. } => "view deletion",
-            Self::RollbackPublication { .. } => "library publication rollback",
+            Self::RollbackPublication { .. } => "restore from publication",
         }
     }
 

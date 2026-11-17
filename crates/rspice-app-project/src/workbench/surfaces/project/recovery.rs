@@ -639,9 +639,13 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
             format_bytes(snapshot.stored_bytes)
         };
         property_row(ui, "Space used", &space_used);
-        // `ProjectCheckpointReason::TechnologyAttachment` is the one
-        // checkpoint RSpice takes on its own.
-        property_row(ui, "Taken automatically", "Before technology changes");
+        // `ProjectCheckpointReason::TechnologyAttachment` and
+        // `PublicationRestore` are the checkpoints RSpice takes on its own.
+        property_row(
+            ui,
+            "Taken automatically",
+            "Before technology changes and restores from a publication",
+        );
         // Integrity is a row only when it is not in order. "All checkpoints
         // verified" and "Nothing to check" were the card reporting that
         // nothing had gone wrong, which is what the absence of the row says.
