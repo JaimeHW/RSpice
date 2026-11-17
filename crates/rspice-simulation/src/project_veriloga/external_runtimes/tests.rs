@@ -72,3 +72,30 @@ fn a_compiled_pdk_source_still_refuses_changed_bytes() {
         "{error}"
     );
 }
+
+/// A preparation that must not wait stops at a source another thread is
+/// compiling, and `compiling` holds on its thread until that compile ends.
+/// The preparation after that compiles the source as before.
+#[test]
+fn a_preparation_that_must_not_wait_stops_at_a_source_still_compiling() {
+    let sealed = sealed_pdk("a_preparation_that_must_not_wait_stops_at_a_source_still_compiling");
+    let (package, archive_digest, _, bindings) = sealed
+        .pdk_veriloga_authority()
+        .expect("the PDK's Verilog-A");
+    let compile = super::native::hold_compile(super::native::Key::pdk(
+        package,
+        archive_digest,
+        &bindings[0],
+    ));
+    thread_compiles::take();
+    assert!(super::unless_compiling(|| prepared_pdk_veriloga_runtimes(&sealed)).is_none());
+    assert!(super::compiling());
+    assert!(thread_compiles::take().is_empty());
+
+    drop(compile);
+    assert!(!super::compiling());
+    let prepared = super::unless_compiling(|| prepared_pdk_veriloga_runtimes(&sealed))
+        .expect("nothing is compiling");
+    assert!(prepared.is_ok());
+    assert_eq!(thread_compiles::take(), ["pdk_resistor"]);
+}

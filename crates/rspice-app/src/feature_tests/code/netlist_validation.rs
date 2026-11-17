@@ -510,3 +510,81 @@ fn the_validate_command_validates_the_deck_the_netlist_page_shows() {
         )
     );
 }
+
+/// A validation pressed while a Verilog-A source its preparation reads is
+/// compiling on another thread holds no frame: it waits, the status bar says
+/// so, and frames keep coming while the compile runs. The first frame after
+/// the compile ends validates the deck. Stop drops a validation that waits.
+#[test]
+fn a_validation_pressed_mid_compile_waits_while_frames_keep_coming() {
+    use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
+    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_runs::workbench::waiting::{WaitingValidation, hold_compiling};
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+
+    const WAITING: &str = "Validating the netlist \u{b7} waiting for the Verilog-A compile";
+    fn says(output: &egui::FullOutput, text: &str) -> bool {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .is_some_and(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(text) || node.value() == Some(text))
+            })
+    }
+    fn validations(app: &RSpiceApp) -> usize {
+        app.state
+            .model
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.message.starts_with("Validated the netlist"))
+            .count()
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    assert!(app.state.apply_imported_netlist(
+        "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+        None,
+        "standalone.cir"
+    ));
+    app.state.workbench.workspace = Workspace::Netlist;
+    let ctx = themed_context();
+
+    let compile = hold_compiling();
+    app.execute_command_key(CodeCommand::ValidateCodeDocument.key());
+    assert_eq!(
+        app.state.runs.waiting.validation,
+        Some(WaitingValidation { then_format: false })
+    );
+    for _ in 0..3 {
+        let output = frame(&ctx, &mut app, DESKTOP);
+        assert!(says(&output, WAITING), "the status bar says what waits");
+        assert!(app.state.model.netlist_artifacts.validation.is_none());
+    }
+    drop(compile);
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert!(app.state.runs.waiting.is_empty());
+    assert!(app.state.model.netlist_artifacts.validation.is_some());
+    assert_eq!(validations(&app), 1);
+    assert!(!says(&output, WAITING));
+
+    let compile = hold_compiling();
+    app.execute_command_key(CodeCommand::ValidateCodeDocument.key());
+    assert!(app.state.runs.waiting.validation.is_some());
+    assert!(app.command_key_enabled(ids::STOP_SIMULATION));
+    app.execute_command_key(ids::STOP_SIMULATION);
+    assert!(app.state.runs.waiting.is_empty());
+    drop(compile);
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(validations(&app), 1, "a stopped validation never runs");
+}

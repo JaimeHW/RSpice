@@ -8,6 +8,7 @@ pub mod run_host;
 #[cfg(test)]
 pub(crate) mod test_host;
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::SimulationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
@@ -100,6 +101,7 @@ impl CommandSet for SimulateCommand {
             ),
             Self::Stop => (
                 reads.runs.preflight.checking.is_some()
+                    || !reads.runs.waiting.is_empty()
                     || simulation.can_request_abort_active_run(),
                 if simulation.cancellation_is_pending() {
                     "simulation cancellation is already in progress"
@@ -138,6 +140,12 @@ impl CommandSet for SimulateCommand {
                 if cx.runs.preflight.checking.is_some() {
                     // The frame loop stops it before it looks for a verdict.
                     cx.runs.preflight.request_check_cancel();
+                } else if !cx.runs.waiting.is_empty() {
+                    let dropped = cx.runs.waiting.cancel().join(" and ");
+                    let message = format!("Stopped {dropped} waiting for the Verilog-A compile.");
+                    cx.model
+                        .record(LogSeverity::Info, LogSource::Run, message.clone());
+                    cx.wb.prompt(message);
                 } else if cx.model.simulation.can_request_abort_active_run()
                     && let Err(error) = cx.model.simulation.request_abort_active_run()
                 {

@@ -192,7 +192,10 @@ const SHOW: &[Step] = &[
     ("11.3", &["reconcile_platform_full_screen(app)"]),
     (
         "11.4",
-        &["preflight::poll(&mut app.state, &mut app.simulation_controller)"],
+        &[
+            "preflight::poll(&mut app.state, &mut app.simulation_controller)",
+            "poll_waiting_preparations(app)",
+        ],
     ),
     ("11.5", &["app.state.drain_notices(ctx)"]),
     ("11.6", &["announce_run_completion(ctx, app)"]),

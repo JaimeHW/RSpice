@@ -10,7 +10,9 @@
 //! validates a manual deck or queues a campaign reads the runtimes instead of
 //! compiling them, and every member of a campaign shares one compile. A
 //! preparation that asks while another thread compiles the same source waits
-//! for that compile rather than starting a second one.
+//! for that compile rather than starting a second one. One that a frame runs
+//! under [`unless_compiling`] stops there instead, so the frame goes on and
+//! asks again once [`compiling`] says the compile has ended.
 //!
 //! A compile that fails is not kept: the next preparation compiles the source
 //! again and refuses it with its own diagnostic. The cache holds the sources
@@ -85,8 +87,40 @@ pub fn warm(
     let _ = (sealed_models, reference_process);
 }
 
+/// Whether a source this thread's preparations read is compiling on another
+/// thread: one the latest [`warm`] on this thread named, or one an
+/// [`unless_compiling`] preparation stopped at. A preparation started now
+/// would wait for it.
+pub fn compiling() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native::compiling()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+/// Run `prepare`, which must not wait for a source another thread is
+/// compiling: it returns `None` when it reached one, refused there instead of
+/// waiting, and [`compiling`] then holds on this thread until that compile
+/// ends. A source no thread is compiling compiles on this one, as it would
+/// outside.
+pub fn unless_compiling<R>(prepare: impl FnOnce() -> R) -> Option<R> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native::unless_compiling(prepare)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Some(prepare())
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
+    use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
     use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
@@ -259,6 +293,57 @@ mod native {
         }
     }
 
+    thread_local! {
+        /// The sources this thread's preparations read that may still be
+        /// compiling: those its latest warm named and those a preparation
+        /// stopped at.
+        static WATCHED: RefCell<Vec<Key>> = const { RefCell::new(Vec::new()) };
+        /// Whether this thread's preparation refuses a source another thread
+        /// is compiling instead of waiting, and whether it has refused one.
+        static UNLESS_COMPILING: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn compiling() -> bool {
+        WATCHED.with_borrow_mut(|watched| {
+            if watched.is_empty() {
+                return false;
+            }
+            let cache = lock();
+            watched.retain(|key| {
+                matches!(
+                    cache.as_ref().and_then(|slots| slots.get(key)),
+                    Some(Slot::Compiling(_))
+                )
+            });
+            !watched.is_empty()
+        })
+    }
+
+    pub(super) fn unless_compiling<R>(prepare: impl FnOnce() -> R) -> Option<R> {
+        let outer = UNLESS_COMPILING.replace(Some(false));
+        let prepared = prepare();
+        let stopped = UNLESS_COMPILING.replace(outer) == Some(true);
+        if stopped {
+            // An enclosing preparation stopped too.
+            if outer.is_some() {
+                UNLESS_COMPILING.set(Some(true));
+            }
+            None
+        } else {
+            Some(prepared)
+        }
+    }
+
+    /// Claim `key` as a compile in flight until the returned guard drops,
+    /// which ends it with nothing compiled.
+    #[cfg(test)]
+    pub(super) fn hold_compile(key: Key) -> impl Drop {
+        let mut cache = lock();
+        let claim = Claim::insert(cache.get_or_insert_with(HashMap::new), key);
+        drop(cache);
+        claim
+    }
+
     pub(super) fn compiled(
         key: Key,
         compile: impl FnOnce() -> Result<Runtimes, PreparedRuntimeError>,
@@ -268,6 +353,18 @@ mod native {
             let slots = cache.get_or_insert_with(HashMap::new);
             match slots.get(&key) {
                 Some(Slot::Compiled(runtimes)) => return Ok(runtimes.clone()),
+                Some(Slot::Compiling(_)) if UNLESS_COMPILING.get().is_some() => {
+                    drop(cache);
+                    UNLESS_COMPILING.set(Some(true));
+                    WATCHED.with_borrow_mut(|watched| {
+                        if !watched.contains(&key) {
+                            watched.push(key);
+                        }
+                    });
+                    return Err(PreparedRuntimeError::Compile(
+                        "the source is still compiling on another thread".to_owned(),
+                    ));
+                }
                 Some(Slot::Compiling(compiling)) => {
                     let compiling = Arc::clone(compiling);
                     drop(cache);
@@ -338,6 +435,10 @@ mod native {
                 .map(|authority| (Key::model_library(authority), None)),
         );
 
+        WATCHED.with_borrow_mut(|watched| {
+            watched.clear();
+            watched.extend(named.iter().map(|(key, _)| key.clone()));
+        });
         // The sources not compiled are claimed here, before the thread
         // starts, so a preparation that needs one in the meantime waits for
         // the thread instead of compiling its own copy.

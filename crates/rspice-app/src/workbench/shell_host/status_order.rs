@@ -368,7 +368,9 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
             text,
             engine_status_mark(
                 availability,
-                app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
+                app.state.model.simulation.execution.has_active_execution()
+                    || checking.is_some()
+                    || !app.state.runs.waiting.is_empty(),
             ),
         ),
         (None, Some(outcome)) => (outcome.text.clone(), outcome.mark),
@@ -387,6 +389,8 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 ))
             },
         )
+    } else if !app.state.runs.waiting.is_empty() {
+        Cow::Borrowed("Waits for the Verilog-A compile running in the background. Stop drops it.")
     } else if let Some(outcome) = &outcome {
         Cow::Owned(format!("Show Run {}'s details", outcome.run))
     } else if can_open {
@@ -499,8 +503,15 @@ fn preflight_checking(app: &RSpiceApp) -> Option<PreflightStage> {
 fn engine_words(app: &RSpiceApp, availability: &EngineAvailability) -> Option<String> {
     match preflight_checking(app) {
         Some(stage) => Some(preflight_status(stage)),
-        None => simulation_engine_status(&app.state.model.simulation, availability),
+        None => waiting_words(app)
+            .or_else(|| simulation_engine_status(&app.state.model.simulation, availability)),
     }
+}
+
+/// What waits for a Verilog-A compile before it is prepared: a manual deck's
+/// validation or a campaign's start.
+fn waiting_words(app: &RSpiceApp) -> Option<String> {
+    app.state.runs.waiting.status()
 }
 
 /// The active run's specifications as the verification sheet judged them,

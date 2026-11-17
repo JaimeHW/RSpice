@@ -39,9 +39,11 @@
 //! second and wrong answer beside the authoritative one.
 
 use super::*;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 use rspice_app_runs::simulation::RunHost;
+use rspice_app_runs::workbench::waiting::{self, WaitingCampaign};
 
 /// The dialog's accessible description, and nothing painted.
 ///
@@ -479,24 +481,82 @@ fn declared_refusal(name: &str, member_ids: &[SimulationPlanId]) -> Option<Strin
     None
 }
 
+/// Queue the campaign the dialog committed. When a member's preparation would
+/// read a PDK or model-library Verilog-A source still compiling on another
+/// thread, the campaign waits for that compile instead of holding the frame:
+/// the status bar says so, the frame loop queues it once the compile ends
+/// ([`poll_waiting_campaign`]), and Stop drops it. Returns what the reader is
+/// told either way.
 pub(super) fn commit_simulation_campaign(
     cx: &mut Cx<'_, SimulateFeature>,
     name: &str,
     member_ids: &[SimulationPlanId],
 ) -> Result<String, String> {
+    match start_campaign(cx, name, member_ids)? {
+        Some(message) => Ok(message),
+        None => {
+            cx.runs.waiting.campaign = Some(WaitingCampaign {
+                name: name.trim().to_owned(),
+                member_ids: member_ids.to_vec(),
+            });
+            Ok(format!(
+                "Campaign {} waits for the Verilog-A compile; it is queued when the compile ends.",
+                name.trim()
+            ))
+        }
+    }
+}
+
+/// Queue the campaign that waits, once no source its preparation reads is
+/// compiling. Called once per frame; does nothing while the compile runs.
+pub fn poll_waiting_campaign(cx: &mut Cx<'_, SimulateFeature>) {
+    if cx.runs.waiting.campaign.is_none() || waiting::compiling() {
+        return;
+    }
+    let Some(campaign) = cx.runs.waiting.campaign.take() else {
+        return;
+    };
+    match start_campaign(cx, &campaign.name, &campaign.member_ids) {
+        Ok(Some(message)) => cx.wb.prompt(message),
+        Ok(None) => cx.runs.waiting.campaign = Some(campaign),
+        Err(error) => {
+            let message = format!("Campaign {} was not queued: {error}", campaign.name);
+            cx.model
+                .record(LogSeverity::Error, LogSource::Run, message.clone());
+            cx.wb.prompt(message);
+        }
+    }
+}
+
+/// Queue the campaign, or `None`, with nothing queued, when a member's
+/// preparation reached a Verilog-A source another thread is compiling.
+fn start_campaign(
+    cx: &mut Cx<'_, SimulateFeature>,
+    name: &str,
+    member_ids: &[SimulationPlanId],
+) -> Result<Option<String>, String> {
     if cx.model.simulation.execution.has_active_execution()
         || cx.model.simulation.execution.trigger_simulation
     {
         return Err("A simulation is already running or waiting to start".to_owned());
     }
+    // A draft the controller refuses is refused at once; it prepares nothing.
+    if waiting::compiling() && declared_refusal(name, member_ids).is_none() {
+        return Ok(None);
+    }
     let (mut host, controller) = crate::workbench::simulate::run_host(cx);
     host.sync_active_schematic_to_workspace();
     rspice_app_runs::workbench::preflight::check_design_and_record(&mut host);
-    let receipt = controller.prepare_and_start_campaign(&mut host, name, member_ids)?;
-    Ok(format!(
+    let Some(receipt) = waiting::unless_compiling(|| {
+        controller.prepare_and_start_campaign(&mut host, name, member_ids)
+    }) else {
+        return Ok(None);
+    };
+    let receipt = receipt?;
+    Ok(Some(format!(
         "Campaign {} queued {} plans as {} tasks.",
         receipt.campaign_id, receipt.member_count, receipt.task_count
-    ))
+    )))
 }
 
 #[cfg(test)]
@@ -738,6 +798,53 @@ mod tests {
         assert!(
             reverse.contains(&third) && !reverse.contains(&second),
             "declared {third} first and the commit stopped at: {reverse}"
+        );
+    }
+
+    /// A campaign committed while a Verilog-A source its members read is
+    /// compiling on another thread waits for that compile instead of holding
+    /// the frame, and the first poll after the compile ends carries it out. A
+    /// draft the controller refuses is still refused at once.
+    #[test]
+    fn a_campaign_committed_mid_compile_waits_for_the_compile() {
+        use rspice_app_runs::workbench::waiting::{WaitingCampaign, hold_compiling};
+
+        let (mut harness, plans) = app_with_three_plans();
+        let compile = hold_compiling();
+        let unnamed = commit_simulation_campaign(&mut harness.cx(), "   ", &plans[..2])
+            .expect_err("a blank name is refused at once");
+        assert!(unnamed.contains("must not be empty"), "{unnamed}");
+        assert!(harness.runs.waiting.is_empty());
+
+        let waits = commit_simulation_campaign(&mut harness.cx(), "Nightly", &plans[..2])
+            .expect("the campaign waits");
+        assert!(waits.contains("waits for the Verilog-A compile"), "{waits}");
+        assert_eq!(
+            harness.runs.waiting.campaign,
+            Some(WaitingCampaign {
+                name: "Nightly".to_owned(),
+                member_ids: plans[..2].to_vec(),
+            })
+        );
+        poll_waiting_campaign(&mut harness.cx());
+        assert!(
+            harness.runs.waiting.campaign.is_some(),
+            "nothing is prepared while the compile runs"
+        );
+
+        drop(compile);
+        poll_waiting_campaign(&mut harness.cx());
+        assert!(harness.runs.waiting.is_empty());
+        let told = harness
+            .wb
+            .prompt
+            .as_ref()
+            .expect("the reader is told how the campaign went")
+            .text
+            .clone();
+        assert!(
+            told.starts_with("Campaign ") && !told.contains("waits"),
+            "{told}"
         );
     }
 

@@ -12,6 +12,7 @@
 //! re-derivations free to disagree.
 
 mod campaign;
+pub use campaign::poll_waiting_campaign;
 mod compare;
 mod create;
 pub mod exchange;

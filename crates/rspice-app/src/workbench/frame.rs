@@ -41,6 +41,22 @@ use rspice_app_workbench::workbench::routing::surface_catalog::{SurfaceArchetype
 
 pub(in crate::workbench) mod dialog_order;
 
+/// Carry out a manual deck's validation or a campaign's start that waits for
+/// a Verilog-A compile, once it has ended. Nothing is lent while nothing
+/// waits.
+fn poll_waiting_preparations(app: &mut RSpiceApp) {
+    if app.state.runs.waiting.validation.is_some() {
+        rspice_app_code::workbench::code::netlist_validation::poll_waiting_validation(
+            &mut features::cx::<rspice_app_code::workbench::code::CodeFeature>(app),
+        );
+    }
+    if app.state.runs.waiting.campaign.is_some() {
+        rspice_app_simulate::workbench::surfaces::simulate::plan_manager::poll_waiting_campaign(
+            &mut features::cx::<rspice_app_simulate::workbench::simulate::SimulateFeature>(app),
+        );
+    }
+}
+
 /// Render one complete workbench frame.
 ///
 /// `root` is the frame `Ui` eframe hands to [`eframe::App::ui`]. Panels are
@@ -57,6 +73,10 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // is finished, or stopped, on whichever frame finds it so, whatever that
     // frame shows.
     preflight::poll(&mut app.state, &mut app.simulation_controller);
+    // So is a manual deck's validation, or a campaign's start, that waits for
+    // a Verilog-A compile: it is carried out on the first frame after the
+    // compile ends.
+    poll_waiting_preparations(app);
     // Reported failures are toasted before the mirror runs, so it meets their
     // lines as already announced and does not file each a second time.
     app.state.drain_notices(ctx);

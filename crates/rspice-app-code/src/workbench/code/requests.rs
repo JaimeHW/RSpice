@@ -61,7 +61,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             }
         }
         CodeRequest::ValidateCodeDocument => {
-            crate::workbench::code::netlist_validation::validate_visible_netlist_source(cx);
+            crate::workbench::code::netlist_validation::request_validation(cx, false);
         }
         CodeRequest::ManageSourceDocument => {
             if let Err(error) = source_document::open_source_document_dialog_in(

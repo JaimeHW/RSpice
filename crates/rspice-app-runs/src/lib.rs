@@ -101,4 +101,5 @@ pub mod workbench {
     pub mod slots {
         pub mod runs;
     }
+    pub mod waiting;
 }

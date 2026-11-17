@@ -1564,6 +1564,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "slots"),
             ("lib.rs", "status"),
             ("lib.rs", "veriloga_tests"),
+            ("lib.rs", "waiting"),
             ("lib.rs", "workbench"),
             ("simulation/controller.rs", "prepared_run"),
             ("simulation/controller.rs", "results_post"),

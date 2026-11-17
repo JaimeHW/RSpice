@@ -21,6 +21,9 @@ pub struct RunsState {
     /// The deck a manual-deck run started from and the baseline the last one
     /// left. Runtime only, and boxed so a moved state stays the same size.
     pub manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
+    /// A manual deck's validation and a campaign's start that wait for a
+    /// Verilog-A compile to end. Runtime only.
+    pub waiting: crate::workbench::waiting::WaitingPreparations,
 }
 
 impl RunsState {
