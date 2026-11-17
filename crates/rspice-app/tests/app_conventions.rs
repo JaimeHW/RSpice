@@ -1799,6 +1799,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "workbench"),
             ("lib.rs", "workspace"),
             ("results.rs", "safety"),
+            ("simulation/plan.rs", "connect_rules"),
             ("state.rs", "code_diagnostics"),
             ("state.rs", "command_catalog"),
             ("state.rs", "engineering_table"),
