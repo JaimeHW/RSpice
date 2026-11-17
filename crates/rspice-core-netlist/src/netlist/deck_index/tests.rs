@@ -307,3 +307,37 @@ fn a_function_body_reads_no_parameter_of_a_formal_name() {
         "a built-in function is no read"
     );
 }
+
+#[test]
+fn an_expression_written_with_blanks_is_one_field() {
+    let deck = "spaced
+.param k=2
+R9 a b {1 * k}
+C1 b 0 { k * 1p }
+.end
+";
+    let index = index(deck);
+    assert!(
+        index
+            .references()
+            .iter()
+            .all(|reference| reference.kind != DeckSymbolKind::Model),
+        "no part of an expression is a model: {:?}",
+        index.references()
+    );
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "R9")[0].detail,
+        "{1 * k}"
+    );
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "C1")[0].detail,
+        "{ k * 1p }"
+    );
+    assert_eq!(reads(&index, "k").len(), 2);
+    let nodes = index
+        .nodes()
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(nodes, ["a", "b", "b", "0"]);
+}

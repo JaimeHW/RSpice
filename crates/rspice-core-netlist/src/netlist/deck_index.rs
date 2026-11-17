@@ -163,7 +163,8 @@ pub struct DeckSymbol {
     /// The library section it is written in.
     pub section: Option<String>,
     /// A model's type, a subcircuit's port count, a parameter's value, an
-    /// instance's subcircuit or model.
+    /// instance's subcircuit or model, or the value a resistor, capacitor or
+    /// inductor is written with.
     pub detail: String,
     /// The scope a subcircuit opens.
     pub opens: Option<usize>,
@@ -1027,7 +1028,11 @@ impl Builder {
             parent,
             location,
             card,
-            format!("{} ports", ports.len()),
+            if ports.len() == 1 {
+                "1 port".to_owned()
+            } else {
+                format!("{} ports", ports.len())
+            },
         ));
         let scope = self.index.scopes.len();
         self.index.scopes.push(DeckScope {
@@ -1131,6 +1136,8 @@ impl Builder {
                     !written.starts_with(['{', '\'']) && !written.contains(['(', '{'])
                 }) {
                     target = Some((ReadKind::ModelOrParameter, 2));
+                } else if let Some((written, _, _)) = positional.get(2) {
+                    self.index.symbols[instance].detail.clone_from(written);
                 }
             }
             'V' | 'I' | 'B' => nodes = 2,
@@ -1350,16 +1357,33 @@ fn fields_of(text: &str) -> Vec<Range<usize>> {
     let mut fields: Vec<Range<usize>> = Vec::new();
     for span in token_spans(text) {
         let field = &text[span.clone()];
-        let joins = fields
-            .last()
-            .is_some_and(|previous| text[previous.clone()].ends_with('='))
-            || field.starts_with('=');
+        // `name = value` is one field, and so is an expression written with
+        // blanks in it (`{1 * k}`), as the engine reads them.
+        let joins = fields.last().is_some_and(|previous| {
+            let previous = &text[previous.clone()];
+            previous.ends_with('=') || expression_left_open(previous)
+        }) || field.starts_with('=');
         match fields.last_mut() {
             Some(previous) if joins => previous.end = span.end,
             _ => fields.push(span),
         }
     }
     fields
+}
+
+/// Whether `field` opens a `{...}` or `'...'` expression it does not close.
+fn expression_left_open(field: &str) -> bool {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    for character in field.chars() {
+        match character {
+            '\'' => quoted = !quoted,
+            '{' if !quoted => depth += 1,
+            '}' if !quoted => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0 || quoted
 }
 
 /// The arguments `fields` spell, a quoted one that holds blanks taken whole.

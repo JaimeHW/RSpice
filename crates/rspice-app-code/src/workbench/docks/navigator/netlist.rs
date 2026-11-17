@@ -13,7 +13,7 @@
 //! appeared in neither would be something the deck states and the navigator
 //! hides.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 use egui::{Response, ScrollArea, Ui};
@@ -97,6 +97,7 @@ pub(in crate::workbench) fn netlist(
     let root_label = active_netlist_artifact_name(parts.model, parts.netlist, parts.runs);
     let messages = parts.messages;
     let index = crate::workbench::documents::netlist_document::visible_source_index_in(
+        ui.ctx(),
         parts.model,
         parts.netlist,
     );
@@ -111,6 +112,7 @@ pub(in crate::workbench) fn netlist(
         messages,
     );
     let project_index = crate::workbench::documents::netlist_document::language::project_index_in(
+        ui.ctx(),
         parts.model,
         parts.netlist,
     );
@@ -230,12 +232,7 @@ pub(in crate::workbench) fn netlist(
                 if !group.expanded {
                     continue;
                 }
-                // An empty group's own row already reads "0". A child note
-                // spelling that out again is a row spent on nothing.
-                if group.declarations() == 0 {
-                    continue;
-                }
-                uniform_rows(ui, height, group.declarations(), |ui, position| {
+                uniform_rows(ui, height, group.row_count(), |ui, position| {
                     // Declarations are named as they are drawn. A flat deck
                     // declares tens of thousands of devices and a frame shows
                     // forty of them.
@@ -249,7 +246,11 @@ pub(in crate::workbench) fn netlist(
                             meta: child.meta.as_deref(),
                             meta_tone: None,
                             icon: None,
-                            shape: NetlistOutlineRowShape::Child,
+                            shape: if child.nested {
+                                NetlistOutlineRowShape::NestedChild
+                            } else {
+                                NetlistOutlineRowShape::Child
+                            },
                             selected: child.contains_line(active_line),
                             enabled: true,
                             height,
@@ -1244,13 +1245,16 @@ impl NetlistNavigatorRow {
     }
 }
 
-/// One declaration under a structure group.
+/// One row under a structure group: a declaration, or the subcircuit the
+/// declarations after it are written inside.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct NetlistOutlineChild {
     pub(super) label: String,
     pub(super) meta: Option<String>,
     pub(super) line: usize,
     pub(super) end_line: usize,
+    /// Drawn under a subcircuit's row.
+    pub(super) nested: bool,
 }
 
 impl NetlistOutlineChild {
@@ -1261,36 +1265,76 @@ impl NetlistOutlineChild {
 
 /// A disclosable structure group and the declarations it holds.
 ///
-/// The declarations are held as outline indices rather than as rows. Naming
-/// one means tokenizing its card, and a deck that declares fifty thousand
-/// devices would pay for all of them on every frame to show forty.
+/// The declarations are held as outline indices rather than as rows, and a
+/// row is named only when it is drawn: a deck that declares fifty thousand
+/// devices would otherwise pay for all of them on every frame to show forty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct NetlistOutlineGroup {
     pub(super) row: NetlistNavigatorRow,
     pub(super) section: OutlineSectionKind,
     /// Indices into the source index's entries, in source order.
     entries: Vec<usize>,
+    /// The rows the group draws when a declaration sits inside a subcircuit:
+    /// the top level's declarations, then each subcircuit's row and its own.
+    /// `None` when every declaration is at the top level and the rows are the
+    /// declarations.
+    scoped: Option<Vec<OutlineSlot>>,
     pub(super) expanded: bool,
 }
 
+/// One row of a group that lists declarations under their subcircuits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutlineSlot {
+    /// A declaration's entry, and whether it is drawn under a subcircuit.
+    Declaration { entry: usize, nested: bool },
+    /// The entry of the `.subckt` card whose declarations follow.
+    Subcircuit(usize),
+}
+
 impl NetlistOutlineGroup {
-    /// How many declarations this group discloses, which is what its count
-    /// states and how many rows it occupies.
+    /// How many declarations this group holds, which is what its count
+    /// states.
+    #[cfg(test)]
     pub(super) fn declarations(&self) -> usize {
         self.entries.len()
     }
 
-    /// The declaration at `position`, named from its own card.
+    /// How many rows the group draws when disclosed: its declarations, and a
+    /// row for each subcircuit they are written inside.
+    pub(super) fn row_count(&self) -> usize {
+        self.scoped.as_ref().map_or(self.entries.len(), Vec::len)
+    }
+
+    /// The row at `position`, named from the index.
     pub(super) fn child(
         &self,
         position: usize,
         index: &crate::state::NetlistSourceIndex,
     ) -> Option<NetlistOutlineChild> {
-        let entry = index
-            .outline()
-            .entries()
-            .get(*self.entries.get(position)?)?;
-        Some(outline_child(self.section, entry, index.card(entry.line())))
+        let entries = index.outline().entries();
+        let slot = match &self.scoped {
+            Some(rows) => *rows.get(position)?,
+            None => OutlineSlot::Declaration {
+                entry: *self.entries.get(position)?,
+                nested: false,
+            },
+        };
+        match slot {
+            OutlineSlot::Declaration { entry, nested } => Some(NetlistOutlineChild {
+                nested,
+                ..outline_child(self.section, entries.get(entry)?)
+            }),
+            OutlineSlot::Subcircuit(entry) => {
+                let subcircuit = entries.get(entry)?;
+                Some(NetlistOutlineChild {
+                    label: subcircuit.name().to_owned(),
+                    meta: Some(".subckt".to_owned()),
+                    line: subcircuit.line(),
+                    end_line: subcircuit.end_line(),
+                    nested: false,
+                })
+            }
+        }
     }
 
     /// Whether one of the declarations this group holds contains `line`.
@@ -1648,6 +1692,10 @@ fn outline_group(
     messages: MessageCatalog,
 ) -> Option<NetlistOutlineGroup> {
     let entry_of = |position: &usize| entries.get(*position);
+    // A group the deck declares nothing in is a row spent on nothing.
+    if section.is_empty() {
+        return None;
+    }
     // The filter is matched against the label the reader can see. Matching the
     // English behind it would leave a translated navigator unsearchable by the
     // names it displays.
@@ -1692,47 +1740,57 @@ fn outline_group(
             source_ranges: Vec::new(),
         },
         section: spec.section,
+        scoped: scoped_rows(&selected, entries),
         entries: selected,
         expanded,
     })
 }
 
-/// Name one declaration and what it binds to. The outline entry keeps a head
-/// and one detail token, which names a card but does not describe it, so the
-/// binding is read back off the card itself.
-fn outline_child(
-    section: OutlineSectionKind,
-    entry: &OutlineEntry,
-    card: &str,
-) -> NetlistOutlineChild {
-    let tokens = crate::state::card_tokens(card);
+/// The rows of a group whose declarations include one written inside a
+/// subcircuit: the top level's first, then each subcircuit's under a row
+/// naming it, subcircuits in the order the deck defines them. `None` when
+/// every declaration is at the top level.
+fn scoped_rows(selected: &[usize], entries: &[OutlineEntry]) -> Option<Vec<OutlineSlot>> {
+    let scope_of = |position: &usize| entries.get(*position).and_then(OutlineEntry::scope);
+    if selected.iter().all(|position| scope_of(position).is_none()) {
+        return None;
+    }
+    let mut inside = BTreeMap::<usize, Vec<usize>>::new();
+    let mut rows = Vec::with_capacity(selected.len());
+    for position in selected {
+        match scope_of(position) {
+            Some(subcircuit) => inside.entry(subcircuit).or_default().push(*position),
+            None => rows.push(OutlineSlot::Declaration {
+                entry: *position,
+                nested: false,
+            }),
+        }
+    }
+    for (subcircuit, declarations) in inside {
+        rows.push(OutlineSlot::Subcircuit(subcircuit));
+        rows.extend(
+            declarations
+                .into_iter()
+                .map(|entry| OutlineSlot::Declaration {
+                    entry,
+                    nested: true,
+                }),
+        );
+    }
+    Some(rows)
+}
+
+/// Name one declaration and what it is bound to or written with, as the
+/// engine's index of the deck reads them.
+fn outline_child(section: OutlineSectionKind, entry: &OutlineEntry) -> NetlistOutlineChild {
     let (label, meta) = match section {
-        OutlineSectionKind::Parameters => parameter_child(&tokens),
-        OutlineSectionKind::Devices => (
-            entry.label().to_owned(),
-            device_binding(&tokens).map(str::to_owned),
-        ),
-        OutlineSectionKind::Models => (
-            tokens
-                .get(1)
-                .cloned()
-                .unwrap_or_else(|| entry.label().to_owned()),
-            positional_tokens(&tokens).get(2).cloned(),
-        ),
-        OutlineSectionKind::Analyses => (
-            tokens
-                .first()
-                .cloned()
-                .unwrap_or_else(|| entry.label().to_owned()),
-            (tokens.len() > 1).then(|| tokens[1..].join(" ")),
-        ),
-        OutlineSectionKind::Measurements => (
-            tokens
-                .get(2)
-                .cloned()
-                .unwrap_or_else(|| entry.label().to_owned()),
-            tokens.get(1).cloned(),
-        ),
+        OutlineSectionKind::Parameters
+        | OutlineSectionKind::Devices
+        | OutlineSectionKind::Models
+        | OutlineSectionKind::Analyses
+        | OutlineSectionKind::Measurements => {
+            (entry.name().to_owned(), entry.detail().map(str::to_owned))
+        }
         _ => (entry.label().to_owned(), None),
     };
     NetlistOutlineChild {
@@ -1740,121 +1798,8 @@ fn outline_child(
         meta,
         line: entry.line(),
         end_line: entry.end_line(),
+        nested: false,
     }
-}
-
-/// A `.param` card declares one or more names. One name is shown with the
-/// expression it is bound to; several are listed without one, because the
-/// row would otherwise attribute the first value to all of them.
-fn parameter_child(tokens: &[String]) -> (String, Option<String>) {
-    let assignments = parameter_assignments(tokens);
-    match assignments.as_slice() {
-        [] => (tokens.join(" "), None),
-        [(name, value)] => (name.clone(), value.clone()),
-        several => (
-            several
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            None,
-        ),
-    }
-}
-
-/// The names a card assigns, each with its value where the deck wrote one the
-/// row can quote whole. SPICE accepts `n=v`, `n =v`, `n= v` and `n = v`, and
-/// all four have to read the same way.
-fn parameter_assignments(tokens: &[String]) -> Vec<(String, Option<String>)> {
-    // Reduce the card to lexemes and the `=` between them, so the four
-    // spellings all become the same three-lexeme sequence.
-    let mut lexemes = Vec::<&str>::new();
-    for token in tokens.iter().skip(1) {
-        let mut rest = token.as_str();
-        while let Some(at) = rest.find('=') {
-            if at > 0 {
-                lexemes.push(&rest[..at]);
-            }
-            lexemes.push("=");
-            rest = &rest[at + 1..];
-        }
-        if !rest.is_empty() {
-            lexemes.push(rest);
-        }
-    }
-    (1..lexemes.len().saturating_sub(1))
-        .filter(|index| lexemes[*index] == "=")
-        .filter_map(|index| {
-            let (name, value) = (lexemes[index - 1], lexemes[index + 1]);
-            (name != "=").then(|| {
-                (
-                    name.to_owned(),
-                    (value != "=" && expression_is_whole(value)).then(|| value.to_owned()),
-                )
-            })
-        })
-        .collect()
-}
-
-/// Whether a value lexeme is the whole expression the deck wrote.
-///
-/// `gain = {2 * k}` arrives here already split on whitespace, and `{2` is not
-/// the value of anything — a row that showed it would misquote the deck.
-fn expression_is_whole(value: &str) -> bool {
-    let mut depth = 0i32;
-    for character in value.chars() {
-        match character {
-            '{' | '(' => depth += 1,
-            '}' | ')' => depth -= 1,
-            _ => {}
-        }
-        if depth < 0 {
-            return false;
-        }
-    }
-    depth == 0
-}
-
-/// Everything before the first `name=value` argument. A scan that only looked
-/// for `=` inside a token would read the value of a spaced assignment as one
-/// more positional field.
-fn positional_tokens(tokens: &[String]) -> &[String] {
-    for (index, token) in tokens.iter().enumerate() {
-        if token.contains('=')
-            || tokens
-                .get(index + 1)
-                .is_some_and(|next| next.starts_with('='))
-        {
-            return &tokens[..index];
-        }
-    }
-    tokens
-}
-
-/// The model or subcircuit an instance binds to, when the card's element
-/// letter fixes its terminal count and therefore says which field that is.
-/// Anything else returns nothing rather than naming a node as a model.
-fn device_binding(tokens: &[String]) -> Option<&str> {
-    let positional = positional_tokens(tokens);
-    let letter = positional.first()?.chars().next()?.to_ascii_uppercase();
-    let binding = match letter {
-        // Two terminals then the value expression.
-        'R' | 'C' | 'L' => positional.get(3).map(String::as_str),
-        // Fixed terminal count then the model or subcircuit master.
-        'X' | 'D' | 'Q' | 'J' | 'Z' | 'M' => {
-            let minimum = match letter {
-                'X' => 2,
-                'D' => 4,
-                'M' => 6,
-                _ => 5,
-            };
-            (positional.len() >= minimum)
-                .then(|| positional.last())?
-                .map(String::as_str)
-        }
-        _ => None,
-    };
-    binding.filter(|value| expression_is_whole(value))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2017,6 +1962,8 @@ pub(super) enum NetlistOutlineRowShape {
     Group { expanded: bool },
     /// A declaration under a group: guide line, indent, monospaced label.
     Child,
+    /// A declaration under a subcircuit's row in a group: one indent further.
+    NestedChild,
     /// A semantic-index row: label and count only, flush to the panel edge.
     Index,
 }
@@ -2052,6 +1999,7 @@ impl NetlistOutlineRowShape {
                     + NETLIST_OUTLINE_ICON_GAP
                     + NETLIST_OUTLINE_CHILD_INDENT
             }
+            Self::NestedChild => Self::Child.label_left() + NETLIST_OUTLINE_CHILD_INDENT,
         }
     }
 }
@@ -2129,9 +2077,19 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
             t.color.text_faint,
         );
     }
-    if row.shape == NetlistOutlineRowShape::Child {
+    if matches!(
+        row.shape,
+        NetlistOutlineRowShape::Child | NetlistOutlineRowShape::NestedChild
+    ) {
         ui.painter().vline(
             icon_center_x,
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
+    if row.shape == NetlistOutlineRowShape::NestedChild {
+        ui.painter().vline(
+            icon_center_x + NETLIST_OUTLINE_CHILD_INDENT,
             rect.y_range(),
             egui::Stroke::new(1.0, t.color.border),
         );
@@ -2169,7 +2127,10 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
             egui::pos2(label_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             row.label,
-            if row.shape == NetlistOutlineRowShape::Child {
+            if matches!(
+                row.shape,
+                NetlistOutlineRowShape::Child | NetlistOutlineRowShape::NestedChild
+            ) {
                 theme::mono(tokens::FS_0, FontWeight::Regular)
             } else {
                 theme::sans(tokens::FS_0, FontWeight::Regular)

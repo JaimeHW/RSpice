@@ -40,12 +40,12 @@ fn netlist_projection(source: &str, query: &str) -> NetlistNavigatorProjection {
     )
 }
 
-/// Every declaration a group discloses, named the way a drawn row is.
+/// Every row a group discloses, named the way a drawn row is.
 fn disclosed(
     group: &NetlistOutlineGroup,
     index: &crate::state::NetlistSourceIndex,
 ) -> Vec<NetlistOutlineChild> {
-    (0..group.declarations())
+    (0..group.row_count())
         .filter_map(|position| group.child(position, index))
         .collect()
 }
@@ -261,11 +261,85 @@ fn a_category_the_deck_does_not_declare_is_left_out_of_the_index() {
             .all(|row| row.label != "Conditionals"),
         "an absent category must not be listed as present with a zero"
     );
-    // A structure group stays, with its own count reading zero. It used to
-    // carry a child note spelling that out a second time.
-    assert!(projection.groups.iter().any(|group| {
-        group.row.kind == NetlistNavigatorRowKind::Measurements && group.declarations() == 0
-    }));
+    // A structure group the deck declares nothing in is left out too: a row
+    // reading zero is a row spent on nothing.
+    assert!(
+        projection
+            .groups
+            .iter()
+            .all(|group| group.row.kind != NetlistNavigatorRowKind::Measurements)
+    );
+    assert!(
+        projection
+            .groups
+            .iter()
+            .all(|group| group.declarations() > 0)
+    );
+}
+
+#[test]
+fn a_declaration_inside_a_subcircuit_is_listed_under_it() {
+    let source = "amp test
+.param vdd=1.8
+.subckt amp in out params: gain=2
+R1 in mid {gain}
++ tc1=0
+M1 out mid 0 0 nch
+.param bias=0.6
+.ends amp
+XA a b amp
+R2 b 0 1k
+.model nch nmos
+.op
+.end
+";
+    let index = netlist_index(source);
+    let projection = netlist_projection(source, "");
+    let rows = |kind| {
+        disclosed(
+            projection
+                .groups
+                .iter()
+                .find(|group| group.row.kind == kind)
+                .expect("group exists"),
+            &index,
+        )
+        .into_iter()
+        .map(|child| (child.label, child.meta, child.line, child.nested))
+        .collect::<Vec<_>>()
+    };
+    let row = |label: &str, meta: Option<&str>, line, nested| {
+        (label.to_owned(), meta.map(str::to_owned), line, nested)
+    };
+
+    // The deck's own instances first, then the subcircuit's under its row.
+    assert_eq!(
+        rows(NetlistNavigatorRowKind::Instances),
+        [
+            row("XA", Some("amp"), 9, false),
+            row("R2", Some("1k"), 10, false),
+            row("amp", Some(".subckt"), 3, false),
+            row("R1", Some("{gain}"), 4, true),
+            row("M1", Some("nch"), 6, true),
+        ]
+    );
+    assert_eq!(
+        rows(NetlistNavigatorRowKind::Parameters),
+        [
+            row("vdd", Some("1.8"), 2, false),
+            row("amp", Some(".subckt"), 3, false),
+            row("bias", Some("0.6"), 7, true),
+        ]
+    );
+    // The count is of declarations, not of rows.
+    let instances = projection
+        .groups
+        .iter()
+        .find(|group| group.row.kind == NetlistNavigatorRowKind::Instances)
+        .expect("instances group exists");
+    assert_eq!(instances.row.meta.as_deref(), Some("4"));
+    // A continuation line is the card's.
+    assert!(instances.contains_line(&index, 5));
 }
 
 /// The filter used to be compared against the English label behind a
@@ -413,7 +487,7 @@ fn a_spaced_assignment_is_not_read_as_one_more_positional_field() {
 }
 
 #[test]
-fn an_expression_split_across_lexemes_is_named_rather_than_misquoted() {
+fn an_expression_written_with_spaces_is_quoted_whole() {
     let source = "deck\n.param gain = {2 * k}\n.param trim={2*k}\nR9 a b {1 * k}\n.end\n";
     let index = netlist_index(source);
     let projection = netlist_projection(source, "");
@@ -426,9 +500,10 @@ fn an_expression_split_across_lexemes_is_named_rather_than_misquoted() {
             .expect("parameters group exists"),
         &index,
     );
-    // `{2` is not the value of anything.
+    // The engine reads `{2 * k}` as one expression, so the row quotes it
+    // whole rather than `{2`.
     assert_eq!(parameters[0].label, "gain");
-    assert_eq!(parameters[0].meta, None);
+    assert_eq!(parameters[0].meta.as_deref(), Some("{2 * k}"));
     // The same expression written without spaces survives whole.
     assert_eq!(parameters[1].label, "trim");
     assert_eq!(parameters[1].meta.as_deref(), Some("{2*k}"));
@@ -440,7 +515,7 @@ fn an_expression_split_across_lexemes_is_named_rather_than_misquoted() {
         .and_then(|group| group.child(0, &index))
         .expect("instances group exists");
     assert_eq!(instance.label, "R9");
-    assert_eq!(instance.meta, None);
+    assert_eq!(instance.meta.as_deref(), Some("{1 * k}"));
 }
 
 #[test]

@@ -3,6 +3,10 @@
 //! The navigable structure of a deck — subcircuits, models, analyses,
 //! includes — for the outline pane.
 
+use rspice_core_base::config::ExpressionDialect;
+use rspice_core_netlist::netlist::{
+    DeckCardKind, DeckIndex, DeckIndexSource, DeckSymbol, DeckSymbolKind, DeckTokenKind,
+};
 use serde::{Deserialize, Serialize};
 
 /// The source construct represented by an outline row.
@@ -75,6 +79,14 @@ pub struct OutlineEntry {
     id: u64,
     kind: OutlineEntryKind,
     label: String,
+    /// What the declaration names: a parameter, a model, a device, an
+    /// analysis.
+    name: String,
+    /// What it is bound to or written with: a parameter's value, a model's
+    /// type, the subcircuit or model a device is of, an analysis's arguments.
+    detail: Option<String>,
+    /// The entry of the `.subckt` card the declaration is written inside.
+    scope: Option<usize>,
     line: usize,
     column: usize,
     end_line: usize,
@@ -89,6 +101,23 @@ impl OutlineEntry {
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
+
+    /// The position, among the outline's entries, of the `.subckt` card the
+    /// declaration is written inside; `None` at the top level.
+    #[must_use]
+    pub const fn scope(&self) -> Option<usize> {
+        self.scope
     }
 
     #[must_use]
@@ -127,6 +156,10 @@ impl OutlineSection {
 }
 
 /// Parsed, deterministic navigation model for exact source text.
+///
+/// Read off the engine's [`DeckIndex`] of the text, so a card is what the
+/// engine reads as one: `+` lines continue it, the dialect's comments are not
+/// part of it, and it knows the subcircuit it is written in.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct NetlistOutline {
     entries: Vec<OutlineEntry>,
@@ -136,44 +169,166 @@ pub struct NetlistOutline {
 impl NetlistOutline {
     #[must_use]
     pub fn parse(source: &str) -> Self {
+        Self::from_deck(&deck_index_of(source), source)
+    }
+
+    /// The outline of the deck `deck` indexed as its first file, `source`.
+    #[must_use]
+    pub fn from_deck(deck: &DeckIndex, source: &str) -> Self {
         let mut entries = Vec::<OutlineEntry>::new();
-        let mut first_source_card = true;
-
-        for (zero_line, raw_line) in source.lines().enumerate() {
-            let line = zero_line + 1;
-            let trimmed = raw_line.trim_start();
-            if trimmed.is_empty() || is_comment(trimmed) {
-                continue;
+        // The entry each `.subckt` card became, by card.
+        let mut subcircuit_entries = std::collections::HashMap::<usize, usize>::new();
+        // The definitions each card writes, read once rather than per card.
+        let mut defined_on = std::collections::HashMap::<usize, Vec<&DeckSymbol>>::new();
+        for symbol in deck.symbols() {
+            defined_on.entry(symbol.card).or_default().push(symbol);
+        }
+        for (card_index, card) in deck.cards().iter().enumerate() {
+            if card.location.file != 0 {
+                break;
             }
-
-            if trimmed.starts_with('+') {
-                if let Some(previous) = entries.last_mut() {
-                    previous.end_line = line;
-                }
-                continue;
-            }
-
-            let column = raw_line.chars().take_while(|ch| ch.is_whitespace()).count() + 1;
-            let tokens = tokenize_card(trimmed);
-            if tokens.is_empty() {
-                continue;
-            }
-
-            let head = tokens[0].text.as_str();
-            let (kind, label) = if first_source_card && !head.starts_with('.') {
-                first_source_card = false;
-                (OutlineEntryKind::Title, trimmed.to_owned())
-            } else {
-                first_source_card = false;
-                classify_card(&tokens, trimmed)
+            let on_card = defined_on.get(&card_index).map_or(&[][..], Vec::as_slice);
+            let defined = |kind: DeckSymbolKind| {
+                on_card
+                    .iter()
+                    .copied()
+                    .filter(move |symbol| symbol.kind == kind)
             };
+            let words = card_words(deck, card_index, source);
+            let word = |at: usize| words.get(at).cloned();
+            let directive_label = match words.get(1) {
+                Some(argument) => format!("{} {argument}", card.head),
+                None => card.head.clone(),
+            };
+            let (kind, label, name, detail) = match card.kind {
+                DeckCardKind::Title => {
+                    let title = card.head.trim().to_owned();
+                    (OutlineEntryKind::Title, title.clone(), title, None)
+                }
+                DeckCardKind::Include | DeckCardKind::Library => {
+                    let path = deck
+                        .includes()
+                        .iter()
+                        .find(|include| include.card == card_index)
+                        .map(|include| include.path.clone())
+                        .or_else(|| word(1));
+                    let label = path
+                        .as_ref()
+                        .map_or_else(|| card.head.clone(), |path| format!("{} {path}", card.head));
+                    let kind = if card.kind == DeckCardKind::Include {
+                        OutlineEntryKind::Include
+                    } else {
+                        OutlineEntryKind::Library
+                    };
+                    (kind, label, path.unwrap_or_default(), None)
+                }
+                DeckCardKind::Parameter => {
+                    let parameters = defined(DeckSymbolKind::Parameter).collect::<Vec<_>>();
+                    let (name, detail) = match parameters.as_slice() {
+                        [] => (directive_label.clone(), None),
+                        // One name is shown with what it is bound to; several
+                        // are listed without, or the row would give the first
+                        // value to all of them.
+                        [parameter] => (
+                            parameter.name.clone(),
+                            (!parameter.detail.is_empty()).then(|| parameter.detail.clone()),
+                        ),
+                        several => (
+                            several
+                                .iter()
+                                .map(|parameter| parameter.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            None,
+                        ),
+                    };
+                    (OutlineEntryKind::Parameter, directive_label, name, detail)
+                }
+                DeckCardKind::Model | DeckCardKind::Subcircuit | DeckCardKind::Function => {
+                    let (kind, symbol_kind) = match card.kind {
+                        DeckCardKind::Model => (OutlineEntryKind::Model, DeckSymbolKind::Model),
+                        DeckCardKind::Subcircuit => {
+                            (OutlineEntryKind::Subcircuit, DeckSymbolKind::Subcircuit)
+                        }
+                        _ => (OutlineEntryKind::Function, DeckSymbolKind::Function),
+                    };
+                    match defined(symbol_kind).next() {
+                        Some(symbol) => (
+                            kind,
+                            format!("{} {}", card.head, symbol.name),
+                            symbol.name.clone(),
+                            (!symbol.detail.is_empty()).then(|| symbol.detail.clone()),
+                        ),
+                        None => (kind, directive_label.clone(), directive_label, None),
+                    }
+                }
+                DeckCardKind::Instance => {
+                    let detail = defined(DeckSymbolKind::Instance)
+                        .next()
+                        .map(|instance| instance.detail.clone())
+                        .filter(|detail| !detail.is_empty());
+                    (
+                        OutlineEntryKind::Device,
+                        card.head.clone(),
+                        card.head.clone(),
+                        detail,
+                    )
+                }
+                DeckCardKind::Analysis => (
+                    OutlineEntryKind::Analysis,
+                    directive_label,
+                    card.head.clone(),
+                    (words.len() > 1).then(|| words[1..].join(" ")),
+                ),
+                // `.meas tran rise when v(out)=0.5`: the measurement's name,
+                // and the analysis it reads.
+                DeckCardKind::Measurement => (
+                    OutlineEntryKind::Measurement,
+                    directive_label.clone(),
+                    word(2).unwrap_or(directive_label),
+                    word(1),
+                ),
+                other => {
+                    let kind = match other {
+                        DeckCardKind::Global => OutlineEntryKind::Global,
+                        DeckCardKind::Option => OutlineEntryKind::Option,
+                        DeckCardKind::Output => OutlineEntryKind::Output,
+                        DeckCardKind::Conditional => OutlineEntryKind::Conditional,
+                        DeckCardKind::EndSubcircuit => OutlineEntryKind::EndSubcircuit,
+                        _ => OutlineEntryKind::Control,
+                    };
+                    (kind, directive_label.clone(), directive_label, None)
+                }
+            };
+            // A `.subckt` card is written in the scope around it, and so is
+            // its `.ends`, which closes the scope it is read in.
+            let mut scope = card.scope;
+            if card.kind == DeckCardKind::EndSubcircuit {
+                scope = deck
+                    .scopes()
+                    .get(scope)
+                    .and_then(|scope| scope.parent)
+                    .unwrap_or(0);
+            }
+            let scope = deck
+                .scopes()
+                .get(scope)
+                .and_then(|scope| scope.symbol)
+                .and_then(|symbol| deck.symbols().get(symbol))
+                .and_then(|symbol| subcircuit_entries.get(&symbol.card).copied());
+            if card.kind == DeckCardKind::Subcircuit {
+                subcircuit_entries.insert(card_index, entries.len());
+            }
             entries.push(OutlineEntry {
                 id: entries.len() as u64 + 1,
                 kind,
                 label,
-                line,
-                column,
-                end_line: line,
+                name,
+                detail,
+                scope,
+                line: *card.lines.start(),
+                column: card.location.column,
+                end_line: *card.lines.end(),
             });
         }
 
@@ -247,6 +402,50 @@ impl NetlistOutline {
     }
 }
 
+/// The engine's index of `source` read as a deck of its own.
+fn deck_index_of(source: &str) -> DeckIndex {
+    DeckIndex::build(
+        &[DeckIndexSource {
+            identity: "",
+            text: source,
+        }],
+        ExpressionDialect::Ngspice,
+    )
+}
+
+/// The words of a card as written, its own first: tokens the engine's lexer
+/// reads with nothing between them are one word (`v(out)`, `gain=10`), and a
+/// quoted string is its text.
+fn card_words(deck: &DeckIndex, card: usize, source: &str) -> Vec<String> {
+    let Some(head) = deck.cards().get(card) else {
+        return Vec::new();
+    };
+    if matches!(
+        head.kind,
+        DeckCardKind::Title | DeckCardKind::Control | DeckCardKind::Instance
+    ) {
+        return Vec::new();
+    }
+    let mut words = Vec::<String>::new();
+    let mut end = None::<usize>;
+    for token in deck.card_tokens(card, source) {
+        let Some(written) = source.get(token.span.clone()) else {
+            continue;
+        };
+        let written = if token.kind == DeckTokenKind::String {
+            written.trim_matches('"')
+        } else {
+            written
+        };
+        match words.last_mut() {
+            Some(word) if end == Some(token.span.start) => word.push_str(written),
+            _ => words.push(written.to_owned()),
+        }
+        end = Some(token.span.end);
+    }
+    words
+}
+
 /// One exact source, its outline, and the offsets that let a caller read any
 /// card back by line.
 ///
@@ -259,6 +458,7 @@ pub struct NetlistSourceIndex {
     source: String,
     /// Byte offset of each line, one entry per line `str::lines` would yield.
     line_starts: Vec<usize>,
+    deck: DeckIndex,
     outline: NetlistOutline,
 }
 
@@ -278,10 +478,13 @@ impl NetlistSourceIndex {
         } else if source.ends_with('\n') {
             line_starts.pop();
         }
+        let deck = deck_index_of(source);
+        let outline = NetlistOutline::from_deck(&deck, source);
         Self {
             source: source.to_owned(),
             line_starts,
-            outline: NetlistOutline::parse(source),
+            deck,
+            outline,
         }
     }
 
@@ -296,6 +499,12 @@ impl NetlistSourceIndex {
     #[must_use]
     pub const fn outline(&self) -> &NetlistOutline {
         &self.outline
+    }
+
+    /// The engine's index of the source, which the outline is read from.
+    #[must_use]
+    pub const fn deck(&self) -> &DeckIndex {
+        &self.deck
     }
 
     #[must_use]
@@ -448,11 +657,8 @@ fn names_model_file(argument: &str) -> bool {
             })
 }
 
-/// The tokens of one source card, in order, with quotes and trailing comments
-/// removed. An outline entry keeps only the head and one detail token, which
-/// is enough to name a declaration and not enough to describe it — a navigator
-/// that wants the model a device binds to reads the card through here rather
-/// than tokenizing SPICE a second time.
+/// The whitespace-separated words of one source card, in order, with quotes
+/// and trailing comments removed.
 pub fn card_tokens(card: &str) -> Vec<String> {
     tokenize_card(card.trim_start())
         .into_iter()
@@ -470,46 +676,6 @@ pub fn card_tokens_with_columns(card: &str) -> Vec<(String, usize)> {
         .into_iter()
         .map(|token| (token.text, token.column + leading_columns))
         .collect()
-}
-
-fn classify_card(tokens: &[CardToken], trimmed: &str) -> (OutlineEntryKind, String) {
-    let head = tokens[0].text.to_ascii_lowercase();
-    let detail = tokens.get(1).map_or("", |token| token.text.as_str());
-    let directive_label = || {
-        if detail.is_empty() {
-            tokens[0].text.clone()
-        } else {
-            format!("{} {detail}", tokens[0].text)
-        }
-    };
-
-    match head.as_str() {
-        ".include" | ".inc" | ".veriloga" => (OutlineEntryKind::Include, directive_label()),
-        ".lib" if tokens.len() >= 3 => (OutlineEntryKind::Library, directive_label()),
-        ".param" => (OutlineEntryKind::Parameter, directive_label()),
-        ".global" | ".global_param" => (OutlineEntryKind::Global, directive_label()),
-        ".func" => (OutlineEntryKind::Function, directive_label()),
-        ".option" | ".options" => (OutlineEntryKind::Option, directive_label()),
-        ".model" => (OutlineEntryKind::Model, directive_label()),
-        ".subckt" => (OutlineEntryKind::Subcircuit, directive_label()),
-        ".ends" => (OutlineEntryKind::EndSubcircuit, directive_label()),
-        ".op" | ".dc" | ".ac" | ".tran" | ".noise" | ".pz" | ".sens" | ".tf" | ".disto"
-        | ".four" | ".hb" | ".sp" | ".pss" | ".pac" | ".pnoise" | ".qpss" | ".qpnoise" | ".stb" => {
-            (OutlineEntryKind::Analysis, directive_label())
-        }
-        ".meas" | ".measure" => (OutlineEntryKind::Measurement, directive_label()),
-        ".save" | ".probe" | ".print" | ".plot" => (OutlineEntryKind::Output, directive_label()),
-        ".if" | ".elseif" | ".else" | ".endif" => {
-            (OutlineEntryKind::Conditional, directive_label())
-        }
-        _ if head.starts_with('.') => (OutlineEntryKind::Control, directive_label()),
-        _ => (
-            OutlineEntryKind::Device,
-            tokens
-                .first()
-                .map_or_else(|| trimmed.to_owned(), |token| token.text.clone()),
-        ),
-    }
 }
 
 fn is_comment(trimmed: &str) -> bool {
@@ -672,6 +838,46 @@ mod tests {
                 .filter(|kind| **kind == OutlineEntryKind::Output)
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn a_declaration_inside_a_subcircuit_names_the_subcircuit_it_is_written_in() {
+        let outline = NetlistOutline::parse(
+            "amp test\n.param n=10\nC1 a 0 10n ; load\n.subckt amp in out params: gain=1\nR1 in out\n+ {gain}\n.model nch nmos level=1\n.ends amp\nX1 a b amp\n.end\n",
+        );
+        let entries = outline.entries();
+        let named = |name: &str| {
+            entries
+                .iter()
+                .position(|entry| entry.name() == name)
+                .unwrap_or_else(|| panic!("no entry named {name}: {entries:?}"))
+        };
+        let amp = named("amp");
+        assert_eq!(entries[amp].kind(), OutlineEntryKind::Subcircuit);
+        assert_eq!(entries[amp].detail(), Some("2 ports"));
+        assert_eq!(entries[amp].scope(), None);
+
+        let resistor = &entries[named("R1")];
+        assert_eq!(resistor.scope(), Some(amp));
+        assert_eq!((resistor.line(), resistor.end_line()), (5, 6));
+        assert_eq!(resistor.detail(), Some("{gain}"));
+        let model = &entries[named("nch")];
+        assert_eq!(model.scope(), Some(amp));
+        assert_eq!(model.detail(), Some("nmos"));
+
+        let instance = &entries[named("X1")];
+        assert_eq!(instance.scope(), None);
+        assert_eq!(instance.detail(), Some("amp"));
+        let capacitor = &entries[named("C1")];
+        assert_eq!(capacitor.detail(), Some("10n"));
+        let parameter = &entries[named("n")];
+        assert_eq!(parameter.detail(), Some("10"));
+        assert!(
+            entries
+                .iter()
+                .filter(|entry| entry.kind() == OutlineEntryKind::EndSubcircuit)
+                .all(|entry| entry.scope().is_none())
         );
     }
 }

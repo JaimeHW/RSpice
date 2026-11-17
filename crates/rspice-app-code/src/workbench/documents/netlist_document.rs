@@ -7,7 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::CodeSourceFileAction;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
@@ -31,6 +31,7 @@ mod editor;
 mod executed_deck;
 mod highlight;
 mod import_review;
+mod index_worker;
 pub mod language;
 mod navigation;
 mod owned_source;
@@ -60,7 +61,10 @@ pub use editor::show as show_editor;
 pub use editor::{commit_edit as commit_editor_edit, editor_id_in};
 pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
-pub use source_index::{root_deck_source_index, visible_source_index_in};
+pub use source_index::{
+    root_deck_source_index, root_deck_source_index_now, visible_source_index_in,
+    visible_source_index_now,
+};
 
 /// Exact, derived state of one project-owned netlist publication.
 ///
@@ -2279,6 +2283,10 @@ pub struct NetlistDocumentState {
     diag_library_folders: Vec<std::path::PathBuf>,
     /// `ui.input(..).time` of the last edit, for parse debounce.
     last_edit_time: f64,
+    /// Revision the last edit typed in the editor left the buffer at. While
+    /// the buffer stands there its indexes may trail it by a build; text put
+    /// in the buffer any other way is indexed before a frame shows it.
+    typed_revision: Option<u64>,
     /// Current parse diagnostics.
     pub diagnostics: std::sync::Arc<NetlistDiagnosticCollection>,
     /// Result data version last reconciled with the editor baseline.
@@ -2310,9 +2318,9 @@ pub struct NetlistDocumentState {
     pub completion_dismissed_at: Option<u64>,
     /// Harvested `.model` and `.subckt` symbols.
     symbols: Vec<completion::SymbolEntry>,
-    /// Revision-keyed semantic indexes for generated and project-owned source
-    /// closures. Exact document revisions make stale indexes unobservable.
-    project_indexes: HashMap<crate::state::NetlistDocumentId, language::CachedProjectIndex>,
+    /// The project index of the root the editor shows, keyed by the root
+    /// document's exact revision and built away from the editor's thread.
+    project_index: language::ProjectIndexSlot,
     /// Buffer-revision-keyed value spans behind the editor's value hover.
     value_index: Option<language::CachedValueIndex>,
     /// What the parse of one buffer revision left unread in the buffer: the
@@ -2325,13 +2333,19 @@ pub struct NetlistDocumentState {
     )>,
     /// Outline and line offsets of the visible buffer. Read through
     /// [`visible_source_index_in`], which is what keeps it current.
-    source_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
+    source_index: source_index::SourceIndexSlot,
     /// The same for the project's top-level deck while the editor shows other
     /// text. Read through [`root_deck_source_index`].
-    root_deck_index: std::sync::Arc<crate::state::NetlistSourceIndex>,
+    root_deck_index: source_index::SourceIndexSlot,
 }
 
 impl NetlistDocumentState {
+    /// Whether the buffer stands where an edit typed in the editor left it,
+    /// so its indexes may trail it by a build while the writer types.
+    fn is_being_typed(&self) -> bool {
+        self.typed_revision == Some(self.revision)
+    }
+
     /// Take the schematic cross-probe's line: withdraw the request it made
     /// before while nothing has asked for another line, mark `line`, and ask
     /// for it while the generated deck is the document shown.

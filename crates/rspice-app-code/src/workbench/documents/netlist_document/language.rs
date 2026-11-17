@@ -1,16 +1,19 @@
 //! Project-scoped SPICE symbols and cross-file references.
 //!
-//! The index is derived only from the authenticated root/dependency closure.
-//! It never reads an ambient filesystem path, so native and browser builds
-//! answer completion and navigation from the same exact source set.
+//! The index is the engine's index of the authenticated root/dependency
+//! closure, built away from the editor's thread. It never reads an ambient
+//! filesystem path, so native and browser builds answer completion and
+//! navigation from the same exact source set.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use rspice_core::netlist::{
+    DeckIndex, DeckIndexSource, DeckLocation, DeckNameAt, DeckSymbol, DeckSymbolKind,
     NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
 };
 
+use super::index_worker::BackgroundIndex;
 use super::{ActiveNetlistDocument, Model, NetlistDocumentState, canonical_root_document_in};
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{MessageCatalog, MessageId};
@@ -82,22 +85,29 @@ pub(crate) struct ProjectSymbolHover {
     pub(crate) detail: String,
 }
 
+/// The names the root and its SPICE includes define and read, as the
+/// engine's index of them binds each read under SPICE scoping.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetlistProjectIndex {
     symbols: Vec<ProjectSymbol>,
     references: Vec<ProjectReference>,
-    pending_model_references: Vec<PendingModelReference>,
-    pending_expression_references: Vec<ProjectReference>,
     raw_hierarchy: Vec<RawHierarchyInstance>,
     hierarchy: Vec<ProjectHierarchyInstance>,
     hierarchy_truncated: bool,
     source_count: usize,
+    deck: DeckIndex,
+    /// The files indexed, in the order the index numbers them: the root,
+    /// then its SPICE includes.
+    files: Vec<IndexedFile>,
 }
 
+/// One file of the index: where it opens, and the text it was indexed from.
 #[derive(Debug, Clone)]
-struct PendingModelReference {
-    candidates: Vec<ProjectReference>,
-    retain_first_if_unresolved: bool,
+struct IndexedFile {
+    root: ActiveNetlistDocument,
+    dependency_identity: Option<String>,
+    display_name: String,
+    digest: crate::product::ContentDigest,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +120,19 @@ struct RawHierarchyInstance {
 
 const MAX_EXPANDED_HIERARCHY_INSTANCES: usize = 100_000;
 
+impl ProjectSymbolKind {
+    /// The project's kind of a name the index records; an instance is none.
+    const fn of(kind: DeckSymbolKind) -> Option<Self> {
+        match kind {
+            DeckSymbolKind::Parameter => Some(Self::Parameter),
+            DeckSymbolKind::Function => Some(Self::Function),
+            DeckSymbolKind::Subcircuit => Some(Self::Subcircuit),
+            DeckSymbolKind::Model => Some(Self::Model),
+            DeckSymbolKind::Instance => None,
+        }
+    }
+}
+
 impl NetlistProjectIndex {
     fn build(root: ActiveNetlistDocument, document: &crate::state::NetlistDocument) -> Self {
         let root_name = match root {
@@ -119,8 +142,13 @@ impl NetlistProjectIndex {
                 return Self::default();
             }
         };
-        let mut index = Self::default();
-        index.index_source(root, None, root_name, document.source());
+        let mut files = vec![IndexedFile {
+            root,
+            dependency_identity: None,
+            display_name: root_name,
+            digest: crate::state::content_digest(document.source()),
+        }];
+        let mut texts = vec![document.source()];
         for dependency in document.dependencies() {
             if document.is_veriloga_dependency(dependency) {
                 continue;
@@ -128,15 +156,90 @@ impl NetlistProjectIndex {
             let Some(source) = dependency.source() else {
                 continue;
             };
-            index.index_source(
+            files.push(IndexedFile {
                 root,
-                Some(dependency.locator().logical_identity().to_owned()),
-                dependency.locator().display_name().to_owned(),
-                source,
-            );
+                dependency_identity: Some(dependency.locator().logical_identity().to_owned()),
+                display_name: dependency.locator().display_name().to_owned(),
+                digest: crate::state::content_digest(source),
+            });
+            texts.push(source);
         }
-        index.resolve_pending_model_references();
-        index.resolve_pending_expression_references();
+        let sources = files
+            .iter()
+            .zip(&texts)
+            .map(|(file, text)| DeckIndexSource {
+                identity: file.dependency_identity.as_deref().unwrap_or(""),
+                text,
+            })
+            .collect::<Vec<_>>();
+        let deck = DeckIndex::build(&sources, rspice_core::config::ExpressionDialect::Ngspice);
+
+        let symbols = deck
+            .symbols()
+            .iter()
+            .filter_map(|symbol| {
+                let kind = ProjectSymbolKind::of(symbol.kind)?;
+                let detail = match kind {
+                    ProjectSymbolKind::Parameter if symbol.detail.is_empty() => ".param".to_owned(),
+                    ProjectSymbolKind::Parameter => format!("= {}", symbol.detail),
+                    _ => symbol.detail.clone(),
+                };
+                Some(ProjectSymbol {
+                    name: symbol.name.clone(),
+                    kind,
+                    detail,
+                    definition: location_in(&files, &symbol.location),
+                })
+            })
+            .collect();
+        // A name nothing defines is still read where it can only be one
+        // thing: the subcircuit an instance is of, the model a device names.
+        // Elsewhere it may be a node or a keyword, and is no read.
+        let references = deck
+            .references()
+            .iter()
+            .filter_map(|reference| {
+                let kind = ProjectSymbolKind::of(reference.kind)?;
+                (reference.target.is_some()
+                    || matches!(
+                        kind,
+                        ProjectSymbolKind::Subcircuit | ProjectSymbolKind::Model
+                    ))
+                .then(|| ProjectReference {
+                    name: reference.name.clone(),
+                    kind,
+                    location: location_in(&files, &reference.location),
+                })
+            })
+            .collect();
+        let raw_hierarchy = deck
+            .symbols()
+            .iter()
+            .filter(|symbol| {
+                symbol.kind == DeckSymbolKind::Instance
+                    && symbol.name.starts_with(['X', 'x'])
+                    && !symbol.detail.is_empty()
+            })
+            .map(|instance| RawHierarchyInstance {
+                parent: deck
+                    .scopes()
+                    .get(instance.scope)
+                    .and_then(|scope| scope.name.clone()),
+                instance: instance.name.clone(),
+                target: instance.detail.clone(),
+                location: location_in(&files, &instance.location),
+            })
+            .collect();
+
+        let mut index = Self {
+            symbols,
+            references,
+            raw_hierarchy,
+            source_count: files.len(),
+            deck,
+            files,
+            ..Self::default()
+        };
         index.expand_hierarchy();
         index.symbols.sort_by(|left, right| {
             left.name
@@ -150,207 +253,6 @@ impl NetlistProjectIndex {
                 .then_with(|| left.definition.line.cmp(&right.definition.line))
         });
         index
-    }
-
-    fn index_source(
-        &mut self,
-        root: ActiveNetlistDocument,
-        dependency_identity: Option<String>,
-        display_name: String,
-        source: &str,
-    ) {
-        self.source_count = self.source_count.saturating_add(1);
-        let source_index = crate::state::NetlistSourceIndex::parse(source);
-        let mut current_subcircuit = None::<String>;
-        for entry in source_index.outline().entries() {
-            let positioned_tokens = crate::state::netlist_document::card_tokens_with_columns(
-                source_index.card(entry.line()),
-            );
-            let tokens = positioned_tokens
-                .iter()
-                .map(|(token, _)| token.clone())
-                .collect::<Vec<_>>();
-            if tokens.is_empty() {
-                continue;
-            }
-            let location = |token_index: usize| ProjectSourceLocation {
-                root,
-                dependency_identity: dependency_identity.clone(),
-                display_name: display_name.clone(),
-                line: entry.line(),
-                column: positioned_tokens
-                    .get(token_index)
-                    .map_or(entry.column(), |(_, column)| *column),
-            };
-            match entry.kind() {
-                crate::state::OutlineEntryKind::Model => {
-                    if let Some(name) = tokens.get(1) {
-                        self.symbols.push(ProjectSymbol {
-                            name: name.clone(),
-                            kind: ProjectSymbolKind::Model,
-                            detail: tokens.get(2).cloned().unwrap_or_default(),
-                            definition: location(1),
-                        });
-                    }
-                }
-                crate::state::OutlineEntryKind::Subcircuit => {
-                    if let Some(name) = tokens.get(1) {
-                        let port_count = tokens
-                            .iter()
-                            .skip(2)
-                            .take_while(|token| {
-                                !token.eq_ignore_ascii_case("params:") && !token.contains('=')
-                            })
-                            .count();
-                        self.symbols.push(ProjectSymbol {
-                            name: name.clone(),
-                            kind: ProjectSymbolKind::Subcircuit,
-                            detail: format!("{port_count} ports"),
-                            definition: location(1),
-                        });
-                        current_subcircuit = Some(name.clone());
-                    }
-                }
-                crate::state::OutlineEntryKind::Parameter => {
-                    for (name, column) in parameter_definitions(source_index.card(entry.line())) {
-                        self.symbols.push(ProjectSymbol {
-                            name,
-                            kind: ProjectSymbolKind::Parameter,
-                            detail: ".param".to_owned(),
-                            definition: ProjectSourceLocation {
-                                root,
-                                dependency_identity: dependency_identity.clone(),
-                                display_name: display_name.clone(),
-                                line: entry.line(),
-                                column,
-                            },
-                        });
-                    }
-                }
-                crate::state::OutlineEntryKind::Function => {
-                    if let Some(name) = tokens
-                        .get(1)
-                        .and_then(|token| token.split(['(', '=']).next())
-                        .filter(|name| valid_symbol_name(name))
-                    {
-                        self.symbols.push(ProjectSymbol {
-                            name: name.to_owned(),
-                            kind: ProjectSymbolKind::Function,
-                            detail: ".func".to_owned(),
-                            definition: location(1),
-                        });
-                    }
-                }
-                crate::state::OutlineEntryKind::EndSubcircuit => {
-                    if let Some(name) = tokens.get(1) {
-                        self.references.push(ProjectReference {
-                            name: name.clone(),
-                            kind: ProjectSymbolKind::Subcircuit,
-                            location: location(1),
-                        });
-                    }
-                    current_subcircuit = None;
-                }
-                crate::state::OutlineEntryKind::Device => {
-                    if let Some((name, token_index)) = referenced_subcircuit(&tokens) {
-                        let reference_location = location(token_index);
-                        self.references.push(ProjectReference {
-                            name: name.to_owned(),
-                            kind: ProjectSymbolKind::Subcircuit,
-                            location: reference_location.clone(),
-                        });
-                        self.raw_hierarchy.push(RawHierarchyInstance {
-                            parent: current_subcircuit.clone(),
-                            instance: tokens[0].clone(),
-                            target: name.to_owned(),
-                            location: reference_location,
-                        });
-                    } else if let Some(reference) = referenced_definition_candidates(&tokens) {
-                        self.pending_model_references.push(PendingModelReference {
-                            candidates: reference
-                                .token_indices
-                                .into_iter()
-                                .filter_map(|token_index| {
-                                    tokens.get(token_index).map(|name| ProjectReference {
-                                        name: name.clone(),
-                                        kind: ProjectSymbolKind::Model,
-                                        location: location(token_index),
-                                    })
-                                })
-                                .collect(),
-                            retain_first_if_unresolved: reference.retain_first_if_unresolved,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        self.pending_expression_references
-            .extend(expression_references(
-                root,
-                dependency_identity,
-                display_name,
-                source,
-            ));
-    }
-
-    fn resolve_pending_model_references(&mut self) {
-        let model_names = self
-            .symbols
-            .iter()
-            .filter(|symbol| symbol.kind == ProjectSymbolKind::Model)
-            .map(|symbol| symbol.name.to_ascii_lowercase())
-            .collect::<std::collections::HashSet<_>>();
-        for pending in self.pending_model_references.drain(..) {
-            let resolved = pending
-                .candidates
-                .iter()
-                .find(|candidate| model_names.contains(&candidate.name.to_ascii_lowercase()))
-                .cloned()
-                .or_else(|| {
-                    pending
-                        .retain_first_if_unresolved
-                        .then(|| pending.candidates.into_iter().next())
-                        .flatten()
-                });
-            if let Some(reference) = resolved {
-                self.references.push(reference);
-            }
-        }
-    }
-
-    fn resolve_pending_expression_references(&mut self) {
-        let definitions = self
-            .symbols
-            .iter()
-            .map(|symbol| {
-                (
-                    (symbol.kind, symbol.name.to_ascii_lowercase()),
-                    symbol.definition.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut seen = self
-            .references
-            .iter()
-            .map(reference_identity)
-            .collect::<std::collections::HashSet<_>>();
-        for reference in self.pending_expression_references.drain(..) {
-            let key = (reference.kind, reference.name.to_ascii_lowercase());
-            let matching_definitions = definitions
-                .iter()
-                .filter(|(definition_key, _)| definition_key == &key)
-                .map(|(_, location)| location)
-                .collect::<Vec<_>>();
-            if matching_definitions.is_empty()
-                || matching_definitions.contains(&&reference.location)
-            {
-                continue;
-            }
-            if seen.insert(reference_identity(&reference)) {
-                self.references.push(reference);
-            }
-        }
     }
 
     fn expand_hierarchy(&mut self) {
@@ -434,10 +336,71 @@ impl NetlistProjectIndex {
             .collect()
     }
 
+    /// The file the index numbers the source `dependency_identity` names
+    /// (the root for `None`), while `text` is still the text it indexed.
+    fn file_holding(&self, dependency_identity: Option<&str>, text: &str) -> Option<usize> {
+        let file = self
+            .files
+            .iter()
+            .position(|file| file.dependency_identity.as_deref() == dependency_identity)?;
+        (self.files[file].digest == crate::state::content_digest(text)).then_some(file)
+    }
+
+    /// What the name at character `char_index` of `text`, the source
+    /// `dependency_identity` names, is bound to: `None` when the index has no
+    /// name there or was built from other text, `Some(None)` when it has the
+    /// name and nothing in scope defines it.
+    pub(crate) fn definition_at(
+        &self,
+        dependency_identity: Option<&str>,
+        text: &str,
+        char_index: usize,
+    ) -> Option<Option<ProjectSourceLocation>> {
+        let file = self.file_holding(dependency_identity, text)?;
+        let byte = text
+            .char_indices()
+            .nth(char_index)
+            .map_or(text.len(), |(byte, _)| byte);
+        let target = match self.deck.name_at(file, byte)? {
+            DeckNameAt::Definition(symbol) => Some(symbol),
+            DeckNameAt::Reference(reference) => self.deck.references()[reference].target,
+        };
+        Some(
+            target
+                .and_then(|symbol| self.deck.symbols().get(symbol))
+                .filter(|symbol| symbol.kind != DeckSymbolKind::Instance)
+                .map(|symbol| location_in(&self.files, &symbol.location)),
+        )
+    }
+
+    /// The parameters a reader on one-based `line` of the source
+    /// `dependency_identity` names sees, each the definition the engine binds
+    /// there: a subcircuit's own and its formals inside it, the deck's
+    /// outside.
+    pub(crate) fn parameters_visible_at(
+        &self,
+        dependency_identity: Option<&str>,
+        line: usize,
+    ) -> Vec<&DeckSymbol> {
+        let scope = self
+            .files
+            .iter()
+            .position(|file| file.dependency_identity.as_deref() == dependency_identity)
+            .map_or(0, |file| self.deck.scope_on_line(file, line));
+        self.deck
+            .parameters_visible_in(scope)
+            .into_iter()
+            .filter_map(|symbol| self.deck.symbols().get(symbol))
+            .collect()
+    }
+
+    /// The project's subcircuits, models and functions for completion; its
+    /// parameters complete by what the caret's scope sees.
     pub(crate) fn completion_symbols(&self) -> Vec<super::completion::SymbolEntry> {
         let mut seen = std::collections::HashSet::new();
         self.symbols
             .iter()
+            .filter(|symbol| symbol.kind != ProjectSymbolKind::Parameter)
             .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase())))
             .map(|symbol| super::completion::SymbolEntry {
                 name: symbol.name.clone(),
@@ -454,49 +417,90 @@ impl NetlistProjectIndex {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct CachedProjectIndex {
-    pub(super) revision: crate::product::ObjectRevision,
-    pub(super) index: Arc<NetlistProjectIndex>,
+/// Where `location` is, as the editor opens it.
+fn location_in(files: &[IndexedFile], location: &DeckLocation) -> ProjectSourceLocation {
+    let file = files.get(location.file);
+    ProjectSourceLocation {
+        root: file.map_or(ActiveNetlistDocument::Generated, |file| file.root),
+        dependency_identity: file.and_then(|file| file.dependency_identity.clone()),
+        display_name: file
+            .map(|file| file.display_name.clone())
+            .unwrap_or_default(),
+        line: location.line,
+        column: location.column,
+    }
 }
 
-/// The project index of the root the editor shows, cached in the netlist
-/// editor's state against the root document's revision. It reads the
-/// model.
-pub(crate) fn project_index_in(
+/// The project index of the root the editor shows, kept in the netlist
+/// editor's state against the root document's revision and built away from
+/// the editor's thread.
+pub(crate) type ProjectIndexSlot = BackgroundIndex<
+    (
+        crate::state::NetlistDocumentId,
+        crate::product::ObjectRevision,
+    ),
+    NetlistProjectIndex,
+>;
+
+/// The root the editor's language tools read, and the key of its text.
+fn shown_root_in(
     model: &Model,
-    netlist: &mut NetlistDocumentState,
-) -> Option<Arc<NetlistProjectIndex>> {
+    netlist: &NetlistDocumentState,
+) -> Option<(
+    ActiveNetlistDocument,
+    (
+        crate::state::NetlistDocumentId,
+        crate::product::ObjectRevision,
+    ),
+)> {
     let root = netlist
         .active_dependency_root
         .unwrap_or(netlist.active_document);
-    let document = canonical_root_document_in(model, netlist, root)?.clone();
-    if let Some(cached) = netlist.project_indexes.get(&document.id())
-        && cached.revision == document.revision()
-    {
-        return Some(Arc::clone(&cached.index));
+    let document = canonical_root_document_in(model, netlist, root)?;
+    Some((root, (document.id(), document.revision())))
+}
+
+/// The project index of the root the editor shows, for a frame. While the
+/// writer types, the last index built stands in until the one of the root as
+/// it stands is built; a root changed any other way is indexed before the
+/// frame shows it. It reads the model.
+pub(crate) fn project_index_in(
+    ctx: &egui::Context,
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Option<Arc<NetlistProjectIndex>> {
+    if !netlist.is_being_typed() {
+        return project_index_now(model, netlist);
     }
-    let index = Arc::new(NetlistProjectIndex::build(root, &document));
-    netlist.project_indexes.insert(
-        document.id(),
-        CachedProjectIndex {
-            revision: document.revision(),
-            index: Arc::clone(&index),
-        },
-    );
-    let generated_id = model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-        .map(crate::state::NetlistDocument::id);
-    let owned_id = netlist
-        .owned_document
-        .as_ref()
-        .map(crate::state::NetlistDocument::id);
-    netlist.project_indexes.retain(|document_id, _| {
-        Some(*document_id) == generated_id || Some(*document_id) == owned_id
-    });
-    Some(index)
+    let (root, key) = shown_root_in(model, netlist)?;
+    if netlist.project_index.wants(|built| *built == key)
+        && let Some(document) = canonical_root_document_in(model, netlist, root).cloned()
+    {
+        let wake = ctx.clone();
+        netlist.project_index.start(
+            key,
+            move || NetlistProjectIndex::build(root, &document),
+            move || wake.request_repaint(),
+        );
+    }
+    netlist
+        .project_index
+        .last_built()
+        .or_else(|| project_index_now(model, netlist))
+}
+
+/// The project index of the root the editor shows as it stands, waiting for
+/// its build to finish: what an action answers from.
+pub(crate) fn project_index_now(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Option<Arc<NetlistProjectIndex>> {
+    let (root, key) = shown_root_in(model, netlist)?;
+    if let Some(index) = netlist.project_index.wait_for(|built| *built == key) {
+        return Some(index);
+    }
+    let index = NetlistProjectIndex::build(root, canonical_root_document_in(model, netlist, root)?);
+    Some(netlist.project_index.store(key, index))
 }
 
 pub(crate) fn symbol_name_at(source: &str, char_index: usize) -> Option<String> {
@@ -765,11 +769,12 @@ pub(crate) fn value_hover_at_in(
 }
 
 pub(crate) fn symbol_hover(
+    ctx: &egui::Context,
     model: &Model,
     netlist: &mut NetlistDocumentState,
     name: &str,
 ) -> Option<ProjectSymbolHover> {
-    let index = project_index_in(model, netlist)?;
+    let index = project_index_in(ctx, model, netlist)?;
     let definitions = index.definitions_named(name);
     let references = index.references_named(name);
     match definitions.as_slice() {
@@ -868,13 +873,24 @@ pub fn go_to_definition_at_cursor_in(
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
     })?;
-    let index = project_index_in(model, netlist)
+    let index = project_index_now(model, netlist)
         .ok_or_else(|| "The active source has no project index.".to_owned())?;
-    let definitions = index
-        .definitions_named(&symbol)
-        .into_iter()
-        .map(|definition| definition.definition.clone())
-        .collect::<Vec<_>>();
+    // The read under the caret binds the definition its scope sees: a
+    // subcircuit's own parameter inside it, the deck's outside.
+    let bound = index.definition_at(
+        netlist.active_dependency_identity.as_deref(),
+        &model.simulation.source.netlist_content,
+        netlist.cursor_char_index,
+    );
+    let definitions = match bound {
+        Some(Some(definition)) => vec![definition],
+        Some(None) => Vec::new(),
+        None => index
+            .definitions_named(&symbol)
+            .into_iter()
+            .map(|definition| definition.definition.clone())
+            .collect::<Vec<_>>(),
+    };
     match definitions.as_slice() {
         [] => Err(format!(
             "No definition for '{symbol}' exists in the project's sources."
@@ -919,7 +935,7 @@ pub fn show_signature_help_at_cursor(
                 "Place the caret on an analysis, subcircuit, model, parameter, or function name."
                     .to_owned()
             })?;
-            let index = project_index_in(model, netlist)
+            let index = project_index_now(model, netlist)
                 .ok_or_else(|| "The active source has no project index.".to_owned())?;
             let definitions = index.definitions_named(&symbol);
             match definitions.as_slice() {
@@ -960,7 +976,7 @@ pub(crate) fn open_workspace_symbols(
     netlist: &mut NetlistDocumentState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
-    let index = project_index_in(model, netlist)
+    let index = project_index_now(model, netlist)
         .ok_or_else(|| "The active source has no project index.".to_owned())?;
     let count = index.symbols().len();
     workbench.navigator_visible = true;
@@ -1101,357 +1117,6 @@ fn symbol_at_cursor(source: &str, cursor_char_index: usize) -> Option<String> {
         end += 1;
     }
     (start < end).then(|| characters[start..end].iter().collect())
-}
-
-fn valid_symbol_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '$'))
-}
-
-fn reference_identity(
-    reference: &ProjectReference,
-) -> (ProjectSymbolKind, String, u8, Option<String>, usize, usize) {
-    (
-        reference.kind,
-        reference.name.to_ascii_lowercase(),
-        match reference.location.root {
-            ActiveNetlistDocument::Generated => 0,
-            ActiveNetlistDocument::OwnedSource => 1,
-            ActiveNetlistDocument::GeneratedDiff => 2,
-            ActiveNetlistDocument::RunSnapshot => 3,
-        },
-        reference.location.dependency_identity.clone(),
-        reference.location.line,
-        reference.location.column,
-    )
-}
-
-fn parameter_definitions(card: &str) -> Vec<(String, usize)> {
-    let characters = card.chars().collect::<Vec<_>>();
-    let directive_end = characters
-        .iter()
-        .position(|character| character.is_whitespace())
-        .unwrap_or(characters.len());
-    let mut definitions = Vec::new();
-    let mut index = directive_end;
-    while index < characters.len() {
-        while index < characters.len()
-            && (characters[index].is_whitespace() || characters[index] == ',')
-        {
-            index += 1;
-        }
-        let start = index;
-        while index < characters.len()
-            && (characters[index].is_ascii_alphanumeric() || matches!(characters[index], '_' | '$'))
-        {
-            index += 1;
-        }
-        if start == index {
-            index += 1;
-            continue;
-        }
-        let mut equals = index;
-        while equals < characters.len() && characters[equals].is_whitespace() {
-            equals += 1;
-        }
-        if characters.get(equals) == Some(&'=') && characters.get(equals + 1) != Some(&'=') {
-            definitions.push((characters[start..index].iter().collect(), start + 1));
-            index = equals.saturating_add(1);
-        }
-    }
-    definitions
-}
-
-fn expression_references(
-    root: ActiveNetlistDocument,
-    dependency_identity: Option<String>,
-    display_name: String,
-    source: &str,
-) -> Vec<ProjectReference> {
-    let mut references = Vec::new();
-    for (zero_line, line) in source.lines().enumerate() {
-        for (name, column, kind) in expression_identifier_candidates(line) {
-            references.push(ProjectReference {
-                name,
-                kind,
-                location: ProjectSourceLocation {
-                    root,
-                    dependency_identity: dependency_identity.clone(),
-                    display_name: display_name.clone(),
-                    line: zero_line + 1,
-                    column,
-                },
-            });
-        }
-    }
-    references
-}
-
-fn expression_identifier_candidates(line: &str) -> Vec<(String, usize, ProjectSymbolKind)> {
-    let trimmed = line.trim_start();
-    if trimmed.is_empty()
-        || trimmed.starts_with('*')
-        || trimmed.starts_with(';')
-        || trimmed.starts_with("//")
-        || trimmed.starts_with('+')
-    {
-        return Vec::new();
-    }
-    let characters = line.chars().collect::<Vec<_>>();
-    let mut expression = vec![false; characters.len()];
-    let mut quoted = vec![false; characters.len()];
-    let mut quote = None;
-    let mut cutoff = characters.len();
-    for (index, character) in characters.iter().copied().enumerate() {
-        if let Some(active_quote) = quote {
-            quoted[index] = true;
-            if character == active_quote {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(character, '\'' | '"') {
-            quote = Some(character);
-            quoted[index] = true;
-        } else if matches!(character, ';' | '$') {
-            cutoff = index;
-            break;
-        }
-    }
-
-    let mut brace_depth = 0usize;
-    for index in 0..cutoff {
-        if quoted[index] {
-            continue;
-        }
-        match characters[index] {
-            '{' => brace_depth = brace_depth.saturating_add(1),
-            '}' => brace_depth = brace_depth.saturating_sub(1),
-            _ if brace_depth > 0 => expression[index] = true,
-            _ => {}
-        }
-    }
-
-    for index in 0..cutoff {
-        if characters[index] != '='
-            || characters.get(index.wrapping_sub(1)) == Some(&'=')
-            || characters.get(index + 1) == Some(&'=')
-            || matches!(characters.get(index.wrapping_sub(1)), Some('<' | '>' | '!'))
-        {
-            continue;
-        }
-        let mut start = index + 1;
-        while start < cutoff && characters[start].is_whitespace() {
-            start += 1;
-        }
-        if let Some(delimiter @ ('\'' | '"')) = characters.get(start).copied() {
-            let mut end = start + 1;
-            while end < cutoff && characters[end] != delimiter {
-                expression[end] = true;
-                end += 1;
-            }
-        } else if characters.get(start) != Some(&'{') {
-            let mut end = start;
-            while end < cutoff && !characters[end].is_whitespace() && characters[end] != ',' {
-                expression[end] = true;
-                end += 1;
-            }
-        }
-    }
-
-    let lower = trimmed.to_ascii_lowercase();
-    let leading_columns = line
-        .chars()
-        .take_while(|character| character.is_whitespace())
-        .count();
-    let full_expression_start = if lower.starts_with(".if ")
-        || lower.starts_with(".elseif ")
-        || lower.starts_with(".else if ")
-    {
-        trimmed
-            .find(char::is_whitespace)
-            .map(|index| leading_columns + trimmed[..index].chars().count() + 1)
-    } else if lower.starts_with(".func ")
-        || trimmed
-            .chars()
-            .next()
-            .is_some_and(|head| head.eq_ignore_ascii_case(&'b'))
-    {
-        characters
-            .iter()
-            .position(|character| *character == '=')
-            .map(|index| index + 1)
-    } else {
-        None
-    };
-    if let Some(start) = full_expression_start {
-        for marked in expression.iter_mut().take(cutoff).skip(start) {
-            *marked = true;
-        }
-    }
-
-    let function_formals = function_formal_names(trimmed);
-    let mut candidates = Vec::new();
-    let mut index = 0usize;
-    while index < cutoff {
-        let character = characters[index];
-        if !(character.is_ascii_alphabetic() || matches!(character, '_' | '$')) {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        index += 1;
-        while index < cutoff
-            && (characters[index].is_ascii_alphanumeric() || matches!(characters[index], '_' | '$'))
-        {
-            index += 1;
-        }
-        let name = characters[start..index].iter().collect::<String>();
-        let mut following = index;
-        while following < cutoff && characters[following].is_whitespace() {
-            following += 1;
-        }
-        let function_call = characters.get(following) == Some(&'(');
-        if function_formals
-            .iter()
-            .any(|formal| formal.eq_ignore_ascii_case(&name))
-            || inside_spice_probe_argument(&characters, start)
-        {
-            continue;
-        }
-        if function_call && (!quoted[start] || expression[start]) {
-            candidates.push((name, start + 1, ProjectSymbolKind::Function));
-        } else if expression[start] {
-            candidates.push((name, start + 1, ProjectSymbolKind::Parameter));
-        }
-    }
-
-    let tokens = crate::state::netlist_document::card_tokens_with_columns(line);
-    if tokens
-        .first()
-        .and_then(|(token, _)| token.as_bytes().first())
-        .is_some_and(|head| matches!(head.to_ascii_uppercase(), b'R' | b'C' | b'L'))
-        && let Some((name, column)) = tokens.get(3)
-        && valid_symbol_name(name)
-    {
-        candidates.push((name.clone(), *column, ProjectSymbolKind::Parameter));
-    }
-    candidates
-}
-
-fn inside_spice_probe_argument(characters: &[char], index: usize) -> bool {
-    let mut nested = 0usize;
-    for cursor in (0..index).rev() {
-        match characters[cursor] {
-            ')' => nested = nested.saturating_add(1),
-            '(' if nested > 0 => nested -= 1,
-            '(' => {
-                let mut name_end = cursor;
-                while name_end > 0 && characters[name_end - 1].is_whitespace() {
-                    name_end -= 1;
-                }
-                let mut name_start = name_end;
-                while name_start > 0 && characters[name_start - 1].is_ascii_alphabetic() {
-                    name_start -= 1;
-                }
-                let name = characters[name_start..name_end].iter().collect::<String>();
-                return name.eq_ignore_ascii_case("v") || name.eq_ignore_ascii_case("i");
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn function_formal_names(trimmed: &str) -> Vec<String> {
-    if !trimmed.to_ascii_lowercase().starts_with(".func ") {
-        return Vec::new();
-    }
-    let Some(open) = trimmed.find('(') else {
-        return Vec::new();
-    };
-    let Some(close) = trimmed[open + 1..]
-        .find(')')
-        .map(|offset| open + 1 + offset)
-    else {
-        return Vec::new();
-    };
-    trimmed[open + 1..close]
-        .split(',')
-        .map(str::trim)
-        .filter(|name| valid_symbol_name(name))
-        .map(str::to_owned)
-        .collect()
-}
-
-struct ModelReferenceCandidates {
-    token_indices: Vec<usize>,
-    retain_first_if_unresolved: bool,
-}
-
-fn referenced_subcircuit(tokens: &[String]) -> Option<(&str, usize)> {
-    let head = tokens.first()?;
-    if !head.as_bytes().first()?.eq_ignore_ascii_case(&b'X') {
-        return None;
-    }
-    let boundary = tokens
-        .iter()
-        .position(|token| token.eq_ignore_ascii_case("params:") || token.contains('='))
-        .unwrap_or(tokens.len());
-    let index = boundary.checked_sub(1)?.max(1);
-    tokens.get(index).map(|name| (name.as_str(), index))
-}
-
-fn referenced_definition_candidates(tokens: &[String]) -> Option<ModelReferenceCandidates> {
-    let head = tokens.first()?;
-    let device = head.as_bytes().first()?.to_ascii_uppercase();
-    let one = |token_index, retain_first_if_unresolved| ModelReferenceCandidates {
-        token_indices: vec![token_index],
-        retain_first_if_unresolved,
-    };
-    match device {
-        b'D' => tokens.get(3).map(|_| one(3, true)),
-        b'J' | b'Z' => tokens.get(4).map(|_| one(4, true)),
-        // Ordinary MOS uses D G S B MODEL; compact VDMOS uses D G S MODEL.
-        b'M' => {
-            let token_indices = [5, 4]
-                .into_iter()
-                .filter(|index| tokens.get(*index).is_some_and(|token| !token.contains('=')))
-                .collect::<Vec<_>>();
-            (!token_indices.is_empty()).then_some(ModelReferenceCandidates {
-                token_indices,
-                retain_first_if_unresolved: true,
-            })
-        }
-        // BJT accepts optional substrate and thermal nodes. The model is the
-        // last positional token before assignments/OFF/area; definitions make
-        // this exact even when node names are alphabetic.
-        b'Q' => {
-            let boundary = tokens
-                .iter()
-                .enumerate()
-                .skip(4)
-                .find_map(|(index, token)| {
-                    (token.contains('=') || token.eq_ignore_ascii_case("off")).then_some(index)
-                })
-                .unwrap_or(tokens.len());
-            let token_indices = (4..boundary).rev().collect::<Vec<_>>();
-            (!token_indices.is_empty()).then_some(ModelReferenceCandidates {
-                token_indices,
-                retain_first_if_unresolved: true,
-            })
-        }
-        // Passive model forms are lexically indistinguishable from a value or
-        // parameter expression, so they become references only when the token
-        // resolves to a model definition in the authenticated closure.
-        b'R' | b'C' | b'L' => tokens.get(3).map(|_| one(3, false)),
-        b'S' => tokens.get(5).map(|_| one(5, true)),
-        b'W' | b'U' => tokens.get(4).map(|_| one(4, true)),
-        b'O' => tokens.get(5).map(|_| one(5, true)),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

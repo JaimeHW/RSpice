@@ -2,8 +2,9 @@
 //!
 //! Two completion sources: dot-commands with signature docs, and the
 //! deck's own symbols (`.model` / `.subckt` definitions, harvested from
-//! the same parse that drives diagnostics). Anchored at the token being
-//! typed; ↑↓ select, ⇥ accepts, Esc dismisses until the next edit.
+//! the same parse that drives diagnostics, and the project index's, with the
+//! parameters the caret's scope sees). Anchored at the token being typed;
+//! ↑↓ select, ⇥ accepts, Esc dismisses until the next edit.
 
 use egui::{Key, Modifiers, Ui};
 
@@ -207,7 +208,7 @@ pub fn show(
         return None;
     };
 
-    let candidates = collect_candidates(state, buffer, &token, token_start == line_start);
+    let candidates = collect_candidates(state, &token, token_start == line_start);
     if candidates.is_empty() {
         state.completion_open = false;
         return None;
@@ -286,7 +287,6 @@ fn char_to_byte(buffer: &str, char_index: usize) -> usize {
 /// Filter both sources against the typed prefix.
 fn collect_candidates(
     state: &NetlistDocumentState,
-    buffer: &str,
     token: &str,
     at_line_start: bool,
 ) -> Vec<Candidate> {
@@ -315,9 +315,18 @@ fn collect_candidates(
     if token.len() < 2 {
         return out;
     }
-    for symbol in &state.symbols {
+    let project = state.project_index.last_built();
+    let project_symbols = project
+        .as_ref()
+        .map(|index| index.completion_symbols())
+        .unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    for symbol in state.symbols.iter().chain(&project_symbols) {
         let name_lower = symbol.name.to_ascii_lowercase();
-        if name_lower.starts_with(&lower) && name_lower != lower {
+        if name_lower.starts_with(&lower)
+            && name_lower != lower
+            && seen.insert((symbol.kind, name_lower))
+        {
             out.push(Candidate {
                 kind: symbol.kind,
                 label: symbol.name.clone(),
@@ -327,16 +336,23 @@ fn collect_candidates(
             });
         }
     }
-    // Parameter names complete inside `{expressions}` and values.
-    for (name, _, _) in super::param_scan::buffer_assignments(buffer) {
-        let name_lower = name.to_ascii_lowercase();
+    // Parameter names complete inside `{expressions}` and values: the ones
+    // the caret's scope sees, a subcircuit's own and its formals inside it.
+    let parameters = project.as_ref().map(|index| {
+        index.parameters_visible_at(
+            state.active_dependency_identity.as_deref(),
+            state.cursor_line + 1,
+        )
+    });
+    for parameter in parameters.into_iter().flatten() {
+        let name_lower = parameter.name.to_ascii_lowercase();
         if name_lower.starts_with(&lower) && name_lower != lower {
             out.push(Candidate {
                 kind: "param",
-                label: name.clone(),
-                detail: String::new(),
-                doc: format!("Deck parameter `{name}` (.param)."),
-                insert: name,
+                label: parameter.name.clone(),
+                detail: parameter.detail.clone(),
+                doc: format!("Deck parameter `{}` (.param).", parameter.name),
+                insert: parameter.name.clone(),
             });
         }
     }

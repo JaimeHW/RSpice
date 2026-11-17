@@ -117,6 +117,9 @@ pub fn show(
     let editor_id = editor_id_in(model, netlist);
 
     refresh_diagnostics(ui, model, netlist, include_resolutions);
+    // Hover, completion and the navigator read the project index of the deck
+    // as it stands; its build starts once the text changes, off this thread.
+    super::language::project_index_in(ui.ctx(), model, netlist);
 
     // Popover keys (⇥, ↑↓, Esc) must be consumed before the editor so
     // an open popover owns them, unless the editor's right-click menu is
@@ -370,7 +373,7 @@ pub fn show(
     {
         show_value_hover(&editor_response, hover);
     } else if let Some(symbol) = hover_symbol
-        && let Some(hover) = super::language::symbol_hover(model, netlist, &symbol)
+        && let Some(hover) = super::language::symbol_hover(ui.ctx(), model, netlist, &symbol)
     {
         editor_response.clone().on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(360.0);
@@ -493,6 +496,7 @@ fn commit_owned_source_edit(
         return false;
     }
     netlist.last_edit_time = now;
+    netlist.typed_revision = Some(netlist.revision);
     if netlist.active_dependency_identity.is_none() {
         runs.manual_run.edited_lines.insert(cursor_line);
     }
@@ -662,25 +666,13 @@ fn validate_visible_source_in(
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
     }
-    let project_symbols = super::language::project_index_in(model, netlist)
-        .map(|index| index.completion_symbols())
-        .unwrap_or_default();
     netlist.diagnostics = Arc::new(bounded_netlist_diagnostics(
         diagnostics,
         &buffer,
         revision,
         &validation_id,
     ));
-    if let Some(mut symbols) = symbols {
-        let mut seen = symbols
-            .iter()
-            .map(|symbol| (symbol.kind, symbol.name.to_ascii_lowercase()))
-            .collect::<std::collections::HashSet<_>>();
-        symbols.extend(
-            project_symbols
-                .into_iter()
-                .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase()))),
-        );
+    if let Some(symbols) = symbols {
         netlist.symbols = symbols;
     }
     netlist.unread_source = unread.map(|unread| (revision, unread.into()));

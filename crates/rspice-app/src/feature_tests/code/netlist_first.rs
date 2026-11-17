@@ -6,7 +6,7 @@ use crate::workbench::features::{self, Registered};
 use egui::{Rect, Ui, Vec2, vec2};
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::netlist_first::*;
-use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index;
+use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index_now;
 use rspice_app_state::workbench::workspace::Workspace;
 
 const DECK: &str = "Precision front-end bench\n\
@@ -147,7 +147,7 @@ fn a_restored_session_shows_its_deck_before_the_editor_has_been_opened() {
         text.contains("R1 in inn 4.7k"),
         "deck lines missing in:\n{text}"
     );
-    let index = root_deck_source_index(&app.state.model, &mut app.state.code.netlist);
+    let index = root_deck_source_index_now(&app.state.model, &mut app.state.code.netlist);
     assert_eq!(
         deck_facts(&app.state.model, &app.state.code.netlist, &index).lines,
         13

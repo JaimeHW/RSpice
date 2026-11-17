@@ -185,7 +185,7 @@ fn body(
     open_label: &str,
     action: &mut Option<NetlistFirstAction>,
 ) {
-    let index = root_deck_source_index(model, netlist);
+    let index = root_deck_source_index(ui.ctx(), model, netlist);
     let facts = deck_facts(model, netlist, &index);
 
     let available = ui.available_rect_before_wrap();

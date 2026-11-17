@@ -5,11 +5,6 @@
 
 use std::collections::HashSet;
 
-#[cfg(test)]
-use crate::quantity::engineering::parse_engineering_value;
-#[cfg(test)]
-use std::collections::HashMap;
-
 pub(super) fn changed_lines_against_baseline(current: &str, baseline: &str) -> HashSet<usize> {
     let current_lines: Vec<&str> = current.lines().collect();
     let baseline_lines: Vec<&str> = baseline.lines().collect();
@@ -23,26 +18,6 @@ pub(super) fn changed_lines_against_baseline(current: &str, baseline: &str) -> H
     }
 
     changed
-}
-
-#[cfg(test)]
-fn param_values(buffer: &str) -> HashMap<String, f64> {
-    let mut values = HashMap::new();
-    for line in buffer.lines() {
-        let Some(assignments) = super::param_scan::scan_assignments(line) else {
-            continue;
-        };
-        for (name, start, end) in assignments {
-            let raw = &line[start..end];
-            if raw.starts_with('{') {
-                continue;
-            }
-            if let Ok(value) = parse_engineering_value(raw) {
-                values.insert(name.to_ascii_lowercase(), value);
-            }
-        }
-    }
-    values
 }
 
 #[cfg(test)]
@@ -61,13 +36,5 @@ mod tests {
     #[test]
     fn changed_lines_is_empty_for_identical_snapshots() {
         assert!(changed_lines_against_baseline("a\nb\n", "a\nb\n").is_empty());
-    }
-
-    #[test]
-    fn param_values_parse_numeric_assignments_case_insensitively() {
-        let values = param_values(".param Itail=20u cl = 2p expr={w*2}\n");
-        assert!((values["itail"] - 20e-6).abs() < 1e-15);
-        assert!((values["cl"] - 2e-12).abs() < 1e-21);
-        assert!(!values.contains_key("expr"));
     }
 }

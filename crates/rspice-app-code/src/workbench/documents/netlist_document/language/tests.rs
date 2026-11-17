@@ -242,13 +242,6 @@ fn expanded_hierarchy_stops_at_recursive_subcircuit_edges() {
 
 #[test]
 fn project_index_tracks_parameter_and_function_expression_references() {
-    let candidates = expression_identifier_candidates(".param base=1k gain = {base*2}");
-    assert!(
-        candidates.iter().any(|(name, _, kind)| {
-            name.eq_ignore_ascii_case("base") && *kind == ProjectSymbolKind::Parameter
-        }),
-        "expression candidates were {candidates:?}"
-    );
     let source = "expressions\n\
 .param base=1k gain = {base*2}\n\
 .func shape(x)={x*gain}\n\
@@ -291,6 +284,89 @@ B1 y 0 V={shape(V(out))*gain}\n\
     assert_eq!(index.references_named("shape").len(), 1);
     assert!(index.references_named("x").is_empty());
     assert!(index.references_named("out").is_empty());
+}
+
+#[test]
+fn go_to_definition_lands_on_the_definition_in_the_file_that_holds_it() {
+    let mut harness = harness();
+    crate::workbench::documents::netlist_document::fixtures::seed_owned_dependency(
+        &mut harness.model,
+        &mut harness.state.netlist,
+    );
+    let root = crate::workbench::documents::netlist_document::fixtures::ROOT;
+    harness.state.netlist.cursor_char_index = root.find("rmodel").expect("a read") + 2;
+
+    let said = go_to_definition_at_cursor_in(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
+        &mut harness.runs,
+        &mut harness.wb,
+    )
+    .expect("the definition opens");
+
+    assert_eq!(said, "Opened definition of rmodel");
+    assert_eq!(
+        harness.state.netlist.active_dependency_identity.as_deref(),
+        Some(crate::workbench::documents::netlist_document::fixtures::INCLUDE_IDENTITY)
+    );
+    assert_eq!(harness.state.netlist.requested_line, Some(1));
+}
+
+#[test]
+fn go_to_definition_inside_a_subcircuit_lands_on_its_own_parameter() {
+    let deck = "cell deck
+.param gain=5
+.subckt cell a b params: gain=1
+R1 a b
++ {gain}
+.ends cell
+R2 a 0 {gain}
+.end
+";
+    let provenance = crate::state::GeneratedProvenance::try_new(
+        "language-scope-test",
+        crate::state::GenerationInput::new(
+            crate::product::ObjectRevision::INITIAL,
+            crate::state::content_digest("language-scope-input"),
+        ),
+    )
+    .unwrap();
+    let artifact = crate::state::GeneratedArtifact::try_from_utf8(
+        provenance,
+        deck.as_bytes().to_vec(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let mut harness = harness();
+    harness.model.netlist_artifacts.generated_document = Some(
+        crate::state::NetlistDocument::from_generated(
+            crate::state::NetlistDocumentId::new(),
+            artifact,
+        )
+        .unwrap(),
+    );
+    harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+    harness.model.simulation.source.netlist_content = deck.to_owned();
+    let mut go_to = |needle: &str| {
+        harness.state.netlist.cursor_char_index =
+            deck.find(needle).expect("a read") + needle.find("gain").expect("a name") + 1;
+        go_to_definition_at_cursor_in(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
+            &mut harness.runs,
+            &mut harness.wb,
+        )
+        .expect("the definition opens");
+        harness.state.netlist.requested_line
+    };
+
+    // The read on the continuation line binds the formal on the .subckt line.
+    assert_eq!(go_to("+ {gain}"), Some(3));
+    // The same name outside the subcircuit binds the deck's own.
+    assert_eq!(go_to("R2 a 0 {gain}"), Some(2));
 }
 
 /// An ASCII deck, so a byte offset found with `find` is also the character

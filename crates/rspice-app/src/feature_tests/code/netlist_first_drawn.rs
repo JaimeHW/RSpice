@@ -3,7 +3,7 @@
 use super::netlist_first::netlist_first_app;
 use crate::workbench::RSpiceApp;
 use rspice_app_code::workbench::code::netlist_first::deck_facts;
-use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index;
+use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index_now;
 
 #[test]
 fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
@@ -26,7 +26,7 @@ fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
 #[test]
 fn deck_facts_read_the_live_document_rather_than_placeholders() {
     let mut app = netlist_first_app();
-    let index = root_deck_source_index(&app.state.model, &mut app.state.code.netlist);
+    let index = root_deck_source_index_now(&app.state.model, &mut app.state.code.netlist);
     let facts = deck_facts(&app.state.model, &app.state.code.netlist, &index);
 
     assert!(facts.name.contains("front_end"), "name: {}", facts.name);

@@ -30,19 +30,21 @@ fn owned_dependency_state() -> CodeHarness {
     harness
 }
 
-/// The navigator asks for the outline on every frame. Parsing costs the
-/// deck, so the answer has to be the same object until the bytes change —
-/// and a different one the moment they do, because a navigator listing
-/// declarations the buffer no longer contains is worse than a slow one.
+/// The navigator asks for the outline on every frame. Building it costs the
+/// deck, so the answer has to be the same object until the bytes change, and
+/// a different one once they do: a navigator listing declarations the buffer
+/// no longer contains is worse than a slow one. A frame gets the last outline
+/// built while the next one builds off the editor's thread.
 #[test]
-fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
+fn the_visible_outline_is_built_once_per_change_and_never_reused_across_one() {
     let mut harness = owned_dependency_state();
 
-    let first = visible_source_index_in(&harness.model, &mut harness.state.netlist);
-    let again = visible_source_index_in(&harness.model, &mut harness.state.netlist);
+    let first = visible_source_index_now(&harness.model, &mut harness.state.netlist);
+    let ctx = egui::Context::default();
+    let frame = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
     assert!(
-        std::sync::Arc::ptr_eq(&first, &again),
-        "an unchanged buffer must not be parsed twice"
+        std::sync::Arc::ptr_eq(&first, &frame),
+        "an unchanged buffer must not be built twice"
     );
     assert!(first.describes(ROOT));
     assert_eq!(first.card(3), "V1 out 0 1");
@@ -52,18 +54,41 @@ fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
         &mut harness.state.netlist,
         &mut harness.state.netlist_open_documents,
         &mut harness.wb,
-        format!("{ROOT}* one more card\n")
+        format!(
+            "{ROOT}* one more card
+"
+        )
     ));
-    let edited = visible_source_index_in(&harness.model, &mut harness.state.netlist);
-    assert!(!std::sync::Arc::ptr_eq(&first, &edited));
-    assert_eq!(edited.line_count(), first.line_count() + 1);
+    let replaced = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
+    assert!(
+        replaced.describes(&format!("{ROOT}* one more card\n")),
+        "text put in the buffer without typing is outlined before a frame shows it"
+    );
+
+    let typed = format!("{ROOT}* one more card\n* and one typed\n");
+    assert!(replace_owned_source(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.state.netlist_open_documents,
+        &mut harness.wb,
+        typed.clone()
+    ));
+    harness.state.netlist.typed_revision = Some(harness.state.netlist.revision);
+    let stale = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
+    assert!(
+        std::sync::Arc::ptr_eq(&replaced, &stale) || stale.describes(&typed),
+        "while the writer types, a frame shows the last outline built or the new one, never another"
+    );
+    let edited = visible_source_index_now(&harness.model, &mut harness.state.netlist);
+    assert!(edited.describes(&typed));
+    assert_eq!(edited.line_count(), first.line_count() + 2);
 
     // Switching documents changes the buffer without editing it.
     assert!(open_generated_primary_in(
         &mut harness.model,
         &mut harness.state.netlist
     ));
-    assert!(visible_source_index_in(&harness.model, &mut harness.state.netlist).describes(ROOT));
+    assert!(visible_source_index_now(&harness.model, &mut harness.state.netlist).describes(ROOT));
 }
 
 #[test]
