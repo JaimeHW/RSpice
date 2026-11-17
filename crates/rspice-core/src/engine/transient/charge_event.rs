@@ -57,6 +57,10 @@ pub(super) struct EventVoltageControl {
 
 // Descriptor plus sparse incidence and allocator headroom, in Value units.
 const SOURCE_STORAGE_VALUES: usize = 16;
+/// Relative rounding of an evaluated row per unit of `sum |J_ij x_j|`: one
+/// ulp reading the state, one forming a junction voltage, one in the
+/// exponential, with a factor of two to spare.
+const STATE_RESOLUTION: Value = 8.0 * Value::EPSILON;
 
 #[derive(Clone, Copy)]
 pub(super) enum EventVoltageEquation {
@@ -618,6 +622,16 @@ impl ChargeEventTopology {
     }
 }
 
+/// The residual that rounding `state` alone can leave in a row with these
+/// Jacobian entries: [`STATE_RESOLUTION`] times `sum |J_ij x_j|`.
+fn state_resolution(entries: &[(usize, Value)], state: &[Value]) -> Value {
+    STATE_RESOLUTION
+        * entries
+            .iter()
+            .map(|&(column, value)| (value * state[column]).abs())
+            .sum::<Value>()
+}
+
 fn voltage(state: &[Value], node: usize) -> Value {
     if node == 0 { 0.0 } else { state[node - 1] }
 }
@@ -732,10 +746,23 @@ impl Equations {
         check_abort(abort)?;
         Ok(result)
     }
-    fn norm(&self, options: &EventOptions) -> Result<Value> {
+    /// The largest residual scaled by its row's tolerance.
+    ///
+    /// Given the `rounded` state another solver produced, a row also
+    /// tolerates the residual that rounding it alone leaves: an evaluation
+    /// reads each coordinate to an ulp, so a row cannot balance below about
+    /// `EPSILON * sum |J_ij x_j|`. That floor is far below every tolerance
+    /// until a junction runs far forward: a BJT with 6 V across its
+    /// base-emitter junction carries 1e84 A, its collector row's Jacobian
+    /// times the state is 1.3e87, and the operating point that ngspice-46
+    /// and this engine both solve leaves 1.5e71 A in that row. A state this
+    /// solve iterates itself keeps the strict test.
+    fn norm(&self, options: &EventOptions, rounded: Option<&[Value]>) -> Result<Value> {
         let mut norm: Value = 0.0;
         for row in 0..self.values.len() {
-            let denominator = self.absolute[row] + options.relative_tolerance * self.scales[row];
+            let denominator = self.absolute[row]
+                + options.relative_tolerance * self.scales[row]
+                + rounded.map_or(0.0, |state| state_resolution(&self.rows[row], state));
             if !denominator.is_finite() || !self.values[row].is_finite() {
                 return Err(error("nonfinite residual scale"));
             }

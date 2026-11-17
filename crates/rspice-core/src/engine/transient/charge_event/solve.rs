@@ -213,7 +213,10 @@ impl ChargeEventTopology {
                 }
                 result => result?,
             };
-            let residual = equations.norm(options)?;
+            // An incoming state certified unchanged was rounded by the solver
+            // that produced it; this solve cannot iterate it any closer.
+            let rounded = (!matches!(policy, CoordinatePolicy::Project)).then_some(&trial[..]);
+            let residual = equations.norm(options, rounded)?;
             let mut update: Value = 0.0;
             for (column, (&value, &change)) in trial.iter().zip(&correction).enumerate() {
                 let absolute = if self.source_columns[column] {
@@ -268,7 +271,7 @@ impl ChargeEventTopology {
                     }
                     let next_equations =
                         self.jump_equations(&next, incoming_q, &next_sample, options, abort)?;
-                    let next_norm = next_equations.norm(options)?;
+                    let next_norm = next_equations.norm(options, None)?;
                     if next_norm < residual || (next_norm <= 1.0 && update * alpha <= 1.0) {
                         accepted = Some(next);
                         break;
@@ -428,7 +431,11 @@ impl ChargeEventTopology {
             let scale = physical.f.scales[row]
                 .max(physical.q_time[row].abs())
                 .max(current.abs());
-            if residual.abs() > options.current_tolerance + options.relative_tolerance * scale {
+            // A row balances only to the rounding of the state it was read at.
+            let tolerance = options.current_tolerance
+                + options.relative_tolerance * scale
+                + state_resolution(&physical.f.rows[row], &trial);
+            if residual.abs() > tolerance {
                 return Err(error(format!("finite-current KCL failed at row {row}")));
             }
         }
