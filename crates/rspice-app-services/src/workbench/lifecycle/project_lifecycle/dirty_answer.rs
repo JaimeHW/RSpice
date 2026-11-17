@@ -142,10 +142,12 @@ fn held_or_compared(state: &LifecycleView<'_>) -> Rc<Compared> {
         .held(&stamp, &baseline)
     {
         #[cfg(debug_assertions)]
-        audit(
-            &held,
-            &rspice_project::registry::unobserved(|| fingerprint(state)),
-        );
+        if !audit_suspended() {
+            audit(
+                &held,
+                &rspice_project::registry::unobserved(|| fingerprint(state)),
+            );
+        }
         return held;
     }
     compare(state, stamp, baseline)
@@ -230,10 +232,12 @@ pub(super) fn netlist_input(
         .map(|(_, digest)| *digest);
     if let Some(digest) = digest {
         #[cfg(debug_assertions)]
-        audit_netlist_input(
-            digest,
-            &rspice_project::registry::unobserved(|| digest_netlist_input(state)),
-        );
+        if !audit_suspended() {
+            audit_netlist_input(
+                digest,
+                &rspice_project::registry::unobserved(|| digest_netlist_input(state)),
+            );
+        }
         return Ok(digest);
     }
     let digest = digest_netlist_input(state)?;
@@ -282,8 +286,15 @@ thread_local! {
     static AUDIT_SUSPENDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Run `work` with held answers unchecked, for a test that holds a stale
-/// one on purpose to show what reads it and what does not.
+/// Whether held answers go unchecked: a suspended audit captures nothing.
+#[cfg(debug_assertions)]
+fn audit_suspended() -> bool {
+    AUDIT_SUSPENDED.with(std::cell::Cell::get)
+}
+
+/// Run `work` with held answers unchecked and uncaptured: for a test that
+/// holds a stale one on purpose to show what reads it and what does not, and
+/// for one that drives thousands of frames to prove something else.
 #[cfg(any(test, feature = "test-support"))]
 pub fn without_audit<R>(work: impl FnOnce() -> R) -> R {
     #[cfg(debug_assertions)]
@@ -331,7 +342,7 @@ fn audit_netlist_input(
     held: ContentDigest,
     current: &Result<ContentDigest, ProjectLifecycleError>,
 ) {
-    if AUDIT_SUSPENDED.with(std::cell::Cell::get) {
+    if audit_suspended() {
         return;
     }
     assert!(
@@ -347,7 +358,7 @@ fn audit_netlist_input(
 /// does not cover.
 #[cfg(debug_assertions)]
 fn audit(held: &Compared, current: &Result<DocumentFingerprints, String>) {
-    if AUDIT_SUSPENDED.with(std::cell::Cell::get) {
+    if audit_suspended() {
         return;
     }
     let differing = match (&held.working, current) {
