@@ -347,8 +347,9 @@ fn assert_adcs_identical(
 
 /// With no coupled root, a connect-rule A/D edge is a `cross()` event dated
 /// at the crossing (VAMS-LRM 2.4 5.10.3.1). A probe of a candidate past the
-/// crossing asks the stepper to land one representable instant past it, and
-/// the edge is dated at the crossing there, and on a candidate the stepper
+/// crossing asks the stepper to land just past it, by half the window an
+/// interpolated crossing is trusted to, and the edge is dated at the
+/// crossing there, and on a candidate the stepper
 /// could not cut. `adc_bridge` keeps ngspice-46's law and dates the same
 /// edge at the first sample past the threshold
 /// (icm/digital/adc_bridge/cfunc.mod:217-257).
@@ -378,8 +379,8 @@ fn an_uncoupled_connect_adc_dates_its_edge_at_the_crossing() {
         .candidate_event_time(&ctx)
         .expect("a crossing inside the step asks for a landing");
     assert!(
-        landing > crossing && landing - crossing <= 4.0 * f64::EPSILON * crossing,
-        "lands one representable instant past the crossing: {landing:e} vs {crossing:e}"
+        landing > crossing && landing - crossing <= 36.0 * f64::EPSILON * crossing,
+        "lands 32 ulps past the crossing: {landing:e} vs {crossing:e}"
     );
 
     let one = |published: Vec<Published>| {
@@ -977,7 +978,7 @@ fn a_bidirectional_port_drives_and_reads_its_own_node() {
 
 /// A released bidirectional converter's receiving half is the one-way A/D
 /// with no coupled root: a probe past the crossing asks the stepper to land
-/// one representable instant past it, and the edge is dated at the crossing
+/// just past it, and the edge is dated at the crossing
 /// there and on a candidate the stepper could not cut
 /// (`an_uncoupled_connect_adc_dates_its_edge_at_the_crossing`). The probe
 /// publishes nothing, and the driving half stays released throughout.
@@ -1014,8 +1015,8 @@ fn an_uncoupled_connect_bidir_dates_its_edge_at_the_crossing() {
         .candidate_event_time(&ctx)
         .expect("a crossing inside the step asks for a landing");
     assert!(
-        landing > crossing && landing - crossing <= 4.0 * f64::EPSILON * crossing,
-        "lands one representable instant past the crossing: {landing:e} vs {crossing:e}"
+        landing > crossing && landing - crossing <= 36.0 * f64::EPSILON * crossing,
+        "lands 32 ulps past the crossing: {landing:e} vs {crossing:e}"
     );
 
     for time in [landing, candidate] {

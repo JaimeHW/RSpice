@@ -304,9 +304,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         // event, P and QS bit-identical, and CLK moved at the 89 points on
         // its edges by at most 4.4e-16 V. The deck with that old double
         // written out reproduces the previous hash.
+        //
+        // Re-measured when an A/D root began landing past its crossing by
+        // 32 * EPSILON * t, half its root window, rather than one ulp: the
+        // same 518 points. The 90
+        // that moved are CLK's 20 crossing landings and the restart steps
+        // after them, each 32 to 61 ulps later (at most 1.35e-21 s), and the
+        // 20 CLK and 10 QS events dated on those landings moved with them, P
+        // and QS by at most 4.5e-11 V.
         Pinned::Grid {
             points: 518,
-            grid_hash: 0xac5c_1670_ff3a_1bea,
+            grid_hash: 0x0c47_8eb4_c677_1019,
         },
     ),
     (
@@ -428,12 +436,19 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
     // its decimal (`ticks / 1e9` where it was `ticks * 1e-9`): the same 38
     // points, YA and YB's 12 ns rise one ulp earlier (1.2e-8 where it was
     // 1.2000000000000002e-8), and the 11 grid points after it moved with it.
+    //
+    // And together again when an A/D root began landing past its crossing
+    // by 32 * EPSILON * t, half its root window, rather than one ulp: the
+    // same 38 points, `ca`'s
+    // 10.6 ns landing and the four restart points after it 45 ulps
+    // (7.4e-23 s) later, `ca`'s and `q`'s events on them with them, and
+    // every other point and event bit-identical.
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
         Pinned::Grid {
             points: 38,
-            grid_hash: 0xc6f5_1ce4_875a_777c,
+            grid_hash: 0x7cca_5291_b703_231b,
         },
     ),
     (
@@ -441,7 +456,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         "hardening_feedback_split",
         Pinned::Grid {
             points: 38,
-            grid_hash: 0xc6f5_1ce4_875a_777c,
+            grid_hash: 0x7cca_5291_b703_231b,
         },
     ),
     (
@@ -449,7 +464,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         "hardening_feedback_order",
         Pinned::Grid {
             points: 38,
-            grid_hash: 0xc6f5_1ce4_875a_777c,
+            grid_hash: 0x7cca_5291_b703_231b,
         },
     ),
     (

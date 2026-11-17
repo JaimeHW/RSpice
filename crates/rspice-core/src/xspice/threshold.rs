@@ -167,8 +167,8 @@ impl AnalogThresholdBehavior {
 /// A threshold crossing that a coupled run's root located on one converter
 /// input, carried to the candidate that lands past it.
 ///
-/// The root lands one representable instant past the crossing, where the
-/// input can still read a rounding short of the threshold. A converter that
+/// The root lands just past the crossing (`root_landing`), where the input
+/// can still read short of the threshold. A converter that
 /// decided by that sample would hold, and the run would chase the same
 /// crossing one solver floor later. So once a crossing is located, the side
 /// of it a candidate lies on decides: on it or past it, the converter takes

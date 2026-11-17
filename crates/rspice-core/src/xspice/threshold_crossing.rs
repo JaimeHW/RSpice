@@ -121,6 +121,26 @@ pub(crate) fn first_landing_after(start: f64, minimum_timestep: f64) -> f64 {
     first
 }
 
+/// Where a root lands for a crossing it located at `crossing`, in an interval
+/// from the accepted point `start` whose first instant a root may land on is
+/// `first` ([`first_landing_after`]).
+///
+/// Past the crossing by half the resolution an interpolated crossing is
+/// trusted to, 32 ulps of it and never less than one, as a Verilog-AMS
+/// `cross()` lands past its root. A crossing has happened only where its
+/// input reads past the threshold (VAMS-LRM 2.4 5.10.3.1), and one
+/// representable instant past a crossing interpolated from rounded samples
+/// can still read short of it, as 4 of the 200 edges of a 2 ns ramp did.
+/// Half the window keeps the landing on the crossing as
+/// [`endpoint_root_window`] judges it.
+#[cfg(feature = "veriloga")]
+pub(crate) fn root_landing(crossing: f64, start: f64, first: f64) -> f64 {
+    let at = crossing.max(start);
+    (at + 32.0 * f64::EPSILON * at.abs())
+        .max(at.next_up())
+        .max(first)
+}
+
 /// Whether both samples of a crossing lie within floating-point resolution of
 /// the threshold — 64 ulps of the larger magnitude, the trust
 /// [`endpoint_root_window`] gives an interpolation.

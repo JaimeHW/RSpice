@@ -193,7 +193,8 @@ use crate::xspice::event_scheduler::{Instant, SchedulerError, SchedulerLimits, T
 use crate::xspice::models::OFFICIAL_BRIDGE_TIMING_MIN;
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::{
-    crossing_below_resolution, endpoint_root_window, first_landing_after, threshold_crossing_time,
+    crossing_below_resolution, endpoint_root_window, first_landing_after, root_landing,
+    threshold_crossing_time,
 };
 
 /// Read an analog time as an HDL-visible tick, through the instant it is.
@@ -511,8 +512,8 @@ struct BoundaryHistories {
 /// # The located crossings
 ///
 /// A converter root found inside a candidate's interval rolls that candidate
-/// back and lands one representable instant past the crossing, where the
-/// converter's input can still read a rounding short of its threshold. The
+/// back and lands just past the crossing (`root_landing`), where the
+/// converter's input can still read short of its threshold. The
 /// crossing is the candidate's fact, not the landed sample's, so it is kept
 /// here across the rollback and decides at the landing; see
 /// [`crate::xspice::LocatedCrossing`].
@@ -4593,12 +4594,13 @@ impl MixedSignalHost {
             if self.scratch.ledger.decided(index, time).is_some() {
                 continue;
             }
-            // Land on the entering side of a representable root, as the analog
-            // cross operator does. Never quantize this physical solve to HDL ticks.
+            // Land past the root by half its resolution, as the analog cross
+            // operator does; see `root_landing`. Never quantize this physical
+            // solve to HDL ticks.
             let target = if opened_on_drive_step {
                 first_allowed
             } else {
-                crossing.max(start).next_up().max(first_allowed)
+                root_landing(crossing, start, first_allowed)
             };
             if target >= time {
                 continue;
@@ -4915,7 +4917,7 @@ impl MixedSignalHost {
                             landing: if decided_here {
                                 time_seconds
                             } else {
-                                crossing.max(start).next_up().max(first_landing)
+                                root_landing(crossing, start, first_landing)
                             },
                             decided_at: decided_here.then_some(time_seconds),
                         },

@@ -63,7 +63,8 @@ use super::{AdcBridge, DacBridge};
 use crate::Value;
 use crate::xspice::logic_map;
 use crate::xspice::threshold_crossing::{
-    crossing_below_resolution, endpoint_root_window, first_landing_after, threshold_crossing_time,
+    crossing_below_resolution, endpoint_root_window, first_landing_after, root_landing,
+    threshold_crossing_time,
 };
 use crate::xspice::verilog::store::BitDrive;
 use crate::xspice::{
@@ -879,8 +880,8 @@ impl CodeModel for ConnectAdc {
         true
     }
 
-    /// The landing one representable instant past the earliest crossing
-    /// [`chord_crossing`] located inside the step, where it lies further
+    /// The landing just past the earliest crossing [`chord_crossing`]
+    /// located inside the step ([`root_landing`]), where it lies further
     /// inside than the endpoint window and a landing can still be made.
     fn candidate_event_time(&self, ctx: &CmContext) -> Option<Value> {
         let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking).ok()?;
@@ -888,9 +889,10 @@ impl CodeModel for ConnectAdc {
     }
 }
 
-/// The landing one representable instant past the earliest crossing an A/D
-/// half's [`chord_crossing`] located inside the step, where it lies further
-/// inside than the endpoint window and a landing can still be made.
+/// The landing just past the earliest crossing an A/D half's
+/// [`chord_crossing`] located inside the step ([`root_landing`]), where it
+/// lies further inside than the endpoint window and a landing can still be
+/// made.
 fn adc_candidate_event_time(
     ctx: &CmContext,
     law: AdcLaw,
@@ -906,7 +908,7 @@ fn adc_candidate_event_time(
             let (sample, low, high) =
                 law.terms(analog_vector_input_value(ctx, slots.input, index), supply);
             let crossing = chord_crossing(ctx, law.band, slots, index, sample, low, high)?;
-            let landing = crossing.time.max(start).next_up().max(first);
+            let landing = root_landing(crossing.time, start, first);
             (crossing.land && landing < ctx.time).then_some(landing)
         })
         .reduce(Value::min)
