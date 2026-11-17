@@ -1,6 +1,6 @@
 //! A run's results store as the controller reports it: a transient its volume stopped keeps its
-//! rows and says where it stopped, and a stored column a waveform could not read is a finding of
-//! the run that wrote it.
+//! rows and says where it stopped, a stored column a waveform could not read is a finding of the
+//! run that wrote it, and a stored run saved with its project reopens with the same samples.
 
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::{
@@ -205,4 +205,82 @@ fn a_stored_column_that_cannot_be_read_is_a_finding_of_the_run_that_wrote_it() {
     assert!(state.model.log_buffer.entries().any(|entry| entry.message
         == "Results: the stored samples of 'V(out)' could not be read from \
             /tmp/rspice-results/7-1-0/9.rsr: chunk 4's checksum does not match"));
+}
+
+#[test]
+fn a_stored_run_saved_with_its_project_writes_its_samples_and_reopens_to_draw() {
+    let deck = "stored run saved with its project
+V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
+R1 in out 1k
+C1 out 0 10n
+.tran 0.1u 300u
+.end
+";
+    let state: RunTestHost = super::super::test_execution::run_manual_batch_session(deck);
+    let simulation = &state.model.simulation;
+    let analysis = &simulation.retained.runs[0].analyses[0];
+    assert!(
+        analysis
+            .waveforms
+            .iter()
+            .all(|waveform| waveform.x.is_stored() && waveform.y.is_stored()),
+        "the desktop route keeps the run's samples in its store"
+    );
+
+    let saved = serde_json::to_string(&crate::io::capture_simulation_results(simulation))
+        .expect("the project's results serialize");
+    let reopened = crate::io::simulation_state_from_results(
+        serde_json::from_str(&saved).expect("the project's results parse"),
+    )
+    .expect("the project's results restore");
+
+    let back = &reopened.retained.runs[0].analyses[0];
+    assert!(back.success);
+    let names = |analysis: &crate::state::AnalysisResult| {
+        analysis
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(back), names(analysis));
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    for (before, after) in analysis.waveforms.iter().zip(&back.waveforms) {
+        // The file holds the samples themselves, as it does for a run kept in memory.
+        assert!(!after.y.is_stored(), "{} reopens from the file", after.name);
+        assert_eq!(bits(&after.x), bits(&before.x), "{}", after.name);
+        assert_eq!(bits(&after.y), bits(&before.y), "{}", after.name);
+    }
+
+    // The reopened run draws: its strip carries every trace with every sample.
+    let models = rspice_results_ui::waves::build_models(
+        &reopened.display_runs(),
+        &reopened.retained.executed_decks,
+        &mut rspice_results_ui::derived::DerivedSeries::default(),
+        &rspice_ui_kit::tokens::Tokens::default(),
+        rspice_results_ui::waves::ProjectionOptions {
+            phase_continuous: false,
+            complex_display: Default::default(),
+            ac: Default::default(),
+            selection: None,
+            hidden_family_traces: &Default::default(),
+        },
+        |_| None,
+    );
+    let drawn: Vec<_> = models[0]
+        .traces
+        .iter()
+        .map(|trace| (trace.source_waveform_name.clone(), trace.y.len()))
+        .collect();
+    let expected: Vec<_> = analysis
+        .waveforms
+        .iter()
+        .map(|waveform| (waveform.name.clone(), waveform.y.len()))
+        .collect();
+    assert_eq!(drawn, expected);
 }

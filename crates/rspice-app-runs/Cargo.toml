@@ -37,6 +37,7 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = t
 rspice-app-state = { workspace = true, features = ["test-support"] }
 rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
+rspice-ui-kit.workspace = true
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }

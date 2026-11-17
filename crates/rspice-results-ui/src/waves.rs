@@ -735,6 +735,9 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
 }
 
 #[cfg(test)]
+mod stored_tests;
+
+#[cfg(test)]
 mod phase_digit_tests {
     use super::*;
     use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
