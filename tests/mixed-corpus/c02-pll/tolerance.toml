@@ -90,8 +90,8 @@ band = 0.030
 window = [0.0, 2.5e-5]
 oracle = "O2"
 ref = "ref/mx.tran.O2.out"
-abs = 2e-9
-why = "O2 is the mx loop with vco_pwl.va's integrating VCO and the Verilog in Icarus (oracle/mx.o2/deck.cir), locking at 5.5505 us. It cannot be refined past a 70 ps cap (ngspice-46 + d_cosim stops on timestep too small), where it moves 1.09 ns from the 100 ps cap; its pump D/A edges (100 ps against 1 ps) move it 0.63 ns: allowed 1.72 ns, rounded up to 2 ns. Was 5 % against a twin whose d_osc VCO locked 0.15 us later"
+abs = 2.5e-9
+why = "O2 is the mx loop with vco_pwl.va's integrating VCO and the Verilog in Icarus (oracle/mx.o2/deck.cir), locking at 5.542840 us. Its own resolution: d_cosim delays from 1 to 100 ps, which by themselves move the lock under 0.8 ns (1 ns moves it 7.7 ns), scatter it over [5.541323, 5.544019] us, at most 1.52 ns from the 20 ps capture; the 1.09 ns it moves from the 100 ps step cap to 70 ps is inside that. Its pump D/A edges (100 ps against 1 ps) move it 0.63 ns. Its 50 ps buffer is where the deck's 100 ps transition(), started at the cross() of the phase, crosses the A/D's 0.5 V, so it agrees with the deck. Allowed 1.52 + 0.63 = 2.15 ns, rounded up to 2.5 ns. Was 5 % against a twin whose d_osc VCO locked 0.15 us later"
 
 [[q]]
 id = "vlock"

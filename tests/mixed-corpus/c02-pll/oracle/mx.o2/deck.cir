@@ -30,8 +30,14 @@ adiv2 d_vco d_div2 div2
 .model div2 d_fdiv(div_factor = 2 high_cycles = 1
 + i_count = 0 rise_delay = 1e-10
 + fall_delay = 1e-10)
+* The deck runs div20_pfd with no delay; d_cosim's default delay is 1 ns
+* (ngspice-46 d_cosim/ifspec.ifs:50-54), which locked 7.7 ns late (5.550538
+* us). At 1, 2, 5 and 10 ps Icarus reports "time reversal" at ngspice's
+* rejected steps (74, 56, 37, 6 times); 20 ps is the smallest delay with
+* none, and its lock time (5.542840 us) lies among theirs (5.541323 to
+* 5.542949 us; 50 and 100 ps give 5.544019 and 5.542966 us).
 apfd [d_div2 d_ref] [d_upn d_dn d_divout] pfd
-.model pfd d_cosim simulation="ivlng" sim_args=["div20_pfd"]
+.model pfd d_cosim simulation="ivlng" sim_args=["div20_pfd"] delay=20p
 abridgegate [d_upn d_dn] [upn_h dn_h] dac_gate
 .model dac_gate dac_bridge(out_low = 0 out_high = 'vcc' out_undef = 'vcc/2'
 + input_load = 5.0e-12 t_rise = 1e-10 t_fall = 1e-10)
@@ -44,7 +50,7 @@ iinj xlf.dra 0 dc 0 ac 1
 * small" in the pump (xlf.vss) at 16.4 us with 70 ps to 25 us, at 5.7 us
 * with 100 ps to 25 us, and at 3.8 us with 50 ps; it locks at 5.55 us and
 * the locked mean is read over [10, 12] us. The pump's dac_bridge edges
-* (100 ps) against 1 ps move the lock time 0.63 ns.
+* (100 ps) against 1 ps move the lock time 0.63 ns (with d_cosim's 1 ns).
 * rspice-full-rows: 5.54e-6 5.56e-6
 .tran 0.1n 12u 0 0.07n uic
 .save v(cont)
