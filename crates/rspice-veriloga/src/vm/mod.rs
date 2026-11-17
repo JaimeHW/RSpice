@@ -21,9 +21,9 @@ pub use context::{
     terminal_pair_current_len,
 };
 #[cfg(any(feature = "native", all(feature = "wasm-jit", test)))]
-pub(crate) use context::{
-    INTEGRATION_CANDIDATE_FAILED, INTEGRATION_CANDIDATE_IDLE, INTEGRATION_CANDIDATE_NONE,
-};
+pub(crate) use context::INTEGRATION_CANDIDATE_FAILED;
+#[cfg(feature = "native")]
+pub(crate) use context::{INTEGRATION_CANDIDATE_IDLE, INTEGRATION_CANDIDATE_NONE};
 #[cfg(feature = "native")]
 pub(crate) use context::{
     LIMITER_HISTORY_UNINITIALIZED, LIMITER_HISTORY_VALID, pin_limiter_history,
