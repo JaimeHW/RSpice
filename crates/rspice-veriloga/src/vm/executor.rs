@@ -1141,8 +1141,14 @@ impl<'a> Vm<'a> {
                         .map_err(VmError::InvalidRuntimeConfiguration)?
                 } else {
                     buffer
-                        .eval(current_time, current_value, delay_time, None)
+                        .eval_before_arrival_with_coefficients(
+                            current_time,
+                            current_value,
+                            delay_time,
+                            None,
+                        )
                         .map_err(VmError::InvalidRuntimeConfiguration)?
+                        .output
                 };
 
                 self.stack.push(result);
@@ -1182,8 +1188,14 @@ impl<'a> Vm<'a> {
                         .output
                 } else if is_transient {
                     buffer
-                        .eval(current_time, current_value, delay_time, Some(max_delay))
+                        .eval_before_arrival_with_coefficients(
+                            current_time,
+                            current_value,
+                            delay_time,
+                            Some(max_delay),
+                        )
                         .map_err(VmError::InvalidRuntimeConfiguration)?
+                        .output
                 } else {
                     buffer
                         .eval_operating_point(
@@ -1261,7 +1273,12 @@ impl<'a> Vm<'a> {
                     evaluate(evaluation)?
                 } else if is_transient {
                     let evaluation = buffer
-                        .eval_with_coefficients(current_time, input, delay_time, max_delay)
+                        .eval_before_arrival_with_coefficients(
+                            current_time,
+                            input,
+                            delay_time,
+                            max_delay,
+                        )
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
                     evaluate(evaluation)?
                 } else {
@@ -1508,7 +1525,11 @@ impl<'a> Vm<'a> {
                     })?;
 
                 // Cross events only trigger in transient analysis.
-                let result = if is_transient { crossed } else { 0.0 };
+                let result = if is_transient {
+                    self.context.gate_analog_event(crossed)
+                } else {
+                    0.0
+                };
 
                 self.stack.push(result);
             }
@@ -1609,6 +1630,7 @@ impl<'a> Vm<'a> {
                 .map_err(|error| {
                     VmError::InvalidNumericResult(format!("above evaluation failed: {error}"))
                 })?;
+                let result = self.context.gate_analog_event(result);
                 self.stack.push(result);
             }
 
@@ -1647,6 +1669,7 @@ impl<'a> Vm<'a> {
                 if let Some(next_event) = next_event {
                     self.context.request_timer_event(next_event);
                 }
+                let result = self.context.gate_analog_event(result);
                 self.stack.push(result);
             }
 

@@ -126,13 +126,16 @@ fn analog_timer_near_the_model_floor_lands_without_an_invalid_equalized_step() {
             .iter()
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
+        // The timer's own point solves the left limit; the value its body
+        // sets is solved from the next point on, one floor step later and
+        // well inside the 1 ps edge completion.
         assert!(
-            result.voltages[out][..point]
+            result.voltages[out][..=point]
                 .iter()
                 .all(|v| v.abs() < 1e-10)
         );
         assert!(
-            result.voltages[out][point..]
+            result.voltages[out][point + 1..]
                 .iter()
                 .all(|v| (*v - 1.0).abs() < 1e-10)
         );
@@ -462,10 +465,20 @@ fn a_timer_target_just_before_a_source_corner_fires_at_the_corner() {
                 "per={per:e}: V(g) = {level} at t={time:e} counts the firings so far, {count}"
             );
         }
+        // The eleventh firing reads its left limit at its own instant. A
+        // target closer to the stop time than the floor (1e-18 s here) is the
+        // stop time's instant, as it is a corner's, so the run ends on that
+        // left limit; any other is landed on before the stop time.
+        let last_firing = 10.0 * per;
+        let expected = if 100e-6 - last_firing < 1e-18 {
+            10.0
+        } else {
+            11.0
+        };
         let last = *result.voltages[g].last().expect("points");
         assert!(
-            (last - 11.0).abs() <= 2.0 * f64::EPSILON * 11.0,
-            "per={per:e}: V(g) ends at {last}"
+            (last - expected).abs() <= 2.0 * f64::EPSILON * expected,
+            "per={per:e}: V(g) ends at {last}, expected {expected}"
         );
         let creep = result
             .time
@@ -559,16 +572,27 @@ fn a_twenty_volt_cross_step_lands_on_its_root_with_or_without_a_timer() {
                     "{form} {timer}: V(o1) at t={time:e} is {level}, expected {expected}"
                 );
             }
-            let landing = result
-                .time
+            // The event fires at a landing strictly past the root, inside the
+            // crossing's default tolerance (64 ulps of the root's scale), and
+            // that point solves the left limit; 20 V is first solved at the
+            // edge completion one picosecond on.
+            let step = result.voltages[o1]
                 .iter()
-                .zip(&result.voltages[o1])
-                .find(|(_, level)| (*level - 20.0).abs() < 1e-9)
-                .map(|(time, _)| *time)
+                .position(|level| (*level - 20.0).abs() < 1e-9)
                 .expect("o1 reaches 20 V");
+            let event = result.time[step - 1];
+            let completion = result.time[step];
             assert!(
-                (landing - root).abs() < 1e-12,
-                "{form} {timer}: the event lands at {landing:e}, the root is {root:e}"
+                event > root && event - root <= 64.0 * f64::EPSILON * root,
+                "{form} {timer}: the event lands at {event:e}, the root is {root:e}"
+            );
+            assert!(
+                result.voltages[o1][step - 1].abs() < 1e-9,
+                "{form} {timer}: the event's own point reads the left limit"
+            );
+            assert!(
+                (completion - event - 1e-12).abs() <= 4.0 * f64::EPSILON * completion,
+                "{form} {timer}: 20 V is solved at {completion:e}, the event is at {event:e}"
             );
             let _ = std::fs::remove_file(model);
         }

@@ -35,12 +35,11 @@ impl AnalogEventTrial {
 
 impl MixedSignalHost {
     fn analog_event_counter(&self, name: &str) -> Result<u32, MixedSignalError> {
-        let value = self
-            .analog
-            .variable(name)
-            .ok_or_else(|| MixedSignalError::InvalidBridge {
+        let value = self.analog.variable_after_events(name).ok_or_else(|| {
+            MixedSignalError::InvalidBridge {
                 detail: format!("analog event counter '{name}' has no retained evaluation"),
-            })?;
+            }
+        })?;
         if !value.is_finite()
             || value.fract() != 0.0
             || value < 0.0
@@ -150,6 +149,10 @@ impl MixedSignalHost {
             .enumerate()
             .map(|(index, (name, _))| (name.as_str(), index))
             .collect();
+        // The analog solution at the candidate is its left limit; the
+        // occurrences a digital process wakes on are what the events found
+        // there do at the instant, which the evaluation ran on a copy and kept
+        // (`VerilogADevice::run_deferred_event_pass`).
         let occurrences = self
             .analog
             .analog_assignment_occurrence_groups()

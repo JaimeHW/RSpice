@@ -20,7 +20,11 @@ fn one_shot_timer_fires_once_and_schedules_an_exact_timepoint() {
 module one_shot_timer(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ timer(1.0);
+    real ticks;
+    analog begin
+        @(timer(1.0)) ticks = ticks + 1.0;
+        I(p, n) <+ ticks;
+    end
 endmodule
 "#,
     );
@@ -29,18 +33,22 @@ endmodule
     assert_eq!(evaluate(&mut device, 0.0, 0.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), Some(1.0));
 
-    assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 1.0_f64.to_bits());
-    assert_eq!(
-        evaluate(&mut device, 1.0, 1.0).to_bits(),
-        1.0_f64.to_bits(),
-        "Newton reevaluation must preserve the event level"
-    );
+    // The point at the timer solves its left limit; the event acts from its
+    // instant on.
+    assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 0.0_f64.to_bits());
+    assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), None);
 
     device.advance_state();
     assert_eq!(
         evaluate(&mut device, 1.1, 0.1).to_bits(),
-        0.0_f64.to_bits(),
+        1.0_f64.to_bits(),
+        "Newton reevaluation at the timer must fire it once"
+    );
+    device.advance_state();
+    assert_eq!(
+        evaluate(&mut device, 1.2, 0.1).to_bits(),
+        1.0_f64.to_bits(),
         "the accepted one-shot event must not repeat"
     );
 }
@@ -53,7 +61,11 @@ fn periodic_timer_schedules_each_future_event() {
 module periodic_timer(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ timer(1.0, 0.5, 0.0, 1.0);
+    real ticks;
+    analog begin
+        @(timer(1.0, 0.5, 0.0, 1.0)) ticks = ticks + 1.0;
+        I(p, n) <+ ticks;
+    end
 endmodule
 "#,
     );
@@ -61,10 +73,16 @@ endmodule
 
     assert_eq!(evaluate(&mut device, 0.0, 0.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), Some(1.0));
-    assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 1.0_f64.to_bits());
+    assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), Some(0.5));
+    device.advance_state();
     assert_eq!(evaluate(&mut device, 1.5, 0.5).to_bits(), 1.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), Some(0.5));
+    device.advance_state();
+    assert_eq!(
+        evaluate(&mut device, 1.75, 0.25).to_bits(),
+        2.0_f64.to_bits()
+    );
 }
 
 #[test]

@@ -317,6 +317,32 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayEvaluation, String> {
+        self.eval_candidate(time, value, delay, max_delay, false)
+    }
+
+    /// [`Self::eval_with_coefficients`], reading the incoming side of a
+    /// declared fixed-delay event whose exact arrival rounds onto `time`, as
+    /// [`Self::difference_before_arrival`] does. A point landed on an event's
+    /// arrival solves its left limit, as the point the event itself happened
+    /// at did: the delayed step acts from the first instant after it.
+    pub fn eval_before_arrival_with_coefficients(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayEvaluation, String> {
+        self.eval_candidate(time, value, delay, max_delay, true)
+    }
+
+    fn eval_candidate(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+        before_arrival: bool,
+    ) -> Result<DelayEvaluation, String> {
         self.validate_runtime(time, value, delay, max_delay)?;
         if self
             .samples
@@ -331,7 +357,22 @@ impl DelayBuffer {
 
         let (configuration, effective_delay, delay_scale) =
             self.resolve_configuration(delay, max_delay)?;
-        let evaluation = self.candidate_evaluation(time, value, effective_delay, delay_scale)?;
+        let arriving =
+            if before_arrival && matches!(configuration, DelayConfiguration::Fixed { .. }) {
+                self.arriving_event(time, effective_delay)?
+            } else {
+                None
+            };
+        let evaluation = match arriving {
+            Some((_, left)) => DelayEvaluation {
+                output: left,
+                input_coefficient: 0.0,
+                delay_coefficient: 0.0,
+                mixed_input_delay_numerator: 0.0,
+                mixed_input_delay_denominator: 1.0,
+            },
+            None => self.candidate_evaluation(time, value, effective_delay, delay_scale)?,
+        };
         self.candidate = Some(DelayCandidate {
             time,
             value,
@@ -1170,6 +1211,54 @@ impl DelayBuffer {
 
     pub fn accepted_configuration(&self) -> Option<DelayConfiguration> {
         self.configuration
+    }
+
+    /// Whether an accepted event's fixed-delay arrival is at `time` exactly,
+    /// where a read takes the event's left limit ([`Self::eval_with_coefficients`]).
+    pub fn event_arrives_at(&self, time: f64) -> Result<bool, String> {
+        match self.configuration {
+            Some(DelayConfiguration::Fixed { delay }) if !self.left_limits.is_empty() => {
+                Ok(self.arriving_event(time, delay)?.is_some())
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// The pending candidate's input sample, if a candidate is pending.
+    pub fn candidate_value(&self) -> Option<f64> {
+        self.candidate.map(|candidate| candidate.value)
+    }
+
+    /// Declare that the input steps at the pending candidate's instant: the
+    /// candidate holds its left limit there, and `right` is the value the
+    /// outgoing interval starts from.
+    ///
+    /// An analog event takes effect at its instant, after the point there
+    /// solved the left limit, so the input the next interval reads is not the
+    /// one this sample holds. Committed as an event, the step arrives exactly
+    /// one fixed delay later, where the scheduler lands it
+    /// ([`Self::next_discontinuity_after`]), instead of as a ramp to the next
+    /// knot. A bounded delay keeps the ordinary knot: its arrival needs the
+    /// owning solver's delay trajectory. Nothing changes without a candidate,
+    /// for a candidate that already is an event, or for an equal value.
+    pub fn declare_candidate_step(&mut self, right: f64) -> Result<(), String> {
+        let Some(candidate) = self.candidate.as_mut() else {
+            return Ok(());
+        };
+        if !matches!(candidate.configuration, DelayConfiguration::Fixed { .. })
+            || candidate.left_limit.is_some()
+            || right.to_bits() == candidate.value.to_bits()
+        {
+            return Ok(());
+        }
+        if !right.is_finite() {
+            return Err(format!(
+                "delay event right limit must be finite, got {right}"
+            ));
+        }
+        candidate.left_limit = Some(candidate.value);
+        candidate.value = right;
+        Ok(())
     }
 
     /// Iterate accepted samples without allocating a checkpoint copy.

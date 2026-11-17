@@ -16,6 +16,8 @@ mod small_signal;
 pub(crate) use context::INTEGRATION_CANDIDATE_FAILED;
 #[doc(hidden)]
 pub use context::IdtModState;
+#[cfg(feature = "native")]
+pub(crate) use context::gate_analog_event;
 pub(crate) use context::idtmod_wrapped_value;
 pub use context::{
     CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmAcceptedCheckpoint,

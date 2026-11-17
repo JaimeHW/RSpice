@@ -87,7 +87,7 @@ impl MixedSignalHost {
         for driver in &self.analog_drivers {
             let value = self
                 .analog
-                .variable(&driver.variable)
+                .variable_after_events(&driver.variable)
                 .filter(|value| value.is_finite())
                 .ok_or_else(|| MixedSignalError::InvalidBridge {
                     detail: format!(

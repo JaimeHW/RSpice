@@ -196,14 +196,13 @@ impl AnalogModelParticipant<'_> {
                     if !evaluate && !retained {
                         continue;
                     }
-                    let value =
-                        analog
-                            .variable(name)
-                            .ok_or_else(|| MixedSignalError::InvalidBridge {
-                                detail: format!(
-                                    "analog variable `{name}` has no retained evaluation slot"
-                                ),
-                            })?;
+                    let value = analog.variable_after_events(name).ok_or_else(|| {
+                        MixedSignalError::InvalidBridge {
+                            detail: format!(
+                                "analog variable `{name}` has no retained evaluation slot"
+                            ),
+                        }
+                    })?;
                     samples.push((probe_id(index), value));
                 }
             }

@@ -4847,6 +4847,20 @@ impl CircuitData {
             .map_err(crate::SimulationError::Circuit)
     }
 
+    /// When each runtime-compiled Verilog-A device's step at the accepted
+    /// point completes: an analog event there moved a value its analog block
+    /// holds, and the new value is first solved this edge completion later,
+    /// as a discrete value a mixed module reads at its left limit is
+    /// (`MixedSignalHost::read_step_completion`).
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn veriloga_event_step_completions(&self) -> impl Iterator<Item = Value> + '_ {
+        self.veriloga_devices.iter().filter_map(|device| {
+            device
+                .accepted_event_step()
+                .map(|time| time + crate::xspice::models::OFFICIAL_BRIDGE_TIMING_MIN)
+        })
+    }
+
     /// Candidate discontinuities must reach LTE control before acceptance.
     pub(crate) fn veriloga_discontinuity_rising(&self) -> bool {
         #[cfg(feature = "veriloga")]

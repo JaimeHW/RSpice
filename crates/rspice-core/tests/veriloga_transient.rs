@@ -477,11 +477,23 @@ endmodule
     let assert_event = |result: &rspice_core::engine::TransientResult, mode: &str| {
         let input = node_series(&result.node_names, &result.voltages, "input");
         let output = node_series(&result.node_names, &result.voltages, "output");
-        let event_index = output
+        let latched = output
             .iter()
             .position(|value| *value > 0.5)
             .unwrap_or_else(|| panic!("{mode}: cross event must latch the output"));
+        // The event's point solves the left limit; the latched value is
+        // solved one edge completion later.
+        let event_index = latched - 1;
         let event_time = result.time[event_index];
+        assert!(
+            result.time[latched] - event_time <= 1.0e-12 * (1.0 + 1.0e-9),
+            "{mode}: the latched value must follow the event within 1 ps"
+        );
+        assert!(
+            input[event_index] > 0.0,
+            "{mode}: the event's point must lie past the threshold: {:.16e}",
+            input[event_index]
+        );
         let analytic_root = 0.5e-6;
 
         assert!(
@@ -498,12 +510,12 @@ endmodule
             input[event_index]
         );
         assert!(
-            output[..event_index]
+            output[..=event_index]
                 .iter()
                 .all(|value| value.abs() < 1.0e-12),
             "{mode}: event-controlled state changed before the accepted root: {output:?}"
         );
-        event_index
+        latched
     };
 
     let adaptive = Engine::default()
@@ -2596,5 +2608,284 @@ fn a_verilog_a_driven_node_is_not_reported_floating_and_warnings_print_once() {
         .expect("v(vo4out) is published");
     let last = output.last().copied().expect("samples");
     assert!((last - 1.0).abs() <= 1e-9, "the crossing set x = 1: {last}");
+    let _ = std::fs::remove_file(model);
+}
+
+/// The value at `time` on the run's piecewise-linear trace, as `.meas FIND AT`
+/// reads it.
+fn trace_at(times: &[f64], values: &[f64], time: f64) -> f64 {
+    let index = times.partition_point(|&sample| sample <= time);
+    if index == 0 {
+        return values[0];
+    }
+    if index == times.len() {
+        return values[index - 1];
+    }
+    let (t0, t1) = (times[index - 1], times[index]);
+    let fraction = (time - t0) / (t1 - t0);
+    values[index - 1] + fraction * (values[index] - values[index - 1])
+}
+
+const EVENT_STEP_MODEL: &str = r#"
+`include "disciplines.vams"
+module va_event_step(a, ti, tr, ad);
+    output a, ti, tr, ad;
+    electrical a, ti, tr, ad;
+    real x;
+    analog begin
+        @(initial_step) x = 0;
+        @(timer(500e-6)) x = 1;
+        V(a) <+ x;
+        V(ti) <+ idt(x, 0) * 1e3;
+        V(tr) <+ transition(x, 0, 100u);
+        V(ad) <+ absdelay(x, 50u);
+    end
+endmodule
+"#;
+
+fn event_step_deck(model: &std::path::Path) -> Netlist {
+    let deck = format!(
+        "* an analog event's step takes effect at its instant\n\
+         X1 a ti tr ad va_event_step\n\
+         R1 a c 1k\n\
+         C1 c 0 100n\n\
+         .va \"{}\" va_event_step\n\
+         .end\n",
+        deck_path(model)
+    );
+    Netlist::parse(&deck).expect("parse event-step deck")
+}
+
+/// A value an analog event assigns acts from the event's instant, as a
+/// digital reg's step does: the point at the event solves the left limit, the
+/// new value is solved one edge completion (1 ps) later, and every operator
+/// sees a step there. `V(a) <+ x` into 1 kOhm and 100 nF, with x set to 1 by
+/// a timer at 500 us, against the closed forms: the capacitor 0 at 500 us and
+/// 1 - exp(-1) at 600 us; idt(x)·1e3 0 and 0.1; transition(x, 0, 100u) 0 and
+/// 0.5 at 550 us; absdelay(x, 50u) 0 at 549.999 us and 1 at 550.001 us.
+#[test]
+fn an_analog_event_takes_effect_at_its_instant() {
+    let model = write_model("event_step", EVENT_STEP_MODEL);
+    let netlist = event_step_deck(&model);
+    let result = Engine::default()
+        .run_tran(&netlist, 1.0e-3, 1.0e-6)
+        .expect("event-step transient run");
+    let series = |name: &str| node_series(&result.node_names, &result.voltages, name);
+    let (a, c, ti, tr, ad) = (
+        series("a"),
+        series("c"),
+        series("ti"),
+        series("tr"),
+        series("ad"),
+    );
+    let times = &result.time;
+    let event = times
+        .iter()
+        .position(|&time| time == 500.0e-6)
+        .unwrap_or_else(|| panic!("no point at the timer: {times:?}"));
+    // The point at the event is the left limit.
+    assert_eq!(a[event], 0.0, "V(a) at the event");
+    assert_eq!(c[event], 0.0, "the capacitor at the event");
+    assert_eq!(ti[event], 0.0, "idt at the event");
+    // The step is solved one edge completion later.
+    let completion = times[event + 1] - times[event];
+    assert!(
+        completion > 0.0 && completion <= 1.0e-12 * (1.0 + 1.0e-9),
+        "the step completes within 1 ps: {completion:e}"
+    );
+    assert_eq!(a[event + 1], 1.0, "V(a) after the completion");
+    let close = |actual: f64, expected: f64, tolerance: f64, what: &str| {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{what}: {actual:.9e}, expected {expected:.9e}"
+        );
+    };
+    close(
+        trace_at(times, c, 600.0e-6),
+        1.0 - (-1.0f64).exp(),
+        2.0e-5,
+        "capacitor at 600 us",
+    );
+    close(trace_at(times, ti, 600.0e-6), 0.1, 1.0e-9, "idt at 600 us");
+    close(
+        trace_at(times, tr, 550.0e-6),
+        0.5,
+        1.0e-9,
+        "transition at 550 us",
+    );
+    close(
+        trace_at(times, ad, 549.999e-6),
+        0.0,
+        0.0,
+        "absdelay before arrival",
+    );
+    close(
+        trace_at(times, ad, 550.001e-6),
+        1.0,
+        0.0,
+        "absdelay after arrival",
+    );
+    let arrival = times
+        .iter()
+        .position(|&time| time == 550.0e-6)
+        .unwrap_or_else(|| panic!("no point at the delayed arrival: {times:?}"));
+    assert_eq!(ad[arrival], 0.0, "the arrival solves its left limit");
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// A run checkpointed before an analog event, at its instant (with the event
+/// due but not yet acting), at its edge completion or after it resumes to the
+/// uninterrupted run bit for bit, every accepted point of the suffix: the
+/// event lane, the step the event left for the next trial (its transition
+/// origin) and the delayed arrival all travel with the checkpoint. Each
+/// checkpoint is captured inside the uninterrupted run, so observing it adds
+/// no endpoint to the grid it is compared against.
+#[test]
+fn an_analog_event_survives_a_checkpoint_bit_identically() {
+    use rspice_core::engine::TransientStartupMode;
+    let model = write_model("event_step_checkpoint", EVENT_STEP_MODEL);
+    let netlist = event_step_deck(&model);
+    let engine = Engine::default();
+    let stop = 700.0e-6;
+    for split in [
+        450.0e-6,
+        500.0e-6,
+        500.0e-6 + 1.0e-12,
+        520.0e-6,
+        550.0e-6,
+        600.0e-6,
+    ] {
+        let (full, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                &netlist,
+                stop,
+                1.0e-6,
+                TransientStartupMode::OperatingPoint,
+                &[split],
+                &NoAbort,
+            )
+            .expect("the uninterrupted run");
+        assert_eq!(scheduled.len(), 1, "one checkpoint at {split:e}");
+        let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
+            .expect("the event state survives portable text");
+        let start = full
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .expect("the checkpoint is an accepted point");
+        let (resumed, _) = engine
+            .run_tran_resume_with_abort(&netlist, &checkpoint, stop, 1.0e-6, &NoAbort)
+            .expect("event-step resume");
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            bits(&resumed.time),
+            bits(&full.time[start..]),
+            "the accepted grid differs after a checkpoint at {:e}",
+            checkpoint.time
+        );
+        for (column, (actual, expected)) in resumed.voltages.iter().zip(&full.voltages).enumerate()
+        {
+            assert_eq!(
+                bits(actual),
+                bits(&expected[start..]),
+                "column {column} differs after a checkpoint at {:e}",
+                checkpoint.time
+            );
+        }
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// The comparator idiom: "the event shall occur after the threshold crossing"
+/// (VAMS-LRM 2.4 5.10.3.1), so inside a `cross` or `above` event the crossing
+/// expression is on its far side and `V(in) > th` holds after a rising
+/// crossing and fails after a falling one. A triangle through 0.5 V, whose
+/// rising crossing lands exactly on a grid point.
+///
+/// Each crossing is first found by a trial past its root, which defers the
+/// event, asks for the root and is rejected; the landing re-solves it. The
+/// count proves the rejected trial left nothing behind: each crossing runs
+/// its body once.
+#[test]
+fn a_crossing_event_reads_its_expression_past_the_threshold() {
+    let model = write_model(
+        "comparator_idiom",
+        r#"
+`include "disciplines.vams"
+module va_comparator(in, qa, qb, e, n);
+    input in;
+    output qa, qb, e, n;
+    electrical in, qa, qb, e, n;
+    parameter real th = 0.5;
+    real a, b, seen;
+    integer k;
+    analog begin
+        @(initial_step) begin a = 0; b = 0; seen = 0; k = 0; end
+        @(cross(V(in) - th, 0)) begin
+            a = (V(in) > th) ? 1.0 : 0.0;
+            seen = V(in) - th;
+            k = k + 1;
+        end
+        @(above(V(in) - th)) b = (V(in) > th) ? 1.0 : 0.0;
+        V(qa) <+ a;
+        V(qb) <+ b;
+        V(e) <+ seen * 1e9;
+        V(n) <+ k;
+    end
+endmodule
+"#,
+    );
+    for th in ["0.5", "0.31415926"] {
+        let deck = format!(
+            "* comparator idiom\n\
+             V1 in 0 PWL(0 0 100n 1 200n 0)\n\
+             X1 in qa qb e n va_comparator th={th}\n\
+             .va \"{}\" va_comparator\n\
+             .end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).expect("parse comparator deck");
+        let result = Engine::default()
+            .run_tran(&netlist, 200.0e-9, 0.1e-9)
+            .expect("comparator transient run");
+        let series = |name: &str| node_series(&result.node_names, &result.voltages, name);
+        let (qa, qb, e, n) = (series("qa"), series("qb"), series("e"), series("n"));
+        let times = &result.time;
+        assert_eq!(
+            trace_at(times, qa, 99.0e-9),
+            1.0,
+            "th={th}: cross after the rise"
+        );
+        assert_eq!(
+            trace_at(times, qb, 99.0e-9),
+            1.0,
+            "th={th}: above after the rise"
+        );
+        assert_eq!(
+            trace_at(times, qa, 199.0e-9),
+            0.0,
+            "th={th}: cross after the fall"
+        );
+        assert_eq!(
+            trace_at(times, n, 99.0e-9),
+            1.0,
+            "th={th}: one rising event"
+        );
+        assert_eq!(n[n.len() - 1], 2.0, "th={th}: one event per crossing");
+        // Inside the falling event the expression is already negative.
+        assert!(
+            e[e.len() - 1] < 0.0,
+            "th={th}: V(in) - th in the falling event: {}",
+            e[e.len() - 1]
+        );
+    }
+
     let _ = std::fs::remove_file(model);
 }

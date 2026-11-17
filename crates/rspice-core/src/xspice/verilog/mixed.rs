@@ -6262,10 +6262,13 @@ impl MixedSignalHost {
     /// took the next sample there.
     #[doc(hidden)]
     pub fn read_step_completion(&self) -> Option<f64> {
-        (self.state.started
-            && !self.state.accepted_steps_sampled_holds
-            && self.accepted_point_stepped_a_read())
-        .then_some(self.state.accepted_time + OFFICIAL_BRIDGE_TIMING_MIN)
+        let read = !self.state.accepted_steps_sampled_holds && self.accepted_point_stepped_a_read();
+        // An analog event at the accepted point is read the same way: its
+        // lane acts from the first instant after it
+        // ([`VerilogADevice::accepted_event_step`]).
+        let event = self.analog.accepted_event_step().is_some();
+        (self.state.started && (read || event))
+            .then_some(self.state.accepted_time + OFFICIAL_BRIDGE_TIMING_MIN)
     }
 
     /// Whether a discrete value the analog equations read at its left limit

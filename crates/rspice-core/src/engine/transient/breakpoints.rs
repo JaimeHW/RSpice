@@ -363,7 +363,12 @@ impl Engine {
         // limit completes its step as a D/A edge does.
         #[cfg(feature = "veriloga")]
         if read_step_completions {
-            for time in circuit.mixed_read_step_completions().map(key) {
+            let event_steps = circuit.veriloga_event_step_completions();
+            for time in circuit
+                .mixed_read_step_completions()
+                .chain(event_steps)
+                .map(key)
+            {
                 if time.is_finite() && time >= 0.0 && time <= tstop {
                     runtime_breakpoints.push(time);
                     edge_completions.push(time);

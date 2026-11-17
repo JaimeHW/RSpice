@@ -451,7 +451,48 @@ pub struct VmContext {
     pub zi_filters: Vec<crate::zfilter::ZiFilter>,
     /// Earliest absolute timer event requested during the latest evaluation.
     pub(crate) timer_event_bound: f64,
+    /// Whether this evaluation defers the analog events it finds
+    /// ([`EVENT_DEFER`]) and whether it found one ([`EVENT_DEFERRED`]).
+    /// Speculative: every evaluation sets it afresh; see
+    /// [`Self::gate_analog_event`].
+    pub(crate) event_deferral: u8,
+    /// Set on the copy that runs an accepted point's deferred events, whose
+    /// evaluation fires them in place.
+    pub(crate) event_pass: bool,
+    /// The event-state lane the deferred events left at the evaluation's
+    /// point, committed in place of the left-limit evaluation's own; see
+    /// [`crate::device::VerilogADevice::run_deferred_event_pass`]. Empty
+    /// unless the latest evaluation ran an event pass.
+    pub(crate) event_lane_after: Vec<f64>,
+    /// Whether [`Self::event_lane_after`] moves a value the equations read:
+    /// the point is a discontinuity, and integration restarts from it.
+    pub(crate) event_lane_stepped: bool,
+    /// Accepted: the time of the accepted point whose events moved the
+    /// event-state lane, while the interval leaving it is solved. Every
+    /// `transition` dates the step that explains at that time, as it does a
+    /// discrete step the mixed host states
+    /// ([`Self::set_transition_input_step_origin`]).
+    pub(crate) accepted_event_step: Option<f64>,
+    /// The origin the mixed host stated for the trial.
+    host_input_step_origin: Option<f64>,
 }
+
+/// [`VmContext::gate_analog_event`] on a deferral byte the native helpers reach
+/// through their evaluation context.
+#[inline]
+pub(crate) fn gate_analog_event(deferral: &mut u8, fired: f64) -> f64 {
+    if fired != 0.0 && *deferral & EVENT_DEFER != 0 {
+        *deferral |= EVENT_DEFERRED;
+        0.0
+    } else {
+        fired
+    }
+}
+
+/// [`VmContext::event_deferral`]: events this evaluation finds are deferred.
+pub(crate) const EVENT_DEFER: u8 = 1;
+/// [`VmContext::event_deferral`]: this evaluation deferred an event.
+pub(crate) const EVENT_DEFERRED: u8 = 2;
 
 /// Accepted, trajectory-affecting VM state. Solver proposals, integration
 /// coefficients, terminal values, and other recomputable caches are excluded.
@@ -471,6 +512,9 @@ pub struct VmAcceptedCheckpoint {
     pub laplace_filters: Vec<LaplaceCheckpoint>,
     pub zi_filters: Vec<ZiCheckpoint>,
     pub timer_event_bound: Option<f64>,
+    /// The accepted point whose analog events stepped the event-state lane,
+    /// while the interval leaving it is solved ([`VmContext::accepted_event_step`]).
+    pub accepted_event_step: Option<f64>,
 }
 
 impl Default for VmContext {
@@ -528,6 +572,12 @@ impl Default for VmContext {
             multiplicity: 1.0,
             zi_filters: Vec::new(),
             timer_event_bound: f64::INFINITY,
+            event_deferral: 0,
+            event_pass: false,
+            event_lane_after: Vec::new(),
+            event_lane_stepped: false,
+            accepted_event_step: None,
+            host_input_step_origin: None,
         }
     }
 }
@@ -593,6 +643,9 @@ impl VmContext {
     /// device restores its captured variables and reporting scalars separately.
     pub(crate) fn discard_trial_candidate(&mut self) {
         self.numerical_evaluation_valid = false;
+        self.event_deferral = 0;
+        self.event_lane_after.clear();
+        self.event_lane_stepped = false;
         if let Some(journal) = &mut self.analog_occurrences {
             journal.clear();
         }
@@ -765,6 +818,12 @@ impl VmContext {
             multiplicity: 1.0,
             zi_filters: Vec::new(),
             timer_event_bound: f64::INFINITY,
+            event_deferral: 0,
+            event_pass: false,
+            event_lane_after: Vec::new(),
+            event_lane_stepped: false,
+            accepted_event_step: None,
+            host_input_step_origin: None,
         }
     }
 
@@ -992,6 +1051,15 @@ impl VmContext {
                 .validate_candidate()
                 .map_err(|error| VmError::AnalogTask(error.to_string()))?;
         }
+        if !self.event_lane_after.is_empty()
+            && self.event_lane_after.len() != self.event_state_indices.len()
+        {
+            return Err(VmError::InvalidRuntimeOperation(format!(
+                "the deferred events left {} event-state values for {} slots",
+                self.event_lane_after.len(),
+                self.event_state_indices.len()
+            )));
+        }
         // Validate every sampled-filter commit before mutating any accepted
         // state. The second pass is deliberately infallible, preserving the
         // all-or-nothing contract without cloning filter histories (and
@@ -1129,13 +1197,34 @@ impl VmContext {
             journal.apply_validated_acceptance();
         }
         let time = self.time;
-        for (&index, accepted) in self
+        // A point whose deferred events ran commits the lane they left; the
+        // left-limit evaluation's own lane is what the step leaves behind.
+        let events_ran = !self.event_lane_after.is_empty();
+        let mut lane_stepped = false;
+        for (position, (&index, accepted)) in self
             .event_state_indices
             .iter()
             .zip(&mut self.accepted_event_variables)
+            .enumerate()
         {
-            *accepted = self.variables[index];
+            let value = if events_ran {
+                let after = self.event_lane_after[position];
+                let counter = self
+                    .analog_occurrences
+                    .as_ref()
+                    .is_some_and(|journal| journal.counts_in(index));
+                lane_stepped |= !counter && after.to_bits() != self.variables[index].to_bits();
+                self.variables[index] = after;
+                after
+            } else {
+                self.variables[index]
+            };
+            *accepted = value;
         }
+        self.event_lane_after.clear();
+        self.event_lane_stepped = false;
+        let arrival = self.delay_step_arrives();
+        self.accepted_event_step = (lane_stepped || arrival).then_some(time);
         for index in 0..self.state_candidate_valid.len() {
             match self.state_candidate_valid[index] {
                 INTEGRATION_CANDIDATE_NONE => continue,
@@ -1347,6 +1436,7 @@ impl VmContext {
             timer_event_bound: self
                 .timer_event_step_bound()
                 .map(|_| self.timer_event_bound),
+            accepted_event_step: self.accepted_event_step,
         };
         self.validate_accepted_checkpoint(&checkpoint)?;
         Ok(checkpoint)
@@ -1425,6 +1515,14 @@ impl VmContext {
         {
             return Err(invalid(
                 "checkpoint timer bound must be finite and strictly future".into(),
+            ));
+        }
+        if checkpoint
+            .accepted_event_step
+            .is_some_and(|step| step.to_bits() != checkpoint.time.to_bits())
+        {
+            return Err(invalid(
+                "checkpoint event step must be the accepted point it was taken at".into(),
             ));
         }
         for (index, (target, state)) in self
@@ -1588,6 +1686,10 @@ impl VmContext {
         self.analysis_initial_step = false;
         self.analysis_final_step = false;
         self.timer_event_bound = checkpoint.timer_event_bound.unwrap_or(f64::INFINITY);
+        self.accepted_event_step = checkpoint.accepted_event_step;
+        self.event_lane_after.clear();
+        self.event_lane_stepped = false;
+        self.event_deferral = 0;
     }
 
     /// Reset every device-owned trajectory and in-flight candidate for a new
@@ -1657,6 +1759,10 @@ impl VmContext {
         self.analysis_initial_step = false;
         self.analysis_final_step = false;
         self.timer_event_bound = f64::INFINITY;
+        self.accepted_event_step = None;
+        self.event_lane_after.clear();
+        self.event_lane_stepped = false;
+        self.event_deferral = 0;
     }
 
     /// Begin one complete model evaluation, using `evaluation_mode`. Call once
@@ -1739,6 +1845,18 @@ impl VmContext {
         }
         self.evaluation_state_inputs
             .clone_from(&self.accepted_event_variables);
+        self.event_lane_after.clear();
+        self.event_lane_stepped = false;
+        self.event_deferral = if !self.event_pass
+            && self.analysis_type == 2
+            && self.timestep > 0.0
+            && self.periodic_frame.is_none()
+        {
+            EVENT_DEFER
+        } else {
+            0
+        };
+        self.apply_transition_input_step_origin();
         self.prepare_procedural_replay();
         for &index in &self.event_state_derivatives {
             if let Some(value) = self.variables.get_mut(index) {
@@ -1860,9 +1978,36 @@ impl VmContext {
                     minimum.map_or(target, |current: f64| current.min(target)),
                 ))
             })?;
+        let delay = self
+            .delay_buffers
+            .iter()
+            .enumerate()
+            .filter(|(_, buffer)| {
+                matches!(
+                    buffer.accepted_configuration(),
+                    Some(
+                        rspice_veriloga_runtime::transport_delay::DelayConfiguration::Fixed { .. }
+                    )
+                )
+            })
+            .map(|(index, buffer)| {
+                buffer.next_discontinuity_after(self.time).map_err(|error| {
+                    VmError::InvalidRuntimeOperation(format!(
+                        "delay {index} arrival failed: {error}"
+                    ))
+                })
+            })
+            .try_fold(None, |minimum, target| {
+                Ok::<_, VmError>(match target? {
+                    Some(target) => {
+                        Some(minimum.map_or(target, |current: f64| current.min(target)))
+                    }
+                    None => minimum,
+                })
+            })?;
         let timer = (self.timer_event_bound.is_finite() && self.timer_event_bound > self.time)
             .then_some(self.timer_event_bound);
-        Ok([timer, transition, zi, slew]
+        Ok([timer, transition, zi, slew, delay]
             .into_iter()
             .flatten()
             .reduce(f64::min))
@@ -1928,11 +2073,108 @@ impl VmContext {
     /// `transition` dates an input change that step explains at that time; see
     /// [`TransitionFilter::set_input_step_origin`].
     pub fn set_transition_input_step_origin(&mut self, origin: Option<f64>) {
+        self.host_input_step_origin = origin;
+        self.apply_transition_input_step_origin();
+    }
+
+    /// State the trial's step origin to every `transition`: the host's, or
+    /// else the accepted point whose analog events stepped the event-state
+    /// lane while the interval leaving it is solved.
+    fn apply_transition_input_step_origin(&mut self) {
+        let origin = self.host_input_step_origin.or(self
+            .accepted_event_step
+            .filter(|&step| self.analysis_type == 2 && step < self.time));
         for filter in &mut self.transition_filters {
             if filter.set_input_step_origin(origin) {
                 self.numerical_evaluation_valid = false;
             }
         }
+    }
+
+    /// Whether an `absdelay` step arrives at the evaluation's time: the point
+    /// there solves its left limit, and the step acts from the next trial
+    /// ([`DelayBuffer::eval_with_coefficients`]), so it restarts integration
+    /// and completes one edge later, as the step it delays did.
+    pub(crate) fn delay_step_arrives(&self) -> bool {
+        self.analysis_type == 2
+            && self
+                .delay_buffers
+                .iter()
+                .any(|buffer| buffer.event_arrives_at(self.time).unwrap_or(false))
+    }
+
+    /// What the deferred events the latest evaluation ran left in variable
+    /// `index`, when it is an event-state variable and they ran.
+    pub(crate) fn event_lane_value(&self, index: usize) -> Option<f64> {
+        if self.event_lane_after.is_empty() {
+            return None;
+        }
+        let position = self
+            .event_state_indices
+            .iter()
+            .position(|&slot| slot == index)?;
+        self.event_lane_after.get(position).copied()
+    }
+
+    /// Whether the latest evaluation deferred an analog event.
+    pub(crate) fn deferred_an_event(&self) -> bool {
+        self.event_deferral & EVENT_DEFERRED != 0
+    }
+
+    /// Keep what the deferred events left on `pass`, the copy that ran them
+    /// at this evaluation's point: its event-state lane, committed in place of
+    /// this evaluation's own, and its task and assignment journals, which hold
+    /// the event bodies' effects and this point's other tasks once.
+    pub(crate) fn take_event_pass(&mut self, pass: &mut VmContext) -> Result<(), VmError> {
+        // An `absdelay` input the events stepped arrives as a step, one delay
+        // later, rather than as a ramp to the next knot.
+        for (index, (buffer, fired)) in self
+            .delay_buffers
+            .iter_mut()
+            .zip(&pass.delay_buffers)
+            .enumerate()
+        {
+            if let Some(right) = fired.candidate_value() {
+                buffer.declare_candidate_step(right).map_err(|error| {
+                    VmError::InvalidRuntimeOperation(format!(
+                        "delay {index} event at the accepted point failed: {error}"
+                    ))
+                })?;
+            }
+        }
+        self.event_lane_after.clear();
+        let mut stepped = false;
+        for &index in &self.event_state_indices {
+            let after = pass.variables[index];
+            // A digital wakeup's counter steps nothing the equations read.
+            let counter = self
+                .analog_occurrences
+                .as_ref()
+                .is_some_and(|journal| journal.counts_in(index));
+            stepped |= !counter && after.to_bits() != self.variables[index].to_bits();
+            self.event_lane_after.push(after);
+        }
+        self.event_lane_stepped = stepped;
+        self.analog_effects = pass.analog_effects.take();
+        self.analog_occurrences = pass.analog_occurrences.take();
+        self.timer_event_bound = self.timer_event_bound.min(pass.timer_event_bound);
+        Ok(())
+    }
+
+    /// Defer an analog event this evaluation fired, when it defers events:
+    /// answer that it did not fire and record that one is due.
+    ///
+    /// A transient trial over an interval solves the left limit of its
+    /// endpoint: an event found there takes effect at that instant, so the
+    /// values its body assigns act from the instant on, not over the interval
+    /// that reached it. The evaluation runs no body; the deferred ones run on
+    /// a copy at the same point
+    /// ([`crate::device::VerilogADevice::run_deferred_event_pass`]), and the
+    /// lane they leave acts from the next trial, as a discrete value the
+    /// analog block reads at its left limit does.
+    #[inline]
+    pub(crate) fn gate_analog_event(&mut self, fired: f64) -> f64 {
+        gate_analog_event(&mut self.event_deferral, fired)
     }
 
     /// Set the timestep for transient analysis.

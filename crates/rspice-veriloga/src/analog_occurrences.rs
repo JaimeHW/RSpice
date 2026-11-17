@@ -116,6 +116,12 @@ impl AnalogOccurrenceJournal {
         }
     }
 
+    /// Whether `slot` holds a digital wakeup counter: a value only the
+    /// discrete half reads.
+    pub(crate) fn counts_in(&self, slot: usize) -> bool {
+        self.counters.contains_key(&slot)
+    }
+
     pub(crate) fn invalidate(&mut self) {
         self.failure
             .get_or_insert("analog occurrence evaluation failed");

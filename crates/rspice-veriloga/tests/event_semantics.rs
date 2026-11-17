@@ -20,7 +20,11 @@ fn cross_is_newton_idempotent_and_does_not_treat_tolerance_as_a_crossing() {
 module tolerant_cross(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ cross(V(p, n), 1, 0.0, 0.1, 1.0);
+    real hits;
+    analog begin
+        @(cross(V(p, n), 1, 0.0, 0.1, 1.0)) hits = hits + 1.0;
+        I(p, n) <+ hits;
+    end
 endmodule
 "#,
     );
@@ -43,11 +47,15 @@ endmodule
     );
     device.advance_state();
 
-    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 1.0_f64.to_bits());
+    // The point at the crossing solves its left limit; the event acts from
+    // its instant on, once.
+    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 0.0_f64.to_bits());
+    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 0.0_f64.to_bits());
+    device.advance_state();
     assert_eq!(
-        evaluate(&mut device, 2.0, 1.0).to_bits(),
+        evaluate(&mut device, 3.0, 1.0).to_bits(),
         1.0_f64.to_bits(),
-        "repeated Newton evaluations must preserve the crossing event"
+        "repeated Newton evaluations must preserve the crossing event, once"
     );
 }
 
@@ -81,7 +89,11 @@ fn above_fires_initially_and_only_on_subsequent_rising_events() {
 module stateful_above(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ above(V(p, n) - 1.5, 0.0, 0.0, 1.0);
+    real hits;
+    analog begin
+        @(above(V(p, n) - 1.5, 0.0, 0.0, 1.0)) hits = hits + 1.0;
+        I(p, n) <+ hits;
+    end
 endmodule
 "#,
     );
@@ -99,18 +111,20 @@ endmodule
         0.0_f64.to_bits()
     );
     crossing.advance_state();
+    // The rising crossing's point solves its left limit.
     assert_eq!(
         evaluate(&mut crossing, 1.0, 2.0).to_bits(),
-        1.0_f64.to_bits()
+        0.0_f64.to_bits()
     );
     assert_eq!(
         evaluate(&mut crossing, 1.0, 2.0).to_bits(),
-        1.0_f64.to_bits()
+        0.0_f64.to_bits()
     );
     crossing.advance_state();
     assert_eq!(
         evaluate(&mut crossing, 2.0, 2.5).to_bits(),
-        0.0_f64.to_bits()
+        1.0_f64.to_bits(),
+        "one rising event, and none while the expression stays positive"
     );
 }
 
@@ -173,11 +187,12 @@ fn null_event_optional_slots_use_runtime_defaults() {
 module null_event_arguments(p, n);
     inout p, n;
     electrical p, n;
-    real enabled;
+    real enabled, rises, highs;
     analog begin
         enabled = 1.0;
-        I(p, n) <+ cross(V(p, n), 1, , , enabled)
-                   + above(V(p, n), , , enabled);
+        @(cross(V(p, n), 1, , , enabled)) rises = rises + 1.0;
+        @(above(V(p, n), , , enabled)) highs = highs + 1.0;
+        I(p, n) <+ rises + highs;
     end
 endmodule
 "#,
@@ -186,8 +201,10 @@ endmodule
 
     assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
     device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 0.0);
+    device.advance_state();
     assert_eq!(
-        evaluate(&mut device, 1.0, 1.0),
+        evaluate(&mut device, 2.0, 1.0),
         2.0,
         "null tolerances must select defaults without disabling either rising event"
     );
@@ -212,12 +229,16 @@ endmodule
     );
     let mut device = model.device("A1", &[1, 0]);
 
+    // Each crossing's point solves its left limit; its count acts from the
+    // next point on.
     assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
     device.advance_state();
-    assert_eq!(evaluate(&mut device, 1.0, 1.0), 1.0);
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 0.0);
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 2.0, -1.0), 1.0);
     device.advance_state();
     assert_eq!(
-        evaluate(&mut device, 2.0, -1.0),
+        evaluate(&mut device, 3.0, -1.0),
         2.0,
         "a falling crossing must fire after the runtime direction changes to -1"
     );
@@ -244,10 +265,12 @@ endmodule
     assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
     device.advance_state();
 
-    assert_eq!(evaluate(&mut device, 1.0, 1.0), 1.0);
+    // The crossing's point solves its left limit, and a pass that retreats
+    // behind the threshold leaves no event to commit.
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 0.0);
     assert_eq!(
         evaluate(&mut device, 1.0, 1.0),
-        1.0,
+        0.0,
         "a repeated Newton pass must replay from accepted procedural state"
     );
     assert_eq!(
@@ -256,18 +279,23 @@ endmodule
         "a retreating Newton pass must discard the rejected crossing update"
     );
     device.advance_state();
-
-    assert_eq!(evaluate(&mut device, 2.0, 1.0), 1.0);
+    assert_eq!(evaluate(&mut device, 2.0, 1.0), 0.0);
     device.advance_state();
     let checkpoint = device.checkpoint_state().unwrap();
 
     let mut restored = model.device("A1", &[1, 0]);
     restored.validate_checkpoint_state(&checkpoint).unwrap();
     restored.apply_validated_checkpoint_state(&checkpoint);
-    assert_eq!(evaluate(&mut restored, 3.0, -1.0), 1.0);
+    assert_eq!(
+        evaluate(&mut restored, 3.0, -1.0),
+        1.0,
+        "the crossing at 2.0 fired once and survives the checkpoint"
+    );
     restored.advance_state();
-    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 2.0);
-    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 2.0);
+    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 1.0);
+    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 1.0);
+    restored.advance_state();
+    assert_eq!(evaluate(&mut restored, 5.0, 1.0), 2.0);
 }
 
 #[test]

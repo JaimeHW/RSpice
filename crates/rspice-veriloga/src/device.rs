@@ -386,6 +386,7 @@ mod runtime_checkpoint_codec_tests {
                 }],
                 zi_filters: Vec::new(),
                 timer_event_bound: Some(4.0),
+                accepted_event_step: Some(3.5),
             },
             prev_discontinuity: true,
         }
@@ -1002,7 +1003,7 @@ pub struct VerilogADevice {
 
 /// The accepted-state payload's own version, independent of the outer
 /// checkpoint file format. A payload of any other version is refused.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 13;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 14;
 
 /// What one charge slot held immediately before an accepted-state rotation.
 ///
@@ -1174,6 +1175,7 @@ impl VerilogADeviceCheckpoint {
             encoder.boolean(state.transient_seen);
         }
         encoder.optional_float(self.accepted.timer_event_bound);
+        encoder.optional_float(self.accepted.accepted_event_step);
         encoder.word(self.accepted.idtmod_origins.len() as u64);
         for (slot, origin) in &self.accepted.idtmod_origins {
             encoder.word(*slot as u64);
@@ -1415,6 +1417,7 @@ impl VerilogADeviceCheckpoint {
             });
         }
         let timer_event_bound = decoder.optional_float("timer event bound")?;
+        let accepted_event_step = decoder.optional_float("accepted event step")?;
         let mut idtmod_origins = Vec::new();
         let count = decoder.length("idtmod origins", 4)?;
         if count > state_initialized.len() {
@@ -1470,6 +1473,7 @@ impl VerilogADeviceCheckpoint {
                 laplace_filters,
                 zi_filters,
                 timer_event_bound,
+                accepted_event_step,
             },
             prev_discontinuity,
         })
@@ -3377,6 +3381,53 @@ impl VerilogADevice {
     fn discontinuity_flags(&self) -> Option<f64> {
         self.discontinuity_slot
             .and_then(|slot| self.context.variables.get(slot).copied())
+    }
+
+    /// Run the analog events the evaluation just made deferred, at its own
+    /// point, and keep what they leave as the evaluation's candidate. Nothing
+    /// runs, and nothing is cloned, when it deferred none.
+    ///
+    /// A transient trial solves the left limit of its endpoint: its `timer`,
+    /// `cross` and `above` events ran no body
+    /// ([`crate::vm::VmContext::gate_analog_event`]). The events take effect
+    /// at the point, so their bodies run once here, on a copy evaluated again
+    /// with the same inputs and every event firing in place: each body reads
+    /// `$abstime`, the analog values and every operator output at their left
+    /// limit there. Only what the bodies leave is kept — the event-state lane,
+    /// the task and assignment journals, a `$discontinuity` and the next
+    /// timer — so the trial's equations and the operator histories it commits
+    /// are the left limit's, while its tasks, a `$finish` among them, and a
+    /// mixed module's analog occurrences are the event's, inside the trial
+    /// that finds it. A lane that moved restarts integration from the point
+    /// and is solved again one edge completion later
+    /// ([`Self::accepted_event_step`]). A rejected trial keeps none of it: the
+    /// next evaluation starts from the accepted state.
+    fn run_deferred_event_pass(
+        &mut self,
+        evaluate: impl FnOnce(&mut Self) -> Result<(), VmError>,
+    ) -> Result<(), VmError> {
+        if !self.context.deferred_an_event() {
+            return Ok(());
+        }
+        let mut pass = self.clone();
+        pass.context.event_pass = true;
+        evaluate(&mut pass)?;
+        self.context.take_event_pass(&mut pass.context)?;
+        if pass.discontinuity_pending()
+            && let Some(slot) = self.discontinuity_slot
+            && let Some(flags) = pass.context.variables.get(slot).copied()
+        {
+            self.context.variables[slot] = flags;
+        }
+        Ok(())
+    }
+
+    /// The accepted point whose analog events moved the event-state lane,
+    /// while the interval leaving it is solved
+    /// ([`Self::run_deferred_event_pass`]); the step there completes as a D/A
+    /// edge does.
+    pub fn accepted_event_step(&self) -> Option<f64> {
+        self.context.accepted_event_step
     }
 
     /// Whether a nonnegative `$discontinuity` hint fired during the latest evaluation
@@ -5290,9 +5341,17 @@ impl VerilogADevice {
         SmolStr::new(hasher.finalize().to_hex().as_str())
     }
 
-    /// Whether `$discontinuity` newly fired since the last accepted step
+    /// Whether `$discontinuity` newly fired since the last accepted step, or
+    /// the candidate steps the solution as an analog event does: at the point
+    /// its events fired, which restarts the integration there, and over the
+    /// interval leaving it, whose values act from that instant and so step
+    /// away from the left limit the point solved — history from before the
+    /// instant predicts a solution this interval never had.
     pub fn discontinuity_rising(&self) -> bool {
         (self.discontinuity_pending() && !self.prev_discontinuity)
+            || self.context.event_lane_stepped
+            || self.context.accepted_event_step.is_some()
+            || self.context.delay_step_arrives()
             || self.model.switch_branch_variables.iter().any(|&index| {
                 self.discrete_state_value(index).is_some_and(|accepted| {
                     self.context
@@ -5992,6 +6051,22 @@ impl VerilogADevice {
             .iter()
             .position(|n| n.as_str() == name)?;
         self.context.variables.get(idx).copied()
+    }
+
+    /// [`Self::variable`] as the analog events the latest evaluation ran at
+    /// its point left it ([`Self::run_deferred_event_pass`]): the value a
+    /// discrete reader sees at the event's instant, while the analog
+    /// equations there hold the left limit. The ordinary value where no event
+    /// ran.
+    pub fn variable_after_events(&self, name: &str) -> Option<f64> {
+        let idx = self
+            .model
+            .variable_names
+            .iter()
+            .position(|n| n.as_str() == name)?;
+        self.context
+            .event_lane_value(idx)
+            .or_else(|| self.context.variables.get(idx).copied())
     }
 
     /// Assignment notifications with an evaluation-local group identity.
@@ -6719,6 +6794,9 @@ impl VerilogADevice {
         let result = self
             .try_evaluate_with_task_recording(mode, true)
             .and_then(|values| {
+                self.run_deferred_event_pass(|pass| {
+                    pass.try_evaluate_with_task_recording(mode, true).map(drop)
+                })?;
                 self.validate_discontinuity_state()?;
                 Ok(values)
             });
@@ -8157,16 +8235,33 @@ impl VerilogADevice {
         R: FnMut(usize, f64),
     {
         self.try_initialize_analysis()?;
-        #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
-        if self.context.periodic_frame.is_none() && self.fused_stamp_driver_is_active() {
-            let result = self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
-            self.context.numerical_evaluation_valid = result.is_ok();
-            return result;
-        }
-
-        let result = self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode);
+        let result = self
+            .try_stamp_dispatch(circuit_voltages, matrix_add, rhs_add, mode)
+            .and_then(|()| {
+                self.run_deferred_event_pass(|pass| {
+                    pass.try_stamp_dispatch(circuit_voltages, |_, _, _| {}, |_, _| {}, mode)
+                })
+            });
         self.context.numerical_evaluation_valid = result.is_ok();
         result
+    }
+
+    fn try_stamp_dispatch<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+        if self.context.periodic_frame.is_none() && self.fused_stamp_driver_is_active() {
+            return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+        }
+        self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
     /// Whether stamping dispatches the fused whole-model driver rather than
@@ -11021,9 +11116,12 @@ mod static_dae_device_tests {
         .unwrap();
         device.try_begin_analysis(2).unwrap();
         device.set_timestep(0.5);
+        // The timer, the crossing and `above` at 0.5 take effect at that
+        // instant: the point solves their left limit, and only the final step
+        // (10.0) and the initial step (1.0) are in its equations.
         for (time, voltage, initial, final_step, expected) in [
             (0.0, -1.0, true, false, -1.0),
-            (0.5, 1.0, false, true, 11113.0),
+            (0.5, 1.0, false, true, 13.0),
         ] {
             device.set_time(time);
             device.set_analysis_step(initial, final_step);

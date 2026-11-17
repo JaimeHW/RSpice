@@ -6447,6 +6447,7 @@ endmodule
         let (prelude_slots, prelude_slots_len) = test_prelude_slots();
         EvalContext {
             analog_occurrences: std::ptr::null_mut(),
+            event_deferral: std::ptr::null_mut(),
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
@@ -6804,6 +6805,7 @@ endmodule
             evaluation_state_inputs: std::ptr::null(),
             evaluation_state_inputs_len: 0,
             analog_occurrences: std::ptr::null_mut(),
+            event_deferral: std::ptr::null_mut(),
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
