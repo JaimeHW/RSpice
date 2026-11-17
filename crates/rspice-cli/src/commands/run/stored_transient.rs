@@ -622,7 +622,8 @@ impl StoredTransient {
             // Planned against the first rows, before the `.MEASURE TRAN` passes change them, and
             // measured after those, which may read the run back whole instead.
             let continuous = if has_continuous(netlist) {
-                let Some(stream) = self.plan_continuous(ctx, &ctx.transient_limits())? else {
+                let limits = ctx.transient_limits();
+                let Some(stream) = self.plan_continuous(ctx, &limits, continuous_failed)? else {
                     log::debug!("the transient's .MEASURE TRAN_CONT statements read it back whole");
                     return Ok(None);
                 };
@@ -647,7 +648,7 @@ impl StoredTransient {
                 plan.measurements = Some(measurements);
             }
             if let Some(stream) = continuous {
-                plan.continuous = Some(self.measure_continuous(stream)?);
+                plan.continuous = Some(self.measure_continuous(stream, continuous_failed)?);
             }
             if !netlist.fft_analyses.is_empty() {
                 let Some(spectra) = self.fft_spectra(ctx, tstop)? else {
@@ -829,11 +830,13 @@ impl StoredTransient {
     }
 
     /// The deck's `.MEASURE TRAN_CONT` statements planned with the first chunk's rows in the
-    /// shell and budgeted by `limits`; `None` when a statement needs the run in memory.
+    /// shell and budgeted by `limits`; `None` when a statement needs the run in memory. An
+    /// evaluation that fails is reported through `failed`, as the route measuring them labels it.
     fn plan_continuous(
         &self,
         ctx: &RunContext<'_>,
         limits: &rspice_core::ResourceLimits,
+        failed: fn(rspice_core::SimulationError) -> CliError,
     ) -> Result<Option<TranContinuousStream>, CliError> {
         let columns = self
             .rows
@@ -848,16 +851,16 @@ impl StoredTransient {
             limits,
             &crate::abort::ProcessAbort,
         )
-        .map_err(continuous_failed)
+        .map_err(failed)
     }
 
     /// `stream`'s results, measured in one pass over the store's rows after one over their
-    /// axis.
+    /// axis; an evaluation that fails is reported through `failed`.
     fn measure_continuous(
         &mut self,
         mut stream: TranContinuousStream,
+        failed: fn(rspice_core::SimulationError) -> CliError,
     ) -> Result<Vec<ContinuousMeasureResult>, CliError> {
-        let failed = continuous_failed;
         let abort = &crate::abort::ProcessAbort;
         let rows = &mut self.rows;
         let chunks = rows.reader.chunk_spans().count();
@@ -1148,10 +1151,12 @@ impl StoredTransient {
                 .next()
                 .map_or(0, |span| span.1);
             self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
-            let planned = self.plan_continuous(ctx, &limits);
+            // Labelled as the run read back whole labels its post-processing: a compression
+            // evaluates these with the transient, under the engine's limits.
+            let planned = self.plan_continuous(ctx, &limits, failed);
             self.rows.clear(&mut self.shell);
             match planned? {
-                Some(stream) => self.measure_continuous(stream)?,
+                Some(stream) => self.measure_continuous(stream, failed)?,
                 None => {
                     self.read_back(ctx, tstop)?;
                     return Ok(None);
