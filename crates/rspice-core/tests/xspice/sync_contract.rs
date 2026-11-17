@@ -340,8 +340,7 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
 /// manager *unrounded*: an event time is not a point on any declared grid, it
 /// is whatever the code model and the step controller produced. A decimal
 /// [`TimeResolution`] is deliberately **not** on this path — quantizing would
-/// move the time the analog step stops at, and `MAX_EXACT_TICKS` would cap
-/// event time at 2.25 s at 1 fs resolution besides.
+/// move the time the analog step stops at.
 ///
 /// [`Instant`] is monotone (so it orders) and exactly invertible (so it
 /// converts back), which is all the kernel asks.

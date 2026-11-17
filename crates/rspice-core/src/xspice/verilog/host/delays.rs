@@ -106,12 +106,8 @@ impl PendingDrives {
     }
 
     /// Queue an update after the owner's others, cancelling any due later
-    /// than it; one due at the tick of the last replaces it. An update due
-    /// past the last representable tick lands after the run ends.
+    /// than it; one due at the tick of the last replaces it.
     fn push(&mut self, due: u64, owner: PendingOwner, value: FourStateValue) {
-        if due > TimeResolution::MAX_EXACT_TICKS {
-            return;
-        }
         while self.last(owner).is_some_and(|(at, _)| *at > due) {
             self.pop(owner);
         }
@@ -153,17 +149,18 @@ impl PendingDrives {
 
     /// Schedule a module path destination's change to `value` at `tick`
     /// (sections 14.4 and 14.6), as the module documentation describes;
-    /// `current` is what it has now.
+    /// `current` is what it has now. `Err` carries a path delay that ends
+    /// past the last 64-bit tick.
     fn schedule_path(
         &mut self,
         store: &mut DigitalSignalStore,
         (signal, value): (DigitalSignalId, FourStateValue),
         current: FourStateValue,
         tick: u64,
-    ) {
+    ) -> Result<(), u64> {
         let owner = PendingOwner::Net(signal);
         let Some(style) = self.paths.as_ref().map(|paths| paths.style(signal)) else {
-            return;
+            return Ok(());
         };
         loop {
             let queue = self.slots.get(&owner).map_or(&[][..], Vec::as_slice);
@@ -175,20 +172,20 @@ impl PendingDrives {
             let from = lead.as_ref().map_or(&before, |(_, value)| value);
             if *from == value {
                 // The pending update, or what the destination has, stands.
-                return;
+                return Ok(());
             }
             let Some(paths) = &self.paths else {
-                return;
+                return Ok(());
             };
             let delay = paths.delay(store, signal, (from, &value), tick);
-            let due = tick.saturating_add(delay.ticks);
+            let due = tick.checked_add(delay.ticks).ok_or(delay.ticks)?;
             let Some((lead_due, lead_value)) = lead else {
                 if due == tick {
                     apply(store, DelayRequest::Net { signal, value });
                 } else {
                     self.push(due, owner, value);
                 }
-                return;
+                return Ok(());
             };
             let shown = shown_as_x(&before, &lead_value);
             let width = due.checked_sub(lead_due);
@@ -209,7 +206,7 @@ impl PendingDrives {
                         self.push(due, owner, shown);
                     }
                     self.push(lead_due, owner, value);
-                    return;
+                    return Ok(());
                 }
                 (Some(width), Some([reject, error])) if width >= reject => {
                     if width < error {
@@ -229,7 +226,7 @@ impl PendingDrives {
                         }
                     }
                     self.push(due, owner, value);
-                    return;
+                    return Ok(());
                 }
                 // Rejected: the change is measured again from the value
                 // before the leading edge.
@@ -288,6 +285,15 @@ fn request_of(owner: PendingOwner, value: FourStateValue) -> DelayRequest {
 }
 
 impl DigitalHost {
+    /// The net a pending update's owner drives, as a refusal names it.
+    fn owner_name(&self, owner: PendingOwner) -> String {
+        let signal = match owner {
+            PendingOwner::Net(signal) => signal,
+            PendingOwner::Driver(driver) => driver.signal,
+        };
+        signal_name(&self.plan, signal)
+    }
+
     /// Run every module path destination undelayed (`.options
     /// hdl_path_delays=no`), before the design starts; a timing check's
     /// delayed signal keeps its delay.
@@ -406,7 +412,7 @@ impl DigitalHost {
         }
         self.scheduler.cancel_target(target);
         if let Some(next) = next {
-            let at = self.instant_of(next)?;
+            let at = self.instant_of(next);
             self.scheduler.schedule_id_at(
                 at,
                 SchedulerRegion::Active,
@@ -438,7 +444,13 @@ impl DigitalHost {
                 && self.store.path_destination(*signal)
             {
                 let target = (*signal, value.clone());
-                pending.schedule_path(&mut self.store, target, current, tick);
+                if let Err(delay) = pending.schedule_path(&mut self.store, target, current, tick) {
+                    return Err(DigitalRunError::DelayPastTimeRange {
+                        what: format!("the path delay into {}", signal_name(&self.plan, *signal)),
+                        tick,
+                        delay,
+                    });
+                }
                 continue;
             }
             if let Some((_, waiting)) = pending.last(owner)
@@ -453,7 +465,16 @@ impl DigitalHost {
             match self.store.transition_ticks(&request, &current, value) {
                 None => {}
                 Some(0) => apply(&mut self.store, request),
-                Some(delay) => pending.push(tick.saturating_add(delay), owner, value.clone()),
+                Some(delay) => {
+                    let due = tick.checked_add(delay).ok_or_else(|| {
+                        DigitalRunError::DelayPastTimeRange {
+                            what: format!("the delayed drive of {}", self.owner_name(owner)),
+                            tick,
+                            delay,
+                        }
+                    })?;
+                    pending.push(due, owner, value.clone());
+                }
             }
         }
         self.pending = Some(pending);
@@ -501,7 +522,7 @@ impl DigitalHost {
         }
         self.scheduler.cancel_target(target);
         if let Some(next) = next {
-            let at = self.instant_of(next)?;
+            let at = self.instant_of(next);
             self.scheduler.schedule_id_at(
                 at,
                 SchedulerRegion::Active,
@@ -550,7 +571,6 @@ impl DigitalHost {
             {
                 return Err("pending drive names an undelayed owner, twice or out of order".into());
             }
-            self.instant_of(update.due).map_err(|e| e.to_string())?;
             pending.push(update.due, update.owner, update.value.clone());
             previous = update.due;
         }

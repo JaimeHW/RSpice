@@ -4010,10 +4010,13 @@ impl MixedSignalHost {
             // it is landed on this timepoint instead of ending the run: the
             // queue below drains to this trial's tick in tick order, which is
             // where the activation keeps its exact time and its ordering.
+            // A trial at the activation's own seconds has landed on it, even
+            // where those seconds are a later tick's too and floor to it.
             let floor = self.analog_step_floor();
-            if !floor.is_finite()
-                || floor <= 0.0
-                || scheduled_seconds - self.accepted_analog_time() >= floor
+            if scheduled_seconds < time_seconds
+                && (!floor.is_finite()
+                    || floor <= 0.0
+                    || scheduled_seconds - self.accepted_analog_time() >= floor)
             {
                 return Err(MixedSignalError::MissedDigitalBreakpoint {
                     scheduled_seconds,

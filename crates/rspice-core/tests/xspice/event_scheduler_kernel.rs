@@ -124,35 +124,32 @@ impl Rng {
 // Tick <-> seconds conversion
 //=============================================================================
 
+/// Every tick below `2^52` has seconds of its own at every resolution, so
+/// reading its seconds back names it again. Above that a fine resolution's
+/// consecutive ticks can share one double; the kernel keeps them apart by
+/// rank, which `crates/rspice-core/src/xspice/event_scheduler.rs` tests.
 #[test]
-fn tick_seconds_round_trip_is_lossless_across_the_exact_range() {
+fn tick_seconds_round_trip_is_lossless_while_every_tick_has_its_own_seconds() {
+    const OWN_SECONDS: u64 = 1 << 52;
     for exponent in [-21i8, -18, -15, -12, -9, -6, -3, 0] {
         let resolution = TimeResolution::new(exponent).expect("supported resolution");
         let mut rng = Rng::new(0x2545_F491_4F6C_DD1D);
 
-        let mut candidates = vec![
-            0,
-            1,
-            2,
-            999,
-            1_000_000,
-            TimeResolution::MAX_EXACT_TICKS,
-            TimeResolution::MAX_EXACT_TICKS - 1,
-        ];
-        for bit in 0..51 {
+        let mut candidates = vec![0, 1, 2, 999, 1_000_000, OWN_SECONDS - 1, OWN_SECONDS - 2];
+        for bit in 0..52 {
             let base = 1u64 << bit;
             candidates.push(base);
             candidates.push(base - 1);
             candidates.push(base + 1);
         }
         for _ in 0..20_000 {
-            candidates.push(rng.below(TimeResolution::MAX_EXACT_TICKS) + 1);
+            candidates.push(rng.below(OWN_SECONDS - 1) + 1);
         }
 
         for ticks in candidates {
             let seconds = resolution
                 .ticks_to_seconds(ticks)
-                .expect("tick inside the exact range converts");
+                .expect("every tick has seconds");
             let back = resolution
                 .seconds_to_ticks(seconds)
                 .expect("seconds from an exact tick convert back");
@@ -164,27 +161,35 @@ fn tick_seconds_round_trip_is_lossless_across_the_exact_range() {
     }
 }
 
+/// Verilog time is a 64-bit count of the design's precision, and every
+/// count has seconds: the last femtosecond tick is 18446.7 s. Seconds past
+/// it have no tick.
 #[test]
-fn ticks_past_the_exact_range_are_refused_rather_than_rounded() {
+fn every_64_bit_tick_has_seconds_and_seconds_past_them_have_no_tick() {
     let resolution = TimeResolution::default();
-    let over = TimeResolution::MAX_EXACT_TICKS + 1;
+    let last = resolution
+        .ticks_to_seconds(u64::MAX)
+        .expect("the last 64-bit tick has seconds");
+    let written: f64 = format!("{}e-15", u64::MAX).parse().expect("a decimal");
+    assert_eq!(last.to_bits(), written.to_bits());
+    // The seconds of a tick far past 2^53 name a tick within the few that
+    // share that double, not one rounded away from it.
+    let far = 1u64 << 62;
+    let seconds = resolution.ticks_to_seconds(far).expect("a tick");
+    let back = resolution.seconds_to_ticks(seconds).expect("a tick");
+    assert!(
+        back.abs_diff(far) <= 1 << 10,
+        "{far} -> {seconds:e} s -> {back}"
+    );
 
     let error = resolution
-        .ticks_to_seconds(over)
-        .expect_err("a tick with no exact seconds image must be refused");
-    assert_eq!(
-        error,
-        SchedulerError::TickNotExactlyRepresentable { ticks: over }
-    );
+        .seconds_to_ticks(last * 2.0)
+        .expect_err("seconds past the last tick have none");
     assert!(
-        error.to_string().contains("no exact seconds image"),
+        error
+            .to_string()
+            .contains("has no representable event tick"),
         "unhelpful diagnostic: {error}"
-    );
-
-    let seconds = resolution.seconds_per_tick() * (over as f64);
-    assert!(
-        resolution.seconds_to_ticks(seconds).is_err(),
-        "seconds past the exact range must be refused too"
     );
 }
 
@@ -250,15 +255,20 @@ fn a_tick_is_the_instant_its_decimal_names_in_a_deck() {
     // written as `15n`.
     for exponent in -21..=2_i8 {
         let resolution = TimeResolution::new(exponent).expect("a declarable resolution");
-        for ticks in (0..=2_000_u64).chain([12_345_678_901, TimeResolution::MAX_EXACT_TICKS]) {
+        for ticks in (0..=2_000_u64).chain([12_345_678_901, (1 << 52) - 1, 1 << 53, u64::MAX]) {
             let written: f64 = format!("{ticks}e{exponent}").parse().expect("a decimal");
-            let seconds = resolution.ticks_to_seconds(ticks).expect("an exact tick");
+            let seconds = resolution
+                .ticks_to_seconds(ticks)
+                .expect("every tick has seconds");
             assert_eq!(
                 seconds.to_bits(),
                 written.to_bits(),
                 "{ticks} ticks of 1e{exponent} s"
             );
-            assert_eq!(resolution.seconds_to_ticks(seconds), Ok(ticks));
+            // Past 2^52 a fine resolution's ticks can share these seconds.
+            if ticks < 1 << 52 {
+                assert_eq!(resolution.seconds_to_ticks(seconds), Ok(ticks));
+            }
         }
     }
 }

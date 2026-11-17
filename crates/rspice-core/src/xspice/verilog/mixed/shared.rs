@@ -1325,7 +1325,9 @@ impl MixedDigitalCoordinator {
                 .resolution
                 .ticks_to_seconds(next)
                 .map_err(DigitalRunError::from)?;
-            if self.activation_was_reachable(scheduled_seconds) {
+            // A trial at the activation's own seconds has landed on it, even
+            // where those seconds are a later tick's too and floor to it.
+            if scheduled_seconds < time && self.activation_was_reachable(scheduled_seconds) {
                 return Err(MixedSignalError::MissedDigitalBreakpoint {
                     scheduled_seconds,
                     trial_seconds: time,

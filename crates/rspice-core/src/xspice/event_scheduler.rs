@@ -33,13 +33,14 @@
 //! the resolution that serves all of them is the finest one, which
 //! [`TimeResolution::finest`] computes. That grid is a *sublattice* of the
 //! instants rather than a second time base: an HDL tick `T` embeds exactly,
-//! as [`Instant::from_tick`], because [`TimeResolution::ticks_to_seconds`] is
-//! exactly invertible up to [`TimeResolution::MAX_EXACT_TICKS`] — see that
-//! constant for why the bound is `2^51 - 1` and not `2^53`. Reading an instant
-//! back as an HDL-visible tick is [`Instant::floor_tick`],
-//! [`Instant::nearest_tick`] or [`Instant::ceil_tick`], and which of the three
-//! a caller wants is a property of the question it is asking, not of the
-//! instant; the three are stated together on that type.
+//! as [`Instant::from_tick`], at the seconds [`TimeResolution::ticks_to_seconds`]
+//! names, and reads back as itself through [`Instant::tick`] — for every
+//! 64-bit tick, because an instant also carries a tick's rank among the
+//! ticks that share one double of seconds. Reading an *analog* time as an
+//! HDL-visible tick is [`Instant::floor_tick`], [`Instant::nearest_tick`] or
+//! [`Instant::ceil_tick`], and which of the three a caller wants is a property
+//! of the question it is asking, not of the instant; the three are stated
+//! together on that type. All four conversions are exact integer arithmetic.
 //!
 //! A caller whose event times are not on any declared grid needs no encoding of
 //! its own. The XSPICE path is that caller: its times come from code models and
@@ -139,6 +140,40 @@ const TICKS_PER_SECOND: [f64; 22] = [
     1e17, 1e18, 1e19, 1e20, 1e21,
 ];
 
+/// Where the exact value of a time sits between two consecutive ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TickFraction {
+    /// On a tick.
+    Zero,
+    BelowHalf,
+    Half,
+    AboveHalf,
+}
+
+impl TickFraction {
+    /// Where a remainder sits against `half`, half a tick on its scale.
+    fn of(remainder: u128, half: u128) -> Self {
+        match remainder.cmp(&half) {
+            _ if remainder == 0 => Self::Zero,
+            std::cmp::Ordering::Less => Self::BelowHalf,
+            std::cmp::Ordering::Equal => Self::Half,
+            std::cmp::Ordering::Greater => Self::AboveHalf,
+        }
+    }
+}
+
+/// The exact value of a non-negative finite double as `mantissa * 2^shift`.
+fn dyadic(seconds: f64) -> (u64, i32) {
+    let bits = seconds.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1 << 52), exponent - 1075)
+    }
+}
+
 /// Tick resolution of a scheduler: one tick is `10^exponent` seconds.
 ///
 /// Verilog spells precision as a decimal power of ten between 1 s and 1 fs, so
@@ -156,20 +191,18 @@ impl Default for TimeResolution {
 }
 
 impl TimeResolution {
-    /// Largest tick count that survives [`Self::ticks_to_seconds`] followed by
-    /// [`Self::seconds_to_ticks`] unchanged.
+    /// The least tick count at which two ticks of some resolution can share
+    /// one seconds image.
     ///
-    /// Integers are exact in `f64` up to `2^53`, but exactness of the *image*
-    /// is not exactness of the *round trip*: no decimal resolution is a binary
-    /// power, so both the multiply and the divide round. Each contributes at
-    /// most a half-ulp, giving `|round_trip(t) - t| <= t * 2^-52`, which stays
-    /// below the half-tick that rounding can absorb exactly when `t < 2^51`.
-    ///
-    /// Measured behaviour matches: across resolutions from 1 s to 1e-21 s, no
-    /// tick below `2^51` fails to round trip, and the first failures appear
-    /// near `2^51.8`. At 1 fs this bound is 2.25 s of event time, and a run
-    /// needing longer declares a coarser precision.
-    pub const MAX_EXACT_TICKS: u64 = (1 << 51) - 1;
+    /// The images of `t` and `t - 1` differ by one tick less two roundings of
+    /// at most half an ulp each, and the ulp of `t` ticks is at most
+    /// `t * 2^-52` ticks, so below `2^52` every tick of every resolution has a
+    /// seconds image of its own. Above it a fine resolution runs out of
+    /// doubles — 1 fs from 8 s on — and consecutive ticks share an image,
+    /// which [`Instant`] then tells apart by rank. Only
+    /// [`Instant::from_tick`] reads it, and that only with HDL time.
+    #[cfg_attr(not(feature = "veriloga"), allow(dead_code))]
+    const SHARED_IMAGE_FLOOR: u64 = 1 << 52;
 
     /// Build a resolution of `10^exponent` seconds.
     ///
@@ -208,28 +241,54 @@ impl TimeResolution {
         }
     }
 
-    /// Convert a tick count to analog seconds.
+    /// Convert a tick count to analog seconds: the tick's *image*.
     ///
-    /// This is the conversion analog breakpoints are placed with, so a tick
-    /// past [`Self::MAX_EXACT_TICKS`] is refused rather than rounded: a
-    /// breakpoint that does not land where the event is scheduled is a
-    /// synchronization fault, not an accuracy loss.
+    /// The image is the double nearest `ticks * 10^exponent`, ties to even,
+    /// which is what the netlist reader makes of the same decimal: `#15` at
+    /// 1 ns and a deck's `15n` are one instant. The product with
+    /// [`Self::seconds_per_tick`] rounds twice and lands one ulp past `15n`,
+    /// where a `.tran` stop at `15n` would drop the event. This is the
+    /// conversion analog breakpoints are placed with, and every tick count
+    /// has one: the `Result` refuses nothing.
     ///
-    /// The result is the double nearest `ticks * 10^exponent`, which is what
-    /// the netlist reader makes of the same decimal: `#15` at 1 ns and a deck's
-    /// `15n` are one instant. The product with [`Self::seconds_per_tick`]
-    /// rounds twice and lands one ulp past `15n`, where a `.tran` stop at `15n`
-    /// would drop the event.
+    /// Images are monotone in the tick and, below
+    /// [`Self::SHARED_IMAGE_FLOOR`], distinct. Above it consecutive ticks of a
+    /// fine resolution can share one: the analog time they land at is one
+    /// double, and their order is kept by [`Instant`]'s rank.
     pub fn ticks_to_seconds(self, ticks: u64) -> Result<f64, SchedulerError> {
-        if ticks > Self::MAX_EXACT_TICKS {
-            return Err(SchedulerError::TickNotExactlyRepresentable { ticks });
-        }
         Ok(self.tick_instant(ticks))
     }
 
-    /// The seconds of a tick inside the exact range, correctly rounded: one
-    /// operation on two exact operands.
+    /// The image of a tick, correctly rounded.
+    ///
+    /// Below `2^53` the tick count and the scale are both exact doubles, so
+    /// one operation rounds once. Above it the count itself rounds, and the
+    /// candidate that gives is moved, a double at a time, to the one whose
+    /// rounding interval holds the exact value — a step or two at most.
     fn tick_instant(self, ticks: u64) -> f64 {
+        let mut image = self.one_operation_image(ticks);
+        if ticks < 1 << 53 {
+            return image;
+        }
+        loop {
+            if self
+                .first_tick_at_or_above(image)
+                .is_none_or(|first| first > ticks)
+            {
+                image = image.next_down();
+            } else if self
+                .last_tick_at_or_below(image)
+                .is_some_and(|last| last < ticks)
+            {
+                image = image.next_up();
+            } else {
+                return image;
+            }
+        }
+    }
+
+    /// The tick count over the scale in one floating-point operation.
+    fn one_operation_image(self, ticks: u64) -> f64 {
         let count = ticks as f64;
         match self.exponent {
             1 => count * 10.0,
@@ -238,29 +297,143 @@ impl TimeResolution {
         }
     }
 
-    /// Seconds as a tick count before rounding, from one operation on an
-    /// exact scale.
-    fn tick_estimate(self, seconds: f64) -> f64 {
-        match self.exponent {
-            1 => seconds / 10.0,
-            2 => seconds / 100.0,
-            exponent => seconds * TICKS_PER_SECOND[(-exponent) as usize],
+    /// The exact value of `mantissa * 2^shift` seconds counted in ticks: its
+    /// whole part, and where the remainder sits against half a tick.
+    ///
+    /// Integer arithmetic throughout, so the answer is exact for every
+    /// double and every resolution: the mantissa times a power of ten up to
+    /// `10^21` stays below `2^125`, and a shift either lands inside `u128` or
+    /// proves the value is past every tick count. `None` is a value of at
+    /// least `2^128` ticks.
+    fn split(self, mantissa: u64, shift: i32) -> Option<(u128, TickFraction)> {
+        let mantissa = u128::from(mantissa);
+        if mantissa == 0 {
+            return Some((0, TickFraction::Zero));
         }
+        let scale = 10u128.pow(u32::from(self.exponent.unsigned_abs()));
+        if self.exponent <= 0 {
+            // value = mantissa * 10^-exponent * 2^shift
+            let scaled = mantissa * scale;
+            let shift_count = shift.unsigned_abs();
+            if shift >= 0 {
+                if shift_count >= scaled.leading_zeros() {
+                    return None;
+                }
+                return Some((scaled << shift_count, TickFraction::Zero));
+            }
+            if shift_count >= 128 {
+                return Some((0, TickFraction::BelowHalf));
+            }
+            let remainder = scaled & ((1 << shift_count) - 1);
+            let fraction = TickFraction::of(remainder, 1 << (shift_count - 1));
+            return Some((scaled >> shift_count, fraction));
+        }
+        // value = numerator / denominator, with the power of two on whichever
+        // side keeps both integers.
+        let shift_count = shift.unsigned_abs();
+        let (numerator, denominator) = if shift >= 0 {
+            if shift_count >= mantissa.leading_zeros() {
+                return None;
+            }
+            (mantissa << shift_count, scale)
+        } else {
+            // A denominator of 2^127 or more is over 2^72 times the mantissa:
+            // far short of half a tick.
+            if shift_count + 1 >= scale.leading_zeros() {
+                return Some((0, TickFraction::BelowHalf));
+            }
+            (mantissa, scale << shift_count)
+        };
+        // The denominator is below 2^127, so twice the remainder fits.
+        let fraction = TickFraction::of(numerator % denominator * 2, denominator);
+        Some((numerator / denominator, fraction))
+    }
+
+    /// The largest tick whose image is at or below `seconds`, or `None` when
+    /// `seconds` itself is past every tick.
+    ///
+    /// A tick's image is at or below `seconds` exactly when its value is below
+    /// the upper edge of `seconds`' rounding interval, half an ulp above it —
+    /// or on that edge, when ties to even round the edge down onto `seconds`.
+    fn last_tick_at_or_below(self, seconds: f64) -> Option<u64> {
+        let (mantissa, shift) = dyadic(seconds);
+        if self.split(mantissa, shift)?.0 > u128::from(u64::MAX) {
+            return None;
+        }
+        let last = match self.split(2 * mantissa + 1, shift - 1) {
+            // On the edge, which rounds up and away from `seconds`.
+            Some((whole, TickFraction::Zero)) if mantissa % 2 == 1 => whole - 1,
+            Some((whole, _)) => whole,
+            None => u128::MAX,
+        };
+        Some(u64::try_from(last).unwrap_or(u64::MAX))
+    }
+
+    /// The least tick whose image is at or above `seconds`, or `None` when no
+    /// tick's image is.
+    ///
+    /// The mirror of [`Self::last_tick_at_or_below`], against the lower edge
+    /// of `seconds`' rounding interval: the upper edge of the double below it.
+    fn first_tick_at_or_above(self, seconds: f64) -> Option<u64> {
+        if seconds == 0.0 {
+            return Some(0);
+        }
+        let (mantissa, shift) = dyadic(seconds.next_down());
+        let first = match self.split(2 * mantissa + 1, shift - 1)? {
+            // On the edge, which ties to even round up onto `seconds`.
+            (whole, TickFraction::Zero) if mantissa % 2 == 1 => whole,
+            (whole, _) => whole + 1,
+        };
+        u64::try_from(first).ok()
+    }
+
+    /// The tick nearest `seconds`, read the way a tick is: the double nearest
+    /// a half tick *is* that half tick, and a half tick goes to the later one.
+    ///
+    /// A deck's `2.5n` is a double just below 2.5 ns, and an author who writes
+    /// it means the half tick of a 1 ns grid. Reading it exactly would put it
+    /// on tick 2, against the tie rule, and a double one ulp below it on tick
+    /// 3 by an accident of rounding the product, as the one-multiply reading
+    /// did. A tick's own image is that tick, even where it is also the double
+    /// nearest the half tick after it, as it can be once a double's spacing
+    /// passes half a tick.
+    fn tick_nearest(self, seconds: f64) -> Option<u64> {
+        let (mantissa, shift) = dyadic(seconds);
+        let (whole, fraction) = self.split(mantissa, shift)?;
+        let later = match fraction {
+            TickFraction::Zero => false,
+            TickFraction::Half | TickFraction::AboveHalf => true,
+            // Short of the half tick, but its nearest double when the half
+            // lies inside this double's rounding interval, unless `whole`'s
+            // own image is this double too.
+            TickFraction::BelowHalf => {
+                let holds_the_half = match self.split(2 * mantissa + 1, shift - 1) {
+                    None => true,
+                    Some((edge, _)) if edge > whole => true,
+                    Some((_, TickFraction::AboveHalf)) => true,
+                    Some((_, TickFraction::Half)) => mantissa % 2 == 0,
+                    Some(_) => false,
+                };
+                holds_the_half
+                    && self
+                        .first_tick_at_or_above(seconds)
+                        .is_none_or(|first| u128::from(first) > whole)
+            }
+        };
+        u64::try_from(whole + u128::from(later)).ok()
     }
 
     /// Convert analog seconds to the nearest tick.
     ///
-    /// Rejects non-finite and negative inputs, and any value whose tick image
-    /// lies past [`Self::MAX_EXACT_TICKS`].
+    /// Rejects non-finite and negative inputs, and any value whose nearest
+    /// tick is past `u64`. Exact for every double: see the reading of a half
+    /// tick on the method this calls.
     pub fn seconds_to_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        let ticks = self.tick_estimate(seconds).round();
-        if !ticks.is_finite() || ticks < 0.0 || ticks > Self::MAX_EXACT_TICKS as f64 {
-            return Err(SchedulerError::SecondsNotRepresentable { seconds });
-        }
-        Ok(ticks as u64)
+        self.tick_nearest(seconds)
+            .ok_or(SchedulerError::SecondsNotRepresentable { seconds })
     }
 
     /// Convert analog seconds to the tick *at or before* them.
@@ -295,14 +468,15 @@ impl TimeResolution {
     /// # Exactness
     ///
     /// The answer is defined as the largest `t` with
-    /// `ticks_to_seconds(t) <= seconds`, and it is computed against that same
-    /// product rather than against the division alone. A single division is
-    /// off by up to one ulp, which for a time that sits exactly on a tick can
-    /// land just under the integer and floor to the tick *before* it — the one
-    /// error this conversion must not make, because an event time handed back
-    /// as a breakpoint would then be delivered a tick late. Correcting against
-    /// the multiplication makes `seconds_to_floor_ticks(ticks_to_seconds(t))`
-    /// exactly `t` for every representable `t`.
+    /// `ticks_to_seconds(t) <= seconds` — against the tick's image, not its
+    /// exact value. A time that is a tick's image converts back to that tick
+    /// and never to the one before it, which is the one error this conversion
+    /// must not make: an event time handed back as a breakpoint would be
+    /// delivered a tick late. It is computed in integers from the edge of
+    /// `seconds`' rounding interval, so it is exact for every double and every
+    /// tick count; where consecutive ticks share an image (past
+    /// [`Self::SHARED_IMAGE_FLOOR`]) it is the last of them, every one of
+    /// which the analog time has reached.
     ///
     /// Crate-visible rather than public, and reached through
     /// [`Instant::floor_tick`] rather than directly: an analog time is an
@@ -314,22 +488,8 @@ impl TimeResolution {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        let estimate = self.tick_estimate(seconds).floor();
-        if !estimate.is_finite() || estimate < 0.0 || estimate > Self::MAX_EXACT_TICKS as f64 {
-            return Err(SchedulerError::SecondsNotRepresentable { seconds });
-        }
-        // The estimate is accurate to within one ulp, so each correction runs
-        // at most once; they are loops rather than single steps so the
-        // postcondition holds by construction instead of by an argument about
-        // rounding.
-        let mut ticks = estimate as u64;
-        while ticks > 0 && self.tick_instant(ticks) > seconds {
-            ticks -= 1;
-        }
-        while ticks < Self::MAX_EXACT_TICKS && self.tick_instant(ticks + 1) <= seconds {
-            ticks += 1;
-        }
-        Ok(ticks)
+        self.last_tick_at_or_below(seconds)
+            .ok_or(SchedulerError::SecondsNotRepresentable { seconds })
     }
 
     /// Convert analog seconds to the tick *at or after* them.
@@ -363,9 +523,9 @@ impl TimeResolution {
     ///
     /// # Exactness
     ///
-    /// Defined as the smallest `t` with `ticks_to_seconds(t) >= seconds`, and
-    /// computed from [`Self::seconds_to_floor_ticks`] so that the two agree by
-    /// construction: an instant that sits exactly on a tick converts to that
+    /// Defined as the smallest `t` with `ticks_to_seconds(t) >= seconds`, the
+    /// mirror of [`Self::seconds_to_floor_ticks`] and computed the same way,
+    /// so the two agree: an instant that is a tick's image converts to that
     /// tick in both directions, and only a strictly interior one moves up.
     ///
     /// Crate-visible and reached through [`Instant::ceil_tick`], and gated
@@ -374,14 +534,11 @@ impl TimeResolution {
     /// that `-D warnings` reports.
     #[cfg(feature = "veriloga")]
     pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
-        let ticks = self.seconds_to_floor_ticks(seconds)?;
-        if self.tick_instant(ticks) >= seconds {
-            return Ok(ticks);
-        }
-        if ticks >= Self::MAX_EXACT_TICKS {
+        if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
-        Ok(ticks + 1)
+        self.first_tick_at_or_above(seconds)
+            .ok_or(SchedulerError::SecondsNotRepresentable { seconds })
     }
 
     /// The tick `seconds` is that tick's instant computed another way: the
@@ -463,14 +620,23 @@ impl EventLattice {
 }
 
 /// One exact physical instant: the IEEE-754 bit pattern of a non-negative
-/// finite `f64` number of seconds.
+/// finite `f64` number of seconds, and the rank of an HDL tick among the
+/// ticks that share those seconds.
 ///
-/// This is the kernel's whole time key, and it is the *analog* spine's time
-/// with nothing done to it. For a non-negative finite `f64` the bit pattern
-/// read as a `u64` is strictly monotone in the value and exactly invertible,
-/// which is everything an event key has to be: it orders, and it converts
-/// back. A time that cannot be scheduled at all — negative, infinite, or NaN —
-/// has no instant, which is the same set the queue has always dropped.
+/// This is the kernel's whole time key, and its seconds are the *analog*
+/// spine's time with nothing done to it. For a non-negative finite `f64` the
+/// bit pattern read as a `u64` is strictly monotone in the value and exactly
+/// invertible, which is everything an event key has to be: it orders, and it
+/// converts back. A time that cannot be scheduled at all — negative,
+/// infinite, or NaN — has no instant, which is the same set the queue has
+/// always dropped.
+///
+/// The seconds are the high half of one `u128` and the rank the low half, so
+/// the kernel orders keys with one integer comparison and never looks at the
+/// rank on its own. A time named in seconds has rank zero. So does every tick
+/// whose image no other tick shares — every tick below
+/// [`TimeResolution::SHARED_IMAGE_FLOOR`], which is every tick of every run
+/// short of 8 s at 1 fs — and its key is then exactly its image's.
 ///
 /// # Why not a tick count
 ///
@@ -479,14 +645,16 @@ impl EventLattice {
 /// code model and the analog step controller name a `f64` second chosen by
 /// interpolation, a delay, or a step controller, on no grid at all. A shared
 /// decimal grid would have to quantize the second kind — a 100.4 ps output on
-/// a 1 ns grid would fire at 1 ns — and a grid fine enough not to (1 fs) caps
-/// event time at 2.25 s, which is inside the range a transient run uses.
+/// a 1 ns grid would fire at 1 ns.
 ///
-/// The exact key refuses both losses. The HDL grid does not disappear: it
-/// embeds, because [`TimeResolution::ticks_to_seconds`] is exact and exactly
-/// invertible below [`TimeResolution::MAX_EXACT_TICKS`], so
-/// [`Self::floor_tick`]`(res)` of [`Self::from_tick`]`(T, res)` is `T` for
-/// every tick a run can reach.
+/// The exact key refuses that loss, and the HDL grid does not disappear: it
+/// embeds. A tick `T` is keyed at its image, [`TimeResolution::ticks_to_seconds`],
+/// which is where the analog side lands its event, and [`Self::tick`] reads
+/// `T` back exactly. Doubles do not resolve every tick of a fine grid for
+/// long — at 1 fs consecutive ticks share an image from 8 s on — so a tick
+/// carries its rank among the ticks sharing its image, and two of them are
+/// two instants, in tick order, at one analog time. The HDL keeps the whole
+/// 64-bit tick range Verilog gives it, as Icarus Verilog does.
 ///
 /// # Reading an instant as a tick
 ///
@@ -535,15 +703,28 @@ impl EventLattice {
 /// stepper keeps with every lane is the same rule again: instants less than one
 /// floor apart are one instant, landed at the latest of them
 /// (`engine::transient`'s `accepted_veriloga_event_time`).
+///
+/// Two words, compared image first: a pair of `u64`s keeps the eight-byte
+/// alignment of everything that holds a key, where a `u128` would double it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Instant(u64);
+pub struct Instant {
+    /// The bit pattern of the image's seconds.
+    bits: u64,
+    /// The rank among the ticks sharing that image.
+    rank: u64,
+}
 
 impl Instant {
     /// The start of an analysis.
     ///
     /// Crate-visible: nothing outside names it, because an out-of-crate caller
     /// builds an instant from the time it has rather than from the origin.
-    pub(crate) const ZERO: Instant = Instant(0);
+    pub(crate) const ZERO: Instant = Instant { bits: 0, rank: 0 };
+
+    /// The key of `seconds`' bit pattern and a rank.
+    const fn from_parts(bits: u64, rank: u64) -> Self {
+        Self { bits, rank }
+    }
 
     /// The instant a number of seconds names, or `None` if it names none.
     ///
@@ -555,29 +736,65 @@ impl Instant {
         if !seconds.is_finite() || seconds < 0.0 {
             return None;
         }
-        Some(Self(if seconds == 0.0 { 0 } else { seconds.to_bits() }))
+        Some(Self::from_parts(
+            if seconds == 0.0 { 0 } else { seconds.to_bits() },
+            0,
+        ))
     }
 
-    /// The seconds this instant is. The exact inverse of [`Self::from_seconds`].
+    /// The seconds this instant is: the exact inverse of
+    /// [`Self::from_seconds`], and for a tick the analog time it lands at.
     pub fn seconds(self) -> f64 {
-        f64::from_bits(self.0)
+        f64::from_bits(self.bits())
     }
 
-    /// The instant an HDL tick names, exactly.
+    /// The bit pattern of [`Self::seconds`].
+    fn bits(self) -> u64 {
+        self.bits
+    }
+
+    /// The rank of a tick among the ticks sharing its image; zero for a time
+    /// named in seconds.
+    fn rank(self) -> u64 {
+        self.rank
+    }
+
+    /// The instant an HDL tick names, exactly: its image, and its rank among
+    /// the ticks sharing that image.
     ///
-    /// A tick past [`TimeResolution::MAX_EXACT_TICKS`] is refused rather than
-    /// rounded, for the reason [`TimeResolution::ticks_to_seconds`] gives: a
-    /// breakpoint that does not land where the event is scheduled is a
-    /// synchronization fault, not an accuracy loss.
+    /// Every tick count has one, and [`Self::tick`] reads it back. The
+    /// seconds are the image a breakpoint is placed at, so the analog side
+    /// lands where the event is scheduled.
     ///
     /// Crate-visible and gated with the only world that has ticks: a caller
     /// outside the crate composes [`TimeResolution::ticks_to_seconds`] with
-    /// [`Self::from_seconds`], which is the same map written out.
+    /// [`Self::from_seconds`], which is the same map written out for every
+    /// tick whose image is its own.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn from_tick(tick: u64, resolution: TimeResolution) -> Result<Self, SchedulerError> {
-        let seconds = resolution.ticks_to_seconds(tick)?;
-        Self::from_seconds(seconds)
-            .ok_or(SchedulerError::TickNotExactlyRepresentable { ticks: tick })
+    pub(crate) fn from_tick(tick: u64, resolution: TimeResolution) -> Self {
+        let image = resolution.tick_instant(tick);
+        let rank = if tick < TimeResolution::SHARED_IMAGE_FLOOR {
+            0
+        } else {
+            tick - resolution.first_tick_at_or_above(image).unwrap_or(tick)
+        };
+        Self::from_parts(image.to_bits(), rank)
+    }
+
+    /// The HDL tick an instant made by [`Self::from_tick`] names: the inverse
+    /// of that map, exact for every tick.
+    ///
+    /// This is how a host reads its own keys back. It is not one of the three
+    /// readings of an analog time below, which take the seconds alone: past
+    /// [`TimeResolution::SHARED_IMAGE_FLOOR`] a tick's seconds are shared, and
+    /// only its rank says which of them it is.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+        let seconds = self.seconds();
+        resolution
+            .first_tick_at_or_above(seconds)
+            .and_then(|first| first.checked_add(self.rank()))
+            .ok_or(SchedulerError::SecondsNotRepresentable { seconds })
     }
 
     /// The HDL tick at or before this instant.
@@ -638,7 +855,7 @@ impl Instant {
         let Some(image) = lattice
             .resolution
             .coincident_tick(seconds, lattice.window(seconds))
-            .and_then(|tick| Self::from_tick(tick, lattice.resolution).ok())
+            .and_then(|tick| Self::from_seconds(lattice.resolution.tick_instant(tick)))
         else {
             return self;
         };
@@ -670,9 +887,15 @@ impl Instant {
     }
 }
 
+/// The seconds, and a tick's rank after a plus sign when the tick shares its
+/// seconds with earlier ones.
 impl fmt::Display for Instant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.seconds())
+        write!(f, "{}", self.seconds())?;
+        match self.rank() {
+            0 => Ok(()),
+            rank => write!(f, "+{rank}"),
+        }
     }
 }
 
@@ -778,8 +1001,8 @@ pub struct OscillationDiagnostic {
     ///
     /// A design's author names a time by its tick, so that is what the
     /// sentence this renders into prints. `None` is the honest answer for an
-    /// instant with no tick on that grid — past the exactly representable
-    /// range — and the sentence then names the instant's seconds instead.
+    /// instant with no tick on that grid — past the last 64-bit tick — and
+    /// the sentence then names the instant's seconds instead.
     pub tick: Option<u64>,
     /// Which limit tripped.
     pub cause: OscillationCause,
@@ -823,12 +1046,7 @@ pub enum SchedulerError {
     SequenceExhausted,
     /// A per-slot execution counter cannot represent another operation.
     AccountingExhausted,
-    /// A tick past the exactly-invertible range reached a seconds conversion.
-    TickNotExactlyRepresentable {
-        /// The offending tick count.
-        ticks: u64,
-    },
-    /// A seconds value was non-finite, negative, or past the exact range.
+    /// A seconds value was non-finite, negative, or past the last 64-bit tick.
     SecondsNotRepresentable {
         /// The offending seconds value.
         seconds: f64,
@@ -856,11 +1074,6 @@ impl fmt::Display for SchedulerError {
         match self {
             SchedulerError::SequenceExhausted => write!(f, "event sequence numbers are exhausted"),
             SchedulerError::AccountingExhausted => write!(f, "event slot accounting is exhausted"),
-            SchedulerError::TickNotExactlyRepresentable { ticks } => write!(
-                f,
-                "event tick {ticks} exceeds {} and has no exact seconds image",
-                TimeResolution::MAX_EXACT_TICKS
-            ),
             SchedulerError::SecondsNotRepresentable { seconds } => {
                 write!(f, "time {seconds:e} s has no representable event tick")
             }
@@ -2548,7 +2761,7 @@ mod tests {
         let resolution = TimeResolution::new(-9).expect("1 ns");
 
         for tick in [0u64, 1, 2, 7, 1_000] {
-            let on_grid = Instant::from_tick(tick, resolution).expect("in range");
+            let on_grid = Instant::from_tick(tick, resolution);
             assert_eq!(on_grid.floor_tick(resolution), Ok(tick));
             assert_eq!(on_grid.nearest_tick(resolution), Ok(tick));
             assert_eq!(on_grid.ceil_tick(resolution), Ok(tick));
@@ -2577,52 +2790,265 @@ mod tests {
     ///
     /// This is the property the whole one-key design rests on: a module's
     /// `#5` and a code model's 100.4 ps output can share one heap because the
-    /// tick is not approximated by the instant it becomes. The bound is
-    /// [`TimeResolution::MAX_EXACT_TICKS`], which is also where `from_tick`
-    /// refuses rather than rounds.
+    /// tick is not approximated by the instant it becomes. It holds for every
+    /// 64-bit tick: where consecutive ticks share one double of seconds, the
+    /// rank keeps them apart and in order. Below that range a tick's instant
+    /// is its image's, and each of the three readings of an analog time names
+    /// the tick again.
     #[test]
     fn an_hdl_tick_embeds_in_an_instant_and_reads_back_as_itself() {
-        for exponent in [-9i8, -12, -15] {
+        for exponent in [-21i8, -15, -12, -9, 0, 2] {
             let resolution = TimeResolution::new(exponent).expect("declared precision");
-            for tick in [
-                0u64,
-                1,
-                2,
-                3,
-                7,
-                999,
-                1_000,
-                1_001,
-                123_456_789,
-                TimeResolution::MAX_EXACT_TICKS,
-            ] {
-                let at = Instant::from_tick(tick, resolution).expect("in range");
+            let mut ticks = vec![0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789];
+            for centre in [1u64 << 51, 1 << 52, 1 << 53, 1 << 63, u64::MAX - 4] {
+                ticks.extend(centre - 4..=centre + 4);
+            }
+            let mut previous = None;
+            for tick in ticks {
+                let at = Instant::from_tick(tick, resolution);
                 assert_eq!(
                     at.seconds(),
-                    resolution.ticks_to_seconds(tick).expect("in range"),
-                    "exponent {exponent} tick {tick} is the seconds the grid names"
+                    resolution
+                        .ticks_to_seconds(tick)
+                        .expect("every tick has seconds"),
+                    "1e{exponent} s tick {tick} is the seconds the grid names"
                 );
-                assert_eq!(
-                    at.floor_tick(resolution),
-                    Ok(tick),
-                    "exponent {exponent} tick {tick} floor round trip"
-                );
-                assert_eq!(
-                    at.nearest_tick(resolution),
-                    Ok(tick),
-                    "exponent {exponent} tick {tick} nearest round trip"
-                );
-                assert_eq!(
-                    at.ceil_tick(resolution),
-                    Ok(tick),
-                    "exponent {exponent} tick {tick} ceil round trip"
-                );
+                assert_eq!(at.tick(resolution), Ok(tick), "1e{exponent} s tick {tick}");
+                if let Some((before, key)) = previous
+                    && before < tick
+                {
+                    assert!(
+                        key < at,
+                        "1e{exponent} s ticks {before} and {tick} keep order"
+                    );
+                }
+                previous = Some((tick, at));
+                if tick < TimeResolution::SHARED_IMAGE_FLOOR {
+                    assert_eq!(at, Instant::from_seconds(at.seconds()).expect("an instant"));
+                    for (rule, read) in [
+                        ("floor", at.floor_tick(resolution)),
+                        ("nearest", at.nearest_tick(resolution)),
+                        ("ceil", at.ceil_tick(resolution)),
+                    ] {
+                        assert_eq!(read, Ok(tick), "1e{exponent} s tick {tick} {rule}");
+                    }
+                }
             }
-            assert!(
-                Instant::from_tick(TimeResolution::MAX_EXACT_TICKS + 1, resolution).is_err(),
-                "a tick with no exact image is refused rather than rounded"
-            );
         }
+    }
+
+    /// Where the exact value of `seconds` sits in ticks of `resolution`, read
+    /// off its exact decimal expansion: `{:.1100}` prints every digit a double
+    /// has, so this is exact rational arithmetic done in base ten, by a route
+    /// that shares nothing with [`TimeResolution::split`].
+    fn decimal_split(resolution: TimeResolution, seconds: f64) -> (u128, TickFraction) {
+        let text = format!("{seconds:.1100}");
+        let (whole, fraction) = text.split_once('.').expect("a decimal point");
+        let mut digits = format!("{whole}{fraction}");
+        let point = whole.len() as i64 - i64::from(resolution.exponent);
+        while point > digits.len() as i64 {
+            digits.push('0');
+        }
+        let (whole, rest) = if point <= 0 {
+            (
+                String::new(),
+                "0".repeat(point.unsigned_abs() as usize) + &digits,
+            )
+        } else {
+            let point = point as usize;
+            (digits[..point].to_owned(), digits[point..].to_owned())
+        };
+        let whole = whole.trim_start_matches('0').parse::<u128>().unwrap_or(0);
+        let rest = rest.trim_end_matches('0');
+        let fraction = match rest.as_bytes().first() {
+            None => TickFraction::Zero,
+            Some(digit) if *digit < b'5' => TickFraction::BelowHalf,
+            Some(b'5') if rest.len() == 1 => TickFraction::Half,
+            Some(_) => TickFraction::AboveHalf,
+        };
+        (whole, fraction)
+    }
+
+    /// The double nearest a decimal number of ticks, by the standard
+    /// library's correctly rounded reader.
+    fn decimal_image(resolution: TimeResolution, ticks: &str) -> f64 {
+        format!("{ticks}e{}", resolution.exponent)
+            .parse()
+            .expect("a decimal")
+    }
+
+    /// The four conversions against an exact reference, over every
+    /// resolution: ticks around `2^51` (the bound the one-multiply reading was
+    /// proven to), `2^52` (where images start to be shared), `2^53` (where the
+    /// tick count stops being an exact double), `2^63` and the top of `u64`,
+    /// with each image, its neighbouring doubles, and the doubles at and
+    /// around each half tick.
+    #[test]
+    fn tick_conversions_are_exact_against_decimal_arithmetic() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut random = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for exponent in -21..=2i8 {
+            let resolution = TimeResolution::new(exponent).expect("a declarable resolution");
+            let mut ticks = vec![0u64, 1, 2, 3, 7, 10, 999, 1_000, 12_345_678_901];
+            for centre in [1u64 << 51, 1 << 52, 1 << 53, 1 << 63, u64::MAX - 3] {
+                ticks.extend(centre - 3..=centre + 3);
+                ticks.push(centre.saturating_add(random() % 100_000));
+            }
+            for _ in 0..40 {
+                ticks.push(random() >> (random() % 64));
+            }
+            for tick in ticks {
+                let image = resolution.tick_instant(tick);
+                assert_eq!(
+                    image.to_bits(),
+                    decimal_image(resolution, &tick.to_string()).to_bits(),
+                    "image of {tick} ticks of 1e{exponent} s"
+                );
+                let half = decimal_image(resolution, &format!("{tick}.5"));
+                for seconds in [image, half] {
+                    for at in [seconds.next_down(), seconds, seconds.next_up()] {
+                        if at < 0.0 {
+                            continue;
+                        }
+                        check_against_decimal(resolution, at);
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_against_decimal(resolution: TimeResolution, seconds: f64) {
+        let exponent = resolution.exponent;
+        let (whole, fraction) = decimal_split(resolution, seconds);
+        let Ok(whole) = u64::try_from(whole) else {
+            assert!(resolution.seconds_to_ticks(seconds).is_err());
+            assert!(resolution.seconds_to_floor_ticks(seconds).is_err());
+            return;
+        };
+        let image = |tick: u64| decimal_image(resolution, &tick.to_string());
+        // A double exactly on a tick is that tick; otherwise the half tick's
+        // nearest double is the tie, and goes later, unless it is short of
+        // the half and the earlier tick's own image.
+        let half = decimal_image(resolution, &format!("{whole}.5"));
+        let later = match fraction {
+            TickFraction::Zero => false,
+            TickFraction::BelowHalf => seconds >= half && image(whole) != seconds,
+            TickFraction::Half | TickFraction::AboveHalf => true,
+        };
+        let nearest = u128::from(whole) + u128::from(later);
+        assert_eq!(
+            resolution.seconds_to_ticks(seconds).ok().map(u128::from),
+            (nearest <= u128::from(u64::MAX)).then_some(nearest),
+            "nearest tick of {seconds:e} s at 1e{exponent} s"
+        );
+        // The last tick whose image is at or below: the exact floor's image
+        // is, and so is every later tick sharing a double with it.
+        let mut floor = whole;
+        while floor < u64::MAX && image(floor + 1) <= seconds {
+            floor += 1;
+        }
+        assert_eq!(
+            resolution.seconds_to_floor_ticks(seconds),
+            Ok(floor),
+            "floor tick of {seconds:e} s at 1e{exponent} s"
+        );
+        let mut ceil = u128::from(whole) + u128::from(fraction != TickFraction::Zero);
+        if let Ok(mut tick) = u64::try_from(ceil) {
+            while tick > 0 && image(tick - 1) >= seconds {
+                tick -= 1;
+            }
+            ceil = u128::from(tick);
+        }
+        assert_eq!(
+            resolution
+                .seconds_to_ceil_ticks(seconds)
+                .ok()
+                .map(u128::from),
+            (ceil <= u128::from(u64::MAX)).then_some(ceil),
+            "ceil tick of {seconds:e} s at 1e{exponent} s"
+        );
+    }
+
+    /// Below `2^51`, the range the one-multiply readings were proven over,
+    /// the exact ones give the same ticks — except the nearest tick of a
+    /// double within one ulp of a half tick, which the product's rounding
+    /// used to decide. Those are the double nearest the half tick, which now
+    /// always goes later, and the double just below it, which now always
+    /// goes earlier; nothing else moves.
+    #[test]
+    fn below_two_to_the_fifty_one_only_the_half_tick_doubles_move() {
+        let previous_estimate = |resolution: TimeResolution, seconds: f64| match resolution.exponent
+        {
+            1 => seconds / 10.0,
+            2 => seconds / 100.0,
+            exponent => seconds * TICKS_PER_SECOND[exponent.unsigned_abs() as usize],
+        };
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut moved = 0;
+        for exponent in -21..=2i8 {
+            let resolution = TimeResolution::new(exponent).expect("a declarable resolution");
+            for _ in 0..2_000 {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let tick = (state >> 13) % (1 << 51);
+                let image = resolution.tick_instant(tick);
+                let half = decimal_image(resolution, &format!("{tick}.5"));
+                for seconds in [
+                    image.next_down(),
+                    image,
+                    image.next_up(),
+                    half.next_down(),
+                    half,
+                    half.next_up(),
+                ] {
+                    if seconds < 0.0 {
+                        continue;
+                    }
+                    let estimate = previous_estimate(resolution, seconds);
+                    let mut floor = estimate.floor() as u64;
+                    while floor > 0 && resolution.one_operation_image(floor) > seconds {
+                        floor -= 1;
+                    }
+                    while resolution.one_operation_image(floor + 1) <= seconds {
+                        floor += 1;
+                    }
+                    assert_eq!(resolution.seconds_to_floor_ticks(seconds), Ok(floor));
+                    let ceil = if resolution.one_operation_image(floor) >= seconds {
+                        floor
+                    } else {
+                        floor + 1
+                    };
+                    assert_eq!(resolution.seconds_to_ceil_ticks(seconds), Ok(ceil));
+                    let previous = estimate.round() as u64;
+                    let nearest = resolution.seconds_to_ticks(seconds).expect("in range");
+                    if nearest != previous {
+                        moved += 1;
+                        // The half tick this double is near, which need not
+                        // be the sample's: a tick's neighbour can be the
+                        // double nearest the half tick before it.
+                        let half = decimal_image(resolution, &format!("{floor}.5"));
+                        let expected = if seconds == half {
+                            (floor + 1, floor)
+                        } else {
+                            assert_eq!(seconds, half.next_down(), "only half-tick doubles move");
+                            (floor, floor + 1)
+                        };
+                        assert_eq!(
+                            (nearest, previous),
+                            expected,
+                            "{seconds:e} s at 1e{exponent}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(moved > 0, "the sweep reaches the half-tick doubles");
     }
 
     /// An instant that is on no grid is kept as the time it is.
@@ -2666,7 +3092,7 @@ mod tests {
         for exponent in [-9i8, -12, -15] {
             let resolution = TimeResolution::new(exponent).expect("declared precision");
             for tick in [0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789] {
-                let at = Instant::from_tick(tick, resolution).expect("in range");
+                let at = Instant::from_tick(tick, resolution);
                 assert_eq!(
                     at.floor_tick(resolution),
                     Ok(tick),
@@ -2685,7 +3111,7 @@ mod tests {
         assert_eq!(Instant::from_seconds(f64::NAN), None);
         assert_eq!(Instant::from_seconds(f64::INFINITY), None);
         assert!(
-            instant(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+            instant(u64::MAX as f64 * 1.0e-9 * 2.0)
                 .floor_tick(resolution)
                 .is_err()
         );
@@ -2705,7 +3131,7 @@ mod tests {
     fn picosecond_lattice_at_a_millisecond() -> (EventLattice, u64, Instant) {
         let resolution = TimeResolution::new(-12).expect("1 ps");
         let tick = 1_000_104_000;
-        let image = Instant::from_tick(tick, resolution).expect("in range");
+        let image = Instant::from_tick(tick, resolution);
         let floor = crate::numerics::integration::clock_resolution(image.seconds());
         (EventLattice::new(resolution, floor), tick, image)
     }
@@ -2817,7 +3243,7 @@ mod tests {
             "the image is after the instant that scheduled it"
         );
 
-        let next = Instant::from_tick(tick + 1_000, resolution).expect("in range");
+        let next = Instant::from_tick(tick + 1_000, resolution);
         let sum = instant(now.seconds() + 1.0e-9);
         assert!(
             sum != next && (sum.seconds() - next.seconds()).abs() < lattice.window(sum.seconds())
@@ -2835,7 +3261,7 @@ mod tests {
         let resolution = TimeResolution::new(-12).expect("1 ps");
         let lattice = EventLattice::new(resolution, 0.9e-12);
         let tick = 5_000;
-        let image = Instant::from_tick(tick, resolution).expect("in range");
+        let image = Instant::from_tick(tick, resolution);
         let cap = resolution.seconds_per_tick() * EventLattice::MAX_WINDOW_PER_TICK;
         assert_eq!(lattice.window(image.seconds()), cap);
         assert!((cap - 1.0e-15).abs() < 1.0e-30);
@@ -2864,7 +3290,7 @@ mod tests {
     #[test]
     fn a_lattice_with_no_declared_floor_resolves_the_clock() {
         let resolution = TimeResolution::new(-12).expect("1 ps");
-        let image = Instant::from_tick(1_000, resolution).expect("in range");
+        let image = Instant::from_tick(1_000, resolution);
         for floor in [0.0, -1.0, f64::NAN] {
             let lattice = EventLattice::new(resolution, floor);
             assert_eq!(

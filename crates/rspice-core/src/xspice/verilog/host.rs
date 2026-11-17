@@ -255,8 +255,23 @@ pub enum DigitalRunError {
         /// The name that was asked for.
         name: String,
     },
-    /// The run needed more ticks than the decimal grid can represent exactly.
+    /// The run needed more ticks than 64-bit simulation time has.
     TickOverflow,
+    /// A delay that ends past the last tick of 64-bit simulation time.
+    ///
+    /// Verilog keeps simulation time as a 64-bit count of the design's
+    /// precision (IEEE 1364-2005 section 17.7.1), so a delay whose end does
+    /// not fit has no time to fire at: wrapping would fire it in the past, as
+    /// Icarus Verilog does, and saturating would fire it at a time it did not
+    /// ask for.
+    DelayPastTimeRange {
+        /// What asked for the delay: a process, or the drive of a net.
+        what: String,
+        /// The tick it asked at.
+        tick: u64,
+        /// The delay, in design ticks.
+        delay: u64,
+    },
     /// The logical event-order counter cannot represent another operation.
     EventSequenceOverflow,
     /// A stimulus names a different module than the design was compiled for.
@@ -375,9 +390,12 @@ impl fmt::Display for DigitalRunError {
                 write!(f, "the compiled design declares no signal named `{name}`")
             }
             Self::EventSequenceOverflow => write!(f, "digital event ordering sequence exhausted"),
-            Self::TickOverflow => write!(
+            Self::TickOverflow => write!(f, "the run reached a time past 64-bit simulation time"),
+            Self::DelayPastTimeRange { what, tick, delay } => write!(
                 f,
-                "the run reached a time past the exactly representable tick range"
+                "{what} asked at tick {tick} for a delay of {delay} ticks, which ends past tick \
+                 {}, the last of 64-bit simulation time",
+                u64::MAX
             ),
             Self::StimulusModule {
                 compiled,
@@ -457,10 +475,6 @@ enum ProcessStatus {
     AwaitingJoin,
     /// Reached `Return`. An `initial` process ends here and never runs again.
     Finished,
-    /// Suspended on a `#delay` that ends past the last tick the run can
-    /// represent, so past the end of the run: it is still suspended, and a
-    /// `disable` or the run's end is all that reaches it.
-    Parked,
 }
 
 /// One thread's schedule state: a process's own thread, or a child a `fork`
@@ -509,7 +523,7 @@ impl ProcessSlot {
 fn name_oscillating_tick(resolution: TimeResolution, error: SchedulerError) -> SchedulerError {
     match error {
         SchedulerError::Oscillation(mut diagnostic) => {
-            diagnostic.tick = diagnostic.at.floor_tick(resolution).ok();
+            diagnostic.tick = diagnostic.at.tick(resolution).ok();
             SchedulerError::Oscillation(diagnostic)
         }
         other => other,
@@ -531,7 +545,7 @@ pub struct DigitalHost {
     /// It lives here rather than in the kernel because the kernel is keyed on
     /// an exact [`Instant`] and declares no grid at all. This host is the seam
     /// between the two — a tick goes in as [`Instant::from_tick`] and comes
-    /// back as [`Instant::floor_tick`] — and the round trip is exact, so every
+    /// back as [`Instant::tick`] — and the round trip is exact, so every
     /// tick this host puts in is the tick it gets out.
     resolution: TimeResolution,
     /// One stable wakeup identity, with captured payloads owned by their due tick.
@@ -897,23 +911,24 @@ impl DigitalHost {
         self.scheduler.limits()
     }
 
-    /// The instant one of this host's ticks names, exactly.
+    /// The instant one of this host's ticks names, exactly, for every 64-bit
+    /// tick.
     ///
     /// Every tick reaching the kernel goes through here, and every instant
     /// coming back out goes through [`Self::tick_of`]. The pair is the whole
     /// seam between the design's declared grid and the kernel's exact key.
-    fn instant_of(&self, tick: u64) -> Result<Instant, DigitalRunError> {
-        Instant::from_tick(tick, self.resolution).map_err(DigitalRunError::from)
+    fn instant_of(&self, tick: u64) -> Instant {
+        Instant::from_tick(tick, self.resolution)
     }
 
     /// The tick an instant this host scheduled is on.
     ///
-    /// Exact rather than approximate: `floor_tick(from_tick(T)) == T` for
-    /// every tick a run can reach, which is what lets this host keep speaking
-    /// in ticks while the kernel orders instants.
+    /// Exact rather than approximate: `tick(from_tick(T)) == T` for every
+    /// 64-bit tick, including ticks that share one double of seconds, which
+    /// is what lets this host keep speaking in ticks while the kernel orders
+    /// instants.
     fn tick_of(&self, at: Instant) -> Result<u64, DigitalRunError> {
-        at.floor_tick(self.resolution)
-            .map_err(DigitalRunError::from)
+        at.tick(self.resolution).map_err(DigitalRunError::from)
     }
 
     #[doc(hidden)]
@@ -1098,7 +1113,7 @@ impl DigitalHost {
     pub(crate) fn next_tick(&self) -> Option<u64> {
         self.scheduler
             .next_instant()
-            .and_then(|at| at.floor_tick(self.resolution).ok())
+            .and_then(|at| self.tick_of(at).ok())
             .filter(|tick| !self.finished_before(*tick))
     }
 
@@ -1111,7 +1126,7 @@ impl DigitalHost {
     /// that happens to sit at the same interned slot.
     pub(crate) fn next_tick_process(&self) -> Option<(u64, Option<usize>)> {
         let (at, target) = self.scheduler.next_instant_target()?;
-        let tick = at.floor_tick(self.resolution).ok()?;
+        let tick = self.tick_of(at).ok()?;
         if self.finished_before(tick) {
             return None;
         }
@@ -1386,7 +1401,6 @@ impl DigitalHost {
     /// [`Self::begin_endpoint_settle`].
     pub(crate) fn endpoint_settle_is_idle(&self, tick: u64) -> bool {
         self.elaboration_closed
-            && self.instant_of(tick).is_ok()
             && !self.finished_before(tick)
             && self.analog_ready.is_none()
             && self.deferred_start.is_empty()
@@ -1507,7 +1521,7 @@ impl DigitalHost {
         tick: u64,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
-        let bound = self.instant_of(tick)?;
+        let bound = self.instant_of(tick);
         while let Some(next) = self.scheduler.next_instant() {
             if next > bound {
                 break;
@@ -1559,7 +1573,7 @@ impl DigitalHost {
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
         mut resumed: Option<bool>,
     ) -> Result<(), DigitalRunError> {
-        let bound = self.instant_of(tick)?;
+        let bound = self.instant_of(tick);
         let resolution = self.resolution;
         let mut search = RepetitionSearch::default();
         loop {
@@ -1759,7 +1773,7 @@ impl DigitalHost {
             // whatever the signal holds at this moment.
             let due = self.store.take_deferred_in(region);
             if !due.is_empty() {
-                let at = self.instant_of(tick)?;
+                let at = self.instant_of(tick);
                 let resolution = self.resolution;
                 for update in &due {
                     self.scheduler
@@ -1861,7 +1875,7 @@ impl DigitalHost {
     ) -> Result<(), DigitalRunError> {
         let absolute_seconds = match physical_seconds.or(self.analog_activation_seconds) {
             Some(seconds) => seconds,
-            None => self.instant_of(tick)?.seconds(),
+            None => self.instant_of(tick).seconds(),
         };
         self.store
             .set_activation_clock(rspice_veriloga::canonical_ir::DigitalClock {
@@ -1966,16 +1980,15 @@ impl DigitalHost {
                 process: self.describe(index),
                 delay,
             })?;
-            // An update due past the last representable tick lands after the
-            // run ends, as a delayed process does (section 9.7.1).
-            let Some(due) = tick
-                .checked_add(delay)
-                .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
-            else {
-                continue;
-            };
+            let due =
+                tick.checked_add(delay)
+                    .ok_or_else(|| DigitalRunError::DelayPastTimeRange {
+                        what: format!("process {}", self.describe(index)),
+                        tick,
+                        delay,
+                    })?;
             if !self.delayed_updates.contains_key(&due) {
-                let at = self.instant_of(due)?;
+                let at = self.instant_of(due);
                 self.scheduler.schedule_id_at(
                     at,
                     SchedulerRegion::Active,
@@ -2097,18 +2110,17 @@ impl DigitalHost {
                             self.inactive.push(index);
                             return Ok(());
                         }
-                        // IEEE 1364-2005 section 9.7.1 makes a negative delay
-                        // 64-bit unsigned time, so `#-5` is legal and ends
-                        // 2^64 - 5 units on. A delay that ends past the last
-                        // tick the run can represent ends after the run does;
-                        // the rest of the design keeps running.
-                        let Some(target) = tick
-                            .checked_add(delay as u64)
-                            .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
-                        else {
-                            self.slots[index].status = ProcessStatus::Parked;
-                            return Ok(());
-                        };
+                        // A delay past the run's stop waits beyond it, and
+                        // the rest of the design keeps running; one past the
+                        // last 64-bit tick has no time to resume at.
+                        let delay = delay.unsigned_abs();
+                        let target = tick.checked_add(delay).ok_or_else(|| {
+                            DigitalRunError::DelayPastTimeRange {
+                                what: format!("process {}", self.describe(index)),
+                                tick,
+                                delay,
+                            }
+                        })?;
                         self.queue(index, target)
                     }
                 }
@@ -2374,7 +2386,7 @@ impl DigitalHost {
             return Ok(());
         }
         self.slots[index].status = ProcessStatus::Queued;
-        let at = self.instant_of(tick)?;
+        let at = self.instant_of(tick);
         self.scheduler.schedule_id_superseding_at(
             at,
             SchedulerRegion::Active,

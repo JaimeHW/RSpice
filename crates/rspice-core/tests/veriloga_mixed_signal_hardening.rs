@@ -3162,6 +3162,61 @@ fn a_zero_delay_loop_an_analog_event_enables_is_refused_at_the_event_tick() {
     }
 }
 
+/// A 1 fs design that waits 8.1 s: from 8 s on a double of seconds is wider
+/// than a femtosecond, and tick 8.1e15 + 6 shares its double with + 7.
+const SHARED_SECONDS: &str = "`timescale 1fs/1fs
+module late(q);
+  output q; reg q;
+  initial begin q = 0; #(64'd8100000000000006) q = 1; end
+  always @(q) $display(\"q=%b at %0t\", q, $time);
+endmodule
+";
+
+/// Verilog time is a 64-bit count of the precision (IEEE 1364-2005 section
+/// 17.7.1), so a 1 fs design runs past 2^53 fs, 9.007 s, on exact ticks, as
+/// Icarus Verilog 13 runs it. The trial at the seconds of its one activation
+/// lands on it, though those seconds floor to the later tick sharing them.
+#[test]
+fn a_femtosecond_design_runs_past_two_to_the_fifty_three_femtoseconds() {
+    let model = ModelFile::hdl("shared_seconds", SHARED_SECONDS);
+    let deck = format!(
+        "* a 1 fs design past 2^53 fs\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.0\n\
+         xl q late\n\
+         rq q 0 1k\n\
+         .tran 10m 9.2\n\
+         .end\n",
+        model.deck_path()
+    );
+    let collector = std::sync::Arc::new(rspice_core::config::HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let result = Engine::new(config)
+        .run_tran(&netlist, 9.2, 10.0e-3)
+        .expect("the deck runs");
+    let lines: Vec<_> = collector
+        .take()
+        .into_iter()
+        .map(|record| record.text.trim_end().to_owned())
+        .collect();
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("q=1 at 8100000000000006"),
+        "{lines:?}"
+    );
+    let edge = digital_points(&result, "q")
+        .into_iter()
+        .find(|(_, state)| state == "One")
+        .map(|(time, _)| time);
+    assert_eq!(
+        edge,
+        Some(8.100000000000007),
+        "the D/A edge lands on the tick's seconds"
+    );
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps

@@ -62,12 +62,17 @@ impl Default for SchedulerCheckpointLimits {
 ///
 /// Times and real payloads use IEEE-754 bits, retaining off-grid instants,
 /// signed zero and nonfinite payloads without JSON floating-point conversion.
+/// A time's rank among HDL ticks sharing its seconds is written only where it
+/// is not zero, which is only past the range in which every tick has seconds
+/// of its own; every other image is unchanged by it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchedulerCheckpoint {
     version: u32,
     limits: SchedulerLimits,
     current_bits: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    current_rank: u64,
     started: bool,
     next_sequence: u64,
     delta_cycles: u32,
@@ -81,6 +86,8 @@ pub struct SchedulerCheckpoint {
 #[serde(deny_unknown_fields)]
 struct EventImage {
     at_bits: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    at_rank: u64,
     region: SchedulerRegion,
     sequence: u64,
     target: u32,
@@ -105,7 +112,7 @@ impl SchedulerCheckpoint {
     ) -> impl Iterator<Item = (Instant, SchedulerRegion, TargetId, EventValue)> + '_ {
         self.events.iter().map(|event| {
             (
-                Instant(event.at_bits),
+                Instant::from_parts(event.at_bits, event.at_rank),
                 event.region,
                 TargetId(event.target),
                 (&event.value).into(),
@@ -153,9 +160,16 @@ fn error(message: &str) -> SchedulerCheckpointError {
     SchedulerCheckpointError(message.into())
 }
 
-fn instant(bits: u64) -> Result<Instant, SchedulerCheckpointError> {
+fn is_zero(rank: &u64) -> bool {
+    *rank == 0
+}
+
+/// The instant of a time's bits and rank. Whether a rank names a tick is the
+/// enclosing host's to check: it is the one that knows the grid.
+fn instant(bits: u64, rank: u64) -> Result<Instant, SchedulerCheckpointError> {
     Instant::from_seconds(f64::from_bits(bits))
-        .filter(|at| at.0 == bits)
+        .filter(|at| at.bits() == bits)
+        .map(|_| Instant::from_parts(bits, rank))
         .ok_or_else(|| error("time is not a canonical finite nonnegative instant"))
 }
 
@@ -211,18 +225,22 @@ impl EventScheduler {
             .iter()
             .filter(|Reverse(queued)| !self.queues.cancelled.contains(&queued.0.sequence))
             .map(|Reverse(queued)| EventImage {
-                at_bits: queued.0.at.0,
+                at_bits: queued.0.at.bits(),
+                at_rank: queued.0.at.rank(),
                 region: queued.0.region,
                 sequence: queued.0.sequence,
                 target: queued.0.target.0,
                 value: queued.0.value.into(),
             })
             .collect();
-        events.sort_unstable_by_key(|event| (event.at_bits, event.region, event.sequence));
+        events.sort_unstable_by_key(|event| {
+            (event.at_bits, event.at_rank, event.region, event.sequence)
+        });
         Ok(SchedulerCheckpoint {
             version: VERSION,
             limits: self.limits,
-            current_bits: self.current.0,
+            current_bits: self.current.bits(),
+            current_rank: self.current.rank(),
             started: self.started,
             next_sequence: self.queues.next_sequence,
             delta_cycles: self.slot_delta_cycles,
@@ -256,7 +274,7 @@ impl EventScheduler {
         if image.activations.len() != image.targets.len() {
             return Err(error("activation counts do not match target identities"));
         }
-        let current = instant(image.current_bits)?;
+        let current = instant(image.current_bits, image.current_rank)?;
         let activation_count = image
             .activations
             .iter()
@@ -297,7 +315,7 @@ impl EventScheduler {
         }
         let mut sequences = HashSet::with_capacity(image.events.len());
         for event in &image.events {
-            let at = instant(event.at_bits)?;
+            let at = instant(event.at_bits, event.at_rank)?;
             if event.target as usize >= image.targets.len() {
                 return Err(error("event references an undeclared target"));
             }

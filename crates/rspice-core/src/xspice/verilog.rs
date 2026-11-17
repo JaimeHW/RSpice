@@ -1053,9 +1053,7 @@ pub fn run_digital_testbench(
     host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
     host.set_staged_start(true);
     host.start()?;
-    let ceiling = options
-        .tick_ceiling
-        .unwrap_or(TimeResolution::MAX_EXACT_TICKS);
+    let ceiling = options.tick_ceiling.unwrap_or(u64::MAX);
     let mut end_tick = 0;
     let mut end = HdlTestbenchEnd::Quiescent;
     // Every step is accepted: its output is released, and its file writes

@@ -247,9 +247,7 @@ impl DigitalSignalStore {
             absolute_seconds: f64::from_bits(bits),
         });
         if restored.activation_clock.is_some_and(|clock| {
-            !clock.absolute_seconds.is_finite()
-                || clock.absolute_seconds < 0.0
-                || clock.tick > crate::xspice::event_scheduler::TimeResolution::MAX_EXACT_TICKS
+            !clock.absolute_seconds.is_finite() || clock.absolute_seconds < 0.0
         }) {
             return Err("invalid digital activation clock".into());
         }

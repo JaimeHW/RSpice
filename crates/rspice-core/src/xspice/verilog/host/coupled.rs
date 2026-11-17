@@ -323,7 +323,7 @@ impl DigitalActiveExchange<'_> {
         }
         let tick = self.tick;
         let host = self.host.get_mut();
-        let at = host.instant_of(tick)?;
+        let at = host.instant_of(tick);
         let resolution = host.resolution;
         for (driver, _) in drives {
             host.scheduler

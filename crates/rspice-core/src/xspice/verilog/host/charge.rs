@@ -97,13 +97,17 @@ impl DigitalHost {
         for change in changes {
             let bit = (change.signal, change.bit);
             timers.cancel(bit);
-            // A decay due past the last representable tick happens after
-            // the run ends.
-            if let Some(due) = change
-                .decay
-                .and_then(|decay| tick.checked_add(decay))
-                .filter(|due| *due <= TimeResolution::MAX_EXACT_TICKS)
-            {
+            if let Some(decay) = change.decay {
+                let due =
+                    tick.checked_add(decay)
+                        .ok_or_else(|| DigitalRunError::DelayPastTimeRange {
+                            what: format!(
+                                "the charge decay of {}",
+                                signal_name(&self.plan, change.signal)
+                            ),
+                            tick,
+                            delay: decay,
+                        })?;
                 timers.insert(due, bit);
             }
         }
@@ -143,7 +147,7 @@ impl DigitalHost {
         }
         self.scheduler.cancel_target(target);
         if let Some(next) = next {
-            let at = self.instant_of(next)?;
+            let at = self.instant_of(next);
             self.scheduler.schedule_id_at(
                 at,
                 SchedulerRegion::Active,
@@ -171,7 +175,6 @@ impl DigitalHost {
             if previous.is_some_and(|previous| previous >= *tick) || bits.is_empty() {
                 return Err("unordered or empty charge decay bucket".into());
             }
-            self.instant_of(*tick).map_err(|e| e.to_string())?;
             for bit in bits {
                 if !self.store.holds_charge(bit.signal, bit.bit)
                     || timers.bits.contains_key(&(bit.signal, bit.bit))

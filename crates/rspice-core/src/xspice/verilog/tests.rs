@@ -1735,6 +1735,78 @@ fn a_testbench_prints_what_icarus_prints() {
     assert_eq!(finish.origin.scope, "tb");
 }
 
+/// Verilog time is a 64-bit count of the design's precision (IEEE 1364-2005
+/// section 17.7.1), so a 1 fs design 18 s in still steps one femtosecond at
+/// a time. From 8 s on, consecutive femtoseconds share one double of seconds
+/// — here 2^54 to 2^54 + 3 fs are a single double — and each is still its
+/// own time step: its delta cycles finish before the next tick starts. The
+/// expected lines are Icarus Verilog 13's for this module.
+#[test]
+fn femtosecond_ticks_that_share_their_seconds_are_still_separate_time_steps() {
+    const FAR: u64 = 1 << 54;
+    let femtoseconds = TimeResolution::new(-15).expect("1 fs");
+    let seconds = |tick: u64| Instant::from_tick(tick, femtoseconds).seconds();
+    assert!(
+        seconds(FAR) == seconds(FAR + 1) && seconds(FAR + 1) == seconds(FAR + 2),
+        "the three ticks share one double"
+    );
+    let report = bench(
+        "`timescale 1fs/1fs\n\
+         module tb;\n\
+         \x20 reg a, b;\n\
+         \x20 initial begin\n\
+         \x20   a = 0; b = 0;\n\
+         \x20   #(64'd18014398509481984);\n\
+         \x20   a = 1;\n\
+         \x20   #1 a = 0;\n\
+         \x20   #1 a = 1;\n\
+         \x20   #1 $finish;\n\
+         \x20 end\n\
+         \x20 always @(a) b = a;\n\
+         \x20 always @(b) $display(\"b=%b a=%b at %0t\", b, a, $time);\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "b=0 a=0 at 0\n\
+         b=1 a=1 at 18014398509481984\n\
+         b=0 a=0 at 18014398509481985\n\
+         b=1 a=1 at 18014398509481986\n"
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::Finished);
+    assert_eq!(report.end_tick, FAR + 3);
+}
+
+/// A delay that ends past the last tick of 64-bit time has no time to fire
+/// at. Icarus Verilog wraps it and fires it in the past; this is refused,
+/// naming the process, the tick and the delay.
+#[test]
+fn a_delay_past_the_end_of_64_bit_time_is_refused_with_its_time() {
+    let sources = [(
+        std::path::PathBuf::from("tb.v"),
+        "`timescale 1ns/1ns\n\
+         module tb;\n\
+         \x20 initial begin\n\
+         \x20   #10;\n\
+         \x20   #(64'h7FFFFFFFFFFFFFFF);\n\
+         \x20   #(64'h7FFFFFFFFFFFFFFF) $display(\"wrapped\");\n\
+         \x20 end\n\
+         endmodule\n"
+            .to_owned(),
+    )];
+    let error = run_digital_testbench(&sources, &HdlTestbenchOptions::default())
+        .expect_err("the delay has no time to end at")
+        .to_string();
+    assert!(
+        error
+            .contains("asked at tick 9223372036854775817 for a delay of 9223372036854775807 ticks")
+            && error.contains("past tick 18446744073709551615, the last of 64-bit simulation time")
+            && error.contains("initial"),
+        "{error}"
+    );
+}
+
 /// IEEE 1364-2005 sections 12.4 and 17.1.1.6: a generate block is a scope,
 /// so `%m` in a process written inside one names it. An unnamed block is
 /// `genblk<n>`, `<n>` numbering the generate constructs of its scope from 1

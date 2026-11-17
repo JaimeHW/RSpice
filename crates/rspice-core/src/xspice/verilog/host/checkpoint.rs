@@ -203,8 +203,6 @@ enum StatusImage {
     Finished,
     /// At a `join`, waiting for the threads it forked.
     Join,
-    /// On a delay that ends after the run.
-    Parked,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -325,7 +323,6 @@ impl DigitalHost {
                     ProcessStatus::AwaitingExpression(token) => StatusImage::Expression(*token),
                     ProcessStatus::AwaitingJoin => StatusImage::Join,
                     ProcessStatus::Finished => StatusImage::Finished,
-                    ProcessStatus::Parked => StatusImage::Parked,
                     _ => unreachable!("checked drained boundary"),
                 },
                 frames: vec![FrameImage {
@@ -626,7 +623,6 @@ impl DigitalHost {
             let status = match &image.status {
                 StatusImage::Queued => ProcessStatus::Queued,
                 StatusImage::Finished => ProcessStatus::Finished,
-                StatusImage::Parked => ProcessStatus::Parked,
                 StatusImage::Event(image) => {
                     let DigitalWaitRequest::Event(terms) =
                         reader.restore_wait(image).map_err(|e| e.to_string())?
@@ -685,7 +681,6 @@ impl DigitalHost {
             if previous.is_some_and(|previous| previous >= *tick) || images.is_empty() {
                 return Err("unordered or empty delayed update bucket".into());
             }
-            restored.instant_of(*tick).map_err(|e| e.to_string())?;
             let mut updates = Vec::with_capacity(images.len());
             for image in images {
                 updates.push(reader.restore_deferred(image).map_err(|e| e.to_string())?);
@@ -763,7 +758,7 @@ impl DigitalHost {
                     .ok_or_else(|| "suspended process has no continuation".to_string())
             };
             match &slot.status {
-                ProcessStatus::Queued | ProcessStatus::Parked => reader
+                ProcessStatus::Queued => reader
                     .validate_timed_resume(require_frame()?)
                     .map_err(|e| e.to_string())?,
                 ProcessStatus::AwaitingEvent(terms) => {
@@ -906,7 +901,7 @@ impl DigitalHost {
                 return Err("host wakeup region or payload differs".into());
             }
             let tick = self.tick_of(at).map_err(|e| e.to_string())?;
-            if self.instant_of(tick).map_err(|e| e.to_string())? != at {
+            if self.instant_of(tick) != at {
                 return Err("host wakeup is not on its design grid".into());
             }
             if target == self.nba_target {
@@ -1189,6 +1184,61 @@ endmodule
                 .unwrap_err();
             assert!(error.contains("charge decay"), "{error}");
         }
+    }
+
+    /// A 1 fs design 18 s in has its next femtoseconds pending at one double
+    /// of seconds, told apart by rank: the image carries each rank, only
+    /// where it is not zero, and the restored host runs the same ticks in the
+    /// same order to the same image.
+    #[test]
+    fn host_checkpoint_resumes_ticks_that_share_their_seconds() {
+        const FAR: u64 = 1 << 54;
+        const SOURCE: &str = "`timescale 1fs/1fs\nmodule far;\n  reg q;\n  integer n;\n  \
+             initial begin q = 0; n = 0; #(64'd18014398509481984) q = 1; \
+             #1 q = 0; #1 q = 1; #1 q = 0; end\n  always @(q) n = n + 1;\nendmodule\n";
+        let femtosecond_host = || {
+            let plan = rspice_veriloga::VerilogACompiler::default()
+                .compile_canonical_ir(SOURCE)
+                .unwrap()
+                .digital;
+            DigitalHost::new(
+                &plan,
+                TimeResolution::new(-15).unwrap(),
+                SchedulerLimits::default(),
+            )
+        };
+        let mut original = femtosecond_host();
+        original.start().unwrap();
+        original.advance_to(FAR).unwrap();
+        let saved = transport(&image(&original));
+        let ranks: Vec<_> = serde_json::to_value(&saved).unwrap()["scheduler"]["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event.get("at_rank").cloned())
+            .collect();
+        assert_eq!(
+            ranks,
+            [Some(json!(1))],
+            "the pending tick FAR + 1 shares FAR's seconds"
+        );
+        let mut restored = femtosecond_host();
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let count = |host: &DigitalHost| host.read(signal(host, "n")).unwrap().to_u64();
+            let before = count(host).unwrap();
+            for (tick, q) in [(FAR + 1, 0), (FAR + 2, 1), (FAR + 3, 0)] {
+                assert_eq!(host.next_tick(), Some(tick));
+                host.advance_to(tick).unwrap();
+                assert_eq!(host.read(signal(host, "q")).unwrap().to_u64(), Some(q));
+            }
+            assert_eq!(host.next_tick(), None);
+            assert_eq!(count(host), Some(before + 3), "one wake per tick");
+        }
+        assert_eq!(image(&restored), image(&original));
     }
 
     /// IEEE 1364-2005 sections 6.1.3 and 7.14: an image taken while a
