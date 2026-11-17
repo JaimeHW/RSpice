@@ -32,6 +32,24 @@ enum ToolbarIntent {
 }
 
 pub fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    // The page is one screen tall and its table takes what the bands leave
+    // of it; where that is less than the table's least, as on a phone, the
+    // page scrolls rather than running the table under the dock. The screen
+    // is measured once, outside the scroll, so the table's height never
+    // follows the scroll offset.
+    let screen = ui.available_height();
+    ScrollArea::vertical()
+        .id_salt("workbench.project.configuration.page")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let size = vec2(ui.available_width(), screen);
+            ui.allocate_ui_with_layout(size, Layout::top_down(Align::Min), |ui| {
+                page(ui, cx);
+            });
+        });
+}
+
+fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let resolution = cx.state.configuration.resolution(
         &cx.model.workspace,
         &cx.model.library_manager,
