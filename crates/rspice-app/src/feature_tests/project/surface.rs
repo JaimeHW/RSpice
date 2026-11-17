@@ -712,7 +712,18 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
         egui::vec2(390.0, 844.0),
     ] {
         let mut app = recovery_project_app(3, false, false);
+        // Two checkpoints made minutes apart are told apart by the time in
+        // the row; a tablet has no hover to read it from.
+        let made = rspice_app_state::time_compat::utc_stamp(
+            app.state.project.project_checkpoint_recovery.checkpoints[0].created_unix_ms(),
+        );
         let text = painted_project_page(size, |ui| show(ui, &mut app));
+        assert!(
+            text.contains(&format!("{made} \u{b7} 6 min ago \u{b7} revision 3")),
+            "{made:?} missing at {}x{}:\n{text}",
+            size.x,
+            size.y
+        );
         for expected in [
             "Recovery",
             "3 checkpoints",

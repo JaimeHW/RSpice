@@ -267,12 +267,15 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
 
     let hold = CheckpointJobHold::default();
     app.state.project.project_checkpoint_recovery.job_hold = Some(hold.clone());
+    assert_eq!(restores_offered(&listed), [true, true]);
     app_frame(&ctx, &mut app, click_on(&listed, "Create checkpoint"));
     for _ in 0..IDLE_FRAMES {
         let waiting = app_frame(&ctx, &mut app, Vec::new());
         let text = painted(&waiting);
         assert!(text.contains("Creating checkpoint\u{2026}"), "{text}");
         assert!(text.contains("2 checkpoints"), "{text}");
+        // Restoring saves a copy from the list the job is about to change.
+        assert_eq!(restores_offered(&waiting), [false, false]);
     }
 
     hold.release();
@@ -280,6 +283,7 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
     let text = painted(&created);
     assert!(text.contains("Create checkpoint"), "{text}");
     assert!(!text.contains("Creating checkpoint\u{2026}"), "{text}");
+    assert_eq!(restores_offered(&created), [true, true, true]);
     assert!(
         app.state
             .model
@@ -288,6 +292,70 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
             .any(|entry| entry.message.starts_with("Created project checkpoint")),
         "the Console records the checkpoint"
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Whether each checkpoint row's Restore… can be pressed, top to bottom.
+fn restores_offered(output: &egui::FullOutput) -> Vec<bool> {
+    let Some(update) = output.platform_output.accesskit_update.as_ref() else {
+        return Vec::new();
+    };
+    let mut restores = update
+        .nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.label().is_some_and(|label| {
+                label.starts_with("Restore ") && label.ends_with(" as a new project")
+            })
+        })
+        .map(|(_, node)| {
+            (
+                node.bounds().map_or(0.0, |bounds| bounds.y0),
+                !node.is_disabled(),
+            )
+        })
+        .collect::<Vec<_>>();
+    restores.sort_by(|a, b| a.0.total_cmp(&b.0));
+    restores.into_iter().map(|(_, offered)| offered).collect()
+}
+
+/// A checkpoint that cannot be written raises a notice: the list does not
+/// change, so without one the button looks as if it did nothing.
+#[test]
+fn a_checkpoint_that_cannot_be_written_raises_a_notice() {
+    let (mut app, root) = saved_project("recovery-page-create-fails");
+    create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Recovery;
+    let ctx = offscreen();
+    let listed = paint_until(&ctx, &mut app, |text| {
+        text.lines().any(|line| line == "1 checkpoint")
+    });
+    let raised = |app: &RSpiceApp| {
+        app.state
+            .workbench
+            .toasts
+            .activity()
+            .iter()
+            .filter(|toast| toast.title() == "Checkpoint not created")
+            .count()
+    };
+    assert_eq!(raised(&app), 0);
+
+    // The recovery folder becomes a file: nothing can be written into it.
+    let folder = root.join(".rspice-recovery");
+    std::fs::remove_dir_all(&folder).expect("recovery folder removed");
+    std::fs::write(&folder, b"not a folder").expect("a file in its place");
+
+    let mut events = click_on(&listed, "Create checkpoint");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while raised(&app) == 0 {
+        assert!(Instant::now() < deadline, "no notice was raised");
+        app_frame(&ctx, &mut app, std::mem::take(&mut events));
+        app.state.drain_notices(&ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(raised(&app), 1);
     let _ = std::fs::remove_dir_all(root);
 }
 

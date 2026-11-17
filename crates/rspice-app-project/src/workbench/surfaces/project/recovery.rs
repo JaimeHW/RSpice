@@ -128,6 +128,8 @@ impl RecoverySnapshot {
             )
         } else if self.checkpoints.is_empty() {
             ("no checkpoints".to_owned(), None)
+        } else if self.checkpoints.len() == 1 {
+            ("1 checkpoint".to_owned(), None)
         } else {
             (format!("{} checkpoints", self.checkpoints.len()), None)
         }
@@ -504,7 +506,9 @@ fn checkpoint_row(
         "Compare"
     })
     .enabled(!busy);
-    let restore = Button::new("Restore\u{2026}");
+    // Restoring while a checkpoint is being written or compared would save
+    // a copy from a list the job is about to change.
+    let restore = Button::new("Restore\u{2026}").enabled(!busy);
     let actions_width = compare.measured_width(ui) + 6.0 + restore.measured_width(ui);
     let actions = if stacked {
         Rect::from_min_size(
@@ -537,7 +541,7 @@ fn checkpoint_row(
         rect.center().y - text_height * 0.5
     };
     let text_width = (text_right - rect.left() - ROW_INSET).max(1.0);
-    let age = checkpoint_age(checkpoint.created_unix_ms(), now_unix_ms);
+    let created = checkpoint_created(checkpoint.created_unix_ms(), now_unix_ms);
     paint_elided(
         ui,
         pos2(rect.left() + ROW_INSET, text_top),
@@ -547,7 +551,7 @@ fn checkpoint_row(
         text_width,
     );
     let detail = format!(
-        "{age} \u{b7} revision {} \u{b7} {}",
+        "{created} \u{b7} revision {} \u{b7} {}",
         checkpoint.project_revision(),
         format_bytes(checkpoint.snapshot_byte_len())
     );
@@ -604,9 +608,8 @@ fn checkpoint_row(
     });
     theme::paint_focus_ring(ui, &response, rect);
     let response = response.on_hover_text(format!(
-        "{}\nCreated {}\nCheckpoint {}",
+        "{}\nCheckpoint {}",
         checkpoint.reason().label(),
-        utc_stamp(checkpoint.created_unix_ms()),
         checkpoint.checkpoint_id()
     ));
     if response.clicked() && intent.is_none() {
@@ -709,10 +712,19 @@ fn sentence_case(text: &str) -> String {
     }
 }
 
-/// A checkpoint's creation time in UTC, for the row's tooltip, in the spelling
-/// every stored timestamp in this product is written out in.
-fn utc_stamp(created_unix_ms: u64) -> String {
-    crate::time_compat::utc_stamp(created_unix_ms)
+/// When a checkpoint was made, written in the row itself: two checkpoints
+/// made minutes apart are told apart by their time, and a tablet has no hover
+/// to read it from. The time is UTC, the spelling every stored timestamp in
+/// this product is written out in; the age follows it.
+fn checkpoint_created(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
+    if created_unix_ms == 0 {
+        return "time unavailable".to_owned();
+    }
+    format!(
+        "{} \u{b7} {}",
+        crate::time_compat::utc_stamp(created_unix_ms),
+        checkpoint_age(created_unix_ms, now_unix_ms)
+    )
 }
 
 /// The open project's catalog, kept for the project it was read for: listed
@@ -873,8 +885,7 @@ fn manual_checkpoint_pending() -> bool {
 
 /// Create a checkpoint the reader asked for. The project is read off the
 /// model here; writing, verifying and listing run on a background thread.
-/// The Console line is its record; a failure also reaches the notice centre
-/// through the activity mirror.
+/// The Console line is its record; a failure is a notice.
 #[cfg(not(target_arch = "wasm32"))]
 fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     use crate::workbench::app::dialogs::project::{
@@ -897,12 +908,13 @@ fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
                 move || CheckpointJobAnswer::Created(Box::new(capture.publish())),
             ));
         }
-        Err(error) => {
-            cx.model
-                .record(LogSeverity::Error, LogSource::Studio, error);
-        }
+        Err(error) => cx.model.report_failure(CHECKPOINT_NOT_CREATED, error),
     }
 }
+
+/// The notice a checkpoint that could not be written raises: the button
+/// otherwise looks as if it did nothing.
+const CHECKPOINT_NOT_CREATED: &str = "Checkpoint not created";
 
 /// Take a checkpoint job's answer, if it is in, for the project it was
 /// started for: the catalog it read, the checkpoint it wrote, or the
@@ -944,10 +956,7 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
                         .record(LogSeverity::Warning, LogSource::Studio, warning);
                 }
             }
-            Err(error) => {
-                cx.model
-                    .record(LogSeverity::Error, LogSource::Studio, error);
-            }
+            Err(error) => cx.model.report_failure(CHECKPOINT_NOT_CREATED, error),
         },
         CheckpointJobAnswer::Compared(compared) => {
             if let CheckpointJobKind::Compare(checkpoint) = job.kind {
@@ -1010,8 +1019,7 @@ fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     );
     if let Err(error) = started {
         BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
-        cx.model
-            .record(LogSeverity::Error, LogSource::Studio, error);
+        cx.model.report_failure(CHECKPOINT_NOT_CREATED, error);
     }
 }
 
@@ -1033,10 +1041,7 @@ fn poll_browser_manual_checkpoint(cx: &mut Cx<'_, ProjectFeature>) {
                 cx.state.project_checkpoint_recovery.initialized = false;
                 record_manual_checkpoint(cx, &checkpoint);
             }
-            Err(error) => {
-                cx.model
-                    .record(LogSeverity::Error, LogSource::Studio, error);
-            }
+            Err(error) => cx.model.report_failure(CHECKPOINT_NOT_CREATED, error),
         }
     }
 }
@@ -1087,10 +1092,7 @@ pub(super) fn export_project_checkpoint_copy(
                 format!("Saved a recovery copy to {}.", destination.display()),
             );
         }
-        Err(error) => {
-            cx.model
-                .record(LogSeverity::Error, LogSource::Studio, error);
-        }
+        Err(error) => cx.model.report_failure("Recovery copy not saved", error),
     }
 }
 
