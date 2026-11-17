@@ -49,6 +49,18 @@ fn named_saved_output_draft() -> SavedOutputDraft {
     }
 }
 
+/// A design-variable draft a test bench would write: a load resistance with
+/// its bounds. The default writes none, because the variable is the author's.
+fn named_design_variable_draft() -> DesignVariableDraft {
+    DesignVariableDraft {
+        name: "RLOAD_TEST".to_owned(),
+        expression: "10 kohm".to_owned(),
+        description: "Verification load used by characterization plans".to_owned(),
+        allowed_range: "1 kohm \u{2026} 1 Mohm".to_owned(),
+        ..DesignVariableDraft::default()
+    }
+}
+
 #[test]
 fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     let mut harness = SimulateTestHost::harness();
@@ -1078,7 +1090,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
         .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
 
-    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+    commit_design_variable(&mut harness.cx(), &named_design_variable_draft())
         .expect("valid variable commits");
 
     let payload = harness
@@ -1128,7 +1140,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
         .content
         .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
-    let mut draft = DesignVariableDraft::default();
+    let mut draft = named_design_variable_draft();
     draft.allowed_range = "20 kohm … 30 kohm".to_owned();
 
     assert!(commit_design_variable(&mut harness.cx(), &draft).is_err());
@@ -1200,7 +1212,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
 fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let mut harness = SimulateTestHost::harness();
     harness.model.provision_test_project_technology_contract();
-    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+    commit_design_variable(&mut harness.cx(), &named_design_variable_draft())
         .expect("source variable");
     commit_saved_output(&mut harness.cx(), &named_saved_output_draft()).expect("source output");
     let source_id = harness
@@ -1276,7 +1288,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
 fn plan_manager_export_import_remaps_all_local_identities() {
     let mut harness = SimulateTestHost::harness();
     harness.model.provision_test_project_technology_contract();
-    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+    commit_design_variable(&mut harness.cx(), &named_design_variable_draft())
         .expect("source variable");
     commit_saved_output(&mut harness.cx(), &named_saved_output_draft()).expect("source output");
     let source_plan = harness

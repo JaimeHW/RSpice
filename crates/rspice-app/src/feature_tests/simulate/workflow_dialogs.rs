@@ -174,3 +174,24 @@ fn the_analysis_catalogue_opens_over_a_plan_that_does_not_resolve() {
         "the catalogue still lists what the plan could take; it offered {offers} rows"
     );
 }
+
+/// Add variable… opens a new design variable with nothing written in: its
+/// name, value, what it is for and its bounds are the author's, so none is
+/// there for them to delete first.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_new_design_variable_opens_with_nothing_written_in() {
+    use egui::accesskit::Role;
+
+    let mut e = crate::feature_tests::engineer::Engineer::new_project("variables");
+    e.setup_page("Design variables");
+    e.press("Add variable\u{2026}", Role::Button);
+    let shown = e.step(Vec::new()).to_vec();
+    for field in ["Name", "Expression", "Description", "Allowed range"] {
+        let control = shown
+            .iter()
+            .find(|control| control.role == Role::TextInput && control.label == field)
+            .unwrap_or_else(|| panic!("the dialog has no {field} field"));
+        assert_eq!(control.value, "", "{field} opens empty");
+    }
+}

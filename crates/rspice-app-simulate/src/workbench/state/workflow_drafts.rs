@@ -479,15 +479,17 @@ pub struct DesignVariableDraft {
     pub validation_error: Option<String>,
 }
 
+/// A new draft opens empty: the variable, its value, what it is for and its
+/// bounds are the author's, so none is written in for them to delete.
 impl Default for DesignVariableDraft {
     fn default() -> Self {
         Self {
-            name: "RLOAD_TEST".to_owned(),
-            expression: "10 kohm".to_owned(),
+            name: String::new(),
+            expression: String::new(),
             quantity: 0,
             scope: 0,
-            description: "Verification load used by characterization plans".to_owned(),
-            allowed_range: "1 kohm … 1 Mohm".to_owned(),
+            description: String::new(),
+            allowed_range: String::new(),
             sweep_eligibility: 0,
             override_policy: 0,
             validation_error: None,

@@ -370,7 +370,11 @@ fn a_variable_created_on_its_page_is_one_step_put_back_exactly() {
     one_step(&mut app, "new variable", plan_data, |app| {
         press_in_the_dialog(
             app,
-            SimulationWorkflowDialog::DesignVariable(DesignVariableDraft::default()),
+            SimulationWorkflowDialog::DesignVariable(DesignVariableDraft {
+                name: "rload".to_owned(),
+                expression: "10 kohm".to_owned(),
+                ..DesignVariableDraft::default()
+            }),
             "Create variable",
         );
     });
