@@ -49,7 +49,6 @@ fn libraries(workspace: &ProjectWorkspace) -> ProjectLibraries {
         let mut cell = Cell::new(name);
         let mut view = View::new(workspace.active_view.view.clone(), ViewType::Schematic);
         view.modified = true;
-        view.is_open = true;
         cell.add_view(view);
         cell.add_view(View::new("symbol", ViewType::Symbol));
         library.add_cell(cell);
@@ -179,7 +178,7 @@ fn committed_and_current_captures_use_active_authority_without_consuming_live_ed
             .unwrap()
             .get_view(&workspace.active_view.view)
             .unwrap();
-        assert!(!view.modified && !view.is_open);
+        assert!(!view.modified);
     }
     assert_eq!(serde_json::to_value(&workspace).unwrap(), original);
     assert_eq!(active.document().components.len(), 2);
@@ -196,7 +195,7 @@ fn committed_and_current_captures_use_active_authority_without_consuming_live_ed
         .unwrap()
         .get_view(&workspace.active_view.view)
         .unwrap();
-    assert!(view.modified && view.is_open);
+    assert!(view.modified);
 }
 
 #[test]
