@@ -740,7 +740,7 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
             "Compare",
             "Restore\u{2026}",
             "Storage",
-            "Kept until you delete them",
+            "Manual and pinned checkpoints are kept until you delete them.",
         ] {
             assert!(
                 text.contains(expected),

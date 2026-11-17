@@ -105,7 +105,8 @@ pub fn commit_rename_library_dialog(
 }
 
 /// Take the library the review names out of the catalog, its revision not
-/// yet published.
+/// yet published, after a "Before library deletion" checkpoint of the
+/// project as it is.
 pub fn commit_delete_library_review(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<LibraryRemoval, String> {
@@ -113,7 +114,38 @@ pub fn commit_delete_library_review(
         return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
     }
     let library = cx.state.delete_library_target.clone();
+    // A refused deletion changes nothing, so it is refused before a
+    // checkpoint is written for it.
+    if let Some(blocker) = cx.model.library_deletion_blocker(&library) {
+        return Err(blocker);
+    }
+    checkpoint_before_library_deletion(cx).map_err(|error| {
+        format!(
+            "The library was not deleted: no checkpoint of the project could be kept first. {error}"
+        )
+    })?;
     cx.model.delete_library(&library)
+}
+
+/// Keep the project as it is before a library is deleted. In the browser the
+/// project is read here and written after; a write that fails is said then.
+fn checkpoint_before_library_deletion(cx: &mut Cx<'_, ProjectFeature>) -> Result<(), String> {
+    use crate::workbench::lifecycle::project_checkpoint::{self, ProjectCheckpointReason};
+    #[cfg(not(target_arch = "wasm32"))]
+    project_checkpoint::create(
+        &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
+        ProjectCheckpointReason::LibraryDeletion,
+    )?;
+    #[cfg(target_arch = "wasm32")]
+    project_checkpoint::start_create(
+        &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+        ProjectCheckpointReason::LibraryDeletion,
+        crate::workbench::app::dialogs::project::checkpoint_written_later(
+            cx.model.workspace.content.project.id().to_string(),
+        ),
+    )?;
+    cx.state.project_checkpoint_recovery.invalidate();
+    Ok(())
 }
 
 /// Everything the reader loses with the library, counted before the review is

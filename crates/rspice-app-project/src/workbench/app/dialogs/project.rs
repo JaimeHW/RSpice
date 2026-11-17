@@ -38,8 +38,19 @@ pub struct ProjectCheckpointRecoveryState {
     /// Where the checkpoints are kept, as the page states it, worked out
     /// once per project rather than on every frame.
     pub(crate) location: Option<String>,
+    /// What the catalog was listed for: the saved project it belongs to and,
+    /// in the browser, the store's own changes. A save moves the first, so
+    /// the page lists again for it.
+    pub(crate) listed_for: Option<(u64, u64)>,
+    /// The note being written on a checkpoint, before it is kept.
+    pub(crate) note_draft: Option<(uuid::Uuid, String)>,
+    /// What the reader asked to delete, waiting for the answer.
+    pub(crate) delete_review: Option<CheckpointDeletion>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) loading: bool,
+    /// A note, pin or deletion is being written in the browser.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) changing: bool,
     /// The listing, creation or comparison running on a background thread.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) job: Option<CheckpointJob>,
@@ -67,6 +78,61 @@ impl ProjectCheckpointRecoveryState {
     }
 }
 
+/// The notice a checkpoint that could not be written raises: the action that
+/// asked for it otherwise looks as if it did nothing.
+pub(crate) const CHECKPOINT_NOT_CREATED: &str = "Checkpoint not created";
+
+/// What a change to a checkpoint did: the Console line one that was made
+/// leaves, if any, or the notice and reason of one that could not be.
+pub(crate) type ChangeOutcome = Result<Option<String>, (&'static str, String)>;
+
+/// A change to the browser's checkpoints that finished after the frame that
+/// started it, for the Recovery page to take.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct BrowserCheckpointChange {
+    pub(crate) project_id: String,
+    pub(crate) outcome: ChangeOutcome,
+    /// Started from the Recovery page, which waits for it.
+    pub(crate) from_page: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    pub(crate) static BROWSER_CHECKPOINT_CHANGES: std::cell::RefCell<std::collections::VecDeque<BrowserCheckpointChange>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// The completion of a checkpoint a transaction took and did not wait for:
+/// the Recovery page lists again once it is written, and one that could not
+/// be written raises a notice.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn checkpoint_written_later(
+    project_id: String,
+) -> impl FnOnce(
+    Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary, String>,
+) + 'static {
+    move |result| {
+        BROWSER_CHECKPOINT_CHANGES.with(|queue| {
+            queue.borrow_mut().push_back(BrowserCheckpointChange {
+                project_id,
+                outcome: result
+                    .map(|_| None)
+                    .map_err(|error| (CHECKPOINT_NOT_CREATED, error)),
+                from_page: false,
+            });
+        });
+    }
+}
+
+/// What the reader asked to delete from the Recovery page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CheckpointDeletion {
+    /// A checkpoint, by its identity.
+    Checkpoint(uuid::Uuid),
+    /// An artifact that failed verification, by its label.
+    SetAside(String),
+}
+
 /// What a checkpoint job is doing, for the page to say while it runs.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +140,8 @@ pub(crate) enum CheckpointJobKind {
     List,
     Create,
     Compare(crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary),
+    /// A note, a pin or a deletion, then the listing after it.
+    Change,
 }
 
 /// What a checkpoint job found.
@@ -88,6 +156,14 @@ pub(crate) enum CheckpointJobAnswer {
         Box<Result<crate::workbench::lifecycle::project_checkpoint::CheckpointCreated, String>>,
     ),
     Compared(Result<bool, String>),
+    /// What a change did and the catalog listed after it.
+    Changed {
+        outcome: ChangeOutcome,
+        listed: Result<
+            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointCatalog,
+            String,
+        >,
+    },
 }
 
 /// Checkpoint work on a background thread: the page goes on painting while

@@ -95,7 +95,7 @@ pub(super) fn painted(output: &egui::FullOutput) -> String {
 
 /// A press and release in the middle of the control `output` announced as
 /// `label`.
-fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
+pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
     let bounds = output
         .platform_output
         .accesskit_update
@@ -150,7 +150,7 @@ pub(super) fn paint_until(
 
 /// A saved, clean project in its own folder, so its checkpoints are kept
 /// there and nowhere else on the machine.
-fn saved_project(label: &str) -> (RSpiceApp, std::path::PathBuf) {
+pub(super) fn saved_project(label: &str) -> (RSpiceApp, std::path::PathBuf) {
     let root = unique_temp_dir(label);
     let mut app = RSpiceApp::test_instance();
     assert!(
