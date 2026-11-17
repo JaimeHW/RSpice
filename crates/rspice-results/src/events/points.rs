@@ -43,6 +43,13 @@ pub trait EventHistorySource: Send + Sync {
     /// The changes with time in `t0 ..= t1`, with the last change before `t0` and the first
     /// after `t1`.
     fn span(&self, t0: f64, t1: f64) -> Result<EventSpan, String>;
+
+    /// The logical digest of the store that holds the signal and the signal's index in it: a
+    /// signal with the same identity holds the same changes. `None` when the store states no
+    /// digest.
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        None
+    }
 }
 
 /// An event history's points.
@@ -318,6 +325,16 @@ impl<P: EventPoint> EventPoints<P> {
     /// Whether the points are a stored signal's.
     pub fn is_stored(&self) -> bool {
         matches!(self.0, Repr::Stored(_))
+    }
+
+    /// The identity of the stored signal the points are and the time they start from, when they
+    /// are one whose store states it: what a digest of the points can hash in place of reading
+    /// them.
+    pub fn stored_identity(&self) -> Option<(([u8; 32], u64), f64)> {
+        match &self.0 {
+            Repr::Memory(_) => None,
+            Repr::Stored(stored) => Some((stored.source.identity()?, stored.from)),
+        }
     }
 
     /// The points, read from a stored history the first time, or why it could not be read.

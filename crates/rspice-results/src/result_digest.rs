@@ -180,6 +180,71 @@ impl ResultDigestWriter {
         }
     }
 
+    /// A waveform's samples. A window of a stored column whose store states its digest is
+    /// identified by the store, the column and the window without reading a row: the store's
+    /// digest already covers every value it holds. Its rows still count as retained data.
+    fn waveform_values(&mut self, values: &crate::waveform::WaveformValues) {
+        use crate::waveform::WindowLead;
+        let Some((identity, window)) = values
+            .stored_window()
+            .and_then(|(source, window)| Some((source.identity()?, window)))
+        else {
+            self.f64_slice(values);
+            return;
+        };
+        self.stored_identity(identity);
+        self.u64(window.first);
+        self.u64(window.rows);
+        match window.lead {
+            WindowLead::None => self.u8(0),
+            WindowLead::Value(value) => {
+                self.u8(1);
+                self.f64(value);
+            }
+            WindowLead::Interpolated(fraction) => {
+                self.u8(2);
+                self.f64(fraction);
+            }
+        }
+        self.held_values(values.len(), 8);
+    }
+
+    /// An event history's points, each written by `point`. A stored signal whose store states its
+    /// digest is identified by the store, the signal and the time it starts from without reading
+    /// a change.
+    fn event_points<P: crate::events::points::EventPoint>(
+        &mut self,
+        points: &crate::events::points::EventPoints<P>,
+        point_bytes: u64,
+        mut point: impl FnMut(&mut Self, &P),
+    ) {
+        if let Some((identity, from)) = points.stored_identity() {
+            self.stored_identity(identity);
+            self.f64(from);
+            self.usize(points.len());
+            self.held_values(points.len(), point_bytes);
+            return;
+        }
+        self.sequence(points.len());
+        for value in points {
+            point(self, value);
+        }
+    }
+
+    fn stored_identity(&mut self, (store, index): ([u8; 32], u64)) {
+        self.raw(&[0x0a]);
+        self.raw(&store);
+        self.u64(index);
+    }
+
+    /// `count` values of `bytes` each that a store holds for the result.
+    fn held_values(&mut self, count: usize, bytes: u64) {
+        let count = u64::try_from(count).unwrap_or(u64::MAX);
+        self.retained_bytes = self
+            .retained_bytes
+            .saturating_add(count.saturating_mul(bytes));
+    }
+
     fn finish(self) -> ContentDigest {
         ContentDigest::from_bytes(self.hasher.finalize().into())
     }
@@ -253,12 +318,12 @@ where
         writer.sequence(self.waveforms.len());
         for waveform in self.waveforms.clone() {
             writer.string(&waveform.name);
-            writer.f64_slice(&waveform.x);
-            writer.f64_slice(&waveform.y);
+            writer.waveform_values(&waveform.x);
+            writer.waveform_values(&waveform.y);
             writer.option(waveform.complex.as_ref(), |writer, complex| {
                 writer.string(&complex.source_name);
-                writer.f64_slice(&complex.real);
-                writer.f64_slice(&complex.imag);
+                writer.waveform_values(&complex.real);
+                writer.waveform_values(&complex.imag);
             });
             // The unit is not presentation: the same samples read as amps
             // rather than volts are different data, and a dataset that
@@ -1235,20 +1300,18 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
             writer.sequence(digital_traces.len());
             for trace in digital_traces {
                 writer.string(&trace.node_name);
-                writer.sequence(trace.points.len());
-                for point in &trace.points {
+                writer.event_points(&trace.points, 9, |writer, point| {
                     writer.f64(point.time_s);
                     writer.u8(point.value_code);
-                }
+                });
             }
             writer.sequence(real_traces.len());
             for trace in real_traces {
                 writer.string(&trace.node_name);
-                writer.sequence(trace.points.len());
-                for point in &trace.points {
+                writer.event_points(&trace.points, 16, |writer, point| {
                     writer.f64(point.time_s);
                     writer.f64(point.value);
-                }
+                });
             }
             // A declaration is authoritative data, not presentation: the same
             // eight traces read as one byte are a different claim about the

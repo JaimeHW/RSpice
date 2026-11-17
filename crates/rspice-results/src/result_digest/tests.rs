@@ -208,3 +208,194 @@ fn every_typed_payload_digests_under_its_own_tag() {
         }
     }
 }
+
+/// A stored column or event signal in memory that counts its reads; `identity` is what its store
+/// states of it.
+struct Held {
+    values: Vec<f64>,
+    identity: Option<([u8; 32], u64)>,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+impl Held {
+    fn new(values: &[f64], identity: Option<([u8; 32], u64)>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            values: values.to_vec(),
+            identity,
+            reads: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+
+    fn reads(&self) -> usize {
+        self.reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn change(&self, index: usize) -> rspice_results_store::EventChange {
+        rspice_results_store::EventChange {
+            signal: 0,
+            time: index as f64,
+            sequence: index as u32,
+            value: rspice_results_store::EventValue::Real(self.values[index]),
+            strength: 0,
+        }
+    }
+}
+
+impl crate::waveform::ColumnSource for Held {
+    fn name(&self) -> &str {
+        "v(out)"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn rows(&self) -> u64 {
+        self.values.len() as u64
+    }
+
+    fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let first = first as usize;
+        out.copy_from_slice(&self.values[first..first + out.len()]);
+        Ok(())
+    }
+
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        self.identity
+    }
+}
+
+impl crate::events::points::EventHistorySource for Held {
+    fn name(&self) -> &str {
+        "e(out)"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn count(&self) -> Result<u64, String> {
+        Ok(self.values.len() as u64)
+    }
+
+    fn before(&self, t: f64) -> Result<u64, String> {
+        Ok((0..self.values.len()).filter(|&i| (i as f64) < t).count() as u64)
+    }
+
+    fn span(&self, t0: f64, t1: f64) -> Result<rspice_results_store::EventSpan, String> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let times = 0..self.values.len();
+        Ok(rspice_results_store::EventSpan {
+            before: times
+                .clone()
+                .rev()
+                .find(|&i| (i as f64) < t0)
+                .map(|i| self.change(i)),
+            within: times
+                .clone()
+                .filter(|&i| (i as f64) >= t0 && (i as f64) <= t1)
+                .map(|i| self.change(i))
+                .collect(),
+            after: times
+                .clone()
+                .find(|&i| (i as f64) > t1)
+                .map(|i| self.change(i)),
+        })
+    }
+
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        self.identity
+    }
+}
+
+/// Opening a stored run digests it to bind its views: a digest that read every row would read
+/// the whole run before its first paint. A stored window or event history whose store states its
+/// digest is identified by the store, its column or signal and its window, and reads nothing; one
+/// whose store states none (a run recovered without its end) digests as its values in memory do.
+#[test]
+fn a_stored_result_is_identified_by_its_store_without_reading_it() {
+    use crate::events::points::EventPoints;
+    use crate::waveform::{StoredWindow, WaveformValues, WindowLead};
+
+    let writer = || ResultDigestWriter::new("test-stored", ResultDigestEncoding::CURRENT);
+    let values = |values: &WaveformValues| {
+        let mut writer = writer();
+        writer.waveform_values(values);
+        (writer.retained_bytes(), writer.finish())
+    };
+    let events = |points: &EventPoints<crate::events::RealEventPointEvidence>| {
+        let mut writer = writer();
+        writer.event_points(points, 16, |writer, point| {
+            writer.f64(point.time_s);
+            writer.f64(point.value);
+        });
+        (writer.retained_bytes(), writer.finish())
+    };
+    let window = |first, rows, lead| StoredWindow { first, rows, lead };
+    let samples = [0.0, 1.0, 2.0, 3.0, 4.0];
+
+    let column = Held::new(&samples, Some(([7; 32], 1)));
+    let stored = WaveformValues::stored(column.clone(), window(1, 3, WindowLead::None)).unwrap();
+    let (bytes, identified) = values(&stored);
+    assert_eq!(
+        column.reads(),
+        0,
+        "the digest read a row of a stored window"
+    );
+    assert!(
+        bytes >= 3 * 8,
+        "the window's rows count as retained data: {bytes}"
+    );
+    for other in [
+        WaveformValues::stored(column.clone(), window(0, 3, WindowLead::None)),
+        WaveformValues::stored(column.clone(), window(1, 2, WindowLead::None)),
+        WaveformValues::stored(column.clone(), window(1, 3, WindowLead::Value(0.5))),
+        WaveformValues::stored(column.clone(), window(1, 3, WindowLead::Interpolated(0.5))),
+        WaveformValues::stored(
+            Held::new(&samples, Some(([7; 32], 2))),
+            window(1, 3, WindowLead::None),
+        ),
+        WaveformValues::stored(
+            Held::new(&samples, Some(([8; 32], 1))),
+            window(1, 3, WindowLead::None),
+        ),
+    ] {
+        assert_ne!(values(&other.unwrap()).1, identified);
+    }
+    assert_eq!(column.reads(), 0);
+    let unstated =
+        WaveformValues::stored(Held::new(&samples, None), window(1, 3, WindowLead::None)).unwrap();
+    assert_eq!(
+        values(&unstated).1,
+        values(&WaveformValues::from(vec![1.0, 2.0, 3.0])).1
+    );
+
+    let signal = Held::new(&[0.5, 1.5, 2.5], Some(([7; 32], 0)));
+    let history = EventPoints::stored(signal.clone(), 1.0).unwrap();
+    let (bytes, identified) = events(&history);
+    assert_eq!(
+        signal.reads(),
+        0,
+        "the digest read a change of a stored history"
+    );
+    assert!(
+        bytes >= 2 * 16,
+        "the history's changes count as retained data: {bytes}"
+    );
+    assert_ne!(
+        events(&EventPoints::stored(signal.clone(), 0.0).unwrap()).1,
+        identified
+    );
+    assert_ne!(
+        events(&EventPoints::stored(Held::new(&[0.5, 1.5, 2.5], Some(([7; 32], 1))), 1.0).unwrap())
+            .1,
+        identified
+    );
+    let unstated = EventPoints::stored(Held::new(&[0.5, 1.5, 2.5], None), 1.0).unwrap();
+    let in_memory: EventPoints<_> = [(1.0, 1.5), (2.0, 2.5)]
+        .into_iter()
+        .map(|(time_s, value)| crate::events::RealEventPointEvidence { time_s, value })
+        .collect();
+    assert_eq!(events(&unstated).1, events(&in_memory).1);
+}

@@ -36,6 +36,13 @@ pub trait ColumnSource: Send + Sync {
         false
     }
 
+    /// The logical digest of the store that holds the column and the column's index in it (its
+    /// run's x axis being 0): a column with the same identity holds the same rows. `None` when
+    /// the store states no digest, as a run recovered without its end does not.
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        None
+    }
+
     /// The tile of the rows in `rows` with x in `x0 ..= x1` at `pixels` pixels, x being the axis
     /// of the run the column belongs to; `None` when the source keeps nothing to tile from.
     fn tile(

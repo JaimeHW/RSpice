@@ -315,6 +315,13 @@ impl rspice_results::events::points::EventHistorySource for StoredEventSignal {
             .events_around(self.signal, t0, t1)
             .map_err(|error| error.to_string())
     }
+
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        Some((
+            self.run.reader().digest()?.0,
+            u64::try_from(self.signal).ok()?,
+        ))
+    }
 }
 
 /// One column of a stored run, as a waveform reads it.
@@ -353,6 +360,13 @@ impl ColumnSource for StoredColumn {
     /// The time axis: the run checked it ascends strictly before it made its waveforms.
     fn ascending(&self) -> bool {
         self.slot.is_none()
+    }
+
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        let column = self
+            .slot
+            .map_or(Some(0), |slot| u64::try_from(slot).ok()?.checked_add(1))?;
+        Some((self.run.reader().digest()?.0, column))
     }
 
     fn tile(
