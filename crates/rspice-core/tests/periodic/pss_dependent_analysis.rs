@@ -894,6 +894,67 @@ fn a_shooting_carriers_noise_reads_the_orbits_harmonics_beyond_the_folding_windo
     }
 }
 
+/// Periodic AC on a shooting orbit linearizes about every harmonic the orbit
+/// holds, not only those of its sideband window: the rectifying diode's
+/// conversion from V1 to V(out) at sidebands -1 to 1 on a 512-point shooting
+/// orbit must be its conversion on a 64-harmonic harmonic-balance carrier:
+/// 3.1e-6 apart at worst, where an orbit cut at the window gave 6.7% at
+/// sideband -1.
+#[test]
+fn a_shooting_carriers_conversion_reads_the_orbits_harmonics_beyond_the_sideband_window() {
+    use rspice_core::analysis::harmonic_balance::HbConfig;
+    let netlist = rectifying_diode();
+    let engine = Engine::new(SimulationConfig::default());
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(0.13 * F0, 0.37 * F0, 2)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("V1")
+        .with_output_node("out");
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+            &NoAbort,
+        )
+        .expect("shooting solves");
+    let shot = engine
+        .run_pac_from_pss_with_abort(&netlist, config.clone(), &point, &NoAbort)
+        .expect("pac on shooting's carrier");
+    let hb = engine
+        .run_hb(
+            &netlist,
+            HbConfig::new(F0).with_harmonics(64).with_tolerance(1e-9),
+        )
+        .expect("harmonic balance solves");
+    let balanced = engine
+        .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+        .expect("pac on harmonic balance's carrier");
+    for frequency in 0..2 {
+        for output in -1..=1 {
+            let shot = shot
+                .result
+                .conversion_matrix
+                .get(frequency, output, 0)
+                .unwrap();
+            let balanced = balanced
+                .result
+                .conversion_matrix
+                .get(frequency, output, 0)
+                .unwrap();
+            let gap = (shot - balanced).norm() / balanced.norm();
+            assert!(
+                gap < 1e-4,
+                "point {frequency}, sideband {output}: shooting {shot}, harmonic balance \
+                 {balanced}, gap {gap:e}"
+            );
+        }
+    }
+}
+
 #[test]
 fn retained_pss_branch_currents_drive_flicker_including_zero_dc_resistance() {
     for resistance in [1.0_f64, 0.0] {

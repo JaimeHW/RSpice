@@ -105,9 +105,16 @@ impl Engine {
             )));
         }
 
+        // A shooting orbit is projected onto every harmonic its samples
+        // resolve, as periodic noise projects it: the conversion matrix is a
+        // linearization about the whole waveform, not about the sideband
+        // window's share of it.
         let mut hb_config = match &operating_point {
             Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(config.fundamental_freq)
+            Some(PacOperatingPoint::Shooting(point)) => HbConfig::new(config.fundamental_freq)
+                .with_harmonics(point.spectral_harmonic_capacity())
+                .with_oversample(2),
+            None => HbConfig::new(config.fundamental_freq)
                 .with_harmonics(op_harmonics)
                 .with_oversample(4),
         };
