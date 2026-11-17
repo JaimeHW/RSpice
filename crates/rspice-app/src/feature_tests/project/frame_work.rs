@@ -402,7 +402,8 @@ fn the_overview_counts_what_changed_since_its_last_frame() {
     );
     let models = app.state.model.model_library_manager.total_model_count();
     assert!(
-        next.contains(&format!("\u{b7} {models} models \u{b7}")),
+        next.lines()
+            .any(|line| line.starts_with(&format!("{models} models \u{b7}"))),
         "the imported model is counted: {next}"
     );
 }

@@ -198,9 +198,11 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
         assert_eq!((entry.scope(), entry.detail().as_str()), (scope, detail));
     }
 
+    // The Project workspace's pages are in View under Project, and the
+    // palette names each as its tab does.
     let mut pages = 0;
     for command in ProjectCommand::ALL {
-        let ProjectCommand::Page(_) = command else {
+        let ProjectCommand::Page(page) = command else {
             continue;
         };
         pages += 1;
@@ -210,10 +212,11 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
             .expect("the palette lists the project page");
         assert_eq!(
             (entry.scope(), entry.detail().as_str()),
-            (PaletteScope::Window, ""),
+            (PaletteScope::View, "View \u{203a} Project"),
             "{command:?} in {}",
             project_spec(command).group
         );
+        assert_eq!(command_name(project_spec(command)), page.label());
     }
     assert!(pages > 0, "the registry lists the project pages");
 }

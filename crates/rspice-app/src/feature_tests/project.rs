@@ -33,6 +33,7 @@ mod recovery_frames;
 #[cfg(not(target_arch = "wasm32"))]
 mod results_save;
 mod steps;
+mod subject_status;
 mod surface;
 
 use crate::workbench::app::RSpiceApp;

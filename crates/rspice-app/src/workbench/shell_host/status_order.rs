@@ -910,6 +910,39 @@ mod tests {
         );
     }
 
+    /// The Overview's Verification row and the run segment state the
+    /// specifications in the same words, marked alike.
+    #[test]
+    fn the_overview_and_the_run_segment_state_the_specifications_alike() {
+        use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
+        use rspice_app_simulate::workbench::surfaces::verify::raster::seed_corner;
+
+        let mut app = RSpiceApp::test_instance();
+        seed_corner(&mut app.state.model);
+        let snapshot = OverviewSnapshot::capture(
+            &egui::Context::default(),
+            &crate::workbench::features::cx_with_foreign_answers(&mut app, |_| true),
+        );
+        let verification = snapshot
+            .statuses
+            .iter()
+            .find(|status| status.area == "Verification")
+            .expect("the Overview has a Verification row");
+        let run = app.state.model.simulation.active_run().map(|run| run.id);
+        assert_eq!(
+            run_segment(&mut app),
+            Some((
+                format!(
+                    "Run {} \u{b7} {}",
+                    run.expect("the corner run is active"),
+                    verification.state()
+                ),
+                StatusMark::Problem(Problem::Failure)
+            ))
+        );
+        assert_eq!(verification.tone(), Tone::Error);
+    }
+
     /// Pressing the roll-up opens Verify on Specifications with the failing
     /// specification selected.
     #[test]
