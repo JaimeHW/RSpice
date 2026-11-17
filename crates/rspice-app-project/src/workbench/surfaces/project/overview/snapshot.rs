@@ -423,9 +423,15 @@ fn status_rows(
         Some(run) => {
             let has_dataset = !run.analyses.is_empty();
             let destination = run_destination(has_dataset, netlist_first);
+            // Recent operations, beside the row, lists this run with its
+            // analyses, measurements and engine; the row says how it ended.
+            let status = SubjectStatus {
+                detail: String::new(),
+                ..health::latest_run(model)
+            };
             StatusSnapshot::of(
                 "Latest run",
-                health::latest_run(model),
+                status,
                 match (has_dataset, netlist_first) {
                     (true, _) => "Open results",
                     (false, true) => "Open deck",

@@ -37,16 +37,23 @@ fn operations_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<Overv
     ui.add_space(7.0);
     let mut selected = None;
     if snapshot.operations.is_empty() {
-        // One line: the revision and whether it is saved are the header's and
-        // the Unsaved work row's to say.
-        activity_row(
-            ui,
-            "",
-            "No runs or validated revisions yet",
-            "Runs, validated revisions and library publications appear here",
-            Tone::Neutral,
-            false,
-        );
+        // One sentence, wrapped rather than cut: the revision and whether it
+        // is saved are the header's and the Unsaved work row's to say.
+        let t = Tokens::get(ui.ctx());
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(14, 4))
+            .show(ui, |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "No runs, validated revisions or library publications yet",
+                        )
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                    )
+                    .wrap(),
+                );
+            });
     } else {
         for (index, operation) in snapshot.operations.iter().enumerate() {
             let response = activity_row(
