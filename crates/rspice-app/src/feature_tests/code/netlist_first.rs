@@ -119,7 +119,7 @@ fn the_page_names_the_deck_its_actions_and_its_facts() {
     let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     for expected in [
         EYEBROW,
-        "Open Netlist & Script Editor",
+        "Open netlist workspace",
         "Create schematic\u{2026}",
         "Promote to a schematic-driven project",
         "Deck source",

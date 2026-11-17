@@ -738,8 +738,7 @@ const VERIFY_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Verify(VerificationPage::Reference)).access('R'),
 ];
 
-/// Tools: the libraries and models a design draws on, then the editors for
-/// netlists and scripts.
+/// Tools: the libraries and models a design draws on, then the netlist.
 const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::Page(ModelsPage::Models)).access('L'),
     models(ModelsCommand::ModelBrowser).access('B'),
@@ -750,12 +749,7 @@ const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::PdkSettings).access('P'),
     models(ModelsCommand::RescanModelLibraries).access('R'),
     Separator,
-    command_as(
-        ShellCommand::OpenWorkspace(Workspace::Netlist),
-        "Netlist and script editor",
-    )
-    .access('N'),
-    code(CodeCommand::AutomationConsole).access('S'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Netlist), "Netlist").access('N'),
 ];
 
 /// Window: the application's windows and the document in front, the
@@ -809,11 +803,7 @@ const WORKSPACE_MENU: &[MenuEntry] = &[
     command_as(ShellCommand::OpenWorkspace(Workspace::Results), "Results").access('R'),
     command_as(ShellCommand::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
     command_as(ShellCommand::OpenWorkspace(Workspace::Models), "Models").access('M'),
-    command_as(
-        ShellCommand::OpenWorkspace(Workspace::Netlist),
-        "Netlist and script editor",
-    )
-    .access('N'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Netlist), "Netlist").access('N'),
     command_as(
         ShellCommand::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
@@ -969,7 +959,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             CodeCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
             CodeCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
             CodeCommand::ExportNetlist => Some(WorkbenchIcon::Export),
-            CodeCommand::AutomationConsole => Some(WorkbenchIcon::Terminal),
             _ => None,
         };
     }

@@ -20,7 +20,7 @@ use rspice_simulation::veriloga::PreparedVerilogARuntime;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
 
-use super::super::{CodeSourceFileAction, CodeWorkspacePage};
+use super::super::CodeSourceFileAction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeSourceFileDialogState {
@@ -817,7 +817,6 @@ impl AutomationExecutionState {
 
 #[derive(Debug, Clone, Default)]
 pub struct CodeWorkspaceRuntimeState {
-    pub page: CodeWorkspacePage,
     /// Whether the source-document lifecycle dialog is showing. The
     /// transactions below stay independent of it: a file operation opened from
     /// the navigator brings the dialog up around its own review section, and

@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{CodeSourceFileAction, CodeWorkspacePage};
+use super::CodeSourceFileAction;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -1227,16 +1227,14 @@ pub fn replace_owned_dependency_source(
     true
 }
 
-/// Take the reader to the generated deck from another workspace: its page in
-/// the Netlist workspace, with the generated primary in front. With nothing
-/// generated the generated document still comes to the front, where the page
-/// states why there is none, rather than leaving another deck under the
-/// command's name. It works over the model, the netlist editor's state, the
-/// Code workspace's page and the workbench.
+/// Take the reader to the generated deck from another workspace: the Netlist
+/// workspace, with the generated primary in front. With nothing generated the
+/// generated document still comes to the front, where the page states why
+/// there is none, rather than leaving another deck under the command's name.
+/// It works over the model, the netlist editor's state and the workbench.
 pub fn show_generated_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    page: &mut CodeWorkspacePage,
     workbench: &mut crate::workbench::state::WorkbenchSession,
 ) {
     if !open_generated_primary_in(model, netlist)
@@ -1247,7 +1245,6 @@ pub fn show_generated_deck(
         netlist.active_document = ActiveNetlistDocument::Generated;
         netlist.active_document_initialized = true;
     }
-    *page = CodeWorkspacePage::Netlist;
     if workbench.workspace != crate::workbench::state::Workspace::Netlist {
         workbench.activate(crate::workbench::state::Workspace::Netlist);
     }

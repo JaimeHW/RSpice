@@ -110,7 +110,6 @@ impl AppState {
         rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
             &mut self.model,
             &mut self.code.netlist,
-            &mut self.code.code_workspace.page,
             &mut self.workbench,
         );
         self.code.netlist.cursor_line = location.line.saturating_sub(1);

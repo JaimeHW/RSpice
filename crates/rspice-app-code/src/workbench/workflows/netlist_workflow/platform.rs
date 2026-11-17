@@ -124,12 +124,10 @@ fn record_relink_failure(model: &mut Model, error: &str) {
 /// so the staged review always opens in a deterministic workspace.
 pub fn route_started_netlist_import(
     workbench: &mut crate::workbench::state::WorkbenchSession,
-    page: &mut crate::workbench::documents::code_workspace::CodeWorkspacePage,
     started: bool,
 ) -> bool {
     if started {
         workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        *page = crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     }
     started
 }

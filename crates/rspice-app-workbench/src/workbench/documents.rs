@@ -1,24 +1,10 @@
 //! The document engines the central surface hosts.
 //!
 //! Each owns one kind of authored or derived document — netlist source, a
-//! result viewer, Verilog-A and automation code, a device model, a model
-//! correlation study, a visualization. They render inside a surface but do
-//! not own navigation, chrome, or the route: a surface decides which of these
-//! is showing, and these decide what it looks like.
-
-/// The document the Code & Automation workspace currently presents.
-///
-/// Verilog-A is not one of them: a module is a cell view, edited in Design.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CodeWorkspacePage {
-    #[default]
-    Netlist,
-    Automation,
-}
-
-impl CodeWorkspacePage {
-    pub const ALL: [Self; 2] = [Self::Netlist, Self::Automation];
-}
+//! result viewer, Verilog-A code, a device model, a model correlation study,
+//! a visualization. They render inside a surface but do not own navigation,
+//! chrome, or the route: a surface decides which of these is showing, and
+//! these decide what it looks like.
 
 /// A project-owned source-tree transaction requested by a document navigator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

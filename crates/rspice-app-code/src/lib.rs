@@ -179,7 +179,6 @@ pub mod workbench {
     pub mod surfaces {
         pub use rspice_app_workbench::workbench::surfaces::*;
 
-        pub mod automation;
         pub mod netlist;
         pub mod veriloga;
     }

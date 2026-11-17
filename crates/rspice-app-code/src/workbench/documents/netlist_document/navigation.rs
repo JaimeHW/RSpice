@@ -11,8 +11,7 @@ use std::collections::HashSet;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use super::{
-    CodeWorkspacePage, Model, NetlistDocumentState, canonical_root_document_in,
-    open_netlist_dependency_from_root_in,
+    Model, NetlistDocumentState, canonical_root_document_in, open_netlist_dependency_from_root_in,
 };
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
@@ -26,7 +25,6 @@ pub fn open_diagnostic_location(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     workbench: &mut WorkbenchSession,
-    page: &mut CodeWorkspacePage,
     diagnostic_id: uuid::Uuid,
 ) -> Result<(), String> {
     let diagnostic = netlist
@@ -53,7 +51,6 @@ pub fn open_diagnostic_location(
         open_documents,
         runs,
         workbench,
-        page,
         included_source,
         diagnostic.line.or(diagnostic.source_line),
     )
@@ -75,7 +72,6 @@ pub fn open_source_location(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     workbench: &mut WorkbenchSession,
-    page: &mut CodeWorkspacePage,
     included_source: Option<&std::path::Path>,
     line: Option<usize>,
 ) -> Result<(), String> {
@@ -111,7 +107,6 @@ pub fn open_source_location(
         )?;
     }
 
-    *page = CodeWorkspacePage::Netlist;
     workbench.activate(crate::workbench::state::Workspace::Netlist);
     if let Some(line) = line {
         netlist.cursor_line = line;

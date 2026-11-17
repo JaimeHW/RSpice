@@ -3,6 +3,7 @@
 //! the next frame.
 
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_language_tools::RENAME_TITLE;
 use rspice_app_code::workbench::code::commands::CodeCommand;
@@ -60,71 +61,34 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
     );
 }
 
-/// An Automation project whose entry defines `helper` and whose second
-/// file, `shared.py`, uses it; `shared.py` is the environment lock when
-/// `locked`, so a rename may change the entry but not it. The Rename
-/// form is open on `helper` with `assist` typed.
-fn rename_form_over_two_files(locked: bool) -> RSpiceApp {
+/// A Verilog-A cell view open in Design with the Rename form open on its
+/// parameter `g`, `replacement` typed.
+fn rename_form(replacement: &str) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-    let language = rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation;
-    let owner = rspice_app_state::state::ProjectSourceOwner::code_workspace(language);
-    let content = &mut app.state.model.workspace.content;
-    let bundle = content
+    let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "gain.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let source = app
+        .state
+        .model
+        .workspace
+        .content
         .project_sources
-        .bundle_for_owner(&owner)
-        .expect("the fixture project owns an Automation bundle");
-    let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
-    let locks = bundle
-        .paths_for_role(rspice_app_state::state::ProjectSourceRole::AutomationEnvironmentLock)
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    let entry = "def helper():
-return 1
-
-helper()
-";
-    content
-        .replace_project_source_bundle_files_transactionally(
-            bundle_id,
-            [(root.clone(), entry.to_owned())],
-        )
-        .expect("the entry is rewritten");
-    content
-        .add_project_source_bundle_file(
-            bundle_id,
-            &root,
-            rspice_app_state::state::ProjectSourceFile::try_new(
-                "shared.py",
-                "value = helper()
-",
-            )
-            .expect("a valid file"),
-        )
-        .expect("the second file joins the bundle");
-    if locked {
-        for lock in &locks {
-            content
-                .set_project_source_bundle_non_entry_role(bundle_id, lock, None)
-                .expect("the old lock is released");
-        }
-        content
-            .set_project_source_bundle_non_entry_role(
-                bundle_id,
-                "shared.py",
-                Some(rspice_app_state::state::ProjectSourceRole::AutomationEnvironmentLock),
-            )
-            .expect("the second file is the lock");
-    }
+        .get_bundle(bundle_id)
+        .expect("the cell view owns its bundle")
+        .root()
+        .content()
+        .to_owned();
+    let caret = source[..source.find("real g").expect("the parameter") + "real ".len()]
+        .chars()
+        .count();
     code_workspace::open_language_tools_in_bundle(
         &mut app.code_workspace_parts(),
-        language,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         bundle_id,
-        &root,
-        "def h".chars().count(),
+        "gain.va",
+        caret,
     )
-    .expect("the language tools open on helper");
+    .expect("the language tools open on g");
     let tools = app
         .state
         .code
@@ -132,8 +96,8 @@ helper()
         .language_tools
         .as_mut()
         .expect("the form is open");
-    assert_eq!(tools.query, "helper");
-    tools.replacement = "assist".to_owned();
+    assert_eq!(tools.query, "g");
+    tools.replacement = replacement.to_owned();
     app
 }
 
@@ -189,8 +153,8 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
         repeat: false,
         modifiers: egui::Modifiers::NONE,
     };
-    for locked in [true, false] {
-        let mut app = rename_form_over_two_files(locked);
+    for refused in [true, false] {
+        let mut app = rename_form(if refused { "2g" } else { "gm" });
         let ctx = Context::default();
         ctx.enable_accesskit();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -208,11 +172,11 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
         );
         let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
         let open = text.iter().any(|text| text == RENAME_TITLE);
-        if locked {
+        if refused {
             assert!(open, "a refused rename leaves the form open");
             assert!(
                 text.iter()
-                    .any(|text| text.contains("governed read-only source 'shared.py'")),
+                    .any(|text| text.contains("'2g' is not a valid name")),
                 "the refusal is on the form: {text:?}"
             );
         } else {

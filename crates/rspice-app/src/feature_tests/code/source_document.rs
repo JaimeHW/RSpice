@@ -4,6 +4,7 @@
 
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_document::fixtures::facts_of;
 use rspice_app_code::workbench::app::dialogs::source_document::{
@@ -11,10 +12,8 @@ use rspice_app_code::workbench::app::dialogs::source_document::{
     open_source_document_dialog_in, source_document_dialog_is_available,
 };
 use rspice_app_code::workbench::code::commands::LifecycleAction;
-use rspice_app_code::workbench::documents::code_workspace::{
-    CodeSourceFileAction, CodeWorkspacePage,
-};
-use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use rspice_app_code::workbench::documents::code_workspace::CodeSourceFileAction;
+use rspice_app_state::state::ProjectSourceOwner;
 
 /// Bring the lifecycle dialog up for the page that is showing, as Manage
 /// source document does.
@@ -28,16 +27,22 @@ fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
     )
 }
 
+/// A Verilog-A cell view whose source is `gain.va`, open in Design, and the
+/// owner of that source.
+fn veriloga_view_app() -> (RSpiceApp, ProjectSourceOwner) {
+    let mut app = RSpiceApp::test_instance();
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "gain.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    (app, ProjectSourceOwner::cell_view(reference))
+}
+
 /// The defect this dialog exists for. Every file operation was reachable
 /// only from a test, so the whole lifecycle shipped unreachable. Assert a
 /// real transaction can be opened, edited, and committed through the same
 /// entry points the body uses.
 #[test]
 fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    let owner = ProjectSourceOwner::code_workspace(language);
+    let (mut app, owner) = veriloga_view_app();
     let original = app
         .state
         .model
@@ -49,7 +54,7 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         .unwrap_or_default();
     assert!(!original.is_empty(), "the fixture project owns a bundle");
 
-    open_source_document_dialog(&mut app.state).expect("the Automation page owns a source bundle");
+    open_source_document_dialog(&mut app.state).expect("the Verilog-A view owns a source bundle");
     let facts = facts_of(
         app.state.workbench.workspace,
         &app.state.model,
@@ -73,7 +78,7 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         .source_file_dialog
         .as_mut()
         .expect("Rename opens a transaction");
-    draft.proposed_path = "workflows/renamed_entry.py".to_owned();
+    draft.proposed_path = "models/renamed_gain.va".to_owned();
 
     apply_lifecycle_action(
         &mut app.code_workspace_parts(),
@@ -94,7 +99,7 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         .bundle_for_owner(&owner)
         .map(|bundle| bundle.root().logical_path().to_owned())
         .unwrap_or_default();
-    assert_eq!(renamed, "workflows/renamed_entry.py");
+    assert_eq!(renamed, "models/renamed_gain.va");
 }
 
 /// An empty project exposes the lifecycle manager so the first top deck
@@ -102,13 +107,11 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
 #[test]
 fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     // The generated deck is read-only and the project owns no other:
     // there is nothing to manage, and the refusal says so.
     assert!(!source_document_dialog_is_available(
         app.state.workbench.workspace,
         &app.state.model,
-        &app.state.code.code_workspace,
         &app.state.code.netlist,
         &app.state.platform,
     ));
@@ -131,7 +134,6 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     assert!(source_document_dialog_is_available(
         app.state.workbench.workspace,
         &app.state.model,
-        &app.state.code.code_workspace,
         &app.state.code.netlist,
         &app.state.platform,
     ));
@@ -149,7 +151,6 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
 #[test]
 fn new_source_document_opens_on_a_project_that_owns_no_deck() {
     let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     assert!(open_source_document_dialog(&mut app.state).is_err());
 
     begin_new_top_deck_in(
@@ -217,8 +218,8 @@ fn an_owned_deck_states_its_properties_without_identity_jargon() {
     }
 }
 
-/// An Automation or Verilog-A document states its path, role, line
-/// endings and, when stale, its validation. Its twelve-digit identity,
+/// A Verilog-A document states its path, role, line endings and, when
+/// stale, its validation. Its twelve-digit identity,
 /// line and byte count and bundle digest are gone, and its includes are
 /// said in plain words: not "Recorded includes" over "no recorded
 /// include edge in either direction".
@@ -227,8 +228,7 @@ fn a_source_document_states_its_properties_without_identity_jargon() {
     let ctx = Context::default();
     ctx.enable_accesskit();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+    let (mut app, _) = veriloga_view_app();
     open_source_document_dialog(&mut app.state).unwrap();
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
@@ -274,7 +274,6 @@ fn owned_deck_app() -> RSpiceApp {
         rspice_app_state::workbench::preferences::TogglePreference::ReducedMotion,
         true,
     );
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
         &app.state.model,
         &mut app.state.code.netlist,
@@ -332,7 +331,6 @@ fn node_left(nodes: &[egui::accesskit::Node], label: &str) -> f64 {
 #[test]
 fn new_source_document_on_a_deckless_project_is_a_creation_form() {
     let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     begin_new_top_deck_in(
         &app.state.model,
         &mut app.state.code.code_workspace,

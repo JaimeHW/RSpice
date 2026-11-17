@@ -261,7 +261,6 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
         &mut harness.state.netlist_open_documents,
         &mut harness.runs,
         &mut harness.wb,
-        &mut harness.state.code_workspace.page,
         diagnostic_id,
     )
     .unwrap();

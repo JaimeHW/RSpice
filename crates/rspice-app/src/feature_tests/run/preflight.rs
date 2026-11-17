@@ -1690,15 +1690,9 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
-    app.state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     apply_remediation(&mut app, remediation);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
-    assert_eq!(
-        app.state.code.code_workspace.page,
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-    );
     assert_eq!(
         app.state.code.netlist.requested_line,
         Some(42),

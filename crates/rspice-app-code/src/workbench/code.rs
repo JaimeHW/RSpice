@@ -1,6 +1,6 @@
-//! The code feature: the Netlist and Automation workspaces, the Verilog-A
-//! views the Design workspace opens, the landing Design shows for a project
-//! its deck owns, and the source editors they share.
+//! The code feature: the Netlist workspace, the Verilog-A views the Design
+//! workspace opens, the landing Design shows for a project its deck owns,
+//! and the source editors they share.
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
@@ -32,10 +32,9 @@ use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
 use crate::workbench::documents::code_workspace::{
-    self, AutomationRunPort, CodeWorkspacePage, CodeWorkspaceParts, ProblemStep,
-    cancel_veriloga_compile, consume_veriloga_compile_request, design_hosts_veriloga,
-    netlist_page_shown, poll_automation_source_import, poll_veriloga_compile, poll_veriloga_import,
-    refresh_symbol_standing,
+    self, AutomationRunPort, CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile,
+    consume_veriloga_compile_request, design_hosts_veriloga, poll_automation_source_import,
+    poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::{
@@ -60,7 +59,7 @@ pub struct CodeFeature;
 /// only where the document's language service can answer it, then the
 /// clipboard, then the line edits. Mutating rows are greyed on a read-only
 /// source. Every page that draws a source editor is the code feature's:
-/// the deck, Automation and a Verilog-A view.
+/// the deck and a Verilog-A view.
 pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
@@ -122,11 +121,11 @@ impl Feature for CodeFeature {
 }
 
 /// The workbench command the code feature takes a part in: Find on the
-/// netlist page opens the page's own find bar. The shell asks it before the
-/// design feature's search, which would take Find there too.
+/// Netlist workspace opens the deck's own find bar. The shell asks it before
+/// the design feature's search, which would take Find there too.
 const ROUTED: &[RoutedCommand<CodeFeature>] = &[RoutedCommand {
     key: ids::FIND_IN_DESIGN,
-    takes: |reads| netlist_page_shown(reads.wb.workspace, &reads.state.code_workspace),
+    takes: |reads| reads.wb.workspace == Workspace::Netlist,
     enabled: |_| true,
     execute: |cx| cx.state.netlist.find.open = true,
 }];
@@ -210,12 +209,9 @@ impl CommandSet for CodeCommand {
     }
 
     /// A source editor takes its own commands, and refuses the ones that
-    /// would change a read-only document's text. Each window the netlist
-    /// page draws is offered only on that page, not merely in its workspace:
-    /// from Automation it would be set open with nothing on screen and then
-    /// appear unprompted the moment the reader came back. Find and Manage
-    /// act on every code document: the netlist page, the Automation page and
-    /// a Verilog-A cell view in Design.
+    /// would change a read-only document's text. Each window the deck draws
+    /// is offered only on the Netlist workspace. Find and Manage act on every
+    /// code document: the deck and a Verilog-A cell view in Design.
     fn availability(self, reads: &Reads<'_, CodeFeature>) -> CommandAvailability {
         let model = reads.model;
         let code = &reads.state.code_workspace;
@@ -250,8 +246,7 @@ impl CommandSet for CodeCommand {
             Self::ImportVerilogA
             | Self::ExportNetlist
             | Self::ExportBillOfMaterials
-            | Self::GenerateNetlist
-            | Self::AutomationConsole => (true, UNAVAILABLE),
+            | Self::GenerateNetlist => (true, UNAVAILABLE),
             // The locator owns every reason the jump cannot be made, so the
             // disabled explanation is the one the execution would have hit.
             Self::ShowInNetlist if !schematic_in_front(reads) => {
@@ -269,14 +264,13 @@ impl CommandSet for CodeCommand {
                 UNAVAILABLE,
             ),
             // Unlike its neighbours this one belongs to the source documents,
-            // the Automation page and a Verilog-A cell view, not the netlist
-            // page: it manages a project source bundle, which the deck is not.
+            // a Verilog-A cell view, not the deck: it manages a project source
+            // bundle, which the deck is not.
             Self::ManageSourceDocument => (
                 code_document_on_screen(reads)
                     && source_document_dialog_is_available(
                         reads.wb.workspace,
                         model,
-                        code,
                         &reads.state.netlist,
                         reads.platform,
                     ),
@@ -308,7 +302,7 @@ impl CommandSet for CodeCommand {
             // read-only project -- and then the surface refused the request it
             // had just been handed.
             Self::CompileVerilogA => (
-                resolve_veriloga_compile(model, code, reads.platform).is_some(),
+                resolve_veriloga_compile(model, code, reads.platform),
                 veriloga_compile_refusal(model, code, reads.platform),
             ),
             Self::CancelVerilogACompile => (
@@ -363,10 +357,6 @@ impl CommandSet for CodeCommand {
                 netlist.comparison_dialog.open = true;
                 netlist.comparison_dialog.selected_history_index =
                     netlist.generated_history.len().saturating_sub(1);
-            }
-            Self::AutomationConsole => {
-                cx.wb.activate(Workspace::Netlist);
-                cx.state.code_workspace.page = CodeWorkspacePage::Automation;
             }
             Self::CancelVerilogACompile => {
                 cancel_veriloga_compile(&mut cx.state.code_workspace, cx.wb);
@@ -440,10 +430,10 @@ fn editor_takes(wb: &WorkbenchSession, command: CodeCommand) -> bool {
     }
 }
 
-/// Open the export dialog where the netlist page draws it; anywhere else the
-/// deck is exported straight away.
+/// Open the export dialog where the deck draws it; anywhere else the deck is
+/// exported straight away.
 fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
-    if netlist_page_shown(cx.wb.workspace, &cx.state.code_workspace) {
+    if cx.wb.workspace == Workspace::Netlist {
         let dialog = &mut cx.state.netlist.export_dialog;
         dialog.open = true;
         dialog.error = None;
@@ -452,14 +442,13 @@ fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
     }
 }
 
-/// Whether the netlist document, not merely the workspace that hosts it, is
-/// the thing on screen.
+/// Whether the deck is the thing on screen.
 fn netlist_page_on_screen(reads: &Reads<'_, CodeFeature>) -> bool {
-    netlist_page_shown(reads.wb.workspace, &reads.state.code_workspace)
+    reads.wb.workspace == Workspace::Netlist
 }
 
-/// Whether a code document is the thing on screen: one of the Netlist
-/// workspace's pages, or a Verilog-A cell view the Design workspace shows.
+/// Whether a code document is the thing on screen: the Netlist workspace's
+/// deck, or a Verilog-A cell view the Design workspace shows.
 fn code_document_on_screen(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.workspace == Workspace::Netlist
         || design_hosts_veriloga(reads.wb.workspace, &reads.model.workspace)

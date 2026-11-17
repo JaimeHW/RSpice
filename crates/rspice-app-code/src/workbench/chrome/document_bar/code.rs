@@ -1,12 +1,11 @@
 //! The document bar's Netlist tabs: the generated and owned netlists with
-//! their open includes, the comparison and the run's deck, or the one
-//! document a code page shows; which of them is active; and their activation.
+//! their open includes, the comparison and the run's deck; which of them is
+//! active; and their activation.
 
 use std::collections::HashSet;
 
 use crate::workbench::MessageCatalog;
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, NetlistDocumentState, run_deck_snapshot_run_id_in,
 };
@@ -17,13 +16,12 @@ use rspice_app_state::workbench::app_state::model::Model;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// What the Netlist tabs read: the model, the netlist editor's documents,
-/// the Code & Automation page, the includes the reader opened, the runs that
-/// sealed a deck and the message catalogue.
+/// the includes the reader opened, the runs that sealed a deck and the
+/// message catalogue.
 #[derive(Clone, Copy)]
 pub struct NetlistTabsReads<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
-    pub(crate) code_workspace: &'a CodeWorkspaceRuntimeState,
     pub(crate) open_documents: &'a HashSet<WorkspaceDocumentId>,
     pub(crate) runs: &'a RunsState,
     pub(crate) messages: MessageCatalog,
@@ -33,14 +31,10 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
     let NetlistTabsReads {
         model,
         netlist,
-        code_workspace,
         open_documents,
         runs,
         messages,
     } = reads;
-    if code_workspace.page != CodeWorkspacePage::Netlist {
-        return vec![code_workspace_document(model, code_workspace, messages)];
-    }
     let mut documents = Vec::new();
     if let Some(generated) = model.netlist_artifacts.generated_document.as_ref() {
         documents.push(WorkspaceDocument {
@@ -132,44 +126,26 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         });
     }
     if documents.is_empty() {
-        documents.push(code_workspace_document(model, code_workspace, messages));
+        documents.push(code_workspace_document(model));
     }
     documents
 }
 
-/// The Code & Automation workspace shows one document at a time and the page
-/// decides which. Only the netlist page has a dirty bit to report: Automation
-/// sources are a project-owned bundle whose dirtiness belongs to the bundle,
-/// not to this tab.
-fn code_workspace_document(
-    model: &Model,
-    code_workspace: &CodeWorkspaceRuntimeState,
-    messages: MessageCatalog,
-) -> WorkspaceDocument {
-    let page = code_workspace.page;
+/// The deck's own tab, when the Netlist workspace has no other document to
+/// list.
+fn code_workspace_document(model: &Model) -> WorkspaceDocument {
     WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
-        label: crate::workbench::documents::code_workspace::active_document_label(
-            &model.workspace,
-            code_workspace,
-            messages,
-        ),
-        icon: match page {
-            CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
-            CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
-        },
-        dirty: page == CodeWorkspacePage::Netlist && model.workspace.content.netlist_source_dirty,
+        label: crate::workbench::documents::code_workspace::active_document_label(&model.workspace),
+        icon: WorkbenchIcon::Netlist,
+        dirty: model.workspace.content.netlist_source_dirty,
     }
 }
 
 pub fn active_netlist_document_id(
     model: &Model,
     netlist: &NetlistDocumentState,
-    page: CodeWorkspacePage,
 ) -> Option<WorkspaceDocumentId> {
-    if page != CodeWorkspacePage::Netlist {
-        return Some(WorkspaceDocumentId::NetlistSource);
-    }
     if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return Some(WorkspaceDocumentId::NetlistComparison);
     }

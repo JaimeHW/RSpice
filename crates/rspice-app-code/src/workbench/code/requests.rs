@@ -11,8 +11,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::{
-    AutomationRequest, CodeCommand, CodeHandOff, CodeRequest, NetlistEditorRequest,
-    SourceDocumentRequest,
+    CodeCommand, CodeHandOff, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
 };
 use crate::workbench::documents::{code_workspace, netlist_document};
 use crate::workbench::framework::feature::Cx;
@@ -301,7 +300,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::ImportDroppedNetlist(dropped) => {
             return Some(CodeHandOff::ImportDroppedNetlist(dropped));
         }
-        CodeRequest::Automation(request) => answer_automation(cx, request),
     }
     None
 }
@@ -355,110 +353,6 @@ pub fn step_history(cx: &mut Cx<'_, CodeFeature>, undo: bool) -> Result<Option<S
 /// running, as a history step that put back another source asks.
 pub fn void_veriloga_evidence(cx: &mut Cx<'_, CodeFeature>) {
     cx.state.code_workspace.veriloga.void_evidence();
-}
-
-/// Carry out what the Automation page asked, as the page did where it drew.
-fn answer_automation(cx: &mut Cx<'_, CodeFeature>, request: AutomationRequest) {
-    match request {
-        AutomationRequest::ImportDropped(dropped) => {
-            let application_modal_open = cx.application_modal_open();
-            code_workspace::import_dropped_automation_files(
-                &mut CodeFeature::workspace_parts(cx),
-                application_modal_open,
-                dropped,
-            );
-        }
-        AutomationRequest::CreateWorkspace => {
-            if let Err(error) =
-                code_workspace::open_source_workspace_dialog(&mut CodeFeature::workspace_parts(cx))
-            {
-                cx.wb.prompt(error);
-            }
-        }
-        AutomationRequest::Validate => {
-            code_workspace::validate_automation_workspace(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::DryRun => CodeFeature::dry_run_automation_workflow(cx),
-        AutomationRequest::Run => CodeFeature::start_automation_workflow(cx),
-        AutomationRequest::Stop => {
-            code_workspace::cancel_automation_workflow(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::OpenGeneratedNetlist => {
-            let _ = netlist_document::open_generated_primary_in(cx.model, &mut cx.state.netlist);
-            cx.state.code_workspace.page = code_workspace::CodeWorkspacePage::Netlist;
-        }
-        AutomationRequest::ToggleBreakpoint(line) => {
-            code_workspace::toggle_automation_breakpoint(
-                &mut CodeFeature::workspace_parts(cx),
-                line,
-            );
-        }
-        AutomationRequest::FormatDocument { bundle_id, path } => {
-            if let Err(error) = code_workspace::format_language_document(
-                &mut CodeFeature::workspace_parts(cx),
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-                bundle_id,
-                &path,
-            ) {
-                cx.wb.prompt(error);
-            }
-        }
-        AutomationRequest::FindInBundle { path } => {
-            if let Err(error) = code_workspace::open_source_search(
-                &mut CodeFeature::workspace_parts(cx),
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-                &path,
-            ) {
-                cx.wb.prompt(error);
-            }
-        }
-        AutomationRequest::ExportArtifact(kind) => {
-            code_workspace::export_automation_artifact(&mut CodeFeature::workspace_parts(cx), kind);
-        }
-        AutomationRequest::StartDebugger => {
-            code_workspace::start_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::ContinueDebugger => {
-            code_workspace::continue_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::PauseDebugger => {
-            code_workspace::pause_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::StepOver => {
-            code_workspace::step_over_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::StepInto => {
-            code_workspace::step_into_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::StepOut => {
-            code_workspace::step_out_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::RestartDebugger => {
-            code_workspace::restart_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::StopDebugger => {
-            code_workspace::stop_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::RemoveBreakpoint { document_id, line } => {
-            code_workspace::remove_automation_breakpoint(
-                &mut CodeFeature::workspace_parts(cx),
-                document_id,
-                line,
-            );
-        }
-        AutomationRequest::SyncBreakpoints => {
-            code_workspace::sync_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-        AutomationRequest::SelectFrame(frame_id) => {
-            code_workspace::select_automation_debug_frame(
-                &mut CodeFeature::workspace_parts(cx),
-                frame_id,
-            );
-        }
-        AutomationRequest::RefreshWatches => {
-            code_workspace::refresh_automation_debugger(&mut CodeFeature::workspace_parts(cx))
-        }
-    }
 }
 
 /// Carry out what a source document dialog handed over: create the
@@ -521,15 +415,11 @@ fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentR
 }
 
 /// Go to definition, Find references and Rename symbol from the caret of the
-/// source editor on screen, saying why not when it cannot. Verilog-A and
-/// Automation answer through the project source index, over the code
-/// workspace's parts; a netlist answers through its own language service.
+/// source editor on screen, saying why not when it cannot. Verilog-A
+/// answers through the project source index, over the code workspace's
+/// parts; a netlist answers through its own language service.
 fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) {
-    let language = code_workspace::active_source_language(
-        cx.wb.workspace,
-        &cx.model.workspace,
-        cx.state.code_workspace.page,
-    );
+    let language = code_workspace::active_source_language(cx.wb.workspace, &cx.model.workspace);
     let result = match language {
         Some(language) => {
             crate::workbench::app::dialogs::source_language_tools::navigate_source_bundle(

@@ -155,7 +155,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         CodeCommand::ExportNetlist,
         CodeCommand::GenerateNetlist,
         CodeCommand::CompileVerilogA,
-        CodeCommand::AutomationConsole,
     ] {
         assert!(
             command

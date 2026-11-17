@@ -20,13 +20,13 @@ use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory
 /// The deck the script types into its new source document.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
 
-/// The script's `author_deck`: the Netlist & Script Editor's New source
+/// The script's `author_deck`: the Netlist workspace's New source
 /// document opens its Logical path, Tab then Enter creates the deck and closes
 /// the form, and the editor takes the typed deck.
 pub(super) fn author_deck(replay: &mut Replay) {
     replay.frames(Vec::new());
 
-    replay.click("Netlist & Script Editor", Role::Button);
+    replay.click("Netlist", Role::Button);
     replay.click("New source document", Role::Button);
     replay.click("Logical path", Role::TextInput);
     // The Create action follows the field in keyboard order.
@@ -53,7 +53,7 @@ pub(super) fn author_deck(replay: &mut Replay) {
     );
 }
 
-/// `author_deck` and the native half of `run`: the Netlist & Script Editor's
+/// `author_deck` and the native half of `run`: the Netlist workspace's
 /// New source document opens its Logical path, Tab then Enter creates the
 /// deck and closes the form, the editor takes the typed deck, Validate
 /// source and Run deck run it, the finished run opens in Results, a press of
@@ -99,8 +99,8 @@ fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
 }
 
 /// A failed run's notice leaves the editor's Run deck where the reader can
-/// press it. The browser job retries a failed run from the Netlist & Script
-/// Editor while the run's failure notice is still up; the notice used to land
+/// press it. The browser job retries a failed run from the Netlist workspace
+/// while the run's failure notice is still up; the notice used to land
 /// over the editor's toolbar row, took the press, and the retry never started.
 #[test]
 fn a_run_failure_notice_leaves_run_deck_pressable() {

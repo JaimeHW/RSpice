@@ -144,11 +144,6 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
             PaletteScope::Window,
             "Window \u{203a} Workspace",
         ),
-        (
-            CodeCommand::AutomationConsole.key(),
-            PaletteScope::Tools,
-            "Tools",
-        ),
     ] {
         let entry = palette_entry_for(key);
         assert_eq!((entry.scope(), entry.detail().as_str()), (scope, detail));

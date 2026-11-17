@@ -564,8 +564,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "PDK and model paths… | pdk-settings |  | on",
             "Rescan model libraries | rescan-model-libraries |  | on",
             "---",
-            "Netlist and script editor | netlist | Alt+7 | on",
-            "Scripts | automation | Ctrl+` | on",
+            "Netlist | netlist | Alt+7 | on",
         ],
     ),
     (
@@ -586,7 +585,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Results | results | Alt+4 | on",
             "  Verify | verify | Alt+5 | on",
             "  Models | models | Alt+6 | on",
-            "  Netlist and script editor | netlist | Alt+7 | on",
+            "  Netlist | netlist | Alt+7 | on",
             "  Stimulus library | stimulus | Alt+8 | on",
             "Previous document | previous-document | Ctrl+Shift+Tab | off: only one document is open",
             "Next document | next-document | Ctrl+Tab | off: only one document is open",

@@ -908,9 +908,8 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
 
 /// The shell's `contribute`, at the code feature's points. The deck's page
 /// prepares in the feature's context, then draws in it, holding the menu's
-/// answers only while the source editor's menu is open or opening; the
-/// Automation page does the same once its breakpoints have reached the
-/// debugger. What either page raised is answered once it has drawn. The
+/// answers only while the source editor's menu is open or opening. What the
+/// page raised is answered once it has drawn. The
 /// navigator draws in the feature's context on the Netlist workspace and on a
 /// Verilog-A view the Design workspace shows, and on both has what it raised
 /// answered once it has drawn, before the next point draws. The inspector
@@ -927,16 +926,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
              &mut features::cx_with_menu_answers(app, |app| {\
              netlist::source_menu_open(&ctx, &app.state.model, &app.state.code.netlist,)\
              }),\
-             );",
-            "sync_automation_debugger(&mut app.code_workspace_parts());\
-             automation::prepare(&mut features::cx(app));\
-             let ctx = ui.ctx().clone();\
-             automation::show(\
-             ui,\
-             &mut features::cx_with_menu_answers(app, |app| {\
-             automation::source_menu_open(&ctx, &app.state.model, &app.state.code.code_workspace,)\
-             }),\
-             ); } } } } app.after_contribution();",
+             ); } } app.after_contribution();",
         ],
     ),
     (

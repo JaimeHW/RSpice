@@ -127,7 +127,7 @@ const VERIFICATION_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num5, false, true, false, "Alt+5"), ALL)];
 const MODELS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num6, false, true, false, "Alt+6"), ALL)];
-const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
+const NETLIST_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)];
 /// The library reads fourth on the rail and eighth on the keyboard. Alt+8 is
 /// the mockup's chord for it, and taking Alt+4 for rail order would have moved
@@ -204,7 +204,7 @@ impl ShellCommand {
             Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
+            Self::OpenWorkspace(Workspace::Netlist) => NETLIST_WORKSPACE,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::Exit => EXIT,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,

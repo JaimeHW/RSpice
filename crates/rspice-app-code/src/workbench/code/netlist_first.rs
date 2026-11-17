@@ -2,7 +2,7 @@
 //!
 //! A deck-driven project has no schematic to draw, so the Design surface
 //! states what owns the project — the SPICE deck — and routes to the two
-//! things that can change that: the Netlist & Script Editor, and schematic
+//! things that can change that: the Netlist workspace, and schematic
 //! promotion. The page shares the no-project landing's geometry and action
 //! idiom so the workbench's landing surfaces read as one product, and every
 //! fact on it is live document state: the deck preview, the outline counts,
@@ -58,10 +58,10 @@ const PREVIEW_MIN_HEIGHT: f32 = 180.0;
 const STACKED_PREVIEW_HEIGHT: f32 = 320.0;
 
 pub const EYEBROW: &str = "NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC";
-const DESCRIPTION: &str = "This project is driven by its SPICE deck. The Netlist & Script Editor \
-    owns source editing; simulation, probing, and results work exactly as in schematic projects. \
+const DESCRIPTION: &str = "This project is driven by its SPICE deck, edited in the Netlist \
+    workspace; simulation, probing, and results work exactly as in schematic projects. \
     Creating a schematic promotes this into a schematic-driven design.";
-const PREVIEW_ACTION_LABEL: &str = "Open the deck in the Netlist & Script Editor";
+const PREVIEW_ACTION_LABEL: &str = "Open the deck in the Netlist workspace";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetlistFirstAction {
@@ -294,7 +294,7 @@ fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts) {
 }
 
 /// The read-only deck panel. The whole panel is one control that opens the
-/// Netlist & Script Editor — the deck is the document this project continues
+/// Netlist workspace — the deck is the document this project continues
 /// from, so clicking it behaves like opening any other document.
 ///
 /// The panel takes the height its deck needs up to `max_height`: a short deck
@@ -524,7 +524,7 @@ fn preview_rows(ui: &Ui, body: Rect, index: &NetlistSourceIndex, t: &Tokens) {
             pos2(footer.left() + 11.0, footer.center().y),
             Align2::LEFT_CENTER,
             format!(
-                "\u{2026} {} more lines \u{00b7} open in the Netlist & Script Editor",
+                "\u{2026} {} more lines \u{00b7} open in the Netlist workspace",
                 line_count - shown
             ),
             theme::sans(tokens::FS_0, FontWeight::Regular),

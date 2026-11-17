@@ -88,55 +88,42 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
 }
 
 /// A source route opens the editor that owns the bundle and selects the
-/// document in it. The automation bundle is the project's, so the route lands
-/// on the Netlist workspace's Automation page with the reported file chosen.
+/// document in it. A Verilog-A bundle is a cell view's, so the route opens
+/// that view in Design with the reported file chosen.
 #[test]
 fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.workbench.activate(Workspace::Results);
-    let owner = rspice_app_state::state::ProjectSourceOwner::code_workspace(
-        rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation,
+    let (reference, bundle_id) = crate::workbench::app::veriloga_design_tests::add_veriloga_cell(
+        &mut app.state,
+        "gain",
+        "gain.va",
+        "gain",
     );
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .expect("a project holds its automation bundle");
-    let bundle_id = bundle.id();
-    let logical_path = bundle
-        .paths_for_role(rspice_app_state::state::ProjectSourceRole::AutomationPermissionManifest)
-        .next()
-        .expect("the automation bundle has a permission manifest")
-        .to_owned();
+    app.state.workbench.activate(Workspace::Results);
     app.state
         .model
         .diagnostics
         .request_route(DiagnosticRoute::CodeDocument {
             bundle: bundle_id,
-            logical_path: std::sync::Arc::from(logical_path.as_str()),
+            logical_path: std::sync::Arc::from("gain.va"),
             line: Some(2),
             column: None,
         });
 
     apply_pending(&context(), &mut app);
 
-    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
-    assert_eq!(
-        app.state.code.code_workspace.page,
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation
-    );
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(
         app.state
             .code
             .code_workspace
-            .automation
+            .veriloga
             .selected_file
-            .as_deref(),
-        Some(logical_path.as_str())
+            .as_ref()
+            .map(|selection| (selection.bundle_id, selection.logical_path.as_str())),
+        Some((bundle_id, "gain.va"))
     );
 }
 

@@ -590,8 +590,6 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
     app.state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
-    app.state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
         .model
         .log_buffer

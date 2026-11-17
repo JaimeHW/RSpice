@@ -1,79 +1,27 @@
-//! The Netlist workspace's inspector: the deck's diagnostics and provenance,
-//! and the ownership of an automation document.
+//! The Netlist workspace's inspector: the deck's diagnostics and provenance.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
-use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{Problem, code_inspector_section, panel_inset, section_header};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::commands::code_context::{CodeDocumentOwnership, resolve};
-use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
+use crate::workbench::MessageCatalog;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, active_dependency_in};
-use crate::workbench::state::Workspace;
-use crate::workbench::{MessageCatalog, MessageId};
-use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
 
 /// What the Netlist workspace's inspector reads: the model, the netlist
-/// editor's and the Code & Automation page's state, the runs that sealed a
-/// deck, the workspace in front, whether a project is open and the message
-/// catalogue.
+/// editor's state and the message catalogue.
 #[derive(Clone, Copy)]
 pub(crate) struct CodeInspector<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
-    pub(crate) code_workspace: &'a CodeWorkspaceRuntimeState,
-    pub(crate) runs: &'a RunsState,
-    pub(crate) workspace: Workspace,
-    pub(crate) project_open: bool,
     pub(crate) messages: MessageCatalog,
 }
 
-/// Draw the inspector of the page in front.
+/// Draw the deck's inspector.
 pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeInspector<'_>) {
-    if reads.code_workspace.page == CodeWorkspacePage::Netlist {
-        netlist(ui, reads);
-        return;
-    }
-
-    let messages = reads.messages;
-    let Some(context) = resolve(
-        reads.model,
-        reads.netlist,
-        reads.code_workspace,
-        reads.runs,
-        reads.workspace,
-        reads.project_open,
-        messages,
-    ) else {
-        muted_inspector_copy(
-            ui,
-            &messages.text(MessageId::CodeInspectorContextUnavailable),
-        );
-        return;
-    };
-    let ownership = messages.text(match context.ownership {
-        CodeDocumentOwnership::GeneratedReadOnly => MessageId::CodeInspectorGeneratedReadOnly,
-        CodeDocumentOwnership::ProjectOwned => MessageId::CodeInspectorProjectOwned,
-        CodeDocumentOwnership::ExternalReadOnly => MessageId::CodeInspectorExternalReadOnly,
-        CodeDocumentOwnership::ComparisonReadOnly => MessageId::CodeInspectorComparisonReadOnly,
-        CodeDocumentOwnership::GovernedReadOnly => MessageId::CodeInspectorGovernedReadOnly,
-    });
-    // Whether this document can be edited, and nothing else. The page tab
-    // names the page, the document tab names the path, and the toolbar's own
-    // buttons are the one true statement of which commands are available:
-    // five rows reading "available" were that statement copied out by hand.
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeInspectorOwnership),
-        &ownership,
-    );
-}
-
-fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
     };

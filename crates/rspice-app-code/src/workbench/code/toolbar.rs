@@ -1,5 +1,5 @@
 //! The code toolbars: the Verilog-A cell view's build and source tools, and
-//! the Code & Automation workspace's netlist and automation pages.
+//! the Netlist workspace's.
 //!
 //! They are the code feature's toolbars, drawn in its context. Each group
 //! asks what the code workspace shows at the point it draws, after any tool
@@ -10,7 +10,6 @@ use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_butto
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
@@ -20,7 +19,7 @@ use crate::workbench::layout::LayoutSpec;
 
 /// The toolbar of an open Verilog-A cell view.
 pub const VERILOGA_TOOLBAR: ToolbarId = ToolbarId::new("code.veriloga");
-/// The toolbar of the Code & Automation workspace.
+/// The toolbar of the Netlist workspace.
 pub const NETLIST_TOOLBAR: ToolbarId = ToolbarId::new("code.netlist");
 
 /// Every toolbar the code feature registers.
@@ -115,8 +114,8 @@ fn no_compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
     !compile_pending(reads)
 }
 
-/// Take the reader to the generated deck: its page in the Netlist workspace,
-/// with the generated primary in front.
+/// Take the reader to the generated deck: the Netlist workspace, with the
+/// generated primary in front.
 fn show_generated_deck(cx: &mut Cx<'_, CodeFeature>) {
     crate::workbench::surfaces::netlist::generation::show_generated_netlist(cx);
 }
@@ -194,19 +193,12 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
     }
 }
 
-/// The Code & Automation workspace hosts two different documents, so its
-/// toolbar is chosen by the visible page.
+/// The Netlist workspace's toolbar follows the document it is showing: a
+/// generated primary is exported and compared, an owned deck is saved and
+/// run.
 ///
 /// Find is deliberately absent: the editor's own toolbar sits directly under
-/// this one and owns it. Offering it twice was the mockup's own earlier
-/// mistake, and here it was worse than redundant — the find window is drawn
-/// only by the netlist page, so the button silently did nothing on the other
-/// two and then ambushed the user on return.
-///
-/// The netlist page's set follows the document it is showing: a generated
-/// primary is exported and compared, an owned deck is saved and run. The
-/// Automation page's source tools manage the document and search the
-/// closure.
+/// this one and owns it.
 const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         generated_deck_shown,
@@ -246,37 +238,15 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
             ),
         ],
     ),
-    ToolbarEntry::Only(
-        automation_page_shown,
-        &[
-            labelled(
-                CodeCommand::AutomationConsole.key(),
-                WorkbenchIcon::Terminal,
-                "Automation console",
-            ),
-            ToolbarEntry::Separator,
-            icon(
-                CodeCommand::ManageSourceDocument.key(),
-                WorkbenchIcon::Folder,
-            ),
-            icon(CodeCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
-        ],
-    ),
     icon(ids::RUN_SIMULATION, WorkbenchIcon::Run),
 ];
 
 fn generated_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.code_workspace.page == CodeWorkspacePage::Netlist
-        && reads.state.netlist.active_document == ActiveNetlistDocument::Generated
+    reads.state.netlist.active_document == ActiveNetlistDocument::Generated
 }
 
 fn owned_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.code_workspace.page == CodeWorkspacePage::Netlist
-        && reads.state.netlist.active_document != ActiveNetlistDocument::Generated
-}
-
-fn automation_page_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.code_workspace.page == CodeWorkspacePage::Automation
+    reads.state.netlist.active_document != ActiveNetlistDocument::Generated
 }
 
 #[cfg(test)]
@@ -285,8 +255,8 @@ mod tests {
     use crate::workbench::framework::feature::FeatureRegistry;
 
     /// The code feature registers each toolbar once, and both toolbars the
-    /// shell's lane chooses (an open Verilog-A cell view's and the Code &
-    /// Automation workspace's) are ones it registered.
+    /// shell's lane chooses (an open Verilog-A cell view's and the Netlist
+    /// workspace's) are ones it registered.
     #[test]
     fn every_code_toolbar_the_shell_chooses_is_registered_once() {
         assert_eq!(

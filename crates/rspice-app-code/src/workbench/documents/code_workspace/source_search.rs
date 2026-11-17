@@ -9,11 +9,11 @@ use sha2::{Digest as _, Sha256};
 
 use super::CodeWorkspaceParts;
 use crate::product::ContentDigest;
+use crate::state::ProjectSourceLanguage;
 use crate::state::{
     BoundedFindMatches, FindDirection, FindOptions, ProjectSourceBundle,
     find_all_in_source_bounded, replace_source_ranges,
 };
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::accessibility::counted;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use rspice_app_services::workbench::slots::platform::PlatformState;
@@ -142,8 +142,7 @@ pub fn open_source_search_in_bundle(
 }
 
 pub fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
-    match super::active_source_language(parts.wb.workspace, &parts.model.workspace, parts.code.page)
-    {
+    match super::active_source_language(parts.wb.workspace, &parts.model.workspace) {
         None => {
             parts.netlist.find.open = true;
             Ok(())
@@ -161,24 +160,7 @@ pub fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(
             )
         }
         Some(ProjectSourceLanguage::RSpiceAutomation) => {
-            let bundle = parts
-                .model
-                .workspace
-                .content
-                .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::RSpiceAutomation,
-                ))
-                .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-            let active_path = parts
-                .code
-                .automation
-                .selected_file
-                .as_deref()
-                .filter(|path| bundle.contains_file(path))
-                .unwrap_or(bundle.root().logical_path())
-                .to_owned();
-            open_source_search(parts, ProjectSourceLanguage::RSpiceAutomation, &active_path)
+            Err("The Netlist workspace searches its deck.".to_owned())
         }
     }
 }
@@ -773,6 +755,7 @@ fn search_options(search: &CodeSourceSearchState) -> FindOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::ProjectSourceOwner;
     use crate::workbench::code::{
         CodeFeature,
         tests::{CodeHarness, harness},
@@ -1316,16 +1299,6 @@ mod tests {
     #[test]
     fn active_search_command_routes_to_the_visible_code_document_kind() {
         let mut harness = harness();
-        harness.state.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-        open_active_source_search(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
-        let search = harness.state.code_workspace.source_search.as_ref().unwrap();
-        assert_eq!(search.language, ProjectSourceLanguage::RSpiceAutomation);
-        assert!(!search.active_path.is_empty());
-
-        harness.state.code_workspace.source_search = None;
-        harness.state.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         open_active_source_search(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(harness.state.netlist.find.open);
         assert!(harness.state.code_workspace.source_search.is_none());

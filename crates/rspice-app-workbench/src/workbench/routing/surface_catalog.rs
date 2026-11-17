@@ -257,7 +257,7 @@ define_surface_catalog! {
     Results => { id: "results", label: "Results", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=results" },
     Verify => { id: "verify", label: "Verify", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=verify" },
     Models => { id: "models", label: "Models and libraries", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=models" },
-    Netlist => { id: "netlist", label: "Code and automation", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=netlist" },
+    Netlist => { id: "netlist", label: "Netlist", archetype: PrimaryWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?view=netlist" },
     ReleaseCockpit => { id: "release-cockpit", label: "Release closure", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=release-cockpit" },
     ReportAuthoring => { id: "report-authoring", label: "Verification report", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
     ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },

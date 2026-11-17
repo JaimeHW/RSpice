@@ -101,24 +101,6 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
     show_rail(ui, parts, rail)
 }
 
-/// The rail of the project's automation bundle.
-pub(in crate::workbench) fn automation(
-    ui: &mut Ui,
-    parts: &mut SourceRail<'_>,
-) -> Option<RailAction> {
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    let rail = Rail {
-        id_salt: "workbench.automation.navigator",
-        files_title: MessageId::CodeNavigatorWorkflowFiles,
-        files: bundle_rows(parts.model, language),
-        active: active_path(parts.model, parts.code_workspace, language),
-        language,
-        actions: None,
-        used_in: None,
-    };
-    show_rail(ui, parts, rail)
-}
-
 /// Everything one rail lists, gathered before it paints.
 struct Rail {
     id_salt: &'static str,

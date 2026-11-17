@@ -25,13 +25,9 @@ mod veriloga_live_check;
 mod veriloga_symbols;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
-pub use super::{CodeSourceFileAction, CodeWorkspacePage};
+pub use super::CodeSourceFileAction;
 
-pub(crate) use automation::automation_task_count;
 pub use automation::{AutomationRunPort, CodeHandles, CodeWorkspaceParts};
-pub(crate) use automation::{
-    automation_runtime_unavailable_reason, invalidate_automation_evidence_in,
-};
 pub use automation::{
     cancel_automation_workflow, continue_automation_debugger, dry_run_automation_workflow,
     export_automation_artifact, pause_automation_debugger, poll_automation_workflow,
@@ -207,15 +203,6 @@ pub(crate) fn veriloga_dependency_view(
     }
 }
 
-/// Whether `shown` is the Netlist workspace on its netlist page: the
-/// netlist document, not merely the workspace that hosts it.
-pub fn netlist_page_shown(
-    shown: crate::workbench::state::Workspace,
-    code: &CodeWorkspaceRuntimeState,
-) -> bool {
-    shown == crate::workbench::state::Workspace::Netlist && code.page == CodeWorkspacePage::Netlist
-}
-
 /// Whether the Design workspace is showing a Verilog-A cell view, which is
 /// where that view's editor lives.
 pub(crate) fn design_hosts_veriloga(
@@ -227,48 +214,13 @@ pub(crate) fn design_hosts_veriloga(
 }
 
 /// The source language of the code document commands, dialogs, and labels act
-/// on, or `None` for the Netlist page's deck, which is not a project source
-/// bundle at all.
-///
-/// A Verilog-A cell view the Design workspace is showing is that document;
-/// everywhere else it is the page the Netlist workspace has selected.
+/// on: a Verilog-A cell view the Design workspace is showing, or `None` for
+/// the Netlist workspace's deck, which is not a project source bundle at all.
 pub fn active_source_language(
     shown: crate::workbench::state::Workspace,
     workspace: &crate::state::ProjectWorkspace,
-    page: CodeWorkspacePage,
 ) -> Option<crate::state::ProjectSourceLanguage> {
-    if design_hosts_veriloga(shown, workspace) {
-        return Some(crate::state::ProjectSourceLanguage::VerilogA);
-    }
-    match page {
-        CodeWorkspacePage::Netlist => None,
-        CodeWorkspacePage::Automation => {
-            Some(crate::state::ProjectSourceLanguage::RSpiceAutomation)
-        }
-    }
-}
-
-/// The document the Code & Automation workspace is showing right now.
-///
-/// One owner for one fact. The title bar, the document tab, and anything else
-/// that names the active document read this: three chrome elements deriving
-/// the same label separately is how the title bar came to state a filename
-/// the workspace was not showing.
-pub(crate) fn active_document_label(
-    workspace: &crate::state::ProjectWorkspace,
-    code: &CodeWorkspaceRuntimeState,
-    messages: crate::workbench::MessageCatalog,
-) -> String {
-    match code.page {
-        CodeWorkspacePage::Netlist => netlist_document_label(workspace),
-        CodeWorkspacePage::Automation => source_bundle_document_label(
-            workspace,
-            code,
-            messages,
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-            crate::workbench::MessageId::CodePageAutomation,
-        ),
-    }
+    design_hosts_veriloga(shown, workspace).then_some(crate::state::ProjectSourceLanguage::VerilogA)
 }
 
 /// The bundle file a language page is showing.
@@ -357,10 +309,16 @@ pub fn select_source_document(
     Some(bundle_id)
 }
 
-/// The netlist page names the artifact it is editing. A generated primary has
-/// no file of its own, so it is named after the cell that produces it and
-/// marked as generated rather than borrowing a filename it does not have.
-fn netlist_document_label(workspace: &crate::state::ProjectWorkspace) -> String {
+/// The document the Netlist workspace is showing right now, named after the
+/// deck it edits. A generated primary has no file of its own, so it is named
+/// after the cell that produces it and marked as generated rather than
+/// borrowing a filename it does not have.
+///
+/// One owner for one fact. The title bar, the document tab, and anything else
+/// that names the active document read this: three chrome elements deriving
+/// the same label separately is how the title bar came to state a filename
+/// the workspace was not showing.
+pub(crate) fn active_document_label(workspace: &crate::state::ProjectWorkspace) -> String {
     workspace
         .content
         .netlist_descriptor
@@ -375,27 +333,6 @@ fn netlist_document_label(workspace: &crate::state::ProjectWorkspace) -> String 
                 .map(|name| name.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| format!("{}.sp · generated", workspace.content.project.top_cell))
-}
-
-/// The selected file in a language bundle, or its root when nothing is
-/// explicitly selected. A starter filename is never treated as identity: with
-/// no bundle at all the page is named after itself.
-fn source_bundle_document_label(
-    workspace: &crate::state::ProjectWorkspace,
-    code: &CodeWorkspaceRuntimeState,
-    messages: crate::workbench::MessageCatalog,
-    language: crate::state::ProjectSourceLanguage,
-    fallback: crate::workbench::MessageId,
-) -> String {
-    active_bundle_path(workspace, code, language)
-        .map(|path| {
-            path.rsplit('/')
-                .next()
-                .filter(|name| !name.is_empty())
-                .unwrap_or(path.as_str())
-                .to_owned()
-        })
-        .unwrap_or_else(|| messages.text(fallback))
 }
 
 #[cfg(test)]
@@ -414,52 +351,24 @@ mod tests {
         assert!(source.contains("veriloga-error"));
     }
 
-    /// The function takes exactly the state it reads, so the fixture is that
-    /// state and not a whole application.
-    fn fixture() -> (crate::state::ProjectWorkspace, CodeWorkspaceRuntimeState) {
-        (
-            crate::state::ProjectWorkspace::default(),
-            CodeWorkspaceRuntimeState::default(),
-        )
-    }
-
-    fn messages() -> crate::workbench::MessageCatalog {
-        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
-    }
-
     /// The title bar used to state a hardcoded `top.sp · generated` for the
     /// whole workspace, so it named a netlist while the user edited Verilog-A
     /// and kept naming it after the deck was given a filename. One owner, and
-    /// it follows the page.
+    /// it follows the deck.
     #[test]
-    fn the_active_document_label_follows_the_visible_page() {
-        let (mut workspace, mut code) = fixture();
+    fn the_active_document_label_follows_the_deck() {
+        let mut workspace = crate::state::ProjectWorkspace::default();
         workspace.content.project.top_cell = "afe".to_owned();
 
-        code.page = CodeWorkspacePage::Netlist;
-        assert_eq!(
-            active_document_label(&workspace, &code, messages()),
-            "afe.sp · generated"
-        );
+        assert_eq!(active_document_label(&workspace), "afe.sp · generated");
 
         workspace.content.netlist_source_path =
             Some(std::path::PathBuf::from("/p/top_override.sp"));
-        assert_eq!(
-            active_document_label(&workspace, &code, messages()),
-            "top_override.sp"
-        );
-
-        code.page = CodeWorkspacePage::Automation;
-        assert_ne!(
-            active_document_label(&workspace, &code, messages()),
-            "top_override.sp",
-            "the Automation page must never be named after the SPICE deck"
-        );
+        assert_eq!(active_document_label(&workspace), "top_override.sp");
 
         // A Verilog-A cell view is a Design document with a tab of its own.
         // Opening one never renames the Netlist workspace's document: the
         // deck stays named after itself, not after the module's source file.
-        code.page = CodeWorkspacePage::Netlist;
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
         workspace
             .content
@@ -477,10 +386,7 @@ mod tests {
             )
             .unwrap();
         workspace.open_view(reference, crate::state::ViewType::VerilogA);
-        assert_eq!(
-            active_document_label(&workspace, &code, messages()),
-            "top_override.sp"
-        );
+        assert_eq!(active_document_label(&workspace), "top_override.sp");
     }
 
     /// Verilog-A has no source of its own outside a cell view: with no
@@ -488,7 +394,7 @@ mod tests {
     /// reader, and with one active it is that view's.
     #[test]
     fn the_veriloga_source_in_front_is_the_active_cell_views_or_none() {
-        let (mut workspace, _) = fixture();
+        let mut workspace = crate::state::ProjectWorkspace::default();
         let language = crate::state::ProjectSourceLanguage::VerilogA;
         assert_eq!(workspace.active_source_owner(language), None);
         assert!(workspace.active_source_bundle(language).is_none());
@@ -498,19 +404,6 @@ mod tests {
         assert_eq!(
             workspace.active_source_owner(language),
             Some(crate::state::ProjectSourceOwner::cell_view(reference))
-        );
-    }
-
-    /// A logical path is a path; the tab shows the file at the end of it.
-    #[test]
-    fn a_selected_bundle_file_is_named_by_its_leaf() {
-        let (workspace, mut code) = fixture();
-        code.page = CodeWorkspacePage::Automation;
-        code.automation.selected_file = Some("workflows/characterize.py".to_owned());
-
-        assert_eq!(
-            active_document_label(&workspace, &code, messages()),
-            "characterize.py"
         );
     }
 }

@@ -11,8 +11,6 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 #[test]
 fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
     let mut state = AppState::default();
-    state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.code.code_workspace.automation.debug.watches.push(
         rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
             expression: "project.old_value".to_owned(),
@@ -37,10 +35,6 @@ fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console
         .warning(LogSource::Run, "old project warning");
     state.clear_design_execution_context();
 
-    assert_eq!(
-        state.code.code_workspace.page,
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-    );
     assert!(
         state
             .code

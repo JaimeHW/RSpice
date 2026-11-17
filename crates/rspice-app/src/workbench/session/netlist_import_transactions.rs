@@ -543,41 +543,25 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_netlist_project(&mut self) -> bool {
         let started = self.import_netlist_with_mode(NetlistImportMode::OpenProject);
-        route_started_netlist_import(
-            &mut self.workbench,
-            &mut self.code.code_workspace.page,
-            started,
-        )
+        route_started_netlist_import(&mut self.workbench, started)
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn open_netlist_project(&mut self) -> bool {
         let started = self.import_netlist_with_mode(NetlistImportMode::OpenProject);
-        route_started_netlist_import(
-            &mut self.workbench,
-            &mut self.code.code_workspace.page,
-            started,
-        )
+        route_started_netlist_import(&mut self.workbench, started)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn import_netlist(&mut self) -> bool {
         let started = self.import_netlist_with_mode(NetlistImportMode::ImportIntoProject);
-        route_started_netlist_import(
-            &mut self.workbench,
-            &mut self.code.code_workspace.page,
-            started,
-        )
+        route_started_netlist_import(&mut self.workbench, started)
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn import_netlist(&mut self) -> bool {
         let started = self.import_netlist_with_mode(NetlistImportMode::ImportIntoProject);
-        route_started_netlist_import(
-            &mut self.workbench,
-            &mut self.code.code_workspace.page,
-            started,
-        )
+        route_started_netlist_import(&mut self.workbench, started)
     }
 
     #[cfg(target_arch = "wasm32")]

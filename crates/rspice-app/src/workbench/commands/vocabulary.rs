@@ -147,7 +147,7 @@ impl ShellCommand {
                 spec("models", "Open models workspace", "Navigate")
             }
             Self::OpenWorkspace(Workspace::Netlist) => {
-                spec("netlist", "Open Netlist & Script Editor", "Navigate")
+                spec("netlist", "Open netlist workspace", "Navigate")
             }
             Self::RevertActiveDocument => spec("revert-document", "Revert to saved…", "File"),
             Self::CloseActiveDocument => spec("close-document", "Close", "File"),
@@ -728,7 +728,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::CancelVerilogACompile.key(),
     CodeCommand::VerilogABuildSettings.key(),
     CodeCommand::VerilogAOpenSymbol.key(),
-    CodeCommand::AutomationConsole.key(),
     ShellCommand::CommandPalette.key(),
     ShellCommand::KeyboardShortcuts.key(),
     CloudCommand::AccountOrganization.key(),

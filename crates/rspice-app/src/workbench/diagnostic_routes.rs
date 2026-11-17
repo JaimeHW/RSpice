@@ -56,7 +56,6 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
                     &mut app.state.code.netlist_open_documents,
                     &mut app.state.runs,
                     &mut app.state.workbench,
-                    &mut app.state.code.code_workspace.page,
                     diagnostic_id,
                 )
             {
@@ -85,12 +84,11 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
 /// is in, and put the caret on its line and column.
 ///
 /// The owner is what decides the destination: a Verilog-A bundle belongs to a
-/// cell view and is edited in the Design workspace showing that view, while
-/// the automation bundle belongs to the project and is edited on the Netlist
-/// workspace's Automation page. The view is opened before the document is
-/// selected, because the selection is read against the active owner — and the
-/// reveal is queued last, because the editor consumes it on the frame it
-/// shows that document.
+/// cell view and is edited in the Design workspace showing that view. A
+/// bundle the project holds outside every cell view has no editor. The view is
+/// opened before the document is selected, because the selection is read
+/// against the active owner — and the reveal is queued last, because the
+/// editor consumes it on the frame it shows that document.
 fn open_code_document(
     ctx: &Context,
     app: &mut RSpiceApp,
@@ -122,10 +120,11 @@ fn open_code_document(
             app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
             ProjectSourceLanguage::VerilogA
         }
-        ProjectSourceOwner::CodeWorkspace { language } => {
-            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Netlist).key());
-            app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
-            *language
+        ProjectSourceOwner::CodeWorkspace { .. } => {
+            app.state.prompt(format!(
+                "{logical_path} was not opened: no editor shows the source that reported it."
+            ));
+            return;
         }
     };
     // Opening the owner can be refused — an inspector edit that will not
@@ -276,7 +275,6 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 &mut app.state.code.netlist_open_documents,
                 &mut app.state.runs,
                 &mut app.state.workbench,
-                &mut app.state.code.code_workspace.page,
                 None,
                 cursor,
             ) {

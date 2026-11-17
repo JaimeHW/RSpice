@@ -5,28 +5,18 @@
 
 use crate::workbench::RSpiceApp;
 use egui::Context;
-use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
+use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::ProjectSourceLanguage;
 use rspice_app_workbench::workbench::surfaces::register_results_split_region;
 
 #[test]
 fn search_shortcut_handoff_preserves_the_source_editor() {
-    for language in [
-        ProjectSourceLanguage::RSpiceAutomation,
-        ProjectSourceLanguage::VerilogA,
-    ] {
-        source_editor_handoff(language, "");
-    }
+    source_editor_handoff(ProjectSourceLanguage::VerilogA, "");
 }
 
 #[test]
 fn search_shortcut_handoff_binds_preceding_source_edits() {
-    for language in [
-        ProjectSourceLanguage::RSpiceAutomation,
-        ProjectSourceLanguage::VerilogA,
-    ] {
-        source_editor_handoff(language, "preceding_source_edit");
-    }
+    source_editor_handoff(ProjectSourceLanguage::VerilogA, "preceding_source_edit");
 }
 
 fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
@@ -126,53 +116,42 @@ fn source_editor_page(
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = RSpiceApp::test_instance();
-    // Automation is edited on its Netlist-workspace page; a Verilog-A
-    // module is a cell view, edited in Design.
-    let owner = match language {
-        ProjectSourceLanguage::RSpiceAutomation => {
-            app.state
-                .workbench
-                .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
-            app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-            rspice_app_state::state::ProjectSourceOwner::code_workspace(language)
-        }
-        ProjectSourceLanguage::VerilogA => {
-            let reference =
-                rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
-            let mut view = rspice_app_state::state::View::new(
-                "veriloga",
-                rspice_app_state::state::ViewType::VerilogA,
-            );
-            view.metadata
-                .insert("veriloga.module".to_owned(), "gain".to_owned());
-            let mut cell = rspice_app_state::state::Cell::new("gain");
-            cell.add_view(view);
-            let mut library = rspice_app_state::state::Library::new("behavioral");
-            library.add_cell(cell);
-            app.state.model.library_manager.add_library(library);
-            let owner = rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone());
-            app.state
-                .model.workspace
-                .content
-                .project_sources
-                .insert_bundle(
-                    rspice_app_state::state::ProjectSourceBundle::try_new(
-                        owner.clone(),
-                        language,
-                        "gain.va",
-                        "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
-                        [],
-                        [],
-                    )
-                    .unwrap(),
+    // A Verilog-A module is a cell view, edited in Design.
+    let owner = {
+        let reference = rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
+        let mut view = rspice_app_state::state::View::new(
+            "veriloga",
+            rspice_app_state::state::ViewType::VerilogA,
+        );
+        view.metadata
+            .insert("veriloga.module".to_owned(), "gain".to_owned());
+        let mut cell = rspice_app_state::state::Cell::new("gain");
+        cell.add_view(view);
+        let mut library = rspice_app_state::state::Library::new("behavioral");
+        library.add_cell(cell);
+        app.state.model.library_manager.add_library(library);
+        let owner = rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone());
+        app.state
+            .model.workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                rspice_app_state::state::ProjectSourceBundle::try_new(
+                    owner.clone(),
+                    language,
+                    "gain.va",
+                    "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+                    [],
+                    [],
                 )
-                .unwrap();
-            app.state.open_workspace_view(reference);
-            app.state
-                .workbench
-                .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-            owner
-        }
+                .unwrap(),
+            )
+            .unwrap();
+        app.state.open_workspace_view(reference);
+        app.state
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
+        owner
     };
     (ctx, app, owner)
 }
@@ -201,12 +180,7 @@ fn render_page(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) {
 /// was, and the next edit is stored without what was refused.
 #[test]
 fn a_refused_source_write_returns_the_editor_to_the_stored_source() {
-    for language in [
-        ProjectSourceLanguage::RSpiceAutomation,
-        ProjectSourceLanguage::VerilogA,
-    ] {
-        refused_source_write(language);
-    }
+    refused_source_write(ProjectSourceLanguage::VerilogA);
 }
 
 fn refused_source_write(language: ProjectSourceLanguage) {

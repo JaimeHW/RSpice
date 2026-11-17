@@ -1,9 +1,7 @@
 //! The run tier's behaviour, observed through a whole session.
 
 #[cfg(not(target_arch = "wasm32"))]
-mod automation_run_control;
 #[cfg(not(target_arch = "wasm32"))]
-mod automation_source_menu;
 mod campaign;
 mod completion_paths;
 mod controller;

@@ -64,7 +64,7 @@ def has_control(browser, label):
 
 
 def author_deck(browser):
-    browser.click("Netlist & Script Editor", "button")
+    browser.click("Netlist", "button")
     browser.click("New source document", "button")
     browser.click("Logical path", "textInput")
     # The creation form's Create action follows the field in keyboard order;

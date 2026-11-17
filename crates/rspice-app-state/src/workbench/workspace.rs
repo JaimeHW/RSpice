@@ -51,7 +51,7 @@ impl Workspace {
             Self::Results => "Results",
             Self::Verify => "Verify",
             Self::Models => "Models",
-            Self::Netlist => "Netlist & Script Editor",
+            Self::Netlist => "Netlist",
         }
     }
 

@@ -1,102 +1,16 @@
-//! Exact command context for the code documents: the Netlist & Script Editor
-//! workspace's pages, and Verilog-A cell views in the Design workspace.
+//! Whether Compile has a Verilog-A source to compile, and why not.
 //!
 //! Menus, shortcuts, the command palette, and direct toolbar dispatch must
-//! resolve the same project/document authority. The resolver deliberately
-//! returns `None` for incomplete, stale, or internally inconsistent state;
-//! callers fail closed instead of guessing from a visible label or file
-//! extension.
+//! agree on it. The check deliberately fails for incomplete, stale, or
+//! internally inconsistent state instead of guessing from a visible label or
+//! file extension.
 
-use crate::product::{ContentDigest, ProjectId};
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
-use crate::workbench::MessageCatalog;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
-use crate::workbench::documents::netlist_document::NetlistDocumentState;
-use crate::workbench::state::Workspace;
-use rspice_app_runs::workbench::slots::runs::RunsState;
+use crate::workbench::documents::code_workspace::{
+    CodeWorkspaceRuntimeState, selected_veriloga_editor_snapshot_in,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodeDocumentKind {
-    GeneratedNetlist,
-    OwnedNetlist,
-    NetlistComparison,
-    NetlistRunSnapshot,
-    NetlistInclude,
-    VerilogA,
-    Automation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodeDocumentOwnership {
-    GeneratedReadOnly,
-    ProjectOwned,
-    ExternalReadOnly,
-    ComparisonReadOnly,
-    GovernedReadOnly,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct CodeCommandCapabilities {
-    pub find: bool,
-    pub validate: bool,
-    pub execute: bool,
-    pub compare_revisions: bool,
-    pub save: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodeCommandContext {
-    pub project_id: ProjectId,
-    pub document_kind: CodeDocumentKind,
-    pub ownership: CodeDocumentOwnership,
-    pub document_identity: String,
-    pub logical_path: String,
-    pub revision: u64,
-    pub content_digest: ContentDigest,
-    pub capabilities: CodeCommandCapabilities,
-    pub platform: CommandPlatform,
-}
-
-/// The code document in front of the reader: the Netlist workspace's visible
-/// page, or a Verilog-A cell view the Design workspace is showing. It reads
-/// the model, the netlist editor's and the Code & Automation page's state,
-/// the runs that sealed a deck, the workspace in front, whether a project is
-/// open and the message catalogue.
-#[must_use]
-pub(crate) fn resolve(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    code: &CodeWorkspaceRuntimeState,
-    runs: &RunsState,
-    workspace: Workspace,
-    project_open: bool,
-    messages: MessageCatalog,
-) -> Option<CodeCommandContext> {
-    if !project_open {
-        return None;
-    }
-    match workspace {
-        Workspace::Netlist => match code.page {
-            CodeWorkspacePage::Netlist => resolve_netlist(model, netlist, runs, messages),
-            CodeWorkspacePage::Automation => {
-                resolve_project_source(model, code, ProjectSourceLanguage::RSpiceAutomation)
-            }
-        },
-        workspace
-            if crate::workbench::documents::code_workspace::design_hosts_veriloga(
-                workspace,
-                &model.workspace,
-            ) =>
-        {
-            resolve_project_source(model, code, ProjectSourceLanguage::VerilogA)
-        }
-        _ => None,
-    }
-}
-
-/// What Compile would compile, wherever it is offered from.
+/// Whether Compile has something to compile, wherever it is offered from.
 ///
 /// A Verilog-A cell view is a design document, so while one is the active
 /// Design document it is compiled from any workspace — the Models toolbar and
@@ -107,27 +21,29 @@ pub(crate) fn resolve_veriloga_compile(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
-) -> Option<CodeCommandContext> {
+) -> bool {
     if model.safe_mode.project_read_only()
         || !platform.project_lifecycle.is_open()
         || !model.workspace.content.active_view_is_hdl_source()
         || code.veriloga.pending.is_some()
     {
-        return None;
+        return false;
     }
-    let context = resolve_project_source(model, code, ProjectSourceLanguage::VerilogA)?;
-    let selected =
-        crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot_in(
-            model, code,
-        )
-        .ok()?;
+    let Some(selected) = selected_veriloga_editor_snapshot_in(model, code)
+        .ok()
+        .filter(|selected| !selected.selection_was_invalid())
+    else {
+        return false;
+    };
     model
         .workspace
         .content
         .project_sources
         .get_bundle(selected.bundle_id())
-        .filter(|bundle| !bundle.root().content().trim().is_empty())?;
-    Some(context)
+        .is_some_and(|bundle| {
+            bundle.file_content(selected.active_path()).is_some()
+                && !bundle.root().content().trim().is_empty()
+        })
 }
 
 /// Why [`resolve_veriloga_compile`] finds nothing to compile, checked in its
@@ -148,295 +64,5 @@ pub(crate) fn veriloga_compile_refusal(
         "a Verilog-A compile is already running"
     } else {
         "the Verilog-A cell view has no source to compile"
-    }
-}
-
-fn resolve_netlist(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    runs: &RunsState,
-    messages: MessageCatalog,
-) -> Option<CodeCommandContext> {
-    use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, active_dependency_in, active_dependency_is_owned_in,
-    };
-
-    let project_id = model.workspace.content.project.id();
-    let active = netlist.active_document;
-    if let Some(dependency) = active_dependency_in(model, netlist) {
-        let source = dependency.source()?;
-        let owned = active_dependency_is_owned_in(model, netlist);
-        let root = netlist.active_dependency_root?;
-        if root != active || model.simulation.source.netlist_content != source {
-            return None;
-        }
-        let root_document = match root {
-            ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
-            ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
-            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
-        }?;
-        let owned_descriptor = owned.then(|| {
-            model
-                .workspace
-                .content
-                .netlist_descriptor
-                .as_ref()?
-                .owned_include(dependency.locator().logical_identity())
-        });
-        let (document_identity, revision) = if let Some(descriptor) = owned_descriptor.flatten() {
-            (descriptor.document_id.to_string(), descriptor.revision)
-        } else {
-            (
-                format!(
-                    "{}:{}",
-                    root_document.id(),
-                    dependency.locator().logical_identity()
-                ),
-                root_document.revision().get(),
-            )
-        };
-        return Some(CodeCommandContext {
-            project_id,
-            document_kind: CodeDocumentKind::NetlistInclude,
-            ownership: if owned {
-                CodeDocumentOwnership::ProjectOwned
-            } else {
-                CodeDocumentOwnership::ExternalReadOnly
-            },
-            document_identity,
-            logical_path: dependency.locator().logical_identity().to_owned(),
-            revision,
-            content_digest: crate::state::content_digest(source),
-            capabilities: CodeCommandCapabilities {
-                find: true,
-                save: owned,
-                ..CodeCommandCapabilities::default()
-            },
-            platform: runtime_platform(),
-        });
-    }
-
-    let (document_kind, ownership, document_identity, logical_path, revision, source, compare) =
-        match active {
-            ActiveNetlistDocument::Generated => {
-                let document = model.netlist_artifacts.generated_document.as_ref()?;
-                if model.netlist_artifacts.generated_source != document.source()
-                    || model.simulation.source.netlist_content != document.source()
-                {
-                    return None;
-                }
-                (
-                    CodeDocumentKind::GeneratedNetlist,
-                    CodeDocumentOwnership::GeneratedReadOnly,
-                    document.id().to_string(),
-                    "generated.sp".to_owned(),
-                    document.revision().get(),
-                    document.source(),
-                    !netlist.generated_history.is_empty(),
-                )
-            }
-            ActiveNetlistDocument::OwnedSource => {
-                let document = netlist.owned_document.as_ref()?;
-                let descriptor = model.workspace.content.netlist_descriptor.as_ref()?;
-                let canonical = model.workspace.content.netlist_document.as_ref()?;
-                if model.workspace.content.netlist_source.as_deref() != Some(document.source())
-                    || model.simulation.source.netlist_content != document.source()
-                    || canonical.id() != document.id()
-                    || canonical.revision() != document.revision()
-                    || canonical.source() != document.source()
-                {
-                    return None;
-                }
-                (
-                    CodeDocumentKind::OwnedNetlist,
-                    CodeDocumentOwnership::ProjectOwned,
-                    document.id().to_string(),
-                    descriptor.artifact_name.clone(),
-                    document.revision().get(),
-                    document.source(),
-                    !descriptor.revision_history.is_empty(),
-                )
-            }
-            ActiveNetlistDocument::GeneratedDiff => {
-                let document = model.netlist_artifacts.generated_document.as_ref()?;
-                if netlist.generated_diff_source.is_empty() {
-                    return None;
-                }
-                if model.simulation.source.netlist_content != netlist.generated_diff_source {
-                    return None;
-                }
-                (
-                    CodeDocumentKind::NetlistComparison,
-                    CodeDocumentOwnership::ComparisonReadOnly,
-                    format!("{}:comparison", document.id()),
-                    "generated.diff".to_owned(),
-                    document.revision().get(),
-                    netlist.generated_diff_source.as_str(),
-                    false,
-                )
-            }
-            // Sealed with its run, exactly like the automation environment
-            // lock is sealed with its runtime: read-only, and governed by a
-            // record outside the document. Its revision is the run's, read off
-            // the run's own receipt rather than restated here.
-            ActiveNetlistDocument::RunSnapshot => {
-                let run_id =
-                    crate::workbench::documents::netlist_document::run_deck_snapshot_run_id_in(
-                        runs,
-                    )?;
-                let snapshot = runs.manual_run.last_run_buffer.as_deref()?;
-                if model.simulation.source.netlist_content != snapshot {
-                    return None;
-                }
-                let revision = model
-                    .simulation
-                    .retained
-                    .run_by_sequence(run_id)?
-                    .prepared_receipt()?
-                    .project_revision()
-                    .get();
-                (
-                    CodeDocumentKind::NetlistRunSnapshot,
-                    CodeDocumentOwnership::GovernedReadOnly,
-                    format!("run:{run_id}"),
-                    crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name_in(
-                        runs,
-                    ),
-                    revision,
-                    snapshot,
-                    false,
-                )
-            }
-        };
-    let source_is_present = !source.trim().is_empty();
-    let generated_current = active != ActiveNetlistDocument::Generated
-        || (model.netlist_artifacts.generation_error.is_none()
-            && model.netlist_artifacts.generated_input_digest
-                == model.netlist_artifacts.current_generation_input_digest);
-    let editable =
-        ownership == CodeDocumentOwnership::ProjectOwned && !model.safe_mode.project_read_only();
-    Some(CodeCommandContext {
-        project_id,
-        document_kind,
-        ownership,
-        document_identity,
-        logical_path,
-        revision,
-        content_digest: crate::state::content_digest(source),
-        capabilities: CodeCommandCapabilities {
-            find: true,
-            validate: source_is_present
-                && generated_current
-                && !matches!(
-                    document_kind,
-                    CodeDocumentKind::NetlistComparison | CodeDocumentKind::NetlistRunSnapshot
-                ),
-            execute: source_is_present
-                && generated_current
-                && !matches!(
-                    document_kind,
-                    CodeDocumentKind::NetlistComparison | CodeDocumentKind::NetlistRunSnapshot
-                )
-                && crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
-                    model, netlist, messages,
-                )
-                .is_none(),
-            compare_revisions: compare,
-            save: editable,
-        },
-        platform: runtime_platform(),
-    })
-}
-
-fn resolve_project_source(
-    model: &Model,
-    code: &CodeWorkspaceRuntimeState,
-    language: ProjectSourceLanguage,
-) -> Option<CodeCommandContext> {
-    let selected_veriloga = (language == ProjectSourceLanguage::VerilogA)
-        .then(|| {
-            crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot_in(
-                model, code,
-            )
-            .ok()
-        })
-        .flatten()
-        .filter(|selected| !selected.selection_was_invalid());
-    let bundle = match language {
-        ProjectSourceLanguage::VerilogA => model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(selected_veriloga.as_ref()?.bundle_id())?,
-        ProjectSourceLanguage::RSpiceAutomation => {
-            let owner = ProjectSourceOwner::code_workspace(language);
-            model
-                .workspace
-                .content
-                .project_sources
-                .bundle_for_owner(&owner)?
-        }
-    };
-    let selected_path = match language {
-        ProjectSourceLanguage::VerilogA => selected_veriloga.as_ref()?.active_path().to_owned(),
-        ProjectSourceLanguage::RSpiceAutomation => match code.automation.selected_file.as_deref() {
-            Some(path) if bundle.contains_file(path) => path.to_owned(),
-            Some(_) => return None,
-            None => bundle.root().logical_path().to_owned(),
-        },
-    };
-    let source = bundle.file_content(&selected_path)?;
-    let document_identity = bundle.document_id(&selected_path)?.to_string();
-    let revision = bundle.document_revision(&selected_path)?.get();
-    let ownership = if language == ProjectSourceLanguage::RSpiceAutomation
-        && bundle.role_for_path(&selected_path)
-            == Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock)
-    {
-        CodeDocumentOwnership::GovernedReadOnly
-    } else {
-        CodeDocumentOwnership::ProjectOwned
-    };
-    let busy = match language {
-        ProjectSourceLanguage::VerilogA => code.veriloga.pending.is_some(),
-        ProjectSourceLanguage::RSpiceAutomation => {
-            let automation = &code.automation;
-            automation.pending_runtime_validation.is_some()
-                || automation.runtime_execution.is_some()
-                || automation.execution.is_active()
-        }
-    };
-    let project_writable = !model.safe_mode.project_read_only();
-    Some(CodeCommandContext {
-        project_id: model.workspace.content.project.id(),
-        document_kind: match language {
-            ProjectSourceLanguage::VerilogA => CodeDocumentKind::VerilogA,
-            ProjectSourceLanguage::RSpiceAutomation => CodeDocumentKind::Automation,
-        },
-        ownership,
-        document_identity,
-        logical_path: selected_path,
-        revision,
-        content_digest: crate::state::content_digest(source),
-        capabilities: CodeCommandCapabilities {
-            find: true,
-            validate: !busy
-                && !source.trim().is_empty()
-                && (language != ProjectSourceLanguage::VerilogA || project_writable),
-            execute: false,
-            compare_revisions: false,
-            save: ownership == CodeDocumentOwnership::ProjectOwned && !busy && project_writable,
-        },
-        platform: runtime_platform(),
-    })
-}
-
-const fn runtime_platform() -> CommandPlatform {
-    #[cfg(target_arch = "wasm32")]
-    {
-        CommandPlatform::Browser
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        CommandPlatform::Desktop
     }
 }

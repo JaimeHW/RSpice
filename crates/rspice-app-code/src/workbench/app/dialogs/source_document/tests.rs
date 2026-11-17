@@ -1,11 +1,9 @@
 //! Source document dialog tests: include search roots, role labels, the lifecycle
 //! transactions, and the creation form a project with no deck opens.
 
-use super::fixtures::{english, facts_of};
+use super::fixtures::english;
 use super::*;
-use crate::state::{ProjectDescriptor, ProjectSourceOwner};
-use crate::workbench::code::{CodeFeature, tests::harness};
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+use crate::state::ProjectDescriptor;
 use rspice_simulation::netlist_preparation::IncludeSearchChain;
 use std::path::{Path, PathBuf};
 
@@ -136,64 +134,4 @@ fn every_assignable_role_round_trips_through_its_label_in_every_locale() {
             );
         }
     }
-}
-
-/// The environment lock refuses graph mutation and its refusal tells the
-/// user to reassign the role first. That instruction was impossible to
-/// follow, because no control could set a role. Assert the refusal, the
-/// reassignment, and that the refusal then lifts.
-#[test]
-fn reassigning_a_role_lifts_the_environment_lock_refusal() {
-    let mut harness = harness();
-    harness.state.code_workspace.page = CodeWorkspacePage::Automation;
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let locked = harness
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .and_then(|bundle| {
-            bundle
-                .paths_for_role(crate::state::ProjectSourceRole::AutomationEnvironmentLock)
-                .next()
-                .map(str::to_owned)
-        })
-        .unwrap_or_default();
-    assert!(!locked.is_empty(), "the fixture bundle pins an environment");
-    harness.state.code_workspace.automation.selected_file = Some(locked.clone());
-
-    let before = facts_of(
-        harness.wb.workspace,
-        &harness.model,
-        &harness.state.code_workspace,
-        &harness.platform,
-    )
-    .expect("the lock is a document");
-    assert!(before.is_environment_lock);
-    assert!(
-        refusal_reason(&before, CodeSourceFileAction::Rename).is_some(),
-        "the lock refuses graph mutation"
-    );
-
-    apply_lifecycle_action(
-        &mut CodeFeature::workspace_parts(&mut harness.cx()),
-        LifecycleAction::AssignRole(None),
-        before.language,
-        &before.logical_path,
-    );
-
-    let after = facts_of(
-        harness.wb.workspace,
-        &harness.model,
-        &harness.state.code_workspace,
-        &harness.platform,
-    )
-    .expect("the document survives the role change");
-    assert!(!after.is_environment_lock, "the role was reassigned");
-    assert!(
-        refusal_reason(&after, CodeSourceFileAction::Rename).is_none(),
-        "the refusal the service states is now followable"
-    );
 }

@@ -186,23 +186,6 @@ pub(crate) fn invalidate_automation_evidence_in(
     code.automation.debug.breakpoints = breakpoints;
 }
 
-/// Why the managed Python runtime cannot run, or `None` once it can. On the
-/// desktop the runtime is looked for again first.
-pub(crate) fn automation_runtime_unavailable_reason(handles: &mut CodeHandles) -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        handles.automation_runtime.poll_discovery();
-        handles
-            .automation_runtime
-            .availability_reason()
-            .map(str::to_owned)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        handles.automation_runtime.availability_reason()
-    }
-}
-
 fn start_managed_python_workflow(
     parts: &mut CodeWorkspaceParts<'_>,
     mode: AutomationRuntimeLaunchMode,

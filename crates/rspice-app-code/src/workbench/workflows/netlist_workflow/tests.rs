@@ -54,35 +54,17 @@ const GENERATED_BASE: &str = "* generated\n.option reltol=1e-3\n.param gain=10\n
 fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
     let mut harness = harness();
     harness.wb.workspace = crate::workbench::state::Workspace::Models;
-    harness.state.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
 
-    assert!(!route_started_netlist_import(
-        &mut harness.wb,
-        &mut harness.state.code_workspace.page,
-        false
-    ));
+    assert!(!route_started_netlist_import(&mut harness.wb, false));
     assert_eq!(
         harness.wb.workspace,
         crate::workbench::state::Workspace::Models
     );
-    assert_eq!(
-        harness.state.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
-    );
 
-    assert!(route_started_netlist_import(
-        &mut harness.wb,
-        &mut harness.state.code_workspace.page,
-        true
-    ));
+    assert!(route_started_netlist_import(&mut harness.wb, true));
     assert_eq!(
         harness.wb.workspace,
         crate::workbench::state::Workspace::Netlist
-    );
-    assert_eq!(
-        harness.state.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
 }
 

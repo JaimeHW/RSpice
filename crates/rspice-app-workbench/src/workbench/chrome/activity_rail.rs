@@ -182,9 +182,7 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
         Workspace::Results => "Results",
         Workspace::Verify => Workspace::Verify.label(),
         Workspace::Models => "Models and PDKs",
-        // The workspace name the mockup registry gives it; the two pages
-        // inside it stay Netlist and Automation.
-        Workspace::Netlist => "Netlist & Script Editor",
+        Workspace::Netlist => "Netlist",
     }
 }
 
@@ -223,9 +221,6 @@ mod tests {
             activity_workspace_label(Workspace::Models),
             "Models and PDKs"
         );
-        assert_eq!(
-            activity_workspace_label(Workspace::Netlist),
-            "Netlist & Script Editor"
-        );
+        assert_eq!(activity_workspace_label(Workspace::Netlist), "Netlist");
     }
 }

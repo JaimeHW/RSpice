@@ -2,10 +2,18 @@
 //! command, the dialogs the frame draws, and the bundle search behind it.
 
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_find::{LABEL_COLUMN, LABEL_GAP};
 use rspice_app_code::workbench::documents::code_workspace;
-use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
+
+/// A Verilog-A cell view open in Design: a document Find in source searches.
+fn veriloga_view_app() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "gain.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    app
+}
 
 #[test]
 fn initial_focus_accepts_source_search_typing() {
@@ -13,9 +21,7 @@ fn initial_focus_accepts_source_search_typing() {
         let ctx = Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+        let mut app = veriloga_view_app();
         if read_only {
             app.state.model.safe_mode.activate(
                 rspice_app_state::state::write_policy::LocalSafeModeOptions {
@@ -70,7 +76,7 @@ fn initial_focus_accepts_source_search_typing() {
     }
 }
 
-/// Find in a Verilog-A or Automation source has the shape of Find on the
+/// Find in a Verilog-A source has the shape of Find on the
 /// netlist page: Find, Replace and Scope on the label grid, the options
 /// under them, one status in the footer, and Replace all as the footer's
 /// primary. It was an inspector sheet: a "Query" section over an "Active
@@ -85,10 +91,9 @@ fn find_in_source_is_a_label_grid_whose_fields_end_at_the_footer() {
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+    let mut app = veriloga_view_app();
     code_workspace::open_active_source_search(&mut app.code_workspace_parts())
-        .expect("the Automation page owns a searchable bundle");
+        .expect("the Verilog-A view owns a searchable bundle");
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
         let output = ctx.run_ui(
@@ -180,14 +185,13 @@ fn a_result_row_announces_its_whole_match_and_not_just_the_focusable_cell() {
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut app = RSpiceApp::test_instance();
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+    let mut app = veriloga_view_app();
     code_workspace::open_active_source_search(&mut app.code_workspace_parts())
-        .expect("the Automation page owns a searchable bundle");
+        .expect("the Verilog-A view owns a searchable bundle");
     let Some(search) = app.state.code.code_workspace.source_search.as_mut() else {
         panic!("the search opened");
     };
-    search.query = "import".to_owned();
+    search.query = "electrical".to_owned();
     let path = search.active_path.clone();
 
     let output = ctx.run_ui(
@@ -215,7 +219,7 @@ fn a_result_row_announces_its_whole_match_and_not_just_the_focusable_cell() {
         panic!("no result row announced its position; labels: {labels:?}");
     };
     assert!(
-        row.contains("column ") && row.contains("import"),
+        row.contains("column ") && row.contains("electrical"),
         "a row announced its path and line but not its column or its source line: {row:?}"
     );
 }

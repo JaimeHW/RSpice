@@ -149,13 +149,9 @@ fn lower_first_word(text: &str) -> String {
     })
 }
 
-/// Whether the netlist document — not merely the workspace that hosts it — is
-/// the thing on screen.
+/// Whether the netlist document is the thing on screen.
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
-    rspice_app_code::workbench::documents::code_workspace::netlist_page_shown(
-        state.workbench.workspace,
-        &state.code.code_workspace,
-    )
+    state.workbench.workspace == Workspace::Netlist
 }
 
 pub(super) fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {

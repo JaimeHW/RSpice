@@ -429,8 +429,8 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         "no menu lists the model catalog"
     );
     assert!(
-        listed.contains(&CodeCommand::AutomationConsole.key()),
-        "no menu lists the Automation workspace"
+        listed.contains(&ShellCommand::OpenWorkspace(Workspace::Netlist).key()),
+        "no menu lists the Netlist workspace"
     );
     for command in [
         ShellCommand::WindowManager,
@@ -632,11 +632,6 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
         commands
             .iter()
             .all(|key| command_registry().spec(*key).is_some())
-    );
-    assert!(
-        command_registry()
-            .spec(CodeCommand::AutomationConsole.key())
-            .is_some()
     );
     assert!(
         command_registry()
@@ -1356,12 +1351,10 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         app.command_icon(DesignCommand::VisibilityOptions.key()),
         Some(WorkbenchIcon::Visibility)
     );
-    for (command, icon) in [
-        (CodeCommand::CompileVerilogA, WorkbenchIcon::Netlist),
-        (CodeCommand::AutomationConsole, WorkbenchIcon::Terminal),
-    ] {
-        assert_eq!(app.command_icon(command.key()), Some(icon), "{command:?}");
-    }
+    assert_eq!(
+        app.command_icon(CodeCommand::CompileVerilogA.key()),
+        Some(WorkbenchIcon::Netlist)
+    );
     assert_eq!(
         app.command_icon(ModelsCommand::ModelCompareRelease.key()),
         Some(WorkbenchIcon::Compare)

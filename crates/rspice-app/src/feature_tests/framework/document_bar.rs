@@ -47,8 +47,6 @@ fn multi_document_netlist_state() -> AppState {
         .unwrap();
     let mut state = AppState::default();
     state.workbench.workspace = Workspace::Netlist;
-    state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     state.model.netlist_artifacts.generated_source = ROOT.to_owned();
     state.model.netlist_artifacts.generated_document = Some(generated);
     state.code.netlist.owned_document = Some(owned.clone());

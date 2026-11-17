@@ -189,10 +189,7 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         cx.runs,
         cx.wb,
     );
-    if cx.state.code_workspace.page
-        == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-        && !generated_primary_unavailable(cx.model, &cx.state.netlist)
-    {
+    if !generated_primary_unavailable(cx.model, &cx.state.netlist) {
         cx.wb.active_source_editor = Some(
             crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
                 id: editor_id_in(cx.model, &cx.state.netlist),

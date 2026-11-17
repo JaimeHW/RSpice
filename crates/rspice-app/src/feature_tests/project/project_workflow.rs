@@ -1279,8 +1279,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         .node_to_waveform
         .insert("stale".to_string(), 99);
     state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
-    state.code.code_workspace.page =
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.code.code_workspace.automation.debug.watches.push(
         rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
             expression: "old_project.signal".to_owned(),
@@ -1323,10 +1321,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     );
     assert_eq!(state.model.simulation.view.ground_node, None);
     assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
-    assert_eq!(
-        state.code.code_workspace.page,
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-    );
     assert!(
         state
             .code

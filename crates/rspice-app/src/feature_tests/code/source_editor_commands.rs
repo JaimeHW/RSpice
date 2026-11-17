@@ -8,7 +8,7 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
-use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
+use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -104,31 +104,17 @@ fn no_source_page_carries_an_editor_menu_of_its_own() {
     );
     assert!(!has_label(&output, "Editor"), "Verilog-A page");
 
-    // The netlist and automation pages of the Netlist workspace, each known
-    // to be drawn by a control it does keep. The project's own automation
-    // bundle is what the automation page shows.
-    for (page, drawn) in [
-        (
-            CodeWorkspacePage::Netlist,
-            &["Find in active netlist document"][..],
-        ),
-        (
-            CodeWorkspacePage::Automation,
-            &["Python source editor", "RSpice Automation source editor"][..],
-        ),
-    ] {
-        let mut app = open_project_app();
-        app.state.workbench.activate(Workspace::Netlist);
-        app.state.code.code_workspace.page = page;
-        let ctx = themed_context();
-        frame(&ctx, &mut app, DESKTOP);
-        let output = frame(&ctx, &mut app, DESKTOP);
-        assert!(
-            drawn.iter().any(|label| has_label(&output, label)),
-            "the {page:?} page was drawn"
-        );
-        assert!(!has_label(&output, "Editor"), "{page:?} page");
-    }
+    // The Netlist workspace, known to be drawn by a control it does keep.
+    let mut app = open_project_app();
+    app.state.workbench.activate(Workspace::Netlist);
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        has_label(&output, "Find in active netlist document"),
+        "the Netlist workspace was drawn"
+    );
+    assert!(!has_label(&output, "Editor"), "Netlist workspace");
 }
 
 #[test]
@@ -462,12 +448,6 @@ const NAVIGABLE_MODULE: &str = "module gain(p, n);\n  inout p, n;\n  electrical 
 /// The Verilog-A editor's name, as a screen reader is told it.
 const VERILOGA_EDITOR: &str = "Verilog-A/AMS source editor";
 
-/// The Automation page's editor's name, on a Python file.
-const PYTHON_EDITOR: &str = "Python source editor";
-
-/// Its name on a Python file it may not write.
-const PYTHON_VIEWER: &str = "Python source viewer";
-
 /// The top-left corner of the editor named `name`, as a screen reader is
 /// told it.
 fn named_editor_origin(output: &egui::FullOutput, name: &str) -> egui::Pos2 {
@@ -699,95 +679,4 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
         app.state.code.code_workspace.language_tools.is_none(),
         "Go to definition jumps rather than opening the tools dialog"
     );
-}
-
-/// The Automation page with its entry script's caret on the first line, in
-/// a focused editor.
-fn automation_with_focused_editor() -> (egui::Context, RSpiceApp, ProjectSourceId) {
-    let mut app = open_project_app();
-    app.state.workbench.activate(Workspace::Netlist);
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-    let ctx = themed_context();
-    frame(&ctx, &mut app, DESKTOP);
-    frame(&ctx, &mut app, DESKTOP);
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(
-            &rspice_app_state::state::ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::RSpiceAutomation,
-            ),
-        )
-        .expect("the project's Automation workspace");
-    let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
-    let editor =
-        code_workspace::source_editor_id(ProjectSourceLanguage::RSpiceAutomation, bundle_id, &root);
-    ctx.memory_mut(|memory| memory.request_focus(editor));
-    frame(&ctx, &mut app, DESKTOP);
-    (ctx, app, bundle_id)
-}
-
-/// The Automation page's editor offers the source editor's menu, every row
-/// live on its editable entry script, and Toggle line comment, chosen
-/// there, comments the line the menu was opened on once the page has drawn.
-#[test]
-fn the_automation_pages_menu_comments_the_line_it_was_opened_on() {
-    let (ctx, mut app, bundle_id) = automation_with_focused_editor();
-    let original = root_text(&app, bundle_id);
-    let second_line = original.lines().nth(1).expect("a second line").to_owned();
-
-    let output = right_click_line_of(&ctx, &mut app, PYTHON_EDITOR, 2);
-    let rows = CONTEXT_MENU.map(|label| {
-        menu_item(&output, label).unwrap_or_else(|| panic!("the menu offers {label}"))
-    });
-    assert!(
-        rows.windows(2)
-            .all(|pair| pair[0].0.center().y < pair[1].0.center().y),
-        "the menu lists its rows in order"
-    );
-    assert!(
-        rows.iter().all(|(_, enabled)| *enabled),
-        "every row is live on an editable source"
-    );
-
-    press(
-        &ctx,
-        &mut app,
-        rows[6].0.center(),
-        egui::PointerButton::Primary,
-    );
-    frame(&ctx, &mut app, DESKTOP);
-    frame(&ctx, &mut app, DESKTOP);
-    assert_eq!(
-        root_text(&app, bundle_id),
-        original.replacen(&second_line, &format!("# {second_line}"), 1),
-        "Toggle line comment commented the line the menu was opened on"
-    );
-}
-
-/// In a project opened read-only, the Automation page's menu greys what
-/// would write the script and keeps what only reads it.
-#[test]
-fn on_a_read_only_project_the_automation_pages_menu_disables_cut_and_paste() {
-    let (ctx, mut app, _) = automation_with_focused_editor();
-    app.state.model.safe_mode.activate(
-        rspice_app_state::state::write_policy::LocalSafeModeOptions {
-            open_project_read_only: true,
-            ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
-        },
-        String::new(),
-    );
-    let output = right_click_line_of(&ctx, &mut app, PYTHON_VIEWER, 2);
-    let enabled = |label| {
-        menu_item(&output, label)
-            .unwrap_or_else(|| panic!("the menu offers {label}"))
-            .1
-    };
-    assert!(!enabled("Cut"));
-    assert!(!enabled("Paste"));
-    assert!(!enabled("Toggle line comment"));
-    assert!(enabled("Copy"), "reading stays possible");
 }

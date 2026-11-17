@@ -16,14 +16,13 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use egui::{Response, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Response, ScrollArea, Ui};
 
 use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -38,84 +37,6 @@ const NETLIST_OUTLINE_CARET_COLUMN: f32 = 13.0;
 const NETLIST_OUTLINE_CARET_SIZE: f32 = 9.0;
 /// Indent of a declaration under its group, past the guide line.
 const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
-
-/// The Code & Automation page tabs over the page in front, whether the
-/// pointer is coarse and the message catalogue. Returns the page the reader
-/// asked for.
-pub(in crate::workbench) fn code_workspace_pages(
-    ui: &mut Ui,
-    current: CodeWorkspacePage,
-    coarse_pointer: bool,
-    messages: MessageCatalog,
-) -> Option<CodeWorkspacePage> {
-    let t = Tokens::get(ui.ctx());
-    let touch = coarse_pointer;
-    let height = if touch { 44.0 } else { 31.0 };
-    let width = ui.available_width().max(1.0);
-    let (strip, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    ui.painter().rect_filled(strip, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        strip.x_range(),
-        strip.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let content = strip.shrink2(Vec2::new(8.0, 0.0));
-    let button_width = content.width() / CodeWorkspacePage::ALL.len() as f32;
-    let mut selected = None;
-    for (index, page) in CodeWorkspacePage::ALL.into_iter().enumerate() {
-        // The tab's identity is its position, not its name. Keying the `Id` on
-        // the label made the widget move whenever the label was translated.
-        let name = messages.text(match page {
-            CodeWorkspacePage::Netlist => crate::workbench::MessageId::CodePageNetlist,
-            CodeWorkspacePage::Automation => crate::workbench::MessageId::CodePageAutomation,
-        });
-        let left = content.left() + button_width * index as f32;
-        let right = if index + 1 == CodeWorkspacePage::ALL.len() {
-            content.right()
-        } else {
-            left + button_width
-        };
-        let rect = egui::Rect::from_min_max(
-            egui::pos2(left, content.top()),
-            egui::pos2(right, content.bottom()),
-        );
-        let response = ui.interact(
-            rect,
-            egui::Id::new(("workbench.code.page", index)),
-            Sense::click(),
-        );
-        let active = current == page;
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, &name)
-        });
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &name,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            if active || response.hovered() {
-                t.color.text
-            } else {
-                t.color.text_dim
-            },
-        );
-        if active {
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 6.0, rect.bottom() - 2.0),
-                    egui::pos2(rect.right() - 6.0, rect.bottom()),
-                ),
-                0.0,
-                t.color.accent,
-            );
-        }
-        theme::paint_focus_ring(ui, &response, rect.shrink(2.0));
-        if response.clicked() {
-            selected = Some(page);
-        }
-    }
-    selected
-}
 
 /// The Netlist page's outline over what it reads and writes in place, and
 /// what it asks of the whole application.

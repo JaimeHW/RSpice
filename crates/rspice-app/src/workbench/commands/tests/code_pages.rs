@@ -1,71 +1,23 @@
-//! Commands the code workspace's pages own, one visible page at a time.
-//!
-//! These pages share a workspace but not a document, so a command belongs to
-//! the page in front of the user: a netlist route is not offered while a
-//! sibling page is showing, Find opens the window the visible page owns, and
-//! compiling Verilog-A requests the compile rather than merely revealing the
-//! page that would report it.
+//! Commands the code documents own: Find opens the window of the document
+//! in front of the user, and compiling Verilog-A requests the compile rather
+//! than merely revealing the page that would report it.
 
 use super::*;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 
-/// Every one of these opens a window drawn only by the netlist page. Offered
-/// from a sibling page they set a dialog open with nothing on screen, and it
-/// then appeared unprompted when the user navigated back.
-#[test]
-fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
-    use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = Workspace::Netlist;
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    app.state.model.simulation.source.netlist_content = "deck\n.end\n".to_owned();
-
-    assert!(app.command_key_enabled(CodeCommand::ValidateCodeDocument.key()));
-
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-    assert!(
-        !app.command_key_enabled(CodeCommand::ValidateCodeDocument.key()),
-        "the Automation page does not own the netlist deck"
-    );
-    assert!(
-        !app.command_key_enabled(CodeCommand::CompareGeneratedRevisions.key()),
-        "the Automation page does not draw the revision comparison"
-    );
-}
-
-/// Find is the exception to the rule above: it is page-scoped rather than
-/// netlist-only. Each page has a find window of its own -- the deck's on the
-/// netlist page, the bundle search on the Automation page -- so the command
-/// dispatches per page instead of being withheld from one of them. It was
-/// netlist-only for exactly as long as the bundle search had no surface.
+/// Find on the Netlist workspace opens the deck's own find window, not the
+/// bundle search a Verilog-A view opens.
 #[test]
 fn find_opens_the_window_the_visible_code_page_owns() {
-    use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
-
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
 
-    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
     app.execute_command_key(CodeCommand::FindCodeDocument.key());
     assert!(app.state.code.netlist.find.open, "the deck find opened");
     assert!(
         app.state.code.code_workspace.source_search.is_none(),
         "the deck is not a project source bundle"
-    );
-
-    app.state.code.netlist.find.open = false;
-    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
-    app.execute_command_key(CodeCommand::FindCodeDocument.key());
-    assert!(
-        app.state.code.code_workspace.source_search.is_some(),
-        "the bundle search opened"
-    );
-    assert!(
-        !app.state.code.netlist.find.open,
-        "and it did not also open the deck's find window"
     );
 }
 
@@ -75,7 +27,7 @@ fn find_opens_the_window_the_visible_code_page_owns() {
 ///
 /// A Verilog-A cell view is edited in Design, so Compile — offered from the
 /// Models toolbar here — takes the reader to that document and requests the
-/// compile of its bundle. The Netlist workspace's page is left as it was.
+/// compile of its bundle.
 #[test]
 fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     let mut app = RSpiceApp::test_instance();
@@ -112,7 +64,6 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         .unwrap();
     app.state.open_workspace_view(reference.clone());
     app.state.workbench.activate(Workspace::Models);
-    let page_before = app.state.code.code_workspace.page;
 
     assert!(
         app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
@@ -126,7 +77,6 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design
     );
     assert_eq!(app.state.model.workspace.content.active_view, reference);
-    assert_eq!(app.state.code.code_workspace.page, page_before);
     let request = app
         .state
         .code

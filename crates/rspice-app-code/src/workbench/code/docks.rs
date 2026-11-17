@@ -4,12 +4,10 @@
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::docks::inspector::code_workspace::{CodeInspector, code_workspace_inspector};
 use crate::workbench::docks::inspector::veriloga;
-use crate::workbench::docks::navigator::netlist::{
-    NetlistNavigator, code_workspace_pages, netlist as netlist_navigator,
-};
-use crate::workbench::docks::navigator::source_bundle::{RailAction, SourceRail, automation};
+use crate::workbench::docks::navigator::netlist::{NetlistNavigator, netlist as netlist_navigator};
+use crate::workbench::docks::navigator::source_bundle::{RailAction, SourceRail};
 use crate::workbench::docks::navigator::veriloga as veriloga_navigator;
-use crate::workbench::documents::code_workspace::{CodeWorkspacePage, VerilogAInspectorAction};
+use crate::workbench::documents::code_workspace::VerilogAInspectorAction;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::Workspace;
@@ -18,32 +16,13 @@ use super::CodeFeature;
 use super::commands::CodeRequest;
 
 /// The navigator of the code document in front: the Netlist workspace's
-/// page tabs, then the page's outline or the automation bundle's rail; or
-/// the rail of the Verilog-A view the Design workspace shows. What the
-/// navigator changes of the feature's own state it changes in place; what
-/// it asks of the whole application is raised for the shell, which answers
-/// it once the navigator has drawn.
+/// outline, or the rail of the Verilog-A view the Design workspace shows.
+/// What the navigator changes of the feature's own state it changes in
+/// place; what it asks of the whole application is raised for the shell,
+/// which answers it once the navigator has drawn.
 pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     if cx.wb.workspace != Workspace::Netlist {
         let asked = veriloga_navigator::show(ui, &mut source_rail(cx));
-        answer_rail(cx, asked);
-        return;
-    }
-    let asked = code_workspace_pages(
-        ui,
-        cx.state.code_workspace.page,
-        cx.wb.coarse_pointer,
-        cx.wb.messages(),
-    );
-    if let Some(page) = asked {
-        cx.state.code_workspace.page = page;
-        cx.state.netlist.completion_open = false;
-    }
-    // The outline belongs to the page: an automation pipeline and a SPICE
-    // deck are different objects and read differently, so neither borrows
-    // the other's tree.
-    if cx.state.code_workspace.page == CodeWorkspacePage::Automation {
-        let asked = automation(ui, &mut source_rail(cx));
         answer_rail(cx, asked);
         return;
     }
@@ -119,8 +98,8 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
     }
 }
 
-/// The inspector of the code document in front: the Netlist workspace's deck
-/// or automation document, or the Verilog-A view the Design workspace shows.
+/// The inspector of the code document in front: the Netlist workspace's
+/// deck, or the Verilog-A view the Design workspace shows.
 /// Revealing a Verilog-A finding routes the diagnostics in place.
 pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     if cx.wb.workspace != Workspace::Netlist {
@@ -150,10 +129,6 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
         &CodeInspector {
             model: cx.model,
             netlist: &cx.state.netlist,
-            code_workspace: &cx.state.code_workspace,
-            runs: cx.runs,
-            workspace: cx.wb.workspace,
-            project_open: cx.platform.project_lifecycle.is_open(),
             messages: cx.wb.messages(),
         },
     );

@@ -261,7 +261,7 @@ impl PaletteScope {
             "Simulate" | "Stimulus" => Self::Simulate,
             "Results" => Self::Results,
             "Verify" => Self::Verify,
-            "Models" | "Automation" => Self::Tools,
+            "Models" => Self::Tools,
             "Window" | "Navigate" | "Project" => Self::Window,
             "Help" => Self::Help,
             // Edit, the source editor's Code group and anything else that

@@ -72,7 +72,6 @@ impl CodeState {
         crate::workbench::chrome::document_bar::code::NetlistTabsReads {
             model,
             netlist: &self.netlist,
-            code_workspace: &self.code_workspace,
             open_documents: &self.netlist_open_documents,
             runs,
             messages,

@@ -31,7 +31,7 @@ fn canonical_workspace_order_is_stable() {
             "Results",
             "Verify",
             "Models",
-            "Netlist & Script Editor",
+            "Netlist",
         ]
     );
 }

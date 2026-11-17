@@ -58,7 +58,7 @@ pub fn open_source_document_dialog_in(
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
 ) -> Result<(), String> {
-    let Some(language) = visible_language_in(workspace, model, code) else {
+    let Some(language) = visible_language_in(workspace, model) else {
         if !platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
@@ -105,11 +105,10 @@ pub fn begin_new_top_deck_in(
 pub fn source_document_dialog_is_available(
     workspace: Workspace,
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
 ) -> bool {
-    match visible_language_in(workspace, model, code) {
+    match visible_language_in(workspace, model) {
         None => {
             platform.project_lifecycle.is_open() && generated_deck_refusal(model, netlist).is_none()
         }
@@ -132,15 +131,9 @@ pub(crate) fn generated_deck_refusal(
 }
 
 /// The source language of the document the dialog manages: a Verilog-A cell
-/// view open in Design, else the Netlist workspace's page, where `None` is the
-/// deck. It reads the workspace in front, the model and the Code workspace's
-/// runtime state.
-fn visible_language_in(
-    workspace: Workspace,
-    model: &Model,
-    code: &CodeWorkspaceRuntimeState,
-) -> Option<ProjectSourceLanguage> {
-    code_workspace::active_source_language(workspace, &model.workspace, code.page)
+/// view open in Design; `None` is the Netlist workspace's deck.
+fn visible_language_in(workspace: Workspace, model: &Model) -> Option<ProjectSourceLanguage> {
+    code_workspace::active_source_language(workspace, &model.workspace)
 }
 
 /// What the dialog states about the visible document.
@@ -304,7 +297,7 @@ fn document_facts(
     platform: &PlatformState,
     messages: MessageCatalog,
 ) -> Option<DocumentFacts> {
-    let language = visible_language_in(workspace, model, code)?;
+    let language = visible_language_in(workspace, model)?;
     let logical_path = code_workspace::active_bundle_path(&model.workspace, code, language)?;
     let bundle = model.workspace.active_source_bundle(language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
@@ -463,7 +456,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
     if !code.source_document_dialog {
         return None;
     }
-    if visible_language_in(wb.workspace, model, code).is_none() {
+    if visible_language_in(wb.workspace, model).is_none() {
         return render_netlist_source_document_dialog(code, netlist, model, wb, ctx);
     }
     let messages = wb.messages();

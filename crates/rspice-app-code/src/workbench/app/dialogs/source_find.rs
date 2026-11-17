@@ -524,9 +524,6 @@ fn results_list(
 mod tests {
     use super::*;
 
-    use crate::workbench::code::{CodeFeature, tests::harness};
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
     /// Every scope the picker offers must round-trip through its own label, or
     /// choosing one would silently leave the search in the previous scope.
     ///
@@ -554,45 +551,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    /// The defect: search, its results, and its atomic replacement were all
-    /// reachable only from tests. Drive the real entry points.
-    #[test]
-    fn a_bundle_search_finds_and_replaces_through_the_dialog_entry_points() {
-        let mut harness = harness();
-        harness.state.code_workspace.page = CodeWorkspacePage::Automation;
-        code_workspace::open_active_source_search(&mut CodeFeature::workspace_parts(
-            &mut harness.cx(),
-        ))
-        .expect("the Automation page owns a searchable bundle");
-
-        let search = harness
-            .state
-            .code_workspace
-            .source_search
-            .as_mut()
-            .expect("the search opened");
-        search.query = "import".to_owned();
-        search.replacement = "import".to_owned();
-        let search = search.clone();
-
-        let found = code_workspace::source_search_results_in(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.state.netlist,
-            &harness.platform,
-            &search,
-        )
-        .expect("the exact closure is searchable");
-        assert!(
-            found.total_matches > 0,
-            "the fixture Automation bundle imports something"
-        );
-        assert_eq!(
-            found.matches.len().min(SOURCE_SEARCH_RESULT_LIMIT),
-            found.matches.len(),
-            "the display list never exceeds its own limit"
-        );
     }
 }

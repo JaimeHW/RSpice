@@ -5,7 +5,7 @@
 //! workspace's find, validate and document tools, the source editor's
 //! line, navigation, finding and folding commands, the generated deck's
 //! revision comparison, the Verilog-A compiler, its build settings and the
-//! symbol of the module it compiles, and the Automation workspace.
+//! symbol of the module it compiles.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -75,7 +75,6 @@ pub enum CodeCommand {
     CancelVerilogACompile,
     VerilogABuildSettings,
     VerilogAOpenSymbol,
-    AutomationConsole,
 }
 
 /// What the code feature hands the shell, which carries it out over the
@@ -99,8 +98,7 @@ pub enum CodeCommand {
 /// restore, the external change and the import each confirmed, and
 /// a find window press; and, from the netlist page itself, copying an
 /// include into the project, picking its file again, validating the deck,
-/// the quick fix, the profile review, formatting and a dropped file; and
-/// what the Automation page leaves to the application.
+/// the quick fix, the profile review, formatting and a dropped file.
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,8 +173,6 @@ pub enum CodeRequest {
     FormatNetlistDocument,
     /// Stage the files dropped on the netlist page as an import.
     ImportDroppedNetlist(Vec<egui::DroppedFile>),
-    /// What the Automation page asked of the application.
-    Automation(AutomationRequest),
 }
 
 impl Request for CodeRequest {
@@ -254,62 +250,6 @@ pub enum VerilogAStripRequest {
 
 impl Request for VerilogAStripRequest {
     const DRAIN: Drain = Drain::AfterContribution;
-}
-
-/// What the Automation page leaves to the application, which the shell
-/// carries out once the page has drawn: each reaches the automation runtime,
-/// the runs or the project's sources past what the page draws. Raised by
-/// the press, the drop or the editor request that asks for it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AutomationRequest {
-    /// Import the files dropped on the page as its source.
-    ImportDropped(Vec<egui::DroppedFile>),
-    /// Open the source workspace dialog, as the empty page offers.
-    CreateWorkspace,
-    /// Validate the workspace's closure.
-    Validate,
-    /// Run the workflow's preflight without running it.
-    DryRun,
-    /// Run the workflow.
-    Run,
-    /// Stop the workflow running.
-    Stop,
-    /// Open the generated netlist on the Netlist page.
-    OpenGeneratedNetlist,
-    /// Set or clear the breakpoint on this line of the file the editor
-    /// shows.
-    ToggleBreakpoint(usize),
-    /// Format the file at `path` in the bundle.
-    FormatDocument {
-        bundle_id: crate::state::ProjectSourceId,
-        path: String,
-    },
-    /// Open the bundle search from the file at `path`.
-    FindInBundle {
-        path: String,
-    },
-    /// Export the workflow's artifact of this kind.
-    ExportArtifact(crate::automation_workflow::ArtifactKind),
-    /// The debugger's controls.
-    StartDebugger,
-    ContinueDebugger,
-    PauseDebugger,
-    StepOver,
-    StepInto,
-    StepOut,
-    RestartDebugger,
-    StopDebugger,
-    /// Remove the breakpoint on `line` of the document.
-    RemoveBreakpoint {
-        document_id: uuid::Uuid,
-        line: usize,
-    },
-    /// Send the breakpoints the inspector edited to the runtime.
-    SyncBreakpoints,
-    /// Select this call-stack frame.
-    SelectFrame(u64),
-    /// Evaluate the watches again, after one was added.
-    RefreshWatches,
 }
 
 /// What a choice in the source document dialogs still needs of the whole
@@ -422,10 +362,6 @@ const GENERATED_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, false, "Ctrl+L"), DESKTOP),
     alternate(chord(Key::L, true, true, false, "Ctrl+Alt+L"), HOST),
 ];
-const AUTOMATION_CONSOLE: &[ShortcutBinding] = &[primary(
-    chord(Key::Backtick, true, false, false, "Ctrl+`"),
-    ALL,
-)];
 // The source editor's own keys. Ctrl+D is Duplicate on a schematic too; the
 // two contexts never hold focus at once, so the focused surface decides.
 const TOGGLE_LINE_COMMENT: &[ShortcutBinding] = &[primary(
@@ -531,7 +467,6 @@ impl CodeCommand {
         Self::CancelVerilogACompile,
         Self::VerilogABuildSettings,
         Self::VerilogAOpenSymbol,
-        Self::AutomationConsole,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -575,7 +510,6 @@ impl CodeCommand {
             Self::CancelVerilogACompile => CommandKey::new("veriloga-cancel"),
             Self::VerilogABuildSettings => CommandKey::new("veriloga-build-settings"),
             Self::VerilogAOpenSymbol => CommandKey::new("veriloga-open-symbol"),
-            Self::AutomationConsole => CommandKey::new("automation"),
         }
     }
 
@@ -668,7 +602,6 @@ impl CodeCommand {
         match self {
             Self::OpenNetlist => OPEN_NETLIST,
             Self::GenerateNetlist => GENERATED_NETLIST,
-            Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::ToggleLineComment => TOGGLE_LINE_COMMENT,
             // Tab and Shift+Tab stay the focused editor's own keys.
             Self::IndentLines | Self::OutdentLines => NONE,
@@ -719,7 +652,7 @@ impl CodeCommand {
             ),
             Self::ShowInNetlist => ("Show in netlist", "Design", navigates),
             Self::FindCodeDocument => ("Find in source\u{2026}", "Code", palette),
-            Self::ValidateCodeDocument => ("Validate active Code document", "Code", palette),
+            Self::ValidateCodeDocument => ("Validate netlist", "Code", palette),
             Self::ManageSourceDocument => ("Manage source document\u{2026}", "Code", palette),
             Self::ToggleLineComment => ("Toggle line comment", "Edit", palette),
             Self::IndentLines => ("Indent lines", "Edit", palette),
@@ -746,7 +679,6 @@ impl CodeCommand {
             Self::CancelVerilogACompile => ("Cancel Verilog-A/AMS compile", "Design", open),
             Self::VerilogABuildSettings => ("Build settings\u{2026}", "Design", open),
             Self::VerilogAOpenSymbol => ("Open symbol", "Design", open),
-            Self::AutomationConsole => ("Scripts", "Automation", open),
         };
         CommandSpec {
             key: self.key(),

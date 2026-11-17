@@ -88,8 +88,7 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
-                use rspice_app_code::workbench::documents::code_workspace::sync_automation_debugger;
-                use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
+                use rspice_app_code::workbench::surfaces::{netlist, veriloga};
                 use rspice_app_design::workbench::surfaces::stimulus;
                 use rspice_app_project::workbench::project::workspace_state::LibraryCellviewPage;
                 use rspice_app_project::workbench::surfaces::{library_cellview_manager, project};
@@ -239,45 +238,19 @@ impl Host for RSpiceApp {
                     Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),
                     Workspace::Netlist => {
                         netlist::prepare_workspace(&mut features::cx(app));
-                        match app.state.code.code_workspace.page {
-                            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-                                // The page's context holds its menu's answers
-                                // only while the source editor's menu is open
-                                // or opening.
-                                let ctx = ui.ctx().clone();
-                                netlist::show_prepared(
-                                    ui,
-                                    &mut features::cx_with_menu_answers(app, |app| {
-                                        netlist::source_menu_open(
-                                            &ctx,
-                                            &app.state.model,
-                                            &app.state.code.netlist,
-                                        )
-                                    }),
-                                );
-                            }
-                            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-                                // The breakpoints reach the debugger before the
-                                // page draws.
-                                sync_automation_debugger(&mut app.code_workspace_parts());
-                                // The page prepares, putting its editor in
-                                // front, before its context takes the menu's
-                                // answers, which it holds only while the
-                                // source editor's menu is open or opening.
-                                automation::prepare(&mut features::cx(app));
-                                let ctx = ui.ctx().clone();
-                                automation::show(
-                                    ui,
-                                    &mut features::cx_with_menu_answers(app, |app| {
-                                        automation::source_menu_open(
-                                            &ctx,
-                                            &app.state.model,
-                                            &app.state.code.code_workspace,
-                                        )
-                                    }),
-                                );
-                            }
-                        }
+                        // The page's context holds its menu's answers only
+                        // while the source editor's menu is open or opening.
+                        let ctx = ui.ctx().clone();
+                        netlist::show_prepared(
+                            ui,
+                            &mut features::cx_with_menu_answers(app, |app| {
+                                netlist::source_menu_open(
+                                    &ctx,
+                                    &app.state.model,
+                                    &app.state.code.netlist,
+                                )
+                            }),
+                        );
                     }
                 }
                 // A hand-off a page raised on its way into another workspace
@@ -560,13 +533,7 @@ impl Host for RSpiceApp {
             // The views, then the plan's runs under their own header.
             Workspace::Verify => "Views",
             Workspace::Models => "Library browser",
-            Workspace::Netlist => {
-                use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
-                match app.state.code.code_workspace.page {
-                    CodeWorkspacePage::Netlist => "Netlist outline",
-                    CodeWorkspacePage::Automation => "Scripts",
-                }
-            }
+            Workspace::Netlist => "Netlist outline",
         };
         let placeholder = match workspace {
             Workspace::Project => match app.state.project.project_page {
@@ -639,14 +606,7 @@ impl Host for RSpiceApp {
                 ProjectPage::Recovery => "Checkpoint".to_owned(),
             },
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
-            Workspace::Netlist => match app.state.code.code_workspace.page {
-                rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-                    messages.text(MessageId::CodeInspectorNetlistTitle)
-                }
-                rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-                    messages.text(MessageId::CodeInspectorAutomationTitle)
-                }
-            },
+            Workspace::Netlist => messages.text(MessageId::CodeInspectorNetlistTitle),
             // A result sheet's context panel is named by the sheet it is
             // reading, the way every other workspace names its subject.
             Workspace::Results => {
@@ -694,11 +654,7 @@ impl Host for RSpiceApp {
             Workspace::Results => "Results".to_owned(),
             Workspace::Verify => workspace.label().to_owned(),
             Workspace::Models => "Models & PDKs".to_owned(),
-            Workspace::Netlist => code_title_cell(
-                &app.state.model,
-                &app.state.code.code_workspace,
-                app.state.workbench.messages(),
-            ),
+            Workspace::Netlist => code_title_cell(&app.state.model),
         }
     }
 
@@ -1127,11 +1083,7 @@ impl DocumentHost for AppState {
         use rspice_app_code::workbench::chrome::document_bar::code::active_netlist_document_id;
 
         match workspace {
-            Workspace::Netlist => active_netlist_document_id(
-                &self.model,
-                &self.code.netlist,
-                self.code.code_workspace.page,
-            ),
+            Workspace::Netlist => active_netlist_document_id(&self.model, &self.code.netlist),
             _ => None,
         }
     }
