@@ -5,6 +5,9 @@
 //! rendered in the shape of a success, and a display limit reported as though
 //! it were the length of the history.
 
+use super::activity::{operations_meta, relative_time, run_title, unix_seconds_to_millis};
+use super::header::{import_deck_intent, project_status_summary};
+use super::snapshot::{DrcCounts, drc_copy};
 use super::*;
 
 #[test]
