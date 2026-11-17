@@ -2192,6 +2192,11 @@ impl VmContext {
         self.event_lane_stepped = stepped;
         self.analog_effects = pass.analog_effects.take();
         self.analog_occurrences = pass.analog_occurrences.take();
+        // What the bodies did to the open files (a `$fopen`, a `$fscanf`
+        // position) is the point's candidate table, as their tasks are.
+        if pass.analog_files.is_some() {
+            self.analog_files = pass.analog_files.take();
+        }
         self.timer_event_bound = self.timer_event_bound.min(pass.timer_event_bound);
         Ok(())
     }
