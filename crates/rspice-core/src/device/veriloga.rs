@@ -271,6 +271,12 @@ impl VerilogADevices {
         self.validate_checkpoint_states(states)?;
         for (device, state) in self.devices.iter_mut().zip(states) {
             device.apply_validated_checkpoint_state(state);
+            device.restore_checkpoint_files(state).map_err(|error| {
+                format!(
+                    "runtime Verilog-A checkpoint of '{}' cannot reopen its files: {error}",
+                    device.name
+                )
+            })?;
         }
         Ok(())
     }

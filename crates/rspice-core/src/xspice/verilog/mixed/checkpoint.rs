@@ -645,10 +645,11 @@ impl MixedSignalHost {
             };
             restored.state.port_history.push(history);
         }
-        restored
-            .analog
-            .make_mut()
-            .apply_validated_checkpoint_state(&analog);
+        let device = restored.analog.make_mut();
+        device.apply_validated_checkpoint_state(&analog);
+        device
+            .restore_checkpoint_files(&analog)
+            .map_err(|error| error.to_string())?;
         restored
             .apply_analog_inputs(inputs)
             .map_err(|e| e.to_string())?;

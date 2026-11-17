@@ -371,6 +371,21 @@ impl HdlFileOptions {
         }
     }
 
+    /// A run's options: relative paths resolve against the explicit run
+    /// directory, else the deck's directory, and writes land in a fresh store
+    /// on the platform's default target.
+    pub(crate) fn for_run(config: &crate::config::HdlRunConfig) -> Self {
+        let directory = config
+            .run_directory
+            .as_deref()
+            .or(config.deck_directory.as_deref());
+        Self::new(
+            directory,
+            config.unrestricted_io,
+            Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
+        )
+    }
+
     /// The path a design's file name names, for reading.
     pub(crate) fn resolve_read(&self, name: &str) -> Result<PathBuf, String> {
         if name.is_empty() {

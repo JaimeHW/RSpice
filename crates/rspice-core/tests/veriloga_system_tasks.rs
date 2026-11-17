@@ -33,12 +33,25 @@ fn run(
     Result<SimulationOutcome<rspice_core::engine::TransientResult>, String>,
     Vec<HdlOutputRecord>,
 ) {
+    run_with(directory, body, stop, |_| {})
+}
+
+/// [`run`], with the run's HDL options set by `hdl`.
+fn run_with(
+    directory: &std::path::Path,
+    body: &str,
+    stop: f64,
+    hdl: impl FnOnce(&mut rspice_core::config::HdlRunConfig),
+) -> (
+    Result<SimulationOutcome<rspice_core::engine::TransientResult>, String>,
+    Vec<HdlOutputRecord>,
+) {
     let model = directory.join("tasks.va");
     std::fs::write(
         &model,
         format!(
             "`include \"disciplines.vams\"\nmodule tasks(x); inout x; electrical x;\n\
-             integer fd, rc, k, seed, n; real r;\nanalog begin\n{body}\nI(x) <+ V(x) / 1k;\nend\nendmodule\n"
+             integer fd, rc, k, seed, n, a, b, c, d, e, f, g, h, i, j; real r;\nanalog begin\n{body}\nI(x) <+ V(x) / 1k;\nend\nendmodule\n"
         ),
     )
     .unwrap();
@@ -55,6 +68,7 @@ fn run(
     let mut config = rspice_core::SimulationConfig::default();
     config.hdl.output = Some(collector.clone());
     config.hdl.deck_directory = Some(directory.to_path_buf());
+    hdl(&mut config.hdl);
     let outcome = Engine::new(config)
         .run_with_outcome(&NoAbort, |engine, signal| {
             engine.run_tran_with_abort(&netlist, stop, stop / 100.0, signal)
@@ -128,4 +142,88 @@ fn fatal_and_stop_end_the_run_with_their_source_line() {
             "{records:?}"
         );
     }
+}
+
+/// `$random` and `$dist_*` in analog code draw IEEE 1364-2005 section
+/// 17.9.3's sequence: the same values Icarus Verilog 13.0 prints for
+///
+/// ```verilog
+/// seed = 42; a = $random(seed); ... j = $dist_erlang(seed, 2, 5);
+/// s = 3; x = $random(s);
+/// ```
+///
+/// and a `$random` without a seed starts from the run's `hdlseed`, as the
+/// digital kernel's does.
+#[test]
+fn random_and_integer_distributions_draw_what_icarus_draws() {
+    let directory = scratch("random");
+    let (outcome, records) = run_with(
+        &directory,
+        "@(initial_step) begin seed = 42;\n\
+         a = $random(seed); b = $random(seed); c = $random(seed);\n\
+         d = $dist_uniform(seed, -10, 10); e = $dist_normal(seed, 5, 3);\n\
+         f = $dist_exponential(seed, 4); g = $dist_poisson(seed, 6);\n\
+         h = $dist_chi_square(seed, 3); i = $dist_t(seed, 4); j = $dist_erlang(seed, 2, 5);\n\
+         $display(\"%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d seed=%0d\", a, b, c, d, e, f, g, h, i, j, seed);\n\
+         n = $random; $display(\"hdlseed %0d\", n); end",
+        1e-9,
+        |hdl| hdl.seed = 3,
+    );
+    outcome.unwrap();
+    let printed = stdout(&records);
+    assert_eq!(
+        printed,
+        [
+            "-2144582656 646214477 38602500 -5 7 1 4 7 -3 6 seed=2039465103\n",
+            "hdlseed -2147276288\n",
+        ],
+        "{records:?}"
+    );
+}
+
+/// `$fopen`, `$fscanf`, `$test$plusargs` and `$value$plusargs` read the run's
+/// files and plusargs, `$fdisplay` and `$fstrobe` write through the same
+/// table, and `$fstrobe` writes once per accepted point. A path outside the
+/// run directory opens as 0 with a warning, as the digital kernel's does.
+#[test]
+fn files_and_plusargs_are_the_runs() {
+    let directory = scratch("files");
+    std::fs::write(directory.join("in.txt"), "3 2.5\n").unwrap();
+    let (outcome, records) = run_with(
+        &directory,
+        "@(initial_step) begin fd = $fopen(\"out.txt\", \"w\");\n\
+         k = $fopen(\"in.txt\", \"r\"); rc = $fscanf(k, \"%d %g\", n, r);\n\
+         a = $test$plusargs(\"fast\"); b = $value$plusargs(\"gain=%d\", c);\n\
+         e = $fopen(\"../escape.txt\", \"w\");\n\
+         $fdisplay(fd, \"n=%0d r=%g rc=%0d fast=%0d gain=%0d/%0d escape=%0d\", n, r, rc, a, b, c, e);\n\
+         $fclose(k); end\n\
+         $fstrobe(fd, \"t\");",
+        10e-9,
+        |hdl| hdl.plusargs = vec!["+gain=7".into(), "+fast".into()],
+    );
+    let SimulationOutcome::Completed(result) = outcome.unwrap() else {
+        panic!("the run completes");
+    };
+    let written = std::fs::read_to_string(directory.join("out.txt")).unwrap();
+    // `$fdisplay` writes at every evaluation of the accepted first point,
+    // all of them alike; `$fstrobe` once per accepted point.
+    let (displayed, strobed): (Vec<&str>, Vec<&str>) =
+        written.lines().partition(|line| *line != "t");
+    assert!(!displayed.is_empty(), "{written}");
+    assert!(
+        displayed
+            .iter()
+            .all(|line| *line == "n=3 r=2.5 rc=2 fast=1 gain=1/7 escape=0"),
+        "{written}"
+    );
+    assert!(written.starts_with(displayed[0]), "{written}");
+    assert_eq!(strobed.len(), result.time.len(), "{written}");
+    assert!(
+        records.iter().any(
+            |record| matches!(record.stream, HdlStream::Diagnostic { .. })
+                && record.text.contains("$fopen(\"../escape.txt\")")
+        ),
+        "{records:?}"
+    );
+    assert!(!directory.join("../escape.txt").exists());
 }

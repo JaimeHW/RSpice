@@ -2627,6 +2627,28 @@ impl MixedSignalHost {
         &self.analog
     }
 
+    /// The warnings the analog half's file table raised at accepted points.
+    pub(crate) fn take_analog_file_warnings(&mut self) -> Vec<String> {
+        if !self.analog.has_analog_files() {
+            return Vec::new();
+        }
+        self.analog.make_mut().take_analog_file_warnings()
+    }
+
+    /// Give the analog half what its value-returning system functions read
+    /// from the run, over the run's files the digital design shares.
+    pub(crate) fn configure_analog_hdl(
+        &mut self,
+        config: &crate::config::HdlRunConfig,
+        files: &super::effects::files::HdlFileOptions,
+    ) -> Result<(), String> {
+        if self.analog.analog_system_sites().is_empty() {
+            return Ok(());
+        }
+        self.prepared_analog.invalidate();
+        super::effects::analog::configure_device(self.analog.make_mut(), config, files)
+    }
+
     /// Instantaneous D/A level or impedance changes, and a discrete value the
     /// analog equations read changing under them, cannot be compared with
     /// smooth analog history. Report the final candidate's actual electrical

@@ -29,6 +29,7 @@
 //! File and string I/O is [`files`], and the value change dump [`dump`]:
 //! both write through the same journal, released at the same commit.
 
+pub(crate) mod analog;
 pub(crate) mod checkpoint;
 pub(crate) mod dump;
 pub(crate) mod files;
@@ -367,6 +368,11 @@ impl HdlEffects {
         points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
     ) {
         self.traced.drain_into(points);
+    }
+
+    /// The run's file options: its directory, confinement and store.
+    pub(crate) fn file_options(&self) -> &files::HdlFileOptions {
+        &self.config.files
     }
 
     /// Install the run's options before anything has run.

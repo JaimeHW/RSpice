@@ -6572,6 +6572,11 @@ impl Engine {
         }
         let mut built = built;
         built.circuit.analog_task_output = self.config.hdl.output.clone();
+        #[cfg(feature = "veriloga")]
+        built
+            .circuit
+            .configure_analog_hdl(&self.config.hdl)
+            .map_err(SimulationError::Circuit)?;
         if default_ports.is_empty()
             && (transient_stop_time.is_none() || !stop_time_reshapes(&built.circuit))
         {

@@ -982,6 +982,70 @@ fn a_preparation_dispatches_nothing_before_the_worker_installs_its_models() {
     );
 }
 
+/// Analog code's value-returning system functions run on the browser JIT:
+/// `$random` draws IEEE 1364-2005's sequence (Icarus 13.0 gives -2144582656
+/// for seed 42), `$realtobits` keeps the low 32 bits (Icarus: 34359738 for
+/// -2.75e-3), a run with no plusargs matches none, and `$fopen` opens a
+/// file in the browser's run directory.
+#[wasm_bindgen_test]
+fn value_returning_system_functions_run_in_the_worker() {
+    const SOURCE: &str = "`include \"disciplines.vams\"\nmodule draws(q);\n  inout q;\n  \
+                          electrical q;\n  integer seed, r, b, fast, fd;\n  \
+                          analog begin\n    @(initial_step) begin seed = 42; \
+                          r = $random(seed); b = $realtobits(-2.75e-3);\n      \
+                          fast = $test$plusargs(\"fast\"); \
+                          fd = $fopen(\"draws.txt\", \"w\"); end\n    \
+                          I(q) <+ -((r + b) * 1e-9 + fast + (fd != 0 ? 1e-3 : 0)) / 1k;\n  \
+                          end\nendmodule\n";
+    let (deck, runtimes) = deck_with_sealed_module(
+        "Worker draws",
+        &[("draws.va", SOURCE)],
+        &["draws.va"],
+        "draws",
+    );
+    let mut request = worker_request_json(
+        25,
+        serde_json::json!({"Transient": {
+            "stop_time": 1e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] = runtimes;
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let transient = &metadata["outcome"]["Success"]["Transient"];
+    let v_q = transient["waveforms"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"))
+        .iter()
+        .find(|trace| {
+            trace["y_unit"] == "V"
+                && trace["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("q"))
+        })
+        .unwrap_or_else(|| panic!("no node voltage q: {metadata}"));
+    let v_q = transferred_series(&buffers, &v_q["y_values"]).to_vec();
+    let expected = (-2_144_582_656.0 + 34_359_738.0) * 1e-9 + 1e-3;
+    for value in v_q {
+        assert!(
+            (value - expected).abs() < 1e-9,
+            "V(q) = {value}, expected {expected}"
+        );
+    }
+}
+
 /// Two files compiled as one unit, one reading its half period from a local
 /// header, run in the worker from the sealed bytes alone: `top` in one file
 /// instantiates `leaf` from another, whose `` `include "half.vh" `` the

@@ -1190,7 +1190,9 @@ impl VerilogADeviceCheckpoint {
             }
         }
         encoder.word(self.accepted.analog_system.len() as u64);
-        encoder.words.extend_from_slice(&self.accepted.analog_system);
+        encoder
+            .words
+            .extend_from_slice(&self.accepted.analog_system);
         encoder.boolean(self.accepted.analog_files.is_some());
         if let Some(image) = &self.accepted.analog_files {
             encoder.text(image);
@@ -5397,8 +5399,7 @@ impl VerilogADevice {
         &mut self,
         checkpoint: &VerilogADeviceCheckpoint,
     ) -> Result<(), VmError> {
-        self.context
-            .restore_checkpoint_files(&checkpoint.accepted)
+        self.context.restore_checkpoint_files(&checkpoint.accepted)
     }
 
     /// Continue one analysis in a rebuilt instance whose configuration is

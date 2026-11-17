@@ -573,6 +573,32 @@ impl Engine {
         });
         circuit.analog_monitor_values = monitors;
         visited.map_err(SimulationError::Circuit)?;
+        #[cfg(feature = "veriloga")]
+        for (instance, model, text) in circuit.take_analog_file_warnings() {
+            if let Some(sink) = &output
+                && let Some(point) = output_point(point)
+            {
+                use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+                let seconds = match point {
+                    HdlPoint::Transient { time } => time,
+                    _ => 0.0,
+                };
+                sink.emit(&HdlOutputRecord {
+                    point,
+                    tick: 0,
+                    seconds,
+                    stream: HdlStream::Diagnostic {
+                        severity: HdlSeverity::Warning,
+                    },
+                    text,
+                    origin: HdlOrigin {
+                        scope: instance,
+                        file: model,
+                        line: 0,
+                    },
+                });
+            }
+        }
         if let Some(message) = invalid {
             return Err(SimulationError::Circuit(message.into()));
         }

@@ -771,23 +771,13 @@ impl MixedDigitalCoordinator {
     /// starts.
     #[doc(hidden)]
     pub fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
-        use super::super::effects::files::{HdlFileOptions, HdlFileStore, HdlFileTarget};
+        use super::super::effects::files::HdlFileOptions;
         self.hdl_output = config.output.clone();
-        // Relative HDL paths resolve against the
-        // explicit run directory, else the deck's directory.
-        let directory = config
-            .run_directory
-            .as_deref()
-            .or(config.deck_directory.as_deref());
         let digital = self.digital.make_mut();
         digital.configure_effects(super::super::effects::HdlEffectsConfig {
             plusargs: config.plusargs.clone(),
             seed: config.seed,
-            files: HdlFileOptions::new(
-                directory,
-                config.unrestricted_io,
-                Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
-            ),
+            files: HdlFileOptions::for_run(config),
         });
         if !config.path_delays {
             digital.drop_path_delays();
@@ -795,6 +785,12 @@ impl MixedDigitalCoordinator {
         if !config.timing_checks {
             digital.drop_timing_checks();
         }
+    }
+
+    /// The run's HDL file options, which the analog instances share with
+    /// the digital design.
+    pub(crate) fn hdl_file_options(&self) -> &super::super::effects::files::HdlFileOptions {
+        self.digital.hdl_file_options()
     }
 
     /// The `$finish`, `$stop` or `$fatal` the design executed, with the

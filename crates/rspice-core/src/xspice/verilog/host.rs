@@ -842,6 +842,12 @@ impl DigitalHost {
         self.effects.configure(config);
     }
 
+    /// The run's file options, which the analog instances beside the
+    /// design share.
+    pub(crate) fn hdl_file_options(&self) -> &super::effects::files::HdlFileOptions {
+        self.effects.file_options()
+    }
+
     /// Take the output records the design produced since the last release.
     pub(crate) fn drain_hdl_output(&mut self) -> Vec<super::effects::HdlOutputRecord> {
         self.effects.drain_journal()

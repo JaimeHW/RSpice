@@ -4,6 +4,57 @@ use super::CircuitData;
 use rspice_veriloga_runtime::{AnalogTaskEvent, AnalogTaskKind};
 
 impl CircuitData {
+    /// Give every Verilog-A instance what its value-returning system
+    /// functions read from the run: its plusargs, its random seed and its
+    /// files, which a digital design in the circuit shares.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn configure_analog_hdl(
+        &mut self,
+        config: &crate::config::HdlRunConfig,
+    ) -> Result<(), String> {
+        use crate::xspice::verilog::effects::{analog, files::HdlFileOptions};
+        let files = self
+            .scheduler
+            .mixed_digital_coordinator
+            .as_ref()
+            .map_or_else(
+                || HdlFileOptions::for_run(config),
+                |coordinator| coordinator.hdl_file_options().clone(),
+            );
+        for device in self.veriloga_devices.iter_mut() {
+            analog::configure_device(device, config, &files)?;
+        }
+        for host in &mut self.mixed_signal_hosts {
+            host.configure_analog_hdl(config, &files)?;
+        }
+        Ok(())
+    }
+
+    /// The warnings every instance's file table raised at accepted points,
+    /// with the instance's and its model's names, to report once.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn take_analog_file_warnings(&mut self) -> Vec<(String, String, String)> {
+        let mut warnings = Vec::new();
+        for device in self.veriloga_devices.iter_mut() {
+            if device.has_analog_files() {
+                let (instance, model) = (device.name.to_string(), device.model_name().to_owned());
+                for text in device.take_analog_file_warnings() {
+                    warnings.push((instance.clone(), model.clone(), text));
+                }
+            }
+        }
+        for host in &mut self.mixed_signal_hosts {
+            let (instance, model) = (
+                host.analog_device().name.to_string(),
+                host.analog_device().model_name().to_owned(),
+            );
+            for text in host.take_analog_file_warnings() {
+                warnings.push((instance.clone(), model.clone(), text));
+            }
+        }
+        warnings
+    }
+
     /// Point-level host effects require publication in sweep order.
     pub(crate) fn has_point_analog_tasks(&self) -> bool {
         #[cfg(feature = "veriloga")]
