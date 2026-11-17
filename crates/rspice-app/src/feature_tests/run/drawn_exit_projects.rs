@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch_at_within;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::without_audit;
 use rspice_app_state::simulation::plan::AnalysisDraft;
 use rspice_app_state::state::{AnalysisResultPayload, ComponentType, Point, SimulationRun};
 use rspice_results::run::SimulationRunLifecycle;
@@ -67,6 +68,31 @@ fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
     }
 }
 
+/// A key pressed and released with `modifiers`.
+fn stroke(key: Key, modifiers: Modifiers) -> [egui::Event; 2] {
+    [true, false].map(|pressed| egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed,
+        repeat: false,
+        modifiers,
+    })
+}
+
+/// `text` as typed, each line break the Enter key.
+fn typed(text: &str) -> Vec<egui::Event> {
+    let mut events = Vec::new();
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            events.extend(stroke(Key::Enter, Modifiers::NONE));
+        }
+        if !line.is_empty() {
+            events.push(egui::Event::Text(line.to_owned()));
+        }
+    }
+    events
+}
+
 impl Engineer {
     /// File > New project, named `name`.
     fn new_project(name: &str) -> Self {
@@ -83,11 +109,12 @@ impl Engineer {
         engineer
     }
 
-    /// One frame carrying `events`; the controls it published.
+    /// One frame carrying `events`; the controls it published. Held
+    /// unsaved-changes answers go unaudited: the lifecycle's own tests
+    /// audit them, and here each audit would capture the whole drawing
+    /// again on every frame, half of what the drawing costs.
     fn step(&mut self, events: Vec<egui::Event>) -> &[Control] {
-        let tree = self
-            .replay
-            .frame(events)
+        let tree = without_audit(|| self.replay.frame(events))
             .platform_output
             .accesskit_update
             .expect("a frame with AccessKit on publishes its tree");
@@ -131,34 +158,21 @@ impl Engineer {
     }
 
     fn key(&mut self, key: Key, modifiers: Modifiers) -> &[Control] {
-        let event = |pressed| egui::Event::Key {
-            key,
-            physical_key: Some(key),
-            pressed,
-            repeat: false,
-            modifiers,
-        };
-        self.step(vec![event(true), event(false)])
+        self.step(stroke(key, modifiers).into())
     }
 
     /// Typed text in one frame, each line break the Enter key.
     fn type_text(&mut self, text: &str) -> &[Control] {
-        let mut events = Vec::new();
-        for (index, line) in text.split('\n').enumerate() {
-            if index > 0 {
-                for pressed in [true, false] {
-                    events.push(egui::Event::Key {
-                        key: Key::Enter,
-                        physical_key: Some(Key::Enter),
-                        pressed,
-                        repeat: false,
-                        modifiers: Modifiers::NONE,
-                    });
-                }
-            }
-            if !line.is_empty() {
-                events.push(egui::Event::Text(line.to_owned()));
-            }
+        self.step(typed(text))
+    }
+
+    /// The focused field's text selected and replaced by `text` in one
+    /// frame, as a typist does it, and committed with Enter when `enter`.
+    fn retype(&mut self, text: &str, enter: bool) -> &[Control] {
+        let mut events: Vec<_> = stroke(Key::A, PRIMARY).into();
+        events.extend(typed(text));
+        if enter {
+            events.extend(stroke(Key::Enter, Modifiers::NONE));
         }
         self.step(events)
     }
@@ -168,8 +182,7 @@ impl Engineer {
     fn command(&mut self, label: &str) {
         self.key(Key::K, PRIMARY);
         self.press("Command search", Role::ComboBox);
-        self.key(Key::A, PRIMARY);
-        self.type_text(label);
+        self.retype(label, false);
         let row = only(&self.shown, label, Role::ListBoxOption);
         assert!(
             !row.description.starts_with("Unavailable:"),
@@ -200,8 +213,9 @@ impl Engineer {
             self.press("Create", Role::Button);
         }
         self.press("Verilog-A/AMS source editor", Role::MultilineTextInput);
-        self.key(Key::A, PRIMARY);
-        self.step(vec![egui::Event::Paste(source.to_owned())]);
+        let mut events: Vec<_> = stroke(Key::A, PRIMARY).into();
+        events.push(egui::Event::Paste(source.to_owned()));
+        self.step(events);
         self.press("Compile Verilog-A/AMS (F7)", Role::Button);
         let compiled = format!("Compiled {cell}:");
         let started = Instant::now();
@@ -251,7 +265,7 @@ impl Engineer {
     }
 
     /// A press and release on the canvas at `at`, the pointer brought there
-    /// first.
+    /// first: the canvas places and picks where the pointer hovered.
     fn tap(&mut self, at: Point) -> &[Control] {
         let pos = self.screen(at);
         self.step(vec![egui::Event::PointerMoved(pos)]);
@@ -266,9 +280,7 @@ impl Engineer {
     /// The inspector field `label` given `text`.
     fn field(&mut self, label: &str, text: &str) {
         self.press(label, Role::TextInput);
-        self.key(Key::A, PRIMARY);
-        self.type_text(text);
-        let shown = self.key(Key::Enter, Modifiers::NONE).to_vec();
+        let shown = self.retype(text, true).to_vec();
         // A refused entry is kept, outlined, in its field and never reaches
         // the design: say what refused it rather than draw on without it.
         let inline_edit = &self.replay.app.state.workbench.inline_edit;
@@ -293,8 +305,7 @@ impl Engineer {
         let origin = Point::new(at.0, at.1);
         self.command("Place instance");
         self.press("Place component or cell\u{2026}", Role::TextInput);
-        self.key(Key::A, PRIMARY);
-        self.type_text(query);
+        self.retype(query, false);
         self.press(row, Role::Button);
         self.tap(origin);
         self.escape();
@@ -357,6 +368,7 @@ impl Engineer {
         self.command("Place net label");
         self.tap(at);
         self.press("Name", Role::TextInput);
+        // The label takes its name on the frame after the typing.
         self.type_text(net);
         self.key(Key::Enter, Modifiers::NONE);
         self.escape();
@@ -433,7 +445,7 @@ impl Engineer {
         self.key(Key::F5, Modifiers::NONE);
         let started = Instant::now();
         loop {
-            self.replay.frame(Vec::new());
+            self.step(Vec::new());
             let runs = &self.replay.app.state.model.simulation.retained.runs;
             if let Some(run) = runs.first()
                 && !matches!(
@@ -453,7 +465,8 @@ impl Engineer {
                 return run.clone();
             }
             assert!(started.elapsed() < RUN_LIMIT, "the run did not end");
-            std::thread::sleep(Duration::from_millis(20));
+            // The run is the simulator's: a frame only looks in on it.
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
