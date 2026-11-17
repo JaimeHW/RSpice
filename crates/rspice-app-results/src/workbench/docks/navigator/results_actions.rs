@@ -342,15 +342,17 @@ pub(super) fn result_artifact_context_menu(
     state: &mut ResultsParts<'_>,
     artifact: &ResultArtifact,
 ) {
-    let exact_error =
-        crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
-            &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
-            &state.model.simulation.retained.runs,
-        )
-        .err();
-    let exact_available = exact_error.is_none();
     let (popup, _) = row_context_menu(response);
+    // Validated only while the menu is open: the check reads every retained
+    // sample of the run, and each row offers this menu on every frame.
     popup.show(|ui| {
+        let exact_error =
+            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+                &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
+                &state.model.simulation.retained.runs,
+            )
+            .err();
+        let exact_available = exact_error.is_none();
         let open = ui.add_enabled(
             exact_available,
             egui::Button::new("Open in active result pane"),
@@ -473,15 +475,16 @@ pub(super) fn result_signal_context_menu(
     visible: bool,
 ) {
     let key = key.clone();
-    let exact_error =
-        crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
-            &ResultBrowserSelectionKey::Waveform(key.clone()),
-            &state.model.simulation.retained.runs,
-        )
-        .err();
-    let exact_available = exact_error.is_none();
     let (popup, _) = row_context_menu(response);
+    // Validated only while the menu is open, as the artifact menu is.
     popup.show(|ui| {
+        let exact_error =
+            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+                &ResultBrowserSelectionKey::Waveform(key.clone()),
+                &state.model.simulation.retained.runs,
+            )
+            .err();
+        let exact_available = exact_error.is_none();
         let membership = ui.add_enabled(
             exact_available,
             egui::Button::new(if visible {
