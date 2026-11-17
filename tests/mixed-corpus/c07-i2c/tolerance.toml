@@ -159,6 +159,49 @@ expect = "c07::vcont"
 abs = 5e-3
 why = "a converter driving 1 against one driving 0, each its level behind 20 ohm, with Rp to 3.3 V: V = 3.3·(1/20 + 1/2200)/(2/20 + 1/2200) = 1.6575 V"
 
+# The receivers' side of the contention: a d_buffer on SDA's event net, shown
+# on rx through a dac_bridge at 0 and 1 V (x reads 0.5 V). The bidirectional
+# converters segregate the net, so its receivers read their A/D of V(sda) at
+# vcc/2 = 1.65 V (LRM 7.8.4 rule 2), not the drivers' 1 and 0 resolved to x:
+# 0 at V_OL = 29.7 mV while the controller alone sinks SDA, and 1 at the
+# contention level 1.6575 V, 7.5 mV above the threshold. The dac_bridge's
+# levels are exact; 1e-3 V is a millivolt of solver noise on rx.
+[[q]]
+id = "rx_before"
+analysis = "tran"
+variants = ["cont"]
+kind = "mean"
+signal = "v(rx)"
+window = [2.96e-4, 2.99e-4]
+oracle = "O6"
+expect = "c07::rx"
+abs = 1e-3
+why = "the controller alone sinks SDA: the receivers read 0 (derivation above)"
+
+[[q]]
+id = "rx_cont"
+analysis = "tran"
+variants = ["cont"]
+kind = "mean"
+signal = "v(rx)"
+window = [3.02e-4, 3.08e-4]
+oracle = "O6"
+expect = "c07::rx"
+abs = 1e-3
+why = "SDA contended at 1.6575 V: the receivers read 1, not x (derivation above)"
+
+[[q]]
+id = "rx_after"
+analysis = "tran"
+variants = ["cont"]
+kind = "mean"
+signal = "v(rx)"
+window = [3.11e-4, 3.14e-4]
+oracle = "O6"
+expect = "c07::rx"
+abs = 1e-3
+why = "i2c_dev51 released, the controller still sinks SDA: the receivers read 0 again (derivation above)"
+
 [[q]]
 id = "vcont"
 analysis = "tran"

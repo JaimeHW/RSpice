@@ -7,5 +7,11 @@
 xctrl scl sda i2c_ctrl mode=1
 xdev2a scl sda i2c_dev addr=42
 xdev51 scl sda i2c_dev addr=81 contend=1
+* A receiver on SDA's event net, as the modules' receivers read it: a
+* d_buffer whose input is the ports' net, shown on rx through a dac_bridge.
+abufrx sda sda_rx dbufrx
+.model dbufrx d_buffer(rise_delay = 1n fall_delay = 1n)
+adacrx [sda_rx] [rx] dacrx
+.model dacrx dac_bridge(out_low = 0 out_high = 1 out_undef = 0.5)
 .tran 100n 320u
 .end

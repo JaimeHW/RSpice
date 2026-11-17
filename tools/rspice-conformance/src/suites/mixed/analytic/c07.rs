@@ -22,6 +22,7 @@ pub const REGISTRY: Registry = &[
     ("tf30", tf30),
     ("vol", vol),
     ("vcont", vcont),
+    ("rx", rx),
     ("idle", idle),
 ];
 
@@ -101,6 +102,32 @@ fn vol(_: &Context<'_>) -> Result<Expected, String> {
 fn vcont(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![contention_level()]))
 }
+
+/// `cont`'s receiver (deck/cont.tran.cir): a d_buffer on SDA's event net
+/// shown through a dac_bridge at 0 and 1 V (x at 0.5 V). The net is
+/// segregated by the bidirectional converters, so every receiver on it, a
+/// code model's input among them, reads the converters' A/D of V(sda) at
+/// vcc/2 (LRM 7.8.4 rule 2), never the drivers resolved together: 0 at V_OL
+/// while the controller alone sinks [295, 300] and [310, 315] µs, and the
+/// contention level against 1.65 V over [300, 310] µs.
+fn rx(context: &Context<'_>) -> Result<Expected, String> {
+    let [start, stop] = context
+        .quantity
+        .measure
+        .window
+        .ok_or("c07::rx needs the window")?;
+    let contended = start >= CONTENTION[0] && stop <= CONTENTION[1];
+    let level = if contended {
+        contention_level()
+    } else {
+        v_ol()
+    };
+    Ok(values(vec![if level >= 0.5 * VDD { 1.0 } else { 0.0 }]))
+}
+
+/// i2c_dev51 drives SDA push-pull high over this span while the controller
+/// sinks it.
+const CONTENTION: [f64; 2] = [300e-6, 310e-6];
 
 fn contention_level() -> f64 {
     let g = 1.0 / R_DRIVER;
