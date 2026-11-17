@@ -3394,6 +3394,82 @@ struct LiveMeasurementEvaluation {
     overrides: HashMap<String, MeasureResult>,
 }
 
+/// What the live route of [`evaluate_equation_measurements_with_observations`] makes of a
+/// transient's `.MEASURE TRAN` statements when `result` carries impulses, as it decides before
+/// reading a row: the failures it gives in place of their sampled results, by statement name.
+/// `None` when it reads a statement row by row instead, so its result is the live route's: the
+/// statement observes an impulse in its window, is a continuous equation, reads another
+/// statement's result, or another statement reads its result. Only the axis, the impulse traces
+/// and the result's names are read of `result`.
+pub(crate) fn tran_impulse_failures(
+    netlist: &Netlist,
+    result: &TransientResult,
+    abort: &dyn AbortSignal,
+) -> Result<Option<HashMap<String, MeasureResult>>, SimulationError> {
+    let mut programs = Vec::new();
+    for statement in netlist
+        .measurements
+        .iter()
+        .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+    {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if matches!(statement.measure_type, MeasureType::Equation { .. }) {
+            return Ok(None);
+        }
+        let (state, mut failure) = match compile_live_measure_state(
+            statement,
+            "TRAN",
+            &result.time,
+            None,
+            netlist.options.measure_use_lttm(),
+            &netlist.params,
+        ) {
+            Ok(state) => (Some(state), None),
+            Err(error) => (None, Some(error)),
+        };
+        if let Some(state) = &state {
+            match impulse_measure::compile(netlist, result, statement, state, abort) {
+                Ok(Some(_)) => return Ok(None),
+                Ok(None) => {}
+                Err(impulse_observation::ImpulseObservationError::Aborted) => {
+                    return Err(SimulationError::Aborted);
+                }
+                Err(error) => failure = Some(error.to_string()),
+            }
+        }
+        let dependencies = state
+            .as_ref()
+            .map(LiveMeasureState::all_dependencies)
+            .unwrap_or_default();
+        programs.push((
+            statement,
+            statement.name.to_ascii_uppercase(),
+            failure,
+            dependencies,
+        ));
+    }
+    let names = programs
+        .iter()
+        .map(|(_, name, ..)| name.as_str())
+        .collect::<HashSet<_>>();
+    if programs.iter().any(|(.., dependencies)| {
+        dependencies
+            .iter()
+            .any(|dependency| names.contains(dependency.as_str()))
+    }) {
+        return Ok(None);
+    }
+    let mut failures = HashMap::new();
+    for (statement, name, failure, _) in programs {
+        if let Some(error) = failure {
+            failures.insert(name, MeasureResult::failed_for_statement(statement, &error));
+        }
+    }
+    Ok(Some(failures))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate_equation_measurements_with_observations(
     netlist: &Netlist,
@@ -7317,26 +7393,39 @@ fn evaluate_tran_measurements_with_signals_directed(
         insert_case_variants(&mut signals, name, waveform);
     }
     let mut current_overrides = HashMap::new();
-    let live_traces = match evaluate_equation_measurements_with_observations(
-        netlist,
-        "TRAN",
-        time,
-        &signals,
-        -1.0,
-        None,
-        current_result,
-        None,
-        &HashSet::new(),
-        abort,
-    ) {
-        Ok(evaluation) => {
-            current_overrides = evaluation.overrides;
-            Ok(evaluation.traces)
+    let impulse_failures = match streamed.map(|streamed| &**streamed) {
+        Some(StreamedStatements::Results {
+            impulse_failures, ..
+        }) => impulse_failures.as_ref(),
+        _ => None,
+    };
+    let live_traces = if let Some(failures) = impulse_failures {
+        // A streamed run's impulses were read over its whole axis: the live route would have
+        // read no row, kept no trace and given these failures (see [`tran_impulse_failures`]).
+        current_overrides = failures.clone();
+        Ok(Vec::new())
+    } else {
+        match evaluate_equation_measurements_with_observations(
+            netlist,
+            "TRAN",
+            time,
+            &signals,
+            -1.0,
+            None,
+            current_result,
+            None,
+            &HashSet::new(),
+            abort,
+        ) {
+            Ok(evaluation) => {
+                current_overrides = evaluation.overrides;
+                Ok(evaluation.traces)
+            }
+            Err(EquationMeasurementEvaluationError::Aborted) => {
+                return Err(SimulationError::Aborted);
+            }
+            Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
         }
-        Err(EquationMeasurementEvaluationError::Aborted) => {
-            return Err(SimulationError::Aborted);
-        }
-        Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
     };
     // A card's `D()`/`E()` operands read the run's event traces as step
     // functions; the sampled table above holds no event column.

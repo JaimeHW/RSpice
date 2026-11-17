@@ -1254,7 +1254,7 @@ impl MeasureEngine {
                         }
                         streamed => match with_earlier_results(m, &results) {
                             Ok(statement) => match streamed {
-                                Some(stream::StreamedStatements::Results(streamed)) => {
+                                Some(stream::StreamedStatements::Results { streamed, .. }) => {
                                     match streamed.get(index) {
                                         Some(Some(result)) => {
                                             result.clone().check_contract(&statement)

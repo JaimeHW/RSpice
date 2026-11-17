@@ -34,7 +34,13 @@ pub(crate) enum StreamedStatements {
     Chunk(Mutex<ChunkReads>),
     /// Each statement's result as the pass computed it, by statement place; `None` for one the
     /// engine evaluates itself (a PARAM, which reads the others).
-    Results(Vec<Option<MeasureResult>>),
+    Results {
+        streamed: Vec<Option<MeasureResult>>,
+        /// For a run with impulses, the failures the live impulse route gives in place of
+        /// sampled results, decided over the run's whole axis (see
+        /// [`crate::analysis::measure_signals::tran_impulse_failures`]).
+        impulse_failures: Option<HashMap<String, MeasureResult>>,
+    },
 }
 
 /// A value a streamed statement reads at each row. While the statement is planned, a waveform
@@ -773,6 +779,9 @@ pub struct TranMeasureStream {
     axis: AxisFacts,
     slots: Option<Vec<Slot>>,
     row: Vec<Value>,
+    /// A run with impulses keeps its axis: the live impulse route decides over the whole axis
+    /// which statements it fails or reads row by row.
+    impulse_axis: Option<Vec<Value>>,
 }
 
 /// Where one statement is in the passes.
@@ -808,15 +817,13 @@ impl TranMeasureStream {
     ) -> Result<Option<Self>, SimulationError> {
         let statements = measurements_for_analysis(netlist, "TRAN");
         if probe.time.is_empty()
-            || probe.current_impulses.is_some()
-            || probe.voltage_impulses.is_some()
             || statements
                 .iter()
                 .any(|statement| matches!(statement.measure_type, MeasureType::Equation { .. }))
         {
             log::debug!(
-                "the .MEASURE TRAN statements are measured in memory: the run has impulses or a \
-                 statement is a continuous equation"
+                "the .MEASURE TRAN statements are measured in memory: a statement is a \
+                 continuous equation"
             );
             return Ok(None);
         }
@@ -967,6 +974,8 @@ impl TranMeasureStream {
                 fourier_ends,
             },
             slots: None,
+            impulse_axis: (probe.current_impulses.is_some() || probe.voltage_impulses.is_some())
+                .then(Vec::new),
         }))
     }
 
@@ -1014,6 +1023,9 @@ impl TranMeasureStream {
     pub fn axis(&mut self, x: &[Value]) {
         for &x in x {
             self.axis.push(x);
+        }
+        if let Some(axis) = &mut self.impulse_axis {
+            axis.extend_from_slice(x);
         }
     }
 
@@ -1147,6 +1159,23 @@ impl TranMeasureStream {
         if spans && !self.axis.nondecreasing {
             return Ok(None);
         }
+        let impulse_failures = match self.impulse_axis.take() {
+            None => None,
+            Some(axis) => {
+                let mut run = span.clone();
+                run.time = axis;
+                let failures =
+                    crate::analysis::measure_signals::tran_impulse_failures(netlist, &run, abort)?;
+                if failures.is_none() {
+                    log::debug!(
+                        "the .MEASURE TRAN statements are measured in memory: the live impulse \
+                         route reads a statement row by row"
+                    );
+                    return Ok(None);
+                }
+                failures
+            }
+        };
         self.open();
         let Self { slots, .. } = self;
         let mut results = Vec::new();
@@ -1158,7 +1187,10 @@ impl TranMeasureStream {
                 Slot::Active(_) | Slot::Waiting => return Ok(None),
             });
         }
-        let hook = Arc::new(StreamedStatements::Results(results));
+        let hook = Arc::new(StreamedStatements::Results {
+            streamed: results,
+            impulse_failures,
+        });
         evaluate_tran_measurements_directed(netlist, span, Some(&hook), abort).map(Some)
     }
 }

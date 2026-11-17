@@ -459,3 +459,55 @@ fn error_functions_and_file_errors_measure_what_the_run_in_memory_measures_to_th
     }
     let _ = std::fs::remove_file(&reference);
 }
+
+/// `run` with a current impulse through `V1` at 0.5.
+fn with_impulse(mut run: TransientResult) -> TransientResult {
+    use crate::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
+    run.current_impulses = Some(vec![CurrentImpulseTrace {
+        derivatives: Vec::new(),
+        owner: CurrentImpulseOwner::Branch {
+            branch_name: "V1".into(),
+        },
+        complete: true,
+        points: vec![CurrentImpulsePoint {
+            time: 0.5,
+            charge_coulombs: 1.0e-6,
+        }],
+    }]);
+    run
+}
+
+#[test]
+fn a_run_with_impulses_streams_what_the_live_impulse_route_reads_no_row_of() {
+    let run = with_impulse(run(2_000));
+    // No voltage sees the impulse; an extremum of the current over a window holding it fails
+    // before a row is read, and one over a window without it is sampled.
+    let netlist = deck(
+        ".meas tran a1 AVG V(out)
+.meas tran m1 MAX V(in) FROM=0.1 TO=0.9
+.meas tran m2 MAX I(V1) FROM=0.1 TO=0.9
+.meas tran m3 MAX I(V1) FROM=0.6 TO=0.9
+.meas tran f1 FIND V(out) AT=0.3
+.meas tran w1 WHEN V(in)=0.5 CROSS=2
+.meas tran q1 FOUR V(out) AT=1.3",
+    );
+    let in_memory = evaluate_tran_measurements_with_abort(&netlist, &run, &NoAbort).unwrap();
+    let failed = in_memory
+        .iter()
+        .filter(|result| result.error.is_some())
+        .map(|result| result.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(failed, ["M2"], "{in_memory:#?}");
+    for chunk in [1, 37, 2_000] {
+        let streamed = streamed(&netlist, &run, chunk).expect("every statement streams");
+        assert_same(&streamed, &in_memory);
+    }
+    // The live route reads an integral of the current row by row, and a statement another
+    // statement reads.
+    for cards in [
+        ".meas tran a1 AVG V(out)\n.meas tran i1 INTEG I(V1)",
+        ".meas tran a1 AVG V(out)\n.meas tran p1 PARAM='a1*2'",
+    ] {
+        assert!(streamed(&deck(cards), &run, 50).is_none(), "{cards}");
+    }
+}
