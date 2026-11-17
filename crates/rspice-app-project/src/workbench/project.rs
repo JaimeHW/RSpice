@@ -368,6 +368,11 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
         },
     );
     if let Some(intent) = intent {
+        // The Overview shows no library, so a library chosen on its rail is
+        // opened on the Library page, which does.
+        if cx.state.project_page == ProjectPage::Overview {
+            cx.state.project_page = ProjectPage::Library;
+        }
         crate::workbench::surfaces::project::library::apply_library_intent(ui.ctx(), cx, intent);
     }
 }

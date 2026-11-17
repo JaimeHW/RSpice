@@ -570,7 +570,9 @@ impl Host for RSpiceApp {
         };
         let placeholder = match workspace {
             Workspace::Project => match app.state.project.project_page {
-                ProjectPage::Overview | ProjectPage::Library => "Filter libraries, cells, views…",
+                // The rail lists libraries; a cell's or a view's name finds
+                // the library that holds it.
+                ProjectPage::Overview | ProjectPage::Library => "Filter libraries…",
                 ProjectPage::Configuration => "Filter configurations…",
                 ProjectPage::Dependencies => "Filter dependencies…",
                 ProjectPage::Recovery => "Filter checkpoints…",

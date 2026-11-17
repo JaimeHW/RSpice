@@ -2,9 +2,13 @@
 //! the reader selects from, and nothing a panel beside it already owns.
 
 use crate::workbench::RSpiceApp;
+use egui::{Event, Modifiers};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_state::state::{Cell, Library, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator::show;
+
+use super::surface::painted_text;
 
 /// A project with two libraries, an active configuration and a recovery
 /// catalog behind it, so every Project rail has rows to show.
@@ -157,4 +161,83 @@ fn the_project_rails_state_no_fact_a_panel_beside_them_owns() {
     ] {
         assert!(!recovery.contains(retired), "{retired:?} in:\n{recovery}");
     }
+}
+
+/// One pass of the Project rail as the shell draws it.
+fn rail_frame(ctx: &egui::Context, app: &mut RSpiceApp, events: Vec<Event>) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(260.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, app);
+            });
+        },
+    )
+}
+
+/// On the Overview, a library chosen on the rail opens the Library page on
+/// it, and the rail's filter says that it filters libraries.
+#[test]
+fn a_library_on_the_overview_rail_opens_the_library_page_on_it() {
+    let mut app = RSpiceApp::test_instance();
+    let mut bench = Library::new("bench");
+    let mut cell = Cell::new("amp");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    bench.add_cell(cell);
+    app.state.model.library_manager.add_library(bench);
+    app.state.workbench.workspace = Workspace::Project;
+    app.state.project.project_page = ProjectPage::Overview;
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut settled = rail_frame(&ctx, &mut app, Vec::new());
+    for _ in 0..2 {
+        settled = rail_frame(&ctx, &mut app, Vec::new());
+    }
+    let painted = painted_text(&settled);
+    assert!(painted.contains("Filter libraries\u{2026}"), "{painted}");
+    assert!(!painted.contains("cells, views"), "{painted}");
+    let bounds = settled
+        .platform_output
+        .accesskit_update
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| (node.label()? == "bench").then_some(node.bounds()?))
+        .expect("the rail lists the library");
+    let at = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let _ = rail_frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(at),
+            Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::default(),
+            },
+            Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            },
+        ],
+    );
+    assert_eq!(app.state.project.project_page, ProjectPage::Library);
+    assert_eq!(
+        app.state.model.library_manager.selected_library.as_deref(),
+        Some("bench")
+    );
 }
