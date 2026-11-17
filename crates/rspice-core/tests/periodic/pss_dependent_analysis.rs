@@ -706,6 +706,21 @@ fn vcvs_charge_constraints_preserve_the_free_rc_mode() {
     }
 }
 
+/// A diode driven at 2 V into 1 kΩ and 100 pF, conducting in pulses whose
+/// harmonics reach far above a narrow sideband window.
+fn rectifying_diode() -> Netlist {
+    Netlist::parse(
+        "* rectifying diode\n\
+         V1 in 0 SIN(0 2 1meg)\n\
+         D1 in out DM\n\
+         R1 out 0 1k\n\
+         C1 out 0 100p\n\
+         .model DM D(IS=1e-14)\n\
+         .end\n",
+    )
+    .expect("deck parses")
+}
+
 fn retained_linear_operating_point(engine: &Engine, netlist: &Netlist) -> PssOperatingPoint {
     let config = PssConfig::new(F0)
         .with_harmonics(20)
@@ -822,6 +837,60 @@ fn dependent_basis_includes_the_carrier_outside_the_conversion_window() {
         let expected = num_complex::Complex64::new(1.0, 0.0)
             / num_complex::Complex64::new(1.0, 0.25 * omega_c);
         assert!((transfer - expected).norm() < 2e-12);
+    }
+}
+
+/// Periodic noise on a shooting orbit reads every harmonic the orbit holds,
+/// not only those of its folding window: a diode driven hard into conduction
+/// carries its current's harmonics far above the window's two, and its
+/// conductance and shot noise follow the whole waveform. Its noise on a
+/// 512-point shooting orbit must be its noise on a 64-harmonic
+/// harmonic-balance carrier: 2.1e-6 apart, where an orbit cut at the window
+/// gave noise 11.5% high.
+#[test]
+fn a_shooting_carriers_noise_reads_the_orbits_harmonics_beyond_the_folding_window() {
+    use rspice_core::analysis::harmonic_balance::HbConfig;
+    let netlist = rectifying_diode();
+    let engine = Engine::new(SimulationConfig::default());
+    let offsets = [0.13 * F0, 0.37 * F0];
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+            &NoAbort,
+        )
+        .expect("shooting solves");
+    let shot = engine
+        .run_pnoise_from_pss_with_abort(&netlist, &offsets, "out", None, None, 1, &point, &NoAbort)
+        .expect("pnoise on shooting's carrier")
+        .output_noise;
+    let hb = engine
+        .run_hb(
+            &netlist,
+            HbConfig::new(F0).with_harmonics(64).with_tolerance(1e-9),
+        )
+        .expect("harmonic balance solves");
+    let balanced = engine
+        .run_pnoise_from_hb_with_abort(
+            &netlist,
+            &offsets,
+            "out",
+            None,
+            None,
+            1,
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .expect("pnoise on harmonic balance's carrier")
+        .output_noise;
+    for ((offset, shot), balanced) in offsets.iter().zip(&shot).zip(&balanced) {
+        let gap = (shot - balanced).abs() / balanced;
+        assert!(
+            gap < 1e-4,
+            "at {offset:e} Hz: shooting {shot:e}, harmonic balance {balanced:e}, gap {gap:e}"
+        );
     }
 }
 

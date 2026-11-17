@@ -1768,6 +1768,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
 const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
     "angelov_gan",
     "asmesd",
+    "asmhemt",
     "asmesd_dio",
     "bjt504tva",
     "bjt504va",
@@ -1797,37 +1798,18 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
     "PSPNQS104VA",
 ];
 
-/// The generated compact models with a carried operator site whose periodic
-/// noise could not be checked, each with what the check met.
-#[cfg(feature = "veriloga-builtins-base")]
-const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[(
-    "asmhemt",
-    "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
-     model: in a pumped stage its periodic noise on harmonic balance's carrier approaches \
-     shooting's only slowly with harmonics, 7.2e-3 apart at 8 and still 1.0e-3 at 24",
-)];
-
 /// Why periodic noise refuses a generated model with a carried operator
-/// site, or `None` for one [`PNOISE_CHECKED_CARRIED_SITE_MODELS`] names: one
-/// [`PNOISE_UNCHECKED_CARRIED_SITE_MODELS`] names by what its check met, and
-/// a model the generator newly gives a carried site until it is checked.
+/// site, or `None` for one [`PNOISE_CHECKED_CARRIED_SITE_MODELS`] names: a
+/// model the generator newly gives a carried site is refused until it is
+/// checked.
 #[cfg(feature = "veriloga-builtins-base")]
 fn carried_site_noise_refusal(model: &str) -> Option<&'static str> {
-    if PNOISE_CHECKED_CARRIED_SITE_MODELS
+    (!PNOISE_CHECKED_CARRIED_SITE_MODELS
         .iter()
-        .any(|checked| checked.eq_ignore_ascii_case(model))
-    {
-        return None;
-    }
-    Some(
-        PNOISE_UNCHECKED_CARRIED_SITE_MODELS
-            .iter()
-            .find(|(unchecked, _)| unchecked.eq_ignore_ascii_case(model))
-            .map_or(
-                "noise beside an operator harmonic balance carries as an unknown, which no \
-                 reference has checked for this model",
-                |&(_, reason)| reason,
-            ),
+        .any(|checked| checked.eq_ignore_ascii_case(model)))
+    .then_some(
+        "noise beside an operator harmonic balance carries as an unknown, which no reference \
+         has checked for this model",
     )
 }
 
@@ -1899,10 +1881,7 @@ mod tests {
         assert_eq!(carried_site_noise_refusal("pspnqs102va"), None);
         assert_eq!(carried_site_noise_refusal("HISIMHV_VA"), None);
         assert_eq!(carried_site_noise_refusal("BJTD504TVA"), None);
-        assert_eq!(
-            carried_site_noise_refusal("ASMHEMT"),
-            Some(PNOISE_UNCHECKED_CARRIED_SITE_MODELS[0].1)
-        );
+        assert_eq!(carried_site_noise_refusal("ASMHEMT"), None);
         assert!(
             carried_site_noise_refusal("a_model_newly_given_a_carried_site")
                 .is_some_and(|reason| reason.ends_with("no reference has checked for this model"))

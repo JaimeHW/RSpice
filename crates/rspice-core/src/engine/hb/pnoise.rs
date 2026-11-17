@@ -697,9 +697,19 @@ impl Engine {
                 "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {capacity}"
             )));
         }
+        // A shooting orbit is projected onto every harmonic its samples
+        // resolve, not only the folding window's: the conductances and noise
+        // intensities the window reads are functions of the whole waveform.
+        // Cut at the window, an ASM-HEMT stage driven into compression (its
+        // drain 2.9e-3 of the fundamental at harmonic 12) gave noise 1.0e-3
+        // low. The basis already holds the orbit's spectrum, so twice its
+        // width samples the products without folding them into the window.
         let hb_config = match &operating_point {
             Some(PnoiseOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(fundamental_freq)
+            Some(PnoiseOperatingPoint::Shooting(point)) => HbConfig::new(fundamental_freq)
+                .with_harmonics(point.spectral_harmonic_capacity())
+                .with_oversample(2),
+            None => HbConfig::new(fundamental_freq)
                 .with_harmonics(op_harmonics)
                 .with_oversample(4),
         };

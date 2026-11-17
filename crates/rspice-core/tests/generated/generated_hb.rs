@@ -917,25 +917,34 @@ const PNOISE_CHECK: PnoiseCheck = PnoiseCheck {
 
 /// The shipped models whose periodic noise the walk reads other than by
 /// [`PNOISE_CHECK`], each with its check. MVSG's harmonic-balance carrier
-/// takes 16 harmonics: at 8 its sideband-0 noise sat 2.2e-3 from shooting's,
-/// at 16 2.0e-4 and at 24 2.2e-4, shooting's unmoved from 512 to 1024
-/// points.
-const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[(
-    "mvsg_cmc",
-    PnoiseCheck {
-        harmonics: 16,
-        gentle: GENTLE_DRIVE,
-    },
-)];
+/// takes 16 harmonics: its noise sat 2.6e-3 from shooting's at 8, 1.4e-5 at
+/// 16 and 3.5e-7 at 24. ASM-HEMT's takes 16: its drain carries 2.9e-3 of the
+/// fundamental at harmonic 12 and 1.2e-3 at 16, which a carrier of 8 cannot
+/// hold (its eighth harmonic then sits 7.5e-3 of the fundamental from
+/// shooting's, oversampled two to sixteen times alike), so its noise sat
+/// 6.9e-3 from shooting's at 8 and 8.3e-5 at 16.
+const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[
+    (
+        "mvsg_cmc",
+        PnoiseCheck {
+            harmonics: 16,
+            gentle: GENTLE_DRIVE,
+        },
+    ),
+    (
+        "asmhemt",
+        PnoiseCheck {
+            harmonics: 16,
+            gentle: GENTLE_DRIVE,
+        },
+    ),
+];
 
 /// The shipped models whose periodic noise could not be checked, each with
 /// the words of the reason periodic noise refuses it by on either carrier
 /// (see [`check_pnoise_refusal`]). Every other model with a settled-transient
 /// fixture has its periodic noise checked (see [`check_pnoise`]).
-const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[(
-    "asmhemt",
-    "approaches shooting's only slowly with harmonics",
-)];
+const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[];
 
 /// Periodic noise of a fixture's V(`node`) on both carriers, checked two
 /// ways:
