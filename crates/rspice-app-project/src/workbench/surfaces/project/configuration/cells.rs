@@ -5,18 +5,14 @@
 
 use super::*;
 
-use crate::state::{
-    ConfigurationCellBinding, ConfigurationSetDefinition, LibraryManager, default_view_search_order,
-};
 use crate::ui::widgets::select;
 use crate::workbench::project::configuration_state::{
-    CellRow, ConfigurationRow, cell_binding, cell_view_names,
+    CellTableRow, ConfigurationRow, ConfigurationTables,
 };
 
 use super::instances::TableEdit;
 
 const TABLE_MIN_WIDTH: f32 = 700.0;
-const INHERITED: &str = "Inherited";
 
 const COLUMNS: [(&str, f32); 6] = [
     ("Library", 0.15),
@@ -27,38 +23,9 @@ const COLUMNS: [(&str, f32); 6] = [
     ("Inherited view list", 0.26),
 ];
 
-/// One row as drawn: a cell of the design, or a cell binding that binds
-/// nothing in it.
-struct Row<'a> {
-    library: &'a str,
-    cell: &'a str,
-    instances: usize,
-    views_found: &'a [String],
-    in_design: bool,
-}
-
-/// The cell bindings that name no cell of the expanded design: kept, as
-/// Cadence keeps them, and listed after the cells, but binding nothing.
-pub(super) fn bindings_not_in_design<'a>(
-    cells: &'a [CellRow],
-    definition: Option<&'a ConfigurationSetDefinition>,
-) -> impl Iterator<Item = &'a ConfigurationCellBinding> + 'a {
-    definition
-        .into_iter()
-        .flat_map(|definition| &definition.cell_bindings)
-        .filter(move |binding| {
-            !cells.iter().any(|cell| {
-                cell.library.eq_ignore_ascii_case(&binding.library)
-                    && cell.cell.eq_ignore_ascii_case(&binding.cell)
-            })
-        })
-}
-
 pub(super) fn cells_table(
     ui: &mut Ui,
-    cells: &[CellRow],
-    definition: Option<&ConfigurationSetDefinition>,
-    libraries: &LibraryManager,
+    tables: &ConfigurationTables,
     selected: Option<&ConfigurationRow>,
     editable: bool,
 ) -> Option<TableEdit> {
@@ -66,39 +33,10 @@ pub(super) fn cells_table(
     let row_height = t.metrics.row_h;
     let header_height = (row_height - 4.0).max(22.0);
     let width = visible_workspace_width(ui).max(TABLE_MIN_WIDTH);
-    let mut rows = cells
-        .iter()
-        .map(|cell| Row {
-            library: &cell.library,
-            cell: &cell.cell,
-            instances: cell.instances,
-            views_found: &cell.views_found,
-            in_design: true,
-        })
-        .collect::<Vec<_>>();
-    rows.extend(
-        bindings_not_in_design(cells, definition).map(|binding| Row {
-            library: &binding.library,
-            cell: &binding.cell,
-            instances: 0,
-            views_found: &[],
-            in_design: false,
-        }),
-    );
-    let inherited = definition.map_or_else(
-        || {
-            let order = default_view_search_order("schematic", false);
-            let mut words = vec!["the instance's own view".to_owned()];
-            words.extend(order.into_iter().skip(1));
-            words.join(", then ")
-        },
-        |definition| definition.executable_view_policy.join(", then "),
-    );
+    let rows = &tables.cell_rows;
     let context = RowContext {
-        definition,
-        libraries,
+        tables,
         selected,
-        inherited: &inherited,
         editable,
         width,
         height: row_height,
@@ -188,41 +126,31 @@ fn text(
 /// What every row of one frame draws from.
 #[derive(Clone, Copy)]
 struct RowContext<'a> {
-    definition: Option<&'a ConfigurationSetDefinition>,
-    libraries: &'a LibraryManager,
+    tables: &'a ConfigurationTables,
     selected: Option<&'a ConfigurationRow>,
-    inherited: &'a str,
     editable: bool,
     width: f32,
     height: f32,
 }
 
-fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<TableEdit> {
+fn cell_row(ui: &mut Ui, row: &CellTableRow, context: &RowContext<'_>) -> Option<TableEdit> {
     let RowContext {
-        definition,
-        libraries,
+        tables,
         selected,
-        inherited,
         editable,
         width,
         height,
     } = *context;
+    let inherited = tables.inherited.as_str();
     let t = Tokens::get(ui.ctx());
     let is_selected = matches!(
         selected,
         Some(ConfigurationRow::Cell { library, cell })
-            if library.eq_ignore_ascii_case(row.library) && cell.eq_ignore_ascii_case(row.cell)
+            if library.eq_ignore_ascii_case(&row.library) && cell.eq_ignore_ascii_case(&row.cell)
     );
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    let binding = definition.and_then(|definition| cell_binding(definition, row.library, row.cell));
-    let to_use = binding
-        .and_then(|binding| binding.executable_views.first())
-        .map_or(INHERITED, String::as_str);
-    let found = if row.views_found.is_empty() {
-        "\u{2014}".to_owned()
-    } else {
-        row.views_found.join(", ")
-    };
+    let to_use = row.to_use.as_str();
+    let found = &row.found;
     let mut label = format!(
         "Cell {}/{}: {} instance{}; view found {found}; view to use {to_use}; inherited view list {inherited}",
         row.library,
@@ -269,11 +197,11 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
         ui,
         &painter,
         cells[0].1,
-        row.library,
+        &row.library,
         &mono,
         t.color.text_dim,
     );
-    text(ui, &painter, cells[1].1, row.cell, &mono, t.color.text);
+    text(ui, &painter, cells[1].1, &row.cell, &mono, t.color.text);
     text(
         ui,
         &painter,
@@ -284,7 +212,7 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
     );
     let found_cell = cells[3].1;
     if row.in_design {
-        text(ui, &painter, found_cell, &found, &mono, t.color.text_dim);
+        text(ui, &painter, found_cell, found, &mono, t.color.text_dim);
     } else {
         paint_problem_mark(
             &painter,
@@ -309,8 +237,7 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
     let mut edit = None;
     let view_cell = cells[4].1;
     if editable {
-        let mut options = vec![INHERITED.to_owned()];
-        options.extend(cell_view_names(libraries, row.library, row.cell));
+        let options = &tables.view_options[row.options];
         let mut picked = None;
         ui.scope_builder(
             egui::UiBuilder::new()
@@ -322,7 +249,7 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
                     &format!("configuration-cell-view-{}-{}", row.library, row.cell),
                     &format!("View to use for {}/{}", row.library, row.cell),
                     to_use,
-                    &options,
+                    options,
                     ui.available_width(),
                 );
             },
@@ -331,8 +258,8 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
             && options[index] != to_use
         {
             edit = Some(TableEdit::CellView {
-                library: row.library.to_owned(),
-                cell: row.cell.to_owned(),
+                library: row.library.clone(),
+                cell: row.cell.clone(),
                 view: (index > 0).then(|| options[index].clone()),
             });
         }
@@ -349,8 +276,8 @@ fn cell_row(ui: &mut Ui, row: &Row<'_>, context: &RowContext<'_>) -> Option<Tabl
     );
     if response.clicked() && edit.is_none() {
         edit = Some(TableEdit::Select(ConfigurationRow::Cell {
-            library: row.library.to_owned(),
-            cell: row.cell.to_owned(),
+            library: row.library.clone(),
+            cell: row.cell.clone(),
         }));
     }
     edit

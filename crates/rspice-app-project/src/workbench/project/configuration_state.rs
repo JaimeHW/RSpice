@@ -7,16 +7,34 @@
 //! saved with the project, and nothing here changes what a run executes: an
 //! edit reaches the project only through Apply.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::state::workspace::{DesignProjectionKey, HierarchyResolution};
+use rspice_design::stamped::Stamped;
+
+use crate::state::workspace::{DesignProjectionCache, DesignProjectionKey, HierarchyResolution};
 use crate::state::{
     CellViewRef, ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSetCatalog,
     ConfigurationSetDefinition, ConfigurationSetError, ConfigurationSetId,
     ConfigurationSetOverride, InstancePath, InstancePathPattern, LibraryManager, ProjectWorkspace,
-    SchematicState, ViewType,
+    SchematicState, ViewType, default_view_search_order,
 };
+
+/// The view-to-use choice that keeps the view list an instance or a cell
+/// inherits.
+pub(crate) const INHERITED: &str = "Inherited";
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread walked a configuration's bindings, its instance
+    /// paths or the libraries' views to draw the Configuration page.
+    pub static CONFIGURATION_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn count_scan() {
+    #[cfg(any(test, feature = "test-support"))]
+    CONFIGURATION_SCANS.with(|scans| scans.set(scans.get() + 1));
+}
 
 /// The configuration the page shows. `Default` is the built-in search order
 /// a project runs with when no configuration is used for runs; it is not a
@@ -96,6 +114,9 @@ pub struct ConfigurationPageState {
     pub field_edit: Option<FieldEdit>,
     /// Instances whose children the tree hides, by fold key.
     collapsed: BTreeSet<String>,
+    /// Counts the changes to the edits, so the resolution is keyed on which
+    /// edits it resolved without comparing them.
+    draft_revision: u64,
     resolution: ResolutionCache,
 }
 
@@ -129,7 +150,7 @@ impl ConfigurationPageState {
             .as_ref()
             .is_some_and(|draft| selection != ConfigurationSelection::Configuration(draft.id))
         {
-            self.draft = None;
+            self.set_draft(None);
         }
         self.selection = Some(selection);
         self.pending_selection = None;
@@ -206,9 +227,7 @@ impl ConfigurationPageState {
             },
         };
         edit(&mut draft.definition);
-        if draft.definition != *committed.definition() {
-            self.draft = Some(draft);
-        }
+        self.set_draft((draft.definition != *committed.definition()).then_some(draft));
         self.refusal = None;
     }
 
@@ -219,12 +238,18 @@ impl ConfigurationPageState {
         if let Some(draft) = self.draft.as_mut().filter(|draft| draft.id == id) {
             draft.definition.name = name.to_owned();
             draft.base_revision = revision;
+            self.draft_revision += 1;
         }
+    }
+
+    fn set_draft(&mut self, draft: Option<ConfigurationDraft>) {
+        self.draft = draft;
+        self.draft_revision += 1;
     }
 
     /// Drop the edits; the page shows what the project holds again.
     pub(crate) fn revert(&mut self) {
-        self.draft = None;
+        self.set_draft(None);
         self.refusal = None;
     }
 
@@ -262,31 +287,40 @@ impl ConfigurationPageState {
             ConfigurationSelection::Default => None,
         };
         let design = workspace.design_projection_key(libraries, active_view, schematic);
-        let library_revision = libraries.catalog().revision();
+        let library = libraries.catalog().stamp();
         let project_revision = workspace.content.project.revision().get();
         if let (Some(key), Some(value)) = (&self.resolution.key, &self.resolution.value)
             && key.selection == selection
-            && key.draft.as_ref() == draft
+            && key.draft_revision == self.draft_revision
             && key.design == design
-            && key.library_revision == library_revision
+            && key.library == library
             && key.project_revision == project_revision
         {
             return Arc::clone(value);
         }
+        let candidates = self
+            .resolution
+            .candidates
+            .take()
+            .unwrap_or_else(|| workspace.candidate_projection_cache());
         let value = Arc::new(ConfigurationResolution::build(
-            workspace,
-            libraries,
-            active_view,
-            schematic,
+            ResolutionInputs {
+                workspace,
+                libraries,
+                active_view,
+                schematic,
+                candidates: &candidates,
+            },
             selection,
             draft,
         ));
         self.resolution = ResolutionCache {
+            candidates: Some(candidates),
             key: Some(ResolutionKey {
                 selection,
-                draft: draft.cloned(),
+                draft_revision: self.draft_revision,
                 design,
-                library_revision,
+                library,
                 project_revision,
             }),
             value: Some(Arc::clone(&value)),
@@ -342,6 +376,9 @@ impl ConfigurationPageState {
 
 #[derive(Debug, Clone, Default)]
 struct ResolutionCache {
+    /// Where the page's candidate projections are remembered, apart from the
+    /// project's own.
+    candidates: Option<DesignProjectionCache>,
     key: Option<ResolutionKey>,
     value: Option<Arc<ConfigurationResolution>>,
     visible: Option<Arc<[usize]>>,
@@ -350,13 +387,14 @@ struct ResolutionCache {
 
 /// Everything the candidate hierarchy depends on. The design key digests the
 /// live buffers and the project's authorities, the catalog among them; the
-/// two revisions cover a design whose authorities cannot be digested.
+/// library stamp and the project revision cover a design whose authorities
+/// cannot be digested, and the tables' view lists, which read the libraries.
 #[derive(Debug, Clone, PartialEq)]
 struct ResolutionKey {
     selection: ConfigurationSelection,
-    draft: Option<ConfigurationSetDefinition>,
+    draft_revision: u64,
     design: Option<DesignProjectionKey>,
-    library_revision: u64,
+    library: u64,
     project_revision: u64,
 }
 
@@ -370,10 +408,68 @@ pub struct ConfigurationResolution {
     /// Every distinct library/cell the expanded design instantiates, in
     /// library/cell order.
     pub(crate) cells: Vec<CellRow>,
-    /// The views a configuration can take as its top cell.
-    pub(crate) top_cells: Vec<CellViewRef>,
     /// Every view name the project's libraries hold.
     pub(crate) view_names: Vec<String>,
+    /// What the page draws from the shown definition and the hierarchy,
+    /// built with them so a frame only reads it.
+    pub(crate) tables: ConfigurationTables,
+}
+
+/// The rows, choices and counts the page draws, for the definition it shows
+/// (the edits, or what the project holds; none on Default).
+#[derive(Debug, Default)]
+pub(crate) struct ConfigurationTables {
+    /// Whether the shown edits differ from what the project holds.
+    pub(crate) dirty: bool,
+    /// The top cell picker's choices, the shown top cell first when it is
+    /// not one of them, and their labels.
+    pub(crate) top_cell_choices: Vec<CellViewRef>,
+    pub(crate) top_cell_labels: Vec<String>,
+    /// The DUT picker's choices: every instance below the root, the shown DUT
+    /// first when it is not one of them.
+    pub(crate) dut_choices: Vec<String>,
+    /// Whether the shown DUT is an instance of the design.
+    pub(crate) dut_in_design: bool,
+    /// The views the view list can add, and the views the stop list can.
+    pub(crate) addable_views: Vec<String>,
+    pub(crate) addable_stops: Vec<String>,
+    /// The view list a cell without a binding inherits, in the page's words.
+    pub(crate) inherited: String,
+    /// Per tree row: the view its own instance binding uses, and where the
+    /// binding that governs it runs.
+    pub(crate) instance_to_use: Vec<Option<String>>,
+    pub(crate) instance_runs_on: Vec<&'static str>,
+    /// Per hierarchy binding: its cell's view-to-use choices, an index into
+    /// `view_options`.
+    pub(crate) binding_options: Vec<usize>,
+    /// Each cell's view-to-use choices: Inherited, then its views.
+    pub(crate) view_options: Vec<Vec<String>>,
+    /// The Cells table: the design's cells, then the cell bindings that name
+    /// none of them.
+    pub(crate) cell_rows: Vec<CellTableRow>,
+    /// How many cell bindings name no cell of the design.
+    pub(crate) bindings_not_in_design: usize,
+    /// Instances in the design, unbound ones, and ones bound by fallback.
+    pub(crate) total_instances: usize,
+    pub(crate) unbound_instances: usize,
+    pub(crate) fallback_instances: usize,
+    /// Tree row by fold key.
+    index: HashMap<String, usize>,
+}
+
+/// One row of the Cells table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CellTableRow {
+    pub(crate) library: String,
+    pub(crate) cell: String,
+    pub(crate) instances: usize,
+    /// The views its instances resolved to, or a dash.
+    pub(crate) found: String,
+    /// The view its cell binding uses, or Inherited.
+    pub(crate) to_use: String,
+    pub(crate) in_design: bool,
+    /// Its view-to-use choices, an index into `view_options`.
+    pub(crate) options: usize,
 }
 
 /// One library/cell of the expanded design.
@@ -400,23 +496,43 @@ pub(crate) struct InstanceRow {
     pub(crate) children: usize,
 }
 
+/// What a resolution reads: the design as it stands, and where candidate
+/// projections are remembered.
+struct ResolutionInputs<'a> {
+    workspace: &'a ProjectWorkspace,
+    libraries: &'a LibraryManager,
+    active_view: &'a CellViewRef,
+    schematic: &'a SchematicState,
+    candidates: &'a DesignProjectionCache,
+}
+
 impl ConfigurationResolution {
     fn build(
-        workspace: &ProjectWorkspace,
-        libraries: &LibraryManager,
-        active_view: &CellViewRef,
-        schematic: &SchematicState,
+        inputs: ResolutionInputs<'_>,
         selection: ConfigurationSelection,
         draft: Option<&ConfigurationSetDefinition>,
     ) -> Self {
+        let ResolutionInputs {
+            workspace,
+            libraries,
+            active_view,
+            schematic,
+            candidates,
+        } = inputs;
         let catalog: &ConfigurationSetCatalog = &workspace.content.configuration_sets;
         let hierarchy = candidate_catalog(catalog, selection, draft).and_then(|candidate| {
+            // The edits resolve against the workspace where it stands, with
+            // only the configuration catalog swapped: no copy of the design.
             let projection = if candidate == *catalog {
                 workspace.inspect_design_projection(libraries, active_view, schematic)
             } else {
-                let mut candidate_workspace = workspace.clone();
-                *candidate_workspace.content.configuration_sets = candidate;
-                candidate_workspace.inspect_design_projection(libraries, active_view, schematic)
+                workspace.inspect_candidate_design_projection(
+                    &Stamped::new(candidate),
+                    libraries,
+                    active_view,
+                    schematic,
+                    candidates,
+                )
             };
             projection
                 .map(|projection| projection.hierarchy_resolution().clone())
@@ -424,20 +540,295 @@ impl ConfigurationResolution {
         });
         let instances = hierarchy.as_ref().map(instance_rows).unwrap_or_default();
         let cells = hierarchy.as_ref().map(cell_rows).unwrap_or_default();
+        let top_cells = top_cell_choices(workspace, libraries);
+        let view_names = project_view_names(libraries);
+        let shown = match selection {
+            ConfigurationSelection::Configuration(id) => {
+                draft.or_else(|| catalog.find(id).map(|committed| committed.definition()))
+            }
+            ConfigurationSelection::Default => None,
+        };
+        let dirty = match selection {
+            ConfigurationSelection::Configuration(id) => draft.is_some_and(|draft| {
+                catalog
+                    .find(id)
+                    .is_some_and(|committed| committed.definition() != draft)
+            }),
+            ConfigurationSelection::Default => false,
+        };
+        let tables = ConfigurationTables::build(TableInputs {
+            hierarchy: hierarchy.as_ref().ok(),
+            instances: &instances,
+            cells: &cells,
+            top_cells,
+            view_names: &view_names,
+            libraries,
+            definition: shown,
+            dirty,
+        });
         Self {
             hierarchy,
             instances,
             cells,
-            top_cells: top_cell_choices(workspace, libraries),
-            view_names: project_view_names(libraries),
+            view_names,
+            tables,
         }
     }
 
     /// The tree row for `path`.
     pub(crate) fn instance(&self, path: &str) -> Option<&InstanceRow> {
-        let key = fold(path);
-        self.instances.iter().find(|row| fold(&row.path) == key)
+        self.tables
+            .index
+            .get(&fold(path))
+            .map(|index| &self.instances[*index])
     }
+}
+
+/// What the tables are built from.
+struct TableInputs<'a> {
+    hierarchy: Option<&'a HierarchyResolution>,
+    instances: &'a [InstanceRow],
+    cells: &'a [CellRow],
+    top_cells: Vec<CellViewRef>,
+    view_names: &'a [String],
+    libraries: &'a LibraryManager,
+    definition: Option<&'a ConfigurationSetDefinition>,
+    dirty: bool,
+}
+
+impl ConfigurationTables {
+    fn build(inputs: TableInputs<'_>) -> Self {
+        count_scan();
+        let TableInputs {
+            hierarchy,
+            instances,
+            cells,
+            top_cells,
+            view_names,
+            libraries,
+            definition,
+            dirty,
+        } = inputs;
+        let index = instances
+            .iter()
+            .enumerate()
+            .map(|(row, instance)| (fold(&instance.path), row))
+            .collect::<HashMap<_, _>>();
+
+        let mut top_cell_choices = top_cells;
+        let mut dut_choices = instances
+            .iter()
+            .filter(|row| row.depth > 0)
+            .map(|row| row.path.clone())
+            .collect::<Vec<_>>();
+        let mut dut_in_design = false;
+        let mut addable_views = Vec::new();
+        let mut addable_stops = Vec::new();
+        if let Some(definition) = definition {
+            if !top_cell_choices.contains(&definition.root) {
+                top_cell_choices.insert(0, definition.root.clone());
+            }
+            if !dut_choices
+                .iter()
+                .any(|path| path.eq_ignore_ascii_case(&definition.dut_path))
+            {
+                dut_choices.insert(0, definition.dut_path.clone());
+            }
+            dut_in_design = index.contains_key(&fold(&definition.dut_path));
+            let listed = |list: &[String], name: &str| {
+                list.iter().any(|listed| listed.eq_ignore_ascii_case(name))
+            };
+            addable_views = view_names
+                .iter()
+                .filter(|name| !listed(&definition.executable_view_policy, name))
+                .cloned()
+                .collect();
+            // Only a view the list searches can stop it.
+            addable_stops = definition
+                .executable_view_policy
+                .iter()
+                .filter(|view| !listed(&definition.stop_views, view))
+                .cloned()
+                .collect();
+        }
+        let top_cell_labels = top_cell_choices
+            .iter()
+            .map(CellViewRef::display_path)
+            .collect();
+        let inherited = definition.map_or_else(
+            || {
+                let order = default_view_search_order("schematic", false);
+                let mut words = vec!["the instance's own view".to_owned()];
+                words.extend(order.into_iter().skip(1));
+                words.join(", then ")
+            },
+            |definition| definition.executable_view_policy.join(", then "),
+        );
+
+        let (instance_to_use, instance_runs_on) = instance_bindings(instances, definition);
+
+        let mut view_options = Vec::new();
+        let mut options_of = HashMap::new();
+        let mut options = |library: &str, cell: &str| {
+            *options_of
+                .entry((library.to_ascii_lowercase(), cell.to_ascii_lowercase()))
+                .or_insert_with(|| {
+                    let mut choices = vec![INHERITED.to_owned()];
+                    choices.extend(cell_view_names(libraries, library, cell));
+                    view_options.push(choices);
+                    view_options.len() - 1
+                })
+        };
+        let binding_options = hierarchy.map_or_else(Vec::new, |hierarchy| {
+            hierarchy
+                .bindings
+                .iter()
+                .map(|binding| options(&binding.reference.library, &binding.reference.cell))
+                .collect()
+        });
+
+        let mut cell_rows = Vec::with_capacity(cells.len());
+        let mut in_design = HashSet::new();
+        for row in cells {
+            in_design.insert((
+                row.library.to_ascii_lowercase(),
+                row.cell.to_ascii_lowercase(),
+            ));
+            cell_rows.push(CellTableRow {
+                library: row.library.clone(),
+                cell: row.cell.clone(),
+                instances: row.instances,
+                found: if row.views_found.is_empty() {
+                    "\u{2014}".to_owned()
+                } else {
+                    row.views_found.join(", ")
+                },
+                to_use: cell_to_use(definition, &row.library, &row.cell),
+                in_design: true,
+                options: options(&row.library, &row.cell),
+            });
+        }
+        // The cell bindings that name no cell of the expanded design: kept, as
+        // Cadence keeps them, and listed after the cells, but binding nothing.
+        let mut bindings_not_in_design = 0;
+        for binding in definition
+            .into_iter()
+            .flat_map(|definition| &definition.cell_bindings)
+        {
+            if in_design.contains(&(
+                binding.library.to_ascii_lowercase(),
+                binding.cell.to_ascii_lowercase(),
+            )) {
+                continue;
+            }
+            bindings_not_in_design += 1;
+            cell_rows.push(CellTableRow {
+                library: binding.library.clone(),
+                cell: binding.cell.clone(),
+                instances: 0,
+                found: "\u{2014}".to_owned(),
+                to_use: cell_to_use(definition, &binding.library, &binding.cell),
+                in_design: false,
+                options: options(&binding.library, &binding.cell),
+            });
+        }
+
+        let (total_instances, unbound_instances, fallback_instances) =
+            hierarchy.map_or((0, 0, 0), |hierarchy| {
+                (
+                    hierarchy.total_instances,
+                    hierarchy.unresolved_instances(),
+                    hierarchy
+                        .bindings
+                        .iter()
+                        .filter(|binding| binding.used_review_fallback)
+                        .map(|binding| binding.instance_count)
+                        .sum(),
+                )
+            });
+        Self {
+            dirty,
+            top_cell_choices,
+            top_cell_labels,
+            dut_choices,
+            dut_in_design,
+            addable_views,
+            addable_stops,
+            inherited,
+            instance_to_use,
+            instance_runs_on,
+            binding_options,
+            view_options,
+            cell_rows,
+            bindings_not_in_design,
+            total_instances,
+            unbound_instances,
+            fallback_instances,
+            index,
+        }
+    }
+}
+
+/// The view `library`/`cell`'s own binding uses, or Inherited.
+fn cell_to_use(
+    definition: Option<&ConfigurationSetDefinition>,
+    library: &str,
+    cell: &str,
+) -> String {
+    definition
+        .and_then(|definition| cell_binding(definition, library, cell))
+        .and_then(|binding| binding.executable_views.first())
+        .map_or_else(|| INHERITED.to_owned(), String::clone)
+}
+
+/// For each tree row, the view its own instance binding uses and where the
+/// binding that governs it runs: every binding parsed once, every path once.
+fn instance_bindings(
+    instances: &[InstanceRow],
+    definition: Option<&ConfigurationSetDefinition>,
+) -> (Vec<Option<String>>, Vec<&'static str>) {
+    let Some(definition) = definition else {
+        return (vec![None; instances.len()], vec!["All"; instances.len()]);
+    };
+    // The first exact binding of a path is its own, as `instance_binding`
+    // finds it.
+    let mut exact = HashMap::new();
+    for (index, binding) in definition.overrides.iter().enumerate() {
+        if let Ok(path) = InstancePath::parse(&binding.instance_path) {
+            exact.entry(path.fold_key()).or_insert(index);
+        }
+    }
+    let patterns = definition
+        .overrides
+        .iter()
+        .filter_map(|binding| {
+            InstancePathPattern::parse(&binding.instance_path)
+                .ok()
+                .map(|pattern| (binding, pattern))
+        })
+        .collect::<Vec<_>>();
+    instances
+        .iter()
+        .map(|row| {
+            let Ok(path) = InstancePath::parse(&row.path) else {
+                return (None, "All");
+            };
+            let to_use = exact
+                .get(&path.fold_key())
+                .and_then(|index| definition.overrides[*index].executable_views.first())
+                .cloned();
+            // The matching binding that pins the most positions by name, as
+            // the resolver chooses it.
+            let runs_on = patterns
+                .iter()
+                .filter(|(_, pattern)| pattern.matches(&path))
+                .max_by_key(|(_, pattern)| pattern.specificity())
+                .map_or("All", |(binding, _)| {
+                    runs_on_label(&binding.eligible_platforms)
+                });
+            (to_use, runs_on)
+        })
+        .unzip()
 }
 
 /// The catalog the page resolves: Default stops using any configuration,
@@ -658,6 +1049,7 @@ pub fn instance_binding<'a>(
     definition: &'a ConfigurationSetDefinition,
     path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
+    count_scan();
     let key = InstancePath::parse(path).ok()?.fold_key();
     definition.overrides.iter().find(|binding| {
         InstancePath::parse(&binding.instance_path).is_ok_and(|exact| exact.fold_key() == key)
@@ -675,6 +1067,7 @@ pub(crate) fn governing_binding<'a>(
     definition: &'a ConfigurationSetDefinition,
     path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
+    count_scan();
     let instance = InstancePath::parse(path).ok()?;
     definition
         .overrides
@@ -820,6 +1213,7 @@ pub(crate) fn cell_view_names(
     library: &str,
     cell: &str,
 ) -> Vec<String> {
+    count_scan();
     let mut names = libraries
         .libraries_by_key()
         .filter(|(key, _)| key.eq_ignore_ascii_case(library))

@@ -322,18 +322,24 @@ fn publish(model: &mut Model, candidate: ConfigurationSetCatalog) -> Result<(), 
 /// Whether runs could execute with `catalog`: its configuration projects,
 /// the project's connectivity holds, a netlist generates, and every source
 /// it names seals. Each failure says which of the four failed.
+///
+/// The project is read where it stands with `catalog` in place of its own;
+/// nothing of it is copied, and its own projection is not displaced.
 pub(in crate::workbench) fn validate_candidate_configuration(
     model: &Model,
     catalog: &ConfigurationSetCatalog,
 ) -> Result<(), String> {
-    let mut workspace = model.workspace.clone();
-    *workspace.content.configuration_sets = catalog.clone();
+    let workspace = &model.workspace;
+    let candidate = rspice_design::stamped::Stamped::new(catalog.clone());
     let projection = workspace
-        .configuration_execution_projection(
+        .inspect_candidate_design_projection(
+            &candidate,
             &model.library_manager,
-            &model.workspace.content.active_view,
+            &workspace.content.active_view,
             &model.schematic,
+            &workspace.candidate_projection_cache(),
         )
+        .and_then(|projection| projection.into_execution())
         .map_err(|error| match error {
             // Each unbound instance's own sentence names its cell and the
             // views it was searched for; nothing needs to wrap them.
@@ -367,9 +373,11 @@ pub(in crate::workbench) fn validate_candidate_configuration(
             generated.errors.join("; ")
         ));
     }
-    let generated = workspace
-        .content
-        .bind_generated_netlist_provenance(generated.netlist);
+    let generated = rspice_design::netlist_document::bind_generated_netlist_provenance(
+        &workspace.content.design_management,
+        &candidate,
+        generated.netlist,
+    );
     rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
         &generated,
         root.current_file(),

@@ -10,7 +10,16 @@ impl ProjectWorkspace {
     /// configuration sets, or one returned to the built-in default), the
     /// project descriptor's top cell.
     pub fn simulation_root_reference(&self) -> CellViewRef {
-        self.configuration_sets.active().map_or_else(
+        self.simulation_root_under(&self.configuration_sets)
+    }
+
+    /// The root simulation would take with `configuration_sets` in place of
+    /// the project's own: a configuration's edits before they are applied.
+    pub fn simulation_root_under(
+        &self,
+        configuration_sets: &rspice_design::configuration_set::ConfigurationSetCatalog,
+    ) -> CellViewRef {
+        configuration_sets.active().map_or_else(
             || {
                 CellViewRef::new(
                     &self.project.root_library,

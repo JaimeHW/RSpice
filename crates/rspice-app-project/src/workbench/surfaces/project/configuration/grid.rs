@@ -240,14 +240,8 @@ fn configuration_grid(
         ui,
         |ui| {
             grid_row(ui, "Top cell", |ui| {
-                let mut choices = resolution.top_cells.clone();
-                if !choices.contains(&definition.root) {
-                    choices.insert(0, definition.root.clone());
-                }
-                let labels = choices
-                    .iter()
-                    .map(CellViewRef::display_path)
-                    .collect::<Vec<_>>();
+                let choices = &resolution.tables.top_cell_choices;
+                let labels = &resolution.tables.top_cell_labels;
                 let width = picker_width(ui);
                 ui.add_enabled_ui(write_allowed, |ui| {
                     if let Some(index) = select_mono_with_response(
@@ -255,7 +249,7 @@ fn configuration_grid(
                         "configuration-top-cell",
                         "Top cell",
                         &definition.root.display_path(),
-                        &labels,
+                        labels,
                         width,
                     )
                     .picked
@@ -266,18 +260,7 @@ fn configuration_grid(
                 });
             });
             grid_row(ui, "DUT instance", |ui| {
-                let mut choices = resolution
-                    .instances
-                    .iter()
-                    .filter(|row| row.depth > 0)
-                    .map(|row| row.path.clone())
-                    .collect::<Vec<_>>();
-                if !choices
-                    .iter()
-                    .any(|path| path.eq_ignore_ascii_case(&definition.dut_path))
-                {
-                    choices.insert(0, definition.dut_path.clone());
-                }
+                let choices = &resolution.tables.dut_choices;
                 let width = picker_width(ui);
                 ui.add_enabled_ui(write_allowed, |ui| {
                     if let Some(index) = select_mono_with_response(
@@ -285,7 +268,7 @@ fn configuration_grid(
                         "configuration-dut-instance",
                         "DUT instance",
                         &definition.dut_path,
-                        &choices,
+                        choices,
                         width,
                     )
                     .picked
@@ -322,24 +305,13 @@ fn configuration_grid(
         },
         |ui| {
             chip_row(ui, "View list", |ui| {
-                let addable = resolution
-                    .view_names
-                    .iter()
-                    .filter(|name| {
-                        !definition
-                            .executable_view_policy
-                            .iter()
-                            .any(|view| view.eq_ignore_ascii_case(name))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
                 if let Some(chosen) = ordered_chips(
                     ui,
                     "configuration-view-list",
                     "View list",
                     "View",
                     &definition.executable_view_policy,
-                    &addable,
+                    &resolution.tables.addable_views,
                     write_allowed,
                 ) {
                     right_edit = Some(GridEdit::Views(chosen));
@@ -347,24 +319,13 @@ fn configuration_grid(
             });
             chip_row(ui, "Stop list", |ui| {
                 // Only a view the list searches can stop it.
-                let addable = definition
-                    .executable_view_policy
-                    .iter()
-                    .filter(|view| {
-                        !definition
-                            .stop_views
-                            .iter()
-                            .any(|stop| stop.eq_ignore_ascii_case(view))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
                 if let Some(chosen) = ordered_chips(
                     ui,
                     "configuration-stop-list",
                     "Stop list",
                     "View",
                     &definition.stop_views,
-                    &addable,
+                    &resolution.tables.addable_stops,
                     write_allowed,
                 ) {
                     right_edit = Some(GridEdit::Stops(chosen));
@@ -390,7 +351,7 @@ fn problems(
         Err(error) => lines.push(format!("The design does not resolve: {error}")),
         Ok(_) => {
             if let Some(definition) = definition
-                && resolution.instance(&definition.dut_path).is_none()
+                && !resolution.tables.dut_in_design
             {
                 lines.push(format!(
                     "DUT instance {} is not in {}. Pick one of its instances.",

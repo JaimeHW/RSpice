@@ -238,8 +238,8 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
         hierarchy: Ok(hierarchy),
         instances: rows,
         cells: Vec::new(),
-        top_cells: Vec::new(),
         view_names: Vec::new(),
+        tables: Default::default(),
     }));
     assert_eq!(&*page.visible_instances(), [0, 1, 2, 3, 4]);
     page.toggle_collapsed("/X1");

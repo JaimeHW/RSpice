@@ -13,15 +13,14 @@ use rspice_design::hierarchy::{
 use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride};
 use crate::ui::widgets::{SegmentedWidth, segmented, select};
 use crate::workbench::project::configuration_state::{
-    ConfigurationRow, ConfigurationTab, InstanceRow, cell_view_names, governing_binding,
-    instance_binding, is_pattern, runs_on_label, set_cell_view, set_instance_view,
+    ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED, InstanceRow, is_pattern,
+    runs_on_label, set_cell_view, set_instance_view,
 };
 
 /// Below this width the table scrolls sideways instead of squeezing.
 const TABLE_MIN_WIDTH: f32 = 760.0;
 const INDENT: f32 = 14.0;
 const CHEVRON: f32 = 14.0;
-const INHERITED: &str = "Inherited";
 
 /// The columns, by share of the table's width.
 const COLUMNS: [(&str, f32); 8] = [
@@ -81,20 +80,15 @@ pub(super) fn tables(
     let editable = definition.is_some() && !cx.model.safe_mode.project_read_only();
     let page = &cx.state.configuration;
     let tab = page.tab;
-    let mut edit = tab_header(ui, resolution, definition, tab, editable);
+    let mut edit = tab_header(ui, resolution, tab, editable);
     let Ok(hierarchy) = &resolution.hierarchy else {
         apply_table_edit(cx, id, edit);
         return;
     };
     if tab == ConfigurationTab::Cells {
-        if let Some(cell_edit) = super::cells::cells_table(
-            ui,
-            &resolution.cells,
-            definition,
-            &cx.model.library_manager,
-            page.row.as_ref(),
-            editable,
-        ) {
+        if let Some(cell_edit) =
+            super::cells::cells_table(ui, &resolution.tables, page.row.as_ref(), editable)
+        {
             edit = Some(cell_edit);
         }
         apply_table_edit(cx, id, edit);
@@ -111,8 +105,7 @@ pub(super) fn tables(
             hierarchy: &hierarchy.bindings,
             rows: &resolution.instances,
             visible: &visible,
-            definition,
-            libraries: &cx.model.library_manager,
+            tables: &resolution.tables,
             selected: page.row.as_ref(),
             collapsed: &|path| page.is_collapsed(path),
             editable,
@@ -179,7 +172,6 @@ fn apply_table_edit(
 fn tab_header(
     ui: &mut Ui,
     resolution: &ConfigurationResolution,
-    definition: Option<&ConfigurationSetDefinition>,
     tab: ConfigurationTab,
     editable: bool,
 ) -> Option<TableEdit> {
@@ -192,7 +184,7 @@ fn tab_header(
         ConfigurationTab::Cells => {
             let count = resolution.cells.len();
             let cells = format!("{count} cell{}", plural_suffix(count));
-            match super::cells::bindings_not_in_design(&resolution.cells, definition).count() {
+            match resolution.tables.bindings_not_in_design {
                 0 => cells,
                 unused => format!(
                     "{cells} \u{b7} {unused} binding{} not in this design",
@@ -350,8 +342,7 @@ struct TreeInput<'a> {
     hierarchy: &'a [ResolvedHierarchyBinding],
     rows: &'a [InstanceRow],
     visible: &'a [usize],
-    definition: Option<&'a ConfigurationSetDefinition>,
-    libraries: &'a crate::state::LibraryManager,
+    tables: &'a ConfigurationTables,
     selected: Option<&'a ConfigurationRow>,
     collapsed: &'a dyn Fn(&str) -> bool,
     editable: bool,
@@ -378,8 +369,7 @@ fn instance_tree(ui: &mut Ui, input: TreeInput<'_>) -> Option<TableEdit> {
                 .show_rows(ui, row_height, input.visible.len(), |ui, range| {
                     ui.set_min_width(width);
                     for &index in &input.visible[range] {
-                        let row = &input.rows[index];
-                        if let Some(row_edit) = instance_row(ui, &input, row, width, row_height) {
+                        if let Some(row_edit) = instance_row(ui, &input, index, width, row_height) {
                             edit = Some(row_edit);
                         }
                     }
@@ -479,11 +469,12 @@ fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
 fn instance_row(
     ui: &mut Ui,
     input: &TreeInput<'_>,
-    row: &InstanceRow,
+    index: usize,
     width: f32,
     height: f32,
 ) -> Option<TableEdit> {
     let t = Tokens::get(ui.ctx());
+    let row: &InstanceRow = &input.rows[index];
     let binding = &input.hierarchy[row.binding];
     let reference = &binding.reference;
     let is_selected = matches!(
@@ -502,22 +493,16 @@ fn instance_row(
     } else {
         "\u{2014}"
     };
-    let exact = input
-        .definition
-        .and_then(|definition| instance_binding(definition, &row.path));
-    let to_use = exact
-        .and_then(|binding| binding.executable_views.first())
-        .map_or(INHERITED, String::as_str);
+    let to_use = input.tables.instance_to_use[index]
+        .as_deref()
+        .unwrap_or(INHERITED);
     let rule = rule_label(binding.rule);
     let section = if binding.model_section.is_empty() {
         "\u{2014}"
     } else {
         binding.model_section.as_str()
     };
-    let runs_on = input
-        .definition
-        .and_then(|definition| governing_binding(definition, &row.path))
-        .map_or("All", |binding| runs_on_label(&binding.eligible_platforms));
+    let runs_on = input.tables.instance_runs_on[index];
     let (problem, status) = match unbound_reason(binding.status) {
         Some(reason) => (Some(Problem::Failure), reason),
         None => match binding.warnings.first() {
@@ -609,12 +594,7 @@ fn instance_row(
     // configuration can be edited; a fact otherwise.
     let view_cell = cells[3].1;
     if input.editable {
-        let mut options = vec![INHERITED.to_owned()];
-        options.extend(cell_view_names(
-            input.libraries,
-            &reference.library,
-            &reference.cell,
-        ));
+        let options = &input.tables.view_options[input.tables.binding_options[row.binding]];
         let mut picked = None;
         ui.scope_builder(
             egui::UiBuilder::new()
@@ -626,17 +606,17 @@ fn instance_row(
                     &format!("configuration-view-to-use-{}", row.path),
                     &format!("View to use for {}", row.path),
                     to_use,
-                    &options,
+                    options,
                     ui.available_width(),
                 );
             },
         );
-        if let Some(index) = picked
-            && options[index] != to_use
+        if let Some(choice) = picked
+            && options[choice] != to_use
         {
             edit = Some(TableEdit::View {
                 path: row.path.clone(),
-                view: (index > 0).then(|| options[index].clone()),
+                view: (choice > 0).then(|| options[choice].clone()),
             });
         }
     } else {

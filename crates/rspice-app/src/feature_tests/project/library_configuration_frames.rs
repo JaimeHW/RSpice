@@ -1,18 +1,24 @@
-//! The Library page and the cell-view manager through whole application
-//! frames: a frame that changes nothing lists, sorts, scans and projects
-//! nothing, and a change to what a page reads shows on the next frame.
+//! The Library page, the cell-view manager and the Configuration page
+//! through whole application frames: a frame that changes nothing lists,
+//! sorts, scans, projects and resolves nothing, and a change to what a page
+//! reads shows on the next frame.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use egui::{Context, Pos2, Rect, Vec2, vec2};
 
 use crate::workbench::RSpiceApp;
+use crate::workbench::examples::hierarchy_reference;
+use rspice_app_project::workbench::project::configuration_state::{
+    CONFIGURATION_SCANS, ConfigurationTab,
+};
 use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use rspice_app_project::workbench::surfaces::library_cellview_manager::CELLVIEW_PROJECTION_BUILDS;
 use rspice_app_project::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
 use rspice_app_project::workbench::surfaces::project::library::LIBRARY_ROW_BUILDS;
 use rspice_app_state::state::{
-    Cell, Library, LibraryCellInstance, Point, SchematicState, View, ViewType,
+    Cell, ConfigurationCellBinding, Library, LibraryCellInstance, Point, SchematicState, View,
+    ViewType,
 };
 use rspice_app_state::workbench::app_state::cell_usage::CELL_USAGE_SCANS;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -170,8 +176,7 @@ fn an_idle_library_page_lists_and_scans_nothing() {
     let next = app_frame(&ctx, &mut app);
     assert_eq!(take(&CELL_USAGE_SCANS), 1, "the new drawing is read once");
     assert!(
-        painted(&next).contains("Used by
-a/bench/schematic"),
+        painted(&next).contains("Used by\na/bench/schematic"),
         "{}",
         painted(&next)
     );
@@ -245,4 +250,74 @@ fn an_idle_cellview_manager_projects_nothing() {
     assert!(take(&CELLVIEW_PROJECTION_BUILDS) > 0);
     idle(&ctx, &mut app);
     assert_eq!(take(&CELLVIEW_PROJECTION_BUILDS), 0);
+}
+
+/// The Configuration page over a configuration with 200 cell bindings
+/// resolves the design and builds its tables once: idle frames on either
+/// table, and switching between them, resolve and walk nothing. An edit
+/// resolves again, once, and shows on the next frame.
+#[test]
+fn an_idle_configuration_page_resolves_and_walks_nothing() {
+    let mut app = RSpiceApp::test_instance();
+    app.state = hierarchy_reference::build().state;
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Configuration;
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    let id = catalog
+        .active_configuration_id()
+        .expect("the reference uses a configuration");
+    let retire = |definition: &mut rspice_app_state::state::ConfigurationSetDefinition, index| {
+        definition.cell_bindings.push(ConfigurationCellBinding {
+            library: "user".to_owned(),
+            cell: format!("retired_{index:03}"),
+            executable_views: vec!["schematic".to_owned()],
+            stop_view: None,
+        });
+    };
+    app.state
+        .project
+        .configuration
+        .edit(&catalog, id, |definition| {
+            for index in 0..200 {
+                retire(definition, index);
+            }
+        });
+    let ctx = offscreen();
+    take(&CONFIGURATION_SCANS);
+
+    app_frame(&ctx, &mut app);
+    let builds = app.state.project.configuration.resolution_builds();
+    assert!(take(&CONFIGURATION_SCANS) > 0);
+    idle(&ctx, &mut app);
+    app.state.project.configuration.tab = ConfigurationTab::Cells;
+    let cells = idle(&ctx, &mut app);
+    assert!(
+        painted(&cells).contains("200 bindings not in this design"),
+        "{}",
+        painted(&cells)
+    );
+    assert_eq!(app.state.project.configuration.resolution_builds(), builds);
+    assert_eq!(take(&CONFIGURATION_SCANS), 0, "an idle frame walks nothing");
+
+    app.state
+        .project
+        .configuration
+        .edit(&catalog, id, |definition| retire(definition, 200));
+    let next = app_frame(&ctx, &mut app);
+    assert_eq!(
+        app.state.project.configuration.resolution_builds(),
+        builds + 1
+    );
+    assert!(
+        painted(&next).contains("201 bindings not in this design"),
+        "{}",
+        painted(&next)
+    );
+    take(&CONFIGURATION_SCANS);
+    idle(&ctx, &mut app);
+    assert_eq!(
+        app.state.project.configuration.resolution_builds(),
+        builds + 1
+    );
+    assert_eq!(take(&CONFIGURATION_SCANS), 0);
 }

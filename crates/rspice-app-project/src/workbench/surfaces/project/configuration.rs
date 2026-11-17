@@ -74,10 +74,9 @@ fn toolbar(
 ) -> Option<ToolbarIntent> {
     let t = Tokens::get(ui.ctx());
     let catalog = &cx.model.workspace.content.configuration_sets;
-    let page = &cx.state.configuration;
     let name = selection_name(cx, selection);
     let write_allowed = !cx.model.safe_mode.project_read_only();
-    let dirty = page.is_dirty(catalog);
+    let dirty = resolution.tables.dirty;
     let status = binding_status(resolution);
     let mut intent = None;
     let shown = egui::Frame::new()
@@ -186,17 +185,15 @@ struct BindingStatus {
 }
 
 fn binding_status(resolution: &ConfigurationResolution) -> BindingStatus {
-    let hierarchy = match &resolution.hierarchy {
-        Ok(hierarchy) => hierarchy,
-        Err(_) => {
-            return BindingStatus {
-                text: "Hierarchy does not resolve".to_owned(),
-                problem: Some(Problem::Failure),
-            };
-        }
-    };
-    let total = hierarchy.total_instances;
-    let unbound = hierarchy.unresolved_instances();
+    if resolution.hierarchy.is_err() {
+        return BindingStatus {
+            text: "Hierarchy does not resolve".to_owned(),
+            problem: Some(Problem::Failure),
+        };
+    }
+    let tables = &resolution.tables;
+    let total = tables.total_instances;
+    let unbound = tables.unbound_instances;
     let mut text = if unbound == 0 {
         format!("{total} of {total} instance{} bound", plural_suffix(total))
     } else {
@@ -205,12 +202,7 @@ fn binding_status(resolution: &ConfigurationResolution) -> BindingStatus {
             plural_suffix(total)
         )
     };
-    let fallback = hierarchy
-        .bindings
-        .iter()
-        .filter(|binding| binding.used_review_fallback)
-        .map(|binding| binding.instance_count)
-        .sum::<usize>();
+    let fallback = tables.fallback_instances;
     if fallback > 0 {
         text.push_str(&format!(" \u{00b7} {fallback} bound by fallback"));
     }
