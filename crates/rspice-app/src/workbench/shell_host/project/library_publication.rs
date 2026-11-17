@@ -906,8 +906,6 @@ pub(crate) fn rollback_project_library_publication(
         .model
         .library_manager
         .replace_catalog_from_snapshot(&artifact.file.libraries)?;
-    candidate.model.library_edit_locks =
-        rspice_app_state::state::ProjectLibraryLockAuthority::default();
     candidate.model.workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
         artifact.file.workspace,
         artifact.workspace_session,

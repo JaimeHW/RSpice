@@ -1,18 +1,13 @@
-//! Library records, catalog revisions, mutations, and collaboration-lock authority.
+//! Library records, catalog revisions and mutations.
 
 mod catalog;
 mod cell;
 mod edit;
-mod locks;
 pub mod metadata;
 mod mutation;
 mod record;
 mod view;
 
-pub use locks::{
-    ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockAuthority,
-    ProjectLibraryLockBlockReason, ProjectLibraryLockSnapshot,
-};
 pub use mutation::{ProjectLibraryMutation, validate_library_audit_text};
 
 pub use catalog::LibraryCatalog;

@@ -108,10 +108,6 @@ fn model_field_sizes() -> Vec<(&'static str, usize)> {
             size_of::<rspice_app_state::state::LibraryManager>(),
         ),
         (
-            "library_edit_locks",
-            size_of::<rspice_app_state::state::ProjectLibraryLockAuthority>(),
-        ),
-        (
             "workspace",
             size_of::<rspice_app_state::state::ProjectWorkspace>(),
         ),

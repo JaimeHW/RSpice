@@ -59,7 +59,6 @@ impl Model {
             notices: Default::default(),
             netlist_artifacts: Box::default(),
             library_manager,
-            library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
             workspace,
             project_open: Default::default(),
             pdk_config,

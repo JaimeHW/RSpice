@@ -68,8 +68,8 @@ pub use engineering_table::{
 };
 pub use events::{RunEvent, RunEventSink};
 pub use library_browser::{
-    Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
-    View, ViewType, library_cell_placement_candidates,
+    Cell, Library, LibraryCellPlacementCandidate, LibraryManager, View, ViewType,
+    library_cell_placement_candidates,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use model_bound_symbol::store_model_bound_symbol;

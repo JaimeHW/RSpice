@@ -257,8 +257,7 @@ pub fn build_new_project(model: &mut Model, params: &NewProjectParams) -> NewPro
 }
 
 /// Make a replacement project's libraries and workspace the open ones, with
-/// `schematic` as the drawing in front, saved into the workspace, under
-/// fresh library edit locks.
+/// `schematic` as the drawing in front, saved into the workspace.
 pub fn install_project_drawing(
     model: &mut Model,
     library_manager: crate::state::LibraryManager,
@@ -267,7 +266,6 @@ pub fn install_project_drawing(
 ) {
     workspace.save_active_schematic(&schematic);
     model.library_manager = library_manager;
-    model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     model.workspace = workspace;
     model.schematic = schematic;
 }
@@ -1324,10 +1322,9 @@ pub fn prepare_loaded_project(
 }
 
 /// Make a loaded project's libraries, workspace, plan and model catalog the
-/// open ones, under fresh library edit locks.
+/// open ones.
 pub fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) {
     model.library_manager = install.library_manager;
-    model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     model.workspace = install.workspace;
     model.sim_setup = install.sim_setup;
     model.model_library_manager = install.model_library_manager;

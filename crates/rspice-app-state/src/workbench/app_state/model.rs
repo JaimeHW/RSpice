@@ -105,10 +105,6 @@ pub struct Model {
     pub netlist_artifacts: Box<crate::state::NetlistArtifacts>,
     /// Library/Cell/View manager for design hierarchy
     pub library_manager: crate::state::LibraryManager,
-    /// Runtime collaboration-lock authority for governed project library
-    /// mutations. Local projects remain explicitly unmanaged; connected
-    /// sessions install revision-bound authoritative snapshots.
-    pub library_edit_locks: crate::state::ProjectLibraryLockAuthority,
     /// Project/workspace model for active design context and open LCV views.
     pub workspace: crate::state::ProjectWorkspace,
     /// Whether a project is open, as model code reads it. Only the lifecycle

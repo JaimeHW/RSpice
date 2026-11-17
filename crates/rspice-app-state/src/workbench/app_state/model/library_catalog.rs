@@ -135,14 +135,6 @@ impl Model {
                 "{operation} is unavailable because the project is open read-only."
             ));
         }
-        self.library_edit_locks
-            .require_mutation_authority(
-                self.workspace.content.project.id(),
-                self.workspace.content.project.revision(),
-                self.library_manager.revision(),
-                &mutation,
-            )
-            .map_err(|error| format!("Could not reserve {operation}: {error}"))?;
         self.workspace
             .content
             .project
