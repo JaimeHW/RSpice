@@ -736,7 +736,7 @@ fn retention_removals(checkpoints: &[ProjectCheckpointSummary], budget_bytes: u6
 /// A budget in the whole units it is chosen in: "512 MiB", "2 GiB".
 pub fn budget_label(bytes: u64) -> String {
     let mib = bytes / MIB;
-    if mib >= 1024 && mib % 1024 == 0 {
+    if mib >= 1024 && mib.is_multiple_of(1024) {
         format!("{} GiB", mib / 1024)
     } else {
         format!("{mib} MiB")
