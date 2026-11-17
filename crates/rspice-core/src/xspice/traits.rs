@@ -908,9 +908,9 @@ pub trait CodeModel: Send + Sync {
 
     /// Whether this model decides its declared thresholds by a crossing the
     /// coupled run's root located on them, where one is handed to it
-    /// (`CmContext::located_crossing`). A model that does not is
-    /// decided by its sample alone, so its root goes on refining a landing
-    /// whose sample reads a rounding short of the threshold.
+    /// (`CmContext::located_crossing`), which dates the event it causes at
+    /// the crossing rather than at the landing. A model that does not is
+    /// decided by its sample alone.
     fn decides_by_located_crossing(&self) -> bool {
         false
     }

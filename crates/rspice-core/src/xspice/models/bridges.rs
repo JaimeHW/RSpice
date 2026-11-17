@@ -2363,22 +2363,20 @@ mod tests {
         );
     }
 
-    /// A crossing the coupled run's root located on the input decides the
-    /// converter on and past it, in the crossing's direction, and the event
-    /// is dated at the crossing. On the crossing the event has happened, as a
-    /// Verilog-AMS `cross()` event occurs at the located crossing (VAMS-LRM
-    /// 2.4 5.10.3.1), so a rising crossing goes high there although a sample
-    /// on the threshold alone would read low (`in <= in_low` first, ngspice-46
-    /// icm/digital/adc_bridge/cfunc.mod:222). One representable instant past
-    /// it the crossing still decides, where the sample reads a rounding short
-    /// of the threshold and the voltage alone would hold.
+    /// A crossing the coupled run's root located on the input, handed to a
+    /// landing whose sample has crossed, decides the converter in the
+    /// crossing's direction on and past it, and the event is dated at the
+    /// crossing, as a Verilog-AMS `cross()` event occurs at the located
+    /// crossing (VAMS-LRM 2.4 5.10.3.1). The sample alone decides the same
+    /// state, but ngspice-46's law dates it at the landing
+    /// (icm/digital/adc_bridge/cfunc.mod:217-257), a solver floor late here.
     #[cfg(feature = "veriloga")]
     #[test]
-    fn adc_bridge_decides_a_located_crossing_as_crossed_on_and_past_it() {
+    fn adc_bridge_dates_a_located_crossing_at_the_crossing() {
         let crossing = 1.0e-6 + 1.0e-9;
-        for (from, to, short) in [
-            (0.0, DigitalState::One, 0.5 - 6.8e-14),
-            (1.0, DigitalState::Zero, 0.5 + 6.8e-14),
+        for (from, to, beyond) in [
+            (0.0, DigitalState::One, 0.5 + 6.8e-14),
+            (1.0, DigitalState::Zero, 0.5 - 6.8e-14),
         ] {
             let mut ctx = CmContext::new();
             ctx.set_port_width("in", 1);
@@ -2401,7 +2399,7 @@ mod tests {
             }
             ctx.set_input(
                 "in",
-                InputValue::AnalogVector(vec![AnalogValue::new(short)]),
+                InputValue::AnalogVector(vec![AnalogValue::new(beyond)]),
             );
             let located = crate::xspice::LocatedCrossing {
                 time: crossing,
@@ -2429,19 +2427,20 @@ mod tests {
                 [(expected, crossing + 1.0e-9)],
                 "a landing on the crossing decides it as crossed"
             );
-            let past = crossing.next_up();
-            assert!(
-                landed(past, None).is_empty(),
-                "the sample alone reads a rounding short and holds"
-            );
-            let decided = landed(past, Some(located));
-            assert_eq!(decided.len(), 1, "{decided:?}");
-            assert_eq!(decided[0].0, expected);
-            assert!(
-                (decided[0].1 - (crossing + 1.0e-9)).abs() <= f64::EPSILON * crossing,
-                "the event is dated at the crossing plus the delay, not at the landing: {:.17e}",
-                decided[0].1
-            );
+            let past = crossing + 1.0e-18;
+            for (located, dated, why) in [
+                (None, past, "the sample alone dates the edge at the landing"),
+                (Some(located), crossing, "the crossing dates the edge"),
+            ] {
+                let decided = landed(past, located);
+                assert_eq!(decided.len(), 1, "{why}: {decided:?}");
+                assert_eq!(decided[0].0, expected, "{why}");
+                assert!(
+                    (decided[0].1 - (dated + 1.0e-9)).abs() <= f64::EPSILON * crossing,
+                    "{why}, plus the delay: {:.17e}",
+                    decided[0].1
+                );
+            }
         }
     }
 

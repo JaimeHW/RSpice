@@ -516,7 +516,7 @@ fn evaluate_adc(
         let (term, dated) = located_term(ctx, slots.input, index, tracking, sample, low, high)
             .or_else(|| {
                 chord_crossing(ctx, law.band, slots, index, sample, low, high)
-                    .map(|crossing| (crossing.term, crossing.time))
+                    .map(|crossing| (sample, crossing.time))
             })
             .unwrap_or((sample, ctx.time));
         let previous = ctx.int_state(index);
@@ -598,10 +598,9 @@ fn evaluate_adc(
 /// located a crossing on it, and the instant an edge it causes is dated at;
 /// `None` reads the sample. See [`crate::xspice::LocatedCrossing`].
 ///
-/// The root lands one representable instant past the crossing, where the
-/// sample can read a rounding short of the edge. So on or past the crossing
-/// the law reads the quantity on the edge's far side, and an edge it causes
-/// is dated at the crossing, as `adc_bridge` does. `low` and `high` are the
+/// The root hands a crossing over only at a landing whose sample has crossed
+/// the edge. On or past it the law reads the quantity on the edge's far side,
+/// and an edge it causes is dated at the crossing, as `adc_bridge` does. `low` and `high` are the
 /// band edges in the units of `sample` ([`AdcLaw::terms`]). A tracking
 /// converter declares each band edge as a threshold of its own crossing
 /// function, the `threshold`-th edge first low then high; a fixed one
@@ -654,15 +653,18 @@ fn located_term(
 /// first accepted point past it, which is ngspice's `adc_bridge` law. So the
 /// converter dates its edge at the chord's crossing, and its
 /// `candidate_event_time` asks the stepper to land there when
-/// the crossing lies further inside the step than the endpoint window. At
-/// that landing the chord meets the edge within the window, on either side,
-/// and the crossing decides, whichever side the sample's last bits fall on.
-/// A crossing whose samples both rest on the edge to within resolution has
-/// no instant to land on and is decided by the sample
+/// the crossing lies further inside the step than the endpoint window. Only a
+/// sample past the edge has crossed it, as a `cross()` event fires only past
+/// its root. A sample that reads short of the edge, by a rounding at the
+/// landing or by a curved signal's chord, locates nothing: the converter
+/// holds by it, and the next step finds the crossing from it, one solver
+/// floor on where the chord puts it nearer than that. Decided short, an edge
+/// would be published before the signal crossed, for a later sample still
+/// short to take back. A crossing whose samples both rest on the edge to
+/// within resolution has no instant to land on and is decided by the sample
 /// ([`crossing_below_resolution`]).
 ///
-/// `term` is the compared quantity on the edge's far side, `time` the
-/// crossing, and `land` whether a landing can still refine it.
+/// `time` is the crossing, and `land` whether a landing can still refine it.
 fn chord_crossing(
     ctx: &CmContext,
     band: AnalogBandLaw,
@@ -701,16 +703,10 @@ fn chord_crossing(
         // and how far the sample lies past the edge.
         let ahead = (edge - accepted) * motion.signum();
         let past = (sample - edge) * motion.signum();
-        if ahead < 0.0 || (past < 0.0 && -past / motion.abs() * span > window) {
+        if ahead < 0.0 || past <= 0.0 {
             continue;
         }
-        let far = if rising {
-            edge.next_up()
-        } else {
-            edge.next_down()
-        };
-        let term = if past > 0.0 { sample } else { far };
-        let Some((state, _)) = band.decision(term, Some(accepted), held, low, high, false) else {
+        let Some((state, _)) = band.decision(sample, Some(accepted), held, low, high, false) else {
             continue;
         };
         if Some(state) == held {
@@ -726,7 +722,6 @@ fn chord_crossing(
             threshold_crossing_time(ctx.time, start, span, accepted, sample, edge)
         };
         return Some(ChordCrossing {
-            term,
             time,
             land: ahead > 0.0 && ctx.time - time > window,
         });
@@ -736,7 +731,6 @@ fn chord_crossing(
 
 /// A crossing [`chord_crossing`] located.
 struct ChordCrossing {
-    term: Value,
     time: Value,
     land: bool,
 }

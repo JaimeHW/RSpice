@@ -715,10 +715,20 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// located crossing, 1.4e-21 s before 2/3 ns, that point is gone, and every
 /// later point moved by at most 1.0e-18 s. Every rise, and every `ca`, `qa`
 /// and `qb` event, is bit-identical.
+///
+/// Re-measured when an A/D crossing began deciding only at a landing strictly
+/// past its threshold (55 -> 56). The located crossing above is the chord's,
+/// 1.4e-21 s before `-cos`'s exact root at 2/3 ns. The root's landing,
+/// 32 * EPSILON * t (4.7e-24 s) past it, is still that far short of the root
+/// and reads 7.7e-12 V short of the threshold, so it has not crossed and
+/// holds. The fall is decided one solver floor (1e-20 s) later, on a point
+/// of its own 8.6e-21 s past 2/3 ns, strictly past the root as a `cross()`
+/// event is. This is a chord's error on a curved signal, 300 times the
+/// landing's margin, not a rounding, so the point stays.
 const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
     "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
     "hardening_two_crossings",
-    55,
+    56,
 );
 
 /// Print `result`'s fingerprint under `key`, and assert its point count

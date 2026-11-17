@@ -512,11 +512,11 @@ struct BoundaryHistories {
 /// # The located crossings
 ///
 /// A converter root found inside a candidate's interval rolls that candidate
-/// back and lands just past the crossing (`root_landing`), where the
-/// converter's input can still read short of its threshold. The
-/// crossing is the candidate's fact, not the landed sample's, so it is kept
-/// here across the rollback and decides at the landing; see
-/// [`crate::xspice::LocatedCrossing`].
+/// back and lands just past the crossing (`root_landing`). The crossing
+/// is kept here across the rollback, and decides the landing when the landed
+/// sample has crossed, so that the event is dated at the crossing rather
+/// than at the landing; see [`crate::xspice::LocatedCrossing`]. A landing
+/// that reads short of the threshold has not crossed, and holds.
 ///
 /// # Who owns one
 ///
@@ -682,37 +682,43 @@ impl HeldCrossing {
     /// `sample`, in the interval from the accepted point `start` and its
     /// sample `start_sample`.
     ///
-    /// It does when the chord from the accepted sample through this one meets
-    /// the threshold within `window` of `time`, on either side. That is a
-    /// sample taken on the crossing, and which side of the threshold its last
-    /// bits fall on is rounding: on a 1 V/2 ns ramp a 6.8e-14 V rounding is
-    /// 1.4e-22 s along the chord, five decades inside a 2e-17 s floor. So the
-    /// decision does not hinge on the sample's last bits, and the event is
-    /// dated at the crossing whichever side they fall on.
+    /// It does when this sample lies past the threshold the way it was
+    /// crossed, and the chord from the accepted sample through it meets the
+    /// threshold within `window` of `time`. That is a sample taken on the
+    /// crossing: on a 1 V/2 ns ramp a 6.8e-14 V rounding past is 1.4e-22 s
+    /// along the chord, five decades inside a 2e-17 s floor. The event is
+    /// then dated at the crossing rather than at the landing.
     ///
-    /// A sample further from the threshold is a curved signal the chord
-    /// misplaced, and the root refines it from this sample as it always has:
-    /// short of it, the crossing is still ahead; past it, the signal crossed
-    /// before the chord said, and taking the chord's instant would date the
-    /// event late by the chord's error (30 ps on a 1 MHz sine sampled every
-    /// 10 ns).
+    /// A sample short of the threshold has not crossed, however near it reads
+    /// and wherever the chord puts the crossing: an A/D crossing decides only
+    /// at a landing strictly past the threshold, as a Verilog-AMS `cross()`
+    /// event fires only past its root (VAMS-LRM 2.4 5.10.3.1). The candidate
+    /// holds, and once accepted the next interval finds the crossing from it,
+    /// one solver floor on where the chord puts it nearer than that. Decided
+    /// short, the edge is published before the signal has crossed, and a
+    /// later sample still short takes it back. On the crossing's own instant,
+    /// which is the chord's, a 10 MHz sine chorded over 2.5 ns read 7e-5 V
+    /// short, 0.95 ps before its root: the edge was published there, the next
+    /// sample took it back, and the true crossing published it again, so one
+    /// edge woke its processes twice.
     ///
-    /// A candidate on the crossing's own instant is no exception. That
-    /// instant is the chord's, and a curved signal can read well short of the
-    /// threshold there: 7e-5 V, 0.95 ps, on a 10 MHz sine chorded over 2.5
-    /// ns. Decided there, the edge was published short of the threshold, the
-    /// next sample, still short, took it back, and the true crossing
-    /// published it again: one edge woke its processes twice.
+    /// A sample further past is a curved signal that crossed before the chord
+    /// said, and the root refines it from this sample as it always has:
+    /// taking the chord's instant would date the event late by the chord's
+    /// error (30 ps on a 1 MHz sine sampled every 10 ns).
     fn decides(self, time: f64, start: f64, start_sample: f64, sample: f64, window: f64) -> bool {
+        if (sample - self.threshold) * self.direction <= 0.0 {
+            return false;
+        }
         let toward = self.threshold - start_sample;
         if toward == 0.0 {
             // The accepted sample sits on the threshold, so the crossing is
             // the accepted point itself: it decides every later candidate
             // whose sample has left the threshold the way it was crossed.
-            return self.time <= start && (sample - self.threshold) * self.direction > 0.0;
+            return self.time <= start;
         }
         let progress = (sample - start_sample) * toward.signum();
-        progress > 0.0 && (self.threshold - sample).abs() / progress * (time - start) <= window
+        progress > 0.0 && (sample - self.threshold).abs() / progress * (time - start) <= window
     }
 
     fn located(self) -> crate::xspice::LocatedCrossing {
@@ -4792,9 +4798,9 @@ impl MixedSignalHost {
                 .state
                 .started
                 .then_some(self.state.accepted_adc_voltages[index]);
-            // On or past a crossing this candidate's root located, the
-            // crossing decides rather than the sample, which can read a
-            // rounding short of the threshold at the landing. See
+            // On or past a crossing this candidate's root located, a sample
+            // that has crossed is decided by the crossing, and the event is
+            // dated there rather than at the landing. See
             // `crate::xspice::LocatedCrossing`.
             if bridge.decides_by_located
                 && let Some(located) = scratch.ledger.located_at(index, time_seconds)
@@ -8620,8 +8626,8 @@ endmodule
 
     /// A converter root's crossing is the candidate's fact: the ledger holds
     /// it across the rollback that lands the root, it decides the landing
-    /// when the landed sample reads it to within the root's window, and an
-    /// acceptance forgets it.
+    /// when the landed sample is past the threshold and reads the crossing to
+    /// within the root's window, and an acceptance forgets it.
     #[test]
     fn a_located_crossing_is_held_across_the_rejected_step_and_decides_its_landing() {
         let (start, floor): (f64, f64) = (1.0e-4, 1.953_125e-17);
@@ -8644,8 +8650,8 @@ endmodule
         let located = ledger.located_at(3, landing).expect("held at its landing");
         let window = endpoint_root_window(landing, start, floor);
         for (sample, decides, why) in [
-            (0.5 - 6.8e-14, true, "a rounding short"),
-            (0.5, true, "on the threshold"),
+            (0.5 - 6.8e-14, false, "a rounding short has not crossed"),
+            (0.5, false, "on the threshold has not crossed"),
             (0.5 + 6.8e-14, true, "a rounding past"),
             (0.5 + 1.0e-12, true, "past by 2e-21 s along the chord"),
             (0.5 - 1.0e-3, false, "a curved signal the chord overshot"),
@@ -8666,13 +8672,15 @@ endmodule
         // there too a chord can misplace a curved signal's crossing.
         let at_crossing = endpoint_root_window(crossing, start, floor);
         assert!(
-            located.decides(crossing, start, 0.0, 0.5 - 6.8e-14, at_crossing),
-            "a rounding short on the crossing's own instant"
+            located.decides(crossing, start, 0.0, 0.5 + 6.8e-14, at_crossing),
+            "a rounding past on the crossing's own instant"
         );
-        assert!(
-            !located.decides(crossing, start, 0.0, 0.5 - 1.0e-3, at_crossing),
-            "a sample the chord misplaced does not decide the crossing's own instant"
-        );
+        for short in [6.8e-14, 1.0e-3] {
+            assert!(
+                !located.decides(crossing, start, 0.0, 0.5 - short, at_crossing),
+                "a sample {short:e} short does not decide the crossing's own instant"
+            );
+        }
         ledger.mark_decided(3, Some(landing));
         assert!(ledger.decided(3, landing).is_some());
         assert!(
@@ -8721,6 +8729,129 @@ endmodule
                 );
             }
         }
+    }
+
+    /// An A/D crossing decides only at a landing strictly past its threshold.
+    ///
+    /// A converter root locates a crossing on a step and lands just past the
+    /// chord's crossing, where the input reads 5e-10 V short of the
+    /// threshold: a curved signal the chord placed early, half the root's
+    /// window along it. The landing has not crossed and
+    /// holds. The next step finds the crossing within a solver floor of it,
+    /// the root lands a floor-sized step on, where the input is past, and the
+    /// input rises once, dated inside that step. Decided at the short landing,
+    /// the rise was dated at the chord's instant, before the input crossed.
+    #[test]
+    fn a_landing_short_of_its_threshold_holds_and_the_floor_step_past_it_rises_once() {
+        let floor = 1.0e-18;
+        let mut host = host();
+        host.add_converter_input_root(
+            0,
+            "xa",
+            &crate::xspice::AnalogInputThreshold {
+                port: "in".into(),
+                element: 0,
+                low: 0.5,
+                high: 0.5,
+                behavior: crate::xspice::AnalogThresholdBehavior::Hysteresis,
+                quiet: crate::xspice::threshold::ThresholdQuiet::default(),
+            },
+            true,
+        )
+        .expect("the converter root");
+        host.set_analog_step_floor(floor);
+        let root = host.state.bridges.adc.len() - 1;
+        // Open a trial at `time` with the converter's input at `input`, and
+        // settle it.
+        let open = |host: &mut MixedSignalHost, time: f64, input: f64| {
+            let step = time - host.state.accepted_time;
+            host.begin_trial(
+                time,
+                step,
+                IntegrationCoefficients::inactive(),
+                time == 0.0,
+                false,
+            )
+            .expect("begin trial");
+            host.sample_converter_inputs(|_, _, _, _| Some(input))
+                .expect("the input is sampled");
+            while host
+                .settle_analog_bridges(&[0.0; 4])
+                .expect("bridges settle")
+            {}
+        };
+        let mut rises = Vec::new();
+        let mut accept = |host: &mut MixedSignalHost| {
+            let before = host.state.accepted_adc_decisions[root];
+            host.accept_trial().expect("accept a quiet trial");
+            if before == Some(FourStateBit::Zero)
+                && host.state.accepted_adc_decisions[root] == Some(FourStateBit::One)
+            {
+                rises.push(host.state.accepted_adc_transition_times[root]);
+            }
+        };
+        open(&mut host, 0.0, 0.0);
+        accept(&mut host);
+        open(&mut host, 1.0e-9, 0.0);
+        accept(&mut host);
+
+        // The step to 2 ns crosses, and the root lands just past the chord's
+        // crossing at 1.5 ns.
+        open(&mut host, 2.0e-9, 1.0);
+        let landing = host
+            .boundary_refinement_time(floor, false)
+            .expect("the inspection succeeds")
+            .expect("a crossing inside the step is landed on");
+        assert!(
+            landing > 1.5e-9 && landing - 1.5e-9 <= 64.0 * f64::EPSILON * 1.5e-9,
+            "the landing is on the crossing, past it: {landing:e}"
+        );
+        host.reject_trial().expect("a settled trial rolls back");
+
+        // The landing reads short, inside the window along the chord.
+        let short = 0.5 - 5.0e-10;
+        let window = endpoint_root_window(landing, 1.0e-9, floor);
+        assert!(5.0e-10 / short * (landing - 1.0e-9) <= window);
+        open(&mut host, landing, short);
+        assert!(
+            host.scratch.ledger.decided(root, landing).is_none(),
+            "a landing short of the threshold is not decided by the crossing"
+        );
+        let mut handed = false;
+        host.hand_located_crossings(|_, _, _, _, crossing| handed |= crossing.is_some());
+        assert!(!handed, "the converter is handed nothing, and holds");
+        assert_eq!(
+            host.boundary_refinement_time(floor, false).unwrap(),
+            None,
+            "a landing that holds asks for no other"
+        );
+        accept(&mut host);
+
+        // The next step finds the crossing 5e-19 s past the landing, inside
+        // the floor, and the root lands a floor-sized step on.
+        open(&mut host, landing + 1.0e-10, 0.6);
+        let floor_step = host
+            .boundary_refinement_time(floor, false)
+            .unwrap()
+            .expect("the crossing ahead of the landing is landed on");
+        assert_eq!(floor_step, first_landing_after(landing, floor));
+        host.reject_trial().unwrap();
+        open(&mut host, floor_step, 0.5 + 5.0e-10);
+        assert!(
+            host.scratch.ledger.decided(root, floor_step).is_some(),
+            "a landing past the threshold is decided by the crossing"
+        );
+        accept(&mut host);
+        open(&mut host, floor_step + 1.0e-10, 0.6);
+        accept(&mut host);
+
+        assert_eq!(rises.len(), 1, "one crossing, one rise: {rises:?}");
+        let rise = rises[0].expect("the rise is dated");
+        assert!(
+            landing < rise && rise <= floor_step,
+            "the rise is dated past the landing that read short, inside the floor step: \
+             {rise:e} against {landing:e}..{floor_step:e}"
+        );
     }
 
     /// A step a D/A bridge moved in carries no interior A/D root.

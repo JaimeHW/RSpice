@@ -167,17 +167,17 @@ impl AnalogThresholdBehavior {
 /// A threshold crossing that a coupled run's root located on one converter
 /// input, carried to the candidate that lands past it.
 ///
-/// The root lands just past the crossing (`root_landing`), where the input
-/// can still read short of the threshold. A converter that
-/// decided by that sample would hold, and the run would chase the same
-/// crossing one solver floor later. So once a crossing is located, the side
-/// of it a candidate lies on decides: on it or past it, the converter takes
-/// `state`. A candidate on the crossing is where the event happened, as a
-/// Verilog-AMS `cross()` event occurs at the located crossing (VAMS-LRM 2.4
-/// 5.10.3.1); the sign a rounding leaves there decides nothing. The event is
-/// dated at `time`, not at the candidate. The root hands one over only where
-/// the landed sample reads the crossing to within the root's window; a sample
-/// further short is a curved signal the root goes on refining.
+/// The root lands just past the crossing (`root_landing`). It hands the
+/// crossing over only where the landed sample has crossed: past the
+/// threshold the way it was crossed, as a Verilog-AMS `cross()` event fires
+/// only past its root (VAMS-LRM 2.4 5.10.3.1), with the chord through it
+/// meeting the threshold within the root's window. The converter then takes
+/// `state`, and dates the event at `time` rather than at the candidate. A
+/// landing that reads short of the threshold, by a rounding or by a curved
+/// signal's chord, has not crossed: nothing is handed over, the converter
+/// holds by its sample, and the run finds the crossing from that point. A
+/// sample further past is a curved signal that crossed before the chord
+/// said, which the root goes on refining.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[doc(hidden)]
