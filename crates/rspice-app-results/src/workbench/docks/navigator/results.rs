@@ -635,9 +635,10 @@ pub(in crate::workbench) fn results(
         let checked_ordered =
             ordered_checked_result_keys(&checked, &state.model.simulation.retained.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
-            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+            crate::workbench::documents::result_document::result_browser_selection_evidence(
                 key,
-                &state.model.simulation.retained.runs,
+                state.results,
+                state.model,
             )
             .err()
         });

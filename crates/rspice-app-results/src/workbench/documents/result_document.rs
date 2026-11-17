@@ -357,27 +357,47 @@ pub fn exact_result_signal_tsv(
 
 fn validate_exact_analysis_evidence(analysis: &AnalysisResult) -> Result<(), String> {
     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
-    analysis.validate_retained_evidence().map_err(|error| {
-        format!(
-            "The selected analysis's saved results failed validation, so its values cannot be copied or exported: {error}"
-        )
-    })
+    analysis
+        .validate_retained_evidence()
+        .map_err(|error| exact_evidence_refusal(&error))
 }
 
-pub(crate) fn validate_result_browser_selection_evidence(
+/// Why an analysis whose retained evidence failed validation gives no exact
+/// values.
+fn exact_evidence_refusal(error: &str) -> String {
+    format!(
+        "The selected analysis's saved results failed validation, so its values cannot be copied or exported: {error}"
+    )
+}
+
+/// Whether the browser selection `key` gives exact values, and why not,
+/// answered from the workspace's memo: the navigator's row menus and its
+/// band of batch actions ask on every frame, and the run is walked once per
+/// retained revision, not once per row per frame.
+pub(crate) fn result_browser_selection_evidence(
     key: &ResultBrowserSelectionKey,
-    runs: &[SimulationRun],
+    results: &ResultsState,
+    model: &Model,
 ) -> Result<(), String> {
-    let analysis = match key {
-        ResultBrowserSelectionKey::Waveform(key) => resolved_result_signal(key, runs)?.1,
+    let runs = &model.simulation.retained.runs;
+    let (run, analysis) = match key {
+        ResultBrowserSelectionKey::Waveform(key) => {
+            let (run, analysis, _) = resolved_result_signal(key, runs)?;
+            (run, analysis)
+        }
         ResultBrowserSelectionKey::Artifact(key) => {
-            let (_, _, analysis) = key
+            let (run_index, _, analysis) = key
                 .resolve(runs)
                 .ok_or_else(|| "The selected result no longer exists in its run.".to_owned())?;
-            analysis
+            (&runs[run_index], analysis)
         }
     };
-    validate_exact_analysis_evidence(analysis)
+    retained_evidence_verdict_over(
+        results,
+        model,
+        AnalysisPresentationKey::new(run.dataset_id, analysis),
+    )
+    .map_err(|error| exact_evidence_refusal(&error))
 }
 
 pub(crate) fn result_browser_selection_stable_path(
@@ -1275,19 +1295,30 @@ pub(crate) fn retained_evidence_is_valid_over(
     model: &Model,
     analysis: AnalysisPresentationKey,
 ) -> bool {
+    retained_evidence_verdict_over(results, model, analysis).is_ok()
+}
+
+/// The validator's verdict on `analysis`, with its reason, from the
+/// workspace's memo of it.
+pub(crate) fn retained_evidence_verdict_over(
+    results: &ResultsState,
+    model: &Model,
+    analysis: AnalysisPresentationKey,
+) -> Result<(), std::sync::Arc<str>> {
     results
         .retained_evidence_validity
         .get_or_insert_with(&model.simulation, analysis, || {
-            model
+            let Some((_, resolved)) = model
                 .simulation
                 .retained
                 .runs
                 .iter()
                 .find_map(|run| analysis.resolve(run))
-                .is_some_and(|(_, resolved)| {
-                    frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
-                    resolved.validate_retained_evidence().is_ok()
-                })
+            else {
+                return Err("The selected result no longer exists in its run.".into());
+            };
+            frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
+            resolved.validate_retained_evidence().map_err(Into::into)
         })
 }
 
@@ -1529,7 +1560,8 @@ pub struct ResultsState {
     pub(super) event_order_cache: Option<EventOrderCache>,
     /// Source-aware retained-evidence verdict per analysis; see
     /// [`retained_evidence_is_valid`].
-    retained_evidence_validity: RetainedMemo<AnalysisPresentationKey, bool>,
+    retained_evidence_validity:
+        RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
     /// Source-aware content digest per dataset; see
     /// [`retained_dataset_digest`].
     dataset_digests: RetainedMemo<DatasetId, crate::product::ContentDigest>,

@@ -347,9 +347,10 @@ pub(super) fn result_artifact_context_menu(
     // sample of the run, and each row offers this menu on every frame.
     popup.show(|ui| {
         let exact_error =
-            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+            crate::workbench::documents::result_document::result_browser_selection_evidence(
                 &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
-                &state.model.simulation.retained.runs,
+                state.results,
+                state.model,
             )
             .err();
         let exact_available = exact_error.is_none();
@@ -479,9 +480,10 @@ pub(super) fn result_signal_context_menu(
     // Validated only while the menu is open, as the artifact menu is.
     popup.show(|ui| {
         let exact_error =
-            crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
+            crate::workbench::documents::result_document::result_browser_selection_evidence(
                 &ResultBrowserSelectionKey::Waveform(key.clone()),
-                &state.model.simulation.retained.runs,
+                state.results,
+                state.model,
             )
             .err();
         let exact_available = exact_error.is_none();

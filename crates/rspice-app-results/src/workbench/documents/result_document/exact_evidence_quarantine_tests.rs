@@ -16,8 +16,11 @@ fn corrupted_waveform_keeps_identity_but_quarantines_every_exact_value_route() {
     let selection = ResultBrowserSelectionKey::Waveform(waveform.clone());
 
     assert!(result_signal_stable_path(&waveform, &[run.clone()]).is_ok());
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.retained.runs.push(run.clone());
+    let reads = host.results_reads();
     assert!(
-        validate_result_browser_selection_evidence(&selection, &[run.clone()])
+        result_browser_selection_evidence(&selection, reads.results, reads.model)
             .expect_err("corrupted values must be quarantined")
             .contains("cannot be copied or exported")
     );

@@ -117,8 +117,9 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         .retained_evidence_validity
         .get_or_insert_with(context.simulation, key, || {
             super::frame_work::note(super::frame_work::DatasetWalk::EvidenceValidation);
-            analysis.validate_retained_evidence().is_ok()
-        });
+            analysis.validate_retained_evidence().map_err(Into::into)
+        })
+        .is_ok();
     if !valid {
         well_hint(
             ui,

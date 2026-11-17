@@ -94,11 +94,16 @@ mod every_surface {
     use std::time::{Duration, Instant};
 
     use egui::{Key, Modifiers};
+    use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked;
+    use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_results::workbench::documents::result_document::frame_work::WorkCounts;
     use rspice_app_state::state::{
         Cell, Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
         SimulationPage, SimulationRunLifecycle, VerificationPage, View,
     };
     use rspice_app_state::workbench::examples::EXAMPLES;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
     use super::*;
     use crate::feature_tests::replay::Replay;
@@ -111,7 +116,8 @@ mod every_surface {
 
     /// The first example as a saved project, with a Verilog-A cell whose
     /// source the code editor shows and a testbench beside its schematic,
-    /// run once so its results are on hand. The cell views it adds.
+    /// run once so its results are on hand, one of them ticked so the
+    /// navigator offers its batch actions. The cell views it adds.
     fn saved_example_after_a_run() -> (Replay, CellViewRef, CellViewRef, CellViewRef) {
         let mut replay = Replay::new();
         let state = &mut replay.app.state;
@@ -156,6 +162,13 @@ mod every_surface {
         run_to_its_end(&mut replay);
 
         let state = &mut replay.app.state;
+        let run = &state.model.simulation.retained.runs[0];
+        let analysis = &run.analyses[0];
+        let signal = ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(
+            AnalysisPresentationKey::new(run.dataset_id, analysis),
+            analysis.waveforms[0].name.clone(),
+        ));
+        set_result_quantity_ticked(&mut state.results_parts(), &signal, true);
         let baseline = snapshot(state).expect("the project captures");
         state
             .platform
@@ -191,7 +204,7 @@ mod every_surface {
     }
 
     /// `surface` brought up and given a few frames, then idle frames: none
-    /// of them captures the project.
+    /// of them captures the project or walks a whole retained dataset.
     fn idles(replay: &mut Replay, surface: &str, bring_up: &dyn Fn(&mut RSpiceApp)) {
         bring_up(&mut replay.app);
         for _ in 0..SETTLE_FRAMES {
@@ -199,19 +212,25 @@ mod every_surface {
         }
         let before = captures();
         let stamps_before = stamps(&replay.app);
+        let walks = WorkCounts::reset();
         for _ in 0..IDLE_FRAMES {
             replay.frame(Vec::new());
         }
+        let walked = walks.since().nonzero();
         assert_eq!(
             captures() - before,
             0,
             "{surface}: idle frames captured the whole project; stamps {stamps_before} -> {}",
             stamps(&replay.app)
         );
+        assert!(
+            walked.is_empty(),
+            "{surface}: idle frames walked whole retained datasets: {walked:?}"
+        );
     }
 
     #[test]
-    fn idle_frames_on_every_surface_of_a_run_project_capture_nothing() {
+    fn idle_frames_on_every_surface_of_a_run_project_capture_and_walk_nothing() {
         let (mut replay, top, module, testbench) = saved_example_after_a_run();
         let open = |reference: CellViewRef| {
             move |app: &mut RSpiceApp| {
