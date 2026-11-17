@@ -1458,6 +1458,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/docks/inspector/project.rs", "configuration"),
             ("workbench/project.rs", "commands"),
             ("workbench/project.rs", "configuration_state"),
+            ("workbench/project.rs", "health"),
             ("workbench/project.rs", "library_dialogs"),
             ("workbench/project.rs", "workspace_state"),
             ("workbench/project/library_dialogs.rs", "cell_ops"),
