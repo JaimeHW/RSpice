@@ -52,8 +52,15 @@ pub(super) fn overview_header(
                         .layout_no_wrap(title, title_font, tokens.color.text);
                 let (properties_enabled, properties_reason) =
                     command_gate(cx, ProjectCommand::Properties.key());
+                // A line of the title's type, and a finger's reach under a
+                // coarse pointer: the name is the way to the properties.
+                let title_height = title_galley.size().y.max(if tokens.metrics.is_touch() {
+                    tokens.metrics.touch_target()
+                } else {
+                    0.0
+                });
                 let (name_rect, name_response) = ui.allocate_exact_size(
-                    vec2(title_galley.size().x.min(content_width), 27.0),
+                    vec2(title_galley.size().x.min(content_width), title_height),
                     if properties_enabled {
                         Sense::click()
                     } else {
@@ -92,8 +99,9 @@ pub(super) fn overview_header(
                 }
 
                 let facts_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                let facts_height = ui.fonts_mut(|fonts| fonts.row_height(&facts_font)) + 4.0;
                 let (facts_rect, facts_response) =
-                    ui.allocate_exact_size(vec2(content_width, 19.0), Sense::hover());
+                    ui.allocate_exact_size(vec2(content_width, facts_height), Sense::hover());
                 let (facts, shortened) = fitted_header_facts(
                     ui,
                     snapshot.project_revision,

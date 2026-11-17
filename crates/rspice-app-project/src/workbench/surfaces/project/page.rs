@@ -28,7 +28,6 @@ pub(super) const BODY_BOTTOM: f32 = 26.0;
 pub(super) const STACK_BREAKPOINT: f32 = 900.0;
 pub(super) const COLUMN_GAP: f32 = 14.0;
 pub(super) const CARD_GAP: f32 = 10.0;
-const CARD_HEADER_HEIGHT: f32 = 26.0;
 
 /// Lay a page out on the application ground: its own vertical scroll, and a
 /// content column `body` receives as `(inset, width)` from the left edge.
@@ -235,11 +234,12 @@ pub(super) fn list_card<R>(
     let tokens = Tokens::get(ui.ctx());
     let border = 1.0;
     let width = (ui.available_width() - 2.0 * border).max(1.0);
-    let head = CARD_HEADER_HEIGHT.max(if tokens.metrics.is_touch() {
+    // The link in the bar is a finger's reach under a coarse pointer.
+    let head = if tokens.metrics.is_touch() {
         tokens.metrics.touch_target()
     } else {
-        0.0
-    });
+        tokens.metrics.row_h
+    };
     let room = (height - 2.0 * border - head - LIST_CARD_BOTTOM).max(1.0);
     let mut output = None;
     let mut followed = false;
@@ -353,7 +353,8 @@ fn card_link_row(ui: &mut Ui, title: &str, link: &CardLink<'_>, height: f32) -> 
 fn card_title_row(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, CARD_HEADER_HEIGHT), Sense::hover());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width, tokens.metrics.row_h), Sense::hover());
     let radius = tokens.radius as u8;
     ui.painter().rect_filled(
         rect,

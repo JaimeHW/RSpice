@@ -61,7 +61,6 @@ fn project_tab_height(tokens: &Tokens) -> f32 {
 /// room it takes after the label.
 const DIRTY_MARK_SIZE: f32 = 6.0;
 const DIRTY_MARK_ADVANCE: f32 = 12.0;
-const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
 
 /// Height of one ledger row.
 ///
@@ -217,8 +216,12 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
                     } else {
                         // Narrower still: the chips take as many rows as they
                         // need, each whole, rather than running off the edge.
+                        // The revision steps in by a chip's padding, so its
+                        // words start where the words of the chips under it
+                        // do.
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(CHIP_GAP, 0.0);
+                            ui.add_space(CHIP_PADDING);
                             project_context_chips(ui, cx, &chips, &tokens, &mut raised);
                         });
                     }
@@ -687,8 +690,8 @@ fn project_status_chip(
 fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(width, WORKSPACE_TABLE_HEADER_HEIGHT), Sense::hover());
+    let height = tokens.metrics.row_h + tokens.metrics.bar_pad;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel);
     ui.painter().hline(
         rect.x_range(),

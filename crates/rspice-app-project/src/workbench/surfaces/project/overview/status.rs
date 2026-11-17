@@ -14,8 +14,6 @@ use super::super::page::paint_elided;
 use super::snapshot::{ProblemSnapshot, StatusSnapshot};
 use super::{OverviewIntent, overview_card, paint_tone_mark};
 
-/// A status row's height under a fine pointer, for one line of words.
-const STATUS_ROW_HEIGHT: f32 = 27.0;
 /// Where a row's area name starts: past the mark's gutter.
 const NAME_LEFT: f32 = 31.0;
 /// The gap between a row's columns.
@@ -49,10 +47,12 @@ fn status_rows(ui: &mut Ui, statuses: &[StatusSnapshot]) -> Option<OverviewInten
     ui.add_space(5.0);
     let width = ui.available_width().max(1.0);
     let stacked = width < STACKED_BELOW;
+    // One line of words is a list row high, and a finger's reach under a
+    // coarse pointer.
     let base_height = if t.metrics.is_touch() {
         t.metrics.touch_target()
     } else {
-        STATUS_ROW_HEIGHT
+        t.metrics.row_h
     };
     let name_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let words_font = theme::sans(tokens::FS_0, FontWeight::Regular);
