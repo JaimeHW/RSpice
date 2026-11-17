@@ -395,8 +395,8 @@ impl ProjectFeature {
                 let t = Tokens::get(ui.ctx());
                 ui.label(
                     egui::RichText::new("This can be undone with Undo.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.warn),
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
                 );
                 if let Some(error) = displayed_error {
                     error_label(ui, &error);

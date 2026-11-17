@@ -245,8 +245,8 @@ impl ProjectFeature {
                 egui::RichText::new(
                     "This can be undone with Undo.",
                 )
-                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.warn),
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
             );
             if let Some(error) = &displayed_error {
                 ui.add_space(6.0);
