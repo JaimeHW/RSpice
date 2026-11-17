@@ -619,15 +619,6 @@ impl TransientChannelSample {
     pub const fn is_present(self) -> bool {
         matches!(self, Self::Value(_))
     }
-
-    /// Classify one raw solver value, never publishing a non-finite number.
-    pub(crate) fn from_solver_value(value: Value) -> Self {
-        if value.is_finite() {
-            Self::Value(value)
-        } else {
-            Self::Absent(TransientSampleAbsence::NonFinite)
-        }
-    }
 }
 
 /// Whether one channel was retained at all, and if not, why.

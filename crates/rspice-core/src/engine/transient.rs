@@ -21,6 +21,7 @@ use super::{
 };
 use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
 use crate::analysis::transient::EventOnlyNetKind;
+pub use compress::{AcceptedTransientPoints, AcceptedTransientRows};
 #[cfg(test)]
 use compress::{
     TransientCompressionOutputSchedule, accepted_transient_channels, compress_transient_result,
@@ -17293,7 +17294,8 @@ D1 D 0 DMOD
         let channels =
             accepted_transient_channels(&result).expect("accepted channel inventory builds");
         let error = verify_compressed_transient_error(
-            &result,
+            &result.time,
+            &mut &result,
             &channels,
             &CompressionConfig::default(),
             &[0, 2],

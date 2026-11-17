@@ -839,8 +839,8 @@ pub(super) fn run_transient(
     let compression = ctx.compress.then(compression_config);
     // Every transient writes its rows to a results store as it goes. Compression decides what
     // the published waveform keeps, not where the rows live while the run goes: the compressed
-    // output is written from the trajectory read back from the store once the run is over, and
-    // its post-processing products are the ones evaluated on that whole trajectory.
+    // output is chosen from the trajectory in the store once the run is over, and its
+    // post-processing products are the ones evaluated on that whole trajectory.
     let progress_abort = crate::abort::ProgressAbort::new(&pb);
     let stored = if let Some(restart) = authored_restart {
         // The restart schedule writes its checkpoints from the accepted trajectory, so
@@ -1032,8 +1032,8 @@ fn publish_segment_end(
 /// warning, since the stop is what the run reports. When writing the outputs fills the disk, the
 /// store keeps the rows the outputs could not take and the run ends as stopped the same way.
 ///
-/// With `compression`, the outputs are the compressed waveform of the trajectory read back from
-/// the store, and its post-processing products are the ones evaluated on that whole trajectory.
+/// With `compression`, the outputs are the compressed waveform of the trajectory in the store, and
+/// its post-processing products are the ones evaluated on that whole trajectory.
 /// A run its storage stopped publishes what it kept uncompressed, since the stop is what it
 /// reports.
 fn finish_stored_transient(
@@ -1117,8 +1117,8 @@ fn finish_stored_transient(
     }))
 }
 
-/// Write a stored transient's compressed outputs: read the whole trajectory back, compress it,
-/// and publish the compressed waveform with the products evaluated on the trajectory. Returns
+/// Write a stored transient's compressed outputs: compress its trajectory, and publish the
+/// compressed waveform with the products evaluated on the trajectory. Returns
 /// the output it was published to, which a failed write names too, and the published result.
 fn publish_compressed_transient(
     ctx: &RunContext<'_>,
@@ -1129,19 +1129,7 @@ fn publish_compressed_transient(
     Option<std::path::PathBuf>,
     Result<TransientOutcome, CliError>,
 ) {
-    let compressed = stored.read_back(ctx, tstop).and_then(|()| {
-        ctx.engine
-            .compress_transient_result_with_abort(
-                ctx.netlist,
-                &stored.shell,
-                compression,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("Transient".to_string()),
-            })
-    });
+    let compressed = compress_stored(ctx, stored, tstop, compression);
     let compressed = match compressed.and_then(|compressed| {
         report_compression(ctx, &compressed, "Transient complete (compressed)")?;
         Ok(compressed)
@@ -1177,6 +1165,54 @@ fn publish_compressed_transient(
             fourier: None,
         }),
     )
+}
+
+/// Compress a stored transient: from its store a point at a time, holding only its time grid,
+/// step sizes and retained points, when its post-processing products read the store in passes,
+/// and otherwise from the run read back whole.
+fn compress_stored(
+    ctx: &RunContext<'_>,
+    stored: &mut super::stored_transient::StoredTransient,
+    tstop: f64,
+    compression: &rspice_core::engine::CompressionConfig,
+) -> Result<rspice_core::engine::TransientResultCompressed, CliError> {
+    let failed = |source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("Transient".to_string()),
+    };
+    let abort = &crate::abort::ProcessAbort;
+    let post_results = match stored.rows.compression_slots(&stored.shell) {
+        Some(slots) => stored.post_results(ctx, tstop)?.map(|post| (slots, post)),
+        None => {
+            stored.read_back(ctx, tstop)?;
+            None
+        }
+    };
+    let Some((slots, post_results)) = post_results else {
+        log::debug!("the transient was read back whole to be compressed");
+        return ctx
+            .engine
+            .compress_transient_result_with_abort(ctx.netlist, &stored.shell, compression, abort)
+            .map_err(failed);
+    };
+    log::debug!("the transient is compressed from its store");
+    let (time, step_sizes, mut rows) = stored.rows.compression_rows(slots)?;
+    let compressed = ctx
+        .engine
+        .compress_transient_rows_with_abort(
+            ctx.netlist,
+            &stored.shell,
+            rspice_core::engine::AcceptedTransientPoints {
+                time: &time,
+                step_sizes: &step_sizes,
+                rows: &mut rows,
+            },
+            compression,
+            post_results,
+            abort,
+        )
+        .map_err(failed);
+    rows.finish(compressed)
 }
 
 /// Write a stored transient's outputs. Returns the output it was published to, which a failed

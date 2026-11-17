@@ -199,12 +199,12 @@ pub use result::{
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{
-    DEFAULT_MAX_CHECKPOINT_BYTES, ScheduledTransientCheckpoint, SinkTransient,
-    TRANSIENT_SHELL_ANNOTATION, TransientCheckpoint, TransientCheckpointBlocker,
-    TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
-    TransientCheckpointObserver, TransientCheckpointStart, TransientCheckpointStream, TransientEnd,
-    TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
-    XyceRestartPlanError, decode_transient_shell, encode_transient_shell,
+    AcceptedTransientPoints, AcceptedTransientRows, DEFAULT_MAX_CHECKPOINT_BYTES,
+    ScheduledTransientCheckpoint, SinkTransient, TRANSIENT_SHELL_ANNOTATION, TransientCheckpoint,
+    TransientCheckpointBlocker, TransientCheckpointBlockerSource, TransientCheckpointCapability,
+    TransientCheckpointEncoding, TransientCheckpointObserver, TransientCheckpointStart,
+    TransientCheckpointStream, TransientEnd, TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE,
+    XyceRestartJobPlan, XyceRestartPlanError, decode_transient_shell, encode_transient_shell,
     evaluate_transient_fourier_results, evaluate_transient_post_results, netlist_fingerprint,
     transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain_with_alpha,
     xyce_restart_schedule_is_due,

@@ -37,7 +37,7 @@ impl Engine {
         let post_results = evaluate_transient_post_results(netlist, result, limits, abort)?;
         let schedule = TransientCompressionOutputSchedule::from_netlist(
             netlist,
-            result,
+            &result.time,
             limits.max_result_values,
         );
         compress_transient_result(
@@ -49,6 +49,118 @@ impl Engine {
             abort,
         )
     }
+
+    /// Compress a transient whose accepted points `points` reads, rather than `shell`, which
+    /// holds the rest of its result: its names, event histories and impulses.
+    ///
+    /// `post_results` are the run's `.FFT`, `.FOUR` and `.MEASURE` products, evaluated by the
+    /// caller on the same accepted trajectory, as [`evaluate_transient_post_results`] evaluates
+    /// them on a result in memory. The container equals the one
+    /// [`Self::compress_transient_result_with_abort`] builds from the result with its points in
+    /// memory, while only the time grid, the step sizes and the retained points are ever held.
+    pub fn compress_transient_rows_with_abort<R: AcceptedTransientRows>(
+        &self,
+        netlist: &Netlist,
+        shell: &TransientResult,
+        points: AcceptedTransientPoints<'_, R>,
+        compression: &CompressionConfig,
+        post_results: TransientPostResults,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResultCompressed, SimulationError> {
+        let schedule = TransientCompressionOutputSchedule::from_netlist(
+            netlist,
+            points.time,
+            self.config.resource_limits.max_result_values,
+        );
+        check_compression_config(compression)?;
+        if points.step_sizes.len() != points.time.len()
+            || shell.voltages.len() != shell.num_nodes
+            || shell.node_names.len() != shell.num_nodes
+            || shell.branch_currents.len() != shell.branch_names.len()
+        {
+            return Err(malformed_result());
+        }
+        compress_points(
+            shell,
+            points,
+            compression,
+            &schedule,
+            post_results,
+            TransientResultIdentity::default(),
+            abort,
+        )
+    }
+}
+
+/// The solver values of a transient's accepted points, read one point at a time: every channel
+/// of the result's inventory (its node voltages, branch currents, device values and store
+/// traces, in that order) at one accepted point.
+///
+/// A result held in memory reads them from its own waveforms. A run kept in a results store
+/// reads them a chunk at a time, so compressing it never holds the whole run.
+pub trait AcceptedTransientRows {
+    /// Whether channel `channel` has values; a node or branch the run did not save has none.
+    fn saved(&self, channel: usize) -> bool;
+
+    /// Every channel's value at accepted point `index`, into `row`, which has one entry per
+    /// channel; non-finite where a channel has none.
+    fn row(&mut self, index: usize, row: &mut [Value]) -> Result<(), SimulationError>;
+}
+
+impl<R: AcceptedTransientRows + ?Sized> AcceptedTransientRows for &mut R {
+    fn saved(&self, channel: usize) -> bool {
+        (**self).saved(channel)
+    }
+
+    fn row(&mut self, index: usize, row: &mut [Value]) -> Result<(), SimulationError> {
+        (**self).row(index, row)
+    }
+}
+
+/// A result held in memory reads its points from its own waveforms.
+impl AcceptedTransientRows for &TransientResult {
+    fn saved(&self, channel: usize) -> bool {
+        let nodes = self.voltages.len();
+        let waveform = match channel.checked_sub(nodes) {
+            None => self.voltages.get(channel),
+            Some(branch) => self.branch_currents.get(branch),
+        };
+        waveform.is_none_or(|waveform| !waveform.is_empty() || self.time.is_empty())
+    }
+
+    fn row(&mut self, index: usize, row: &mut [Value]) -> Result<(), SimulationError> {
+        let sample = |values: &[Value]| values.get(index).copied().unwrap_or(Value::NAN);
+        let columns = self
+            .voltages
+            .iter()
+            .chain(&self.branch_currents)
+            .map(Vec::as_slice)
+            .chain(
+                self.device_op_traces
+                    .iter()
+                    .map(|trace| trace.values.as_slice()),
+            )
+            .chain(
+                self.store_traces
+                    .iter()
+                    .map(|trace| trace.values.as_slice()),
+            );
+        for (value, column) in row.iter_mut().zip(columns) {
+            *value = sample(column);
+        }
+        Ok(())
+    }
+}
+
+/// The accepted points of one transient, as a compression reads them: the time grid and the
+/// step sizes whole, and every channel's values through `rows`.
+pub struct AcceptedTransientPoints<'a, R> {
+    /// The accepted time grid.
+    pub time: &'a [Value],
+    /// The step that reached each accepted point.
+    pub step_sizes: &'a [Value],
+    /// Every channel's values, one accepted point at a time.
+    pub rows: R,
 }
 
 /// Output schedule a compressed retained grid must be able to reproduce.
@@ -75,16 +187,12 @@ pub(crate) struct TransientCompressionOutputSchedule<'a> {
 
 impl<'a> TransientCompressionOutputSchedule<'a> {
     /// The schedule authored by one netlist for one accepted transient result.
-    pub(crate) fn from_netlist(
-        netlist: &'a Netlist,
-        result: &TransientResult,
-        max_points: usize,
-    ) -> Self {
+    pub(crate) fn from_netlist(netlist: &'a Netlist, time: &[Value], max_points: usize) -> Self {
         let start_time = Self::authored_output_start_time(netlist)
             .filter(|start| start.is_finite() && *start >= 0.0)
-            .or_else(|| result.time.first().copied())
+            .or_else(|| time.first().copied())
             .unwrap_or(0.0);
-        let stop_time = result.time.last().copied().unwrap_or(start_time);
+        let stop_time = time.last().copied().unwrap_or(start_time);
         Self {
             output_time_points: &netlist.options.output_time_points,
             interval_schedule: netlist.options.output_interval_schedule.as_ref(),
@@ -102,28 +210,22 @@ impl<'a> TransientCompressionOutputSchedule<'a> {
     }
 }
 
-/// One accepted analog channel, sampled on the complete accepted grid.
+/// One accepted analog channel of the inventory: what it is, whether it was saved, and why a
+/// value it has none at is absent.
 pub(super) struct AcceptedTransientChannel {
     descriptor: TransientChannelDescriptor,
     availability: TransientChannelAvailability,
-    samples: Vec<TransientChannelSample>,
+    /// What a non-finite solver value of this channel publishes as.
+    absence: TransientSampleAbsence,
 }
 
 impl AcceptedTransientChannel {
-    fn sample(&self, index: usize) -> Option<Value> {
-        self.samples.get(index).and_then(|sample| sample.value())
-    }
-
-    fn retained(&self, indices: &[usize]) -> TransientCompressedChannel {
-        TransientCompressedChannel {
-            descriptor: self.descriptor.clone(),
-            availability: self.availability,
-            samples: match self.availability {
-                TransientChannelAvailability::Available => {
-                    indices.iter().map(|&index| self.samples[index]).collect()
-                }
-                TransientChannelAvailability::NotProjected => Vec::new(),
-            },
+    /// The published sample of one solver value of this channel.
+    fn sample(&self, value: Value) -> TransientChannelSample {
+        if value.is_finite() {
+            TransientChannelSample::Value(value)
+        } else {
+            TransientChannelSample::Absent(self.absence)
         }
     }
 }
@@ -137,15 +239,23 @@ impl AcceptedTransientChannel {
 /// the `NaN` padding that [`TransientResult::record_device_op_sample`] writes
 /// for a device parameter that did not report becomes an explicit
 /// not-recorded absence.
+#[cfg(test)]
 pub(super) fn accepted_transient_channels(
     result: &TransientResult,
 ) -> Result<Vec<AcceptedTransientChannel>, SimulationError> {
-    let point_count = result.time.len();
-    let projected = |waveform: &Vec<Value>| {
-        if waveform.is_empty() && point_count != 0 {
-            TransientChannelAvailability::NotProjected
-        } else {
+    channel_inventory(result, &result)
+}
+
+/// [`accepted_transient_channels`] of a result whose points `rows` reads.
+fn channel_inventory<R: AcceptedTransientRows>(
+    result: &TransientResult,
+    rows: &R,
+) -> Result<Vec<AcceptedTransientChannel>, SimulationError> {
+    let projected = |channel: usize| {
+        if rows.saved(channel) {
             TransientChannelAvailability::Available
+        } else {
+            TransientChannelAvailability::NotProjected
         }
     };
     let mut channels = Vec::with_capacity(
@@ -165,7 +275,11 @@ pub(super) fn accepted_transient_channels(
     // name out of it — exactly the MNA alignment the run is required to keep.
     // The document builders read the same emptiness test the uncompressed path
     // does and publish no voltage descriptor for such a node.
-    for (node_index, (name, waveform)) in result.node_names.iter().zip(&result.voltages).enumerate()
+    for (node_index, name) in result
+        .node_names
+        .iter()
+        .take(result.voltages.len())
+        .enumerate()
     {
         channels.push(AcceptedTransientChannel {
             descriptor: TransientChannelDescriptor::for_role(TransientChannelRole::NodeVoltage {
@@ -173,24 +287,22 @@ pub(super) fn accepted_transient_channels(
                 node: name.clone(),
             })
             .map_err(SimulationError::Circuit)?,
-            availability: projected(waveform),
-            samples: waveform
-                .iter()
-                .map(|value| TransientChannelSample::from_solver_value(*value))
-                .collect(),
+            availability: projected(channels.len()),
+            absence: TransientSampleAbsence::NonFinite,
         });
     }
-    for (name, waveform) in result.branch_names.iter().zip(&result.branch_currents) {
+    for name in result
+        .branch_names
+        .iter()
+        .take(result.branch_currents.len())
+    {
         channels.push(AcceptedTransientChannel {
             descriptor: TransientChannelDescriptor::for_role(TransientChannelRole::BranchCurrent {
                 branch: name.clone(),
             })
             .map_err(SimulationError::Circuit)?,
-            availability: projected(waveform),
-            samples: waveform
-                .iter()
-                .map(|value| TransientChannelSample::from_solver_value(*value))
-                .collect(),
+            availability: projected(channels.len()),
+            absence: TransientSampleAbsence::NonFinite,
         });
     }
     for trace in &result.device_op_traces {
@@ -203,17 +315,7 @@ pub(super) fn accepted_transient_channels(
             )
             .map_err(SimulationError::Circuit)?,
             availability: TransientChannelAvailability::Available,
-            samples: trace
-                .values
-                .iter()
-                .map(|value| {
-                    if value.is_finite() {
-                        TransientChannelSample::Value(*value)
-                    } else {
-                        TransientChannelSample::Absent(TransientSampleAbsence::NotRecorded)
-                    }
-                })
-                .collect(),
+            absence: TransientSampleAbsence::NotRecorded,
         });
     }
     for trace in &result.store_traces {
@@ -223,11 +325,7 @@ pub(super) fn accepted_transient_channels(
             })
             .map_err(SimulationError::Circuit)?,
             availability: TransientChannelAvailability::Available,
-            samples: trace
-                .values
-                .iter()
-                .map(|value| TransientChannelSample::from_solver_value(*value))
-                .collect(),
+            absence: TransientSampleAbsence::NonFinite,
         });
     }
     Ok(channels)
@@ -258,24 +356,7 @@ pub(super) fn compress_transient_result(
     abort: &dyn AbortSignal,
 ) -> Result<TransientResultCompressed, SimulationError> {
     let point_count = result.time.len();
-    if !config.abs_tol.is_finite() || config.abs_tol < 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Compression abs_tol must be finite and non-negative, got {}",
-            config.abs_tol
-        )));
-    }
-    if !config.rel_tol.is_finite() || config.rel_tol < 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Compression rel_tol must be finite and non-negative, got {}",
-            config.rel_tol
-        )));
-    }
-    if !config.maximum_retained_interval.is_finite() || config.maximum_retained_interval < 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Compression maximum interval must be finite and non-negative, got {}",
-            config.maximum_retained_interval
-        )));
-    }
+    check_compression_config(config)?;
     if result.step_sizes.len() != point_count
         || result.voltages.len() != result.num_nodes
         || result.node_names.len() != result.num_nodes
@@ -297,12 +378,71 @@ pub(super) fn compress_transient_result(
             .iter()
             .any(|trace| trace.values.len() != point_count)
     {
-        return Err(SimulationError::Circuit(
-            "Cannot compress a malformed or misaligned transient analog result".to_string(),
-        ));
+        return Err(malformed_result());
     }
-    if result
-        .step_sizes
+    let points = AcceptedTransientPoints {
+        time: &result.time,
+        step_sizes: &result.step_sizes,
+        rows: result,
+    };
+    compress_points(
+        result,
+        points,
+        config,
+        schedule,
+        post_results,
+        identity,
+        abort,
+    )
+}
+
+/// Refuse a compression whose tolerances or interval are not finite and non-negative.
+fn check_compression_config(config: &CompressionConfig) -> Result<(), SimulationError> {
+    if !config.abs_tol.is_finite() || config.abs_tol < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression abs_tol must be finite and non-negative, got {}",
+            config.abs_tol
+        )));
+    }
+    if !config.rel_tol.is_finite() || config.rel_tol < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression rel_tol must be finite and non-negative, got {}",
+            config.rel_tol
+        )));
+    }
+    if !config.maximum_retained_interval.is_finite() || config.maximum_retained_interval < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression maximum interval must be finite and non-negative, got {}",
+            config.maximum_retained_interval
+        )));
+    }
+    Ok(())
+}
+
+fn malformed_result() -> SimulationError {
+    SimulationError::Circuit(
+        "Cannot compress a malformed or misaligned transient analog result".to_string(),
+    )
+}
+
+/// [`compress_transient_result`] of a result whose accepted points `points` reads, and whose
+/// names, event histories and impulses `shell` holds.
+fn compress_points<R: AcceptedTransientRows>(
+    shell: &TransientResult,
+    points: AcceptedTransientPoints<'_, R>,
+    config: &CompressionConfig,
+    schedule: &TransientCompressionOutputSchedule<'_>,
+    post_results: TransientPostResults,
+    identity: TransientResultIdentity,
+    abort: &dyn AbortSignal,
+) -> Result<TransientResultCompressed, SimulationError> {
+    let AcceptedTransientPoints {
+        time,
+        step_sizes,
+        mut rows,
+    } = points;
+    let point_count = time.len();
+    if step_sizes
         .iter()
         .any(|step| !step.is_finite() || *step < 0.0)
     {
@@ -311,18 +451,17 @@ pub(super) fn compress_transient_result(
                 .to_string(),
         ));
     }
-    if result
-        .time
+    if time
         .windows(2)
         .any(|window| !window[0].is_finite() || window[1] <= window[0])
-        || result.time.last().is_some_and(|time| !time.is_finite())
+        || time.last().is_some_and(|time| !time.is_finite())
     {
         return Err(SimulationError::Circuit(
             "Cannot compress a transient with non-finite or non-increasing time points".to_string(),
         ));
     }
     if config.enabled && config.maximum_retained_interval > 0.0 {
-        for window in result.time.windows(2) {
+        for window in time.windows(2) {
             if compression_interval_exceeds(window[0], window[1], config.maximum_retained_interval)
             {
                 return Err(SimulationError::Circuit(format!(
@@ -336,34 +475,29 @@ pub(super) fn compress_transient_result(
         }
     }
 
-    let channels = accepted_transient_channels(result)?;
-    let mandatory_indices = mandatory_schedule_indices(result, schedule)?;
+    let channels = channel_inventory(shell, &rows)?;
+    let mandatory_indices = mandatory_schedule_indices(time, schedule)?;
 
-    let finish = |indices: Vec<usize>,
+    let finish = |rows: &mut R,
+                  indices: Vec<usize>,
                   worst: Option<TransientCompressionErrorObservation>,
                   post_results: TransientPostResults,
                   identity: TransientResultIdentity|
-     -> TransientResultCompressed {
+     -> Result<TransientResultCompressed, SimulationError> {
         let stored_points = indices.len();
-        TransientResultCompressed {
-            instance_unknowns: result.instance_unknowns.clone(),
-            potential_units: result.potential_units.clone(),
-            event_only_nodes: result.event_only_nodes.clone(),
-            voltage_impulses: result.voltage_impulses.clone(),
-            current_impulses: result.current_impulses.clone(),
-            time: indices.iter().map(|&index| result.time[index]).collect(),
-            step_sizes: indices
-                .iter()
-                .map(|&index| result.step_sizes[index])
-                .collect(),
-            channels: channels
-                .iter()
-                .map(|channel| channel.retained(&indices))
-                .collect(),
-            digital_traces: result.digital_traces.clone(),
-            digital_buses: result.digital_buses.clone(),
-            real_traces: result.real_traces.clone(),
-            hdl_sources: result.hdl_sources.clone(),
+        let compressed = TransientResultCompressed {
+            instance_unknowns: shell.instance_unknowns.clone(),
+            potential_units: shell.potential_units.clone(),
+            event_only_nodes: shell.event_only_nodes.clone(),
+            voltage_impulses: shell.voltage_impulses.clone(),
+            current_impulses: shell.current_impulses.clone(),
+            time: indices.iter().map(|&index| time[index]).collect(),
+            step_sizes: indices.iter().map(|&index| step_sizes[index]).collect(),
+            channels: retained_channels(rows, &channels, &indices)?,
+            digital_traces: shell.digital_traces.clone(),
+            digital_buses: shell.digital_buses.clone(),
+            real_traces: shell.real_traces.clone(),
+            hdl_sources: shell.hdl_sources.clone(),
             post_results,
             identity,
             compression_ratio: if stored_points == 0 {
@@ -378,13 +512,19 @@ pub(super) fn compress_transient_result(
                 stored_points,
                 worst,
             ),
-        }
+        };
+        compressed.validate().map_err(SimulationError::Circuit)?;
+        Ok(compressed)
     };
 
     if point_count <= 2 || !config.enabled {
-        let compressed = finish((0..point_count).collect(), None, post_results, identity);
-        compressed.validate().map_err(SimulationError::Circuit)?;
-        return Ok(compressed);
+        return finish(
+            &mut rows,
+            (0..point_count).collect(),
+            None,
+            post_results,
+            identity,
+        );
     }
 
     let mut retained = vec![false; point_count];
@@ -403,6 +543,10 @@ pub(super) fn compress_transient_result(
         .windows(2)
         .map(|window| (window[0], window[1]))
         .collect::<Vec<_>>();
+    // Each segment's endpoint values, and the values of the point it scans.
+    let mut left = vec![0.0; channels.len()];
+    let mut right = vec![0.0; channels.len()];
+    let mut row = vec![0.0; channels.len()];
     while let Some((start, end)) = segments.pop() {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -411,14 +555,14 @@ pub(super) fn compress_transient_result(
             continue;
         }
 
-        let duration = result.time[end] - result.time[start];
+        let duration = time[end] - time[start];
         let interval_split = if config.maximum_retained_interval > 0.0
             && duration > config.maximum_retained_interval
         {
-            let target = result.time[start] + config.maximum_retained_interval;
+            let target = time[start] + config.maximum_retained_interval;
             Some(
                 ((start + 1)..end)
-                    .take_while(|&index| result.time[index] <= target)
+                    .take_while(|&index| time[index] <= target)
                     .last()
                     .unwrap_or(start + 1),
             )
@@ -433,27 +577,26 @@ pub(super) fn compress_transient_result(
             1.0
         };
         if interval_split.is_none() {
-            let t0 = result.time[start];
-            let duration = result.time[end] - t0;
-            for point in (start + 1)..end {
+            let t0 = time[start];
+            let duration = time[end] - t0;
+            rows.row(start, &mut left)?;
+            rows.row(end, &mut right)?;
+            for (point, &point_time) in time.iter().enumerate().take(end).skip(start + 1) {
                 if point.is_multiple_of(4096) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 // Match TransientResultCompressed::interpolate_channel exactly.
                 // Multiplying by a rounded reciprocal can change a small
                 // reconstruction error enough to invalidate its certificate.
-                let fraction = (result.time[point] - t0) / duration;
-                for channel in &channels {
+                let fraction = (point_time - t0) / duration;
+                rows.row(point, &mut row)?;
+                for ((&actual, &left), &right) in row.iter().zip(&left).zip(&right) {
                     // An absent endpoint or sample has no reconstruction to
                     // measure. Skipping it here is the same deterministic rule
                     // the certificate below applies.
-                    let (Some(actual), Some(left), Some(right)) = (
-                        channel.sample(point),
-                        channel.sample(start),
-                        channel.sample(end),
-                    ) else {
+                    if !(actual.is_finite() && left.is_finite() && right.is_finite()) {
                         continue;
-                    };
+                    }
                     let predicted = left + fraction * (right - left);
                     let tolerance = config.abs_tol + config.rel_tol * actual.abs();
                     if !tolerance.is_finite() {
@@ -493,10 +636,11 @@ pub(super) fn compress_transient_result(
         .enumerate()
         .filter_map(|(index, keep)| keep.then_some(index))
         .collect::<Vec<_>>();
+    drop(retained);
     if config.maximum_retained_interval > 0.0 {
         for retained_window in indices.windows(2) {
-            let start = result.time[retained_window[0]];
-            let stop = result.time[retained_window[1]];
+            let start = time[retained_window[0]];
+            let stop = time[retained_window[1]];
             if compression_interval_exceeds(start, stop, config.maximum_retained_interval) {
                 return Err(SimulationError::Circuit(format!(
                     "Compression failed to enforce the maximum retained interval {:.17e}s between {:.17e}s and {:.17e}s",
@@ -506,11 +650,38 @@ pub(super) fn compress_transient_result(
         }
     }
     let worst_observed =
-        verify_compressed_transient_error(result, &channels, config, &indices, abort)?;
-    verify_retained_grid_reproduces_schedule(result, schedule, &indices)?;
-    let compressed = finish(indices, worst_observed, post_results, identity);
-    compressed.validate().map_err(SimulationError::Circuit)?;
-    Ok(compressed)
+        verify_compressed_transient_error(time, &mut rows, &channels, config, &indices, abort)?;
+    verify_retained_grid_reproduces_schedule(time, schedule, &indices)?;
+    finish(&mut rows, indices, worst_observed, post_results, identity)
+}
+
+/// The retained channels: each one's samples at `indices`, read a point at a time.
+fn retained_channels<R: AcceptedTransientRows>(
+    rows: &mut R,
+    channels: &[AcceptedTransientChannel],
+    indices: &[usize],
+) -> Result<Vec<TransientCompressedChannel>, SimulationError> {
+    let mut retained = channels
+        .iter()
+        .map(|channel| TransientCompressedChannel {
+            descriptor: channel.descriptor.clone(),
+            availability: channel.availability,
+            samples: match channel.availability {
+                TransientChannelAvailability::Available => Vec::with_capacity(indices.len()),
+                TransientChannelAvailability::NotProjected => Vec::new(),
+            },
+        })
+        .collect::<Vec<_>>();
+    let mut row = vec![0.0; channels.len()];
+    for &index in indices {
+        rows.row(index, &mut row)?;
+        for ((channel, retained), &value) in channels.iter().zip(&mut retained).zip(&row) {
+            if channel.availability == TransientChannelAvailability::Available {
+                retained.samples.push(channel.sample(value));
+            }
+        }
+    }
+    Ok(retained)
 }
 
 /// Accepted-grid indices the authored output schedule reads.
@@ -521,14 +692,10 @@ pub(super) fn compress_transient_result(
 /// accepted point or a linear interpolation between two neighbouring accepted
 /// points, so both bracket samples are mandatory.
 fn mandatory_schedule_indices(
-    result: &TransientResult,
+    times: &[Value],
     schedule: &TransientCompressionOutputSchedule<'_>,
 ) -> Result<Vec<usize>, SimulationError> {
-    let result_window = result
-        .time
-        .first()
-        .copied()
-        .zip(result.time.last().copied());
+    let result_window = times.first().copied().zip(times.last().copied());
     let mut indices = Vec::new();
     for (schedule_index, &time) in schedule.output_time_points.iter().enumerate() {
         if !time.is_finite() {
@@ -539,8 +706,7 @@ fn mandatory_schedule_indices(
         if !result_window.is_some_and(|(start, stop)| time >= start && time <= stop) {
             continue;
         }
-        let index = result
-            .time
+        let index = times
             .binary_search_by(|candidate| candidate.total_cmp(&time))
             .map_err(|_| {
                 SimulationError::Circuit(format!(
@@ -551,9 +717,9 @@ fn mandatory_schedule_indices(
     }
 
     if let Some(interval_schedule) = schedule.interval_schedule {
-        for event in interval_output_events(schedule, &result.time, interval_schedule)? {
+        for event in interval_output_events(schedule, times, interval_schedule)? {
             let (accepted_index, interpolated) = event;
-            if accepted_index >= result.time.len() {
+            if accepted_index >= times.len() {
                 return Err(SimulationError::Circuit(format!(
                     "Cannot compress transient because an INITIAL_INTERVAL output row names accepted sample {accepted_index}, which does not exist"
                 )));
@@ -615,21 +781,18 @@ fn interval_output_events(
 /// than assumed, and a mismatch fails closed instead of publishing a result
 /// whose authored output grid silently moved.
 fn verify_retained_grid_reproduces_schedule(
-    result: &TransientResult,
+    time: &[Value],
     schedule: &TransientCompressionOutputSchedule<'_>,
     indices: &[usize],
 ) -> Result<(), SimulationError> {
     let Some(interval_schedule) = schedule.interval_schedule else {
         return Ok(());
     };
-    if indices.len() == result.time.len() {
+    if indices.len() == time.len() {
         return Ok(());
     }
-    let retained_times = indices
-        .iter()
-        .map(|&index| result.time[index])
-        .collect::<Vec<_>>();
-    let accepted = interval_output_events(schedule, &result.time, interval_schedule)?;
+    let retained_times = indices.iter().map(|&index| time[index]).collect::<Vec<_>>();
+    let accepted = interval_output_events(schedule, time, interval_schedule)?;
     let retained = interval_output_events(schedule, &retained_times, interval_schedule)?;
     let same_rows = accepted.len() == retained.len()
         && accepted.iter().zip(&retained).all(
@@ -644,7 +807,7 @@ fn verify_retained_grid_reproduces_schedule(
         Err(SimulationError::Circuit(format!(
             "Compression retained {} of {} accepted points but the authored INITIAL_INTERVAL output lattice no longer reproduces its {} rows from them",
             indices.len(),
-            result.time.len(),
+            time.len(),
             accepted.len()
         )))
     }
@@ -658,8 +821,9 @@ fn verify_retained_grid_reproduces_schedule(
 /// sample and at both retained endpoints. An absent sample has no
 /// reconstruction and no error; it is skipped deterministically rather than
 /// being coerced into a number.
-pub(super) fn verify_compressed_transient_error(
-    result: &TransientResult,
+pub(super) fn verify_compressed_transient_error<R: AcceptedTransientRows>(
+    time: &[Value],
+    rows: &mut R,
     channels: &[AcceptedTransientChannel],
     config: &CompressionConfig,
     retained_indices: &[usize],
@@ -670,23 +834,29 @@ pub(super) fn verify_compressed_transient_error(
     }
     let comparable = channels
         .iter()
-        .filter(|channel| channel.availability == TransientChannelAvailability::Available)
+        .enumerate()
+        .filter(|(_, channel)| channel.availability == TransientChannelAvailability::Available)
         .collect::<Vec<_>>();
-    if comparable.is_empty() || retained_indices.len() >= result.time.len() {
+    if comparable.is_empty() || retained_indices.len() >= time.len() {
         return Ok(None);
     }
 
     let mut worst: Option<TransientCompressionErrorObservation> = None;
     let mut scanned_points = 0usize;
+    let mut left = vec![0.0; channels.len()];
+    let mut right = vec![0.0; channels.len()];
+    let mut row = vec![0.0; channels.len()];
     for retained_window in retained_indices.windows(2) {
         let start = retained_window[0];
         let end = retained_window[1];
         if end <= start + 1 {
             continue;
         }
-        let t0 = result.time[start];
-        let duration = result.time[end] - t0;
-        for point in (start + 1)..end {
+        let t0 = time[start];
+        let duration = time[end] - t0;
+        rows.row(start, &mut left)?;
+        rows.row(end, &mut right)?;
+        for (point, &point_time) in time.iter().enumerate().take(end).skip(start + 1) {
             scanned_points = scanned_points.saturating_add(1);
             if scanned_points.is_multiple_of(4096) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -694,20 +864,18 @@ pub(super) fn verify_compressed_transient_error(
             // Match TransientResultCompressed::interpolate_channel exactly.
             // Multiplying by a rounded reciprocal can change a small
             // reconstruction error enough to invalidate its certificate.
-            let fraction = (result.time[point] - t0) / duration;
-            for channel in &comparable {
-                let (Some(actual), Some(left), Some(right)) = (
-                    channel.sample(point),
-                    channel.sample(start),
-                    channel.sample(end),
-                ) else {
+            let fraction = (point_time - t0) / duration;
+            rows.row(point, &mut row)?;
+            for &(index, channel) in &comparable {
+                let (actual, left, right) = (row[index], left[index], right[index]);
+                if !(actual.is_finite() && left.is_finite() && right.is_finite()) {
                     continue;
-                };
-                let signal = channel.descriptor.signal();
+                }
                 let predicted = left + fraction * (right - left);
                 let absolute_error = (actual - predicted).abs();
                 let allowed_tolerance = config.abs_tol + config.rel_tol * actual.abs();
                 if !absolute_error.is_finite() || !allowed_tolerance.is_finite() {
+                    let signal = channel.descriptor.signal();
                     return Err(SimulationError::Circuit(format!(
                         "Compression error certificate became non-finite for '{}:{}' at input sample {point}",
                         signal.kind.as_str(),
@@ -724,35 +892,36 @@ pub(super) fn verify_compressed_transient_error(
                 if !tolerance_utilization.is_finite()
                     || tolerance_utilization > 1.0 + 64.0 * Value::EPSILON
                 {
+                    let signal = channel.descriptor.signal();
                     return Err(SimulationError::Circuit(format!(
                         "Compression final-grid verification failed for '{}:{}' at t={:.17e}s: error {:.17e}, tolerance {:.17e}",
                         signal.kind.as_str(),
                         signal.canonical_name,
-                        result.time[point],
+                        point_time,
                         absolute_error,
                         allowed_tolerance
                     )));
                 }
-                let relative_error = if actual == 0.0 {
-                    None
-                } else {
-                    let relative = absolute_error / actual.abs();
-                    relative.is_finite().then_some(relative)
-                };
-                let observation = TransientCompressionErrorObservation {
-                    signal,
-                    input_sample_index: point,
-                    time: result.time[point],
-                    actual_value: actual,
-                    absolute_error,
-                    relative_error,
-                    allowed_tolerance,
-                    tolerance_utilization,
-                };
-                if worst.as_ref().is_none_or(|current| {
-                    observation.tolerance_utilization > current.tolerance_utilization
-                }) {
-                    worst = Some(observation);
+                if worst
+                    .as_ref()
+                    .is_none_or(|current| tolerance_utilization > current.tolerance_utilization)
+                {
+                    let relative_error = if actual == 0.0 {
+                        None
+                    } else {
+                        let relative = absolute_error / actual.abs();
+                        relative.is_finite().then_some(relative)
+                    };
+                    worst = Some(TransientCompressionErrorObservation {
+                        signal: channel.descriptor.signal(),
+                        input_sample_index: point,
+                        time: point_time,
+                        actual_value: actual,
+                        absolute_error,
+                        relative_error,
+                        allowed_tolerance,
+                        tolerance_utilization,
+                    });
                 }
             }
         }

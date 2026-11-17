@@ -15,11 +15,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core::AbortSignal;
 use rspice_core::analysis::{
-    FourierAnalysis, FourierConfig, FourierMethod, FourierRecord, MeasureResult, TranMeasureStream,
+    FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierRecord, MeasureResult,
+    TranMeasureStream,
 };
 use rspice_core::engine::{
-    ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint, TransientEnd,
-    TransientResult, TransientStartupMode, TransientState,
+    AcceptedTransientRows, ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint,
+    TransientEnd, TransientFourierResult, TransientPostResults, TransientResult,
+    TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventSource, HeldEvents};
 use rspice_core::netlist::{AnalysisCommand, OutputDirectiveKind};
@@ -784,6 +786,192 @@ impl StoredTransient {
         self.rows.fill(&mut self.shell, first, count)?;
         Ok(Some(cards))
     }
+
+    /// The deck's post-processing products measured from the store, equal to the ones
+    /// [`rspice_core::engine::evaluate_transient_post_results`] evaluates on the run read back:
+    /// its `.FOUR` spectra from the rows around their windows, then its `.MEASURE TRAN`
+    /// statements in passes over the rows.
+    ///
+    /// Reads every row back instead, as [`Self::read_back`] does, and returns `None`, when a
+    /// product needs the run in memory: a `.FFT` card, lead power, an instance parameter, a
+    /// continuous measurement, an assertion, a `.VEC` check, a statement measured only whole, or
+    /// a `.FOUR` card that only the whole run evaluates or that another transient owns.
+    pub(super) fn post_results(
+        &mut self,
+        ctx: &RunContext<'_>,
+        tstop: f64,
+    ) -> Result<Option<TransientPostResults>, CliError> {
+        let netlist = ctx.netlist;
+        let abort = &crate::abort::ProcessAbort;
+        let failed = |source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient".to_string()),
+        };
+        let in_passes = self.rows.rows() > 0
+            && self.rows.parameters.is_empty()
+            && ctx.engine.transient_rows_are_whole(netlist)
+            && !netlist
+                .measurements
+                .iter()
+                .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+            && netlist.assertions.is_empty()
+            && netlist.vector_files.is_empty();
+        if !in_passes {
+            self.read_back(ctx, tstop)?;
+            return Ok(None);
+        }
+        self.hold_events()?;
+        let cards = netlist
+            .analyses
+            .iter()
+            .filter(|card| matches!(card, AnalysisCommand::Four { .. }))
+            .collect::<Vec<_>>();
+        let fourier = if cards.is_empty() {
+            Vec::new()
+        } else {
+            let every_card =
+                ctx.fourier_cards_for_current_transient()? == (0..cards.len()).collect::<Vec<_>>();
+            let records = if every_card {
+                self.fourier_window(ctx, tstop)?
+            } else {
+                self.read_back(ctx, tstop)?;
+                None
+            };
+            let Some(records) = records else {
+                return Ok(None);
+            };
+            match self.fourier_spectra(ctx, &cards, &records)? {
+                Some(fourier) => fourier,
+                None => {
+                    self.read_back(ctx, tstop)?;
+                    return Ok(None);
+                }
+            }
+        };
+        let measurements = if netlist
+            .measurements
+            .iter()
+            .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN"))
+        {
+            let probe_rows = self
+                .rows
+                .reader
+                .chunk_spans()
+                .next()
+                .map_or(0, |span| span.1);
+            self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
+            let measured = self.measure(ctx);
+            self.rows.clear(&mut self.shell);
+            match measured? {
+                Some(measurements) => measurements,
+                None => {
+                    self.read_back(ctx, tstop)?;
+                    return Ok(None);
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        // With neither continuous measurements nor assertions, these read no rows.
+        let limits = ctx.engine.config().resource_limits;
+        let continuous_measurements =
+            rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
+                netlist,
+                &self.shell,
+                &limits,
+                abort,
+            )
+            .map_err(failed)?;
+        let assertions =
+            rspice_core::analysis::evaluate_tran_assertions(netlist, &self.shell, abort)
+                .map_err(failed)?;
+        Ok(Some(TransientPostResults {
+            fft: self.shell.fft_results.clone(),
+            fourier,
+            measurements,
+            continuous_measurements,
+            assertions,
+        }))
+    }
+
+    /// Each `.FOUR` card's spectra, analysed from the records [`Self::fourier_window`] took and
+    /// the rows it left in the shell, as
+    /// [`rspice_core::engine::evaluate_transient_fourier_results`] analyses the run read back;
+    /// `None` when a card or an operand fails, which the run read back then reports.
+    fn fourier_spectra(
+        &self,
+        ctx: &RunContext<'_>,
+        cards: &[&AnalysisCommand],
+        records: &FourierRecords,
+    ) -> Result<Option<Vec<TransientFourierResult>>, CliError> {
+        let netlist = ctx.netlist;
+        let abort = &crate::abort::ProcessAbort;
+        let limits = ctx.engine.config().resource_limits;
+        let method = FourierMethod::for_dialect(netlist.parse_dialect());
+        let mut spectra = Vec::new();
+        for (card_index, &card) in cards.iter().enumerate() {
+            let &AnalysisCommand::Four {
+                fundamental,
+                num_harmonics,
+                ..
+            } = card
+            else {
+                return Ok(None);
+            };
+            let Some(config) = (fundamental.is_finite() && fundamental > 0.0 && num_harmonics > 0)
+                .then(|| FourierConfig::try_from(card).ok())
+                .flatten()
+            else {
+                return Ok(None);
+            };
+            let columns = match rspice_core::analysis::evaluate_tran_four_output_requests_with_abort(
+                netlist,
+                &self.shell,
+                card_index,
+                limits,
+                abort,
+            ) {
+                Ok(columns) => columns,
+                Err(rspice_core::SimulationError::Aborted) => {
+                    return Err(super::cancellation_cli_error(ctx.args.timeout));
+                }
+                Err(_) => return Ok(None),
+            };
+            let Some(card_records) = records
+                .iter()
+                .find(|(index, _)| *index == card_index)
+                .map(|(_, records)| records)
+                .filter(|records| records.len() == columns.len())
+            else {
+                return Ok(None);
+            };
+            let analysis = FourierAnalysis::new(config.with_method(method));
+            for ((output, physical_type, waveform), record) in columns.into_iter().zip(card_records)
+            {
+                let spectrum = match analysis.analyze_transient_record_with_abort(
+                    record,
+                    &self.shell,
+                    &waveform,
+                    abort,
+                ) {
+                    Ok(spectrum) => spectrum,
+                    Err(FourierError::Aborted) => {
+                        return Err(super::cancellation_cli_error(ctx.args.timeout));
+                    }
+                    Err(_) => return Ok(None),
+                };
+                spectra.push(TransientFourierResult {
+                    card_index,
+                    output,
+                    physical_type,
+                    fundamental,
+                    harmonic_count: num_harmonics,
+                    spectrum,
+                });
+            }
+        }
+        Ok(Some(spectra))
+    }
 }
 
 /// The result column a slot's values fill, as an output reads it; `None` for one an output
@@ -1264,6 +1452,89 @@ impl StoredRows {
         Ok((first, last - first))
     }
 
+    /// Where each channel of `shell`'s compression inventory is in the store; `None` when a
+    /// device or store trace is no store column, the store keeps no step sizes, or a column
+    /// with no slot is not empty, which the run read back then reports as it is.
+    pub(super) fn compression_slots(&self, shell: &TransientResult) -> Option<CompressionSlots> {
+        let mut nodes = vec![None; shell.voltages.len()];
+        let mut branches = vec![None; shell.branch_currents.len()];
+        let mut devices = vec![None; shell.device_op_traces.len()];
+        let mut stores = vec![None; shell.store_traces.len()];
+        let mut step_size = None;
+        for (slot, &target) in self.targets.iter().enumerate() {
+            let entry = match target {
+                SlotTarget::Voltage(node) => nodes.get_mut(node),
+                SlotTarget::Current(branch) => branches.get_mut(branch),
+                SlotTarget::DeviceOp(index) => devices.get_mut(index),
+                SlotTarget::Store(index) => stores.get_mut(index),
+                SlotTarget::StepSize => Some(&mut step_size),
+                SlotTarget::Parameter(_) => None,
+            };
+            if let Some(entry) = entry {
+                *entry = Some(slot);
+            }
+        }
+        let unsaved_empty = nodes
+            .iter()
+            .zip(&shell.voltages)
+            .chain(branches.iter().zip(&shell.branch_currents))
+            .all(|(slot, column)| slot.is_some() || column.is_empty());
+        if !unsaved_empty || devices.iter().chain(&stores).any(Option::is_none) {
+            return None;
+        }
+        Some(CompressionSlots {
+            channels: nodes
+                .into_iter()
+                .chain(branches)
+                .chain(devices)
+                .chain(stores)
+                .collect(),
+            step_size: step_size?,
+        })
+    }
+
+    /// The run's accepted time grid and step sizes, read whole, and a reader of the rest of its
+    /// rows at `slots`, a point at a time.
+    pub(super) fn compression_rows(
+        &mut self,
+        slots: CompressionSlots,
+    ) -> Result<(Vec<f64>, Vec<f64>, CompressionRows<'_>), CliError> {
+        let rows = usize::try_from(self.rows()).map_err(|_| CliError::InternalError {
+            message: "a transient store holds more rows than this host can address".to_owned(),
+        })?;
+        let spans = self.reader.chunk_spans().collect::<Vec<_>>();
+        let dir = self.store.dir.as_path();
+        let read = |error| store_error(dir, error);
+        let (mut time, mut step_sizes) = (Vec::with_capacity(rows), Vec::with_capacity(rows));
+        let mut column = Vec::new();
+        for chunk in 0..spans.len() {
+            self.reader.read_chunk_x(chunk, &mut column).map_err(read)?;
+            time.extend_from_slice(&column);
+            self.reader
+                .read_chunk_slot(chunk, slots.step_size, &mut column)
+                .map_err(read)?;
+            step_sizes.extend_from_slice(&column);
+        }
+        let chunk_values = spans
+            .iter()
+            .map(|&(_, rows)| rows)
+            .max()
+            .unwrap_or(1)
+            .saturating_mul(slots.channels.len())
+            .max(1);
+        let rows = CompressionRows {
+            dir,
+            reader: &mut self.reader,
+            spans,
+            capacity: (COMPRESSION_CACHE_VALUES / chunk_values).max(2),
+            slots: slots.channels,
+            cache: Vec::new(),
+            column,
+            error: None,
+        };
+        Ok((time, step_sizes, rows))
+    }
+
     /// A reader of rows `first ..` for `plan`'s signals, chunk by chunk.
     pub(super) fn cursor<'r>(&'r mut self, plan: &'r StreamPlan, first: u64) -> RowCursor<'r> {
         RowCursor::over(&self.store.dir, &mut self.reader, &plan.slots, first)
@@ -1431,6 +1702,126 @@ impl<'r> RowCursor<'r> {
         }
         if self.non_finite {
             return Err(crate::commands::export_table::invalid_samples(path));
+        }
+        Ok(())
+    }
+}
+
+/// Decoded values a compression's row cache keeps at most: chunks of a wide run hold up to 1 Mi
+/// values each, so this keeps a few of them, and more of a narrow run's.
+const COMPRESSION_CACHE_VALUES: usize = 8 << 20;
+
+/// Where each channel of a compression's inventory is in a store: its value slot, none for a
+/// node or branch the run did not save; and the step sizes' slot.
+pub(super) struct CompressionSlots {
+    channels: Vec<Option<usize>>,
+    step_size: usize,
+}
+
+/// A transient's rows in its store as a compression reads them, a point at a time: every
+/// channel's values at one accepted point, from the chunks a cache keeps decoded, the most
+/// recently read last. A read that fails is kept for [`Self::finish`] to report.
+pub(super) struct CompressionRows<'r> {
+    dir: &'r Path,
+    reader: &'r mut SegmentReader<FileIo>,
+    spans: Vec<(u64, usize)>,
+    slots: Vec<Option<usize>>,
+    cache: Vec<CachedChunk>,
+    capacity: usize,
+    column: Vec<f64>,
+    error: Option<StoreError>,
+}
+
+/// One decoded chunk: its rows' channel values, row after row.
+struct CachedChunk {
+    chunk: usize,
+    first: u64,
+    rows: usize,
+    values: Vec<f64>,
+}
+
+impl CompressionRows<'_> {
+    /// Make the cache's last chunk the one holding row `row`, decoding it when it holds none.
+    fn load(&mut self, row: u64) -> Result<(), StoreError> {
+        let chunk = self
+            .spans
+            .partition_point(|&(start, rows)| start + rows as u64 <= row);
+        let Some(&(first, rows)) = self.spans.get(chunk) else {
+            return Err(StoreError::OutOfRange(format!(
+                "row {row} of a segment with {} rows",
+                self.reader.rows()
+            )));
+        };
+        if let Some(cached) = self.cache.iter().position(|cached| cached.chunk == chunk) {
+            let cached = self.cache.remove(cached);
+            self.cache.push(cached);
+            return Ok(());
+        }
+        let mut values = if self.cache.len() >= self.capacity {
+            self.cache.remove(0).values
+        } else {
+            Vec::new()
+        };
+        let width = self.slots.len();
+        values.clear();
+        values.resize(rows * width, f64::NAN);
+        for (channel, &slot) in self.slots.iter().enumerate() {
+            let Some(slot) = slot else {
+                continue;
+            };
+            self.reader.read_chunk_slot(chunk, slot, &mut self.column)?;
+            for (row, &value) in self.column.iter().enumerate() {
+                values[row * width + channel] = value;
+            }
+        }
+        self.cache.push(CachedChunk {
+            chunk,
+            first,
+            rows,
+            values,
+        });
+        Ok(())
+    }
+
+    /// `compressed`, unless a read of the store failed, which is then what failed.
+    pub(super) fn finish<T>(self, compressed: Result<T, CliError>) -> Result<T, CliError> {
+        match self.error {
+            Some(error) => Err(store_error(self.dir, error)),
+            None => compressed,
+        }
+    }
+}
+
+impl AcceptedTransientRows for CompressionRows<'_> {
+    fn saved(&self, channel: usize) -> bool {
+        self.slots.get(channel).is_some_and(Option::is_some)
+    }
+
+    fn row(&mut self, index: usize, row: &mut [f64]) -> Result<(), rspice_core::SimulationError> {
+        let index = index as u64;
+        let cached = |cached: &CachedChunk| {
+            cached.first <= index && index < cached.first + cached.rows as u64
+        };
+        if !self.cache.last().is_some_and(cached)
+            && let Err(error) = self.load(index)
+        {
+            let failed = rspice_core::SimulationError::Circuit(format!(
+                "the transient's results store could not be read: {error}"
+            ));
+            self.error.get_or_insert(error);
+            return Err(failed);
+        }
+        let width = self.slots.len();
+        let values = self
+            .cache
+            .last()
+            .and_then(|cached| {
+                let offset = (index - cached.first) as usize * width;
+                cached.values.get(offset..offset + width)
+            })
+            .unwrap_or_default();
+        for (value, &cached) in row.iter_mut().zip(values) {
+            *value = cached;
         }
         Ok(())
     }
