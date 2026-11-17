@@ -11,6 +11,7 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant moved into zbus 6, but accesskit_unix 0.24 and atspi 0.30, the newest, are still on zbus 5; it is linked only by rspice-app's Linux and BSD build, for D-Bus messages on the user's own session and AT-SPI buses." },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names moved into zbus 6, but accesskit_unix 0.24 and atspi 0.30, the newest, are still on zbus 5; it is linked only by rspice-app's Linux and BSD build, for D-Bus names on the user's own session and AT-SPI buses." },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive's macros moved into zbus 6, but it stays until zvariant leaves the accesskit_unix and atspi graph; it is a proc-macro run only while rspice-app's Linux and BSD build compiles." },
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained (no vulnerability); arrow 60.1, the newest, needs it for the parquet result export in rspice-formats, and rspice-app-state reads one local zone offset from the copy arrow already links. Replace it when arrow moves to jiff or time." },
 ]
 
 [licenses]
