@@ -12,8 +12,10 @@
 //! A parameter whose presence changes the model, not only its value, is left
 //! out: an omitted `BV` means no breakdown, an omitted `VAF` no Early effect,
 //! a given `TOX` derives `KP` and `GAMMA` from the process, a given `CBD`
-//! replaces the area junction. Writing such a parameter at any value would
-//! make a different device, so the designer adds it when the device has it;
+//! replaces the area junction, and an omitted `IBV` is the dialect's own (1
+//! mA in ngspice and Xyce, LTspice's 1e-10 A times AREA and M in the
+//! default). Writing such a parameter at any value would make a different
+//! device, so the designer adds it when the device has it, IBV with BV;
 //! so are the geometry parameters of a resistor or capacitor model (`RSH`,
 //! `CJ`), which make its value from the instance's length and width.
 
@@ -66,7 +68,6 @@ const DIODE: &[ModelParameterDefault] = &[
         "forward-bias depletion capacitance coefficient",
     ),
     p("TT", 0.0, "s", "transit time"),
-    p("IBV", 1e-3, "A", "current at the breakdown voltage"),
     p("ISR", 0.0, "A", "recombination current"),
     p("NR", 2.0, "", "recombination emission coefficient"),
     p("EG", 1.11, "eV", "activation energy"),
