@@ -2,8 +2,8 @@
 //! that only paints does no whole-project work. Nothing a frame paints shows
 //! that work, so each kind is counted where it is done: fingerprint passes,
 //! whole-project captures, hashes of model sources, project files read,
-//! checkpoint directories listed and files stat'ed, whole-catalog sorts and
-//! net extractions.
+//! checkpoint directories listed and files stat'ed, whole-catalog sorts, net
+//! extractions, library columns listed and drawings or bindings walked.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 use egui::Context;
 
 use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::project::configuration_state::CONFIGURATION_SCANS;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_project::workbench::surfaces::library_cellview_manager::CELLVIEW_PROJECTION_BUILDS;
+use rspice_app_project::workbench::surfaces::project::library::LIBRARY_ROW_BUILDS;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, create,
 };
@@ -25,6 +28,7 @@ use rspice_app_state::state::{
     Library, Point, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
     ProjectTechnologyChangeContext, UnresolvedBindingPolicy, View, ViewType,
 };
+use rspice_app_state::workbench::app_state::cell_usage::CELL_USAGE_SCANS;
 use rspice_app_state::workbench::workspace::Workspace;
 
 use super::recovery_frames::{IDLE_FRAMES, app_frame, offscreen, paint_until, painted};
@@ -55,47 +59,79 @@ struct FrameWork {
     catalog_sorts: usize,
     /// Nets extracted from a schematic.
     net_extractions: usize,
+    /// Library browser columns listed and sorted, and the cell-view
+    /// manager's catalog projected.
+    library_rows: usize,
+    /// Drawings walked for a cell's placements, and a configuration's
+    /// bindings, instance paths or views walked.
+    design_scans: usize,
 }
 
 impl FrameWork {
-    /// What the page itself did, leaving out the unsaved-document count's
-    /// share. Every frame of the application asks that count, on every
-    /// workspace, and each answer captures the project, fingerprints it and
-    /// proves its model libraries: `per_answer` is what one answer costs on
-    /// this project, and the fingerprint passes say how many were asked.
-    fn page_work(self, per_answer: Self) -> Self {
-        let answers = self
-            .fingerprint_passes
-            .checked_div(per_answer.fingerprint_passes)
-            .unwrap_or(0);
-        assert_eq!(
-            answers * per_answer.fingerprint_passes,
+    const fn counts(self) -> [usize; 9] {
+        [
             self.fingerprint_passes,
-            "every fingerprint pass belongs to an answer of the count: {self:?} against {per_answer:?}"
-        );
-        let less = |total: usize, each: usize| {
-            total.checked_sub(answers * each).unwrap_or_else(|| {
-                panic!(
-                    "{answers} answers of {per_answer:?} cost more than the frames did: {self:?}"
-                )
-            })
-        };
+            self.project_captures,
+            self.model_library_hashes,
+            self.project_file_reads,
+            self.checkpoint_reads,
+            self.catalog_sorts,
+            self.net_extractions,
+            self.library_rows,
+            self.design_scans,
+        ]
+    }
+
+    const fn from_counts(counts: [usize; 9]) -> Self {
+        let [
+            fingerprint_passes,
+            project_captures,
+            model_library_hashes,
+            project_file_reads,
+            checkpoint_reads,
+            catalog_sorts,
+            net_extractions,
+            library_rows,
+            design_scans,
+        ] = counts;
         Self {
-            fingerprint_passes: 0,
-            project_captures: less(self.project_captures, per_answer.project_captures),
-            model_library_hashes: less(self.model_library_hashes, per_answer.model_library_hashes),
-            project_file_reads: less(self.project_file_reads, per_answer.project_file_reads),
-            checkpoint_reads: less(self.checkpoint_reads, per_answer.checkpoint_reads),
-            catalog_sorts: less(self.catalog_sorts, per_answer.catalog_sorts),
-            net_extractions: less(self.net_extractions, per_answer.net_extractions),
+            fingerprint_passes,
+            project_captures,
+            model_library_hashes,
+            project_file_reads,
+            checkpoint_reads,
+            catalog_sorts,
+            net_extractions,
+            library_rows,
+            design_scans,
         }
     }
-}
 
-/// Whole-project captures since the last call. The capture counter is kept by
-/// the project lifecycle; until it counts them this reads none.
-fn take_project_captures() -> usize {
-    0
+    /// What the page itself did, leaving out the checks of the held
+    /// unsaved-document answer.
+    ///
+    /// The toolbar, the window title and the Overview ask on every frame
+    /// whether the project holds unsaved work, and read the answer held for
+    /// the working state. A debug build checks every read: it captures the
+    /// project again, outside the capture and fingerprint counts, and that
+    /// capture proves the model libraries. A release build does not.
+    /// `per_read` is what one checked read costs on this project; the frames'
+    /// work must be a whole number of reads, and what is left is the page's.
+    fn page_work(self, per_read: Self) -> Self {
+        let (frames, each) = (self.counts(), per_read.counts());
+        let reads = frames
+            .iter()
+            .zip(each)
+            .find(|(_, each)| *each > 0)
+            .map_or(0, |(total, each)| total / each);
+        Self::from_counts(std::array::from_fn(|kind| {
+            frames[kind]
+                .checked_sub(reads * each[kind])
+                .unwrap_or_else(|| {
+                    panic!("{reads} checked reads of {per_read:?} cost more than the frames did: {self:?}")
+                })
+        }))
+    }
 }
 
 /// The work counted on this thread since the last call, and start again.
@@ -104,7 +140,7 @@ fn take_work() -> FrameWork {
     let design = rspice_design_model::work_tally::take();
     FrameWork {
         fingerprint_passes: rspice_project::registry::FINGERPRINT_PASSES.with(|n| n.replace(0)),
-        project_captures: take_project_captures(),
+        project_captures: rspice_project::registry::PROJECT_CAPTURES.with(|n| n.replace(0)),
         model_library_hashes: rspice_model_library::MODEL_SOURCE_HASHES.with(|n| n.replace(0))
             + rspice_model_library::CATALOG_LIBRARY_SERIALIZATIONS.with(|n| n.replace(0))
             + rspice_app_state::workbench::app_state::model::SOURCE_DRIFT_HASHES
@@ -114,6 +150,10 @@ fn take_work() -> FrameWork {
         catalog_sorts: rspice_model_library::CATALOG_SORTS.with(|n| n.replace(0))
             + design.catalog_sorts,
         net_extractions: design.connectivity_passes,
+        library_rows: LIBRARY_ROW_BUILDS.with(|n| n.replace(0))
+            + CELLVIEW_PROJECTION_BUILDS.with(|n| n.replace(0)),
+        design_scans: CELL_USAGE_SCANS.with(|n| n.replace(0))
+            + CONFIGURATION_SCANS.with(|n| n.replace(0)),
     }
 }
 
@@ -205,21 +245,28 @@ fn large_project(label: &str, components: usize) -> (RSpiceApp, PathBuf) {
     (app, folder)
 }
 
-/// The work thirty idle frames do, all of it and the page's share of it.
-fn idle_frames(ctx: &Context, app: &mut RSpiceApp) -> (FrameWork, FrameWork) {
+/// The page's share of the work thirty idle frames do. On no page does an
+/// idle frame capture or fingerprint the project: the unsaved-document
+/// answer is held for the working state until it changes.
+fn idle_frames(ctx: &Context, app: &mut RSpiceApp) -> FrameWork {
     take_work();
     for _ in 0..IDLE_FRAMES {
         app_frame(ctx, app, Vec::new());
     }
     let frames = take_work();
+    assert_eq!(
+        (frames.fingerprint_passes, frames.project_captures),
+        (0, 0),
+        "an idle frame neither captures nor fingerprints the project: {frames:?}"
+    );
     let _ = dirty_document_count(&app.state);
-    let per_answer = take_work();
-    (frames, frames.page_work(per_answer))
+    let per_read = take_work();
+    frames.page_work(per_read)
 }
 
-/// The work thirty idle frames of `page` do, counted from the first frame
-/// after the page has shown what it shows: all of it, and the page's share.
-fn idle_work(page: ProjectPage) -> (FrameWork, FrameWork) {
+/// The page's share of the work thirty idle frames of `page` do, counted
+/// from the first frame after the page has shown what it shows.
+fn idle_work(page: ProjectPage) -> FrameWork {
     let (mut app, folder) = large_project("frame-work", COMPONENTS);
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = page;
@@ -237,27 +284,22 @@ fn idle_work(page: ProjectPage) -> (FrameWork, FrameWork) {
 
 #[test]
 fn the_overview_does_no_project_work_on_an_idle_frame() {
-    assert_eq!(idle_work(ProjectPage::Overview).1, FrameWork::default());
+    assert_eq!(idle_work(ProjectPage::Overview), FrameWork::default());
 }
 
 #[test]
-#[ignore = "library rows are rebuilt and sorted per frame"]
 fn the_library_page_does_no_project_work_on_an_idle_frame() {
-    assert_eq!(idle_work(ProjectPage::Library).1, FrameWork::default());
+    assert_eq!(idle_work(ProjectPage::Library), FrameWork::default());
 }
 
 #[test]
-#[ignore = "configuration rows and indexes are rebuilt per frame"]
 fn the_configuration_page_does_no_project_work_on_an_idle_frame() {
-    assert_eq!(
-        idle_work(ProjectPage::Configuration).1,
-        FrameWork::default()
-    );
+    assert_eq!(idle_work(ProjectPage::Configuration), FrameWork::default());
 }
 
 #[test]
 fn the_dependencies_page_does_no_project_work_on_an_idle_frame() {
-    assert_eq!(idle_work(ProjectPage::Dependencies).1, FrameWork::default());
+    assert_eq!(idle_work(ProjectPage::Dependencies), FrameWork::default());
 }
 
 /// The checkpoints are listed on a background thread: the first frame says
@@ -283,29 +325,8 @@ fn the_recovery_page_lists_its_checkpoints_off_the_frame_and_idles() {
         (0, 0),
         "the frames that waited for the list read nothing"
     );
-    assert_eq!(idle_frames(&ctx, &mut app).1, FrameWork::default());
+    assert_eq!(idle_frames(&ctx, &mut app), FrameWork::default());
     let _ = std::fs::remove_dir_all(folder);
-}
-
-/// What the page work above leaves out: the unsaved-document count is asked
-/// by the toolbar, the window title and the Overview on every frame.
-#[test]
-#[ignore = "the unsaved-document count captures and fingerprints the whole project on every frame"]
-fn no_project_page_fingerprints_the_project_on_an_idle_frame() {
-    for page in [
-        ProjectPage::Overview,
-        ProjectPage::Library,
-        ProjectPage::Configuration,
-        ProjectPage::Dependencies,
-        ProjectPage::Recovery,
-    ] {
-        let (work, _) = idle_work(page);
-        assert_eq!(
-            (work.fingerprint_passes, work.project_captures),
-            (0, 0),
-            "{page:?}"
-        );
-    }
 }
 
 /// `count` and the noun for it, as the Overview states a count.
@@ -589,12 +610,12 @@ fn the_attach_dialog_proves_its_candidates_when_the_catalogue_changes() {
             && !offered.contains("No model library can be attached"),
         "{offered}"
     );
-    assert_eq!(idle_frames(&ctx, &mut app).1.model_library_hashes, 0);
+    assert_eq!(idle_frames(&ctx, &mut app).model_library_hashes, 0);
 }
 
 /// How long an idle Overview frame takes on an empty project and on the
-/// large one, and how much of it one answer of the unsaved-document count
-/// is. Numbers to read from a release build, not a rule: the rule is the
+/// large one, and how long a read of the held unsaved-document answer
+/// takes. Numbers to read from a release build, not a rule: the rule is the
 /// work counted above.
 ///
 /// `cargo test --release -p rspice-app --lib -- overview_idle_frame_time
@@ -614,28 +635,20 @@ fn overview_idle_frame_time() {
             app_frame(&ctx, &mut app, Vec::new());
         }
         let frames = u32::try_from(IDLE_FRAMES).expect("the frame count fits");
-        take_work();
         let started = std::time::Instant::now();
         for _ in 0..IDLE_FRAMES {
             app_frame(&ctx, &mut app, Vec::new());
         }
         let frame = started.elapsed() / frames;
-        let framed = take_work();
         let started = std::time::Instant::now();
         for _ in 0..IDLE_FRAMES {
             let _ = dirty_document_count(&app.state);
         }
-        let answer = started.elapsed() / frames;
-        let answered = take_work();
+        let read = started.elapsed() / frames;
         println!(
-            "Overview, {components} components: {:.2} ms a frame, of which {} unsaved-document answers of {:.2} ms each",
+            "Overview, {components} components: {:.2} ms a frame; a read of the unsaved-document answer {:.3} ms",
             frame.as_secs_f64() * 1e3,
-            framed
-                .fingerprint_passes
-                .checked_div(answered.fingerprint_passes / IDLE_FRAMES)
-                .unwrap_or(0)
-                / IDLE_FRAMES,
-            answer.as_secs_f64() * 1e3,
+            read.as_secs_f64() * 1e3,
         );
         let _ = std::fs::remove_dir_all(folder);
     }

@@ -5,8 +5,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use egui::{Context, Pos2, Rect, Vec2, vec2};
+use egui::Context;
 
+use super::recovery_frames::{IDLE_FRAMES, app_frame, offscreen, painted};
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
 use rspice_app_project::workbench::project::configuration_state::{
@@ -26,59 +27,11 @@ use rspice_app_workbench::workbench::routing::{
     navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
 };
 
-const IDLE_FRAMES: usize = 30;
-const SIZE: Vec2 = vec2(1600.0, 900.0);
-
-/// One whole application frame, as the shell paints it.
-fn app_frame(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SIZE)),
-            ..Default::default()
-        },
-        |ui| {
-            let ctx = ui.ctx().clone();
-            app.prepare_frame(&ctx);
-            app.render_frame_chrome(ui);
-            app.render_frame_dialogs(&ctx);
-        },
-    )
-}
-
-fn offscreen() -> Context {
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx
-}
-
-/// Every string a frame painted, one per line.
-fn painted(output: &egui::FullOutput) -> String {
-    fn collect(shape: &egui::epaint::Shape, text: &mut String) {
-        match shape {
-            egui::epaint::Shape::Text(shape) => {
-                text.push_str(shape.galley.text());
-                text.push('\n');
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    collect(shape, text);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut text = String::new();
-    for clipped in &output.shapes {
-        collect(&clipped.shape, &mut text);
-    }
-    text
-}
-
 /// Paint `IDLE_FRAMES` frames that change nothing, and the last of them.
 fn idle(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
-    let mut last = app_frame(ctx, app);
+    let mut last = app_frame(ctx, app, Vec::new());
     for _ in 1..IDLE_FRAMES {
-        last = app_frame(ctx, app);
+        last = app_frame(ctx, app, Vec::new());
     }
     last
 }
@@ -124,7 +77,7 @@ fn an_idle_library_page_lists_and_scans_nothing() {
     take(&LIBRARY_ROW_BUILDS);
     take(&CELL_USAGE_SCANS);
 
-    let first = app_frame(&ctx, &mut app);
+    let first = app_frame(&ctx, &mut app, Vec::new());
     assert!(painted(&first).contains("c0000"), "{}", painted(&first));
     assert!(
         take(&LIBRARY_ROW_BUILDS) > 0,
@@ -151,7 +104,7 @@ fn an_idle_library_page_lists_and_scans_nothing() {
         .expect("the library is there")
         .rename_cell("c0001", "a_renamed");
     assert!(renamed);
-    let next = app_frame(&ctx, &mut app);
+    let next = app_frame(&ctx, &mut app, Vec::new());
     assert!(take(&LIBRARY_ROW_BUILDS) > 0);
     let text = painted(&next);
     let at = |name: &str| {
@@ -173,7 +126,7 @@ fn an_idle_library_page_lists_and_scans_nothing() {
         .model
         .workspace
         .insert_schematic_editor("a/bench/schematic".to_owned(), bench);
-    let next = app_frame(&ctx, &mut app);
+    let next = app_frame(&ctx, &mut app, Vec::new());
     assert_eq!(take(&CELL_USAGE_SCANS), 1, "the new drawing is read once");
     assert!(
         painted(&next).contains("Used by\na/bench/schematic"),
@@ -219,7 +172,7 @@ fn an_idle_cellview_manager_projects_nothing() {
     let ctx = offscreen();
     take(&CELLVIEW_PROJECTION_BUILDS);
 
-    let first = app_frame(&ctx, &mut app);
+    let first = app_frame(&ctx, &mut app, Vec::new());
     assert!(
         painted(&first).contains("Form revision r3"),
         "{}",
@@ -241,7 +194,7 @@ fn an_idle_cellview_manager_projects_nothing() {
         .expect("the library is there")
         .add_view("amp", store(&definition))
         .expect("the cell is there");
-    let next = app_frame(&ctx, &mut app);
+    let next = app_frame(&ctx, &mut app, Vec::new());
     assert!(
         painted(&next).contains("Form revision r4"),
         "{}",
@@ -285,7 +238,7 @@ fn an_idle_configuration_page_resolves_and_walks_nothing() {
     let ctx = offscreen();
     take(&CONFIGURATION_SCANS);
 
-    app_frame(&ctx, &mut app);
+    app_frame(&ctx, &mut app, Vec::new());
     let builds = app.state.project.configuration.resolution_builds();
     assert!(take(&CONFIGURATION_SCANS) > 0);
     idle(&ctx, &mut app);
@@ -303,7 +256,7 @@ fn an_idle_configuration_page_resolves_and_walks_nothing() {
         .project
         .configuration
         .edit(&catalog, id, |definition| retire(definition, 200));
-    let next = app_frame(&ctx, &mut app);
+    let next = app_frame(&ctx, &mut app, Vec::new());
     assert_eq!(
         app.state.project.configuration.resolution_builds(),
         builds + 1
