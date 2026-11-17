@@ -1757,21 +1757,31 @@ impl SimulationController {
         }
     }
 
-    fn changed_lines_against_baseline(
-        current: &str,
-        baseline: &str,
-    ) -> std::collections::HashSet<usize> {
-        let current_lines: Vec<&str> = current.lines().collect();
-        let baseline_lines: Vec<&str> = baseline.lines().collect();
-        let max_len = current_lines.len().max(baseline_lines.len());
-        let mut changed = std::collections::HashSet::new();
-
-        for idx in 0..max_len {
-            if current_lines.get(idx) != baseline_lines.get(idx) {
-                changed.insert(idx);
+    /// The lines of `current` that differ from `baseline`, the deck a run
+    /// executed, by a line diff: inserting a line marks that line, not every
+    /// line after it. Where lines were deleted, the line now standing in
+    /// their place is marked, so a deletion still shows.
+    pub fn changed_lines_against_baseline(current: &str, baseline: &str) -> HashSet<usize> {
+        let current_lines = current.lines().collect::<Vec<_>>();
+        let baseline_lines = baseline.lines().collect::<Vec<_>>();
+        let last = current_lines.len().checked_sub(1);
+        let mut changed = HashSet::new();
+        for op in
+            similar::capture_diff_slices(similar::Algorithm::Myers, &baseline_lines, &current_lines)
+        {
+            match op {
+                similar::DiffOp::Equal { .. } => {}
+                similar::DiffOp::Delete { new_index, .. } => {
+                    changed.extend(last.map(|last| new_index.min(last)));
+                }
+                similar::DiffOp::Insert {
+                    new_index, new_len, ..
+                }
+                | similar::DiffOp::Replace {
+                    new_index, new_len, ..
+                } => changed.extend(new_index..new_index + new_len),
             }
         }
-
         changed
     }
 

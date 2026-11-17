@@ -1526,6 +1526,26 @@ fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
 }
 
 #[test]
+fn a_line_inserted_while_the_deck_ran_marks_that_line_alone() {
+    let mut state = RunTestHost::default();
+    let mut controller = SimulationController::new();
+    state.model.simulation.source.netlist_content =
+        "deck\n.op\nC1 out 0 1n\nR1 out 0 1k\nR2 out 0 2k\n.end\n".to_string();
+    let run_id = state.model.simulation.start_run().id;
+    bind_test_run_running(&mut state, &mut controller, run_id);
+    state.runs.manual_run.pending_manual_run_id = Some(run_id);
+    state.runs.manual_run.pending_run_buffer =
+        Some("deck\n.op\nR1 out 0 1k\nR2 out 0 2k\n.end\n".to_string());
+
+    controller.finish_simulation_batch(&mut state);
+
+    assert_eq!(
+        state.runs.manual_run.edited_lines,
+        std::collections::HashSet::from([2])
+    );
+}
+
+#[test]
 fn ui_progress_fraction_uses_runner_fraction_or_running_floor() {
     assert!((SimulationController::ui_progress_fraction(Some(0.42), true) - 0.42).abs() < 1e-6);
     assert_eq!(SimulationController::ui_progress_fraction(None, true), 0.08);

@@ -5454,6 +5454,7 @@ dependencies = [
  "rspice-vocabulary",
  "serde_json",
  "sha2 0.10.9",
+ "similar",
  "uuid",
  "web-sys",
 ]
