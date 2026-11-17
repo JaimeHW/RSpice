@@ -18,6 +18,8 @@ struct Finger {
     time: f64,
     /// What the last frame named for a screen reader, and where.
     named: Vec<(String, Rect)>,
+    /// A modal dialog is open over the canvas, shown before the strip.
+    modal: bool,
 }
 
 impl Finger {
@@ -46,6 +48,7 @@ impl Finger {
             size,
             time: 0.0,
             named: Vec::new(),
+            modal: false,
         };
         finger.frame(Vec::new());
         finger
@@ -77,6 +80,7 @@ impl Finger {
             size,
             time,
             named,
+            modal,
         } = self;
         let output = ctx.run_ui(
             RawInput {
@@ -94,6 +98,10 @@ impl Finger {
                     &mut app.state.canvas_frame(),
                     None,
                 );
+                if *modal {
+                    egui::Modal::new(egui::Id::new("dialog-over-the-strip"))
+                        .show(ui.ctx(), |ui| ui.label("A dialog"));
+                }
                 show(&ui.ctx().clone(), &mut strip_cx(app), *canvas);
                 app.after_contribution();
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
@@ -330,6 +338,27 @@ fn the_strip_buttons_run_the_canvas_commands() {
     assert!(
         finger.app.state.model.schematic.session.editor.zoom < 6.0,
         "Fit frames the sheet"
+    );
+}
+
+/// A modal dialog stays over the strip even when the strip shows after it,
+/// as it does on the first touch after a restore: a press where a strip
+/// button is goes to the dialog, and the canvas is left alone.
+#[test]
+fn a_modal_dialog_stays_over_the_strip() {
+    let mut finger = Finger::new(Vec2::new(820.0, 1180.0));
+    finger.modal = true;
+    finger.frame(Vec::new());
+    finger.wake();
+    let fit = finger
+        .find("Fit drawing sheet")
+        .expect("a touch shows the strip under the dialog");
+    finger.app.state.model.schematic.session.editor.zoom = 6.0;
+    finger.frame(Vec::new());
+    finger.tap(fit.center());
+    assert_eq!(
+        finger.app.state.model.schematic.session.editor.zoom, 6.0,
+        "the press went to the dialog, not to Fit"
     );
 }
 

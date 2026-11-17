@@ -248,8 +248,11 @@ pub fn show(
     let t = Tokens::get(ctx);
     let mut latches = touch_latches(ctx);
     let mut pending_request = None;
+    // Over the canvas with its breadcrumb, under every modal: a strip on the
+    // modals' own order was painted over a dialog whenever it was shown
+    // after it, as on the first frame after a restore.
     let area = egui::Area::new(Id::new("workbench.design.mobile-canvas-controls"))
-        .order(Order::Foreground)
+        .order(Order::Middle)
         .fixed_pos(rect.min)
         // `strip_rect` already keeps the strip inside the canvas. egui's own
         // constraint would clamp the first frame against a guessed size and
