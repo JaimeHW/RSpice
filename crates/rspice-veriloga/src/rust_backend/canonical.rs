@@ -556,6 +556,9 @@ fn kernel_region_metrics(
                 write!(out, "digital-delay-ticks:{input:?}:{signed}")
             }
             CfgValueKind::DigitalTime { query } => write!(out, "digital-time:{query:?}"),
+            CfgValueKind::DigitalDriverQuery { query, port, .. } => {
+                write!(out, "digital-driver-query:{query:?}:{}", usize::from(*port))
+            }
             CfgValueKind::DigitalAnalogVariable { probe, array_index } => {
                 write!(out, "digital-analog-variable:{probe}:{array_index:?}")
             }

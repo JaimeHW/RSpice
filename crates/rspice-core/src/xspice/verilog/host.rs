@@ -651,6 +651,14 @@ impl DigitalEnvironment for HostEnvironment<'_> {
     fn read_clock(&self) -> Option<rspice_veriloga::canonical_ir::DigitalClock> {
         self.store.read_clock()
     }
+    fn driver_query(
+        &self,
+        port: DigitalSignalId,
+        query: rspice_veriloga::canonical_ir::DigitalDriverQuery,
+        index: Option<u64>,
+    ) -> Result<FourStateValue, String> {
+        self.store.driver_query(port, query, index)
+    }
     fn read_signal(&self, signal: DigitalSignalId) -> Option<FourStateValue> {
         self.store.read_signal(signal)
     }
@@ -917,6 +925,22 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::Compile { detail })
     }
 
+    /// Give the connect modules whose signals are `owned` their drivers'
+    /// view; see `DigitalSignalStore::enable_driver_access`.
+    pub(crate) fn enable_driver_access(
+        &mut self,
+        owned: &[DigitalSignalId],
+    ) -> Result<(), DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
+        self.store
+            .enable_driver_access(owned)
+            .map_err(|detail| DigitalRunError::Compile { detail })
+    }
+
     /// Segregate the connected nets a bidirectional connect module's digital
     /// port joins: `members` are that port's bits.
     #[doc(hidden)]
@@ -1111,6 +1135,14 @@ impl DigitalHost {
     #[doc(hidden)]
     pub fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
+        if let Some(port) = self.store.unwatched_driver_update() {
+            return Err(DigitalRunError::Compile {
+                detail: format!(
+                    "`driver_update` on port `{port}` has no net to watch: the connect module \
+                     reads the drivers of a mixed net, and its port joins none"
+                ),
+            });
+        }
         if self.checks.is_some() {
             for warning in checks::TimingChecks::start_warnings(&self.plan) {
                 self.effects.warn_unsited(None, &warning);

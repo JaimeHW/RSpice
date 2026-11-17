@@ -1929,6 +1929,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
             | CfgValueKind::DigitalSignalRead { .. }
         | CfgValueKind::DigitalRealSignalRead { .. }
         | CfgValueKind::DigitalTime { .. }
+        | CfgValueKind::DigitalDriverQuery { .. }
             | CfgValueKind::DigitalDelayTicks { .. }
         | CfgValueKind::DigitalRepeatCount { .. }
         // A probe of a continuous net is `Newton` for a stronger reason than

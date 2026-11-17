@@ -39,6 +39,10 @@ pub struct AnalyzedDigital {
     /// outside a library binding.
     pub(crate) definition: Option<crate::ast::ModuleBinding>,
     pub analog_events: Vec<super::AnalogEventBinding>,
+    /// A connect module's `driver_update` subscriptions: each port a process
+    /// waits on that way, with the counter signal the wait was lowered onto
+    /// and the first term that waits on it.
+    pub driver_updates: Vec<(SmolStr, SmolStr, Span)>,
     pub event_assigned_variables: Vec<SmolStr>,
     pub immutable_analog_variables: Vec<SmolStr>,
     pub time_scale: crate::time_scale::ModuleTimeScale,
@@ -952,6 +956,7 @@ impl SemanticAnalyzer {
         }
         analyzed.digital = AnalyzedDigital {
             analog_events: Vec::new(),
+            driver_updates: Vec::new(),
             event_assigned_variables: Vec::new(),
             immutable_analog_variables: Vec::new(),
             time_scale: module.time_scale,
@@ -3526,6 +3531,65 @@ impl SemanticAnalyzer {
     // Expressions
     // ------------------------------------------------------------------
 
+    /// A connect module's driver access function (Verilog-AMS LRM 2.4
+    /// sections 9.22 and 9.23): called from a connect module, on a scalar
+    /// discrete port of it, with a driver index after the port unless it is
+    /// `$driver_count`.
+    fn check_driver_query(
+        &mut self,
+        function: &crate::ast::SystemFunction,
+        query: crate::canonical_ir::DigitalDriverQuery,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        let name = query.name();
+        if !self.in_connect_module {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{name}` (Verilog-AMS LRM 2.4 section 9.22) reads the drivers of a connect \
+                     module's port, and only a connect module can call it"
+                )),
+                function.span,
+            );
+            return;
+        }
+        let arity = if query.takes_index() { 2 } else { 1 };
+        if function.args.len() != arity {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(if query.takes_index() {
+                    format!("`{name}` takes a port of its connect module and a driver index")
+                } else {
+                    format!("`{name}` takes one port of its connect module")
+                }),
+                function.span,
+            );
+            return;
+        }
+        let scalar_port = match &function.args[0] {
+            Expression::Identifier(port) => {
+                self.symbols
+                    .lookup(&port.name)
+                    .is_some_and(|symbol| symbol.kind == SymbolKind::Port)
+                    && index
+                        .get(&port.name)
+                        .and_then(|&slot| signals.get(slot))
+                        .is_some_and(|signal| signal.width == 1 && !signal.class.is_real())
+            }
+            _ => false,
+        };
+        if !scalar_port {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{name}` names a scalar discrete port of its connect module"
+                )),
+                function.args[0].span(),
+            );
+        }
+        if let Some(driver) = function.args.get(1) {
+            self.check_digital_expression(driver, signals, index);
+        }
+    }
+
     /// Resolve every identifier a discrete-domain expression reads, and refuse
     /// the continuous-domain forms that cannot appear in one.
     pub(super) fn check_digital_expression(
@@ -3717,6 +3781,29 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::SystemFunction(function) => {
+                if let Some(query) =
+                    crate::canonical_ir::DigitalDriverQuery::from_name(&function.name)
+                {
+                    self.check_driver_query(function, query, signals, index);
+                    return;
+                }
+                if let Some(section) = match function.name.as_str() {
+                    "$driver_delay" => Some("9.23.1"),
+                    "$driver_next_state" => Some("9.23.2"),
+                    "$driver_next_strength" => Some("9.23.3"),
+                    _ => None,
+                } {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "`{}` (Verilog-AMS LRM 2.4 section {section}) reads a driver's \
+                             pending transaction, which RSpice does not expose to a connect \
+                             module yet",
+                            function.name
+                        )),
+                        function.span,
+                    );
+                    return;
+                }
                 if crate::canonical_ir::DigitalTimeQuery::from_name(&function.name).is_some() {
                     if !function.args.is_empty() {
                         self.record_error_at(

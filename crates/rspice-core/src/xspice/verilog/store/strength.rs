@@ -62,6 +62,28 @@ impl StrengthBit {
         }
     }
 
+    /// The range's two ends on the section 7.10 scale, `Su0` at -7 through
+    /// `HiZ` at 0 to `Su1` at 7, the weaker-0 end first.
+    pub(crate) const fn ends(self) -> (i8, i8) {
+        (self.lo, self.hi)
+    }
+
+    /// The strength `$driver_strength` reports for the bit (Verilog-AMS LRM
+    /// 2.4 section 9.22.3, Figure 9-3): strength0 in bits 5-3 and strength1
+    /// in bits 2-0, each a level from 0 (`HiZ`) to 7 (`Su`). A 0 or a 1
+    /// reports its range's strong end as strength0 and its weak end as
+    /// strength1; an `x` reports its 0 side as strength0 and its 1 side as
+    /// strength1.
+    pub(crate) const fn driver_strength_code(self) -> u64 {
+        let (zero, one) = match self.value() {
+            FourStateBit::HighImpedance => (0, 0),
+            FourStateBit::Zero => (self.lo.unsigned_abs(), self.hi.unsigned_abs()),
+            FourStateBit::One => (self.hi.unsigned_abs(), self.lo.unsigned_abs()),
+            FourStateBit::Unknown => (self.lo.unsigned_abs(), self.hi.unsigned_abs()),
+        };
+        ((zero as u64) << 3) | one as u64
+    }
+
     /// A strong drive of `bit`: what a net without strengths carries.
     pub(crate) const fn strong(bit: FourStateBit) -> Self {
         Self::driven(bit, DigitalDriveStrength::STRONG)

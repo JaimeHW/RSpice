@@ -529,6 +529,11 @@ pub struct SemanticAnalyzer {
     /// Ports that declare nothing and only join discrete ports below them,
     /// by module; see [`interconnect`].
     implicit_discrete_ports: HashMap<SmolStr, HashSet<SmolStr>>,
+    /// The connect modules the source defines: only their processes may use
+    /// the driver access functions (Verilog-AMS LRM 2.4 section 9.22).
+    connect_modules: HashSet<SmolStr>,
+    /// Whether the module under analysis is one of `connect_modules`.
+    in_connect_module: bool,
     /// Analog reads of discrete signals so far (`AnalyzedModule::discrete_reads`).
     discrete_reads: Vec<(SmolStr, Span)>,
     discrete_projection: discrete_projection::ProjectionBuilder,
@@ -633,6 +638,8 @@ impl SemanticAnalyzer {
             arrays: HashMap::new(),
             discrete_validity: HashMap::new(),
             implicit_discrete_ports: HashMap::new(),
+            connect_modules: HashSet::new(),
+            in_connect_module: false,
             discrete_reads: Vec::new(),
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
@@ -720,6 +727,14 @@ impl SemanticAnalyzer {
         self.warnings.clear();
         self.implicit_discrete_ports =
             interconnect::implicitly_discrete_ports(source, &self.disciplines);
+        self.connect_modules = source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::ConnectModule(module) => Some(module.name.clone()),
+                _ => None,
+            })
+            .collect();
 
         // Second pass: analyze modules in declaration order while applying
         // the file-scoped default-transition and default-discipline settings.
@@ -1168,6 +1183,7 @@ impl SemanticAnalyzer {
         let substituted = string_parameters::substituted(module)?;
         let module = substituted.as_ref().unwrap_or(module);
         let original_source = module;
+        self.in_connect_module = self.connect_modules.contains(&module.name);
         let (expanded, mut physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
         for (name, reference) in &module.foreign_physical {
             if matches!(reference.kind, ForeignPhysicalKind::Node { is_port: true }) {
@@ -1182,7 +1198,7 @@ impl SemanticAnalyzer {
         let module = expanded.as_ref();
         let event_lowering = module
             .has_digital_content()
-            .then(|| analog_events::lower(module))
+            .then(|| analog_events::lower(module, self.connect_modules.contains(&module.name)))
             .transpose()?;
         self.assignment_events = analog_events::AssignmentEvents::new(event_lowering.as_ref());
         let module = event_lowering
@@ -2389,6 +2405,7 @@ impl SemanticAnalyzer {
         self.analyze_digital(module, &mut analyzed);
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
+            analyzed.digital.driver_updates = lowered.driver_updates.clone();
             for (process, inputs) in analyzed
                 .digital
                 .processes

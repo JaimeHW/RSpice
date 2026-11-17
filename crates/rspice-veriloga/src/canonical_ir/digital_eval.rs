@@ -188,6 +188,29 @@ pub trait DigitalEnvironment {
     /// the plan's probe table exists to make impossible.
     fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64>;
 
+    /// A connect module's driver access function (Verilog-AMS LRM 2.4 section
+    /// 9.22) over the drivers of the net `port` joins: the count, or driver
+    /// `index`'s state, strength or type, at the query's
+    /// [`bit_width`](super::digital::DigitalDriverQuery::bit_width). `index`
+    /// is `None` when the call's index is `x`, `z`, a negative literal
+    /// `integer` value or real.
+    ///
+    /// An error is a question the host cannot answer, such as an index past
+    /// the last driver, and the interpreter refuses with it rather than
+    /// answering a value no driver has.
+    fn driver_query(
+        &self,
+        _port: DigitalSignalId,
+        query: super::digital::DigitalDriverQuery,
+        _index: Option<u64>,
+    ) -> Result<FourStateValue, String> {
+        Err(format!(
+            "{} needs the drivers of the net its connect module's port joins, and this host \
+             keeps no driver table",
+            query.name()
+        ))
+    }
+
     /// Sample the current supplied by the analog solver for this flow probe.
     /// Environments without current bindings explicitly report unavailable.
     fn read_analog_flow(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
@@ -858,6 +881,12 @@ pub enum DigitalEvalError {
     },
     /// The host did not publish an activation clock, or its time is invalid.
     ClockUnavailable,
+    /// A connect module's driver access function could not be answered: the
+    /// host keeps no driver table for the port, or the index names no driver.
+    DriverAccess {
+        value: ValueId,
+        detail: String,
+    },
     InvalidClock,
     /// The caller paired a process with a different containing plan.
     ProcessNotInPlan(DigitalProcessId),
@@ -1014,6 +1043,7 @@ impl std::fmt::Display for DigitalEvalError {
             Self::InvalidPackedUpdate(value) => write!(f, "invalid packed update at value {value}"),
             Self::UnsealedPlan => write!(f, "digital plan has no compiled content identity"),
             Self::ClockUnavailable => write!(f, "digital process activation has no clock"),
+            Self::DriverAccess { detail, .. } => write!(f, "{detail}"),
             Self::InvalidClock => write!(
                 f,
                 "digital process activation has an invalid clock or time scale"
@@ -3250,6 +3280,38 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     64,
                     ticks as u64,
                 )))
+            }
+            CfgValueKind::DigitalDriverQuery { query, port, index } => {
+                let index = if query.takes_index() {
+                    match self.scalar(*index)? {
+                        ScalarRef::Integer(value) => u64::try_from(value).ok(),
+                        // A negative `integer` reads as a large index, past
+                        // every driver.
+                        ScalarRef::FourState(value) => value.to_u64(),
+                        ScalarRef::Real(_) => None,
+                        ScalarRef::Effect => {
+                            return Err(DigitalEvalError::EffectValueRead(*index));
+                        }
+                    }
+                } else {
+                    Some(0)
+                };
+                let value = self
+                    .environment
+                    .driver_query(*port, *query, index)
+                    .map_err(|detail| DigitalEvalError::DriverAccess { value: id, detail })?;
+                if value.width() != query.bit_width() {
+                    return Err(DigitalEvalError::DriverAccess {
+                        value: id,
+                        detail: format!(
+                            "{} answered {} bits where it returns {}",
+                            query.name(),
+                            value.width(),
+                            query.bit_width()
+                        ),
+                    });
+                }
+                Ok(DigitalScalar::FourState(value))
             }
             CfgValueKind::DigitalTime { query } => {
                 use super::digital::DigitalTimeQuery;

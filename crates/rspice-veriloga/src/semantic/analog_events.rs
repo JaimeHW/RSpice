@@ -23,11 +23,18 @@ pub struct AnalogEventBinding {
 pub(super) struct LoweredAnalogEvents {
     pub module: Module,
     pub bindings: Vec<AnalogEventBinding>,
+    /// A connect module's `driver_update` waits: each port, the counter the
+    /// waits on it were lowered onto, and the first such wait.
+    pub driver_updates: Vec<(SmolStr, SmolStr, Span)>,
     pub candidates: BTreeSet<SmolStr>,
     pub local_inputs: Vec<HashMap<Span, SmolStr>>,
 }
 
-pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
+/// `connect_module` admits a `driver_update` wait (Verilog-AMS LRM 2.4
+/// section 9.22.4), which only a connect module may use; it is lowered onto
+/// a private counter the host advances on every update of a driver of the
+/// port's net.
+pub(super) fn lower(source: &Module, connect_module: bool) -> CompileResult<LoweredAnalogEvents> {
     let mut module = source.clone();
     // Numeric declarations acquire digital ownership from their procedural
     // writers. Analog ownership/event classification is completed after function
@@ -84,6 +91,9 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         local_inputs: HashMap::new(),
         local_declarations: Vec::new(),
         bindings: Vec::new(),
+        connect_module,
+        ports: source.ports.iter().map(|port| port.name.clone()).collect(),
+        driver_updates: Vec::new(),
         functions: Vec::new(),
         observers: Vec::new(),
         variable_events: BTreeMap::new(),
@@ -119,10 +129,29 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
     {
         lower.continuous_reads(value);
     }
+    for (_, counter, span) in &lower.driver_updates {
+        module.digital_variables.push(DigitalVariableDecl {
+            kind: DigitalVariableKind::Reg,
+            signedness: Signedness::Unsigned,
+            range: Some(VectorRange {
+                msb: number(31, *span),
+                lsb: number(0, *span),
+                span: *span,
+            }),
+            items: vec![DigitalDeclItem {
+                name: counter.clone(),
+                dimensions: Vec::new(),
+                init: Some(number(0, *span)),
+                span: *span,
+            }],
+            span: *span,
+        });
+    }
     if lower.bindings.is_empty() {
         return Ok(LoweredAnalogEvents {
             module,
             bindings: Vec::new(),
+            driver_updates: lower.driver_updates,
             candidates: lower.candidates,
             local_inputs,
         });
@@ -207,6 +236,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
     Ok(LoweredAnalogEvents {
         module,
         bindings: lower.bindings,
+        driver_updates: lower.driver_updates,
         candidates: lower.candidates,
         local_inputs,
     })
@@ -227,6 +257,9 @@ struct Lower {
     local_declarations: Vec<DigitalVariableDecl>,
     names: BTreeSet<SmolStr>,
     bindings: Vec<AnalogEventBinding>,
+    connect_module: bool,
+    ports: BTreeSet<SmolStr>,
+    driver_updates: Vec<(SmolStr, SmolStr, Span)>,
     functions: Vec<(EventExpr, AnalogEventBinding)>,
     observers: Vec<([Expression; 5], AnalogEventBinding)>,
     variable_events: BTreeMap<SmolStr, AnalogEventBinding>,
@@ -234,6 +267,42 @@ struct Lower {
     arrays: BTreeMap<SmolStr, Vec<ArrayDimension>>,
 }
 impl Lower {
+    /// The counter a `driver_update` wait on `call`'s port is lowered onto,
+    /// one per port.
+    fn driver_update(&mut self, term: &EventTerm, call: &CallExpr) -> CompileResult<SmolStr> {
+        if !self.connect_module {
+            return invalid(
+                "`driver_update` (Verilog-AMS LRM 2.4 section 9.22.4) watches the drivers of a \
+                 connect module's port, and only a connect module can use it",
+                term.span,
+            );
+        }
+        if term.edge.is_some() {
+            return invalid(
+                "`driver_update` takes no posedge or negedge: every driver update is an event",
+                term.span,
+            );
+        }
+        let port = match call.args.as_slice() {
+            [Expression::Identifier(port)] if self.ports.contains(&port.name) => port.name.clone(),
+            _ => {
+                return invalid(
+                    "`driver_update` names one port of its connect module",
+                    term.span,
+                );
+            }
+        };
+        if let Some((_, counter, _)) = self.driver_updates.iter().find(|(name, ..)| *name == port) {
+            return Ok(counter.clone());
+        }
+        let mut counter: SmolStr = format!("$rspice$driver_update${port}").into();
+        while self.names.contains(&counter) {
+            counter = format!("{counter}$").into();
+        }
+        self.names.insert(counter.clone());
+        self.driver_updates.push((port, counter.clone(), term.span));
+        Ok(counter)
+    }
     fn binding(&mut self, span: Span, source_variable: Option<SmolStr>) -> AnalogEventBinding {
         let mut index = self.bindings.len();
         loop {
@@ -399,6 +468,13 @@ impl Lower {
             return Ok(());
         };
         for term in terms {
+            if let Expression::Call(call) = &term.signal
+                && call.name == "driver_update"
+            {
+                let counter = self.driver_update(term, call)?;
+                term.signal = identifier(&counter, term.span);
+                continue;
+            }
             if matches!(&term.signal, Expression::Call(call)
                 if matches!(call.name.as_str(), "absdelta" | "cross" | "above" | "timer"))
             {

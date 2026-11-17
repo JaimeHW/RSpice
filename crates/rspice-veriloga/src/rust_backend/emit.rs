@@ -2751,6 +2751,7 @@ impl<'a> Emitter<'a> {
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }
             | CfgValueKind::DigitalTime { .. }
+            | CfgValueKind::DigitalDriverQuery { .. }
             | CfgValueKind::DigitalDelayTicks { .. }
             | CfgValueKind::DigitalRepeatCount { .. }
             | CfgValueKind::DigitalAnalogPotential { .. }

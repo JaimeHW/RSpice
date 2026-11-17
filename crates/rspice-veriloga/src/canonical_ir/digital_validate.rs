@@ -563,6 +563,22 @@ impl CanonicalDigitalPlan {
                 return Err(error("analog read quantity does not match its target kind"));
             }
         }
+        for update in &self.driver_updates {
+            let counter = self.signal(update.counter).is_some_and(|signal| {
+                !signal.kind.is_real() && signal.width == 32 && signal.local.is_none()
+            });
+            if !counter
+                || !event_signals.insert(update.counter)
+                || self.drivers_of(update.counter).next().is_some()
+                || self
+                    .signal(update.port)
+                    .is_none_or(|signal| signal.kind.is_real() || signal.width != 1)
+            {
+                return Err(error(
+                    "driver_update requires an independent counter signal and a scalar discrete port",
+                ));
+            }
+        }
         for observer in &self.absdelta {
             observer.time_scale.validate().map_err(error)?;
             let valid = self.signal(observer.signal).is_some_and(|signal| {
@@ -976,6 +992,25 @@ impl CanonicalDigitalPlan {
                             if value.value_type != query.value_type() {
                                 return Err(error(
                                     "digital time query has the wrong value domain or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalDriverQuery { query, port, index } => {
+                            if value.value_type
+                                != (CfgValueType::FourState {
+                                    width: query.bit_width(),
+                                })
+                                || !matches!(
+                                    function.value(*index).value_type,
+                                    CfgValueType::FourState { .. } | CfgValueType::Integer
+                                )
+                                || self
+                                    .signal(*port)
+                                    .is_none_or(|signal| signal.kind.is_real())
+                            {
+                                return Err(error(
+                                    "driver access query has the wrong value domain or names no \
+                                     discrete signal",
                                 ));
                             }
                         }

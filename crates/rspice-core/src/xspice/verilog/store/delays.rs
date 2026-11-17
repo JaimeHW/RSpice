@@ -137,6 +137,12 @@ impl DigitalSignalStore {
         self.delays.net(signal).is_some() || self.delays.path(signal)
     }
 
+    /// Whether contribution `slot` is a delayed driver, whose new values
+    /// wait in the host's pending slot before they land.
+    pub(super) fn delayed_driver(&self, slot: usize) -> bool {
+        self.delays.driver(slot).is_some()
+    }
+
     /// Whether `signal` is a module path's destination, whose changes wait
     /// for the delay the host chooses.
     pub(crate) fn path_destination(&self, signal: DigitalSignalId) -> bool {

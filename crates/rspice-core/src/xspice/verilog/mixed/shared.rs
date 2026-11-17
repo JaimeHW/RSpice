@@ -721,6 +721,16 @@ impl MixedDigitalCoordinator {
             digital.connect_bits(&bit_groups)?;
             digital.segregate_bits(&converter_bits)?;
         }
+        // A connect module's driver access functions count every driver of
+        // its port's net but a connect module's own (LRM 2.4 section 9.22).
+        let connect_owned: Vec<_> = hosts
+            .iter()
+            .zip(&maps)
+            .zip(&port_signals)
+            .filter(|((host, _), _)| connect_modules.contains(&host.instance))
+            .flat_map(|((_, map), signals)| map.signals.iter().chain(signals).copied())
+            .collect();
+        digital.enable_driver_access(&connect_owned)?;
         for (host, view) in hosts.iter_mut().zip(views) {
             if !event_nodes.is_empty() {
                 host.strip_event_boundaries(event_nodes);

@@ -1946,6 +1946,28 @@ impl Parser<'_> {
             }
             _ => None,
         };
+        // Verilog-AMS LRM 2.4 section 9.22.4 spells `driver_update clock` with
+        // no parentheses; the parenthesized form is already a call. Both
+        // reach the analyzer as a call of `driver_update`.
+        if edge.is_none()
+            && self.check(TokenKind::Identifier)
+            && self.current().text.as_deref() == Some("driver_update")
+            && !self.peek_is(TokenKind::LParen)
+        {
+            self.advance();
+            let operand = self.parse_expression()?;
+            let span = start.extend(self.previous_span());
+            return Ok(EventTerm {
+                edge,
+                signal: Expression::Call(CallExpr {
+                    resolved_builtin: false,
+                    name: "driver_update".into(),
+                    args: vec![operand],
+                    span,
+                }),
+                span,
+            });
+        }
         let signal = self.parse_expression()?;
         Ok(EventTerm {
             edge,

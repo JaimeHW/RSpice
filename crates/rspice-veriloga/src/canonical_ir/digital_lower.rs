@@ -1450,6 +1450,34 @@ fn lower_with_analog_variables(
             instance.time_scale,
         );
     }
+    // A connect module's `driver_update` counters start at 0; the host
+    // counts every driver update of the port's net from there.
+    let mut driver_updates = Vec::new();
+    for (port, counter, span) in &digital.driver_updates {
+        let (Some(&port), Some(&counter)) = (
+            module_scope.get(port.as_str()),
+            module_scope.get(counter.as_str()),
+        ) else {
+            diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                "driver_update has no port or counter signal",
+                (*span).into(),
+            ));
+            continue;
+        };
+        let scalar = &signals[usize::from(port)];
+        if scalar.width != 1 || scalar.kind.is_real() {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal_with_kind(
+                DigitalRefusalKind::InvalidExpression,
+                "`driver_update` names a scalar discrete port of its connect module",
+                (*span).into(),
+            ));
+            continue;
+        }
+        signals[usize::from(counter)].initial_value = Some(
+            super::digital::DigitalInitialValue::FourState(FourStateValue::from_u64(32, 0)),
+        );
+        driver_updates.push(super::digital::DigitalDriverUpdate { port, counter });
+    }
     diagnostics.extend(reject_overdriven_real_nets(&signals, &drivers));
     // IEEE 1364-2005 section 4.6.2: a `uwire` admits one driver per bit, so
     // two drivers of different bits are legal.
@@ -1655,6 +1683,7 @@ fn lower_with_analog_variables(
         drivers,
         analog_probes: probes,
         absdelta,
+        driver_updates,
         scopes: calls.scopes,
         system_calls: calls.sites,
         observers: calls.observers,
@@ -6197,6 +6226,47 @@ impl ProcessLowerer<'_> {
                 unreachable!("operators use the iterative expression lowerer")
             }
             Expression::SystemFunction(function)
+                if super::digital::DigitalDriverQuery::from_name(&function.name).is_some() =>
+            {
+                let query = super::digital::DigitalDriverQuery::from_name(&function.name).unwrap();
+                if self.constant_expression {
+                    self.error(
+                        "a driver access function is not a constant expression",
+                        function.span,
+                    );
+                    return self.unknown(query.bit_width());
+                }
+                // The analyzer admitted only a scalar discrete port of this
+                // connect module as the first operand.
+                let Some(port) = function
+                    .args
+                    .first()
+                    .and_then(signal_name)
+                    .and_then(|name| self.index.get(name).copied())
+                else {
+                    self.error(
+                        "a driver access function names a port of its connect module",
+                        function.span,
+                    );
+                    return self.unknown(query.bit_width());
+                };
+                let index = match function.args.get(1).filter(|_| query.takes_index()) {
+                    Some(index) => self.expression(block, index),
+                    None => self.builder.push(
+                        block,
+                        CfgValueType::FourState { width: 32 },
+                        CfgValueKind::FourStateConstant(FourStateValue::from_u64(32, 0)),
+                    ),
+                };
+                self.builder.push(
+                    block,
+                    CfgValueType::FourState {
+                        width: query.bit_width(),
+                    },
+                    CfgValueKind::DigitalDriverQuery { query, port, index },
+                )
+            }
+            Expression::SystemFunction(function)
                 if super::digital::DigitalTimeQuery::from_name(&function.name).is_some() =>
             {
                 if self.constant_expression {
@@ -6333,6 +6403,12 @@ impl ProcessLowerer<'_> {
             // Rules (g) and (h).
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
             | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => false,
+            // A driver access function's count, strength and type are
+            // `integer`s (Verilog-AMS LRM 2.4 section 9.22).
+            Expression::SystemFunction(function) => {
+                super::digital::DigitalDriverQuery::from_name(&function.name)
+                    .is_some_and(super::digital::DigitalDriverQuery::signed)
+            }
             _ => false,
         }
     }
@@ -6420,6 +6496,10 @@ impl ProcessLowerer<'_> {
             Expression::SystemFunction(function) => {
                 super::digital::DigitalTimeQuery::from_name(&function.name)
                     .and_then(|query| query.bit_width())
+                    .or_else(|| {
+                        super::digital::DigitalDriverQuery::from_name(&function.name)
+                            .map(super::digital::DigitalDriverQuery::bit_width)
+                    })
                     .unwrap_or(1)
             }
             _ => 1,

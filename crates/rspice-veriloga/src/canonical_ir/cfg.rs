@@ -954,6 +954,15 @@ pub enum CfgValueKind {
     DigitalTime {
         query: super::digital::DigitalTimeQuery,
     },
+    /// A connect module's driver access function over the drivers of the net
+    /// its port `port` joins (Verilog-AMS LRM 2.4 section 9.22), pinned to
+    /// the process block like a clock read. `index` names the driver; it is a
+    /// constant 0 for `$driver_count`, which names none.
+    DigitalDriverQuery {
+        query: super::digital::DigitalDriverQuery,
+        port: DigitalSignalId,
+        index: ValueId,
+    },
     /// Normalize a repeat count: X/Z and signed nonpositive values become zero.
     /// Integral operands retain their width; real operands convert to integer.
     DigitalRepeatCount {
@@ -1499,6 +1508,7 @@ impl CfgValueKind {
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
             | Self::DigitalTime { .. }
+            | Self::DigitalDriverQuery { .. }
             | Self::DigitalDelayTicks { .. }
             | Self::DigitalRepeatCount { .. }
             | Self::DigitalAnalogPotential { .. }
@@ -1621,6 +1631,7 @@ impl CfgValueKind {
             Self::AnalogTask(task) => task.expressions().copied().collect(),
             Self::AnalogTaskGuard(value) => vec![*value],
             Self::DigitalRepeatCount { input, .. }
+            | Self::DigitalDriverQuery { index: input, .. }
             | Self::DigitalDelayTicks { input, .. }
             | Self::Unary { input, .. }
             | Self::Ddt { input, .. }
@@ -1935,6 +1946,7 @@ impl CfgValueKind {
                 }
             }
             Self::DigitalRepeatCount { input, .. }
+            | Self::DigitalDriverQuery { index: input, .. }
             | Self::DigitalDelayTicks { input, .. }
             | Self::Unary { input, .. }
             | Self::Ddt { input, .. }

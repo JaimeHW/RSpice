@@ -1739,6 +1739,14 @@ impl DigitalEnvironment for DigitalSignalStore {
     fn read_clock(&self) -> Option<DigitalClock> {
         self.activation_clock
     }
+    fn driver_query(
+        &self,
+        port: DigitalSignalId,
+        query: rspice_veriloga::canonical_ir::DigitalDriverQuery,
+        index: Option<u64>,
+    ) -> Result<FourStateValue, String> {
+        self.connected_driver_query(port, query, index)
+    }
     fn read_signal(&self, signal: DigitalSignalId) -> Option<FourStateValue> {
         self.values.get(usize::from(signal)).cloned()
     }

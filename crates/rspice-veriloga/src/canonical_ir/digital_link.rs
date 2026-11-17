@@ -523,6 +523,13 @@ pub fn link_digital_plans(
                     name: format!("{}.{}", layout.instance.name, alias.name).into(),
                 });
         }
+        for update in &source.driver_updates {
+            plan.driver_updates
+                .push(super::digital::DigitalDriverUpdate {
+                    port: layout.map.signals[usize::from(update.port)],
+                    counter: layout.map.signals[usize::from(update.counter)],
+                });
+        }
         for observer in &source.absdelta {
             let mut observer = observer.clone();
             observer.signal = layout.map.signals[usize::from(observer.signal)];
@@ -1118,6 +1125,7 @@ fn relocate_value(
             }
         }
         CfgValueKind::DigitalPackedBlockingWrite { signal, .. }
+        | CfgValueKind::DigitalDriverQuery { port: signal, .. }
         | CfgValueKind::DigitalSignalRead { signal }
         | CfgValueKind::DigitalRealSignalRead { signal } => {
             *signal = map.signals[usize::from(*signal)];

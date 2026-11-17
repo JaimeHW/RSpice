@@ -40,6 +40,10 @@ struct BitNet {
     /// The net's driver-receiver segregation, when a bidirectional connect
     /// module joins it.
     segregation: Option<Segregation>,
+    /// The `driver_update` counters of the connect module ports on the net
+    /// (Verilog-AMS LRM 2.4 section 9.22.4), each advanced whenever one of
+    /// the net's drivers takes a new value.
+    driver_counters: Vec<DigitalSignalId>,
 }
 
 /// Driver-receiver segregation on a net a bidirectional connect module
@@ -61,6 +65,16 @@ struct Segregation {
     /// The external drivers that are a built-in bidirectional converter's
     /// A/D half.
     converter_externals: Vec<usize>,
+}
+
+/// Whether `signal` is a connect module's, whose drivers the driver access
+/// functions do not count (Verilog-AMS LRM 2.4 section 9.22).
+fn connect_owned(topology: &BitTopology, signal: DigitalSignalId) -> bool {
+    topology
+        .connect_owned
+        .get(usize::from(signal))
+        .copied()
+        .unwrap_or(false)
 }
 
 impl Segregation {
@@ -95,6 +109,10 @@ struct BitTopology {
     other_driver_observers: Vec<bool>,
     observed: Vec<bool>,
     external_attached: bool,
+    /// The signals of connect modules, whose drivers the driver access
+    /// functions do not count (section 9.22); empty when no connect module
+    /// reads its drivers.
+    connect_owned: Vec<bool>,
 }
 
 pub(super) struct ConnectedBits {
@@ -104,6 +122,10 @@ pub(super) struct ConnectedBits {
     resolved: Vec<DigitalValue>,
     external_values: Vec<DigitalValue>,
     other_driver_values: Vec<DigitalValue>,
+    /// Each net's drivers as the driver access functions read them, at the
+    /// last resolution, for a net with `driver_update` counters; empty for
+    /// every other net.
+    driver_values: Vec<Vec<(i8, i8)>>,
     pending: Vec<Option<FourStateValue>>,
     touched: Vec<DigitalSignalId>,
 }
@@ -117,6 +139,7 @@ impl Clone for ConnectedBits {
             resolved,
             external_values,
             other_driver_values,
+            driver_values,
             pending,
             touched,
         } = self;
@@ -125,6 +148,7 @@ impl Clone for ConnectedBits {
             resolved: resolved.clone(),
             external_values: external_values.clone(),
             other_driver_values: other_driver_values.clone(),
+            driver_values: driver_values.clone(),
             pending: pending.clone(),
             touched: touched.clone(),
         }
@@ -136,6 +160,7 @@ impl Clone for ConnectedBits {
             resolved,
             external_values,
             other_driver_values,
+            driver_values,
             pending,
             touched,
         } = self;
@@ -144,6 +169,7 @@ impl Clone for ConnectedBits {
             resolved: source_resolved,
             external_values: source_external_values,
             other_driver_values: source_other_driver_values,
+            driver_values: source_driver_values,
             pending: source_pending,
             touched: source_touched,
         } = source;
@@ -151,6 +177,7 @@ impl Clone for ConnectedBits {
         resolved.clone_from(source_resolved);
         external_values.clone_from(source_external_values);
         other_driver_values.clone_from(source_other_driver_values);
+        driver_values.clone_from(source_driver_values);
         pending.clone_from(source_pending);
         touched.clone_from(source_touched);
     }
@@ -165,12 +192,14 @@ impl ConnectedBits {
             resolved,
             external_values,
             other_driver_values,
+            driver_values,
             pending,
             touched,
         } = self;
         *resolved == saved.resolved
             && *external_values == saved.external_values
             && *other_driver_values == saved.other_driver_values
+            && *driver_values == saved.driver_values
             && *pending == saved.pending
             && *touched == saved.touched
     }
@@ -184,6 +213,7 @@ impl ConnectedBits {
             resolved: self.resolved.clone(),
             external: self.external_values.clone(),
             other_drivers: self.other_driver_values.clone(),
+            driver_values: self.driver_values.clone(),
         })
     }
 
@@ -192,6 +222,7 @@ impl ConnectedBits {
             || image.resolved.len() != self.resolved.len()
             || image.external.len() != self.external_values.len()
             || image.other_drivers.len() != self.other_driver_values.len()
+            || image.driver_values.len() != self.driver_values.len()
         {
             return Err("bit checkpoint topology or dimensions differ".into());
         }
@@ -201,6 +232,7 @@ impl ConnectedBits {
         restored
             .other_driver_values
             .clone_from(&image.other_drivers);
+        restored.driver_values.clone_from(&image.driver_values);
         Ok(restored)
     }
 
@@ -209,6 +241,7 @@ impl ConnectedBits {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
             external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             other_driver_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
+            driver_values: vec![Vec::new(); topology.nets.len()],
             pending: vec![None; topology.by_signal.len()],
             touched: Vec::new(),
             topology,
@@ -235,6 +268,7 @@ pub(super) struct BitCheckpoint {
     resolved: Vec<DigitalValue>,
     external: Vec<DigitalValue>,
     other_drivers: Vec<DigitalValue>,
+    driver_values: Vec<Vec<(i8, i8)>>,
 }
 
 impl DigitalSignalStore {
@@ -315,6 +349,7 @@ impl DigitalSignalStore {
             other_driver_observers: Vec::new(),
             observed: vec![false; nets.len()],
             external_attached: false,
+            connect_owned: Vec::new(),
         };
         let mut components = std::collections::BTreeMap::new();
         for (group, members) in groups.into_iter().enumerate() {
@@ -326,6 +361,7 @@ impl DigitalSignalStore {
                     contributions: Vec::new(),
                     external_nets: Vec::new(),
                     segregation: None,
+                    driver_counters: Vec::new(),
                 });
                 index
             });
@@ -448,6 +484,224 @@ impl DigitalSignalStore {
             }
         }
         Ok(())
+    }
+
+    /// Give the connect modules whose signals are `owned` their drivers'
+    /// view (Verilog-AMS LRM 2.4 section 9.22): each `driver_update`
+    /// counter the plan declares watches the net its port joins, and the
+    /// driver access functions count every driver of that net but a connect
+    /// module's own. Runs after the external drivers are attached, if any,
+    /// and before any process executes.
+    pub(crate) fn enable_driver_access(&mut self, owned: &[DigitalSignalId]) -> Result<(), String> {
+        let Some(mut connected) = self.connected.take() else {
+            return match self.plan.driver_updates.first() {
+                None => Ok(()),
+                Some(update) => Err(format!(
+                    "`driver_update` watches the drivers of the net port `{}` joins, and it \
+                     joins none",
+                    super::signal_name(&self.plan, update.port)
+                )),
+            };
+        };
+        let watched = self.watch_driver_updates(&mut connected, owned);
+        self.connected = Some(connected);
+        watched
+    }
+
+    /// [`Self::enable_driver_access`] on the connected bits, taken out of
+    /// the store while their topology changes.
+    fn watch_driver_updates(
+        &self,
+        connected: &mut ConnectedBits,
+        owned: &[DigitalSignalId],
+    ) -> Result<(), String> {
+        let updates = &self.plan.driver_updates;
+        let topology = Arc::make_mut(&mut connected.topology);
+        topology.connect_owned = vec![false; self.values.len()];
+        for signal in owned {
+            if let Some(owned) = topology.connect_owned.get_mut(usize::from(*signal)) {
+                *owned = true;
+            }
+        }
+        for update in updates {
+            let member = DigitalBitConnection {
+                signal: update.port,
+                bit: 0,
+            };
+            let net = topology
+                .by_signal
+                .get(usize::from(update.port))
+                .into_iter()
+                .flatten()
+                .copied()
+                .find(|&index| topology.nets[index].members.contains(&member))
+                .ok_or_else(|| {
+                    format!(
+                        "`driver_update` watches the drivers of the net port `{}` joins, and it \
+                         joins none",
+                        super::signal_name(&self.plan, update.port)
+                    )
+                })?;
+            let watched = &topology.nets[net];
+            let delayed = watched.contributions.iter().any(|&(slot, _)| {
+                self.delayed_driver(slot) && !self.connect_owned_slot(topology, watched, slot)
+            }) || watched.members.iter().any(|member| {
+                !connect_owned(topology, member.signal) && self.delays_net(member.signal)
+            });
+            if delayed {
+                return Err(format!(
+                    "`driver_update` on port `{}` watches a net with a delayed driver: a \
+                     driver update is the moment a new value is scheduled on a driver \
+                     (Verilog-AMS LRM 2.4 section 9.22.4), ahead of the value itself, and \
+                     RSpice does not expose a driver's pending value to a connect module yet",
+                    super::signal_name(&self.plan, update.port)
+                ));
+            }
+            topology.nets[net].driver_counters.push(update.counter);
+        }
+        Ok(())
+    }
+
+    /// Whether a connect module makes contribution `slot` of `net`, which
+    /// the driver access functions do not count.
+    fn connect_owned_slot(&self, topology: &BitTopology, net: &BitNet, slot: usize) -> bool {
+        // A net's contributions are its members' (`connect_bits`).
+        net.members.iter().any(|member| {
+            let span = self.spans[usize::from(member.signal)];
+            connect_owned(topology, member.signal)
+                && (span.start..span.start + span.count).contains(&slot)
+        })
+    }
+
+    /// The drivers of connected net `net_index` the driver access functions
+    /// count (Verilog-AMS LRM 2.4 section 9.22): its contributions that no
+    /// connect module makes, in slot order; the pull a `tri0` or `tri1`
+    /// member's net type adds, the kernel's driver of section 9.23.4; then
+    /// its XSPICE drivers but a built-in converter's, in their order. A
+    /// contribution with no value yet is a driver at `HiZ`.
+    fn access_drivers(&self, connected: &ConnectedBits, net_index: usize) -> Vec<StrengthBit> {
+        let topology = &connected.topology;
+        let net = &topology.nets[net_index];
+        let owned_signal = |signal: DigitalSignalId| connect_owned(topology, signal);
+        let owned = |slot: usize| self.connect_owned_slot(topology, net, slot);
+        let converter = |slot: &usize| {
+            crate::xspice::is_auto_bridge_name(&topology.external_sources[*slot].1.instance)
+                || net
+                    .segregation
+                    .as_ref()
+                    .is_some_and(|segregation| segregation.converter_externals.contains(slot))
+        };
+        let mut drivers: Vec<StrengthBit> = net
+            .contributions
+            .iter()
+            .filter(|(slot, _)| !owned(*slot))
+            .map(|&(slot, offset)| match &self.contributions[slot].value {
+                ContributionValue::FourState(Some(value))
+                    if offset < value.width() - u32::from(self.slot_gate(slot).is_some()) =>
+                {
+                    self.contribution_bit(slot, value, offset)
+                }
+                _ => StrengthBit::HIGH_Z,
+            })
+            .collect();
+        let mut seen = None;
+        for member in &net.members {
+            if seen == Some(member.signal) {
+                continue;
+            }
+            seen = Some(member.signal);
+            if owned_signal(member.signal) {
+                continue;
+            }
+            if let NetResolution::Strength(Some(implicit)) =
+                self.strengths.nets[usize::from(member.signal)]
+            {
+                drivers.push(implicit);
+            }
+        }
+        drivers.extend(
+            topology.external_by_net[net_index]
+                .iter()
+                .filter(|slot| !converter(slot))
+                .map(|&slot| logic_map::hdl_strength(connected.external_values[slot])),
+        );
+        drivers
+    }
+
+    /// The port of the first `driver_update` that no net watches for, which
+    /// would never wake: a connect module not enrolled with the nets its
+    /// port joins.
+    pub(crate) fn unwatched_driver_update(&self) -> Option<String> {
+        let topology = self.connected.as_ref().map(|connected| &connected.topology);
+        self.plan
+            .driver_updates
+            .iter()
+            .find(|update| {
+                !topology.is_some_and(|topology| {
+                    topology
+                        .nets
+                        .iter()
+                        .any(|net| net.driver_counters.contains(&update.counter))
+                })
+            })
+            .map(|update| super::signal_name(&self.plan, update.port))
+    }
+
+    /// A connect module's driver access function on its port `port`
+    /// (Verilog-AMS LRM 2.4 section 9.22); see
+    /// [`DigitalEnvironment::driver_query`].
+    pub(super) fn connected_driver_query(
+        &self,
+        port: DigitalSignalId,
+        query: rspice_veriloga::canonical_ir::DigitalDriverQuery,
+        index: Option<u64>,
+    ) -> Result<FourStateValue, String> {
+        use rspice_veriloga::canonical_ir::DigitalDriverQuery as Query;
+        let name = query.name();
+        let port_name = super::signal_name(&self.plan, port);
+        let member = DigitalBitConnection {
+            signal: port,
+            bit: 0,
+        };
+        let net = self.connected.as_ref().and_then(|connected| {
+            connected
+                .topology
+                .by_signal
+                .get(usize::from(port))
+                .into_iter()
+                .flatten()
+                .copied()
+                .find(|&index| connected.topology.nets[index].members.contains(&member))
+                .map(|index| (connected, index))
+        });
+        let Some((connected, net)) = net else {
+            return Err(format!(
+                "`{name}` reads the drivers of the net port `{port_name}` joins, and it joins none"
+            ));
+        };
+        let drivers = self.access_drivers(connected, net);
+        if query == Query::Count {
+            return Ok(FourStateValue::from_u64(32, drivers.len() as u64));
+        }
+        let Some(driver) = index
+            .and_then(|index| usize::try_from(index).ok())
+            .and_then(|index| drivers.get(index))
+        else {
+            return Err(format!(
+                "`{name}({port_name}, {})` names no driver: the net `{port_name}` joins has {} \
+                 driver{}, numbered from 0 (Verilog-AMS LRM 2.4 section 9.22.1)",
+                index.map_or_else(|| "x".to_string(), |index| index.to_string()),
+                drivers.len(),
+                if drivers.len() == 1 { "" } else { "s" },
+            ));
+        };
+        Ok(match query {
+            Query::State => FourStateValue::from_bits_msb_first(&[driver.value()]),
+            Query::Strength => FourStateValue::from_u64(32, driver.driver_strength_code()),
+            // `DRIVER_UNKNOWN`: section 9.23.4's answer from a simulator that
+            // does not classify its drivers.
+            Query::Type | Query::Count => FourStateValue::from_u64(32, 0),
+        })
     }
 
     pub(crate) fn inherit_bit_connections(&mut self, source: &Self) {
@@ -573,6 +827,20 @@ impl DigitalSignalStore {
                     target.instance, target.port_name, target.driver_index
                 ));
             }
+        }
+        if let Some((_, target)) = drivers.iter().find(|(net, target)| {
+            !crate::xspice::is_auto_bridge_name(&target.instance)
+                && !connected.topology.nets[connected.topology.external_nets[*net]]
+                    .driver_counters
+                    .is_empty()
+        }) {
+            return Err(format!(
+                "`driver_update` watches a net the XSPICE code model `{}` drives: a driver \
+                 update is the moment a new value is scheduled on a driver (Verilog-AMS LRM \
+                 2.4 section 9.22.4), and an XSPICE driver's pending values are not visible \
+                 to the driver access functions",
+                target.instance
+            ));
         }
         let topology = Arc::make_mut(&mut connected.topology);
         topology.external_attached = true;
@@ -1014,6 +1282,20 @@ impl DigitalSignalStore {
                     self.connected_net_name(net)
                 ));
             }
+            if !net.driver_counters.is_empty()
+                && !connected.driver_values[index].is_empty()
+                && connected.driver_values[index]
+                    != self
+                        .access_drivers(connected, index)
+                        .into_iter()
+                        .map(StrengthBit::ends)
+                        .collect::<Vec<_>>()
+            {
+                return Err(format!(
+                    "the drivers of net {} differ from the ones its connect module last saw",
+                    self.connected_net_name(net)
+                ));
+            }
             for &slot in &connected.topology.external_by_net[index] {
                 let expected = if connected.topology.other_driver_observers[slot] {
                     self.observer_reading(connected, index, slot, reading)
@@ -1079,6 +1361,23 @@ impl DigitalSignalStore {
             connected
                 .edit(member.signal, &self.values[usize::from(member.signal)])
                 .set_bit(member.bit, hdl_bit(value));
+        }
+        // A driver that took a new value is a driver update (section
+        // 9.22.4), whether or not the net's value moved.
+        if !net.driver_counters.is_empty() {
+            let drivers: Vec<_> = self
+                .access_drivers(connected, net_index)
+                .into_iter()
+                .map(StrengthBit::ends)
+                .collect();
+            if connected.driver_values[net_index] != drivers {
+                connected.driver_values[net_index] = drivers;
+                for &counter in &net.driver_counters {
+                    let count = connected.edit(counter, &self.values[usize::from(counter)]);
+                    let next = count.to_u64().unwrap_or(0).wrapping_add(1) & u64::from(u32::MAX);
+                    *count = FourStateValue::from_u64(32, next);
+                }
+            }
         }
     }
 

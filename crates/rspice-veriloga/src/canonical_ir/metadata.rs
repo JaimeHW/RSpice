@@ -288,7 +288,10 @@ use smol_str::SmolStr;
 /// (`HirHoistedPort::discipline`), which selects the connect statement that
 /// converts it at its circuit node. An earlier artifact selected every one
 /// as `logic`.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 196;
+/// Version 197 carries a connect module's driver access (Verilog-AMS LRM 2.4
+/// section 9.22): [`CfgValueKind::DigitalDriverQuery`](super::cfg::CfgValueKind::DigitalDriverQuery)
+/// and the plan's `driver_updates`. An earlier artifact refused both.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 197;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

@@ -171,6 +171,78 @@ impl DigitalTimeQuery {
             })
     }
 }
+/// A connect module's driver access function (Verilog-AMS LRM 2.4 section
+/// 9.22), evaluated over the drivers of the net its port joins: those of
+/// ordinary modules and code models, never a connect module's own.
+///
+/// Section 9.23's `$driver_delay`, `$driver_next_state` and
+/// `$driver_next_strength` read a driver's pending transaction, which no
+/// host exposes yet; the analyzer refuses them by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalDriverQuery {
+    /// `$driver_count`: the number of drivers (section 9.22.1).
+    Count,
+    /// `$driver_state`: one driver's value, 0, 1, x or z (section 9.22.2).
+    State,
+    /// `$driver_strength`: one driver's strength, strength0 in bits 5-3 and
+    /// strength1 in bits 2-0 (section 9.22.3, Figure 9-3).
+    Strength,
+    /// `$driver_type`: one driver's `driver_access.vams` bits (section
+    /// 9.23.4); 0, `DRIVER_UNKNOWN`, where the host cannot tell.
+    Type,
+}
+
+impl DigitalDriverQuery {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "$driver_count" => Some(Self::Count),
+            "$driver_state" => Some(Self::State),
+            "$driver_strength" => Some(Self::Strength),
+            "$driver_type" => Some(Self::Type),
+            _ => None,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Count => "$driver_count",
+            Self::State => "$driver_state",
+            Self::Strength => "$driver_strength",
+            Self::Type => "$driver_type",
+        }
+    }
+
+    /// The width of the result: one four-state bit for a state, an
+    /// `integer` otherwise.
+    pub const fn bit_width(self) -> u32 {
+        match self {
+            Self::State => 1,
+            Self::Count | Self::Strength | Self::Type => 32,
+        }
+    }
+
+    /// Whether the result is a signed `integer`.
+    pub const fn signed(self) -> bool {
+        !matches!(self, Self::State)
+    }
+
+    /// Whether the call names a driver by index after the signal.
+    pub const fn takes_index(self) -> bool {
+        !matches!(self, Self::Count)
+    }
+}
+
+/// A connect module's `driver_update` subscription (Verilog-AMS LRM 2.4
+/// section 9.22.4): the host adds one to `counter` whenever a driver of the
+/// net `port` joins takes a new value, so a process waiting on any change of
+/// `counter` runs on every driver update, whether or not the net's resolved
+/// value changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalDriverUpdate {
+    pub port: DigitalSignalId,
+    pub counter: DigitalSignalId,
+}
+
 /// Scheduling region of one simulation time slot.
 ///
 /// IEEE 1364-2005 section 11 stratifies a time slot so that a nonblocking
@@ -1396,6 +1468,10 @@ pub struct CanonicalDigitalPlan {
     pub analog_probes: Vec<DigitalAnalogProbe>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub absdelta: Vec<DigitalAbsDeltaObserver>,
+    /// A connect module's `driver_update` subscriptions, one per port a
+    /// process waits on that way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub driver_updates: Vec<DigitalDriverUpdate>,
     /// Hierarchical scopes a system call can name (`%m`), root first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<DigitalScope>,
@@ -2262,6 +2338,7 @@ impl CanonicalDigitalPlan {
             || !self.drivers.is_empty()
             || !self.analog_probes.is_empty()
             || !self.absdelta.is_empty()
+            || !self.driver_updates.is_empty()
     }
 
     /// Stable representatives for real-net views, including transitive and
