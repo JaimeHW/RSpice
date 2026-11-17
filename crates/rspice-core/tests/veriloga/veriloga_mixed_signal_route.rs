@@ -241,8 +241,8 @@ fn mixed_analog_initialization_uses_the_resolved_deck_temperature() {
 fn unsupported_analog_control_reaches_the_engine_as_a_refusal() {
     for discrete in ["", "reg started; initial started=1;"] {
         for (task, statement) in [
-            ("$fatal", "analog begin if (0) $fatal(1, \"invalid\"); end"),
-            ("$stop", "analog begin @(final_step) $stop; end"),
+            // `$error` cannot stop a run that initialization has not started;
+            // in the analog block itself it runs, as `$fatal` and `$stop` do.
             ("$error", "analog initial $error(\"invalid\");"),
         ] {
             let model = ModelFile::new(
