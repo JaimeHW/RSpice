@@ -559,14 +559,15 @@ fn delete_staged_batch(cx: &mut Cx<'_, ProjectFeature>, targets: Vec<LibraryDele
     let mut pruned = Vec::new();
     for target in &targets {
         let (library, cell, view) = (target.library(), target.cell(), target.view());
-        let Some(mut lib) = cx.model.library_manager.edit_library(library) else {
-            continue;
+        let removed = {
+            let Some(mut lib) = cx.model.library_manager.edit_library(library) else {
+                continue;
+            };
+            match view {
+                Some(view) => lib.remove_view(cell, view) == Some(true),
+                None => lib.remove_cell(cell),
+            }
         };
-        let removed = match view {
-            Some(view) => lib.remove_view(cell, view) == Some(true),
-            None => lib.remove_cell(cell),
-        };
-        drop(lib);
         if !removed {
             continue;
         }

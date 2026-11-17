@@ -229,7 +229,7 @@ impl ProjectState {
         self.project_library_filter.clear();
         self.builtin_models.open = false;
         self.builtin_models.source = None;
-        self.library_browser = Default::default();
+        *self.library_browser = Default::default();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;

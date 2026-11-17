@@ -1083,14 +1083,14 @@ fn library_items(
     }
     ui.separator();
     let publish = readiness.publish_blocker();
-    if menu_item(ui, "Publish project\u{2026}", publish.as_deref()) {
+    if menu_item(ui, "Publish project\u{2026}", publish) {
         intent = Some(LibraryIntent::PublishProject);
     }
     let restore = readiness.restore_blocker();
     if menu_item(
         ui,
         "Restore project from publication\u{2026}",
-        restore.as_deref(),
+        restore,
     ) {
         intent = Some(LibraryIntent::RestoreFromPublication);
     }
