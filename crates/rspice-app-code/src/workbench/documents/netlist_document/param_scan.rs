@@ -3,7 +3,8 @@
 //! Completion and the document's parameter list need the name and the byte
 //! span of every assigned value, without parsing the deck. The spans are
 //! line-local: callers use them to locate a value inside the line they already
-//! hold, not to index the whole buffer.
+//! hold, not to index the whole buffer. The character-run helpers here are
+//! shared with the highlighter.
 
 /// Parse a `.param` line into `(name, value_start, value_end)` triples
 /// (byte offsets into `line`). Returns `None` for non-`.param` lines.
@@ -14,70 +15,67 @@ pub(super) fn scan_assignments(line: &str) -> Option<Vec<(String, usize, usize)>
     if !(lower.starts_with(".param") || lower.starts_with(".parameter")) {
         return None;
     }
-    let after_cmd = trimmed.find(char::is_whitespace)?;
+    // Every offset below comes from a character search, so each slice falls
+    // on a character boundary whatever the line holds.
+    let mut i = trimmed.find(char::is_whitespace)?;
     let mut out = Vec::new();
-    let bytes = trimmed.as_bytes();
-    let mut i = after_cmd;
 
-    while i < bytes.len() {
-        // Skip whitespace.
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-            i += 1;
-        }
-        if i >= bytes.len() || bytes[i] == b';' || bytes[i] == b'$' {
+    loop {
+        i = run_end(trimmed, i, char::is_whitespace);
+        if trimmed[i..].is_empty() || trimmed[i..].starts_with([';', '$']) {
             break;
         }
         // Name token.
         let name_start = i;
-        while i < bytes.len() {
-            let ch = bytes[i] as char;
-            if ch.is_whitespace() || ch == '=' {
-                break;
-            }
-            i += 1;
-        }
+        i = run_end(trimmed, i, |ch| !ch.is_whitespace() && ch != '=');
         let name = trimmed[name_start..i].to_owned();
         // Skip to '='.
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-            i += 1;
-        }
-        if i >= bytes.len() || bytes[i] != b'=' {
+        i = run_end(trimmed, i, char::is_whitespace);
+        if !trimmed[i..].starts_with('=') {
             break; // malformed tail; the parser diagnostics own this
         }
-        i += 1;
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-            i += 1;
-        }
-        if i >= bytes.len() {
+        i = run_end(trimmed, i + 1, char::is_whitespace);
+        if i == trimmed.len() {
             break;
         }
         // Value: `{balanced expression}` or a bare token.
         let value_start = i;
-        if bytes[i] == b'{' {
-            let mut depth = 0i32;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'{' => depth += 1,
-                    b'}' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
+        i = if trimmed[i..].starts_with('{') {
+            expression_end(trimmed, i)
         } else {
-            while i < bytes.len() && !(bytes[i] as char).is_whitespace() {
-                i += 1;
-            }
-        }
+            run_end(trimmed, i, |ch| !ch.is_whitespace())
+        };
         out.push((name, prefix_len + value_start, prefix_len + i));
     }
 
     Some(out)
+}
+
+/// End of the run of characters from byte `from` that `keep` accepts: the
+/// byte offset of the first character it refuses, or the end of the text.
+pub(super) fn run_end(text: &str, from: usize, keep: impl Fn(char) -> bool) -> usize {
+    text[from..]
+        .find(|ch: char| !keep(ch))
+        .map_or(text.len(), |offset| from + offset)
+}
+
+/// End of the `{expression}` that opens at byte `start`: just past its
+/// matching brace, or the end of the text when it never closes.
+pub(super) fn expression_end(text: &str, start: usize) -> usize {
+    let mut depth = 0i32;
+    for (offset, ch) in text[start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return start + offset + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    text.len()
 }
 
 /// Every `.param` assignment in the buffer, for completion: the spans are
@@ -122,5 +120,39 @@ mod tests {
             .collect();
 
         assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn non_ascii_assignments_scan_on_character_boundaries() {
+        let line = ".param\u{a0}gain=2\u{a0}tà=1Å vbias={gain*入} e\u{85}=\u{85}😀";
+        let rows = scan_assignments(line).expect("a .param line");
+        let read: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|(name, start, end)| (name.as_str(), &line[*start..*end]))
+            .collect();
+
+        assert_eq!(
+            read,
+            vec![
+                ("gain", "2"),
+                ("tà", "1Å"),
+                ("vbias", "{gain*入}"),
+                ("e", "😀")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_param_line_with_any_character_anywhere_scans_without_a_split_character() {
+        let row = ".param gain=2 vbias={gain*1.5} x = y";
+        let boundaries = row.char_indices().map(|(at, _)| at).chain([row.len()]);
+        for at in boundaries {
+            for character in ["\u{a0}", "\u{85}", "à", "Å", "Р", "入", "😀"] {
+                let line = format!("{}{character}{}", &row[..at], &row[at..]);
+                for (_, start, end) in scan_assignments(&line).into_iter().flatten() {
+                    assert!(line.is_char_boundary(start) && line.is_char_boundary(end));
+                }
+            }
+        }
     }
 }

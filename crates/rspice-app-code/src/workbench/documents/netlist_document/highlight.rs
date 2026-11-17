@@ -12,6 +12,7 @@ use egui::{Color32, FontId, Stroke};
 use crate::ui::palette::Palette;
 
 use super::DiagnosticSeverity;
+use super::param_scan::{expression_end, run_end};
 use crate::state::netlist_diagnostics::Diagnostic;
 
 /// Mockup contract: 11-point editor text at a 1.55 line-height.
@@ -288,18 +289,15 @@ fn highlight_fields(
     push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
     first_is_element: bool,
 ) {
-    let bytes = text.as_bytes();
+    // `i` only ever lands on a character boundary: every step is a whole
+    // character, so a slice never cuts a multi-byte character in two.
     let mut i = 0;
     let mut field_index = 0usize;
 
-    while i < bytes.len() {
-        let ch = bytes[i] as char;
-
+    while let Some(ch) = text[i..].chars().next() {
         if ch.is_whitespace() {
             let start = i;
-            while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-                i += 1;
-            }
+            i = run_end(text, i, char::is_whitespace);
             push(job, &text[start..i], c.text);
             continue;
         }
@@ -307,42 +305,15 @@ fn highlight_fields(
         if ch == '{' {
             // Expression: color braces and body green, to the matching brace.
             let start = i;
-            let mut depth = 0i32;
-            while i < bytes.len() {
-                match bytes[i] as char {
-                    '{' => depth += 1,
-                    '}' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
+            i = expression_end(text, i);
             push(job, &text[start..i], c.traces[3]);
             field_index += 1;
             continue;
         }
 
         if ch == '"' || ch == '\'' {
-            let quote = ch;
             let start = i;
-            i += 1;
-            let mut escaped = false;
-            while i < bytes.len() {
-                let current = bytes[i] as char;
-                i += 1;
-                if escaped {
-                    escaped = false;
-                } else if current == '\\' {
-                    escaped = true;
-                } else if current == quote {
-                    break;
-                }
-            }
+            i = quoted_end(text, i, ch);
             push(job, &text[start..i], c.warn);
             field_index += 1;
             continue;
@@ -356,15 +327,9 @@ fn highlight_fields(
 
         // A token: read to whitespace, '=', or '{'.
         let start = i;
-        while i < bytes.len() {
-            let t = bytes[i] as char;
-            if t.is_whitespace() || t == '=' || t == '{' {
-                break;
-            }
-            i += 1;
-        }
+        i = run_end(text, i, |t| !(t.is_whitespace() || t == '=' || t == '{'));
         let token = &text[start..i];
-        let next_is_assign = bytes.get(i).copied() == Some(b'=');
+        let next_is_assign = text[i..].starts_with('=');
 
         let color = if field_index == 0 && first_is_element {
             c.traces[0]
@@ -381,6 +346,23 @@ fn highlight_fields(
         push(job, token, color);
         field_index += 1;
     }
+}
+
+/// End of the quoted string that opens with `quote` at byte `start`: just
+/// past its closing quote, or the end of the text when it never closes. A
+/// backslash escapes the character after it.
+fn quoted_end(text: &str, start: usize, quote: char) -> usize {
+    let mut escaped = false;
+    for (offset, ch) in text[start..].char_indices().skip(1) {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == quote {
+            return start + offset + ch.len_utf8();
+        }
+    }
+    text.len()
 }
 
 /// Engineering-notation literal: starts with a digit, sign, or decimal
@@ -481,5 +463,103 @@ mod tests {
         );
 
         assert_eq!(underlined_ranges(&job), vec![13..16]);
+    }
+
+    /// Characters whose UTF-8 bytes include 0x85 or 0xA0 (both whitespace
+    /// when a byte is read as a Latin-1 character), a CJK character and an
+    /// emoji.
+    const AWKWARD: [&str; 8] = ["\u{a0}", "\u{85}", "à", "Å", "Р", "入", "😀", "\u{2003}"];
+
+    fn tokens(job: &LayoutJob) -> Vec<(&str, Color32)> {
+        job.sections
+            .iter()
+            .map(|section| {
+                (
+                    &job.text[section.byte_range.start.0..section.byte_range.end.0],
+                    section.format.color,
+                )
+            })
+            .collect()
+    }
+
+    fn highlight(text: &str) -> LayoutJob {
+        layout_job(text, FontId::monospace(12.0), &INSTRUMENT_DARK, &[])
+    }
+
+    #[test]
+    fn every_row_with_non_ascii_text_lays_out_whole() {
+        let rows = [
+            "Gain stage title line",
+            "R1 in out 1k",
+            "+ w=1u l={l0*2}",
+            ".param gain=2 vbias={gain*1.5}",
+            ".model nch nmos level=1",
+            "X1 a b {w*2} cell",
+            "V1 in 0 'pulse' 1",
+            "C1 out 0 1p ; trailing note",
+        ];
+        for row in rows {
+            let boundaries = row.char_indices().map(|(at, _)| at).chain([row.len()]);
+            for at in boundaries {
+                for character in AWKWARD {
+                    let line = format!("{}{character}{}", &row[..at], &row[at..]);
+                    let text = format!("{line}\r\n{line}");
+                    let job = highlight(&text);
+                    assert_eq!(job.text, text, "the layout must hold the text exactly");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_ascii_tokens_keep_their_colours_and_boundaries() {
+        let c = &INSTRUMENT_DARK;
+        let job = highlight("Rà in\u{a0}out\u{85}Å 1k");
+        assert_eq!(
+            tokens(&job),
+            vec![
+                ("Rà", c.traces[0]),
+                (" ", c.text),
+                ("in", c.traces[2]),
+                ("\u{a0}", c.text),
+                ("out", c.traces[2]),
+                ("\u{85}", c.text),
+                ("Å", c.traces[2]),
+                (" ", c.text),
+                ("1k", c.traces[3]),
+            ]
+        );
+
+        let job = highlight("Gain\u{a0}stage 入😀");
+        assert_eq!(
+            tokens(&job),
+            vec![
+                ("Gain", c.traces[0]),
+                ("\u{a0}", c.text),
+                ("stage", c.traces[2]),
+                (" ", c.text),
+                ("入😀", c.traces[2]),
+            ]
+        );
+
+        let job = highlight(".param gain=2\u{a0}vbias={gain*à} note='Å'");
+        assert_eq!(
+            tokens(&job),
+            vec![
+                (".param", c.traces[1]),
+                (" ", c.text),
+                ("gain", c.net_label),
+                ("=", c.text_faint),
+                ("2", c.traces[3]),
+                ("\u{a0}", c.text),
+                ("vbias", c.net_label),
+                ("=", c.text_faint),
+                ("{gain*à}", c.traces[3]),
+                (" ", c.text),
+                ("note", c.net_label),
+                ("=", c.text_faint),
+                ("'Å'", c.warn),
+            ]
+        );
     }
 }
