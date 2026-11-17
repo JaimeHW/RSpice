@@ -2,7 +2,9 @@
 //! 1800-2017 section 18.13).
 //!
 //! The `$random` and `$dist_*` generators are section 17.9.3's reference
-//! algorithms, implemented from the standard's text: the 32-bit linear
+//! algorithms, which the analog runtimes share
+//! ([`rspice_veriloga_runtime::random`]), implemented from the standard's
+//! text: the 32-bit linear
 //! congruential seed update `seed = 69069 * seed + 1`, a uniform deviate built
 //! from the seed's top 23 bits as an IEEE single, and the distribution
 //! functions on top of it. Every simulator that follows the text — Icarus
@@ -22,174 +24,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Section 17.9.3's `uniform`: one deviate in `[start, end)`, advancing the
-/// seed. A zero seed is first replaced by the standard's fixed nonzero value.
-fn uniform(seed: &mut i32, start: i32, end: i32) -> f64 {
-    const D: f64 = 0.000_000_119_209_289_550_781_25;
-    if *seed == 0 {
-        *seed = 259_341_593;
-    }
-    let (a, b) = if start >= end {
-        (0.0, 2_147_483_647.0)
-    } else {
-        (f64::from(start), f64::from(end))
-    };
-    *seed = seed.wrapping_mul(69_069).wrapping_add(1);
-    let bits = ((*seed as u32) >> 9) | 0x3f80_0000;
-    let mut c = f64::from(f32::from_bits(bits));
-    c += c * D;
-    (b - a) * (c - 1.0) + a
-}
-
-/// The standard's `(long) r` for a non-negative `r` and `(long)(r - 1)` for a
-/// negative one.
-fn floor_cast(r: f64) -> i32 {
-    if r >= 0.0 { r as i32 } else { (r - 1.0) as i32 }
-}
-
-/// Round half away from zero, the way every `rtl_dist_*` returns its value.
-fn round_cast(r: f64) -> i32 {
-    if r >= 0.0 {
-        (r + 0.5) as i32
-    } else {
-        -((-r + 0.5) as i32)
-    }
-}
-
-/// `rtl_dist_uniform`: an integer uniformly distributed over `[start, end]`.
-pub(crate) fn dist_uniform(seed: &mut i32, start: i32, end: i32) -> i32 {
-    if start >= end {
-        return start;
-    }
-    if end != i32::MAX {
-        let end = end + 1;
-        let i = floor_cast(uniform(seed, start, end));
-        i.max(start).min(end - 1)
-    } else if start != i32::MIN {
-        let start = start - 1;
-        let i = floor_cast(uniform(seed, start, end) + 1.0);
-        if i <= start { start + 1 } else { i.min(end) }
-    } else {
-        let r = (uniform(seed, start, end) + 2_147_483_648.0) / 4_294_967_295.0;
-        floor_cast(r * 4_294_967_296.0 - 2_147_483_648.0)
-    }
-}
-
-/// `$random`: the full signed 32-bit range.
-pub(crate) fn random(seed: &mut i32) -> i32 {
-    dist_uniform(seed, i32::MIN, i32::MAX)
-}
-
-/// The polar Box-Muller method, as section 17.9.3 writes it.
-fn normal(seed: &mut i32, mean: i32, deviation: i32) -> f64 {
-    let mut v1 = 0.0;
-    let mut s = 1.0;
-    while s >= 1.0 || s == 0.0 {
-        v1 = uniform(seed, -1, 1);
-        let v2 = uniform(seed, -1, 1);
-        s = v1 * v1 + v2 * v2;
-    }
-    let s = v1 * (-2.0 * s.ln() / s).sqrt();
-    s * f64::from(deviation) + f64::from(mean)
-}
-
-fn exponential(seed: &mut i32, mean: i32) -> f64 {
-    let n = uniform(seed, 0, 1);
-    if n != 0.0 {
-        -n.ln() * f64::from(mean)
-    } else {
-        n
-    }
-}
-
-fn poisson(seed: &mut i32, mean: i32) -> i32 {
-    let mut n = 0;
-    let p = (-f64::from(mean)).exp();
-    let mut q = uniform(seed, 0, 1);
-    while p < q {
-        n += 1;
-        q *= uniform(seed, 0, 1);
-    }
-    n
-}
-
-fn chi_square(seed: &mut i32, degrees: i32) -> f64 {
-    let mut x = if degrees % 2 != 0 {
-        let x = normal(seed, 0, 1);
-        x * x
-    } else {
-        0.0
-    };
-    let mut k = 2;
-    while k <= degrees {
-        x += 2.0 * exponential(seed, 1);
-        k += 2;
-    }
-    x
-}
-
-fn student_t(seed: &mut i32, degrees: i32) -> f64 {
-    let chi2 = chi_square(seed, degrees);
-    let root = (chi2 / f64::from(degrees)).sqrt();
-    normal(seed, 0, 1) / root
-}
-
-fn erlangian(seed: &mut i32, k: i32, mean: i32) -> f64 {
-    let mut x = 1.0;
-    for _ in 1..=k {
-        x *= uniform(seed, 0, 1);
-    }
-    -f64::from(mean) * x.ln() / f64::from(k)
-}
-
-/// The outcome of a `$dist_*` call: a value, or the standard's warning and 0
-/// for a parameter outside the distribution's domain (the seed is unchanged).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Distribution {
-    Value(i32),
-    Invalid(&'static str),
-}
-
-pub(crate) fn dist_normal(seed: &mut i32, mean: i32, deviation: i32) -> Distribution {
-    Distribution::Value(round_cast(normal(seed, mean, deviation)))
-}
-
-pub(crate) fn dist_exponential(seed: &mut i32, mean: i32) -> Distribution {
-    if mean <= 0 {
-        return Distribution::Invalid("Exponential distribution must have a positive mean");
-    }
-    Distribution::Value(round_cast(exponential(seed, mean)))
-}
-
-pub(crate) fn dist_poisson(seed: &mut i32, mean: i32) -> Distribution {
-    if mean <= 0 {
-        return Distribution::Invalid("Poisson distribution must have a positive mean");
-    }
-    Distribution::Value(poisson(seed, mean))
-}
-
-pub(crate) fn dist_chi_square(seed: &mut i32, degrees: i32) -> Distribution {
-    if degrees <= 0 {
-        return Distribution::Invalid(
-            "Chi_square distribution must have positive degree of freedom",
-        );
-    }
-    Distribution::Value(round_cast(chi_square(seed, degrees)))
-}
-
-pub(crate) fn dist_t(seed: &mut i32, degrees: i32) -> Distribution {
-    if degrees <= 0 {
-        return Distribution::Invalid("t distribution must have positive degree of freedom");
-    }
-    Distribution::Value(round_cast(student_t(seed, degrees)))
-}
-
-pub(crate) fn dist_erlang(seed: &mut i32, k: i32, mean: i32) -> Distribution {
-    if k <= 0 {
-        return Distribution::Invalid("k-stage erlangian distribution must have positive k");
-    }
-    Distribution::Value(round_cast(erlangian(seed, k, mean)))
-}
+pub(crate) use rspice_veriloga_runtime::random::{
+    Distribution, dist_chi_square, dist_erlang, dist_exponential, dist_normal, dist_poisson,
+    dist_t, dist_uniform, random,
+};
 
 /// One process's `$urandom` stream: PCG32 (XSH-RR, 64-bit state).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
