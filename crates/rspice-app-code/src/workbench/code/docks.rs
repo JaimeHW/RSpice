@@ -81,6 +81,9 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
             .outbox
             .push(CodeRequest::RelinkNetlistDependency(identity));
     }
+    if let Some(usage) = asked.show_instance {
+        cx.wb.outbox.push(CodeRequest::OpenCellInstance(usage));
+    }
 }
 
 /// What a source bundle rail reads, lent from the feature's context.

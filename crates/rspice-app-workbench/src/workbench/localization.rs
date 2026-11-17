@@ -437,7 +437,6 @@ define_messages! {
     NetlistNavigatorMappedLine => "Line {line} · {cell}",
     NetlistNavigatorInstance => "Instance {instance}",
     NetlistNavigatorCrossProbe => "Cross-probe schematic component",
-    NetlistNavigatorCrossProbeSucceeded => "Cross-probed generated line {line} to component {component}.",
     NetlistShowInstanceLocated => "Located instance {instance} at generated line {line}.",
     NetlistShowInstanceStale => "Located instance {instance} at generated line {line} in a stale deck; regenerating it may move the card.",
     CodePageNetlist => "Netlist",

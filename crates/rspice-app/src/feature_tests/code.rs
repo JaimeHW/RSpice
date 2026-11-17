@@ -9,6 +9,7 @@ use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::rend
 use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle;
 
 mod generated_netlist_jumps;
+mod netlist_cross_probe;
 #[cfg(not(target_arch = "wasm32"))]
 mod netlist_document;
 pub(super) mod netlist_export;

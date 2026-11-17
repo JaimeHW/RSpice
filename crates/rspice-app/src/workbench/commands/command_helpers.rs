@@ -302,20 +302,19 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
             }
         }
         CodeHandOff::OpenCellInstance(usage) => {
+            // The schematic that holds the instance comes to the front in
+            // Design, and only then is the instance selected and centred: its
+            // id names an instance in that schematic and nowhere else. A
+            // schematic that cannot be opened has said why on the status bar.
             app.state.open_workspace_view(usage.schematic.clone());
-            let position = app
-                .state
-                .model
-                .schematic
-                .document()
-                .components
-                .iter()
-                .find(|component| component.id == usage.component_id)
-                .map(|component| component.pos);
-            let editor = &mut app.state.model.schematic.session.editor;
-            editor.selection.select_only_component(usage.component_id);
-            editor.net_highlight.clear();
-            editor.center_request = position;
+            if app.state.model.workspace.content.active_view == usage.schematic {
+                rspice_app_workbench::workbench::app::reveal::placed_instance_in(
+                    &mut app.state.model,
+                    &mut app.state.workbench,
+                    None,
+                    usage.component_id,
+                );
+            }
         }
         CodeHandOff::CommitNetlistImport => {
             app.state.commit_staged_netlist_import();
