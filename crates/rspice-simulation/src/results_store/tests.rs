@@ -131,3 +131,102 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
     drop((axis, values, out));
     assert!(!path.exists(), "the last column took its segment with it");
 }
+
+#[test]
+fn a_stored_waveform_tiles_fits_and_reads_cursors_from_its_store_as_from_its_values() {
+    let schema = Schema {
+        x: Default::default(),
+        signals: vec![Signal::new("out", "V", SignalKind::Real)],
+    };
+    let (path, io) = create_segment().unwrap();
+    let mut writer = RunWriter::create(io, &schema, &RunMeta::default()).unwrap();
+    let rows = 60_000u64;
+    let time = |row: u64| row as f64 * 1.0e-6;
+    let value = |row: u64| (row as f64 * 2.0e-4).sin() * 3.0 - 1.0;
+    for row in 0..rows {
+        writer.push_row(time(row), &[value(row)]).unwrap();
+    }
+    let (_, io) = writer.finish(RunStatus::Completed).unwrap();
+    let reader = SegmentReader::open(Box::new(io.into_file()) as SegmentBytes).unwrap();
+    let run = Arc::new(StoredRun::new(StoreReader::new(reader), path));
+    // An output window from 1.5 us past row 100: a lead between rows 100 and 101, as the
+    // transient's own output start makes one.
+    let start = time(100) + 0.5e-6;
+    let window = |lead| StoredWindow {
+        first: 101,
+        rows: rows - 101,
+        lead,
+    };
+    let axis = WaveformValues::stored(
+        StoredColumn::new(run.clone(), None, "time".to_owned()),
+        window(WindowLead::Value(start)),
+    )
+    .unwrap();
+    let out = WaveformValues::stored(
+        StoredColumn::new(run.clone(), Some(0), "out".to_owned()),
+        window(WindowLead::Interpolated(0.5)),
+    )
+    .unwrap();
+    assert!(axis.is_ascending_axis() && !out.is_ascending_axis());
+    assert_eq!(axis.ends(), Some((start, time(rows - 1))));
+
+    // What the same samples give read whole, from copies that do not share the windows.
+    let (x, y) = (axis.to_vec(), out.to_vec());
+    let linear = rspice_results::sampling::SampleInterpolation::Linear;
+    let cubic = rspice_results::sampling::SampleInterpolation::MonotoneCubic;
+    for at in [
+        0.0,
+        start,
+        start + 0.2e-6,
+        time(4_096) + 0.3e-6,
+        0.03,
+        time(rows - 1),
+        1.0,
+    ] {
+        for interpolation in [linear, cubic] {
+            let whole = rspice_results::sampling::sample_at_with(&x, &y, at, interpolation);
+            let read = out.value_at(&axis, at, interpolation).unwrap();
+            assert_eq!(read.to_bits(), whole.to_bits(), "{at} by {interpolation:?}");
+        }
+    }
+
+    let extent = out.extent_over(&axis, None).unwrap();
+    let finite = |values: &[f64]| {
+        values
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+                (lo.min(v), hi.max(v))
+            })
+    };
+    assert_eq!((extent.min, extent.max), finite(&y));
+    let (x0, x1) = (0.01, 0.02);
+    let inside: Vec<f64> = x
+        .iter()
+        .zip(&y)
+        .filter(|(t, _)| (x0..=x1).contains(*t))
+        .map(|(_, v)| *v)
+        .collect();
+    let windowed = out.extent_over(&axis, Some((x0, x1))).unwrap();
+    assert_eq!((windowed.min, windowed.max), finite(&inside));
+
+    // The lead is the first pixel's: a tile of the window's start holds it.
+    let Some(rspice_results::waveform::ColumnTile::Samples { x: xs, y: ys, .. }) =
+        out.tile_over(&axis, 0.0, time(103), 400)
+    else {
+        panic!("a few rows tile as samples");
+    };
+    assert_eq!(xs, &x[..4]);
+    assert_eq!(ys, &y[..4]);
+    assert!(out.tile_over(&axis, 0.0, 0.05, 400).is_some());
+    // A window over other rows of the axis is not this waveform's axis: read the values instead.
+    let other = WaveformValues::stored(
+        StoredColumn::new(run, None, "time".to_owned()),
+        StoredWindow {
+            first: 0,
+            rows: 10,
+            lead: WindowLead::None,
+        },
+    )
+    .unwrap();
+    assert!(out.tile_over(&other, 0.0, 1.0, 10).is_none());
+}

@@ -51,7 +51,17 @@ pub struct DerivedSeries {
     /// identity: merging two grids is a pass over both, and the pane is drawn
     /// every frame.
     xy_curves: std::collections::HashMap<u64, XyCurveMemo>,
+    /// The extent of a stored series over the last window asked of it, per
+    /// series key: a steady view reads no tile for its fit.
+    stored_extents: std::collections::HashMap<u64, StoredExtentMemo>,
 }
+
+/// A window (`None`: the whole series, else its bounds' bits) and the extent
+/// read over it.
+type StoredExtentMemo = (
+    Option<(u64, u64)>,
+    Option<rspice_results::waveform::ValueExtent>,
+);
 
 type XyCurveMemo = Result<std::sync::Arc<crate::waves::xy::XyCurve>, crate::waves::xy::XyRefusal>;
 
@@ -74,6 +84,7 @@ impl DerivedSeries {
             self.event_lanes.clear();
             self.bus_lanes.clear();
             self.xy_curves.clear();
+            self.stored_extents.clear();
             self.version = version;
         }
     }
@@ -143,6 +154,25 @@ impl DerivedSeries {
     }
 
     /// Fetch or compute the cached finite (min, max) of a series.
+    /// The extent of the stored series under `key` over `window`, built
+    /// when the window differs from the one last asked of the key.
+    pub fn stored_extent_or(
+        &mut self,
+        key: u64,
+        window: Option<(f64, f64)>,
+        build: impl FnOnce() -> Option<rspice_results::waveform::ValueExtent>,
+    ) -> Option<rspice_results::waveform::ValueExtent> {
+        let bits = window.map(|(x0, x1)| (x0.to_bits(), x1.to_bits()));
+        if let Some((held, extent)) = self.stored_extents.get(&key)
+            && *held == bits
+        {
+            return *extent;
+        }
+        let extent = build();
+        self.stored_extents.insert(key, (bits, extent));
+        extent
+    }
+
     pub fn range_or(
         &mut self,
         key: u64,

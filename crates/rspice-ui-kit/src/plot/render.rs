@@ -498,7 +498,7 @@ impl MarkerSlots {
             .iter()
             .enumerate()
             .map(|(index, trace)| {
-                !trace.x.is_empty() && trace.look(index, color_safe).marker.is_some()
+                !trace.is_empty() && trace.look(index, color_safe).marker.is_some()
             })
             .collect();
         let count = marked.iter().filter(|marked| **marked).count();
@@ -890,11 +890,7 @@ fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
 
 fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -> String {
     use crate::accessibility::counted;
-    let trace_count = spec
-        .traces
-        .iter()
-        .filter(|trace| !trace.x.is_empty() && !trace.y.is_empty())
-        .count();
+    let trace_count = spec.traces.iter().filter(|trace| !trace.is_empty()).count();
     let trace_summary = if trace_count == 0 && spec.accessible_detail.is_some() {
         "custom-rendered engineering data".to_owned()
     } else {
@@ -1203,33 +1199,32 @@ pub fn show(
         let rows = (plot_rect.height().ceil() as usize).next_multiple_of(64);
         let marker_slots = MarkerSlots::for_pane(spec, plot_rect, t.color_safe_traces);
         for (trace_index, trace) in spec.traces.iter().enumerate() {
-            if trace.x.is_empty() {
+            if trace.is_empty() {
                 continue;
             }
             let stroke = Stroke::new(trace.width, trace.color);
-            let points: Vec<Pos2> = match trace.cache_key {
-                Some(key) => cache
-                    .series(
-                        key,
-                        trace.x,
-                        trace.y,
-                        super::decimate::TraceView {
-                            x0: spec.x.min,
-                            x1: spec.x.max,
-                            y0: spec.y.min,
-                            y1: spec.y.max,
-                            x_scale: spec.x_scale,
-                            y_scale: spec.y_scale,
-                            columns,
-                            rows,
-                        },
-                        trace.parametric,
-                        trace.shape,
-                    )
+            let view = super::decimate::TraceView {
+                x0: spec.x.min,
+                x1: spec.x.max,
+                y0: spec.y.min,
+                y1: spec.y.max,
+                x_scale: spec.x_scale,
+                y_scale: spec.y_scale,
+                columns,
+                rows,
+            };
+            let points: Vec<Pos2> = match (trace.stored, trace.cache_key) {
+                (Some(stored), key) => cache
+                    .stored_series(key, stored, view)
                     .iter()
                     .map(|p| pos2(mx(p[0]), my(p[1])))
                     .collect(),
-                None => trace
+                (None, Some(key)) => cache
+                    .series(key, trace.x, trace.y, view, trace.parametric, trace.shape)
+                    .iter()
+                    .map(|p| pos2(mx(p[0]), my(p[1])))
+                    .collect(),
+                (None, None) => trace
                     .x
                     .iter()
                     .zip(trace.y.iter())

@@ -42,6 +42,12 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     let mut x1 = f64::NEG_INFINITY;
     // An event lane is drawn over its column's grid, so a strip showing only
     // lanes still has the extent of its run.
+    let mut take = |x: f64| {
+        if x.is_finite() && !(model.x_scale == XScale::Log10 && x <= 0.0) {
+            x0 = x0.min(x);
+            x1 = x1.max(x);
+        }
+    };
     for x in model
         .traces
         .iter()
@@ -54,14 +60,19 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
                 .filter(|lane| lane.visible)
                 .map(|lane| &lane.x),
         )
-        .flat_map(|x| x.iter().copied())
-        .filter(|value| value.is_finite())
     {
-        if model.x_scale == XScale::Log10 && x <= 0.0 {
+        // A stored run's time axis ascends, so its ends are its extent, read
+        // without reading the axis; a decade scale needs its least positive
+        // sample, which only the samples give.
+        if x.is_ascending_axis()
+            && model.x_scale == XScale::Linear
+            && let Some((first, last)) = x.ends()
+        {
+            take(first);
+            take(last);
             continue;
         }
-        x0 = x0.min(x);
-        x1 = x1.max(x);
+        x.iter().copied().for_each(&mut take);
     }
     if !x0.is_finite() || !x1.is_finite() {
         return None;

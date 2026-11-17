@@ -14,7 +14,7 @@ use egui::Ui;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, MarkerKind, WavePanePresentationKey,
 };
-use rspice_ui_kit::plot::{CursorPair, fmt_si_significant, sample::sample_at_with_shape};
+use rspice_ui_kit::plot::{CursorPair, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -568,8 +568,7 @@ pub fn marker_section(
                 // canvas' own fallback — the first branch that covers the
                 // marker's X — so the row and the tagged point agree.
                 let at = position.unwrap_or_else(|seed| seed);
-                let sampled =
-                    sample_at_with_shape(&trace.x, &trace.y, &trace.shape, at, interpolation);
+                let sampled = super::trace_value_at(trace, at, interpolation);
                 Some((model_index, trace_index, sampled))
             });
         MarkerRow {

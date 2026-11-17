@@ -214,6 +214,27 @@ impl StoreReader {
     }
 }
 
+impl From<Tile> for crate::waveform::ColumnTile {
+    fn from(tile: Tile) -> Self {
+        match tile {
+            Tile::Samples {
+                x,
+                y,
+                before,
+                after,
+            } => Self::Samples {
+                x,
+                y,
+                before,
+                after,
+            },
+            Tile::Envelope {
+                min, max, touched, ..
+            } => Self::Envelope { min, max, touched },
+        }
+    }
+}
+
 impl Drop for StoreReader {
     fn drop(&mut self) {
         lock_cache().forget(self.id);

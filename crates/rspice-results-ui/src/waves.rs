@@ -724,6 +724,14 @@ impl UnitPane<'_> {
 /// reading every coordinate. A grid that fails it keeps the linear scan;
 /// a parametric sweep is under no obligation to be monotonic.
 pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
+    // A stored run's time axis ascends, as its run checked: no need to read it.
+    if model
+        .traces
+        .first()
+        .is_some_and(|trace| trace.x.is_ascending_axis())
+    {
+        return true;
+    }
     model.sample_grid().is_some_and(|grid| {
         let mut previous = f64::NEG_INFINITY;
         grid.iter().all(|value| {
@@ -732,6 +740,27 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
             ordered
         })
     })
+}
+
+/// `trace`'s value at `x` by `interpolation`, as a cursor reads it. A trace whose samples a
+/// results store keeps reads only the rows around `x`, never its whole column.
+pub(crate) fn trace_value_at(
+    trace: &StripTrace,
+    x: f64,
+    interpolation: rspice_ui_kit::plot::SampleInterpolation,
+) -> f64 {
+    trace
+        .y
+        .value_at(&trace.x, x, interpolation)
+        .unwrap_or_else(|| {
+            rspice_ui_kit::plot::sample::sample_at_with_shape(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                x,
+                interpolation,
+            )
+        })
 }
 
 #[cfg(test)]

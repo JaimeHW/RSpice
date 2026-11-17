@@ -59,6 +59,35 @@ pub struct SweepShape {
 }
 
 impl SweepShape {
+    /// One ascending sweep of `len` samples, as [`Self::of`] classifies a strictly ascending
+    /// column.
+    pub fn ascending(len: usize) -> Self {
+        if len == 0 {
+            return Self {
+                class: SweepClass::Empty,
+                runs: Vec::new(),
+            };
+        }
+        Self {
+            class: SweepClass::Ascending,
+            runs: vec![MonotoneRun {
+                start: 0,
+                end: len,
+                orientation: XOrientation::Ascending,
+            }],
+        }
+    }
+
+    /// [`Self::of`] the samples of `x`, without reading a stored run's time axis, which its run
+    /// checked ascends strictly.
+    pub fn of_axis(x: &crate::waveform::WaveformValues) -> Self {
+        if x.is_ascending_axis() {
+            Self::ascending(x.len())
+        } else {
+            Self::of(x)
+        }
+    }
+
     /// Classify `x` in one pass.
     ///
     /// Segmentation rules, each of them a case the instrument actually meets:

@@ -232,13 +232,7 @@ pub fn nearest_drawn_trace<'a>(
             samples.iter().map(|sample| sample.value).collect()
         };
         if values.is_empty() {
-            values.push(sample_at_with_shape(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-            ));
+            values.push(super::trace_value_at(trace, x, interpolation));
         }
         for value in values {
             let Some(y) = screen_y(value) else { continue };
@@ -292,16 +286,18 @@ pub fn plot_markers<'a>(
         // A loop has a value on each branch that reaches this X, and a tag on
         // only one of them points at half the evidence.
         let mut samples = Vec::new();
-        sample_branches_into(
-            &trace.x,
-            &trace.y,
-            &trace.shape,
-            marker.x,
-            interpolation,
-            &mut samples,
-        );
+        if !trace.shape.is_single_ascending() {
+            sample_branches_into(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                marker.x,
+                interpolation,
+                &mut samples,
+            );
+        }
         if trace.shape.branch_count() <= 1 || samples.is_empty() {
-            let y = sample_at_with_shape(&trace.x, &trace.y, &trace.shape, marker.x, interpolation);
+            let y = super::trace_value_at(trace, marker.x, interpolation);
             if y.is_finite() {
                 projected.push(plot::Marker::point(marker.x, y, color, label));
             }
@@ -839,8 +835,14 @@ pub fn show_plot<'a>(
         // reverse sweep vanished the moment it was zoomed — every window it
         // was asked for came back empty — and a hysteresis loop lost whichever
         // branch fell outside one contiguous index window.
-        let mut plot_trace = strip_trace_cues(
+        // A stored trace draws from its store's tiles, never its columns.
+        let samples = if trace.y.is_stored() {
+            Trace::stored(&trace.x, &trace.y, color)
+        } else {
             Trace::new(&trace.x, &trace.y, color)
+        };
+        let mut plot_trace = strip_trace_cues(
+            samples
                 .width(input.trace_width)
                 .cache_key(trace_key(model, trace))
                 .shape(&trace.shape),
@@ -897,14 +899,17 @@ pub fn show_plot<'a>(
         )];
         let mut samples: Vec<BranchSample> = Vec::new();
         for trace in &readout_traces {
-            sample_branches_into(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-                &mut samples,
-            );
+            samples.clear();
+            if !trace.shape.is_single_ascending() {
+                sample_branches_into(
+                    &trace.x,
+                    &trace.y,
+                    &trace.shape,
+                    x,
+                    interpolation,
+                    &mut samples,
+                );
+            }
             // A sweep with one answer at this X keeps its single unlabelled
             // row. A loop reports each branch that reaches here, because one
             // of the two numbers is not the reading.
@@ -912,8 +917,7 @@ pub fn show_plot<'a>(
                 || samples.is_empty()
                 || samples.len() > MAX_READOUT_BRANCHES
             {
-                let value =
-                    sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
+                let value = super::trace_value_at(trace, x, interpolation);
                 rows.push((
                     trace.name.clone(),
                     model.format_trace_value(trace, value, significant_digits, quantity_policy),

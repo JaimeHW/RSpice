@@ -98,6 +98,9 @@ enum Reduction {
     /// Per-column extremes of a whole set of curves; see
     /// [`DecimationCache::band`].
     Band,
+    /// Per-pixel extremes from a results store's tiles; see
+    /// [`DecimationCache::stored_series`].
+    Tiles,
 }
 
 impl Reduction {
@@ -323,8 +326,12 @@ impl DecimationCache {
                         )
                     })
             }
-            // `reduction_for` never selects a band; only `band` keys one.
-            Reduction::Ordered | Reduction::OrderedReversed | Reduction::Band => {
+            // `reduction_for` never selects a band or tiles; only `band` and
+            // `stored_series` key them.
+            Reduction::Ordered
+            | Reduction::OrderedReversed
+            | Reduction::Band
+            | Reduction::Tiles => {
                 let orientation = if reduction == Reduction::OrderedReversed {
                     XOrientation::Descending
                 } else {
@@ -342,6 +349,38 @@ impl DecimationCache {
             }
         }
         .into();
+        self.retain(key, &envelope);
+        envelope
+    }
+
+    /// [`Self::series`] of samples a results store keeps: the store's tile of
+    /// the view, read without reading either column. Without a `trace_key`
+    /// the tile is read every frame.
+    pub fn stored_series(
+        &mut self,
+        trace_key: Option<u64>,
+        stored: super::spec::StoredSamples<'_>,
+        view: TraceView,
+    ) -> Arc<[[f64; 2]]> {
+        let Some(trace_key) = trace_key else {
+            return stored_envelope(stored, view);
+        };
+        let key = CacheKey {
+            trace: trace_key,
+            columns: view.columns as u32,
+            x0_bits: view.x0.to_bits(),
+            x1_bits: view.x1.to_bits(),
+            rows: 0,
+            y0_bits: 0,
+            y1_bits: 0,
+            reduction: Reduction::Tiles,
+            x_scale: view.x_scale,
+            y_scale: view.y_scale,
+        };
+        if let Some(hit) = self.lookup(&key) {
+            return hit;
+        }
+        let envelope = stored_envelope(stored, view);
         self.retain(key, &envelope);
         envelope
     }
@@ -486,7 +525,7 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
         // sample of margin each side so the strokes into the plot edges are
         // read too; anything else is read whole, in source order.
         let (logical, window) = match reduction_for(member.parametric, member.shape) {
-            Reduction::PixelCells | Reduction::Band => {
+            Reduction::PixelCells | Reduction::Band | Reduction::Tiles => {
                 let logical = LogicalView::new(member.x, member.y, false);
                 (logical, 0..logical.paired_len())
             }
@@ -673,6 +712,84 @@ pub fn decimate_minmax(
         flush(&mut out, col_x, min_v, max_v, min_i, max_i);
     }
     out
+}
+
+/// The envelope of samples a results store keeps, over `view`: the store's
+/// tile at `view.columns` pixels, as two points in the middle of each pixel
+/// its rows touch (its least and greatest value, the one nearer the stroke
+/// so far first), or as the rows themselves with one row of margin either
+/// side when few enough fall in the view. A pixel whose rows hold no
+/// available value breaks the stroke, as a hole in the samples does.
+/// Samples the store cannot tile are reduced as [`decimate_minmax`] reduces
+/// them, which reads them.
+fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> Arc<[[f64; 2]]> {
+    use rspice_results::waveform::ColumnTile;
+    if view.columns == 0
+        || !matches!(
+            view.x1.partial_cmp(&view.x0),
+            Some(std::cmp::Ordering::Greater)
+        )
+    {
+        return Arc::from([]);
+    }
+    let tile = if view.x_scale == XScale::Linear {
+        stored.y.tile_over(stored.x, view.x0, view.x1, view.columns)
+    } else {
+        None
+    };
+    let Some(tile) = tile else {
+        return decimate_minmax(
+            stored.x,
+            stored.y,
+            view.x0,
+            view.x1,
+            view.x_scale,
+            view.columns,
+            XOrientation::Ascending,
+        )
+        .into();
+    };
+    match tile {
+        ColumnTile::Samples {
+            x,
+            y,
+            before,
+            after,
+        } => before
+            .into_iter()
+            .chain(x.into_iter().zip(y))
+            .chain(after)
+            .map(|(x, y)| [x, y])
+            .collect(),
+        ColumnTile::Envelope { min, max, touched } => {
+            let width = (view.x1 - view.x0) / min.len() as f64;
+            let mut out = Vec::with_capacity(2 * min.len());
+            let mut last = f64::NAN;
+            for pixel in 0..min.len() {
+                if !touched[pixel] {
+                    continue;
+                }
+                let x = view.x0 + (pixel as f64 + 0.5) * width;
+                let (lo, hi) = (min[pixel], max[pixel]);
+                if lo.is_nan() || hi.is_nan() {
+                    out.push([x, f64::NAN]);
+                    last = f64::NAN;
+                    continue;
+                }
+                let (first, second) = if (hi - last).abs() < (lo - last).abs() {
+                    (hi, lo)
+                } else {
+                    (lo, hi)
+                };
+                out.push([x, first]);
+                if second != first {
+                    out.push([x, second]);
+                }
+                last = second;
+            }
+            out.into()
+        }
+    }
 }
 
 /// Screen cell index of one sample under `view`'s projection.

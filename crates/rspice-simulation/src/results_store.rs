@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
-use rspice_results::waveform::ColumnSource;
+use rspice_results::waveform::{ColumnSource, ColumnTile, RowsAround};
 use rspice_results_store::{FileIo, SegmentIo, SegmentReader, StoreError};
 
 /// The folder under the system's temporary folder that holds every process's stores.
@@ -241,6 +241,11 @@ impl StoredRun {
         self.reader.rows()
     }
 
+    /// The reader every column of the run shares.
+    pub(crate) fn reader(&self) -> &StoreReader {
+        &self.reader
+    }
+
     /// Run `read` with the segment's reader.
     pub(crate) fn with_reader<T>(
         &self,
@@ -299,6 +304,42 @@ impl ColumnSource for StoredColumn {
         self.run
             .read(self.slot, first, out)
             .map_err(|error| error.to_string())
+    }
+
+    /// The time axis: the run checked it ascends strictly before it made its waveforms.
+    fn ascending(&self) -> bool {
+        self.slot.is_none()
+    }
+
+    fn tile(
+        &self,
+        rows: std::ops::Range<u64>,
+        x0: f64,
+        x1: f64,
+        pixels: usize,
+    ) -> Option<Result<ColumnTile, String>> {
+        let slot = self.slot?;
+        Some(
+            self.run
+                .reader()
+                .tile(slot, rows, x0, x1, pixels)
+                .map(ColumnTile::from)
+                .map_err(|error| error.to_string()),
+        )
+    }
+
+    fn rows_around(
+        &self,
+        rows: std::ops::Range<u64>,
+        x: f64,
+    ) -> Option<Result<RowsAround, String>> {
+        let slot = self.slot?;
+        Some(
+            self.run
+                .reader()
+                .rows_around(slot, rows, x)
+                .map_err(|error| error.to_string()),
+        )
     }
 }
 

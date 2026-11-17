@@ -7,7 +7,7 @@ use egui::Ui;
 use rspice_results::visualization_document::Abscissa;
 use rspice_ui_kit::{
     icons::Icon,
-    plot::{paint_trace_swatch, sample::sample_at_with_shape},
+    plot::paint_trace_swatch,
     theme,
     tokens::Tokens,
     widgets::{IconButton, chip, chip_width},
@@ -481,10 +481,8 @@ fn legend_entry(
     let label = match cursor_a {
         Some((x, presentation, policy)) => {
             let digits = usize::from(presentation.displayed_significant_digits().get());
-            let value = sample_at_with_shape(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
+            let value = super::trace_value_at(
+                trace,
                 *x,
                 cursor_interpolation(presentation.cursor_interpolation()),
             );

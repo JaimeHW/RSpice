@@ -49,6 +49,6 @@ pub use render::{
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};
 pub use spec::{
-    Axis, Band, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace, YCaptionRow,
-    trace_cache_key,
+    Axis, Band, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, StoredSamples,
+    Trace, YCaptionRow, trace_cache_key,
 };

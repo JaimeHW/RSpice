@@ -219,6 +219,19 @@ pub fn pane_trace_extremes(
 ) -> Extremes {
     let mut extremes = Extremes::default();
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
+        // A stored trace's extent comes from its tiles, never its whole column.
+        if trace.y.is_stored()
+            && let Some(extent) = derived.stored_extent_or(trace_key(model, trace), window, || {
+                trace.y.extent_over(&trace.x, window)
+            })
+        {
+            extremes.absorb(Extremes {
+                min: extent.min,
+                max: extent.max,
+                min_positive: extent.min_positive,
+            });
+            continue;
+        }
         let index = derived.extrema_or(trace_key(model, trace), &trace.y, &mut note_samples);
         extremes.absorb(match window {
             Some(window) => index.window(&trace.x, &trace.y, &trace.shape, window),

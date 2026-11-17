@@ -219,6 +219,17 @@ pub struct Trace<'a> {
     /// existed. Classifying is O(n), so it belongs in the owner's cache, not
     /// in the per-frame render path.
     pub shape: Option<&'a SweepShape>,
+    /// The samples, when a results store keeps them: `x` and `y` are then empty, and the trace
+    /// is drawn from the store's tiles at the view's width without reading either column.
+    pub stored: Option<StoredSamples<'a>>,
+}
+
+/// A trace's samples as windows of the columns of a results store: its run's axis and the
+/// signal's values over the same rows.
+#[derive(Clone, Copy)]
+pub struct StoredSamples<'a> {
+    pub x: &'a rspice_results::waveform::WaveformValues,
+    pub y: &'a rspice_results::waveform::WaveformValues,
 }
 
 impl<'a> Trace<'a> {
@@ -237,6 +248,29 @@ impl<'a> Trace<'a> {
             cache_key: None,
             parametric: false,
             shape: None,
+            stored: None,
+        }
+    }
+
+    /// A solid 1.8 pt trace of samples a results store keeps, drawn from its tiles. Samples the
+    /// store cannot tile (held in memory, or on a scale its tiles do not follow) are drawn as
+    /// [`Self::new`] draws them.
+    pub fn stored(
+        x: &'a rspice_results::waveform::WaveformValues,
+        y: &'a rspice_results::waveform::WaveformValues,
+        color: Color32,
+    ) -> Self {
+        Self {
+            stored: Some(StoredSamples { x, y }),
+            ..Self::new(&[], &[], color)
+        }
+    }
+
+    /// Whether the trace has no samples to draw.
+    pub fn is_empty(&self) -> bool {
+        match self.stored {
+            Some(stored) => stored.x.is_empty() || stored.y.is_empty(),
+            None => self.x.is_empty() || self.y.is_empty(),
         }
     }
 

@@ -334,7 +334,7 @@ fn append_projected_traces(
                 run_id,
                 false,
             ),
-            || SweepShape::of(&projection.x),
+            || SweepShape::of_axis(&projection.x),
         );
         traces.push(StripTrace {
             waveform_index,
@@ -827,7 +827,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         overlay_run.id,
                         true,
                     ),
-                    || SweepShape::of(&projected.0),
+                    || SweepShape::of_axis(&projected.0),
                 );
                 projected_overlay_traces.push(StripTrace {
                     waveform_index: overlay_index,
@@ -906,7 +906,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             event_markers: analysis
                 .waveforms
                 .first()
-                .and_then(|waveform| Some((*waveform.x.first()?, *waveform.x.last()?)))
+                .and_then(|waveform| waveform.x.ends())
                 .and_then(|axis| super::logic::RunMarkers::of(&analysis.checks, axis))
                 .map(Arc::new),
             expression_panes: Vec::new(),

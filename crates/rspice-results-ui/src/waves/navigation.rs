@@ -1,6 +1,6 @@
 //! Shared waveform X-axis drawing, overview navigation and local gesture state.
 
-use super::{StripModel, trace_key};
+use super::{StripModel, StripTrace, trace_key};
 use crate::derived::DerivedSeries;
 use egui::Ui;
 use rspice_ui_kit::plot::{Axis, CursorPair, XScale};
@@ -356,26 +356,40 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             // Folding them again here was a second full pass over the
             // retained samples on every frame, for a curve fourteen pixels
             // tall.
+            // A stored trace's miniature is its tile across the whole axis,
+            // read from the store's summaries rather than its column.
+            let stored = (scale == XScale::Linear)
+                .then(|| stored_overview(trace))
+                .flatten();
             let (minimum, maximum) = derived
-                .range_or(trace_key(model, trace), || {
-                    output.extrema_samples_read = trace.y.len();
-                    rspice_results::measurements::finite_extremes(&trace.y)
+                .range_or(trace_key(model, trace), || match &stored {
+                    Some((range, _)) => *range,
+                    None => {
+                        output.extrema_samples_read = trace.y.len();
+                        rspice_results::measurements::finite_extremes(&trace.y)
+                    }
                 })
                 .unwrap_or((0.0, 1.0));
             let span = (maximum - minimum).max(f64::EPSILON);
             // Cache bounded source knots with explicit gap separators. Both
             // extrema and gap discovery happen only when the source changes.
-            let indices = derived.overview_indices_or(trace_key(model, trace), || {
-                output.overview_samples_read = trace.y.len().saturating_mul(2);
-                rspice_results::waveform::RetainedWaveform::new(
-                    "overview",
-                    trace.x.clone(),
-                    trace.y.clone(),
-                )
-                .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
-            });
-            output.overview_samples_read += indices.len();
-            for segment in overview_segments(&trace.x, &trace.y, &indices) {
+            let segments = match stored {
+                Some((_, segments)) => segments,
+                None => {
+                    let indices = derived.overview_indices_or(trace_key(model, trace), || {
+                        output.overview_samples_read = trace.y.len().saturating_mul(2);
+                        rspice_results::waveform::RetainedWaveform::new(
+                            "overview",
+                            trace.x.clone(),
+                            trace.y.clone(),
+                        )
+                        .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
+                    });
+                    output.overview_samples_read += indices.len();
+                    overview_segments(&trace.x, &trace.y, &indices)
+                }
+            };
+            for segment in segments {
                 let points = segment
                     .into_iter()
                     // t = 0 has no place on a logarithmic axis: the miniature
@@ -843,6 +857,49 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             .to_owned()
     }));
     output
+}
+
+/// A stored trace's range, and its miniature as unbroken runs of points.
+type StoredOverview = (Option<(f64, f64)>, Vec<Vec<(f64, f64)>>);
+
+/// The range and miniature of a trace whose samples a results store keeps: its
+/// tile across its whole axis, each pixel's least and greatest value at the
+/// pixel's middle, broken where a pixel holds no available value. `None` for a
+/// trace held in memory.
+fn stored_overview(trace: &StripTrace) -> Option<StoredOverview> {
+    use rspice_results::waveform::ColumnTile;
+    let (x0, x1) = trace.x.ends()?;
+    (x1 > x0).then_some(())?;
+    let tile = trace
+        .y
+        .tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?;
+    let mut points: Vec<(f64, f64)> = Vec::new();
+    match tile {
+        ColumnTile::Samples { x, y, .. } => points.extend(x.into_iter().zip(y)),
+        ColumnTile::Envelope { min, max, touched } => {
+            let width = (x1 - x0) / min.len() as f64;
+            for pixel in (0..min.len()).filter(|&pixel| touched[pixel]) {
+                let x = x0 + (pixel as f64 + 0.5) * width;
+                points.push((x, min[pixel]));
+                if max[pixel] != min[pixel] {
+                    points.push((x, max[pixel]));
+                }
+            }
+        }
+    }
+    let range = points
+        .iter()
+        .map(|&(_, y)| y)
+        .filter(|y| y.is_finite())
+        .fold(None, |range: Option<(f64, f64)>, y| {
+            Some(range.map_or((y, y), |(lo, hi)| (lo.min(y), hi.max(y))))
+        });
+    let segments = points
+        .split(|(x, y)| !(x.is_finite() && y.is_finite()))
+        .filter(|segment| !segment.is_empty())
+        .map(<[(f64, f64)]>::to_vec)
+        .collect();
+    Some((range, segments))
 }
 
 fn overview_segments(x: &[f64], y: &[f64], indices: &[usize]) -> Vec<Vec<(f64, f64)>> {

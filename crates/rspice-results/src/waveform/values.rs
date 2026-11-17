@@ -5,9 +5,13 @@
 //! for the values: every clone shares that one read, and a reader that asks only how many samples
 //! there are reads nothing. A column stored in memory is shared the same way, so a run's axis is
 //! one allocation however many waveforms share it.
+//!
+//! What a plot needs of a stored window never reads it whole: its tile of a view (per pixel, the
+//! least and greatest value of the rows in it), the rows around a cursor, its extent, and the ends
+//! of a time axis come from the store's summaries and the few rows they name.
 
 use std::fmt;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// A column of samples kept outside memory and read on demand: one signal of a run in a results
@@ -25,6 +29,116 @@ pub trait ColumnSource: Send + Sync {
 
     /// Read rows `first .. first + out.len()` into `out`.
     fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String>;
+
+    /// Whether the column's rows ascend strictly: a time axis its run checked as it ended.
+    fn ascending(&self) -> bool {
+        false
+    }
+
+    /// The tile of the rows in `rows` with x in `x0 ..= x1` at `pixels` pixels, x being the axis
+    /// of the run the column belongs to; `None` when the source keeps nothing to tile from.
+    fn tile(
+        &self,
+        _rows: Range<u64>,
+        _x0: f64,
+        _x1: f64,
+        _pixels: usize,
+    ) -> Option<Result<ColumnTile, String>> {
+        None
+    }
+
+    /// The rows of `rows` around `x` on its run's axis, each as (x, value), with the index of
+    /// the first: up to two at or before `x` and up to two after, consecutive. `None` when the
+    /// source cannot find them without reading the column.
+    fn rows_around(&self, _rows: Range<u64>, _x: f64) -> Option<Result<RowsAround, String>> {
+        None
+    }
+}
+
+/// Consecutive rows of a column around a cursor, each as (x, value), and the index of the
+/// first.
+pub type RowsAround = (u64, Vec<(f64, f64)>);
+
+/// What a stored column shows of a view of its rows: N pixels over x in [x0, x1], x being the
+/// axis of the run the column belongs to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ColumnTile {
+    /// At most two rows per pixel: every row with x in the view, and the nearest row either
+    /// side of them, each as (x, value).
+    Samples {
+        x: Vec<f64>,
+        y: Vec<f64>,
+        before: Option<(f64, f64)>,
+        after: Option<(f64, f64)>,
+    },
+    /// Per pixel, the least and greatest value of the rows in it (NaN in both where they hold
+    /// no available value), and whether any row fell in it.
+    Envelope {
+        min: Vec<f64>,
+        max: Vec<f64>,
+        touched: Vec<bool>,
+    },
+}
+
+impl ColumnTile {
+    /// A view of no rows: what a column that cannot be read shows.
+    fn empty(pixels: usize) -> Self {
+        Self::Envelope {
+            min: vec![f64::NAN; pixels],
+            max: vec![f64::NAN; pixels],
+            touched: vec![false; pixels],
+        }
+    }
+
+    /// This view with the sample `(x, y)` that comes before every row in it.
+    fn with_lead(mut self, (x, y): (f64, f64), x0: f64, x1: f64) -> Self {
+        let inside = x >= x0 && x <= x1;
+        match &mut self {
+            Self::Samples {
+                x: xs,
+                y: ys,
+                before,
+                after,
+            } => {
+                if inside {
+                    xs.insert(0, x);
+                    ys.insert(0, y);
+                } else if x < x0 {
+                    before.get_or_insert((x, y));
+                } else {
+                    *after = Some((x, y));
+                }
+            }
+            Self::Envelope { min, max, touched } => {
+                if inside {
+                    let pixels = min.len();
+                    let pixel = if x1 > x0 {
+                        (((x - x0) / (x1 - x0) * pixels as f64) as usize).min(pixels - 1)
+                    } else {
+                        0
+                    };
+                    if !y.is_nan() {
+                        min[pixel] = if min[pixel] <= y { min[pixel] } else { y };
+                        max[pixel] = if max[pixel] >= y { max[pixel] } else { y };
+                    }
+                    touched[pixel] = true;
+                }
+            }
+        }
+        self
+    }
+}
+
+/// The pixels a stored waveform's extent is read at: fine enough that the least positive pixel
+/// extreme is close to the least positive value.
+const EXTENT_PIXELS: usize = 1024;
+
+/// The least and greatest available values of a set of samples, and the least positive one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ValueExtent {
+    pub min: f64,
+    pub max: f64,
+    pub min_positive: f64,
 }
 
 /// What a stored window holds before its first row.
@@ -107,6 +221,10 @@ struct Stored {
     window: StoredWindow,
     values: OnceLock<Vec<f64>>,
     failure: OnceLock<ColumnReadFailure>,
+    /// The value an interpolated lead holds, read once.
+    lead_value: OnceLock<f64>,
+    /// The first and last sample, read once.
+    ends: OnceLock<Option<(f64, f64)>>,
 }
 
 impl Stored {
@@ -148,14 +266,128 @@ impl Stored {
     fn values(&self) -> &Vec<f64> {
         self.values.get_or_init(|| {
             self.read().unwrap_or_else(|failure| {
-                UNREPORTED_FAILURES
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .push(failure.clone());
-                let _ = self.failure.set(failure);
+                self.fail(failure);
                 vec![f64::NAN; self.len()]
             })
         })
+    }
+
+    /// Keep the window's first failure, and hand it to diagnostics once.
+    fn fail(&self, failure: ColumnReadFailure) {
+        if self.failure.set(failure.clone()).is_ok() {
+            UNREPORTED_FAILURES
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(failure);
+        }
+    }
+
+    fn failed(&self, cause: String) -> ColumnReadFailure {
+        ColumnReadFailure {
+            column: self.source.name().to_owned(),
+            store: self.source.store(),
+            cause,
+        }
+    }
+
+    /// The rows of the column the window holds.
+    fn rows(&self) -> Range<u64> {
+        self.window.first..self.window.first + self.window.rows
+    }
+
+    /// What the window holds before its first row, read once for an interpolated lead.
+    fn lead(&self) -> Option<f64> {
+        match self.window.lead {
+            WindowLead::None => None,
+            WindowLead::Value(value) => Some(value),
+            WindowLead::Interpolated(fraction) => Some(*self.lead_value.get_or_init(|| {
+                // As [`Self::read`] makes it: the row before the first, moved `fraction` of the
+                // way to the first.
+                let count = if self.window.rows > 0 { 2 } else { 1 };
+                let mut pair = [0.0; 2];
+                match self.source.read(self.window.first - 1, &mut pair[..count]) {
+                    Ok(()) if count == 2 => pair[0] + fraction * (pair[1] - pair[0]),
+                    Ok(()) => pair[0],
+                    Err(cause) => {
+                        self.fail(self.failed(cause));
+                        f64::NAN
+                    }
+                }
+            })),
+        }
+    }
+
+    /// The first and last sample, reading only those.
+    fn ends(&self) -> Option<(f64, f64)> {
+        *self.ends.get_or_init(|| {
+            if let Some(values) = self.values.get() {
+                return Some((*values.first()?, *values.last()?));
+            }
+            let row = |row: u64| {
+                let mut value = [0.0];
+                match self.source.read(row, &mut value) {
+                    Ok(()) => value[0],
+                    Err(cause) => {
+                        self.fail(self.failed(cause));
+                        f64::NAN
+                    }
+                }
+            };
+            let last = match self.window.rows {
+                0 => self.lead()?,
+                rows => row(self.window.first + rows - 1),
+            };
+            let first = match self.lead() {
+                Some(lead) => lead,
+                None => row(self.window.first),
+            };
+            Some((first, last))
+        })
+    }
+
+    /// The tile of the window over x in `x0 ..= x1`, the window's lead at `lead_x`.
+    fn tile(&self, lead_x: Option<f64>, x0: f64, x1: f64, pixels: usize) -> Option<ColumnTile> {
+        if self.failure.get().is_some() {
+            return Some(ColumnTile::empty(pixels));
+        }
+        let tile = match self.source.tile(self.rows(), x0, x1, pixels)? {
+            Ok(tile) => tile,
+            Err(cause) => {
+                self.fail(self.failed(cause));
+                return Some(ColumnTile::empty(pixels));
+            }
+        };
+        Some(match lead_x.zip(self.lead()) {
+            Some(lead) => tile.with_lead(lead, x0, x1),
+            None => tile,
+        })
+    }
+
+    /// The window's value at `at`, the window's lead at `lead_x`.
+    fn value_at(
+        &self,
+        lead_x: Option<f64>,
+        at: f64,
+        interpolation: crate::sampling::SampleInterpolation,
+    ) -> Option<f64> {
+        if self.failure.get().is_some() {
+            return Some(f64::NAN);
+        }
+        let (first, mut rows) = match self.source.rows_around(self.rows(), at)? {
+            Ok(around) => around,
+            Err(cause) => {
+                self.fail(self.failed(cause));
+                return Some(f64::NAN);
+            }
+        };
+        // The lead comes before the window's first row: a cursor near it reads it too.
+        if first == self.window.first
+            && let Some(lead) = lead_x.zip(self.lead())
+        {
+            rows.insert(0, lead);
+        }
+        let (x, y): (Vec<f64>, Vec<f64>) = rows.into_iter().unzip();
+        Some(crate::sampling::sample_at_with(&x, &y, at, interpolation))
     }
 
     fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
@@ -196,6 +428,8 @@ impl WaveformValues {
             window,
             values: OnceLock::new(),
             failure: OnceLock::new(),
+            lead_value: OnceLock::new(),
+            ends: OnceLock::new(),
         }))))
     }
 
@@ -223,6 +457,96 @@ impl WaveformValues {
             Repr::Memory(_) => None,
             Repr::Stored(stored) => Some((&stored.source, stored.window)),
         }
+    }
+
+    /// Whether the samples are a window of a column whose rows ascend strictly: a stored run's
+    /// time axis.
+    pub fn is_ascending_axis(&self) -> bool {
+        matches!(&self.0, Repr::Stored(stored) if stored.source.ascending())
+    }
+
+    /// The first and last sample, reading at most those two of a stored window.
+    pub fn ends(&self) -> Option<(f64, f64)> {
+        match &self.0 {
+            Repr::Memory(values) => Some((*values.first()?, *values.last()?)),
+            Repr::Stored(stored) => stored.ends(),
+        }
+    }
+
+    /// The stored window these samples are, and the abscissa of its lead, when `x` is the window
+    /// of its run's axis over the same rows.
+    fn stored_against(&self, x: &Self) -> Option<(&Stored, Option<f64>)> {
+        let (Repr::Stored(values), Repr::Stored(axis)) = (&self.0, &x.0) else {
+            return None;
+        };
+        let lead_x = match (axis.window.lead, values.window.lead) {
+            (WindowLead::None, WindowLead::None) => None,
+            (WindowLead::Value(x), WindowLead::Value(_) | WindowLead::Interpolated(_)) => Some(x),
+            _ => return None,
+        };
+        let same_rows =
+            axis.window.first == values.window.first && axis.window.rows == values.window.rows;
+        (same_rows && axis.source.ascending()).then_some((values.as_ref(), lead_x))
+    }
+
+    /// The tile of these samples over x in `x0 ..= x1` at `pixels` pixels, `x` being their run's
+    /// axis over the same rows: read from the store's summaries, never the whole window. `None`
+    /// when they are not such a window of a column that can tile; read the values instead. A
+    /// window that cannot be read tiles as no rows, and its failure goes to
+    /// [`take_column_read_failures`] once.
+    pub fn tile_over(&self, x: &Self, x0: f64, x1: f64, pixels: usize) -> Option<ColumnTile> {
+        if pixels == 0 || !(x0.is_finite() && x1.is_finite() && x0 <= x1) {
+            return None;
+        }
+        let (stored, lead_x) = self.stored_against(x)?;
+        stored.tile(lead_x, x0, x1, pixels)
+    }
+
+    /// The value at `at` by `interpolation`, as [`crate::sampling::sample_at_with`] reads it
+    /// from the whole series, from the few rows around `at` alone, `x` being their run's axis
+    /// over the same rows. `None` when these samples are not such a window; read the values
+    /// instead. A window that cannot be read reads NaN.
+    pub fn value_at(
+        &self,
+        x: &Self,
+        at: f64,
+        interpolation: crate::sampling::SampleInterpolation,
+    ) -> Option<f64> {
+        let (stored, lead_x) = self.stored_against(x)?;
+        stored.value_at(lead_x, at, interpolation)
+    }
+
+    /// The least and greatest available value, and the least positive one, over x in `window`
+    /// (all of the samples when `None`), `x` being their run's axis over the same rows, from a
+    /// fine tile. The least positive value is a pixel's extreme, so where one pixel's rows cross
+    /// zero it may stand above the least positive sample. `None` when these samples cannot tile.
+    pub fn extent_over(&self, x: &Self, window: Option<(f64, f64)>) -> Option<ValueExtent> {
+        let (x0, x1) = match window {
+            Some(window) => window,
+            None => x.ends()?,
+        };
+        let tile = self.tile_over(x, x0.min(x1), x0.max(x1), EXTENT_PIXELS)?;
+        let mut extent = ValueExtent {
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+            min_positive: f64::INFINITY,
+        };
+        let mut take = |value: f64| {
+            if value.is_finite() {
+                extent.min = extent.min.min(value);
+                extent.max = extent.max.max(value);
+                if value > 0.0 {
+                    extent.min_positive = extent.min_positive.min(value);
+                }
+            }
+        };
+        match tile {
+            ColumnTile::Samples { y, .. } => y.into_iter().for_each(&mut take),
+            ColumnTile::Envelope { min, max, .. } => {
+                min.into_iter().chain(max).for_each(&mut take);
+            }
+        }
+        Some(extent)
     }
 
     /// The values, read from a stored window the first time, or why it could not be read.
