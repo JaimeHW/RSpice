@@ -28,6 +28,7 @@ mod library_keyboard;
 mod library_page;
 mod library_transfers;
 mod library_undo;
+mod narrow;
 mod new_cell;
 mod new_project;
 mod new_project_fields;

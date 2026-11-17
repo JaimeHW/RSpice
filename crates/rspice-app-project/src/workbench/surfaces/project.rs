@@ -47,7 +47,16 @@ use technology::poll_technology_change;
 pub use technology::show_technology_attachment_dialog;
 use technology::{open_technology_attachment_dialog, open_technology_detach_dialog};
 
-const PROJECT_TAB_HEIGHT: f32 = 24.0;
+/// The height of a page tab and of a chip beside the tabs: a dense grid's row
+/// under a fine pointer, the touch target under a coarse one.
+fn project_tab_height(tokens: &Tokens) -> f32 {
+    if tokens.metrics.is_touch() {
+        tokens.metrics.touch_target()
+    } else {
+        tokens.metrics.grid_row_h
+    }
+}
+
 /// The unsaved mark a tab or row carries, the document bar's dot, and the
 /// room it takes after the label.
 const DIRTY_MARK_SIZE: f32 = 6.0;
@@ -189,18 +198,30 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
                     });
                 });
             } else {
+                // Too narrow for every tab: they scroll under a finger, with no
+                // bar under them, and the page in front is kept in view.
                 ScrollArea::horizontal()
                     .id_salt("workbench.project.tabs.compact")
                     .auto_shrink([false, true])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
                         project_tabs(ui, cx);
                     });
                 if !chips.is_empty() {
-                    ui.horizontal(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            project_context_cluster(ui, cx, &chips, context_width, &mut raised);
+                    if context_width <= ui.available_width() {
+                        ui.horizontal(|ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                project_context_cluster(ui, cx, &chips, context_width, &mut raised);
+                            });
                         });
-                    });
+                    } else {
+                        // Narrower still: the chips take as many rows as they
+                        // need, each whole, rather than running off the edge.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(CHIP_GAP, 0.0);
+                            project_context_chips(ui, cx, &chips, &tokens, &mut raised);
+                        });
+                    }
                 }
             }
         });
@@ -229,26 +250,37 @@ fn project_context_cluster(
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().min(desired).max(1.0);
     ui.allocate_ui_with_layout(
-        vec2(width, PROJECT_TAB_HEIGHT),
+        vec2(width, project_tab_height(&tokens)),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = CHIP_GAP;
-            project_revision_label(ui, cx, &tokens);
-            for chip in chips {
-                let response = project_status_chip(
-                    ui,
-                    chip.kind.id_salt(),
-                    &chip.label,
-                    &chip.description,
-                    chip.problem,
-                    chip.enabled,
-                );
-                if response.clicked() {
-                    chip_clicked(cx, chip.kind, raised);
-                }
-            }
+            project_context_chips(ui, cx, chips, &tokens, raised);
         },
     );
+}
+
+/// The revision and the chips, in the layout the caller opened.
+fn project_context_chips(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    chips: &[HealthChip],
+    tokens: &Tokens,
+    raised: &mut Option<ChromeRaise>,
+) {
+    project_revision_label(ui, cx, tokens);
+    for chip in chips {
+        let response = project_status_chip(
+            ui,
+            chip.kind.id_salt(),
+            &chip.label,
+            &chip.description,
+            chip.problem,
+            chip.enabled,
+        );
+        if response.clicked() {
+            chip_clicked(cx, chip.kind, raised);
+        }
+    }
 }
 
 /// Room between the revision and the chips, and between chips.
@@ -315,6 +347,16 @@ fn project_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         .state
         .configuration
         .is_dirty(&cx.model.workspace.content.configuration_sets);
+    let height = project_tab_height(&tokens);
+    // The page the strip last brought into view: a strip that scrolls brings
+    // the page in front into view when it changes, however it was changed,
+    // and leaves the strip where a finger put it otherwise.
+    let shown_id = ui.id().with("project-section-tab-shown");
+    let brought = ui.data(|data| data.get_temp::<ProjectPage>(shown_id));
+    let bring_into_view = brought != Some(cx.state.project_page);
+    if bring_into_view {
+        ui.data_mut(|data| data.insert_temp(shown_id, cx.state.project_page));
+    }
     let shown = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (index, page) in ProjectPage::ALL.into_iter().enumerate() {
@@ -325,10 +367,12 @@ fn project_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 .x;
             let dirty = page == ProjectPage::Configuration && configuration_dirty;
             let mark_width = if dirty { DIRTY_MARK_ADVANCE } else { 0.0 };
-            let (_, rect) =
-                ui.allocate_space(vec2(text_width + 20.0 + mark_width, PROJECT_TAB_HEIGHT));
+            let (_, rect) = ui.allocate_space(vec2(text_width + 20.0 + mark_width, height));
             let response = ui.interact(rect, tab_ids[index], Sense::click());
             let selected = cx.state.project_page == page;
+            if selected && bring_into_view {
+                response.scroll_to_me(None);
+            }
             response.widget_info(|| {
                 WidgetInfo::selected(
                     WidgetType::SelectableLabel,
@@ -577,7 +621,18 @@ fn project_status_chip(
     } else {
         0.0
     };
-    let (_, rect) = ui.allocate_space(vec2(text_width + mark_advance + 2.0 * CHIP_PADDING, 22.0));
+    // A chip wider than its whole row ends in an ellipsis rather than
+    // running past the edge; its announcement keeps every word.
+    let room = (ui.max_rect().width() - mark_advance - 2.0 * CHIP_PADDING).max(1.0);
+    let (label, text_width) = if text_width > room {
+        (elide_text(ui, label, &font, room), room)
+    } else {
+        (label.to_owned(), text_width)
+    };
+    let (_, rect) = ui.allocate_space(vec2(
+        text_width + mark_advance + 2.0 * CHIP_PADDING,
+        project_tab_height(&tokens),
+    ));
     let response = ui.interact(
         rect,
         ui.id().with(("project-status-chip", id_salt)),

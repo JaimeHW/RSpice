@@ -643,11 +643,16 @@ impl Host for RSpiceApp {
 
         let app = self;
         match workspace {
-            // The narrow layout shows no document bar, so its title names the
-            // page in front.
-            Workspace::Project => {
-                format!("Project \u{b7} {}", app.state.project.project_page.label())
-            }
+            // The page tabs under the title name the page in front, so the
+            // narrow layout's title names the project.
+            Workspace::Project => app
+                .state
+                .model
+                .workspace
+                .content
+                .project
+                .display_name()
+                .to_owned(),
             Workspace::Design => design_title_cell(&app.state.model),
             Workspace::Simulate => "Simulation plan".to_owned(),
             Workspace::Stimulus => "Stimulus Library".to_owned(),
