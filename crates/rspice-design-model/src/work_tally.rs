@@ -31,6 +31,9 @@ pub struct WorkTally {
     pub sheet_catalog_lookups: usize,
     /// Reconciliations of the open cell view's sheet membership.
     pub sheet_reconciliations: usize,
+    /// Sorts of a whole library catalog, or of every cell of a library, by
+    /// name.
+    pub catalog_sorts: usize,
 }
 
 impl WorkTally {
@@ -44,6 +47,7 @@ impl WorkTally {
         junction_updates: 0,
         sheet_catalog_lookups: 0,
         sheet_reconciliations: 0,
+        catalog_sorts: 0,
     };
 }
 

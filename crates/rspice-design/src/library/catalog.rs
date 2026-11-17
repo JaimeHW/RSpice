@@ -93,6 +93,8 @@ impl LibraryCatalog {
     }
 
     pub fn libraries_sorted(&self) -> Vec<&Library> {
+        #[cfg(feature = "work-observation")]
+        rspice_design_model::work_tally::record(|work| work.catalog_sorts += 1);
         let mut libs: Vec<_> = self.libraries.values().collect();
         libs.sort_by(|a, b| a.name.cmp(&b.name));
         libs

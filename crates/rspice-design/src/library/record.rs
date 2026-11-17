@@ -62,6 +62,8 @@ impl Library {
 
     /// Get cells sorted by name
     pub fn cells_sorted(&self) -> Vec<&Cell> {
+        #[cfg(feature = "work-observation")]
+        rspice_design_model::work_tally::record(|work| work.catalog_sorts += 1);
         let mut cells: Vec<_> = self.cells.values().collect();
         cells.sort_by(|a, b| a.name.cmp(&b.name));
         cells

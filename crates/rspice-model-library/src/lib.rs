@@ -32,7 +32,7 @@ pub use authoring::*;
 pub use bin_family::{BinFamily, BindableModel, model_bin_family};
 pub use binding::CornerModelBinding;
 #[cfg(any(test, feature = "catalog-test-observation"))]
-pub use catalog::CATALOG_LIBRARY_SERIALIZATIONS;
+pub use catalog::{CATALOG_LIBRARY_SERIALIZATIONS, CATALOG_SORTS};
 pub use catalog::{
     CapturedHdlSources, ModelCatalog, ModelDefinitionProvider, ProjectModelCommit,
     ProjectModelTarget, model_library_source_digest,

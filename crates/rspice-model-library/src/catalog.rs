@@ -28,6 +28,15 @@ pub use identity::model_library_source_digest;
 pub use project_models::{ProjectModelCommit, ProjectModelTarget};
 pub use providers::ModelDefinitionProvider;
 
+#[cfg(any(test, feature = "catalog-test-observation"))]
+thread_local! {
+    /// How many times this thread sorted every library of a catalog by name.
+    /// A surface that sorts on every frame pays for the whole catalog per
+    /// repaint, and nothing it paints shows it; counting is how a test states
+    /// it.
+    pub static CATALOG_SORTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ModelCatalog {
@@ -72,6 +81,8 @@ impl ModelCatalog {
     }
 
     pub fn libraries_sorted(&self) -> Vec<&ModelLibrary> {
+        #[cfg(any(test, feature = "catalog-test-observation"))]
+        CATALOG_SORTS.with(|sorts| sorts.set(sorts.get() + 1));
         let mut libs: Vec<_> = self.libraries.values().collect();
         libs.sort_by(|a, b| a.name.cmp(&b.name));
         libs

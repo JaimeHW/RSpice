@@ -371,6 +371,14 @@ impl ProjectTechnologyBinding {
     }
 }
 
+#[cfg(any(test, feature = "catalog-test-observation"))]
+thread_local! {
+    /// How many retained model sources this thread hashed to prove them
+    /// against their pins. A foundry library retains megabytes, so a surface
+    /// that proves a binding on every frame hashes megabytes per repaint.
+    pub static MODEL_SOURCE_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn validate_retained_model_sources(
     library: &crate::ModelLibrary,
 ) -> Result<(), TechnologyBindingError> {
@@ -381,6 +389,8 @@ fn validate_retained_model_sources(
         if pin.path != content.path {
             return Err(TechnologyBindingError::RetainedSourceIdentityMismatch);
         }
+        #[cfg(any(test, feature = "catalog-test-observation"))]
+        MODEL_SOURCE_HASHES.with(|hashes| hashes.set(hashes.get() + 1));
         let digest = rspice_vocabulary::product::ContentDigest::from_bytes(
             sha2::Sha256::digest(&content.bytes).into(),
         );
