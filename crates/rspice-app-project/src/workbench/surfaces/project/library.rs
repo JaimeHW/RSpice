@@ -18,7 +18,7 @@ use crate::workbench::slots::ProjectState;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
 
 pub mod builtin_models;
-pub mod columns;
+mod columns;
 
 use columns::column_head_height;
 pub use columns::{BrowserColumn, LibraryBrowserState};
@@ -514,7 +514,13 @@ fn column_frame<R>(
             ui.set_min_size(vec2(width, height));
             ui.set_width(width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            let (header, _) = ui.allocate_exact_size(vec2(width, head_height), Sense::hover());
+            let (header, head) = ui.allocate_exact_size(vec2(width, head_height), Sense::hover());
+            // The head reads as the column's name, its count as the value.
+            head.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Label, true, format!("{title} column"))
+            });
+            ui.ctx()
+                .accesskit_node_builder(head.id, |node| node.set_value(count));
             ui.painter().rect_filled(header, 0.0, t.color.bg_panel);
             ui.painter().text(
                 pos2(header.left() + 10.0, header.center().y),
