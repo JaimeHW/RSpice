@@ -25,7 +25,6 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     RevertReviewToken,
 };
 use rspice_app_services::workbench::lifecycle::recovery::{self, RecoveryCandidate};
-#[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{CellViewRef, LibraryManager, ViewType};
 
@@ -72,6 +71,12 @@ impl AppState {
 /// Restore the session's project. A session saved with no project open
 /// restores onto the no-project landing: its workspace is the placeholder
 /// Close Project left behind, and it is never bound or opened.
+///
+/// The session keeps no unsaved project work: it is written when the
+/// application closes, after the reader saved or gave up that work. A
+/// project it left with changes its file does not hold opens as saved, and
+/// the autosave another session left newer than the file is looked for and
+/// offered once.
 pub(crate) fn initialize_from_session(state: &mut AppState) {
     if !state.platform.project_lifecycle.is_open() {
         state
@@ -80,12 +85,28 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
         return;
     }
     project_lifecycle::bind_restored_project(state);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The session keeps no unsaved project work: a closed window left it
+        // in an autosave, which the open offers back, and File > Exit saved
+        // it or gave it up.
+        let saved = project_lifecycle::canonical_native_path(&state.platform);
+        match saved {
+            Some(path) if project_lifecycle::has_unsaved_changes(state) => {
+                state.load_project_from_path(&path);
+            }
+            _ => autosave::start_recovered_work_search(&state.model, &mut state.platform, None),
+        }
+    }
 }
 
 /// What the Project workspace shows of the project going away: the
 /// feature's selections, and its navigator's filter, which names that
 /// project's libraries, configurations and checkpoints.
 fn forget_project_presentation(state: &mut AppState) {
+    // The project going away had its unsaved work saved or given up.
+    #[cfg(not(target_arch = "wasm32"))]
+    autosave::project_left(&mut state.platform);
     state.project.on_project_changed();
     state
         .workbench
@@ -105,6 +126,9 @@ pub(crate) fn accept_loaded_project(
     state.model.clear_project_design_history();
     forget_project_presentation(state);
     project_lifecycle::accept_loaded_project(state, baseline, binding);
+    // An autosave another session left of the project just opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    autosave::start_recovered_work_search(&state.model, &mut state.platform, None);
 }
 
 /// Start a new, unsaved project, after resetting what the features kept of
@@ -272,6 +296,126 @@ pub(crate) fn open_comparison(
     Err(recovery::comparison_unavailable())
 }
 
+/// Put the checkpoint the Recovery page read back into the open project, and
+/// say so on the status bar. The page lists its checkpoints again, the
+/// "Before restore" one among them.
+pub(crate) fn apply_restored_checkpoint(state: &mut AppState) {
+    let Some(restored) = state.project.project_checkpoint_recovery.restored.take() else {
+        return;
+    };
+    state.project.project_checkpoint_recovery.invalidate();
+    let when = rspice_app_state::time_compat::utc_stamp(restored.checkpoint.created_unix_ms());
+    match restore_checkpoint_in_place(state, restored.project) {
+        Ok(()) => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!(
+                    "Restored checkpoint \u{201c}{}\u{201d} from {when}; the project as it was is checkpoint {}.",
+                    restored.checkpoint.title(),
+                    restored.before.checkpoint_id()
+                ),
+            );
+            state.prompt(format!(
+                "Restored \u{201c}{}\u{201d} from {when} as unsaved changes. The project as it was is kept as \u{201c}{}\u{201d}.",
+                restored.checkpoint.title(),
+                restored.before.title()
+            ));
+        }
+        Err(error) => state.report_failure("Checkpoint not restored", error),
+    }
+}
+
+/// Put a checkpoint's project back in the open project as unsaved changes:
+/// its libraries, documents, simulation plan, models and results, its top
+/// cell and its description. The project keeps who it is: its file, its
+/// revision, its technology and every audit and publication record. A
+/// checkpoint taken under another technology is refused: a technology is
+/// changed on Dependencies, where the change is recorded.
+pub(crate) fn restore_checkpoint_in_place(
+    state: &mut AppState,
+    mut checkpoint: ProjectSnapshot,
+) -> Result<(), String> {
+    if state.model.safe_mode.project_read_only() {
+        return Err("The project is open read-only.".to_owned());
+    }
+    if state.model.simulation.execution.has_active_execution() {
+        return Err("A simulation is running.".to_owned());
+    }
+    let current = &state.model.workspace.content.project;
+    if checkpoint.file.workspace.project.id() != current.id() {
+        return Err("The checkpoint belongs to another project.".to_owned());
+    }
+    if checkpoint.file.workspace.project.technology_binding() != current.technology_binding() {
+        return Err(
+            "The checkpoint has another technology. Change the technology on Dependencies first, or save the checkpoint as a new project."
+                .to_owned(),
+        );
+    }
+    let (simulation_plan, model_library_manager, warnings) =
+        match checkpoint.file.execution_context.take() {
+            Some(context) => rspice_app_services::io::restore_execution_context(context)
+                .map_err(|error| format!("The checkpoint's simulation setup cannot be read: {error}"))?,
+            None => (
+                rspice_app_state::workbench::app_state::sim_setup::SimSetupState::new_with_user_preferences(
+                    &state.model.preferences,
+                ),
+                rspice_app_state::workbench::workspace::default_model_library_manager(),
+                vec!["The checkpoint has no simulation setup; the default setup was restored".to_owned()],
+            ),
+        };
+    let mut project = current.clone();
+    let restored = &checkpoint.file.workspace.project;
+    project.root_library = restored.root_library.clone();
+    project.top_cell = restored.top_cell.clone();
+    project.description = restored.description.clone();
+    project
+        .set_include_search_paths(restored.include_search_paths().to_vec())
+        .map_err(|error| format!("The checkpoint's include search paths are not valid: {error}"))?;
+    checkpoint.file.workspace.project = project;
+
+    let mut candidate = state.clone();
+    candidate.cancel_schematic_drag();
+    candidate.clear_design_execution_context();
+    candidate
+        .model
+        .library_manager
+        .replace_catalog_from_snapshot(&checkpoint.file.libraries)?;
+    candidate.model.workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
+        checkpoint.file.workspace,
+        checkpoint.workspace_session,
+    );
+    candidate.model.sim_setup = simulation_plan;
+    candidate.model.model_library_manager = model_library_manager;
+    candidate.restore_active_schematic_from_workspace();
+    candidate.bump_active_schematic_epoch();
+    candidate.model.simulation = rspice_app_state::state::SimulationState::default();
+    rspice_app_services::io::restore_simulation_results(
+        checkpoint.file.simulation_results,
+        &mut candidate.model.simulation,
+    )
+    .map_err(|error| format!("The checkpoint's results cannot be read: {error}"))?;
+    candidate
+        .model
+        .workspace
+        .content
+        .project
+        .validate()
+        .map_err(|error| format!("The restored project is not valid: {error}"))?;
+    // What the features kept of the project before, and its edit history,
+    // describe documents the restore replaced.
+    candidate.models.on_project_changed();
+    candidate.design.on_project_changed();
+    candidate.code.on_project_changed();
+    candidate.model.clear_project_design_history();
+    project_lifecycle::refresh_registry(&mut candidate).map_err(|error| error.to_string())?;
+    state.commit_candidate(candidate);
+    for warning in warnings {
+        state.record(LogSeverity::Warning, LogSource::Studio, warning);
+    }
+    Ok(())
+}
+
 fn restore_project_structure_preserving_documents(state: &mut AppState, baseline: LibraryManager) {
     for reference in project_lifecycle::replace_project_structure(&mut state.model, baseline) {
         state.prune_workspace_after_view_deleted(
@@ -375,6 +519,49 @@ impl AppState {
                     &self.model.workspace.content.visualization_documents,
                 ),
             );
+        }
+    }
+}
+
+/// The recovered-work question an open or a start raised: Keep puts the
+/// autosave back in the open project as unsaved changes, Open the saved
+/// project leaves it on the Recovery page, Compare shows it there with what
+/// it changes listed.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Context) {
+    use autosave::RecoveredWorkAnswer;
+    let Some(answer) = autosave::recovered_work_dialog(&mut state.platform, ctx) else {
+        return;
+    };
+    match answer {
+        RecoveredWorkAnswer::Keep(found) => {
+            let when = rspice_app_state::time_compat::utc_stamp(found.autosave.created_unix_ms());
+            match restore_checkpoint_in_place(state, *found.project) {
+                Ok(()) => {
+                    state.project.project_checkpoint_recovery.invalidate();
+                    state.prompt(format!(
+                        "Kept the changes recovered from {when}; save to keep them in the project file."
+                    ));
+                }
+                Err(error) => state.report_failure("Recovered changes not kept", error),
+            }
+        }
+        RecoveredWorkAnswer::OpenSaved(found) => state.prompt(format!(
+            "Opened the saved project. The recovered changes are on the Recovery page as \u{201c}{}\u{201d} until you save.",
+            found.autosave.title()
+        )),
+        RecoveredWorkAnswer::Compare(found) => {
+            let id = found.autosave.checkpoint_id();
+            let recovery = &mut state.project.project_checkpoint_recovery;
+            recovery.project_id = Some(found.project_id);
+            recovery.invalidate();
+            recovery.set_comparison(id, found.differences);
+            state.project.project_checkpoint_selection = Some(id.to_string());
+            state.project.project_page =
+                rspice_app_project::workbench::project::workspace_state::ProjectPage::Recovery;
+            state
+                .workbench
+                .activate(rspice_app_state::workbench::workspace::Workspace::Project);
         }
     }
 }

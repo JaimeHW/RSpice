@@ -569,6 +569,11 @@ impl RSpiceApp {
         if let Some(event) = self.state.poll_results_save(ctx) {
             self.handle_save_continuation_event(event);
         }
+        // A checkpoint the Recovery page read back goes into the project
+        // before anything draws it.
+        crate::workbench::app_state::services_access::apply_restored_checkpoint(&mut self.state);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.project_autosave(ctx);
         // Closing the window while a save copies its results asks, as File > Exit does.
         #[cfg(not(target_arch = "wasm32"))]
         if self.state.results_copy_running()
@@ -981,6 +986,10 @@ impl eframe::App for RSpiceApp {
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
         self.terminate_code_runtime();
+        // Unsaved work a closed window leaves becomes an autosave the next
+        // start offers; work File > Exit saved or gave up leaves none.
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_app_services::workbench::app_state::session::autosave::at_exit(&mut self.state);
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
         if let Err(error) =
@@ -1022,20 +1031,107 @@ impl eframe::App for RSpiceApp {
         log::debug!("save: done");
     }
 
-    /// Persist the complete recoverable working session on the same cadence
-    /// selected in Preferences. Native builds additionally publish their
-    /// path-bound exact-byte checkpoint; browser/mobile builds use eframe's
-    /// durable application storage as their device-local recovery owner.
+    /// On the desktop the session is kept when the application closes, never
+    /// between frames while it runs: writing it out serialises the whole
+    /// application on the UI thread. The open project's unsaved work is kept
+    /// by its autosave checkpoint, written off the frame. The browser keeps
+    /// its session on the cadence selected in Preferences, as its device-local
+    /// recovery.
     fn auto_save_interval(&self) -> std::time::Duration {
-        configured_autosave_interval(self.state.platform.autosave_minutes)
+        if cfg!(target_arch = "wasm32") {
+            configured_autosave_interval(self.state.platform.autosave_minutes)
+        } else {
+            std::time::Duration::MAX
+        }
     }
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench) fn process_exit_request(&mut self, ctx: &Context) {
+    /// The open project's autosave, written off the frame at the autosave
+    /// interval, and the recovered work an open or a start looked for.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn project_autosave(&mut self, ctx: &Context) {
+        use rspice_app_services::workbench::app_state::session::autosave;
+        if autosave::project_autosave_tick(&mut self.state, ctx) {
+            self.state.project.project_checkpoint_recovery.invalidate();
+        }
+        autosave::take_recovered_work(&mut self.state.model, &mut self.state.platform);
+        autosave::take_unopened_project(&mut self.state.platform);
+        if let Some(checkpoint) = self
+            .state
+            .platform
+            .recovery_catalog
+            .save_as_new_project
+            .take()
+        {
+            self.save_checkpoint_as_new_project(&checkpoint);
+        }
+        if self.state.platform.project_autosave.busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+
+    /// Save a project checkpoint as a project of its own, where the reader
+    /// picks, and open it: the file it was taken from is left as it is. The
+    /// open asks about unsaved work first, as any open does.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_checkpoint_as_new_project(
+        &mut self,
+        checkpoint: &rspice_app_services::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    ) {
+        use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
+        use rspice_app_services::workbench::lifecycle::project_checkpoint;
+
+        const NOT_SAVED: &str = "Not saved as a new project";
+        let name = project_checkpoint::recovery_copy_file_name(checkpoint);
+        let picked = self.export_workflow_io.show_save_dialog(
+            rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig {
+                title: "Save Checkpoint as New Project",
+                default_name: &name,
+                filter_name: "RSpice Project",
+                filter_extensions: &["rspiceproj"],
+            },
+        );
+        let path = match picked {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                self.state.report_failure(NOT_SAVED, error);
+                return;
+            }
+        };
+        if let Err(error) = project_checkpoint::publish_recovery_copy(checkpoint, &path) {
+            self.state.report_failure(NOT_SAVED, error);
+            return;
+        }
+        self.state.record(
+            rspice_app_state::diagnostics::LogSeverity::Info,
+            rspice_app_state::diagnostics::LogSource::Studio,
+            format!(
+                "Saved checkpoint \u{201c}{}\u{201d} as a new project: {}.",
+                checkpoint.title(),
+                path.display()
+            ),
+        );
+        self.state.project.project_launcher_open = false;
+        self.open_recent_file(RecentFile {
+            kind: RecentKind::Project,
+            path,
+            opened_at_unix_ms: 0,
+            pinned: false,
+            missing: false,
+        });
+    }
+
+    pub(crate) fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.shell.exit_requested {
             return;
         }
+        // File > Exit asked about the unsaved work before it got here.
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_app_services::workbench::app_state::session::autosave::note_reviewed_exit(
+            &mut self.state.platform,
+        );
 
         log::info!("application exit requested — closing viewport");
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

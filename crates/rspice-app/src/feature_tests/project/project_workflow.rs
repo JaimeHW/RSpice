@@ -251,8 +251,9 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
 }
 
 /// A saved project survives the restart through its session: Reopen last
-/// project binds its file again, and Start with no project keeps it open
-/// when it carries an edit the file does not have, and says why.
+/// project binds its file again. An edit the file does not have is not
+/// brought back by the session: the saved project opens as it is, with
+/// nothing unsaved, and Start with no project then closes it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_saved_project_comes_back_through_its_session() {
@@ -316,17 +317,26 @@ fn a_saved_project_comes_back_through_its_session() {
             .is_some()
     );
 
+    let edited_saved = restart(&session("edited-saved.rspiceproj", true), 0);
+    assert!(edited_saved.platform.project_lifecycle.is_open());
+    assert_eq!(
+        edited_saved.model.schematic.document().components.len(),
+        0,
+        "the saved project, without the edit"
+    );
+    assert!(
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
+            edited_saved.as_ref()
+        ),
+        "nothing unsaved"
+    );
     let edited = restart(&session("edited.rspiceproj", true), 1);
     assert!(
-        edited.platform.project_lifecycle.is_open(),
-        "unsaved changes stay"
+        !edited.platform.project_lifecycle.is_open(),
+        "Start with no project closes it: nothing unsaved holds it open"
     );
-    assert_eq!(edited.model.schematic.document().components.len(), 1);
-    assert!(edited.model.log_buffer.entries().any(|entry| {
-        entry.message == "The last project was reopened because it has unsaved changes."
-    }));
 
-    drop((reopened, edited));
+    drop((reopened, edited_saved, edited));
     let _ = std::fs::remove_dir_all(&folder);
 }
 

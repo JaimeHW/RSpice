@@ -156,6 +156,11 @@ impl DocumentFingerprints {
         self.content
     }
 
+    /// Whether the snapshot holds the document at all.
+    pub fn contains(&self, id: &ProjectDocumentId) -> bool {
+        self.documents.contains_key(id)
+    }
+
     /// The documents whose identity differs between `self` and `other`,
     /// including any present in only one, in stable-key order.
     pub fn differing_documents(&self, other: &Self) -> Vec<ProjectDocumentId> {

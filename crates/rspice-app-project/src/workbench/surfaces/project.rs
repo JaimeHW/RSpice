@@ -137,6 +137,7 @@ pub fn poll_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
         poll_browser_technology_checkpoint(ctx, cx);
         poll_browser_recovery_completions(ctx, cx);
         recovery::poll_browser_checkpoint_changes(cx);
+        recovery::poll_browser_checkpoint_reads(cx);
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

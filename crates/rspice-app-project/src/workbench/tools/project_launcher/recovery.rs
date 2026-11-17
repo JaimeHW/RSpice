@@ -28,6 +28,7 @@ pub(super) fn recovery_page(
         &[
             ("Discard selected autosave…", false),
             ("Safe mode\u{2026}", false),
+            ("Save as new project\u{2026}", false),
             ("Open recovery comparison", true),
         ],
     );
@@ -70,6 +71,7 @@ pub(super) fn recovery_page(
                         .recovery_catalog
                         .candidates
                         .clone();
+                    let projects = cx.platform.recovery_catalog.projects.clone();
                     let selected = cx.platform
                         .recovery_catalog
                         .selected_checkpoint
@@ -81,7 +83,7 @@ pub(super) fn recovery_page(
                         .inner_margin(Margin::symmetric(16, 0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
-                            if candidates.is_empty() {
+                            if candidates.is_empty() && projects.is_empty() {
                                 Frame::new()
                                     .inner_margin(Margin::symmetric(18, 28))
                                     .show(ui, |ui| {
@@ -103,7 +105,7 @@ pub(super) fn recovery_page(
                                             }
                                             ui.label(
                                                 egui::RichText::new(
-                                                    "No recent drawing left an autosave from an interrupted session.",
+                                                    "No recent project has a checkpoint, and no recent drawing left an autosave.",
                                                 )
                                                 .font(theme::sans(
                                                     tokens::FS_1,
@@ -131,6 +133,10 @@ pub(super) fn recovery_page(
                                 }
                             }
                         });
+
+                    if !projects.is_empty() {
+                        project_checkpoints(ui, cx, &projects);
+                    }
 
                     if let Some(candidate) = cx.platform
                         .recovery_catalog
@@ -171,6 +177,21 @@ pub(super) fn recovery_page(
         if Button::new("Safe mode\u{2026}").show(ui).clicked() {
             *action = Some(LauncherAction::Page(ProjectLauncherPage::SafeMode));
         }
+        let project_checkpoint = cx
+            .platform
+            .recovery_catalog
+            .selected_project_checkpoint()
+            .cloned();
+        let save = Button::new("Save as new project\u{2026}")
+            .enabled(project_checkpoint.is_some())
+            .show(ui)
+            .on_disabled_hover_text("Select a project checkpoint to save it as a new project");
+        if save.clicked()
+            && let Some(checkpoint) = project_checkpoint
+        {
+            cx.platform.recovery_catalog.save_as_new_project = Some(checkpoint);
+            ui.ctx().request_repaint();
+        }
         let recoverable = selected
             .as_ref()
             .is_some_and(|candidate| candidate.integrity.is_recoverable());
@@ -203,6 +224,92 @@ pub(super) fn recovery_page(
             *action = Some(LauncherAction::Recover(candidate));
         }
     });
+}
+
+/// The checkpoints kept beside each recent project's file, a group per
+/// project: what is left of a project whose file will not open. Selecting one
+/// offers it as a new project; Enter or a double-click saves it as one.
+fn project_checkpoints(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    projects: &[crate::workbench::lifecycle::recovery::RecentProjectCheckpoints],
+) {
+    use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, Group, RowKey};
+
+    let t = Tokens::get(ui.ctx());
+    Frame::new()
+        .inner_margin(Margin {
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new("Project checkpoints")
+                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+        });
+    let rows = projects
+        .iter()
+        .flat_map(|project| &project.checkpoints)
+        .collect::<Vec<_>>();
+    let keys = rows
+        .iter()
+        .map(|checkpoint| RowKey::Text(checkpoint.checkpoint_id().to_string()))
+        .collect::<Vec<_>>();
+    let mut first_row = 0;
+    let groups = projects
+        .iter()
+        .map(|project| {
+            let group = Group::new(
+                format!("{} \u{b7} {}", project.name(), project.project.display()),
+                first_row,
+            );
+            first_row += project.checkpoints.len();
+            group
+        })
+        .collect::<Vec<_>>();
+    let columns = [
+        Column::name("Checkpoint", 180.0),
+        Column::words("Taken", 260.0),
+    ];
+    let now_unix_ms = crate::time_compat::checked_unix_time_ms().ok();
+    let catalog = &mut cx.platform.recovery_catalog;
+    let response = Frame::new()
+        .inner_margin(Margin::symmetric(16, 0))
+        .show(ui, |ui| {
+            DataTable::new(
+                "workbench.project_launcher.recovery.projects",
+                &columns,
+                rows.len(),
+            )
+            .state(&mut catalog.project_table)
+            .keys(&keys)
+            .groups(&groups)
+            .show(ui, |row| {
+                let checkpoint = rows[row];
+                let created = checkpoint.created_unix_ms();
+                let taken = crate::time_compat::utc_stamp(created);
+                let taken = match now_unix_ms.and_then(|now| now.checked_sub(created)) {
+                    Some(age) => format!(
+                        "{taken} \u{b7} {}",
+                        crate::time_compat::relative_age(std::time::Duration::from_millis(age))
+                    ),
+                    None => taken,
+                };
+                vec![Cell::text(checkpoint.title()), Cell::text(taken)]
+            })
+        })
+        .inner;
+    if response.selection_changed && catalog.project_table.selection.is_some() {
+        catalog.project_checkpoint_selected();
+    }
+    if let Some(row) = response.activate {
+        catalog.save_as_new_project = Some(rows[row].clone());
+        ui.ctx().request_repaint();
+    }
 }
 
 pub(super) fn recovery_row(

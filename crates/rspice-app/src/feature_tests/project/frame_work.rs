@@ -56,6 +56,8 @@ struct FrameWork {
     project_file_reads: usize,
     /// Checkpoint directories listed and files whose metadata was read.
     checkpoint_reads: usize,
+    /// Checkpoints written, an autosave among them.
+    checkpoint_writes: usize,
     /// Every library of a catalog, or every cell of a library, sorted.
     catalog_sorts: usize,
     /// Nets extracted from a schematic.
@@ -69,13 +71,14 @@ struct FrameWork {
 }
 
 impl FrameWork {
-    const fn counts(self) -> [usize; 9] {
+    const fn counts(self) -> [usize; 10] {
         [
             self.fingerprint_passes,
             self.project_captures,
             self.model_library_hashes,
             self.project_file_reads,
             self.checkpoint_reads,
+            self.checkpoint_writes,
             self.catalog_sorts,
             self.net_extractions,
             self.library_rows,
@@ -83,13 +86,14 @@ impl FrameWork {
         ]
     }
 
-    const fn from_counts(counts: [usize; 9]) -> Self {
+    const fn from_counts(counts: [usize; 10]) -> Self {
         let [
             fingerprint_passes,
             project_captures,
             model_library_hashes,
             project_file_reads,
             checkpoint_reads,
+            checkpoint_writes,
             catalog_sorts,
             net_extractions,
             library_rows,
@@ -101,6 +105,7 @@ impl FrameWork {
             model_library_hashes,
             project_file_reads,
             checkpoint_reads,
+            checkpoint_writes,
             catalog_sorts,
             net_extractions,
             library_rows,
@@ -148,6 +153,7 @@ fn take_work() -> FrameWork {
                 .with(|n| n.replace(0)),
         project_file_reads: disk.project_files,
         checkpoint_reads: disk.checkpoint_directories + disk.file_stats,
+        checkpoint_writes: disk.checkpoints_written,
         catalog_sorts: rspice_model_library::CATALOG_SORTS.with(|n| n.replace(0))
             + design.catalog_sorts,
         net_extractions: design.connectivity_passes,
@@ -327,6 +333,57 @@ fn the_recovery_page_lists_its_checkpoints_off_the_frame_and_idles() {
         "the frames that waited for the list read nothing"
     );
     assert_eq!(idle_frames(&ctx, &mut app), FrameWork::default());
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// The autosave of a large project with unsaved work is read off the model
+/// on the frame the interval runs out on, and written, listed and pruned on
+/// a background thread: no frame writes or reads a checkpoint, and the
+/// autosave is on disk once its answer is taken.
+#[test]
+fn the_autosave_is_written_off_the_frame() {
+    let (mut app, folder) = large_project("frame-work-autosave", COMPONENTS);
+    app.state.model.schematic.with_undo("Place", |schematic| {
+        schematic.add_component(ComponentType::Capacitor, Point::new(-40, -40));
+    });
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let ctx = offscreen();
+    for _ in 0..WARM_UP_FRAMES {
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    app.state
+        .platform
+        .project_autosave
+        .arm_at(std::time::Instant::now() - std::time::Duration::from_secs(3600));
+    take_work();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while app.state.platform.project_autosave.written().is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the autosave was never written"
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let frames = take_work();
+    assert_eq!(
+        (
+            frames.checkpoint_writes,
+            frames.project_file_reads,
+            frames.checkpoint_reads
+        ),
+        (0, 0, 0),
+        "no frame wrote or read a checkpoint: {frames:?}"
+    );
+    assert!(
+        rspice_app_services::workbench::lifecycle::project_checkpoint::list(&app.state.model)
+            .expect("listed")
+            .checkpoints
+            .iter()
+            .any(|checkpoint| checkpoint.reason() == ProjectCheckpointReason::Autosave),
+        "the autosave is on disk"
+    );
     let _ = std::fs::remove_dir_all(folder);
 }
 

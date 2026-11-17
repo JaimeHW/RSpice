@@ -354,7 +354,7 @@ fn restores_offered(output: &egui::FullOutput) -> Vec<bool> {
         .iter()
         .filter(|(_, node)| {
             node.label().is_some_and(|label| {
-                label.starts_with("Restore ") && label.ends_with(" as a new project")
+                label.starts_with("Restore ") && label.ends_with(" into the project")
             })
         })
         .map(|(_, node)| {

@@ -12,6 +12,10 @@ pub struct PlatformState {
     #[cfg(not(target_arch = "wasm32"))]
     pub pending_autosave_restore:
         Option<crate::workbench::lifecycle::recovery_checkpoint::AutosaveRestoreCandidate>,
+    /// The open project's autosave: its timer, the checkpoint being written
+    /// and the recovered work an open found. Transient.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub project_autosave: crate::workbench::app_state::session::autosave::ProjectAutosave,
     /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
     /// next to the project file and never touch it.
     pub autosave_minutes: u8,
@@ -57,6 +61,8 @@ impl Default for PlatformState {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
             pending_autosave_restore: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            project_autosave: Default::default(),
             // Crash recovery is not opt-in; Off stays available.
             autosave_minutes: 5,
             autosave_failing: false,

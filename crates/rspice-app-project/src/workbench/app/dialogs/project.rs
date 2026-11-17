@@ -49,6 +49,16 @@ pub struct ProjectCheckpointRecoveryState {
     pub(crate) note_draft: Option<(uuid::Uuid, String)>,
     /// What the reader asked to delete, waiting for the answer.
     pub(crate) delete_review: Option<CheckpointDeletion>,
+    /// The checkpoint the reader asked to restore, waiting for the answer.
+    pub(crate) restore_review: Option<uuid::Uuid>,
+    /// A checkpoint read back for a restore, with the "Before restore"
+    /// checkpoint already written: the shell puts it in the open project.
+    pub restored: Option<RestoredCheckpoint>,
+    /// A checkpoint saved as a new project, and where: the page offers to
+    /// open it.
+    pub saved_copy: Option<(uuid::Uuid, std::path::PathBuf)>,
+    /// What the last comparison found, for the checkpoint it compared.
+    pub(crate) comparison: Option<(uuid::Uuid, CheckpointComparison)>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) loading: bool,
     /// A note, pin or deletion is being written in the browser.
@@ -63,6 +73,11 @@ pub struct ProjectCheckpointRecoveryState {
 }
 
 impl ProjectCheckpointRecoveryState {
+    /// Show what a comparison with `checkpoint` found under its row.
+    pub fn set_comparison(&mut self, checkpoint: uuid::Uuid, found: CheckpointComparison) {
+        self.comparison = Some((checkpoint, found));
+    }
+
     /// List the checkpoints again. A listing already running may have read
     /// the directory before the change, so it is dropped and a new one
     /// starts; a creation or comparison still reports, and a creation's
@@ -81,9 +96,26 @@ impl ProjectCheckpointRecoveryState {
     }
 }
 
+/// A checkpoint to put back in the open project as unsaved changes, read and
+/// verified off the frame, and the "Before restore" checkpoint that keeps the
+/// project as it was.
+#[derive(Debug, Clone)]
+pub struct RestoredCheckpoint {
+    pub checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    pub project: crate::io::ProjectSnapshot,
+    pub before: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+}
+
+/// What a comparison of the open project with a checkpoint found, by
+/// document.
+pub type CheckpointComparison =
+    Vec<crate::workbench::lifecycle::project_checkpoint::DocumentDifference>;
+
 /// The notice a checkpoint that could not be written raises: the action that
 /// asked for it otherwise looks as if it did nothing.
 pub(crate) const CHECKPOINT_NOT_CREATED: &str = "Checkpoint not created";
+/// The notice a restore that could not be made raises.
+pub(crate) const CHECKPOINT_NOT_RESTORED: &str = "Checkpoint not restored";
 
 /// What a change to a checkpoint did: the Console line one that was made
 /// leaves, if any, or the notice and reason of one that could not be.
@@ -143,6 +175,8 @@ pub(crate) enum CheckpointJobKind {
     List,
     Create,
     Compare(Box<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>),
+    /// A "Before restore" checkpoint written, then this one read back.
+    Restore(Box<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>),
     /// A note, a pin or a deletion, then the listing after it.
     Change,
 }
@@ -158,7 +192,14 @@ pub(crate) enum CheckpointJobAnswer {
     Created(
         Box<Result<crate::workbench::lifecycle::project_checkpoint::CheckpointCreated, String>>,
     ),
-    Compared(Result<bool, String>),
+    Compared(Result<CheckpointComparison, String>),
+    /// The "Before restore" checkpoint, then the checkpoint to restore read
+    /// back: none is read when the first could not be written.
+    Restored {
+        before:
+            Box<Result<crate::workbench::lifecycle::project_checkpoint::CheckpointCreated, String>>,
+        project: Option<Result<Box<crate::io::ProjectSnapshot>, String>>,
+    },
     /// What a change did and the catalog listed after it.
     Changed {
         outcome: ChangeOutcome,

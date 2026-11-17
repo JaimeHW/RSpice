@@ -313,6 +313,80 @@ impl CurrentProjectState {
         Ok(digest(serialized.as_bytes()) == summary.snapshot_digest
             && serialized.len() as u64 == summary.snapshot_byte_len)
     }
+
+    /// The documents in which this project differs from the checkpoint
+    /// `summary` names, read back and verified here; none when it holds
+    /// exactly this project.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn differences(
+        &self,
+        summary: &ProjectCheckpointSummary,
+    ) -> Result<Vec<DocumentDifference>, String> {
+        if self.matches(summary)? {
+            return Ok(Vec::new());
+        }
+        differences_between(&self.project, &load(summary)?)
+    }
+
+    /// The documents in which this project differs from `checkpoint`.
+    pub fn differences_from(
+        &self,
+        checkpoint: &ProjectSnapshot,
+    ) -> Result<Vec<DocumentDifference>, String> {
+        differences_between(&self.project, checkpoint)
+    }
+}
+
+/// How a document of the open project stands against a checkpoint's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DifferenceKind {
+    /// In both, with different content.
+    Changed,
+    /// Only in the open project: added since the checkpoint.
+    Added,
+    /// Only in the checkpoint: removed since.
+    Removed,
+}
+
+impl DifferenceKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Changed => "Changed",
+            Self::Added => "Added since",
+            Self::Removed => "Removed since",
+        }
+    }
+}
+
+/// One document in which the open project and a checkpoint differ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentDifference {
+    pub document: crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId,
+    pub kind: DifferenceKind,
+}
+
+/// The documents in which `current` differs from `other`, by the
+/// fingerprints the unsaved-work answer is made of, in document order.
+pub fn differences_between(
+    current: &ProjectSnapshot,
+    other: &ProjectSnapshot,
+) -> Result<Vec<DocumentDifference>, String> {
+    let current = rspice_project::registry::document_fingerprints(&current.file)
+        .map_err(|error| format!("the open project could not be compared: {error}"))?;
+    let other = rspice_project::registry::document_fingerprints(&other.file)
+        .map_err(|error| format!("the checkpoint could not be compared: {error}"))?;
+    Ok(current
+        .differing_documents(&other)
+        .into_iter()
+        .map(|document| {
+            let kind = match (current.contains(&document), other.contains(&document)) {
+                (true, true) => DifferenceKind::Changed,
+                (true, false) => DifferenceKind::Added,
+                (false, _) => DifferenceKind::Removed,
+            };
+            DocumentDifference { document, kind }
+        })
+        .collect())
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -543,6 +617,33 @@ pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, Strin
     rspice_results::store_reader::keep_segments_in(&segment_folder(snapshot));
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
+}
+
+/// Whether the checkpoint reads back intact, without opening it.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn verify(summary: &ProjectCheckpointSummary) -> Result<(), String> {
+    validate_snapshot_bytes(summary, &read_snapshot_bytes(summary)?).map(drop)
+}
+
+/// The name a checkpoint saved as a new project is offered under: the
+/// project's, said to be recovered, with the revision it was taken at.
+pub fn recovery_copy_file_name(summary: &ProjectCheckpointSummary) -> String {
+    let base = summary
+        .project_name()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!(
+        "{}-recovered-r{}.rspiceproj",
+        base.trim_matches('-'),
+        summary.project_revision()
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1117,6 +1218,7 @@ fn publish_native(
     manifest: &ProjectCheckpointManifest,
     bytes: &[u8],
 ) -> Result<ProjectCheckpointSummary, String> {
+    super::recovery::disk_observation::checkpoint_written();
     prepare_directory(directory)?;
     let snapshot = directory.join(&manifest.snapshot_name);
     let manifest_path = directory.join(format!("{}{}", manifest.checkpoint_id, MANIFEST_SUFFIX));
@@ -1188,6 +1290,24 @@ fn publish_private_file(
 /// manifest records; its bytes are verified when it is used.
 #[cfg(not(target_arch = "wasm32"))]
 fn list_directory(directory: &Path, project_id: &str) -> Result<ProjectCheckpointCatalog, String> {
+    list_directory_for(directory, Some(project_id))
+}
+
+/// The checkpoints kept beside the project file at `path`, whatever project
+/// each names: what can be recovered of a file that will not open, which
+/// cannot say who it is.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn list_beside(path: &Path) -> Result<ProjectCheckpointCatalog, String> {
+    list_directory_for(&directory_for(Some(path), "")?, None)
+}
+
+/// The checkpoints in `directory`, of the project `project_id` names, or of
+/// any when it names none.
+#[cfg(not(target_arch = "wasm32"))]
+fn list_directory_for(
+    directory: &Path,
+    project_id: Option<&str>,
+) -> Result<ProjectCheckpointCatalog, String> {
     super::recovery::disk_observation::checkpoint_directory();
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
@@ -1233,7 +1353,7 @@ fn list_directory(directory: &Path, project_id: &str) -> Result<ProjectCheckpoin
             }
         };
         let manifest = match serde_json::from_slice::<ProjectCheckpointManifest>(&bytes) {
-            Ok(manifest) if manifest.project_id == project_id => manifest,
+            Ok(manifest) if project_id.is_none_or(|id| manifest.project_id == id) => manifest,
             Ok(_) => continue,
             Err(error) => {
                 quarantined.push(unreadable(format!(
@@ -1554,6 +1674,20 @@ pub fn start_recovery_copy_bytes(
                     .map_err(|error| format!("recovery copy serialization failed: {error}"))
             }));
         },
+    );
+}
+
+/// Read a checkpoint's project back from the browser's store, verified
+/// against its manifest.
+#[cfg(target_arch = "wasm32")]
+pub fn start_load(
+    summary: ProjectCheckpointSummary,
+    complete: impl FnOnce(Result<ProjectSnapshot, String>) + 'static,
+) {
+    let ProjectCheckpointLocator::Browser { snapshot_key, .. } = &summary.locator;
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_read(
+        snapshot_key.clone(),
+        move |result| complete(result.and_then(|bytes| validate_snapshot_bytes(&summary, &bytes))),
     );
 }
 

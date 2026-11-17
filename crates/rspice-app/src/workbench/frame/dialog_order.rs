@@ -515,6 +515,34 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {
+        key: DialogKey("services.unopened_project"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| state.platform.project_autosave.rescue.is_some()),
+        render: |app, ctx| {
+            if let Some(Some(checkpoint)) =
+                rspice_app_services::workbench::app_state::session::autosave::unopened_project_dialog(
+                    &mut app.state.platform,
+                    ctx,
+                )
+            {
+                app.save_checkpoint_as_new_project(&checkpoint);
+            }
+        },
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    DialogSpec {
+        key: DialogKey("services.recovered_work"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| state.platform.project_autosave.offer.is_some()),
+        render: |app, ctx| {
+            crate::workbench::app_state::services_access::process_recovered_work_dialog(
+                &mut app.state,
+                ctx,
+            );
+        },
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    DialogSpec {
         key: DialogKey("services.autosave_restore"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.platform.pending_autosave_restore.is_some()),

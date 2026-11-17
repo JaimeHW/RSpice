@@ -1,13 +1,13 @@
 //! The recovery page: the project's checkpoints and where they are kept.
 //!
 //! A checkpoint is a complete, integrity-checked copy of the project. Comparing
-//! or restoring one never mutates or consumes it — restoring saves a separate
-//! project file — so inspecting a checkpoint cannot cost the reader the
-//! ability to recover from it later.
+//! or restoring one never mutates or consumes it, and restoring one first keeps
+//! the project as it was as a checkpoint of its own, so going back cannot cost
+//! the reader the state they went back from.
 
 use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
 pub use super::*;
-use crate::workbench::app::dialogs::project::CheckpointDeletion;
+use crate::workbench::app::dialogs::project::{CheckpointComparison, CheckpointDeletion};
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
     CheckpointEdit, ProjectCheckpointQuarantine, ProjectCheckpointSummary, budget_label,
@@ -20,7 +20,8 @@ use rspice_simulation_contract::run_set::format_bytes;
 /// The one sentence the page opens with: what a checkpoint is, and the
 /// promise restoring one keeps.
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
-     Restoring one saves it as a new project file; your current work is never changed.";
+     Restoring one puts it back as unsaved changes, after keeping the project as it is now \
+     as a checkpoint.";
 pub const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
@@ -65,6 +66,14 @@ struct RecoverySnapshot {
     creating: bool,
     /// The checkpoint a running comparison is comparing with.
     comparing: Option<uuid::Uuid>,
+    /// The checkpoint a running restore is putting back.
+    restoring: Option<uuid::Uuid>,
+    /// The checkpoint the reader asked to restore, waiting for the answer.
+    restore_review: Option<uuid::Uuid>,
+    /// A checkpoint saved as a new project, and where.
+    saved_copy: Option<(uuid::Uuid, std::path::PathBuf)>,
+    /// What the last comparison found, for the checkpoint it compared.
+    comparison: Option<(uuid::Uuid, CheckpointComparison)>,
     /// Checkpoint work is running; another waits for it.
     busy: bool,
     selected: Option<String>,
@@ -81,13 +90,14 @@ impl RecoverySnapshot {
     fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
         let recovery = &cx.state.project_checkpoint_recovery;
         #[cfg(target_arch = "wasm32")]
-        let (loading, creating, comparing) = (
+        let (loading, creating, comparing, restoring) = (
             recovery.loading && !recovery.initialized,
             manual_checkpoint_pending(),
             None,
+            browser_restore_pending(),
         );
         #[cfg(not(target_arch = "wasm32"))]
-        let (loading, creating, comparing) = {
+        let (loading, creating, comparing, restoring) = {
             use crate::workbench::app::dialogs::project::CheckpointJobKind;
             let kind = recovery.job.as_ref().map(|job| &job.kind);
             (
@@ -99,10 +109,16 @@ impl RecoverySnapshot {
                     }
                     _ => None,
                 },
+                match kind {
+                    Some(CheckpointJobKind::Restore(checkpoint)) => {
+                        Some(checkpoint.checkpoint_id())
+                    }
+                    _ => None,
+                },
             )
         };
         #[cfg(target_arch = "wasm32")]
-        let busy = creating || recovery.changing;
+        let busy = creating || recovery.changing || restoring.is_some();
         #[cfg(not(target_arch = "wasm32"))]
         let busy = recovery.job.is_some();
         Self {
@@ -114,6 +130,10 @@ impl RecoverySnapshot {
             loading,
             creating,
             comparing,
+            restoring,
+            restore_review: recovery.restore_review,
+            saved_copy: recovery.saved_copy.clone(),
+            comparison: recovery.comparison.clone(),
             busy,
             selected: cx.state.project_checkpoint_selection.clone(),
             location: recovery.location.clone().unwrap_or_default(),
@@ -169,7 +189,17 @@ enum RecoveryIntent {
     Reload,
     Select(String),
     Compare(ProjectCheckpointSummary),
+    /// Put away what the last comparison found.
+    CloseComparison,
+    /// Ask whether to restore it, in place.
+    AskRestore(ProjectCheckpointSummary),
+    CancelRestore,
     Restore(ProjectCheckpointSummary),
+    /// Write it as a new project file, asking where.
+    SaveAsNewProject(ProjectCheckpointSummary),
+    /// Open the project a checkpoint was saved as.
+    OpenSavedCopy(std::path::PathBuf),
+    DismissSavedCopy,
     /// Start writing a note on the checkpoint.
     WriteNote(ProjectCheckpointSummary),
     /// Keep the note being written.
@@ -195,14 +225,41 @@ impl RecoveryIntent {
                     Some(checkpoint.checkpoint_id().to_string());
                 compare_project_checkpoint(ctx, cx, checkpoint);
             }
+            Self::CloseComparison => cx.state.project_checkpoint_recovery.comparison = None,
+            Self::AskRestore(checkpoint) => {
+                let recovery = &mut cx.state.project_checkpoint_recovery;
+                recovery.note_draft = None;
+                recovery.delete_review = None;
+                recovery.restore_review = Some(checkpoint.checkpoint_id());
+                cx.state.project_checkpoint_selection =
+                    Some(checkpoint.checkpoint_id().to_string());
+            }
+            Self::CancelRestore => cx.state.project_checkpoint_recovery.restore_review = None,
             Self::Restore(checkpoint) => {
+                cx.state.project_checkpoint_recovery.restore_review = None;
+                restore_project_checkpoint(ctx, cx, checkpoint);
+            }
+            Self::SaveAsNewProject(checkpoint) => {
                 cx.state.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
                 export_project_checkpoint_copy(ctx, cx, checkpoint);
             }
+            Self::OpenSavedCopy(path) => {
+                cx.state.project_checkpoint_recovery.saved_copy = None;
+                // Leaving the open project asks about its unsaved work first,
+                // as Open recent does.
+                cx.wb.outbox.push(
+                    crate::workbench::project::commands::ProjectRequest::GoOnLeaving {
+                        action: crate::workbench::app::ConfirmationAction::OpenRecent,
+                        recent: Some((path, crate::services::recent_files::RecentKind::Project)),
+                    },
+                );
+            }
+            Self::DismissSavedCopy => cx.state.project_checkpoint_recovery.saved_copy = None,
             Self::WriteNote(checkpoint) => {
                 let recovery = &mut cx.state.project_checkpoint_recovery;
                 recovery.delete_review = None;
+                recovery.restore_review = None;
                 recovery.note_draft = Some((
                     checkpoint.checkpoint_id(),
                     checkpoint.note().unwrap_or_default().to_owned(),
@@ -234,6 +291,7 @@ impl RecoveryIntent {
             Self::AskDelete(deletion) => {
                 let recovery = &mut cx.state.project_checkpoint_recovery;
                 recovery.note_draft = None;
+                recovery.restore_review = None;
                 if let CheckpointDeletion::Checkpoint(id) = &deletion {
                     cx.state.project_checkpoint_selection = Some(id.to_string());
                 }
@@ -588,6 +646,22 @@ fn checkpoints_card(
             let separated = index + 1 < count;
             let writing_note = snapshot.note_target == Some(id);
             let deleting = snapshot.delete_review == Some(CheckpointDeletion::Checkpoint(id));
+            let restoring = snapshot.restore_review == Some(id);
+            let saved_copy = snapshot
+                .saved_copy
+                .as_ref()
+                .filter(|(saved, _)| *saved == id)
+                .map(|(_, path)| path);
+            let comparison = snapshot
+                .comparison
+                .as_ref()
+                .filter(|(compared, _)| *compared == id)
+                .map(|(_, found)| found);
+            let prompted = writing_note
+                || deleting
+                || restoring
+                || saved_copy.is_some()
+                || comparison.is_some();
             keep_first(
                 &mut intent,
                 checkpoint_row(
@@ -596,13 +670,26 @@ fn checkpoints_card(
                     RowState {
                         selected,
                         comparing: snapshot.comparing == Some(id),
+                        restoring: snapshot.restoring == Some(id),
                         busy: snapshot.busy,
                     },
                     snapshot.now_unix_ms,
-                    separated && !writing_note && !deleting,
+                    separated && !prompted,
                 ),
             );
-            if writing_note {
+            if restoring {
+                keep_first(
+                    &mut intent,
+                    row_prompt(ui, selected, separated, |ui| {
+                        restore_prompt(ui, checkpoint, snapshot.busy)
+                    }),
+                );
+            } else if let Some(path) = saved_copy {
+                keep_first(
+                    &mut intent,
+                    row_prompt(ui, selected, separated, |ui| saved_copy_prompt(ui, path)),
+                );
+            } else if writing_note {
                 keep_first(
                     &mut intent,
                     row_prompt(ui, selected, separated, |ui| {
@@ -631,6 +718,11 @@ fn checkpoints_card(
                             }
                         })
                     }),
+                );
+            } else if let Some(found) = comparison {
+                keep_first(
+                    &mut intent,
+                    row_prompt(ui, selected, separated, |ui| comparison_list(ui, found)),
                 );
             }
         }
@@ -776,6 +868,125 @@ fn delete_prompt(ui: &mut Ui, question: &str, delete_label: &str, busy: bool) ->
     answer
 }
 
+/// A restore asked about in place: what it puts back and what it keeps, then
+/// Restore and Cancel.
+fn restore_prompt(
+    ui: &mut Ui,
+    checkpoint: &ProjectCheckpointSummary,
+    busy: bool,
+) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    let height = prompt_control_height(ui);
+    text_block(
+        ui,
+        &format!(
+            "Restore \u{201c}{}\u{201d} from {}? Its project becomes unsaved changes; the \
+             project as it is now is kept as \u{201c}{}\u{201d}.",
+            checkpoint.title(),
+            crate::time_compat::utc_stamp(checkpoint.created_unix_ms()),
+            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Restore
+                .label()
+        ),
+        body_font(),
+        tokens.color.text,
+    );
+    ui.add_space(8.0);
+    let mut intent = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if Button::new("Restore")
+            .accent()
+            .enabled(!busy)
+            .min_height(height)
+            .accessible_label(&format!("Restore {}", checkpoint.title()))
+            .show(ui)
+            .clicked()
+        {
+            intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
+        }
+        if Button::new("Cancel").min_height(height).show(ui).clicked() {
+            intent = Some(RecoveryIntent::CancelRestore);
+        }
+    });
+    intent
+}
+
+/// A checkpoint just saved as a new project: where it went, and the offer to
+/// open it.
+fn saved_copy_prompt(ui: &mut Ui, path: &std::path::Path) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    let height = prompt_control_height(ui);
+    text_block(
+        ui,
+        &format!("Saved as {}.", path.display()),
+        body_font(),
+        tokens.color.text,
+    );
+    ui.add_space(8.0);
+    let mut intent = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if Button::new("Open it")
+            .accent()
+            .min_height(height)
+            .accessible_label("Open the saved project")
+            .show(ui)
+            .clicked()
+        {
+            intent = Some(RecoveryIntent::OpenSavedCopy(path.to_path_buf()));
+        }
+        if Button::new("Not now").min_height(height).show(ui).clicked() {
+            intent = Some(RecoveryIntent::DismissSavedCopy);
+        }
+    });
+    intent
+}
+
+/// What a comparison found: each document in which the open project differs
+/// from the checkpoint, and how.
+fn comparison_list(ui: &mut Ui, found: &CheckpointComparison) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    let height = prompt_control_height(ui);
+    let heading = if found.len() == 1 {
+        "The current project differs in 1 document:".to_owned()
+    } else {
+        format!("The current project differs in {} documents:", found.len())
+    };
+    text_block(ui, &heading, body_font(), tokens.color.text);
+    ui.add_space(4.0);
+    let width = ui.available_width();
+    let kind_width = 104.0;
+    for difference in found {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+        ui.painter().text(
+            pos2(rect.left(), rect.center().y),
+            Align2::LEFT_CENTER,
+            difference.kind.label(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            tokens.color.text_dim,
+        );
+        paint_elided(
+            ui,
+            pos2(rect.left() + kind_width, rect.top() + 2.0),
+            &difference.document.label(),
+            body_font(),
+            tokens.color.text,
+            (width - kind_width).max(1.0),
+        );
+    }
+    ui.add_space(8.0);
+    let mut intent = None;
+    if Button::new("Close")
+        .min_height(height)
+        .accessible_label("Close the comparison")
+        .show(ui)
+        .clicked()
+    {
+        intent = Some(RecoveryIntent::CloseComparison);
+    }
+    intent
+}
+
 /// What can be done to a checkpoint besides comparing and restoring it: the
 /// row's More menu and its context menu.
 fn checkpoint_menu(
@@ -814,6 +1025,14 @@ fn checkpoint_menu(
         .clicked()
     {
         *intent = Some(RecoveryIntent::WriteNote(checkpoint.clone()));
+        ui.close();
+    }
+    if ui
+        .add_enabled(!busy, egui::Button::new("Save as new project\u{2026}"))
+        .on_hover_text("Write this checkpoint as a project file of its own")
+        .clicked()
+    {
+        *intent = Some(RecoveryIntent::SaveAsNewProject(checkpoint.clone()));
         ui.close();
     }
     ui.separator();
@@ -924,6 +1143,8 @@ struct RowState {
     selected: bool,
     /// This row's checkpoint is being compared with the project.
     comparing: bool,
+    /// This row's checkpoint is being put back in the project.
+    restoring: bool,
     /// Checkpoint work is running, so the row's comparison waits.
     busy: bool,
 }
@@ -938,6 +1159,7 @@ fn checkpoint_row(
     let RowState {
         selected,
         comparing,
+        restoring,
         busy,
     } = state;
     let tokens = Tokens::get(ui.ctx());
@@ -979,9 +1201,14 @@ fn checkpoint_row(
         "Compare"
     })
     .enabled(!busy);
-    // Restoring while a checkpoint is being written or compared would save
-    // a copy from a list the job is about to change.
-    let restore = Button::new("Restore\u{2026}").enabled(!busy);
+    // Restoring while a checkpoint is being written or compared would read
+    // from a list the job is about to change.
+    let restore = Button::new(if restoring {
+        "Restoring\u{2026}"
+    } else {
+        "Restore\u{2026}"
+    })
+    .enabled(!busy);
     let more_label = format!("More actions for {}", checkpoint.title());
     let more = Button::new("More").menu().accessible_label(&more_label);
     let actions_width = compare.measured_width(ui)
@@ -1073,18 +1300,18 @@ fn checkpoint_row(
             checkpoint.title()
         ))
         .show(&mut actions_ui)
-        .on_hover_text("Check whether the current project still matches this checkpoint")
+        .on_hover_text("List what differs between the current project and this checkpoint")
         .clicked()
     {
         intent = Some(RecoveryIntent::Compare(checkpoint.clone()));
     }
     if restore
-        .accessible_label(&format!("Restore {} as a new project", checkpoint.title()))
+        .accessible_label(&format!("Restore {} into the project", checkpoint.title()))
         .show(&mut actions_ui)
-        .on_hover_text("Save this checkpoint as a new project file")
+        .on_hover_text("Put this checkpoint back in the open project")
         .clicked()
     {
-        intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
+        intent = Some(RecoveryIntent::AskRestore(checkpoint.clone()));
     }
     let more = more.show(&mut actions_ui);
     egui::Popup::menu(&more).show(|ui| checkpoint_menu(ui, checkpoint, busy, &mut intent));
@@ -1375,24 +1602,37 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
 fn report_comparison(
     cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
-    compared: Result<bool, String>,
+    compared: Result<CheckpointComparison, String>,
 ) {
+    let recovery = &mut cx.state.project_checkpoint_recovery;
     match compared {
-        Ok(true) => cx
-            .wb
-            .prompt("The current project is identical to this checkpoint."),
-        Ok(false) => cx.wb.prompt(format!(
-            "The current project differs from checkpoint {} (revision {}).",
-            short_identity(&checkpoint.checkpoint_id().to_string()),
-            checkpoint.project_revision()
-        )),
-        Err(error) => cx.model.report_failure("Could not compare", error),
+        Ok(found) if found.is_empty() => {
+            recovery.comparison = None;
+            cx.wb
+                .prompt("The current project is identical to this checkpoint.");
+        }
+        Ok(found) => {
+            cx.wb.prompt(format!(
+                "The current project differs from \u{201c}{}\u{201d} in {}.",
+                checkpoint.title(),
+                if found.len() == 1 {
+                    "1 document".to_owned()
+                } else {
+                    format!("{} documents", found.len())
+                }
+            ));
+            recovery.comparison = Some((checkpoint.checkpoint_id(), found));
+        }
+        Err(error) => {
+            recovery.comparison = None;
+            cx.model.report_failure("Could not compare", error);
+        }
     }
 }
 
-/// Compare the project as it is now with a checkpoint. The project is read
-/// off the model here; writing it out and digesting it runs on a background
-/// thread.
+/// Compare the project as it is now with a checkpoint, document by document.
+/// The project is read off the model here; reading the checkpoint back and
+/// fingerprinting both runs on a background thread.
 #[cfg(not(target_arch = "wasm32"))]
 fn compare_project_checkpoint(
     ctx: &Context,
@@ -1420,21 +1660,187 @@ fn compare_project_checkpoint(
         ctx,
         CheckpointJobKind::Compare(Box::new(checkpoint)),
         recovery,
-        move || CheckpointJobAnswer::Compared(current.matches(&compared)),
+        move || CheckpointJobAnswer::Compared(current.differences(&compared)),
     ));
 }
 
 #[cfg(target_arch = "wasm32")]
 fn compare_project_checkpoint(
-    _: &Context,
+    ctx: &Context,
     cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: ProjectCheckpointSummary,
 ) {
-    let compared = crate::workbench::lifecycle::project_checkpoint::matches_current_state(
-        &checkpoint,
+    let current = match crate::workbench::lifecycle::project_checkpoint::capture_current_state(
         &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    ) {
+        Ok(current) => current,
+        Err(error) => {
+            report_comparison(cx, &checkpoint, Err(error));
+            return;
+        }
+    };
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    let repaint = ctx.clone();
+    let compared = checkpoint.clone();
+    crate::workbench::lifecycle::project_checkpoint::start_load(checkpoint, move |loaded| {
+        let found = loaded.and_then(|project| current.differences_from(&project));
+        BROWSER_CHECKPOINT_READS.with(|queue| {
+            queue.borrow_mut().push_back(BrowserCheckpointRead {
+                project_id,
+                checkpoint: compared,
+                read: BrowserRead::Compared(found),
+            });
+        });
+        repaint.request_repaint();
+    });
+}
+
+/// Put a checkpoint back in the open project: a "Before restore" checkpoint
+/// of the project as it is now is written first, then the checkpoint is read
+/// back, both on a background thread, and the shell installs what was read.
+/// No "Before restore" checkpoint, no restore.
+#[cfg(not(target_arch = "wasm32"))]
+fn restore_project_checkpoint(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    checkpoint: ProjectCheckpointSummary,
+) {
+    use crate::workbench::app::dialogs::project::{
+        CHECKPOINT_NOT_RESTORED, CheckpointJob, CheckpointJobAnswer, CheckpointJobKind,
+    };
+    use crate::workbench::lifecycle::project_checkpoint::{ProjectCheckpointReason, capture, load};
+    if cx.state.project_checkpoint_recovery.job.is_some() {
+        return;
+    }
+    if let Some(refusal) = restore_refusal(cx) {
+        cx.model.report_failure(CHECKPOINT_NOT_RESTORED, refusal);
+        return;
+    }
+    let before = match capture(
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+        ProjectCheckpointReason::Restore,
+    ) {
+        Ok(before) => before,
+        Err(error) => {
+            cx.model.report_failure(
+                CHECKPOINT_NOT_RESTORED,
+                format!("the project as it is now could not be kept first: {error}"),
+            );
+            return;
+        }
+    };
+    let recovery = &mut cx.state.project_checkpoint_recovery;
+    recovery.comparison = None;
+    let restored = checkpoint.clone();
+    recovery.job = Some(CheckpointJob::start(
+        ctx,
+        CheckpointJobKind::Restore(Box::new(checkpoint)),
+        recovery,
+        move || {
+            let before = before.publish();
+            let project = before.is_ok().then(|| load(&restored).map(Box::new));
+            CheckpointJobAnswer::Restored {
+                before: Box::new(before),
+                project,
+            }
+        },
+    ));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn restore_project_checkpoint(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    checkpoint: ProjectCheckpointSummary,
+) {
+    use crate::workbench::app::dialogs::project::CHECKPOINT_NOT_RESTORED;
+    use crate::workbench::lifecycle::project_checkpoint::{
+        ProjectCheckpointReason, start_create, start_load,
+    };
+    if browser_restore_pending() {
+        return;
+    }
+    if let Some(refusal) = restore_refusal(cx) {
+        cx.model.report_failure(CHECKPOINT_NOT_RESTORED, refusal);
+        return;
+    }
+    cx.state.project_checkpoint_recovery.comparison = None;
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    let repaint = ctx.clone();
+    BROWSER_RESTORE_PENDING.with(|pending| pending.set(Some(checkpoint.checkpoint_id())));
+    let restored = checkpoint.clone();
+    let started = start_create(
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+        ProjectCheckpointReason::Restore,
+        move |before| {
+            let checkpoint = restored.clone();
+            let finish = move |read: BrowserRead| {
+                BROWSER_CHECKPOINT_READS.with(|queue| {
+                    queue.borrow_mut().push_back(BrowserCheckpointRead {
+                        project_id,
+                        checkpoint: restored,
+                        read,
+                    });
+                });
+                repaint.request_repaint();
+            };
+            match before {
+                Ok(before) => {
+                    start_load(checkpoint, move |project| {
+                        finish(BrowserRead::Restored(Ok((before, project))));
+                    });
+                }
+                Err(error) => finish(BrowserRead::Restored(Err(error))),
+            }
+        },
     );
-    report_comparison(cx, &checkpoint, compared);
+    if let Err(error) = started {
+        BROWSER_RESTORE_PENDING.with(|pending| pending.set(None));
+        cx.model.report_failure(
+            CHECKPOINT_NOT_RESTORED,
+            format!("the project as it is now could not be kept first: {error}"),
+        );
+    }
+}
+
+/// Why the open project cannot take a checkpoint back now, if it cannot.
+fn restore_refusal(cx: &Cx<'_, ProjectFeature>) -> Option<&'static str> {
+    if cx.model.safe_mode.project_read_only() {
+        Some("the project is open read-only")
+    } else if cx.model.simulation.execution.has_active_execution() {
+        Some("a simulation is running")
+    } else {
+        None
+    }
+}
+
+/// Hand a checkpoint read back for a restore to the shell, which puts it in
+/// the open project, and list the checkpoints again with the "Before restore"
+/// one among them.
+fn hand_over_restore(
+    cx: &mut Cx<'_, ProjectFeature>,
+    checkpoint: ProjectCheckpointSummary,
+    before: Result<ProjectCheckpointSummary, String>,
+    project: Option<Result<Box<crate::io::ProjectSnapshot>, String>>,
+) {
+    use crate::workbench::app::dialogs::project::{CHECKPOINT_NOT_RESTORED, RestoredCheckpoint};
+    let recovery = &mut cx.state.project_checkpoint_recovery;
+    recovery.initialized = false;
+    match (before, project) {
+        (Err(error), _) => cx.model.report_failure(
+            CHECKPOINT_NOT_RESTORED,
+            format!("the project as it is now could not be kept first: {error}"),
+        ),
+        (Ok(_), None) => {}
+        (Ok(_), Some(Err(error))) => cx.model.report_failure(CHECKPOINT_NOT_RESTORED, error),
+        (Ok(before), Some(Ok(project))) => {
+            recovery.restored = Some(RestoredCheckpoint {
+                checkpoint,
+                project: *project,
+                before,
+            });
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1516,6 +1922,18 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
         CheckpointJobAnswer::Compared(compared) => {
             if let CheckpointJobKind::Compare(checkpoint) = job.kind {
                 report_comparison(cx, &checkpoint, compared);
+            }
+        }
+        CheckpointJobAnswer::Restored { before, project } => {
+            if let CheckpointJobKind::Restore(checkpoint) = job.kind {
+                let before = (*before).map(|created| {
+                    if let Some(warning) = created.retention_warning {
+                        cx.model
+                            .record(LogSeverity::Warning, LogSource::Studio, warning);
+                    }
+                    created.summary
+                });
+                hand_over_restore(cx, *checkpoint, before, project);
             }
         }
         CheckpointJobAnswer::Changed { outcome, listed } => {
@@ -1609,34 +2027,14 @@ fn poll_browser_manual_checkpoint(cx: &mut Cx<'_, ProjectFeature>) {
     }
 }
 
-pub(super) fn recovery_copy_filename(
-    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
-) -> String {
-    let base = checkpoint
-        .project_name()
-        .chars()
-        .map(|character| {
-            if character.is_alphanumeric() || matches!(character, '-' | '_') {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    format!(
-        "{}-recovered-r{}.rspiceproj",
-        base.trim_matches('-'),
-        checkpoint.project_revision()
-    )
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn export_project_checkpoint_copy(
     _: &Context,
     cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
-    let filename = recovery_copy_filename(&checkpoint);
+    let filename =
+        crate::workbench::lifecycle::project_checkpoint::recovery_copy_file_name(&checkpoint);
     let Some(destination) = rfd::FileDialog::new()
         .add_filter("RSpice Project", &["rspiceproj"])
         .set_file_name(&filename)
@@ -1652,10 +2050,83 @@ pub(super) fn export_project_checkpoint_copy(
             cx.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
-                format!("Saved a recovery copy to {}.", destination.display()),
+                format!(
+                    "Saved checkpoint \u{201c}{}\u{201d} as a new project: {}.",
+                    checkpoint.title(),
+                    destination.display()
+                ),
             );
+            cx.wb.prompt(format!(
+                "Saved \u{201c}{}\u{201d} as a new project.",
+                checkpoint.title()
+            ));
+            cx.state.project_checkpoint_recovery.saved_copy =
+                Some((checkpoint.checkpoint_id(), destination));
         }
-        Err(error) => cx.model.report_failure("Recovery copy not saved", error),
+        Err(error) => cx.model.report_failure("Not saved as a new project", error),
+    }
+}
+
+/// A checkpoint the browser read back for a comparison or a restore, after
+/// the frame that asked for it.
+#[cfg(target_arch = "wasm32")]
+struct BrowserCheckpointRead {
+    project_id: String,
+    checkpoint: ProjectCheckpointSummary,
+    read: BrowserRead,
+}
+
+#[cfg(target_arch = "wasm32")]
+enum BrowserRead {
+    Compared(Result<CheckpointComparison, String>),
+    /// The "Before restore" checkpoint, then the checkpoint read back.
+    Restored(
+        Result<
+            (
+                ProjectCheckpointSummary,
+                Result<crate::io::ProjectSnapshot, String>,
+            ),
+            String,
+        >,
+    ),
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_CHECKPOINT_READS: std::cell::RefCell<std::collections::VecDeque<BrowserCheckpointRead>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static BROWSER_RESTORE_PENDING: std::cell::Cell<Option<uuid::Uuid>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_restore_pending() -> Option<uuid::Uuid> {
+    BROWSER_RESTORE_PENDING.with(std::cell::Cell::get)
+}
+
+/// Take the comparisons and restores the browser finished reading, for the
+/// project still open.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn poll_browser_checkpoint_reads(cx: &mut Cx<'_, ProjectFeature>) {
+    let reads =
+        BROWSER_CHECKPOINT_READS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    let current_project_id = cx.model.workspace.content.project.id().to_string();
+    for read in reads {
+        if matches!(read.read, BrowserRead::Restored(_)) {
+            BROWSER_RESTORE_PENDING.with(|pending| pending.set(None));
+        }
+        if read.project_id != current_project_id {
+            continue;
+        }
+        match read.read {
+            BrowserRead::Compared(found) => report_comparison(cx, &read.checkpoint, found),
+            BrowserRead::Restored(Err(error)) => {
+                hand_over_restore(cx, read.checkpoint, Err(error), None);
+            }
+            BrowserRead::Restored(Ok((before, project))) => {
+                hand_over_restore(cx, read.checkpoint, Ok(before), Some(project.map(Box::new)))
+            }
+        }
     }
 }
 
@@ -1665,7 +2136,8 @@ pub(super) fn export_project_checkpoint_copy(
     cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
-    let filename = recovery_copy_filename(&checkpoint);
+    let filename =
+        crate::workbench::lifecycle::project_checkpoint::recovery_copy_file_name(&checkpoint);
     let project_id = cx.model.workspace.content.project.id().to_string();
     let queued_filename = filename.clone();
     let repaint = ctx.clone();

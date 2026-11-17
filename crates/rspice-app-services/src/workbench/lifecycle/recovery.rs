@@ -130,7 +130,7 @@ pub struct RecoveryNotice {
 /// launcher do, for the regression tests that hold an idle frame to none of
 /// it. Work on a background thread is that thread's, not the frame's.
 pub(crate) mod disk_observation {
-    /// What one thread has read since it last asked.
+    /// What one thread has read, and written, since it last asked.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct DiskReads {
         /// Whole project files read: a saved project or a checkpoint's
@@ -140,6 +140,8 @@ pub(crate) mod disk_observation {
         pub checkpoint_directories: usize,
         /// Files whose metadata was read.
         pub file_stats: usize,
+        /// Checkpoints written.
+        pub checkpoints_written: usize,
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -149,6 +151,7 @@ pub(crate) mod disk_observation {
                 project_files: 0,
                 checkpoint_directories: 0,
                 file_stats: 0,
+                checkpoints_written: 0,
             })
         };
     }
@@ -183,6 +186,11 @@ pub(crate) mod disk_observation {
     pub(crate) fn file_stat() {
         note(|reads| reads.file_stats += 1);
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn checkpoint_written() {
+        note(|reads| reads.checkpoints_written += 1);
+    }
 }
 
 pub use disk_observation::DiskReads;
@@ -193,6 +201,16 @@ pub use disk_observation::take as take_disk_reads;
 pub struct RecoveryCatalog {
     pub candidates: Vec<RecoveryCandidate>,
     pub selected_checkpoint: Option<PathBuf>,
+    /// The checkpoints kept beside each recent project's file, the project
+    /// with the newest first: reachable here when the file will not open.
+    pub projects: Vec<RecentProjectCheckpoints>,
+    /// The project checkpoints' table; its selection is the checkpoint's
+    /// identity, and excludes a selected autosave.
+    pub project_table: rspice_ui_kit::widgets::table::TableState,
+    /// The project checkpoint the reader asked to save as a new project,
+    /// for the shell to ask where.
+    pub save_as_new_project:
+        Option<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
     pub pending_discard: Option<RecoveryCandidate>,
     pub notice: Option<RecoveryNotice>,
     refresh_requested: bool,
@@ -210,6 +228,9 @@ impl Default for RecoveryCatalog {
         Self {
             candidates: Vec::new(),
             selected_checkpoint: None,
+            projects: Vec::new(),
+            project_table: Default::default(),
+            save_as_new_project: None,
             pending_discard: None,
             notice: None,
             refresh_requested: true,
@@ -219,9 +240,36 @@ impl Default for RecoveryCatalog {
     }
 }
 
-/// What a search for autosaves found, filled in by the thread that searched.
+/// What a search for autosaves and checkpoints found, filled in by the
+/// thread that searched.
 #[derive(Debug, Clone, Default)]
-struct Discovery(std::sync::Arc<std::sync::Mutex<Option<Vec<RecoveryCandidate>>>>);
+struct Discovery(std::sync::Arc<std::sync::Mutex<Option<Discovered>>>);
+
+type Discovered = (Vec<RecoveryCandidate>, Vec<RecentProjectCheckpoints>);
+
+/// A recent project's checkpoints, as the launcher lists them.
+#[derive(Debug, Clone)]
+pub struct RecentProjectCheckpoints {
+    /// The project file they are kept beside.
+    pub project: PathBuf,
+    /// Newest first.
+    pub checkpoints: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
+}
+
+impl RecentProjectCheckpoints {
+    /// The project's name as its checkpoints record it, else its file's.
+    pub fn name(&self) -> String {
+        self.checkpoints
+            .first()
+            .map(|checkpoint| checkpoint.project_name().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| {
+                self.project
+                    .file_stem()
+                    .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
+            })
+    }
+}
 
 impl RecoveryCatalog {
     pub fn request_refresh(&mut self) {
@@ -240,7 +288,30 @@ impl RecoveryCatalog {
             .find(|candidate| &candidate.checkpoint == selected)
     }
 
+    /// The project checkpoint selected in its table.
+    pub fn selected_project_checkpoint(
+        &self,
+    ) -> Option<&crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary> {
+        let rspice_ui_kit::widgets::table::RowKey::Text(selected) =
+            self.project_table.selected_key()?
+        else {
+            return None;
+        };
+        self.projects
+            .iter()
+            .flat_map(|project| &project.checkpoints)
+            .find(|checkpoint| checkpoint.checkpoint_id().to_string() == *selected)
+    }
+
+    /// A project checkpoint was selected: no autosave is.
+    pub fn project_checkpoint_selected(&mut self) {
+        self.selected_checkpoint = None;
+        self.replacement_block = None;
+    }
+
     pub fn select(&mut self, checkpoint: PathBuf) {
+        self.project_table.selection = None;
+        self.project_table.others.clear();
         if self.selected_checkpoint.as_ref() != Some(&checkpoint)
             && self
                 .candidates
@@ -310,21 +381,26 @@ pub fn refresh_catalog_if_requested(ctx: &egui::Context, platform: &mut Platform
     if !platform.recovery_catalog.refresh_requested || platform.recovery_catalog.discovering() {
         return;
     }
-    let source_paths = platform
-        .recent_files
-        .iter()
-        .filter(|recent| recent.kind == RecentKind::Schematic)
-        .map(|recent| recent.path.clone())
-        .collect::<Vec<_>>();
+    let recent = |kind: RecentKind| {
+        platform
+            .recent_files
+            .iter()
+            .filter(|recent| recent.kind == kind)
+            .map(|recent| recent.path.clone())
+            .collect::<Vec<_>>()
+    };
+    let source_paths = recent(RecentKind::Schematic);
+    let project_paths = recent(RecentKind::Project);
     let found = Discovery::default();
     let slot = found.clone();
     let repaint = ctx.clone();
     crate::workbench::platform::spawn_or_inline(move || {
         let candidates = discover_candidates(&source_paths);
+        let projects = discover_project_checkpoints(&project_paths);
         *slot
             .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(candidates);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((candidates, projects));
         repaint.request_repaint();
     });
     let catalog = &mut platform.recovery_catalog;
@@ -337,7 +413,7 @@ pub fn refresh_catalog_if_requested(ctx: &egui::Context, platform: &mut Platform
 /// List what a finished search found, keeping the selection where it still
 /// names an autosave.
 fn take_discovered(catalog: &mut RecoveryCatalog) {
-    let Some(candidates) = catalog.discovery.as_ref().and_then(|discovery| {
+    let Some((candidates, projects)) = catalog.discovery.as_ref().and_then(|discovery| {
         discovery
             .0
             .lock()
@@ -349,6 +425,11 @@ fn take_discovered(catalog: &mut RecoveryCatalog) {
     catalog.discovery = None;
     let previous = catalog.selected_checkpoint.clone();
     catalog.candidates = candidates;
+    catalog.projects = projects;
+    if catalog.selected_project_checkpoint().is_none() {
+        catalog.project_table.selection = None;
+        catalog.project_table.others.clear();
+    }
     catalog.selected_checkpoint = previous
         .filter(|selected| {
             catalog
@@ -357,6 +438,10 @@ fn take_discovered(catalog: &mut RecoveryCatalog) {
                 .any(|candidate| &candidate.checkpoint == selected)
         })
         .or_else(|| {
+            // A project checkpoint the reader chose stays the selection.
+            if catalog.project_table.selection.is_some() {
+                return None;
+            }
             catalog
                 .candidates
                 .iter()
@@ -394,6 +479,49 @@ fn discover_candidates(source_paths: &[PathBuf]) -> Vec<RecoveryCandidate> {
 
 #[cfg(target_arch = "wasm32")]
 fn discover_candidates(_source_paths: &[PathBuf]) -> Vec<RecoveryCandidate> {
+    Vec::new()
+}
+
+/// The checkpoints kept beside each recent project's file, for the projects
+/// that have any, the one with the newest checkpoint first.
+#[cfg(not(target_arch = "wasm32"))]
+fn discover_project_checkpoints(paths: &[PathBuf]) -> Vec<RecentProjectCheckpoints> {
+    use crate::workbench::lifecycle::project_checkpoint::{ProjectCheckpointSummary, list_beside};
+
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup();
+    let mut projects = paths
+        .into_iter()
+        .filter_map(|project| {
+            let checkpoints = list_beside(&project)
+                .inspect_err(|error| {
+                    log::warn!(
+                        "the checkpoints of {} were not listed: {error}",
+                        project.display()
+                    );
+                })
+                .ok()?
+                .checkpoints;
+            (!checkpoints.is_empty()).then_some(RecentProjectCheckpoints {
+                project,
+                checkpoints,
+            })
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by_key(|project| {
+        std::cmp::Reverse(
+            project
+                .checkpoints
+                .first()
+                .map_or(0, ProjectCheckpointSummary::created_unix_ms),
+        )
+    });
+    projects
+}
+
+#[cfg(target_arch = "wasm32")]
+fn discover_project_checkpoints(_paths: &[PathBuf]) -> Vec<RecentProjectCheckpoints> {
     Vec::new()
 }
 

@@ -146,6 +146,8 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("code.new_veriloga_device", DocsTopic::VerilogA),
     ("code.veriloga_build_settings", DocsTopic::VerilogA),
     ("code.netlist", DocsTopic::NetlistsAndScripts),
+    ("services.recovered_work", DocsTopic::Troubleshooting),
+    ("services.unopened_project", DocsTopic::Troubleshooting),
     ("services.autosave_restore", DocsTopic::Troubleshooting),
     ("shell.shortcuts_help", DocsTopic::KeyboardShortcuts),
 ];
