@@ -13,7 +13,9 @@ use crate::ui::widgets::{
 };
 
 const LABEL_WIDTH: f32 = 112.0;
-const ROW_HEIGHT: f32 = 32.0;
+/// A grid row is a control tall plus the room around it, so it grows with
+/// the controls under a finger.
+const ROW_PAD: f32 = 4.0;
 const PICKER_WIDTH: f32 = 300.0;
 /// From this width the five rows sit in two columns.
 const TWO_COLUMN_WIDTH: f32 = 760.0;
@@ -131,6 +133,7 @@ fn chip_row<R>(ui: &mut Ui, label: &str, body: impl FnOnce(&mut Ui) -> R) -> R {
 
 fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
+    let row_height = t.metrics.ctl_h + ROW_PAD;
     let width = ui.available_width().max(1.0);
     let top = ui.cursor().min;
     let body_left = top.x + 10.0 + LABEL_WIDTH;
@@ -138,7 +141,7 @@ fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut 
     // height; starting it that much below the top puts its first line on the
     // label's.
     let inset = if wrap {
-        ((ROW_HEIGHT - t.metrics.ctl_h) * 0.5).max(0.0)
+        ((row_height - t.metrics.ctl_h) * 0.5).max(0.0)
     } else {
         0.0
     };
@@ -146,7 +149,7 @@ fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut 
         pos2(body_left, top.y + inset),
         pos2(
             (top.x + width - 10.0).max(body_left + 1.0),
-            top.y + ROW_HEIGHT - inset,
+            top.y + row_height - inset,
         ),
     );
     let layout = if wrap {
@@ -158,12 +161,12 @@ fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut 
     child.spacing_mut().item_spacing = vec2(6.0, 4.0);
     let inner = body(&mut child);
     let used = child.min_rect().bottom() + inset - top.y;
-    let height = used.max(ROW_HEIGHT);
+    let height = used.max(row_height);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.painter().text(
-        pos2(rect.left() + 10.0, rect.top() + ROW_HEIGHT * 0.5),
+        pos2(rect.left() + 10.0, rect.top() + row_height * 0.5),
         Align2::LEFT_CENTER,
         label,
         theme::sans(tokens::FS_0, FontWeight::Regular),
