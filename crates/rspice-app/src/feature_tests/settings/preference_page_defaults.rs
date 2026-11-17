@@ -277,6 +277,7 @@ fn override_every_setting_on(category: PreferenceCategory, state: &mut AppState)
         (ScalarPreference::LocalParallelSlots, 1),
         (ScalarPreference::RunsKept, 50),
         (ScalarPreference::RecentFilesListed, 20),
+        (ScalarPreference::CheckpointBudgetMib, 2048),
     ] {
         if keys.contains(&format!("ScalarPreference::{key:?}")) {
             state

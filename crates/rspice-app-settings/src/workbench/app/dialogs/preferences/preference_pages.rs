@@ -1055,7 +1055,10 @@ pub fn restore_defaults(
                     TogglePreference::RunDesignChecksOnSave,
                     TogglePreference::KeepSaveBackup,
                 ],
-                &[ScalarPreference::RecentFilesListed],
+                &[
+                    ScalarPreference::RecentFilesListed,
+                    ScalarPreference::CheckpointBudgetMib,
+                ],
             );
             let had_library_folders = !preferences
                 .folders(FolderListPreference::LibraryFolders)

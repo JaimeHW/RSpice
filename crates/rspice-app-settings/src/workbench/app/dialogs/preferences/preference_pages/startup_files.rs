@@ -1,5 +1,6 @@
 //! Projects and files ▸ Startup and files: what RSpice opens with, how long
-//! the recent list is, and whether a save keeps the file it replaces.
+//! the recent list is, whether a save keeps the file it replaces, and how
+//! much space automatic checkpoints are kept in.
 
 use egui::Ui;
 
@@ -17,6 +18,10 @@ use super::{keyword_choice_row, toggle_row};
 
 /// The recent-list lengths offered, shortest first. The shipped one is 8.
 const RECENT_FILES_LISTED: [u32; 4] = [5, 8, 12, 20];
+
+/// The spaces offered for automatic checkpoints, in MiB, smallest first. The
+/// shipped one is 512 MiB.
+const CHECKPOINT_BUDGETS_MIB: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 
 pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Startup and files");
@@ -42,6 +47,57 @@ pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
         "Keep a backup when saving",
         "Saving over a schematic file first copies it to .rsch.bak. Project saves do not.",
         "Keep a backup when saving a schematic file",
+    );
+    checkpoint_budget_row(ui, state);
+}
+
+/// A space in the whole units it is offered in: "512 MiB", "2 GiB".
+fn space_label(mib: u32) -> String {
+    if mib >= 1024 && mib % 1024 == 0 {
+        format!("{} GiB", mib / 1024)
+    } else {
+        format!("{mib} MiB")
+    }
+}
+
+/// How much space each project's automatic checkpoints are kept in.
+fn checkpoint_budget_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
+    let labels = CHECKPOINT_BUDGETS_MIB.map(space_label).to_vec();
+    searchable_row(
+        ui,
+        "Automatic checkpoint space",
+        "Per project. Checkpoints taken before saves and risky changes are kept in it, \
+         oldest dropped first; manual and pinned ones stay until you delete them.",
+        &["checkpoint", "recovery", "disk", "budget", "retention"],
+        |ui| {
+            value_column(ui, |ui| {
+                // Shown as the space it is, so a stored space between two of
+                // the offered ones is not misreported as its neighbour.
+                let current = space_label(
+                    state
+                        .model
+                        .preferences
+                        .scalar(ScalarPreference::CheckpointBudgetMib),
+                );
+                if let Some(selected) = select(
+                    ui,
+                    "preferences.projects.checkpoint-budget",
+                    "Automatic checkpoint space",
+                    &current,
+                    &labels,
+                    control_width(ui),
+                ) {
+                    state
+                        .model
+                        .preferences
+                        .set_scalar(
+                            ScalarPreference::CheckpointBudgetMib,
+                            CHECKPOINT_BUDGETS_MIB[selected],
+                        )
+                        .expect("every offered space is inside the preference domain");
+                }
+            });
+        },
     );
 }
 
