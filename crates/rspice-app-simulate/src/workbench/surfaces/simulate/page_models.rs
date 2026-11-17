@@ -5,7 +5,12 @@
 //! to and whether its source is pinned well enough to be reproducible.
 //!
 //! Authoring belongs to Models & PDKs; this page is the plan's read of that
-//! closure plus the one binding decision the plan owns — the corner.
+//! closure plus the one binding decision the plan owns — the corner. It also
+//! takes a model file straight onto the plan, as a simulator's model-library
+//! setup takes a file and a section, through `model_file`.
+
+#[cfg(not(target_arch = "wasm32"))]
+mod model_file;
 
 use egui::Ui;
 
@@ -63,6 +68,11 @@ fn contested_names(
         })
         .count()
 }
+
+/// The last choice in Add library's list: a model file the project does
+/// not hold yet.
+const FROM_FILE: &str = "From file\u{2026}";
+
 const GATE_COLUMNS: [f32; 3] = [0.30, 0.46, 0.24];
 
 /// How many models with findings the gate card lists before it stops.
@@ -73,6 +83,8 @@ const GATE_COLUMNS: [f32; 3] = [0.30, 0.46, 0.24];
 const GATE_FINDING_ROWS: usize = 8;
 
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    model_file::finish_read(ui.ctx(), cx);
     closure(ui, cx);
     qualification_gate(ui, cx);
     card_row(
@@ -178,6 +190,12 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .collect::<Vec<_>>();
     let mut requested = None;
     let mut attach = None;
+    let mut from_file = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    let from_file_unavailable = model_file::unavailable(ui.ctx());
+    #[cfg(target_arch = "wasm32")]
+    let from_file_unavailable =
+        Some("A browser session reads model files in the Models workspace.");
     card_with_head(
         ui,
         |ui| {
@@ -187,29 +205,36 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 // label at the card's left border with the libraries beside it
                 // as buttons: it sat four columns left of every inset row on
                 // the card, and it grew a row per library until it truncated
-                // itself at four and said "+N more".
+                // itself at four and said "+N more". The libraries the project
+                // holds come first; the last choice brings in one it does not.
                 let choices = available
                     .iter()
                     .map(|name| super::page_kit::PopupChoice {
                         label: name.clone(),
                         unavailable: None,
                     })
+                    .chain(std::iter::once(super::page_kit::PopupChoice {
+                        label: FROM_FILE.to_owned(),
+                        unavailable: from_file_unavailable,
+                    }))
                     .collect::<Vec<_>>();
                 if let Some(index) = super::page_kit::command_popup(
                     ui,
                     "simulation.models.attach-library",
-                    Button::new("Add library\u{2026}")
-                        .icon(Icon::Add)
-                        .enabled(!available.is_empty()),
+                    Button::new("Add library\u{2026}").icon(Icon::Add),
                     "Every executable library is already bound to this plan.",
                     &choices,
-                ) && let Some(name) = available.get(index)
-                {
-                    attach = Some(ModelBindingAction::Attach(name.clone()));
+                ) {
+                    match available.get(index) {
+                        Some(name) => attach = Some(ModelBindingAction::Attach(name.clone())),
+                        None => from_file = true,
+                    }
                 }
             });
         },
         |ui| {
+            #[cfg(not(target_arch = "wasm32"))]
+            model_file::note(ui);
             ledger_head(
                 ui,
                 &CLOSURE_COLUMNS,
@@ -348,12 +373,23 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                     .validate_simulation_plan_bindings(std::slice::from_ref(binding));
                 let (source_text, source_tone) = match (library, validation) {
                     (_, Err(_)) => ("stale".to_owned(), Tone::Error),
+                    // An external library is named by the file it was read
+                    // from, which is what its reader chose.
                     (Some(library), Ok(())) => (
                         format!(
                             "{} · {} pinned",
-                            match library.source_authority {
-                                ModelSourceAuthority::External => "external",
-                                _ => "project",
+                            match (
+                                &library.source_authority,
+                                library
+                                    .root_path
+                                    .as_deref()
+                                    .and_then(std::path::Path::file_name),
+                            ) {
+                                (ModelSourceAuthority::External, Some(file)) => {
+                                    file.to_string_lossy()
+                                }
+                                (ModelSourceAuthority::External, None) => "external".into(),
+                                _ => "project".into(),
                             },
                             library.source_closure.len()
                         ),
@@ -368,6 +404,21 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                     font,
                     source_tone,
                 );
+                // The library and the file it was read from reach a screen
+                // reader as they read on the row.
+                for (cell, salt, text) in [
+                    (cells[1], "library", binding.library_name.as_str()),
+                    (cells[4], "source", source_text.as_str()),
+                ] {
+                    ui.interact(
+                        cell,
+                        ui.id().with(("closure-cell", salt, &binding.library_name)),
+                        egui::Sense::hover(),
+                    )
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text)
+                    });
+                }
                 if library.is_none() || corners.is_empty() {
                     paint_text(
                         ui,
@@ -445,6 +496,13 @@ fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(action) = requested.or(attach) {
         apply_model_binding_action(cx, action);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if from_file {
+        model_file::start_read(ui.ctx(), cx);
+    }
+    // A browser session lists the choice unavailable, so takes nothing.
+    #[cfg(target_arch = "wasm32")]
+    let _ = from_file;
 }
 
 pub enum ModelBindingAction {

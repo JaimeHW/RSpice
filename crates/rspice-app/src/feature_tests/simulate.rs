@@ -14,6 +14,8 @@ mod frame_cost;
 mod geometry;
 mod inspector;
 mod jobs_manager;
+#[cfg(not(target_arch = "wasm32"))]
+mod model_file;
 mod navigator;
 mod page_contracts;
 mod page_models;

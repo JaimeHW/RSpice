@@ -48,9 +48,10 @@
 //! that reaches a control which starts one therefore stops dead until a person
 //! sitting at the machine closes it — and the studio's press sweep does reach
 //! that control, so an unattended run hangs and an attended one records
-//! whichever answer the person gave. Under `cfg(test)` the two `rfd` calls are
-//! replaced by [`chosen_source`] and [`chosen_destination`], which answer from
-//! a thread-local script and default to a cancellation. Only the dialog is
+//! whichever answer the person gave. Under `cfg(test)` the `rfd` calls are
+//! replaced by [`chosen_source`], [`chosen_source_or_any`] and
+//! [`chosen_destination`], which answer from a thread-local script and default
+//! to a cancellation. Only the dialog is
 //! replaced: the ceiling, the decode and the compare-and-exchange publication
 //! all run exactly as they do on the desktop, so a scripted path that cannot be
 //! read produces the refusal a mis-picked file produces.
@@ -290,7 +291,7 @@ where
 
 // ------------------------------------------------------- the desktop pickers
 //
-// One pair of one-line functions, so the dialog is the only thing a test build
+// One-line functions, one per dialog, so the dialog is the only thing a test build
 // stands in for. Everything the picker's answer is put through afterwards is
 // the production code path on both sides of the `cfg`.
 
@@ -309,6 +310,26 @@ fn chosen_destination(kind: FileKind, file_name: &str) -> Option<std::path::Path
         .add_filter(kind.label, kind.extensions)
         .set_file_name(file_name)
         .save_file()
+}
+
+/// Ask the reader which file to read, offering every file beside `kind`'s.
+#[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "test-support"))))]
+fn chosen_source_or_any(kind: FileKind) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter(kind.label, kind.extensions)
+        .add_filter("All files", &["*"])
+        .pick_file()
+}
+
+/// The file the reader picks to read, by its path, for a reader that keeps
+/// the path rather than the text: a model library resolves its `.include`
+/// and `.lib` files beside it. The picker offers every file as well as
+/// `kind`'s, since a model source keeps no one extension. A test build
+/// answers from [`script_next_choice`] in place of the dialog, as every
+/// picker here does.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pick_source_path(kind: FileKind) -> Option<std::path::PathBuf> {
+    chosen_source_or_any(kind)
 }
 
 /// What a test build answers a desktop picker with, in place of the dialog.
@@ -382,6 +403,11 @@ fn next_scripted_choice(kind: FileKind) -> Option<std::path::PathBuf> {
 
 #[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
 fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
+    next_scripted_choice(kind)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
+fn chosen_source_or_any(kind: FileKind) -> Option<std::path::PathBuf> {
     next_scripted_choice(kind)
 }
 

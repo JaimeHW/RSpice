@@ -10,6 +10,9 @@ mod code;
 // browser runner runs no plain test.
 #[cfg(not(target_arch = "wasm32"))]
 mod design;
+// An engineer's whole session at the window, one frame per event.
+#[cfg(not(target_arch = "wasm32"))]
+mod engineer;
 mod framework;
 mod hardcopy;
 mod model;
