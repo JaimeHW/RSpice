@@ -1911,6 +1911,7 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub mod open_lease;
 mod recovery_journal;
 
 #[cfg(unix)]
