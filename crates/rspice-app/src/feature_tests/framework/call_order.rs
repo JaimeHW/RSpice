@@ -120,13 +120,7 @@ const PREPARE_FRAME: &[Step] = &[
     ),
     ("5.19", &["self.poll_browser_pdk_persistence(ctx)"]),
     ("5.20", &["self.poll_browser_pack_restore(ctx)"]),
-    (
-        "5.21",
-        &[
-            "self.handle_shortcuts(ctx)",
-            "dropped::open_dropped_file(ctx, self)",
-        ],
-    ),
+    ("5.21", &["self.handle_shortcuts(ctx)"]),
     (
         "5.22",
         &["file_import::register_text_import_repaint_context(ctx,)"],
@@ -192,6 +186,7 @@ const PREPARE_FRAME: &[Step] = &[
 
 /// `workbench::show`, the chrome, docks and surface of step 11.
 const SHOW: &[Step] = &[
+    ("11.0", &["dropped::open_dropped_file(ctx, app)"]),
     ("11.1", &["app.state.reconcile_schematic_drag(ctx, false)"]),
     ("11.2", &["app.state.apply_schematic_editing_preferences()"]),
     ("11.3", &["reconcile_platform_full_screen(app)"]),

@@ -66,6 +66,8 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
     app.state.workbench.pane_focus.begin_frame();
+    // A file dropped on the window opens before any page draws.
+    crate::workbench::shell_host::project::dropped::open_dropped_file(ctx, app);
     app.state.reconcile_schematic_drag(ctx, false);
     app.state.apply_schematic_editing_preferences();
     reconcile_platform_full_screen(app);
