@@ -181,7 +181,7 @@ impl ProjectFeature {
             .description(
                 "Inspect saved project revisions, what changed since each, and the audit history of schematics, simulations, models, and other records.",
             )
-            .size(DialogSize::SimulationWorkflow)
+            .size(DialogSize::RecordHistory)
             .fill_available_height()
             .flush_body()
             .manual_body_scroll()
@@ -221,6 +221,9 @@ impl ProjectFeature {
                 phone,
                 &mut cx.state.project_revision_history,
             );
+            // The body is the surface's whole track, so the footer stays
+            // at the surface's foot however little the record says.
+            ui.expand_to_include_rect(ui.max_rect());
             None
         });
         if restore {
@@ -618,6 +621,9 @@ fn restore_note(
 
 /// The room the table's sort mark takes beside a column's head.
 const SORT_MARK_ROOM: f32 = 11.0;
+/// What a select's well holds besides its value: the value's lead and the
+/// chevron's room, with a point either side.
+const SELECT_CHROME: f32 = 8.0 + 24.0 + 2.0;
 
 /// The history's body: the filter and the search pinned at the top, the
 /// records under them, and the selected record below a divider the reader
@@ -657,8 +663,9 @@ fn revision_history_body(
         return false;
     }
 
-    // The list over the selected record, split where the reader dragged it
-    // or evenly, each side keeping room for its head and a few rows.
+    // The list over the selected record, split where the reader dragged it,
+    // or else as tall as its rows up to half the body, each side keeping
+    // room for its head and a few rows.
     let t = Tokens::get(ui.ctx());
     let line = LineHeights::grid(&t);
     let room = ui.available_height();
@@ -670,9 +677,10 @@ fn revision_history_body(
         + 2.0 * line.row;
     let most_list = (room - least_record).max(least_list);
     let range = least_list..=most_list;
+    let rows_height = line.head + line.row * dialog.shown.rows.len() as f32 + 1.0;
     let held = dialog
         .list_height
-        .unwrap_or(room / 2.0)
+        .unwrap_or_else(|| rows_height.min(room / 2.0))
         .clamp(least_list, most_list);
     let split = Id::new(SPLIT_ID);
     hold_panel_height(ui.ctx(), split, held);
@@ -1010,12 +1018,18 @@ fn record_controls(
     let spacing = ui.spacing().item_spacing.x;
     let label = "Compare with";
     let label_width = words_width(ui.painter(), label, false);
+    // As wide as its longest choice in the select's own face, with the
+    // well's lead and the chevron's room, so no choice is cut.
     let select_width = options
         .iter()
-        .map(|option| words_width(ui.painter(), option, false))
+        .map(|option| {
+            ui.painter()
+                .layout_no_wrap(option.clone(), theme::field_sans(), Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
         .fold(0.0, f32::max)
-        + 2.0 * CELL_PAD
-        + t.metrics.ctl_h;
+        + SELECT_CHROME;
     let buttons_width = buttons
         .iter()
         .map(|(words, _, _)| Button::new(words).measured_width(ui))
