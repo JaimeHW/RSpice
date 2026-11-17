@@ -30,7 +30,7 @@ use super::verdict::{Verdict, VerdictCell};
 use super::*;
 use crate::ui::widgets::table::{
     Cell, CellEditor, Column, DataTable, EditOutcome, LineHeights, RowKey, SortKey,
-    TABLE_EDGE_INSET, TABLE_HEAD_H, TABLE_ROW_H, TableState,
+    TABLE_EDGE_INSET, TABLE_ROW_H, TableState,
 };
 use crate::workbench::simulate::commands::SimulateCommand;
 
@@ -629,7 +629,8 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     }
     // The table takes the height of its rows, scrolling past its share of
     // the body; the detail fills everything under it.
-    let table_h = (ui.available_height() * TABLE_SHARE).max(TABLE_HEAD_H + TABLE_ROW_H);
+    let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+    let table_h = (ui.available_height() * TABLE_SHARE).max(lines.head + lines.row);
     // At their least the columns fit the page beside both docks at 1440
     // points; the name column takes whatever is left.
     let columns = [
@@ -893,11 +894,12 @@ impl DetailLayout {
 
     /// The histogram over the list, each the frame's full width under its own
     /// head band: a phone has no width for two halves. The list takes the
-    /// height of its rows up to half the frame; the plot takes the rest.
-    fn stacked(frame: egui::Rect, failing: usize, band_h: f32) -> Self {
-        let rows = TABLE_HEAD_H + TABLE_ROW_H * failing.max(1) as f32;
+    /// height of its rows, at the live line heights, up to half the frame; the
+    /// plot takes the rest.
+    fn stacked(frame: egui::Rect, failing: usize, lines: LineHeights) -> Self {
+        let rows = lines.head + lines.row * failing.max(1) as f32;
         let list_h = rows.min((frame.height() * 0.5).floor());
-        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), band_h));
+        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), lines.band));
         let list =
             egui::Rect::from_min_max(egui::pos2(frame.left(), frame.bottom() - list_h), frame.max);
         Self {
@@ -928,21 +930,21 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
     } = detail;
     let stacked = phone_width(ui.ctx());
     let width = ui.available_width();
+    let lines = LineHeights::grid(&t);
     let least = if stacked {
-        2.0 * (TABLE_HEAD_H + TABLE_ROW_H) + 2.0
+        2.0 * (lines.head + lines.row) + 2.0
     } else {
-        TABLE_HEAD_H + TABLE_ROW_H + 1.0
+        lines.head + lines.row + 1.0
     };
     let height = ui.available_height().max(least);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let frame = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + 1.0), rect.max);
     // The plot's band is a table band's height, so beside the list it lines
     // up with the list's column heads at every density.
-    let band_h = LineHeights::grid(&t).band;
     let DetailLayout { band, plot, list } = if stacked {
-        DetailLayout::stacked(frame, failing.len(), band_h)
+        DetailLayout::stacked(frame, failing.len(), lines)
     } else {
-        DetailLayout::beside(frame, band_h)
+        DetailLayout::beside(frame, lines.band)
     };
     #[cfg(any(test, feature = "test-support"))]
     {

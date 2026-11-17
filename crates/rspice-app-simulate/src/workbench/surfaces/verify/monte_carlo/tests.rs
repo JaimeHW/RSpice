@@ -11,7 +11,7 @@ use super::super::raster::{
     seed_monte_carlo_at_two_points, seed_monte_carlo_over_different_trials,
 };
 use super::*;
-use crate::ui::widgets::table::Selection;
+use crate::ui::widgets::table::{Selection, TABLE_HEAD_H};
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::simulate::test_host::SimulateTestHost;
 
@@ -846,4 +846,20 @@ fn bars_wear_the_results_tones_and_failing_parts_the_failing_ink() {
                 || bar.0 == t.color.bg_elevated),
         "{bars:?}"
     );
+}
+
+/// On a touch phone the failing-trials list is as tall as its rows at the
+/// touch target, not at a fine pointer's grid row, so every trial shows.
+#[test]
+fn a_touch_phone_lists_every_failing_trial_at_the_touch_row_height() {
+    let frame = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(390.0, 700.0));
+    let touch = LineHeights {
+        head: 44.0,
+        row: 44.0,
+        band: 24.0,
+    };
+    let layout = DetailLayout::stacked(frame, 3, touch);
+    assert_eq!(layout.list.height(), 44.0 + 3.0 * 44.0);
+    assert_eq!(layout.band.height(), 24.0);
+    assert_eq!(layout.list.bottom(), frame.bottom());
 }

@@ -25,8 +25,8 @@ use super::toolbar::{PageToolbar, RunChoice, RunRole, Summary, ToolbarAction, em
 use super::verdict::{Verdict, VerdictCell};
 use super::*;
 use crate::ui::widgets::table::{
-    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
-    TABLE_HEAD_H, TABLE_ROW_H,
+    Cell, CellEditor, Column, DataTable, EditOutcome, LineHeights, RowKey, SortKey,
+    TABLE_EDGE_INSET,
 };
 
 /// Least and greatest height of the overlay under the table.
@@ -484,7 +484,10 @@ pub(super) fn reference_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .freeze(1)
         .pin_when_narrow(RESULT_COLUMN)
         .editing(editor)
-        .max_height((body - detail - 1.0).max(TABLE_HEAD_H + TABLE_ROW_H))
+        .max_height((body - detail - 1.0).max({
+            let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+            lines.head + lines.row
+        }))
         .show(ui, |index| row_cells(&rows[index]));
     if response.selection_changed {
         ui.ctx().request_repaint();
