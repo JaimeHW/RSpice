@@ -23,6 +23,6 @@ pulse	pac	worker	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.227e-1° allowed 4.33e
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
-pulse	pnoise	interp	pass	pn_band (O6) [0] |a−e|=8.364e-13 allowed 9.174e-12 (a=4.578603e-10, e=4.586968e-10)
-pulse	pnoise	native	pass	pn_band (O6) [0] |a−e|=8.364e-13 allowed 9.174e-12 (a=4.578603e-10, e=4.586968e-10)
-pulse	pnoise	worker	pass	pn_band (O6) [0] |a−e|=8.364e-13 allowed 9.174e-12 (a=4.578603e-10, e=4.586968e-10)
+pulse	pnoise	interp	pass	pn_psd (O6) [3] |a−e|=4.743e-23 allowed 4.847e-22 (a=4.846809e-17, e=4.846805e-17)
+pulse	pnoise	native	pass	pn_psd (O6) [3] |a−e|=4.743e-23 allowed 4.847e-22 (a=4.846809e-17, e=4.846805e-17)
+pulse	pnoise	worker	pass	pn_psd (O6) [3] |a−e|=4.743e-23 allowed 4.847e-22 (a=4.846809e-17, e=4.846805e-17)

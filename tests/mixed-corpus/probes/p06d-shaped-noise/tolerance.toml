@@ -22,3 +22,5 @@ of = { kind = "held_at", signal = "v(p)", times = { start = 1e-8, step = 1e-8, c
 interval = [4.71e-4, 5.29e-4]
 oracle = "O6"
 why = "√(S·R²·ωp/4) = √(1e-18 A²/Hz · (1 kΩ)² · 1e6/4) = 0.500 mV: noise shaped by laplace_np must render at |H|²·S"
+insensitive = "a sample standard deviation of noise correlated over 1/ωp = 1 µs, so the 1 ms record holds about 1000 correlation times and the estimate's own spread (1/√2000 = 2.2 %, ±5.8 % at 99 %) sets the interval: a 1 % scaling is inside it"
+insensitive_time = "samples of stationary noise: a 1 % stretch reads the same distribution at other instants"

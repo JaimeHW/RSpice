@@ -142,8 +142,8 @@ kind = "noise_int"
 window = [100.0, 5e5]
 oracle = "O6"
 expect = "c11::pn_band"
-rel = 0.02
-why = "the samples are AR(1) with innovation 0.19·kT/C2 and stationary variance kT/C2 (equipartition); [100 Hz, f₀/2] holds kT/C2·(1 − (2/π)·atan(19·tan(π·100 Hz·T))) = 4.5870e-10 V²; the measure's power-law quadrature on the dec 10 grid is 0.17 % low; the result is deterministic; the contract allows 2 %"
+rel = 1e-5
+why = "the samples are AR(1) with innovation 0.19·kT/C2 and stationary variance kT/C2 (equipartition), so S_y is exact on any grid; the expectation integrates S_y on the frequencies RSpice solved with the measure's own power-law quadrature (exactly, [100 Hz, f₀/2] holds 4.5870e-10 V², and that quadrature on the dec 10 grid reads 0.18 % low), so the comparison holds the spectrum's error, not the quadrature's. The closed form leaves out the switches' 1e12 Ω off-resistance, whose noise adds 2T/(Roff·C2)/(1 − 0.81) = 1.2e-6 of kT/C2: allowed 1e-5. Was 2 %, the contract's allowance, which a 1 % error passed"
 
 [[q]]
 id = "pn_psd"
@@ -153,5 +153,5 @@ kind = "noise"
 points = [100.0, 1e4, 1e5, 4.99e5]
 oracle = "O6"
 expect = "c11::pn_psd"
-rel = 0.05
-why = "S_y(f) = (2/f₀)·0.19·(kT/C2)/|1 − 0.9·e^{−j2πf/f₀}|²: 1.7496e-14 V²/Hz at 100 Hz, 1.2911e-14 at 10 kHz, 4.9459e-16 at 100 kHz, 4.8469e-17 at 499 kHz; log interpolation between dec 10 points; the contract allows 5 %"
+rel = 1e-5
+why = "S_y(f) = (2/f₀)·0.19·(kT/C2)/|1 − 0.9·e^{−j2πf/f₀}|²: 1.7496e-14 V²/Hz at 100 Hz, 1.2911e-14 at 10 kHz, 4.9459e-16 at 100 kHz, 4.8469e-17 at 499 kHz, taken at the frequencies RSpice solved nearest each point. The closed form leaves out the switches' 1e12 Ω off-resistance noise, 1.2e-6 of kT/C2: allowed 1e-5. Was 5 %, the contract's allowance, which a 1 % error passed"

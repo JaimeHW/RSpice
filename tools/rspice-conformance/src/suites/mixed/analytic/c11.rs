@@ -14,7 +14,7 @@ use num_complex::Complex64;
 use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
 use crate::suites::mixed::events::Trace;
-use crate::suites::mixed::measure::Measured;
+use crate::suites::mixed::measure::{Measured, integrated_density};
 
 pub const REGISTRY: Registry = &[
     ("rec", rec),
@@ -257,11 +257,13 @@ fn twin_sample_psd(frequency: f64) -> f64 {
     2.0 * PERIOD * innovation / denominator
 }
 
-/// Variant `pulse` pnoise: S_y integrated over the quantity's window, in
-/// closed form: ∫ S_y df from f₁ to f₂ ≤ f₀/2 is
+/// Variant `pulse` pnoise: S_y integrated over the quantity's window by the
+/// `noise_int` measure's own power-law quadrature on the frequencies RSpice
+/// solved, so a comparison holds RSpice's spectrum to S_y and not the
+/// quadrature to the integral. Exactly, ∫ S_y df from f₁ to f₂ ≤ f₀/2 is
 /// (kT/C2)·(2/π)·[atan(((1 + b)/(1 − b))·tan(πfT))] with b = 0.9, so the
 /// whole of [0, f₀/2] is kT/C2 (4.6045e-10 V²) and [100 Hz, f₀/2] is
-/// 4.5870e-10 V².
+/// 4.5870e-10 V²; on a dec 10 grid the quadrature reads that 0.18 % low.
 fn pn_band(context: &Context<'_>) -> Result<Expected, String> {
     let [low, high] = context
         .quantity
@@ -273,19 +275,14 @@ fn pn_band(context: &Context<'_>) -> Result<Expected, String> {
             "c11::pn_band: [{low:e}, {high:e}] Hz is not inside [0, f0/2]"
         ));
     }
-    let pole = 1.0 - SHARE;
-    let primitive = |frequency: f64| {
-        let half_angle = std::f64::consts::PI * frequency * PERIOD;
-        if (half_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-15 {
-            std::f64::consts::FRAC_PI_2
-        } else {
-            ((1.0 + pole) / (1.0 - pole) * half_angle.tan()).atan()
-        }
-    };
-    let variance = BOLTZMANN * KELVIN / C2;
-    Ok(values(vec![
-        variance * std::f64::consts::FRAC_2_PI * (primitive(high) - primitive(low)),
-    ]))
+    let axis = &context.rspice.axis;
+    let density: Vec<f64> = axis
+        .iter()
+        .map(|frequency| twin_sample_psd(*frequency))
+        .collect();
+    integrated_density(axis, &density, (low, high))
+        .map(|band| values(vec![band]))
+        .map_err(|error| format!("c11::pn_band: {error}"))
 }
 
 /// Variant `pulse` pnoise: S_y at the quantity's points.
@@ -349,6 +346,33 @@ mod tests {
             "{quadrature} vs {closed}"
         );
         assert!((closed / 4.587e-10 - 1.0).abs() < 1e-3, "{closed}");
+        // pn_band integrates S_y on RSpice's frequencies: a dense axis gives
+        // the closed form, a dec 10 axis reads it 0.18 % low.
+        let band = |per_decade: i32| {
+            let quantity: crate::suites::mixed::design::Quantity = toml::from_str(
+                "id = \"q\"\nanalysis = \"pnoise\"\nvariants = [\"pulse\"]\noracle = \"O6\"\nkind = \"noise_int\"\nwindow = [100.0, 5e5]\nwhy = \"w\"\n",
+            )
+            .unwrap();
+            let rspice = crate::suites::mixed::case::Observation {
+                axis: (0..=5 * per_decade)
+                    .map(|step| 10.0 * 10f64.powf(f64::from(step) / f64::from(per_decade)))
+                    .collect(),
+                ..Default::default()
+            };
+            let Expected::Measured(Measured::Values(band)) = pn_band(&Context {
+                quantity: &quantity,
+                variant: "pulse",
+                rspice: &rspice,
+                trial: None,
+            })
+            .unwrap() else {
+                panic!()
+            };
+            band[0]
+        };
+        assert!((band(2000) / closed - 1.0).abs() < 1e-6, "{}", band(2000));
+        let coarse = band(10) / closed - 1.0;
+        assert!((coarse + 1.8e-3).abs() < 2e-4, "{coarse}");
         // The held value: 0.5 + 0.2/(1 + (2π·1e6·1e-9)²).
         assert!(
             (twin_held() - 0.699_992_104_6).abs() < 1e-9,

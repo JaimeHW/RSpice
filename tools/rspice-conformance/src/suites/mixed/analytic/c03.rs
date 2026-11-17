@@ -46,7 +46,7 @@ const JOHNSON_BITS: usize = 5;
 // pwm: Cycles = Samples = 100 (the deck's X-card overrides), one tick per
 // microsecond, into 20 Ω (D/A) + 100 kΩ and 1 µF.
 const VCC_PWM: f64 = 3.3;
-const PWM_RC: f64 = (100e3 + 20.0) * 1e-6;
+const PWM_RC: f64 = (100e3 + DA_OHMS) * 1e-6;
 const PWM_TICK: f64 = 1e-6;
 const PWM_CYCLES: i64 = 100;
 /// pwm.v's `M_TWO_PI` (6.28318530717958647652) rounds to this double.
@@ -160,15 +160,40 @@ fn adcop(context: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![VCC_ADC; count]))
 }
 
-/// out = 0 from the initial block.
+/// The built-in D/A's output resistance, behind its 0 V and vcc levels.
+const DA_OHMS: f64 = 20.0;
+/// The `delay` decks' supply.
+const VCC_DELAY: f64 = 3.3;
+/// The op decks' pull-up to vcc on the net the closed form reads.
+const PULL_UP_OHMS: f64 = 1e3;
+
+/// A D/A's low level read through its 20 Ω against the op decks' 1 kΩ
+/// pull-up to `vcc`: `vcc·20/(20 + 1k)`.
+fn pulled_low(vcc: f64) -> f64 {
+    vcc * DA_OHMS / (DA_OHMS + PULL_UP_OHMS)
+}
+
+/// out = 0 from the initial block, so every d is at the D/A's low level:
+/// 0 V, and d0, pulled up to vcc through 1 kΩ, at [`pulled_low`].
 fn delayop(context: &Context<'_>) -> Result<Expected, String> {
-    let count = context
+    let signals = context
         .quantity
         .measure
         .signals
         .as_ref()
-        .map_or(0, Vec::len);
-    Ok(values(vec![0.0; count]))
+        .ok_or("c03::delayop needs the signals")?;
+    Ok(values(
+        signals
+            .iter()
+            .map(|signal| {
+                if signal.eq_ignore_ascii_case("v(d0)") {
+                    pulled_low(VCC_DELAY)
+                } else {
+                    0.0
+                }
+            })
+            .collect(),
+    ))
 }
 
 /// The output edges pwm.v produces, as (tick, level) from t = 0: its `always`
@@ -234,7 +259,8 @@ fn pwmsine(context: &Context<'_>) -> Result<Expected, String> {
     Ok(values(expected))
 }
 
-/// out = 0 from the initial block, and the capacitor holds smooth at 0.
+/// out = 0 from the initial block, pulled up to vcc through 1 kΩ, so out is
+/// at [`pulled_low`], and the open capacitor leaves smooth at out.
 fn pwmop(context: &Context<'_>) -> Result<Expected, String> {
     let count = context
         .quantity
@@ -242,7 +268,7 @@ fn pwmop(context: &Context<'_>) -> Result<Expected, String> {
         .signals
         .as_ref()
         .map_or(0, Vec::len);
-    Ok(values(vec![0.0; count]))
+    Ok(values(vec![pulled_low(VCC_PWM); count]))
 }
 
 #[cfg(test)]

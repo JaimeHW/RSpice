@@ -15,6 +15,7 @@ oracle = "O6"
 expect = "p06c::one_step"
 abs = 1e-9
 why = "D-D: a read-before-assign variable holds its value from the previous accepted point"
+insensitive_time = "it compares each accepted point's output with the input at the accepted point before: an index, which a stretch of the time axis leaves alone"
 
 [[q]]
 id = "delay.va"
@@ -26,3 +27,4 @@ oracle = "O6"
 expect = "p06c::one_step"
 abs = 1e-9
 why = "the analog-only twin, the same rule"
+insensitive_time = "it compares each accepted point's output with the input at the accepted point before: an index, which a stretch of the time axis leaves alone"

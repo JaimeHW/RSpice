@@ -2,5 +2,10 @@
 .verilog "../net/delay_v2005.v" delay
 .include ../net/delay.cir
 .param vcc=3.3
+* A 1 kOhm pull-up to vcc on d0 reads the D/A that drives it: out = 0 at the
+* operating point, so d0 sits at vcc * 20 / (20 + 1k), the D/A's 20 ohm low
+* level against the pull-up.
+vpu pu 0 {vcc}
+rpu d0 pu 1k
 .op
 .end

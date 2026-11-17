@@ -15,6 +15,8 @@ of = { kind = "held_at", signal = "v(p)", times = { start = 1e-7, step = 1e-9, c
 interval = [0.0214, 0.0233]
 oracle = "O6"
 why = "√(1e-18 A²/Hz · (1 kΩ)² · 500 MHz) = 22.36 mV: the mixed module's white_noise must reach the transient"
+insensitive = "a sample standard deviation over 1901 independent samples, whose own spread (σ/√(2N) = 1.6 %, ±4.2 % at 99 %) sets the interval: a 1 % scaling is inside it. The probe asks whether the noise reaches the transient at all, which a missing source (σ = 0) fails"
+insensitive_time = "samples of white noise: a 1 % stretch reads the same distribution at other instants"
 
 [[q]]
 id = "sigma.va"

@@ -213,8 +213,8 @@ kind = "op"
 signals = ["v(d4)", "v(d3)", "v(d2)", "v(d1)", "v(d0)"]
 oracle = "O6"
 expect = "c03::delayop"
-abs = 1e-3
-why = "out = 0 from the initial block"
+abs = 1e-6
+why = "out = 0 from the initial block, so d4..d1 sit at the D/A's 0 V and d0, pulled up to vcc through 1 kΩ, at vcc·20/(20 + 1k) = 64.706 mV, a linear divider the operating point solves to its node tolerance (vntol 1 µV). The pull-up gives the cell a nonzero value: all zeros, it passed with any scaling. Was 1e-3"
 
 [[q]]
 id = "op"
@@ -224,5 +224,5 @@ kind = "op"
 signals = ["v(out)", "v(smooth)"]
 oracle = "O6"
 expect = "c03::pwmop"
-abs = 1e-3
-why = "out = 0 from the initial block"
+abs = 1e-6
+why = "out = 0 from the initial block, pulled up to vcc through 1 kΩ: out = vcc·20/(20 + 1k) = 64.706 mV, and the open capacitor leaves smooth at out through 100 kΩ, a linear divider the operating point solves to its node tolerance (vntol 1 µV). The pull-up gives the cell a nonzero value: all zeros, it passed with any scaling. Was 1e-3"

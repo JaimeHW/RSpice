@@ -194,3 +194,5 @@ trials = 10
 interval = [0.036, 0.136]
 oracle = "O6"
 why = "sigma(delta) = sqrt(255) * 0.005 = 0.0798 LSB (C7 against C6..C0, 0.5 % per unit), with the 1/16 LSB resolution of both transitions in quadrature 0.0838; chi^2 99 %, 9 df: [0.0368, 0.1357]"
+insensitive = "a standard deviation over 10 trials, held to its chi² 99 % interval, which spans a factor of 3.8: a 1 % scaling moves it by a hundredth of that spread. The deterministic cells read the codes themselves"
+insensitive_time = "each trial's value is a code's mean over [0.5, 16.5] µs, flat between conversions, and the statistic is over trials: a 1 % stretch moves the window's ends inside the same conversions"
