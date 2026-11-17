@@ -242,7 +242,7 @@ fn an_archive_embeds_the_run_once_names_its_stores_and_reads_back() {
         .archive()
         .unwrap();
     assert_eq!(archived.record(), "{\"run\":1}");
-    assert_eq!(archived.segments(), [store.clone()]);
+    assert_eq!(archived.segments(), std::slice::from_ref(&store));
     assert_eq!(
         reopened.archived_segments().collect::<Vec<_>>(),
         [store.as_str()]
