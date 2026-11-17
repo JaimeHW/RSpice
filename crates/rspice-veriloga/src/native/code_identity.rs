@@ -128,6 +128,29 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// corpus did when it left the postfix plan. The corpus went from 109,217,294
 /// bytes to 104,417,156.
 ///
+/// `e7487270…` is the census of `3d1b849a54`, in which a source evaluation's
+/// prelude evaluates a `ddx` that only the operating-point report reads
+/// without failing the trial on a non-finite operand. It was measured as
+/// `8a79b3a6…` was, at that commit and at its parent `dab5104c5d`, each in two
+/// processes that gave the same digests. Exactly three modules moved, all at
+/// `3d1b849a54`, and the other fifty-seven are digest identical. Each keeps a
+/// `$finish` once the census discards output tasks, so each compiles as a
+/// source evaluation, and each released check was one `CheckedValue` helper
+/// call:
+/// - BSIM-CMG 110.0.0 `bsimcmg`, 1,072,260 to 1,068,516 bytes and 2,620 to
+///   2,549 helper calls: all 71 of its `ddx`;
+/// - `bsimimg` (BSIM-IMG 103.0.0), 967,309 to 964,973 bytes and 2,445 to
+///   2,413 helper calls: all 32 of its `ddx`;
+/// - `bsimsoi_va` (BSIM-SOI 4.6.1), 956,795 to 955,707 bytes and 1,965 to
+///   1,952 helper calls: 13 of its 17 `ddx`. The other four (`B4SOIgm`, both
+///   arms of `B4SOIgds`, and `B4SOIgmbs`) feed its thermal noise and keep their
+///   checks.
+///
+/// Nothing else between `3838a01726` and `5b480860de` moved a module: the
+/// three are digest identical to `8a79b3a6…`'s at `dab5104c5d`, and the other
+/// fifty-seven at `5b480860de`. The corpus went from 104,417,156 bytes to
+/// 104,409,988.
+///
 /// # How it is re-baselined
 ///
 /// Only with evidence that names the modules that moved and why. The census
@@ -424,7 +447,7 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "8a79b3a64920c329b25dfb1733e1b1618e5e41f1b5a2acd04103f1601bc00194";
+    "e7487270803d91b20a2f69ab4118fef569e628ee3f8a125bcf6e501798400324";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
