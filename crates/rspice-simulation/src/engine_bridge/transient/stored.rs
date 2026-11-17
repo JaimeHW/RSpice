@@ -16,6 +16,7 @@ use std::sync::Arc;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{SinkTransient, TransientResult, TransientState};
 use rspice_core::result_sink::SinkStop;
+use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::stored_transient::{
     SlotTarget, clear_rows, fill_events, fill_rows, fill_span, instance_parameters, slot_targets,
 };
@@ -152,10 +153,10 @@ impl EngineBridge {
             }
         };
         let reader = match inner.into_io() {
-            Some(io) => SegmentReader::open(io.into_inner().into_file()),
+            Some(io) => SegmentReader::open(Box::new(io.into_inner().into_file()) as SegmentBytes),
             None => FileIo::open(&path)
                 .map_err(StoreError::from)
-                .and_then(SegmentReader::open),
+                .and_then(|io| SegmentReader::open(Box::new(io) as SegmentBytes)),
         };
         let reader = match reader {
             Ok(reader) if shell.is_some() || reader.rows() > 0 => reader,
@@ -178,7 +179,7 @@ impl EngineBridge {
             }
         };
         let bytes = std::fs::metadata(&path).map_or(0, |meta| meta.len());
-        let run = Arc::new(StoredRun::new(reader, path.clone()));
+        let run = Arc::new(StoredRun::new(StoreReader::new(reader), path.clone()));
         let (shell, targets, parameters) = run
             .with_reader(|reader| {
                 // A run that ended with an error returned no result: the segment names it.

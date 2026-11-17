@@ -43,7 +43,7 @@ pub use reader::{SegmentReader, SegmentState};
 pub use run_writer::{RunIo, RunWriter};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use sink::{StoreSink, sink_stop};
-pub use tile::{Tile, pixel_of};
+pub use tile::{BlockCache, BlockKey, NoBlockCache, Tile, pixel_of};
 #[cfg(any(unix, windows))]
 pub use watch::volume_free_space;
 pub use watch::{

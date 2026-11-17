@@ -10,9 +10,10 @@
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
+use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::waveform::ColumnSource;
 use rspice_results_store::{FileIo, SegmentIo, SegmentReader, StoreError};
 
@@ -222,21 +223,13 @@ impl SegmentIo for TemporaryIo {
 
 /// A finished segment its waveforms read from, deleted with the last of them.
 pub(crate) struct StoredRun {
-    reader: Mutex<Option<SegmentReader<FileIo>>>,
-    /// Each chunk's first row and row count, in row order.
-    spans: Vec<(u64, usize)>,
-    rows: u64,
+    reader: StoreReader,
     path: PathBuf,
 }
 
 impl StoredRun {
-    pub(crate) fn new(reader: SegmentReader<FileIo>, path: PathBuf) -> Self {
-        Self {
-            spans: reader.chunk_spans().collect(),
-            rows: reader.rows(),
-            reader: Mutex::new(Some(reader)),
-            path,
-        }
+    pub(crate) fn new(reader: StoreReader, path: PathBuf) -> Self {
+        Self { reader, path }
     }
 
     /// The segment file.
@@ -245,70 +238,32 @@ impl StoredRun {
     }
 
     pub(crate) fn rows(&self) -> u64 {
-        self.rows
+        self.reader.rows()
     }
 
     /// Run `read` with the segment's reader.
     pub(crate) fn with_reader<T>(
         &self,
-        read: impl FnOnce(&mut SegmentReader<FileIo>) -> Result<T, StoreError>,
+        read: impl FnOnce(&mut SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut reader = self.reader.lock().unwrap_or_else(|p| p.into_inner());
-        let reader = reader.as_mut().ok_or_else(|| StoreError::Io {
-            kind: std::io::ErrorKind::Other,
-            message: "the results segment was closed".to_owned(),
-        })?;
-        read(reader)
+        self.reader.with_reader(read)
     }
 
-    /// Rows `first .. first + out.len()` of the x axis (`slot` `None`) or a value slot, decoded
-    /// chunk by chunk into `out`.
+    /// Rows `first .. first + out.len()` of the x axis (`slot` `None`) or a value slot.
     pub(crate) fn read(
         &self,
         slot: Option<usize>,
         first: u64,
         out: &mut [f64],
     ) -> Result<(), StoreError> {
-        let end = first + out.len() as u64;
-        if end > self.rows {
-            return Err(StoreError::OutOfRange(format!(
-                "rows {first} .. {end} of a segment with {} rows",
-                self.rows
-            )));
-        }
-        self.with_reader(|reader| {
-            let mut chunk = self
-                .spans
-                .partition_point(|&(start, rows)| start + rows as u64 <= first);
-            let mut buffer = Vec::new();
-            let mut row = first;
-            while row < end {
-                let (start, rows) = self.spans[chunk];
-                match slot {
-                    None => reader.read_chunk_x(chunk, &mut buffer)?,
-                    Some(slot) => reader.read_chunk_slot(chunk, slot, &mut buffer)?,
-                }
-                let from = (row - start) as usize;
-                let to = rows.min((end - start) as usize);
-                let at = (row - first) as usize;
-                out[at..at + to - from].copy_from_slice(&buffer[from..to]);
-                row = start + to as u64;
-                chunk += 1;
-            }
-            Ok(())
-        })
+        self.reader.read(slot, first, out)
     }
 }
 
 impl Drop for StoredRun {
     fn drop(&mut self) {
         // Close the segment before deleting it: a host may refuse to delete an open file.
-        drop(
-            self.reader
-                .get_mut()
-                .unwrap_or_else(|p| p.into_inner())
-                .take(),
-        );
+        self.reader.close();
         let _ = fs::remove_file(&self.path);
     }
 }

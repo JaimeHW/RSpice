@@ -98,12 +98,12 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
         writer.push_row(row as f64, &[row as f64 * 0.5]).unwrap();
     }
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let reader = SegmentReader::open(io.into_file()).unwrap();
+    let reader = SegmentReader::open(Box::new(io.into_file()) as SegmentBytes).unwrap();
     assert!(
         reader.chunk_spans().len() > 2,
         "the rows span several chunks"
     );
-    let run = Arc::new(StoredRun::new(reader, path.clone()));
+    let run = Arc::new(StoredRun::new(StoreReader::new(reader), path.clone()));
     let time = StoredColumn::new(run.clone(), None, "time".to_owned());
     let out = StoredColumn::new(run.clone(), Some(0), "v(out)".to_owned());
     drop(run);
