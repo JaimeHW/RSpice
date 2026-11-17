@@ -65,12 +65,15 @@ impl Feature for ProjectFeature {
         ids::open_workspace(Workspace::Simulate),
         ids::open_workspace(Workspace::Results),
         ids::open_workspace(Workspace::Netlist),
+        ids::open_workspace(Workspace::Verify),
         ids::CONFIGURATION_SETS,
         ids::MODELS_CATALOG,
         ids::OPEN_NETLIST,
         ProjectCommand::NewCell.key(),
         ProjectCommand::RevisionHistory.key(),
         ProjectCommand::Page(ProjectPage::Library).key(),
+        ProjectCommand::Page(ProjectPage::Dependencies).key(),
+        ProjectCommand::Page(ProjectPage::Recovery).key(),
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
