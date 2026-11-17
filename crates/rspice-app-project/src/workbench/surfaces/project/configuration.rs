@@ -122,18 +122,28 @@ fn toolbar(
                     }
                     // Runs use what was applied; the tables show the edits.
                     let edits = if checking {
-                        Some(("Checking\u{2026}", t.color.text_dim))
+                        Some(("Checking\u{2026}", t.color.text_dim, None))
                     } else if out_of_date {
-                        Some(("Edits out of date: Revert, then edit again", t.color.warn))
+                        Some((
+                            "Edits out of date",
+                            t.color.warn,
+                            Some(
+                                "The configuration changed in a part these edits change \
+                                 too. Revert, then edit again.",
+                            ),
+                        ))
                     } else {
-                        dirty.then_some(("Edits not applied", t.color.text_dim))
+                        dirty.then_some(("Edits not applied", t.color.text_dim, None))
                     };
-                    if let Some((edits, color)) = edits {
-                        ui.label(
+                    if let Some((edits, color, why)) = edits {
+                        let said = ui.label(
                             egui::RichText::new(edits)
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                 .color(color),
                         );
+                        if let Some(why) = why {
+                            said.on_hover_text(why);
+                        }
                     }
                     if selection != ConfigurationSelection::Default {
                         if Button::new("Apply")

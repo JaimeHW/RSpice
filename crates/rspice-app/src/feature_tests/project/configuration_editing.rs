@@ -686,7 +686,7 @@ fn edits_follow_a_rename_of_the_design_they_were_made_to() {
     assert!(!says(&output, "Edits not applied"), "Apply landed them");
 }
 
-const OUT_OF_DATE: &str = "Edits out of date: Revert, then edit again";
+const OUT_OF_DATE: &str = "Edits out of date";
 
 /// A change the project makes to a part the edits change too cannot be
 /// carried over: the band says so at once, Apply is not offered, and Revert
