@@ -203,3 +203,54 @@ fn the_library_operations_run_from_the_command_palette() {
         "the audit history opens: {shown:?}"
     );
 }
+
+/// Ctrl+A chooses every cell of the column, Delete opens one review of all
+/// of them, Enter confirms it, and one Undo puts all of them back.
+#[test]
+fn twelve_cells_chosen_together_are_one_review_and_one_undo() {
+    let mut app = RSpiceApp::test_instance();
+    let mut bulk = Library::new("bulk");
+    for n in 1..=12 {
+        let mut cell = Cell::new(format!("cell{n:02}"));
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        bulk.add_cell(cell);
+    }
+    app.state.model.library_manager.add_library(bulk);
+    app.state
+        .model
+        .library_manager
+        .select_cell("bulk", "cell01");
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Library;
+    let mut replay = Replay::of(app);
+    replay.frames(Vec::new());
+    let cells = |replay: &Replay| {
+        replay
+            .app
+            .state
+            .model
+            .library_manager
+            .get_library("bulk")
+            .map(|library| library.cell_count())
+    };
+
+    replay.key(Key::A, PRIMARY);
+    press(&mut replay, Key::Delete);
+    assert_eq!(
+        replay
+            .app
+            .state
+            .project
+            .library_deletion_review
+            .targets()
+            .len(),
+        12,
+        "one review holds every chosen cell"
+    );
+    press(&mut replay, Key::Enter);
+    assert_eq!(cells(&replay), Some(0), "the review deletes all twelve");
+    replay.key(Key::Z, PRIMARY);
+    assert_eq!(cells(&replay), Some(12), "one Undo puts all twelve back");
+    replay.key(Key::Z, PRIMARY | Modifiers::SHIFT);
+    assert_eq!(cells(&replay), Some(0), "one Redo deletes them again");
+}

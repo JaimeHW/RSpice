@@ -143,7 +143,10 @@ pub struct ProjectState {
     pub pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
     pub pending_delete_view: Option<(String, String, String)>,
-    /// Exact, revision-bound destructive review for deleting one cell or view.
+    /// Pending deletion of several cells or views at once, in order.
+    pub pending_delete_batch:
+        Vec<crate::workbench::project::workspace_state::LibraryDeletionTarget>,
+    /// Exact, revision-bound destructive review for deleting cells or views.
     pub library_deletion_review:
         crate::workbench::project::workspace_state::LibraryDeletionReviewState,
 

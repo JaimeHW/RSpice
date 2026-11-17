@@ -441,8 +441,10 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             persist_global_veriloga,
         } => {
             void_veriloga_evidence(&mut app.state, &removed_sources);
-            apply_workspace_pruned(&mut app.state, pruned);
-            if let Some(target) = remove_placements {
+            for pruned in pruned {
+                apply_workspace_pruned(&mut app.state, pruned);
+            }
+            for target in remove_placements {
                 app.state.model.remove_deleted_master_placements(
                     target.library(),
                     target.cell(),

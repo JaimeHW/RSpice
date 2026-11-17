@@ -33,6 +33,36 @@ pub struct LibraryDeletionImpact {
     project_root: bool,
 }
 
+impl LibraryDeletionImpact {
+    /// Count `other`'s impact in with this one's, for a review of several.
+    fn add(&mut self, other: Self) {
+        self.views += other.views;
+        self.open_views += other.open_views;
+        self.dirty_open_views += other.dirty_open_views;
+        self.instance_references += other.instance_references;
+        self.source_bundles += other.source_bundles;
+        self.configuration_roots += other.configuration_roots;
+        self.project_root |= other.project_root;
+    }
+}
+
+/// What a review of several deletes, by name under the library and cell they
+/// share: "work: amp, bias, mirror".
+fn deletion_list(targets: &[LibraryDeletionTarget]) -> String {
+    let Some(first) = targets.first() else {
+        return String::new();
+    };
+    let names = targets
+        .iter()
+        .map(|target| target.view().unwrap_or(target.cell()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match first.view() {
+        Some(_) => format!("{}/{}: {names}", first.library(), first.cell()),
+        None => format!("{}: {names}", first.library()),
+    }
+}
+
 impl ProjectState {
     /// Open the deletion review on the exact cell `library`/`cell`, against
     /// the library revision `model` holds now.
@@ -75,14 +105,39 @@ impl ProjectState {
         model: &Model,
         target: LibraryDeletionTarget,
     ) -> Result<(), String> {
-        validate_library_deletion_target(model, &target)?;
-        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+        self.open_library_deletions_review(model, vec![target])
+    }
+
+    /// Open one deletion review on every cell or view of `targets`, a
+    /// multi-selection, against the library revision `model` holds now:
+    /// one confirmation deletes them all, and one step of Undo restores them.
+    pub fn open_library_deletions_review(
+        &mut self,
+        model: &Model,
+        targets: Vec<LibraryDeletionTarget>,
+    ) -> Result<(), String> {
+        for target in &targets {
+            validate_library_deletion_target(model, target)?;
+        }
+        if self.library_deletion_pending() {
             return Err("Another library deletion is already pending.".to_owned());
         }
+        let mut targets = targets.into_iter();
+        let Some(target) = targets.next() else {
+            return Err("Nothing is selected to delete.".to_owned());
+        };
         self.library_deletion_review.target = Some(target);
+        self.library_deletion_review.also = targets.collect();
         self.library_deletion_review.expected_library_revision = model.library_manager.revision();
         self.library_deletion_review.error = None;
         Ok(())
+    }
+
+    /// A confirmed deletion waits to be carried out.
+    fn library_deletion_pending(&self) -> bool {
+        self.pending_delete_cell.is_some()
+            || self.pending_delete_view.is_some()
+            || !self.pending_delete_batch.is_empty()
     }
 
     pub fn confirm_library_deletion_review(
@@ -91,22 +146,30 @@ impl ProjectState {
         resolution: DeletionInstanceResolution,
     ) -> Result<(), String> {
         let review = &self.library_deletion_review;
-        let target = review
-            .target
-            .clone()
-            .ok_or_else(|| "No library deletion is awaiting confirmation.".to_owned())?;
+        let targets = review.targets();
+        let Some(target) = targets.first().cloned() else {
+            return Err("No library deletion is awaiting confirmation.".to_owned());
+        };
         if model.library_manager.revision() != review.expected_library_revision {
             return Err(
                 "The library catalog changed after this review opened. Review the deletion again."
                     .to_owned(),
             );
         }
-        let impact = library_deletion_impact(model, &target);
-        can_delete(model, &target, &impact, Some(resolution))?;
-        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+        for target in &targets {
+            let impact = library_deletion_impact(model, target);
+            can_delete(model, target, &impact, Some(resolution))?;
+        }
+        if self.library_deletion_pending() {
             return Err("Another library deletion is already pending.".to_owned());
         }
 
+        if targets.len() > 1 {
+            self.pending_delete_batch = targets;
+            self.library_deletion_review.close();
+            self.library_deletion_review.resolution = Some(resolution);
+            return Ok(());
+        }
         match target {
             LibraryDeletionTarget::Cell { library, cell } => {
                 self.pending_delete_cell = Some((library, cell));
@@ -132,22 +195,39 @@ impl ProjectFeature {
         cx: &mut Cx<'_, Self>,
         ctx: &Context,
     ) {
-        let Some(target) = cx.state.library_deletion_review.target.clone() else {
+        let targets = cx.state.library_deletion_review.targets();
+        let Some(target) = targets.first().cloned() else {
             return;
         };
-        let impact = library_deletion_impact(cx.model, &target);
+        let several = targets.len() > 1;
+        let mut impact = LibraryDeletionImpact::default();
+        let mut gate = Ok(());
+        for each in &targets {
+            let each_impact = library_deletion_impact(cx.model, each);
+            if gate.is_ok() {
+                gate = can_delete(
+                    cx.model,
+                    each,
+                    &each_impact,
+                    Some(DeletionInstanceResolution::default()),
+                );
+            }
+            impact.add(each_impact);
+        }
         let revision_current = cx.model.library_manager.revision()
             == cx.state.library_deletion_review.expected_library_revision;
-        let gate = can_delete(
-            cx.model,
-            &target,
-            &impact,
-            Some(DeletionInstanceResolution::default()),
-        );
         let deletable = revision_current && gate.is_ok();
         let placements = impact.instance_references;
-        let target_path = target.display_path();
-        let object = target.kind_label().to_ascii_lowercase();
+        let target_path = if several {
+            deletion_list(&targets)
+        } else {
+            target.display_path()
+        };
+        let object = if several {
+            format!("{}s", target.kind_label().to_ascii_lowercase())
+        } else {
+            target.kind_label().to_ascii_lowercase()
+        };
         let view_count = impact.views.to_string();
         let open_count = format!(
             "{} ({} with working changes)",
@@ -167,27 +247,36 @@ impl ProjectFeature {
             .as_deref()
             .map(str::to_owned);
         let displayed_error = stale_error.or_else(|| gate.err()).or(retained_error);
-        let title = match target {
-            LibraryDeletionTarget::Cell { .. } => "Delete cell",
-            LibraryDeletionTarget::View { .. } => "Delete view",
+        let title = if several {
+            format!("Delete {} {object}", targets.len())
+        } else {
+            format!("Delete {object}")
         };
-        let description = match target {
-            LibraryDeletionTarget::Cell { .. } => {
+        let description = match (&target, several) {
+            (LibraryDeletionTarget::Cell { .. }, false) => {
                 "Permanently remove this cell, all of its views, owned sources, open documents, and loaded workspace buffers."
             }
-            LibraryDeletionTarget::View { .. } => {
+            (LibraryDeletionTarget::View { .. }, false) => {
                 "Permanently remove this view, its owned source, open document, and loaded workspace buffer."
             }
+            (LibraryDeletionTarget::Cell { .. }, true) => {
+                "Permanently remove these cells, all of their views, owned sources, open documents, and loaded workspace buffers."
+            }
+            (LibraryDeletionTarget::View { .. }, true) => {
+                "Permanently remove these views, their owned sources, open documents, and loaded workspace buffers."
+            }
         };
+        let these = if several { "these" } else { "this" };
         let placement_question = (placements > 0).then(|| {
             format!(
-                "{placements} {} of this {object} {} drawn in this project. Deleting it does not decide what happens to {}.",
+                "{placements} {} of {these} {object} {} drawn in this project. Deleting {} does not decide what happens to {}.",
                 if placements == 1 {
                     "placement"
                 } else {
                     "placements"
                 },
                 if placements == 1 { "is" } else { "are" },
+                if several { "them" } else { "it" },
                 if placements == 1 { "it" } else { "them" }
             )
         });
@@ -281,7 +370,10 @@ impl ProjectFeature {
     /// out as this step returns. A review neither opens nor confirms while a
     /// deletion waits, so at most one does.
     pub fn process_pending_library_deletions(cx: &mut Cx<'_, Self>) {
-        if let Some((lib_name, cell_name)) = cx.state.pending_delete_cell.take() {
+        let batch = std::mem::take(&mut cx.state.pending_delete_batch);
+        if !batch.is_empty() {
+            delete_staged_batch(cx, batch);
+        } else if let Some((lib_name, cell_name)) = cx.state.pending_delete_cell.take() {
             delete_staged_cell(cx, lib_name, cell_name);
         } else if let Some((lib_name, cell_name, view_name)) = cx.state.pending_delete_view.take() {
             delete_staged_view(cx, lib_name, cell_name, view_name);
@@ -333,10 +425,13 @@ fn delete_staged_cell(cx: &mut Cx<'_, ProjectFeature>, lib_name: String, cell_na
         .prune_workspace_after_cell_deleted(&lib_name, &cell_name);
     cx.wb.outbox.push(ProjectRequest::CellOrViewDeleted {
         removed_sources,
-        pruned,
+        pruned: vec![pruned],
         mutation: ReservedLibraryRevision::new(project_mutation),
-        remove_placements: (resolution == DeletionInstanceResolution::RemoveInstances)
-            .then(|| Box::new(target)),
+        remove_placements: if resolution == DeletionInstanceResolution::RemoveInstances {
+            vec![target]
+        } else {
+            Vec::new()
+        },
         notice: format!("Deleted cell '{cell_name}' from library '{lib_name}'."),
         persist_global_veriloga: lib_name == VERILOGA_LIBRARY_NAME,
     });
@@ -397,12 +492,124 @@ fn delete_staged_view(
         .prune_workspace_after_view_deleted(&lib_name, &cell_name, &view_name);
     cx.wb.outbox.push(ProjectRequest::CellOrViewDeleted {
         removed_sources,
-        pruned,
+        pruned: vec![pruned],
         mutation: ReservedLibraryRevision::new(project_mutation),
-        remove_placements: (resolution == DeletionInstanceResolution::RemoveInstances)
-            .then(|| Box::new(target)),
+        remove_placements: if resolution == DeletionInstanceResolution::RemoveInstances {
+            vec![target]
+        } else {
+            Vec::new()
+        },
         notice: format!("Deleted view '{view_name}' from cell '{cell_name}'."),
         persist_global_veriloga: lib_name == VERILOGA_LIBRARY_NAME,
+    });
+}
+
+/// Delete the staged cells or views as one library change, which one step
+/// of Undo reverses, unless the gate now refuses one of them: then the
+/// status bar says why and none is deleted.
+fn delete_staged_batch(cx: &mut Cx<'_, ProjectFeature>, targets: Vec<LibraryDeletionTarget>) {
+    let resolution = cx.state.library_deletion_review.resolution.take();
+    let mut catalog = (*cx.model.workspace.content.design_management).clone();
+    let mut catalog_changed = false;
+    for target in &targets {
+        let impact = library_deletion_impact(cx.model, target);
+        let checked = can_delete(cx.model, target, &impact, resolution).and_then(|()| {
+            remove_from_design_management(
+                &mut catalog,
+                target.library(),
+                target.cell(),
+                target.view(),
+            )
+        });
+        match checked {
+            Ok(changed) => catalog_changed |= changed,
+            Err(error) => {
+                cx.wb.prompt(error);
+                return;
+            }
+        }
+    }
+    let operations = targets
+        .iter()
+        .map(|target| match target.clone() {
+            LibraryDeletionTarget::Cell { library, cell } => {
+                crate::state::ProjectLibraryMutation::DeleteCell { library, cell }
+            }
+            LibraryDeletionTarget::View {
+                library,
+                cell,
+                view,
+            } => crate::state::ProjectLibraryMutation::DeleteView {
+                library,
+                cell,
+                view,
+            },
+        })
+        .collect();
+    let project_mutation = match cx.model.preflight_project_library_mutation(
+        crate::state::ProjectLibraryMutation::Batch { operations },
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            cx.wb.prompt(error);
+            return;
+        }
+    };
+    let mut removed_sources = Vec::new();
+    let mut pruned = Vec::new();
+    for target in &targets {
+        let (library, cell, view) = (target.library(), target.cell(), target.view());
+        let Some(mut lib) = cx.model.library_manager.edit_library(library) else {
+            continue;
+        };
+        let removed = match view {
+            Some(view) => lib.remove_view(cell, view) == Some(true),
+            None => lib.remove_cell(cell),
+        };
+        drop(lib);
+        if !removed {
+            continue;
+        }
+        removed_sources.extend(remove_project_sources_for_deleted_scope(
+            cx.model, library, cell, view,
+        ));
+        pruned.push(match view {
+            Some(view) => cx
+                .model
+                .prune_workspace_after_view_deleted(library, cell, view),
+            None => cx.model.prune_workspace_after_cell_deleted(library, cell),
+        });
+    }
+    if catalog_changed {
+        *cx.model.workspace.content.design_management = catalog;
+    }
+    let first = &targets[0];
+    let notice = match first.view() {
+        Some(_) => format!(
+            "Deleted {} views from cell '{}'.",
+            targets.len(),
+            first.cell()
+        ),
+        None => format!(
+            "Deleted {} cells from library '{}'.",
+            targets.len(),
+            first.library()
+        ),
+    };
+    let persist_global_veriloga = targets
+        .iter()
+        .any(|target| target.library() == VERILOGA_LIBRARY_NAME);
+    cx.wb.outbox.push(ProjectRequest::CellOrViewDeleted {
+        removed_sources,
+        pruned,
+        mutation: ReservedLibraryRevision::new(project_mutation),
+        remove_placements: if resolution == Some(DeletionInstanceResolution::RemoveInstances) {
+            targets
+        } else {
+            Vec::new()
+        },
+        notice,
+        persist_global_veriloga,
     });
 }
 
@@ -598,6 +805,19 @@ fn prepare_design_management_removal(
     view: Option<&str>,
 ) -> Result<Option<PendingDesignManagementRemoval>, String> {
     let mut catalog = (*model.workspace.content.design_management).clone();
+    Ok(
+        remove_from_design_management(&mut catalog, library, cell, view)?
+            .then_some(PendingDesignManagementRemoval { catalog }),
+    )
+}
+
+/// Take the deleted cell or view out of `catalog`; whether that changed it.
+fn remove_from_design_management(
+    catalog: &mut crate::state::DesignManagementCatalog,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<bool, String> {
     let receipt = match view {
         Some(view) => catalog.remove_sheet_catalog_for_view(
             &crate::state::CellViewRef::new(library, cell, view).key(),
@@ -611,13 +831,9 @@ fn prepare_design_management_removal(
         );
         format!("Cannot delete {target}: Design Management still references it ({error}).")
     })?;
-    if receipt.affected_sheet_catalogs == 0
-        && receipt.remapped_variant_objects == 0
-        && receipt.remapped_annotation_objects == 0
-    {
-        return Ok(None);
-    }
-    Ok(Some(PendingDesignManagementRemoval { catalog }))
+    Ok(receipt.affected_sheet_catalogs != 0
+        || receipt.remapped_variant_objects != 0
+        || receipt.remapped_annotation_objects != 0)
 }
 
 fn apply_design_management_removal(

@@ -12,7 +12,9 @@ use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_project::workbench::project::library_dialogs::new_view::create_new_view;
-use rspice_app_project::workbench::project::workspace_state::DeletionInstanceResolution;
+use rspice_app_project::workbench::project::workspace_state::{
+    DeletionInstanceResolution, LibraryDeletionTarget,
+};
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
     SchematicState, View, ViewType,
@@ -482,6 +484,53 @@ fn deleting_a_view_undoes_as_one_step() {
                 .and_then(|cell| cell.get_view("model"))
                 .is_none(),
             "the view is deleted"
+        );
+    });
+}
+
+/// Twelve cells chosen together are deleted by one review, and one step of
+/// Undo puts every one of them back.
+#[test]
+fn deleting_twelve_cells_at_once_undoes_as_one_step() {
+    let mut app = app_with_parts();
+    let mut bulk = Library::new("bulk");
+    let names = (1..=12).map(|n| format!("cell{n:02}")).collect::<Vec<_>>();
+    for name in &names {
+        let mut cell = Cell::new(name.as_str());
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        bulk.add_cell(cell);
+    }
+    app.state.model.library_manager.add_library(bulk);
+    let targets = names
+        .iter()
+        .map(|cell| LibraryDeletionTarget::Cell {
+            library: "bulk".to_owned(),
+            cell: cell.clone(),
+        })
+        .collect::<Vec<_>>();
+    one_step(app, "deleting twelve cells", |app| {
+        let state = &mut app.state;
+        state
+            .project
+            .open_library_deletions_review(&state.model, targets)
+            .expect("one review opens on all twelve");
+        assert_eq!(state.project.library_deletion_review.targets().len(), 12);
+        state
+            .project
+            .confirm_library_deletion_review(
+                &state.model,
+                DeletionInstanceResolution::KeepUnresolved,
+            )
+            .expect("the review confirms");
+        delete(app);
+        assert_eq!(
+            app.state
+                .model
+                .library_manager
+                .get_library("bulk")
+                .map(|library| library.cell_count()),
+            Some(0),
+            "every cell is deleted"
         );
     });
 }

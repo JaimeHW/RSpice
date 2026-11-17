@@ -203,6 +203,9 @@ pub enum DeletionInstanceResolution {
 #[derive(Debug, Clone, Default)]
 pub struct LibraryDeletionReviewState {
     pub target: Option<LibraryDeletionTarget>,
+    /// The rest of a multi-selection the review deletes with `target`, all
+    /// confirmed at once and undone as one step.
+    pub also: Vec<LibraryDeletionTarget>,
     pub(crate) expected_library_revision: u64,
     pub(crate) error: Option<String>,
     /// The choice the reader confirmed for the object's placements. Set when
@@ -214,5 +217,10 @@ pub struct LibraryDeletionReviewState {
 impl LibraryDeletionReviewState {
     pub fn close(&mut self) {
         *self = Self::default();
+    }
+
+    /// Every cell or view the review deletes, `target` first.
+    pub fn targets(&self) -> Vec<LibraryDeletionTarget> {
+        self.target.iter().chain(&self.also).cloned().collect()
     }
 }

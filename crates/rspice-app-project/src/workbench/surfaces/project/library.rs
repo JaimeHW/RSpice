@@ -7,12 +7,15 @@
 pub use super::*;
 use std::sync::Arc;
 
+use crate::state::shortcuts::ShortcutStroke;
 use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
+use crate::workbench::project::workspace_state::LibraryDeletionTarget;
 use crate::workbench::slots::ProjectState;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
 
 pub mod builtin_models;
 pub mod columns;
@@ -69,6 +72,8 @@ pub enum LibraryIntent {
     },
     RenameView(CellViewRef),
     DeleteView(CellViewRef),
+    /// One review of a multi-selection's cells or views.
+    DeleteSeveral(Vec<LibraryDeletionTarget>),
     ShowAuditHistory,
     PublishProject,
     RestoreFromPublication,
@@ -154,6 +159,7 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
         browser.focus.get_or_insert(browser.active);
     }
     browser.focusing = browser.focus.take();
+    browser.holds_keyboard = false;
     let read = &*cx;
     let available = ui.available_size();
     let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
@@ -191,9 +197,64 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
             });
         });
     let asked = browser.asked_menu.take();
-    let menu = row_menu(ui.ctx(), read, asked);
+    let holds_keyboard = browser.holds_keyboard;
     cx.state.library_browser = browser;
+    if holds_keyboard {
+        hand_on_undo(ui.ctx(), cx);
+    }
+    let menu = row_menu(ui.ctx(), cx, asked);
     (intent.or(menu), (page_height - browser_height).max(0.0))
+}
+
+/// Undo or Redo, pressed while a list holds the keyboard.
+///
+/// The shell keeps Edit's keys from any control that holds the keyboard, as
+/// it must from a text field; a list edits no text, and a deletion made from
+/// the keyboard is one the reader undoes from it. Only the profile's own
+/// single-stroke bindings are taken, matched exactly, so Redo's Shift is
+/// never read as Undo.
+fn hand_on_undo(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let platform = runtime_command_platform(ctx);
+    let shortcuts = cx.model.preferences.shortcuts();
+    let pressed = [ids::REDO, ids::UNDO].into_iter().find(|command| {
+        shortcuts
+            .effective_bindings(cx.commands, *command)
+            .iter()
+            .filter(|binding| binding.supports(platform))
+            .filter_map(|binding| match binding.sequence().strokes() {
+                [stroke] => Some(*stroke),
+                _ => None,
+            })
+            .any(|stroke| consume_stroke(ctx, stroke))
+    });
+    if let Some(command) = pressed {
+        cx.execute(command);
+    }
+}
+
+/// Take a press of `stroke` from this frame's input, its modifiers exact.
+fn consume_stroke(ctx: &Context, stroke: ShortcutStroke) -> bool {
+    let mut modifiers = egui::Modifiers::NONE;
+    if stroke.primary() {
+        modifiers |= egui::Modifiers::COMMAND;
+    }
+    if stroke.alt() {
+        modifiers |= egui::Modifiers::ALT;
+    }
+    if stroke.shift() {
+        modifiers |= egui::Modifiers::SHIFT;
+    }
+    ctx.input_mut(|input| {
+        let before = input.events.len();
+        input.events.retain(|event| {
+            !matches!(
+                event,
+                egui::Event::Key { key, pressed: true, modifiers: pressed, .. }
+                    if *key == stroke.key() && pressed.matches_exact(modifiers)
+            )
+        });
+        input.events.len() != before
+    })
 }
 
 /// The menu a row of `column` asked for at `position`, or the one already
@@ -213,7 +274,7 @@ fn row_menu(
     if asked.is_none() && !egui::Popup::is_id_open(ctx, id) {
         return None;
     }
-    let target = Target::of(cx.model, &cx.state.project_library_filter);
+    let target = Target::of(cx.model, cx.state);
     let builtin = cx.state.builtin_models.open;
     let mut intent = None;
     egui::Popup::new(
@@ -532,13 +593,29 @@ struct Target {
     writable_library_available: bool,
     /// Why the cell cannot become the project top, if it cannot.
     top_refusal: Option<String>,
+    /// The cells the Cell column has chosen, `cell` first: more than one
+    /// while the reader has selected several.
+    cells_chosen: Vec<String>,
+    /// The views the View column has chosen, `view` first.
+    views_chosen: Vec<String>,
 }
 
 impl Target {
-    fn of(model: &Model, filter: &str) -> Self {
+    fn of(model: &Model, state: &ProjectState) -> Self {
         let manager = &model.library_manager;
-        let cell_shown = selected_cell_shown(model, filter);
+        let cell_shown = selected_cell_shown(model, &state.project_library_filter);
         let cell = selected_cell(manager).filter(|_| cell_shown);
+        let view = selected_view(manager)
+            .filter(|_| cell_shown)
+            .map(|(reference, view_type, modified, _)| (reference, view_type, modified));
+        // A list's choice counts only while it leads with the selection the
+        // page acts on; a selection made elsewhere stands alone.
+        let led_by = |chosen: Vec<String>, lead: Option<&str>| match lead {
+            Some(lead) if chosen.first().is_some_and(|first| first == lead) => chosen,
+            Some(lead) => vec![lead.to_owned()],
+            None => Vec::new(),
+        };
+        let browser = &state.library_browser;
         Self {
             top_refusal: cell
                 .as_ref()
@@ -549,10 +626,17 @@ impl Target {
             symbol: cell
                 .as_ref()
                 .and_then(|(library, cell, _)| symbol_view(model, library, cell)),
+            cells_chosen: led_by(
+                columns::chosen(&browser.cells),
+                cell.as_ref().map(|(_, cell, _)| cell.as_str()),
+            ),
+            views_chosen: led_by(
+                columns::chosen(&browser.views),
+                view.as_ref()
+                    .map(|(reference, _, _)| reference.view.as_str()),
+            ),
             cell,
-            view: selected_view(manager)
-                .filter(|_| cell_shown)
-                .map(|(reference, view_type, modified, _)| (reference, view_type, modified)),
+            view,
             writable_library_available: manager
                 .libraries_by_key()
                 .any(|(_, library)| !library.read_only),
@@ -627,12 +711,16 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
             cell: cell.clone(),
         });
     }
+    let label = match target.cells_chosen.len() {
+        0 | 1 => "Delete cell\u{2026}".to_owned(),
+        count => format!("Delete {count} cells\u{2026}"),
+    };
     if menu_item(
         ui,
-        "Delete cell\u{2026}",
+        &label,
         read_only.then_some("The library is read-only; its cells cannot be deleted."),
     ) {
-        intent = Some(LibraryIntent::DeleteCell { library, cell });
+        intent = deletion_intent(&library, None, &target.cells_chosen);
     }
     intent
 }
@@ -652,21 +740,62 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     ) {
         intent = Some(LibraryIntent::RenameView(reference.clone()));
     }
+    let label = match target.views_chosen.len() {
+        0 | 1 => "Delete view\u{2026}".to_owned(),
+        count => format!("Delete {count} views\u{2026}"),
+    };
     if menu_item(
         ui,
-        "Delete view\u{2026}",
+        &label,
         read_only.then_some("The library is read-only; its views cannot be deleted."),
     ) {
-        intent = Some(LibraryIntent::DeleteView(reference));
+        intent = deletion_intent(
+            &reference.library,
+            Some(&reference.cell),
+            &target.views_chosen,
+        );
     }
     intent
+}
+
+/// What Delete asks for in a column: the review of the one row chosen, or
+/// one review of every chosen row; cells when `cell` is `None`, else that
+/// cell's views. `chosen` holds the lead first.
+fn deletion_intent(library: &str, cell: Option<&str>, chosen: &[String]) -> Option<LibraryIntent> {
+    let target = |name: &String| match cell {
+        Some(cell) => LibraryDeletionTarget::View {
+            library: library.to_owned(),
+            cell: cell.to_owned(),
+            view: name.clone(),
+        },
+        None => LibraryDeletionTarget::Cell {
+            library: library.to_owned(),
+            cell: name.clone(),
+        },
+    };
+    match chosen {
+        [] => None,
+        [lead] => Some(match target(lead) {
+            LibraryDeletionTarget::Cell { library, cell } => {
+                LibraryIntent::DeleteCell { library, cell }
+            }
+            LibraryDeletionTarget::View {
+                library,
+                cell,
+                view,
+            } => LibraryIntent::DeleteView(CellViewRef::new(&library, &cell, &view)),
+        }),
+        several => Some(LibraryIntent::DeleteSeveral(
+            several.iter().map(target).collect(),
+        )),
+    }
 }
 
 /// The band under the columns: what the selection is, its path cut to the
 /// width the controls leave, then Library actions, Cell actions and Open.
 fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
-    let target = Target::of(cx.model, &cx.state.project_library_filter);
+    let target = Target::of(cx.model, cx.state);
     let mut intent = None;
     let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
         ui.set_min_height(t.metrics.ctl_h);
@@ -1011,6 +1140,11 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 cx.wb.prompt(error);
             }
         }
+        LibraryIntent::DeleteSeveral(targets) => {
+            if let Err(error) = cx.state.open_library_deletions_review(cx.model, targets) {
+                cx.wb.prompt(error);
+            }
+        }
         LibraryIntent::ShowAuditHistory => {
             ctx.data_mut(|data| {
                 data.insert_temp(egui::Id::new(AUDIT_REPORT_ID), true);
@@ -1050,7 +1184,7 @@ pub fn command_intent(
     project_open: bool,
 ) -> Result<LibraryIntent, &'static str> {
     let readiness = super::library_publication::PublicationReadiness::of(model, project_open);
-    let target = Target::of(model, &state.project_library_filter);
+    let target = Target::of(model, state);
     let builtin = &state.builtin_models;
     let column = state.library_browser.active;
     let writable = |read_only: bool, intent: LibraryIntent| {
@@ -1108,27 +1242,27 @@ pub fn command_intent(
                     )
                 }
                 BrowserColumn::Cell => {
-                    let (library, cell, read_only) = target.cell.ok_or("select a cell")?;
-                    writable(
-                        read_only,
-                        if rename {
-                            LibraryIntent::RenameCell { library, cell }
-                        } else {
-                            LibraryIntent::DeleteCell { library, cell }
-                        },
-                    )
+                    let (library, cell, read_only) = target.cell.clone().ok_or("select a cell")?;
+                    let intent = if rename {
+                        Some(LibraryIntent::RenameCell { library, cell })
+                    } else {
+                        deletion_intent(&library, None, &target.cells_chosen)
+                    };
+                    writable(read_only, intent.ok_or("select a cell")?)
                 }
                 BrowserColumn::View => {
                     let read_only = target.read_only();
-                    let (reference, _, _) = target.view.ok_or("select a view")?;
-                    writable(
-                        read_only,
-                        if rename {
-                            LibraryIntent::RenameView(reference)
-                        } else {
-                            LibraryIntent::DeleteView(reference)
-                        },
-                    )
+                    let (reference, _, _) = target.view.clone().ok_or("select a view")?;
+                    let intent = if rename {
+                        Some(LibraryIntent::RenameView(reference))
+                    } else {
+                        deletion_intent(
+                            &reference.library,
+                            Some(&reference.cell),
+                            &target.views_chosen,
+                        )
+                    };
+                    writable(read_only, intent.ok_or("select a view")?)
                 }
             }
         }
@@ -1400,6 +1534,11 @@ fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> 
         crate::state::ProjectLibraryMutation::RollbackPublication {
             publication_label, ..
         } => format!("Project restored from {publication_label}"),
+        crate::state::ProjectLibraryMutation::Batch { operations } => operations
+            .iter()
+            .map(library_mutation_summary)
+            .collect::<Vec<_>>()
+            .join(", "),
     }
 }
 

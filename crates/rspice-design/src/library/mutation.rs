@@ -63,6 +63,11 @@ pub enum ProjectLibraryMutation {
         authority_id: String,
         reason: String,
     },
+    /// Several operations taken as one, in order: a multi-selection's
+    /// deletion, which one review confirms and one step of Undo reverses.
+    Batch {
+        operations: Vec<ProjectLibraryMutation>,
+    },
 }
 
 impl ProjectLibraryMutation {
@@ -80,12 +85,27 @@ impl ProjectLibraryMutation {
             Self::DeleteCell { .. } => "cell deletion",
             Self::DeleteView { .. } => "view deletion",
             Self::RollbackPublication { .. } => "restore from publication",
+            Self::Batch { .. } => "library changes",
         }
     }
 
     /// Validate the operation before it enters a project audit or publication.
     pub fn validate(&self) -> Result<(), String> {
         let fields: &[(&str, &str)] = match self {
+            Self::Batch { operations } => {
+                if operations.is_empty() {
+                    return Err("a batch of library changes holds none".to_owned());
+                }
+                return operations.iter().try_for_each(|operation| match operation {
+                    Self::Batch { .. } => {
+                        Err("a batch of library changes holds another batch".to_owned())
+                    }
+                    Self::RollbackPublication { .. } => {
+                        Err("a batch of library changes holds a restore".to_owned())
+                    }
+                    _ => operation.validate(),
+                });
+            }
             Self::CreateLibrary { library } | Self::DeleteLibrary { library } => {
                 &[("library", library)]
             }
@@ -215,4 +235,44 @@ pub fn validate_library_audit_text(field: &str, value: &str) -> Result<(), Strin
         return Err(format!("{field} contains a control character"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn delete(cell: &str) -> ProjectLibraryMutation {
+        ProjectLibraryMutation::DeleteCell {
+            library: "work".to_owned(),
+            cell: cell.to_owned(),
+        }
+    }
+
+    /// A batch holds plain operations, each valid, and at least one; it
+    /// round-trips through the audit's own encoding.
+    #[test]
+    fn a_batch_holds_valid_plain_operations_and_round_trips() {
+        let batch = ProjectLibraryMutation::Batch {
+            operations: vec![delete("amp"), delete("bias")],
+        };
+        assert_eq!(batch.validate(), Ok(()));
+        let encoded = serde_json::to_string(&batch).expect("the batch encodes");
+        assert_eq!(
+            serde_json::from_str::<ProjectLibraryMutation>(&encoded).expect("it decodes"),
+            batch
+        );
+
+        let empty = ProjectLibraryMutation::Batch {
+            operations: Vec::new(),
+        };
+        assert!(empty.validate().is_err());
+        let nested = ProjectLibraryMutation::Batch {
+            operations: vec![batch.clone()],
+        };
+        assert!(nested.validate().is_err());
+        let invalid = ProjectLibraryMutation::Batch {
+            operations: vec![delete(" amp")],
+        };
+        assert!(invalid.validate().is_err());
+    }
 }

@@ -388,18 +388,19 @@ pub enum ProjectRequest {
         notice: String,
         persist_global_veriloga: bool,
     },
-    /// What deleting a cell or a view left outside its catalog change, in
-    /// the order the deletion once did it: compile evidence naming a source
-    /// it removed is dropped, what the catalog change left is carried out,
-    /// the placements are removed when the reader chose that, then the
-    /// revision it reserved is published, so its step of Undo holds them,
-    /// then its own line in the log, and the user's Verilog-A library saved
-    /// when the object was in it.
+    /// What deleting cells or views, one or a multi-selection, left outside
+    /// its catalog change, in the order the deletion once did it: compile
+    /// evidence naming a source it removed is dropped, what the catalog
+    /// change left is carried out for each object in turn, the placements
+    /// of each object are removed when the reader chose that, then the
+    /// revision it reserved is published, so its one step of Undo holds
+    /// them, then its own line in the log, and the user's Verilog-A library
+    /// saved when an object was in it.
     CellOrViewDeleted {
         removed_sources: Vec<ProjectSourceId>,
-        pruned: WorkspacePruned,
+        pruned: Vec<WorkspacePruned>,
         mutation: ReservedLibraryRevision,
-        remove_placements: Option<Box<LibraryDeletionTarget>>,
+        remove_placements: Vec<LibraryDeletionTarget>,
         notice: String,
         persist_global_veriloga: bool,
     },

@@ -62,6 +62,8 @@ pub struct LibraryBrowserState {
     pub(super) queued: Option<LibraryIntent>,
     /// The row menu a column asked for this frame, and where.
     pub(super) asked_menu: Option<(BrowserColumn, egui::Pos2)>,
+    /// A list held the keyboard this frame.
+    pub(super) holds_keyboard: bool,
 }
 
 /// The key the built-in library's row goes by: no project library's name.
@@ -280,6 +282,17 @@ fn follow_lead(state: &mut TableState, keys: &[RowKey], lead: Option<RowKey>) {
     state.others.clear();
 }
 
+/// The names of the rows `state` selects, its lead first.
+pub(super) fn chosen(state: &TableState) -> Vec<String> {
+    state
+        .selection
+        .iter()
+        .chain(&state.others)
+        .filter_map(|selection| selection.key.as_ref().and_then(text))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The text a row is keyed by.
 fn text(key: &RowKey) -> Option<&str> {
     match key {
@@ -304,6 +317,7 @@ fn answer_moves(
 ) {
     if response.focused {
         browser.active = column;
+        browser.holds_keyboard = true;
     }
     if let Some(next) = response.across.and_then(|by| column.beside(by)) {
         browser.focus = Some(next);
@@ -465,6 +479,7 @@ pub(super) fn cell_column(
         .list()
         .state(&mut browser.cells)
         .keys(&cells.keys)
+        .multi_select()
         .focus(focus)
         .max_height(body)
         .show(ui, |row| {
@@ -490,7 +505,7 @@ pub(super) fn cell_column(
     } else if response.rename.is_some() {
         Some(LibraryIntent::RenameCell { library, cell })
     } else if response.delete {
-        Some(LibraryIntent::DeleteCell { library, cell })
+        deletion_intent(&library, None, &chosen(&browser.cells))
     } else {
         None
     }
@@ -548,6 +563,7 @@ pub(super) fn view_column(
         .list()
         .state(&mut browser.views)
         .keys(&views.keys)
+        .multi_select()
         .focus(focus)
         .max_height(body)
         .show(ui, |row| {
@@ -589,7 +605,7 @@ pub(super) fn view_column(
     } else if response.rename.is_some() {
         Some(LibraryIntent::RenameView(reference))
     } else if response.delete {
-        Some(LibraryIntent::DeleteView(reference))
+        deletion_intent(library, Some(cell), &chosen(&browser.views))
     } else {
         None
     }

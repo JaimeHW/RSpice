@@ -889,6 +889,14 @@ fn reversal(operation: &ProjectLibraryMutation) -> Option<ProjectLibraryMutation
             to_view: from_view,
         },
         Operation::RollbackPublication { .. } => return None,
+        // The operations taken back in the reverse of the order they ran.
+        Operation::Batch { operations } => Operation::Batch {
+            operations: operations
+                .iter()
+                .rev()
+                .map(reversal)
+                .collect::<Option<_>>()?,
+        },
     })
 }
 
@@ -934,5 +942,40 @@ fn describe(operation: &ProjectLibraryMutation) -> String {
         Operation::RollbackPublication {
             publication_label, ..
         } => format!("restore project from publication {publication_label}"),
+        Operation::Batch { operations } => describe_batch(operations),
+    }
+}
+
+/// A batch's name: "delete 12 cells from work" when its operations are all
+/// of one kind in one library, else each operation's own name in turn.
+fn describe_batch(operations: &[ProjectLibraryMutation]) -> String {
+    use ProjectLibraryMutation as Operation;
+    let libraries = operations
+        .iter()
+        .map(|operation| match operation {
+            Operation::DeleteCell { library, .. } | Operation::DeleteView { library, .. } => {
+                Some(library.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Option<std::collections::BTreeSet<_>>>();
+    let cells = operations
+        .iter()
+        .all(|operation| matches!(operation, Operation::DeleteCell { .. }));
+    let views = operations
+        .iter()
+        .all(|operation| matches!(operation, Operation::DeleteView { .. }));
+    match libraries {
+        Some(libraries) if libraries.len() == 1 && (cells || views) => format!(
+            "delete {} {} from {}",
+            operations.len(),
+            if cells { "cells" } else { "views" },
+            libraries.first().copied().unwrap_or_default()
+        ),
+        _ => operations
+            .iter()
+            .map(describe)
+            .collect::<Vec<_>>()
+            .join(", "),
     }
 }
