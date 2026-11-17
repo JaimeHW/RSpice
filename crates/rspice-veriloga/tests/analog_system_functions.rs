@@ -119,3 +119,32 @@ fn a_checkpoint_resumes_every_seed_bit_for_bit() {
         resumed.try_advance_state().unwrap();
     }
 }
+
+/// A call inside an event's body runs only when the event fires: an
+/// `@(initial_step)` draw happens at the first point and never again, so it
+/// takes one value from the stream and every later point's draw follows.
+#[test]
+fn a_call_in_an_event_body_runs_only_when_the_event_fires() {
+    let fixture = fixture(
+        "integer seed, r, a, b, count; analog initial begin seed = 42; count = 0; end",
+        "@(initial_step) begin r = $random(seed); a = $random; count = count + 1; end \
+         b = $random;",
+    );
+    let mut device = fixture.device("DRAWS", &[1, 0]);
+    device.set_analysis_type(2);
+    let mut seed = 42;
+    let first = random::random(&mut seed);
+    let mut stream = 0;
+    let a = random::random(&mut stream);
+    for point in 0..3 {
+        let b = random::random(&mut stream);
+        device.set_analysis_step(point == 0, false);
+        device.try_evaluate().unwrap();
+        assert_eq!(device.variable("r"), Some(f64::from(first)));
+        assert_eq!(device.variable("seed"), Some(f64::from(seed)));
+        assert_eq!(device.variable("count"), Some(1.0));
+        assert_eq!(device.variable("a"), Some(f64::from(a)));
+        assert_eq!(device.variable("b"), Some(f64::from(b)), "point {point}");
+        device.try_advance_state().unwrap();
+    }
+}

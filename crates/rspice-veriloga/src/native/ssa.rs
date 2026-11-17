@@ -1916,8 +1916,15 @@ impl Program {
 
         let mut owners: Vec<Option<ArmOwner>> = vec![None; self.instructions.len()];
         for index in (0..self.instructions.len()).rev() {
+            // A value-returning system function's call is the one journal
+            // write that must sink: it opens files, reads them and draws from
+            // seeds, so an arm that is not taken must not call it.
+            let arm_call = matches!(
+                self.instructions[index].op,
+                NativeOp::SystemCall { .. } | NativeOp::SystemOutput { .. }
+            );
             if self.instructions[index].effects.writes_state()
-                || self.instructions[index].effects.writes_journal()
+                || (self.instructions[index].effects.writes_journal() && !arm_call)
             {
                 continue;
             }
