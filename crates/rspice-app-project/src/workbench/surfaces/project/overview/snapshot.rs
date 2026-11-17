@@ -1,8 +1,21 @@
 //! The Overview's snapshot: what the page shows, read once per frame from the
 //! project, its lifecycle, the checks, the run history and the model catalog
 //! before anything is drawn.
+//!
+//! # Derived on change, not on a frame
+//!
+//! What has to walk the design or the catalogues to be known — the net count,
+//! the view count, the activity register, the model sources, the deck's line
+//! count, the configuration's validity — is derived once and kept in the
+//! frame context beside the identity of what it was derived from: a content
+//! stamp, a catalogue revision, the run history's revision, a digest. A frame
+//! in which none of those moved derives nothing, so the page costs the same on
+//! a project of eight thousand instances as on an empty one.
 
 use std::collections::BTreeSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash as _, Hasher as _};
+use std::sync::Arc;
 
 use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
 use crate::state::{CellViewRef, ViewType};
@@ -16,6 +29,7 @@ use crate::workbench::project::{ProjectFeature, lifecycle_view};
 use crate::workbench::state::Workspace;
 use rspice_design::drc::DrcSeverity;
 
+use super::super::derived::derived;
 use super::activity::{relative_time, run_title, unix_seconds_to_millis};
 use super::{
     OverviewIntent, Tone, command_gate, lifecycle_label, lifecycle_tone, run_destination,
@@ -128,7 +142,7 @@ pub struct OverviewSnapshot {
     pub(super) execution_target: String,
 }
 
-fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
+fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeckSnapshot> {
     let document = model.workspace.content.netlist_document.as_ref()?;
     let name = document
         .provenance()
@@ -154,7 +168,12 @@ fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
         DocumentOwnership::Imported => "imported",
         DocumentOwnership::Editable => "editable",
     };
-    let line_count = document.source().lines().count();
+    let line_count = derived(
+        ctx,
+        "overview.deck lines",
+        document.content_digest(),
+        || document.source().lines().count(),
+    );
     let dependency_count = document.dependencies().len();
     let dependencies_sealed = document.dependency_graph_is_sealed();
     let validation = document.validation();
@@ -252,19 +271,30 @@ fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
 }
 
 impl OverviewSnapshot {
-    pub fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
+    /// What the page shows now, with what has to walk the project to be
+    /// known kept in `ctx` until what it was derived from changes.
+    pub fn capture(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Self {
         let project = &cx.model.workspace.content.project;
         let dirty_documents =
             dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
         let netlist_first = cx.model.is_netlist_first_without_schematic();
-        let source_deck = source_deck_snapshot(cx.model);
-        let configuration = configuration_snapshot(cx);
+        let source_deck = source_deck_snapshot(ctx, cx.model);
+        let configuration = configuration_snapshot(ctx, cx);
         let checks = checks_snapshot(cx);
-        let models = model_snapshot(cx);
+        let models = model_snapshot(ctx, cx);
         let library_count = cx.model.library_manager.library_count();
         let model_library_count = cx.model.model_library_manager.library_count();
-        let cell_count = cx.model.library_manager.total_cell_count();
-        let view_count = cx.model.library_manager.total_view_count();
+        let (cell_count, view_count) = derived(
+            ctx,
+            "overview.catalog counts",
+            cx.model.library_manager.catalog().stamp(),
+            || {
+                (
+                    cx.model.library_manager.total_cell_count(),
+                    cx.model.library_manager.total_view_count(),
+                )
+            },
+        );
         let root_reference = CellViewRef::new(
             &project.root_library,
             &project.top_cell,
@@ -292,7 +322,9 @@ impl OverviewSnapshot {
         let root_instance_count =
             root_schematic.map_or(0, |schematic| schematic.document().components.len());
         let root_net_count = root_schematic.map_or(0, |schematic| {
-            rspice_design::connectivity::summary::design_nets(schematic).len()
+            derived(ctx, "overview.root nets", schematic.content_stamp(), || {
+                rspice_design::connectivity::summary::design_nets(schematic).len()
+            })
         });
 
         let latest_run_status = cx.model.simulation.retained.runs.first().map_or_else(
@@ -454,152 +486,18 @@ impl OverviewSnapshot {
 
         let now_ms =
             u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
-        let mut operations = cx
-            .model
-            .simulation
-            .retained
-            .runs
+        let retained = derived(
+            ctx,
+            "overview.operations",
+            OperationsKey::of(cx.model),
+            || Arc::new(retained_operations(cx.model)),
+        );
+        let operations = retained
+            .newest
             .iter()
-            .enumerate()
-            .take(8)
-            .map(|(index, run)| {
-                let measurement_count = run
-                    .analyses
-                    .iter()
-                    .map(|analysis| analysis.measurements.len())
-                    .sum();
-                let timestamp_ms = unix_seconds_to_millis(run.timestamp);
-                (
-                    timestamp_ms.unwrap_or_default(),
-                    OperationSnapshot {
-                        when: timestamp_ms.map_or_else(
-                            || "time n/a".to_owned(),
-                            |value| relative_time(value, now_ms),
-                        ),
-                        event: format!(
-                            "{} · {}",
-                            run_title(run.id, &run.label),
-                            lifecycle_label(run.lifecycle, run.success)
-                        ),
-                        detail: format!(
-                            "{} {} · {measurement_count} {} · {} · {}",
-                            run.analyses.len(),
-                            singular_or_plural(run.analyses.len(), "analysis", "analyses"),
-                            singular_or_plural(measurement_count, "measurement", "measurements"),
-                            run.execution_target.map_or_else(
-                                || "execution target not retained".to_owned(),
-                                |target| target.label().to_owned(),
-                            ),
-                            crate::quantity::format_elapsed(run.elapsed_time),
-                        ),
-                        tone: lifecycle_tone(run.lifecycle, run.success),
-                        intent: Some(OverviewIntent::OpenRun(index)),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut retained_revision_ids = BTreeSet::new();
-        for schematic in std::iter::once(cx.model.schematic.editor_ref().design)
-            .chain(cx.model.workspace.content.schematic_buffers.values())
-        {
-            for revision in schematic
-                .document()
-                .validated_revisions
-                .records()
-                .iter()
-                .rev()
-                .take(8)
-            {
-                if !retained_revision_ids.insert(revision.id().as_uuid().to_string()) {
-                    continue;
-                }
-                let findings = revision.finding_counts();
-                let tone = if findings.blockers > 0 {
-                    Tone::Error
-                } else if findings.advisories > 0 {
-                    Tone::Warn
-                } else {
-                    Tone::Neutral
-                };
-                operations.push((
-                    revision.created_unix_ms(),
-                    OperationSnapshot {
-                        when: relative_time(revision.created_unix_ms(), now_ms),
-                        event: format!("{} validated", revision.view_identity()),
-                        detail: format!(
-                            "{} · project revision {} · {}",
-                            revision.revision_note(),
-                            revision.project_revision(),
-                            revision.author()
-                        ),
-                        tone,
-                        intent: Some(OverviewIntent::Command(
-                            ProjectCommand::RevisionHistory.key(),
-                        )),
-                    },
-                ));
-            }
-        }
-        // Published library snapshots are the third class of retained project
-        // operation that carries its own creation time. The hash-chained library
-        // *mutation* receipts beside them are deliberately absent: they record a
-        // sequence and no timestamp, so this time-ordered register could only
-        // show them by inventing a `when` for them.
-        for publication in cx
-            .model
-            .workspace
-            .content
-            .project
-            .library_publications()
-            .iter()
-            .rev()
-            .take(8)
-        {
-            // A retained receipt cannot carry a zero creation time; the draft
-            // validation rejects one before the receipt is ever chained.
-            let created_unix_ms = publication.created_unix_ms();
-            operations.push((
-                created_unix_ms,
-                OperationSnapshot {
-                    when: relative_time(created_unix_ms, now_ms),
-                    event: format!("Library published · {}", publication.label()),
-                    detail: format!(
-                        "#{:04} · library revision {} · {} · {}",
-                        publication.sequence(),
-                        publication.library_revision(),
-                        publication.reason(),
-                        publication.actor_id()
-                    ),
-                    tone: Tone::Neutral,
-                    intent: Some(OverviewIntent::Command(
-                        ProjectCommand::Page(ProjectPage::Library).key(),
-                    )),
-                },
-            ));
-        }
-        operations.sort_by(|left, right| right.0.cmp(&left.0));
-        // Counted from the retained records themselves, not from what the loops
-        // above collected: each of those is capped, so reporting their length
-        // would describe the cap rather than the project.
-        let retained_revision_total = std::iter::once(cx.model.schematic.editor_ref().design)
-            .chain(cx.model.workspace.content.schematic_buffers.values())
-            .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
-            .map(|revision| revision.id().as_uuid())
-            .collect::<BTreeSet<_>>()
-            .len();
-        let operation_total = cx.model.simulation.retained.runs.len()
-            + retained_revision_total
-            + cx.model
-                .workspace
-                .content
-                .project
-                .library_publications()
-                .len();
-        let operations = operations
-            .into_iter()
-            .take(5)
-            .map(|(_, operation)| operation)
+            .map(|operation| operation.at(now_ms))
             .collect();
+        let operation_total = retained.total;
 
         Self {
             project_name: project.display_name().to_owned(),
@@ -634,6 +532,239 @@ impl OverviewSnapshot {
             run_plan_name: cx.model.sim_setup.active_plan_name().as_str().to_owned(),
             execution_target: crate::state::ExecutionTarget::current().label().to_owned(),
         }
+    }
+}
+
+/// One retained operation, with the time it happened rather than a phrase
+/// about it: how long ago it was is said again on every frame.
+#[derive(Debug, Clone)]
+struct RetainedOperation {
+    timestamp_ms: Option<u64>,
+    event: String,
+    detail: String,
+    tone: Tone,
+    intent: Option<OverviewIntent>,
+}
+
+impl RetainedOperation {
+    fn at(&self, now_ms: u64) -> OperationSnapshot {
+        OperationSnapshot {
+            when: self.timestamp_ms.map_or_else(
+                || "time n/a".to_owned(),
+                |value| relative_time(value, now_ms),
+            ),
+            event: self.event.clone(),
+            detail: self.detail.clone(),
+            tone: self.tone,
+            intent: self.intent.clone(),
+        }
+    }
+}
+
+/// The activity register: the newest operations, and how many the project
+/// retains.
+#[derive(Debug, Clone, Default)]
+struct RetainedOperations {
+    newest: Vec<RetainedOperation>,
+    total: usize,
+}
+
+/// What the activity register is read from, by identity: the run history,
+/// every schematic (whose validated revisions it lists) and the project's
+/// publications.
+#[derive(Clone, PartialEq)]
+struct OperationsKey {
+    runs: crate::state::RunHistoryRevision,
+    schematics: (usize, u64, u64),
+    /// The newest library publication's receipt digest. The receipts are
+    /// hash-chained, so it names every publication before it as well.
+    publications: Option<crate::product::ContentDigest>,
+}
+
+impl OperationsKey {
+    fn of(model: &Model) -> Self {
+        Self {
+            runs: model.simulation.retained.runs.revision(),
+            schematics: schematic_stamps(model),
+            publications: model
+                .workspace
+                .content
+                .project
+                .library_publications()
+                .last()
+                .map(|receipt| receipt.receipt_digest()),
+        }
+    }
+}
+
+/// The content stamps of the open editor's schematic and of every buffered
+/// one, folded without regard to the buffers' order: an edit to any of them,
+/// or a buffer added or dropped, moves the fold.
+fn schematic_stamps(model: &Model) -> (usize, u64, u64) {
+    let mut folded_xor = 0_u64;
+    let mut folded_sum = 0_u64;
+    let editor = std::iter::once((None, model.schematic.editor_ref().design.content_stamp()));
+    let buffers = model
+        .workspace
+        .content
+        .schematic_buffers
+        .iter()
+        .map(|(key, schematic)| (Some(key), schematic.content_stamp()));
+    for (key, stamp) in editor.chain(buffers) {
+        let mut entry = DefaultHasher::new();
+        key.hash(&mut entry);
+        stamp.hash(&mut entry);
+        let entry = entry.finish();
+        folded_xor ^= entry;
+        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
+    }
+    (
+        model.workspace.content.schematic_buffers.len(),
+        folded_xor,
+        folded_sum,
+    )
+}
+
+/// The runs, validated revisions and library publications the project
+/// retains, newest first.
+fn retained_operations(model: &Model) -> RetainedOperations {
+    let mut operations = model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .enumerate()
+        .take(8)
+        .map(|(index, run)| {
+            let measurement_count = run
+                .analyses
+                .iter()
+                .map(|analysis| analysis.measurements.len())
+                .sum();
+            let timestamp_ms = unix_seconds_to_millis(run.timestamp);
+            (
+                timestamp_ms.unwrap_or_default(),
+                RetainedOperation {
+                    timestamp_ms,
+                    event: format!(
+                        "{} · {}",
+                        run_title(run.id, &run.label),
+                        lifecycle_label(run.lifecycle, run.success)
+                    ),
+                    detail: format!(
+                        "{} {} · {measurement_count} {} · {} · {}",
+                        run.analyses.len(),
+                        singular_or_plural(run.analyses.len(), "analysis", "analyses"),
+                        singular_or_plural(measurement_count, "measurement", "measurements"),
+                        run.execution_target.map_or_else(
+                            || "execution target not retained".to_owned(),
+                            |target| target.label().to_owned(),
+                        ),
+                        crate::quantity::format_elapsed(run.elapsed_time),
+                    ),
+                    tone: lifecycle_tone(run.lifecycle, run.success),
+                    intent: Some(OverviewIntent::OpenRun(index)),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut retained_revision_ids = BTreeSet::new();
+    for schematic in std::iter::once(model.schematic.editor_ref().design)
+        .chain(model.workspace.content.schematic_buffers.values())
+    {
+        for revision in schematic
+            .document()
+            .validated_revisions
+            .records()
+            .iter()
+            .rev()
+            .take(8)
+        {
+            if !retained_revision_ids.insert(revision.id().as_uuid().to_string()) {
+                continue;
+            }
+            let findings = revision.finding_counts();
+            let tone = if findings.blockers > 0 {
+                Tone::Error
+            } else if findings.advisories > 0 {
+                Tone::Warn
+            } else {
+                Tone::Neutral
+            };
+            operations.push((
+                revision.created_unix_ms(),
+                RetainedOperation {
+                    timestamp_ms: Some(revision.created_unix_ms()),
+                    event: format!("{} validated", revision.view_identity()),
+                    detail: format!(
+                        "{} · project revision {} · {}",
+                        revision.revision_note(),
+                        revision.project_revision(),
+                        revision.author()
+                    ),
+                    tone,
+                    intent: Some(OverviewIntent::Command(
+                        ProjectCommand::RevisionHistory.key(),
+                    )),
+                },
+            ));
+        }
+    }
+    // Published library snapshots are the third class of retained project
+    // operation that carries its own creation time. The hash-chained library
+    // *mutation* receipts beside them are deliberately absent: they record a
+    // sequence and no timestamp, so this time-ordered register could only
+    // show them by inventing a `when` for them.
+    for publication in model
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .iter()
+        .rev()
+        .take(8)
+    {
+        // A retained receipt cannot carry a zero creation time; the draft
+        // validation rejects one before the receipt is ever chained.
+        let created_unix_ms = publication.created_unix_ms();
+        operations.push((
+            created_unix_ms,
+            RetainedOperation {
+                timestamp_ms: Some(created_unix_ms),
+                event: format!("Library published · {}", publication.label()),
+                detail: format!(
+                    "#{:04} · library revision {} · {} · {}",
+                    publication.sequence(),
+                    publication.library_revision(),
+                    publication.reason(),
+                    publication.actor_id()
+                ),
+                tone: Tone::Neutral,
+                intent: Some(OverviewIntent::Command(
+                    ProjectCommand::Page(ProjectPage::Library).key(),
+                )),
+            },
+        ));
+    }
+    operations.sort_by(|left, right| right.0.cmp(&left.0));
+    // Counted from the retained records themselves, not from what the loops
+    // above collected: each of those is capped, so reporting their length
+    // would describe the cap rather than the project.
+    let retained_revision_total = std::iter::once(model.schematic.editor_ref().design)
+        .chain(model.workspace.content.schematic_buffers.values())
+        .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
+        .map(|revision| revision.id().as_uuid())
+        .collect::<BTreeSet<_>>()
+        .len();
+    RetainedOperations {
+        newest: operations
+            .into_iter()
+            .take(5)
+            .map(|(_, operation)| operation)
+            .collect(),
+        total: model.simulation.retained.runs.len()
+            + retained_revision_total
+            + model.workspace.content.project.library_publications().len(),
     }
 }
 
@@ -831,7 +962,10 @@ pub(super) fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy 
     }
 }
 
-fn configuration_snapshot(cx: &Cx<'_, ProjectFeature>) -> ConfigurationSnapshot {
+fn configuration_snapshot(
+    ctx: &egui::Context,
+    cx: &Cx<'_, ProjectFeature>,
+) -> ConfigurationSnapshot {
     let catalog = &cx.model.workspace.content.configuration_sets;
     // With no configuration used for runs the project runs Default: its own
     // top cell through the built-in view list, with no DUT instance.
@@ -841,12 +975,20 @@ fn configuration_snapshot(cx: &Cx<'_, ProjectFeature>) -> ConfigurationSnapshot 
         .content
         .simulation_root_reference()
         .display_path();
-    if let Err(error) = catalog.validate() {
+    // Validating proves every configuration's digest, so it is done once per
+    // edit of the catalogue rather than on every frame.
+    let validity = derived(
+        ctx,
+        "overview.configuration validity",
+        catalog.stamp(),
+        || catalog.validate().map_err(|error| error.to_string()),
+    );
+    if let Err(error) = validity {
         let active = catalog.active();
         return ConfigurationSnapshot {
             configured: active.is_some(),
             state: "Unreadable configurations".to_owned(),
-            detail: error.to_string(),
+            detail: error,
             root,
             dut: active.map_or_else(
                 || "\u{2014}".to_owned(),
@@ -891,22 +1033,25 @@ fn configuration_snapshot(cx: &Cx<'_, ProjectFeature>) -> ConfigurationSnapshot 
     }
 }
 
-fn model_snapshot(cx: &Cx<'_, ProjectFeature>) -> ModelSnapshot {
-    let manager = &cx.model.model_library_manager;
-    let library_count = manager.library_count();
-    let model_count = manager.total_model_count();
+/// What the model catalogue holds and whether its sources can execute, as
+/// the status row states it.
+#[derive(Debug, Clone)]
+struct CatalogFacts {
+    library_count: usize,
+    model_count: usize,
+    source_count: usize,
+    source_contract_error: Option<String>,
+}
+
+fn catalog_facts(manager: &crate::state::model_library::ModelLibraryManager) -> CatalogFacts {
+    let libraries = manager.libraries_sorted();
     let mut sources = BTreeSet::new();
-    for library in manager.libraries_sorted() {
+    for library in &libraries {
         for source in &library.source_closure {
             sources.insert(source.path.clone());
         }
     }
-    let source_count = sources.len();
-    let scan_errors = &cx.model.pdk_config.scan_errors;
-    let binding = cx.model.workspace.content.project.technology_binding();
-    let contract_error =
-        binding.and_then(|_| cx.model.validate_project_technology_contract().err());
-    let source_contract_error = manager.libraries_sorted().into_iter().find_map(|library| {
+    let source_contract_error = libraries.into_iter().find_map(|library| {
         if !library.source_authority.has_execution_source() {
             return None;
         }
@@ -937,6 +1082,30 @@ fn model_snapshot(cx: &Cx<'_, ProjectFeature>) -> ModelSnapshot {
         }
         None
     });
+    CatalogFacts {
+        library_count: manager.library_count(),
+        model_count: manager.total_model_count(),
+        source_count: sources.len(),
+        source_contract_error,
+    }
+}
+
+fn model_snapshot(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> ModelSnapshot {
+    let manager = &cx.model.model_library_manager;
+    let CatalogFacts {
+        library_count,
+        model_count,
+        source_count,
+        source_contract_error,
+    } = derived(
+        ctx,
+        "overview.model catalog",
+        manager.catalog_stamp(),
+        || catalog_facts(manager),
+    );
+    let scan_errors = &cx.model.pdk_config.scan_errors;
+    let binding = cx.model.workspace.content.project.technology_binding();
+    let contract_error = binding.and_then(|_| cx.model.project_technology_verdict().err());
 
     let copy = if let Some(error) = contract_error {
         HealthCopy {

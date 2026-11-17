@@ -29,11 +29,15 @@ use rspice_app_services::workbench::lifecycle::recovery_checkpoint::{
 };
 use rspice_app_state::workbench::workspace::Workspace;
 
-const IDLE_FRAMES: usize = 30;
+pub(super) const IDLE_FRAMES: usize = 30;
 const SIZE: Vec2 = vec2(1600.0, 900.0);
 
 /// One whole application frame, as the shell paints it, with `events`.
-fn app_frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui::FullOutput {
+pub(super) fn app_frame(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
     ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SIZE)),
@@ -57,7 +61,7 @@ fn first_seen(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
     app_frame(ctx, app, Vec::new())
 }
 
-fn offscreen() -> Context {
+pub(super) fn offscreen() -> Context {
     let ctx = Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -65,7 +69,7 @@ fn offscreen() -> Context {
 }
 
 /// Every string a frame painted, one per line.
-fn painted(output: &egui::FullOutput) -> String {
+pub(super) fn painted(output: &egui::FullOutput) -> String {
     fn collect(shape: &egui::epaint::Shape, text: &mut String) {
         match shape {
             egui::epaint::Shape::Text(shape) => {
@@ -122,7 +126,7 @@ fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
 
 /// Paint until `done` holds for what was painted, as the reader's screen
 /// would while background work finishes.
-fn paint_until(
+pub(super) fn paint_until(
     ctx: &Context,
     app: &mut RSpiceApp,
     done: impl Fn(&str) -> bool,
@@ -246,34 +250,6 @@ fn the_launcher_builds_its_project_list_once_per_change() {
         text.contains("bandgap") && !text.contains("amplifier"),
         "{text}"
     );
-}
-
-/// Eight checkpoints are listed from their manifests on a background thread:
-/// the frames that show the page read no project file and list no
-/// directory, while the list is read and once it is shown.
-#[test]
-fn the_recovery_page_lists_its_checkpoints_off_the_frame() {
-    let (mut app, root) = saved_project("recovery-page-frames");
-    for _ in 0..8 {
-        create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
-    }
-    app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
-    let ctx = offscreen();
-
-    take_disk_reads();
-    let first = app_frame(&ctx, &mut app, Vec::new());
-    assert!(
-        painted(&first).contains("Listing checkpoints\u{2026}"),
-        "{}",
-        painted(&first)
-    );
-    paint_until(&ctx, &mut app, |text| text.contains("8 checkpoints"));
-    for _ in 0..IDLE_FRAMES {
-        app_frame(&ctx, &mut app, Vec::new());
-    }
-    assert_eq!(take_disk_reads(), DiskReads::default());
-    let _ = std::fs::remove_dir_all(root);
 }
 
 /// "Create checkpoint" writes the checkpoint on a background thread. While

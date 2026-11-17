@@ -158,7 +158,8 @@ fn command_gate(cx: &Cx<'_, ProjectFeature>, key: CommandKey) -> (bool, Option<&
     }
 }
 
-/// Render the project overview from a single per-frame authoritative snapshot.
+/// Render the project overview from one snapshot a frame, whose derived
+/// parts the frame context keeps until what they were derived from changes.
 ///
 /// The page shares the landing surfaces' geometry — a header band and a
 /// centred content column on the application ground — and projects the
@@ -168,7 +169,7 @@ fn command_gate(cx: &Cx<'_, ProjectFeature>, key: CommandKey) -> (bool, Option<&
 /// the commands its rows offer. What the reader asked of it is raised as the
 /// page returns, and the shell carries it out straight after.
 pub fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    let snapshot = OverviewSnapshot::capture(cx);
+    let snapshot = OverviewSnapshot::capture(ui.ctx(), cx);
     let mut intent = None;
     let shown = &*cx;
     page::show(

@@ -20,7 +20,13 @@ use rspice_app_state::workbench::workspace::Workspace;
 /// The Overview's snapshot, as the page takes it in the context the shell
 /// lends it, with the dispatcher's answers for the commands its rows offer.
 fn snapshot_of(app: &mut RSpiceApp) -> OverviewSnapshot {
-    OverviewSnapshot::capture(&features::cx_with_foreign_answers(app, |_| true))
+    snapshot_on(&egui::Context::default(), app)
+}
+
+/// The snapshot taken on `ctx`, which keeps what an earlier snapshot there
+/// derived, as the page's frames do.
+fn snapshot_on(ctx: &egui::Context, app: &mut RSpiceApp) -> OverviewSnapshot {
+    OverviewSnapshot::capture(ctx, &features::cx_with_foreign_answers(app, |_| true))
 }
 
 /// The project root's finding, as the page reads it in its context.
@@ -38,8 +44,11 @@ fn raise(app: &mut RSpiceApp, intent: OverviewIntent) {
 #[test]
 fn published_library_snapshots_are_retained_project_operations() {
     let mut app = RSpiceApp::test_instance();
+    // One context throughout: the register taken before the publication is
+    // kept there, and the publication has to replace it.
+    let ctx = egui::Context::default();
     assert!(
-        snapshot_of(&mut app)
+        snapshot_on(&ctx, &mut app)
             .operations
             .iter()
             .all(|operation| !operation.event.contains("Library published")),
@@ -57,7 +66,7 @@ fn published_library_snapshots_are_retained_project_operations() {
     commit_project_library_publication(&mut app.state, candidate)
         .expect("durably accepted publication commits");
 
-    let snapshot = snapshot_of(&mut app);
+    let snapshot = snapshot_on(&ctx, &mut app);
     let published = snapshot
         .operations
         .iter()

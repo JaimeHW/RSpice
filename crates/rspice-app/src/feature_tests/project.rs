@@ -11,6 +11,7 @@ mod configuration_transactions;
 mod design_management;
 mod examples;
 mod file_workflow;
+mod frame_work;
 mod landing;
 mod launcher;
 mod library_changes;

@@ -6,6 +6,7 @@
 
 pub mod configuration;
 pub mod dependencies;
+pub(crate) mod derived;
 pub mod landing;
 pub mod library;
 pub mod library_publication;

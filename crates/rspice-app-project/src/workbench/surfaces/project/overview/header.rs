@@ -201,12 +201,13 @@ pub(super) fn overview_header(
                     }
                     let (new_cell_command_enabled, new_cell_command_reason) =
                         command_gate(cx, ProjectCommand::NewCell.key());
+                    // Whether any library is writable needs no order: sorting
+                    // the catalogue to ask it cost a sort on every frame.
                     let has_writable_library = cx
                         .model
                         .library_manager
-                        .libraries_sorted()
-                        .iter()
-                        .any(|library| !library.read_only);
+                        .libraries_by_key()
+                        .any(|(_, library)| !library.read_only);
                     let new_cell_allowed = new_cell_command_enabled
                         && !cx.model.safe_mode.project_read_only()
                         && has_writable_library;
