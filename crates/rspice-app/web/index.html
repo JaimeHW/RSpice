@@ -206,7 +206,7 @@
   function executableAsset(name) {
     const path = IS_RELEASE
       ? `${RELEASE_ASSET_ROOT}/${name}`
-      : name === "simulation-worker.js" || name === "automation-worker.js" || name === "wasm-loader.js"
+      : name === "simulation-worker.js" || name === "wasm-loader.js"
         ? `./${name}`
         : `./pkg/${name}`;
     // The OIDC callback may load this same entrypoint at a nested route. All
@@ -328,8 +328,6 @@
     }
   }
 
-  // The Python runtime starts on demand; its URL stays bound to this page's assets.
-  window.__RSPICE_AUTOMATION_WORKER_URL = executableAsset("automation-worker.js").href;
   installSimulationWorker();
 
   // Give the canvas its real backing store before eframe's first paint.

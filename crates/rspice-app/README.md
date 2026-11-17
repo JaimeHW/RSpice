@@ -27,7 +27,6 @@ boundaries by `tools/ci/check_app_crate_dependencies.py`.
 | `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport, model qualification |
 | `io/` | File workflows and platform I/O adapters: project load/save, file exchange, netlist and waveform export, project execution |
 | `ui/` | The `rspice-ui-kit` exports application presentation uses |
-| `automation_workflow/`, `automation_runtime/` | The project-scoped Automation/CI workflow language and deterministic evidence rendering; the runtime has a separate browser implementation |
 | `time_compat/` | `Instant` and `SystemTime` shims, because `std::time` traps at runtime on `wasm32-unknown-unknown` |
 
 Desktop, browser and tablet share the workbench state and command registry.
@@ -41,7 +40,7 @@ forms), **Stimulus Library** (the stimulus definitions a project owns),
 **Results** (immutable run and dataset selection with precision viewers),
 **Verify** (checks, specifications, measurements, yield and safe-operating-area
 evidence), **Models** (model and library catalog, bindings, Verilog-A and PDK
-setup) and **Netlist & Script Editor** (a syntax-highlighted SPICE source
+setup) and **Netlist** (a syntax-highlighted SPICE source
 editor with completion and a parameter tuner).
 
 ## Boundaries

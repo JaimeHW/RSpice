@@ -6,13 +6,13 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 
 | Lane | Responsibility |
 | --- | --- |
-| Quality | Every handwritten member's formatting; workspace Clippy over all targets; tooling, browser worker, packaging and runtime harness tests; model provenance and licensing |
+| Quality | Every handwritten member's formatting; workspace Clippy over all targets; tooling, browser worker and packaging tests; model provenance and licensing |
 | Core, Linux | All default-feature core unit, integration and documentation tests; routine digital and mixed-signal conformance and execution corpora |
 | Verilog-A & mixed signal, Linux | Every `veriloga`-gated core integration suite through the bytecode interpreter; the desktop lane runs the same suites through the x64 JIT |
 | UI, Linux | All default UI unit, integration and documentation tests; generated-catalog UI contracts |
-| Remaining workspace, Linux | Every other member's default tests, including output, design, automation, cloud, engine adapter, publishers and viewers; new members are selected automatically |
+| Remaining workspace, Linux | Every other member's default tests, including output, design, cloud, engine adapter, publishers and viewers; new members are selected automatically |
 | Generated models | Portable feature shards, full catalog validation, XSPICE registry, resource and numerical checks, representative performance qualification |
-| Desktop | Windows/macOS UI and CLI tests; OS-specific output and managed-runtime tests; native JIT execution on six OS/architecture combinations; macOS hardened-runtime checks |
+| Desktop | Windows/macOS UI and CLI tests; OS-specific output tests; native JIT execution on six OS/architecture combinations; macOS hardened-runtime checks |
 | Browser | wasm32 compilation, production UI/worker size reports, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
 | Mobile | ARM64 Android and iOS portable solver/catalog compilation |
 | Feature shards | Clippy and host tests for configurations hidden by workspace feature unification, including emitted WebAssembly execution in wasmi |

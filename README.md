@@ -340,16 +340,15 @@ every native release package:
 
 An egui application with a wgpu renderer, organized as eight workspaces
 (Project, Design, Simulate, Stimulus Library, Results, Verify, Models, and
-Netlist & Script Editor) covering schematic and symbol editing, analysis setup,
+Netlist) covering schematic and symbol editing, analysis setup,
 reusable stimulus definitions, waveform and RF result views, verification
 evidence, model and PDK binding, and direct netlist editing. Desktop, browser
 and tablet layouts share one workbench state and command registry; the browser
 build is an experimental IDE that needs a WebGPU-capable browser.
 
 The application also hosts the surfaces built around a run rather than inside
-it: signed model packs, governed Python automation, published figure and report
-bundles, organization-managed drawing sheets, and an optional cloud worker
-client.
+it: signed model packs, published figure and report bundles,
+organization-managed drawing sheets, and an optional cloud worker client.
 
 ```bash
 cargo run --release -p rspice-app
@@ -484,7 +483,7 @@ use faer.
 | [`rspice-app-cloud`](crates/rspice-app-cloud) | The application's cloud feature: the RSpice Cloud account and licence, web publication and the live session |
 | [`rspice-app-models`](crates/rspice-app-models) | The application's models feature: the Models & PDKs workspace, the device-model editor, measurement correlation and PDK authoring |
 | [`rspice-app-simulate`](crates/rspice-app-simulate) | The application's simulate feature: the Simulation and Verification Studios, the analysis plan and its run sets, the plan manager and the jobs manager |
-| [`rspice-app-code`](crates/rspice-app-code) | The application's code feature: the netlist and Verilog-A source editors, their documents and workflows, the source dialogs and the automation workspace |
+| [`rspice-app-code`](crates/rspice-app-code) | The application's code feature: the netlist and Verilog-A source editors, their documents and workflows, and the source dialogs |
 | [`rspice-app-project`](crates/rspice-app-project) | The application's project feature: the project pages, the launcher and examples browser, the Library browser and its dialogs, configuration sets, design management and revision history |
 | [`rspice-app-design`](crates/rspice-app-design) | The application's design feature: the schematic canvas and symbol editor, the design workspace's navigator, inspector, surfaces and toolbar, the stimulus editor, and the design dialogs and actions |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
@@ -504,12 +503,10 @@ use faer.
 | [`rspice-hardcopy`](crates/rspice-hardcopy) | Print and export rendering of schematics, plots and reports |
 | [`rspice-hardcopy-contract`](crates/rspice-hardcopy-contract) | Page setup, print plans and the receipts a project retains |
 
-**Automation, cloud and publication**
+**Cloud and publication**
 
 | Crate | Purpose |
 | :--- | :--- |
-| [`rspice-automation-protocol`](crates/rspice-automation-protocol) | The governed Python automation worker protocol |
-| [`rspice-automation-runtime`](crates/rspice-automation-runtime) | Verified managed Python runtime and worker transport |
 | [`rspice-engine-adapter`](crates/rspice-engine-adapter) | Engine executor for the cloud worker protocol |
 | [`rspice-pack`](crates/rspice-pack) | Signed, immutable model pack format |
 | [`rspice-cloud-domain`](crates/rspice-cloud-domain), [`rspice-cloud-contract`](crates/rspice-cloud-contract), [`rspice-cloud-client`](crates/rspice-cloud-client) | The RSpice Cloud client, vendored from its own repository |

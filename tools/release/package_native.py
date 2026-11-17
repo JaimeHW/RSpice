@@ -77,7 +77,6 @@ def rust_toolchain() -> str:
 def validate_inputs(
     binary: Path,
     ui_binary: Path,
-    runtime_root: Path,
     target: str,
     version: str,
     commit: str,
@@ -87,12 +86,6 @@ def validate_inputs(
         raise PackageError(f"binary must be a regular file: {binary}")
     if not ui_binary.is_file() or ui_binary.is_symlink():
         raise PackageError(f"UI binary must be a regular file: {ui_binary}")
-    if not runtime_root.is_dir() or is_link_like(runtime_root):
-        raise PackageError(f"runtime root must be a local directory: {runtime_root}")
-    for required in ("runtime-manifest.json", "runtime-manifest.ed25519.json"):
-        member = runtime_root / required
-        if not member.is_file() or is_link_like(member):
-            raise PackageError(f"signed runtime metadata is missing: {member}")
     if not TARGET.fullmatch(target):
         raise PackageError(f"invalid Rust target triple: {target!r}")
     if not SEMVER.fullmatch(version):
@@ -248,29 +241,6 @@ def is_link_like(path: Path) -> bool:
     )
 
 
-def runtime_tree_payloads(runtime_root: Path) -> list[Payload]:
-    payloads = []
-    for path in sorted(runtime_root.rglob("*"), key=lambda candidate: candidate.as_posix()):
-        if is_link_like(path):
-            raise PackageError(f"runtime payload contains a link: {path}")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            raise PackageError(f"runtime payload contains a non-regular file: {path}")
-        relative = path.relative_to(runtime_root)
-        if any(
-            part in {"", ".", ".."}
-            or any(ord(character) < 32 or ord(character) == 127 for character in part)
-            for part in relative.parts
-        ):
-            raise PackageError(f"runtime payload contains an unsafe path: {relative}")
-        mode = 0o755 if path.stat(follow_symlinks=False).st_mode & 0o111 else 0o644
-        payloads.append(
-            Payload(f"runtimes/python/{relative.as_posix()}", path.read_bytes(), mode)
-        )
-    return payloads
-
-
 def file_payload(path: str, source: Path, mode: int) -> Payload:
     if not source.is_file() or is_link_like(source):
         raise PackageError(f"release payload source must be a regular file: {source}")
@@ -339,8 +309,8 @@ def apple_info_plist(version: str) -> bytes:
 def apple_bundle_payloads(ui_binary: Path, version: str) -> list[Payload]:
     """RSpice.app around the UI binary, and the top-level `rspice-app` that opens it.
 
-    The bundle sits beside `models/` and `runtimes/`, so the installation stays one
-    folder: the application finds both above `RSpice.app/Contents/MacOS`.
+    The bundle sits beside `models/`, so the installation stays one folder: the
+    application finds the models above `RSpice.app/Contents/MacOS`.
     """
     contents = f"{APPLE_BUNDLE}/Contents"
     launcher = (
@@ -357,7 +327,7 @@ def apple_bundle_payloads(ui_binary: Path, version: str) -> list[Payload]:
 
 
 def release_payloads(
-    binary: Path, ui_binary: Path, runtime_root: Path, target: str, version: str
+    binary: Path, ui_binary: Path, target: str, version: str
 ) -> list[Payload]:
     executable = "rspice.exe" if "windows" in target else "rspice"
     sources = [
@@ -375,7 +345,6 @@ def release_payloads(
         ui_executable = "rspice-app.exe" if "windows" in target else "rspice-app"
         payloads.append(file_payload(ui_executable, ui_binary, 0o755))
     payloads.extend(model_tree_payloads())
-    payloads.extend(runtime_tree_payloads(runtime_root))
     payloads.sort(key=lambda payload: payload.path)
     paths = [payload.path for payload in payloads]
     if len(paths) != len(set(paths)):
@@ -473,7 +442,6 @@ def package_release(
     *,
     binary: Path,
     ui_binary: Path,
-    runtime_root: Path,
     target: str,
     version: str,
     commit: str,
@@ -483,14 +451,13 @@ def package_release(
     validate_inputs(
         binary,
         ui_binary,
-        runtime_root,
         target,
         version,
         commit,
         source_date_epoch,
     )
     prefix = f"rspice-{version}-{target}"
-    payloads = release_payloads(binary, ui_binary, runtime_root, target, version)
+    payloads = release_payloads(binary, ui_binary, target, version)
     payloads.append(
         Payload(
             "RELEASE-MANIFEST.json",
@@ -519,7 +486,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--ui-binary", type=Path, required=True)
-    parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
@@ -534,7 +500,6 @@ def main() -> int:
         archive, checksum = package_release(
             binary=arguments.binary.absolute(),
             ui_binary=arguments.ui_binary.absolute(),
-            runtime_root=arguments.runtime_root.absolute(),
             target=arguments.target,
             version=arguments.version,
             commit=arguments.commit,

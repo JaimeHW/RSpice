@@ -2,7 +2,7 @@
 name = "rspice-app-code"
 version.workspace = true
 edition.workspace = true
-description = "The RSpice application's code feature: the netlist and Verilog-A source editors, their documents and workflows, the source dialogs and the automation workspace"
+description = "The RSpice application's code feature: the netlist and Verilog-A source editors, their documents and workflows, and the source dialogs"
 license-file.workspace = true
 publish.workspace = true
 rust-version.workspace = true

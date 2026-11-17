@@ -38,15 +38,16 @@ class BrowserWorkbenchTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 verify_clock_rejection(snapshot(**change), "Review update", "Retained reply")
 
-    def test_packaged_headers_apply_to_real_and_virtual_browser_pages(self):
+    def test_packaged_headers_apply_to_pages_and_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "_headers").write_text("/*\n  Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'\n/assets/*\n  Cache-Control: public, max-age=3600\n", encoding="utf-8")
             (root / "assets").mkdir()
             (root / "assets/probe.js").write_text("export const probe = true;", encoding="utf-8")
+            (root / "page.html").write_text("<!doctype html>", encoding="utf-8")
             handler = functools.partial(ReleaseHandler, directory=str(root))
             with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
-                for path, cached in (("/assets/probe.js?v=1", True), ("/__rspice_qualification__/automation.html", False)):
+                for path, cached in (("/assets/probe.js?v=1", True), ("/page.html", False)):
                     thread = threading.Thread(target=server.handle_request)
                     thread.start()
                     try:
@@ -66,8 +67,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
 
     def test_release_workers_share_the_exact_packaged_cohort(self):
         base = "https://example.test/ide/assets/" + "a" * 64 + "/"
-        state = {"simulation_worker": base + "simulation-worker.js",
-                 "automation_worker": base + "automation-worker.js"}
+        state = {"simulation_worker": base + "simulation-worker.js"}
         verify_worker_urls(state, base)
         for key in state:
             for value in (None, state[key].replace("/ide/assets/", "/assets/"),

@@ -141,8 +141,8 @@ ALLOWED: dict[str, set[str]] = {
     # The code feature: the persisted model, the platform services, the run
     # tier whose controller generates the netlists it shows, the workbench
     # framework it registers with, and the design, project, model library,
-    # simulation, format, result and painting crates its source editors,
-    # netlist documents and automation workspace are built on.
+    # simulation, format, result and painting crates its source editors and
+    # netlist documents are built on.
     "rspice-app-code": {
         "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
         "rspice-design", "rspice-project", "rspice-model-library", "rspice-simulation",

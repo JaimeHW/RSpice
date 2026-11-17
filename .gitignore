@@ -52,10 +52,6 @@ Thumbs.db
 __pycache__/
 /*.out
 *.zip
-# The browser Python runtime ships its standard library as a zip. It is an
-# execution asset that the runtime manifest digests and CI verifies, not a
-# build output, and the browser cannot start Python without it.
-!crates/rspice-app/web/python/pyodide-*/python_stdlib.zip
 /diagnostics/
 /design/
 /docs/
@@ -102,5 +98,4 @@ __pycache__/
 /*_PLAN.md
 /*_DECISION.md
 /*_MATRIX.md
-/PYTHON_AUTOMATION_RUNTIME_ARCHITECTURE.md
 /DEVICE_SUPPORT_RELEASE_MATRIX.md

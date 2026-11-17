@@ -1,4 +1,4 @@
-"""Qualify packaged UI startup and the pinned Python worker."""
+"""Qualify packaged UI startup."""
 
 import argparse
 import base64
@@ -15,9 +15,6 @@ import urllib.parse
 from browser_workbench import WorkbenchBrowser, wait_for
 
 
-AUTOMATION_PAGE = "/__rspice_qualification__/automation.html"
-
-
 class ReleaseHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         # Reproduce the packaged static-host headers, especially the CSP. A
@@ -26,16 +23,6 @@ class ReleaseHandler(http.server.SimpleHTTPRequestHandler):
         for name, value in release_headers(rules, urllib.parse.urlsplit(self.path).path):
             self.send_header(name, value)
         super().end_headers()
-
-    def do_GET(self):
-        if urllib.parse.urlsplit(self.path).path != AUTOMATION_PAGE:
-            return super().do_GET()
-        payload = Path(__file__).with_name("automation_browser_debugger_harness.html").read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
 
 
 def release_headers(rules, path):
@@ -61,10 +48,9 @@ def startup_ready(state):
 
 
 def verify_worker_urls(state, asset_url):
-    for key, name in (("simulation_worker", "simulation-worker.js"),
-                      ("automation_worker", "automation-worker.js")):
-        if state.get(key) != asset_url + name:
-            raise AssertionError(f"{key} is not bound to the packaged asset cohort: {state.get(key)}")
+    if state.get("simulation_worker") != asset_url + "simulation-worker.js":
+        raise AssertionError("simulation_worker is not bound to the packaged asset cohort: "
+                             f"{state.get('simulation_worker')}")
 
 
 def read_startup(browser):
@@ -78,7 +64,6 @@ def read_startup(browser):
                 (loading?.getAttribute('role') === 'alert' ? loading.textContent : null),
             worker_ready: window.__RSPICE_SIM_WORKER_READY === true,
             simulation_worker: window.__RSPICE_SIM_WORKER_URL,
-            automation_worker: window.__RSPICE_AUTOMATION_WORKER_URL,
             jit: document.documentElement.getAttribute('data-rspice-wasm-jit-status'),
             jit_capability: window.__RSPICE_WASM_JIT_CAPABILITY,
             width: innerWidth, height: innerHeight,
@@ -129,11 +114,10 @@ def main():
               "qualification_source_sha": subprocess.check_output(
                   ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
                   text=True).strip(),
-              "scope": "UI startup at emulated viewports and Python debugger integration",
+              "scope": "UI startup at emulated viewports",
               "software_webgpu": args.software_webgpu,
               "harness": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                          for name in ("check_browser_release.py", "browser_workbench.py",
-                                       "automation_browser_debugger_harness.html")}}
+                          for name in ("check_browser_release.py", "browser_workbench.py")}}
     with WorkbenchBrowser(args.web_root, args.output, args.driver, args.browser,
                           args.software_webgpu, request_handler=ReleaseHandler) as browser:
         try:
@@ -154,16 +138,6 @@ def main():
                 capture(browser, label, state)
                 report["viewports"].append({"label": label, **state})
             report["webgpu"] = browser.webgpu_adapter()
-            open_page(browser, browser.origin + AUTOMATION_PAGE + "?" + urllib.parse.urlencode(
-                {"worker": asset_url + "automation-worker.js"}), 1280, 900)
-            automation = wait_for(lambda: browser.script(
-                "return window.RSPICE_AUTOMATION_DEBUGGER_QUALIFICATION || null"),
-                "packaged Python debugger qualification", timeout=150)
-            capture(browser, "automation", automation)
-            if automation.get("status") != "complete" or automation.get("evaluated_value") != 42:
-                raise AssertionError(f"packaged Python qualification failed: {automation}")
-            browser.assert_no_errors()
-            report["automation"] = automation
             if inputs != release_inputs(args.web_root):
                 raise AssertionError("Packaged inputs changed during browser qualification")
             report["status"] = "passed"

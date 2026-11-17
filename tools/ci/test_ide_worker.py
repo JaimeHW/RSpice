@@ -352,7 +352,6 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                     "simulation-worker.js",
                     "rspice-ui.js",
                     "wasm-loader.js",
-                    "automation-worker.js",
                 ):
                     self.assertIn(f'executableAsset("{asset}")', index)
                 self.assertIn('executableAsset(IS_RELEASE ? "rspice-ui_bg.wasm.gz" : "rspice-ui_bg.wasm")', index)

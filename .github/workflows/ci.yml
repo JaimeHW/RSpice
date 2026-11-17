@@ -156,12 +156,6 @@ jobs:
       - name: Native release packager tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/release/test_package_native.py
-      - name: Managed Python runtime staging tests
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: python3 tools/release/test_stage_managed_python.py
-      - name: Browser automation runtime asset integrity
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: python3 tools/ci/test_automation_runtime_assets.py
       - name: No restricted model files are vendored
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/models/license_audit.py --check
@@ -580,8 +574,8 @@ jobs:
         run: cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
       - name: Unit tests
         run: cargo core-lib-test --locked
-      - name: Output and managed-runtime tests
-        run: cargo test --locked -p rspice-output -p rspice-automation-runtime --features rspice-output/durable-file
+      - name: Output tests
+        run: cargo test --locked -p rspice-output --features rspice-output/durable-file
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
