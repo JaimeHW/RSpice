@@ -112,7 +112,7 @@ pub fn restore_dialog(
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string());
-    let age = checkpoint_age(&checkpoint);
+    let age = checkpoint_age(candidate.binding.identity.modified_unix_ms);
     let can_discard = candidate.can_discard();
 
     let choice = Dialog::new("Restore autosave?", "Restore")
@@ -211,15 +211,17 @@ pub fn restore_dialog(
     }
 }
 
-/// Coarse human age of a checkpoint file ("3 min ago"), from its mtime.
+/// Coarse human age of a checkpoint ("3 min ago"), from the modification
+/// time read once when it was found and offered: the dialog asks the clock,
+/// never the file.
 #[cfg(not(target_arch = "wasm32"))]
-fn checkpoint_age(checkpoint: &std::path::Path) -> String {
-    let elapsed = std::fs::metadata(checkpoint)
-        .and_then(|meta| meta.modified())
+fn checkpoint_age(modified_unix_ms: u64) -> String {
+    let elapsed = crate::time_compat::checked_unix_time_ms()
         .ok()
-        .and_then(|modified| modified.elapsed().ok());
+        .filter(|_| modified_unix_ms != 0)
+        .and_then(|now| now.checked_sub(modified_unix_ms));
     match elapsed {
         None => "an earlier session".to_owned(),
-        Some(age) => crate::time_compat::relative_age(age),
+        Some(age) => crate::time_compat::relative_age(std::time::Duration::from_millis(age)),
     }
 }
