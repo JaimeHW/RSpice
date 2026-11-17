@@ -558,6 +558,8 @@ pub struct DataTable<'a> {
     drags: bool,
     /// A row takes a row dragged onto it.
     drops: bool,
+    /// Bring the selected row into view this frame.
+    reveal: bool,
 }
 
 /// A row dragged out of a table: the table, by the name it was built with,
@@ -786,6 +788,7 @@ impl<'a> DataTable<'a> {
             focus: false,
             drags: false,
             drops: false,
+            reveal: false,
         }
     }
 
@@ -893,6 +896,14 @@ impl<'a> DataTable<'a> {
     /// over it, and the release is reported as [`TableResponse::dropped`].
     pub fn drops(mut self) -> Self {
         self.drops = true;
+        self
+    }
+
+    /// Bring the selected row into view this frame, as a keyboard move does:
+    /// for a page that chose the row itself, or that changed which rows the
+    /// table shows or how tall it is.
+    pub fn reveal_selection(mut self, reveal: bool) -> Self {
+        self.reveal = reveal;
         self
     }
 
@@ -1058,7 +1069,7 @@ impl<'a> DataTable<'a> {
         let table_id = ui.id().with((self.id, "table"));
         let mut memory = ViewMemory::load(ui.ctx(), table_id);
         let mut scroll_x = state.as_deref().map(|state| state.scroll_x);
-        let mut reveal = std::mem::take(&mut memory.reveal)
+        let mut reveal = (std::mem::take(&mut memory.reveal) || self.reveal)
             .then(|| state.as_deref().and_then(TableState::selected_row))
             .flatten();
         let focused = state.is_some() && ui.memory(|memory| memory.has_focus(table_id));
@@ -1718,6 +1729,34 @@ struct Words<'a> {
     problem: Option<Problem>,
 }
 
+/// `text` cut to `room` where a reader expects a cut: after the last whole
+/// item of a list its middle dots set apart, else after the last whole word,
+/// and inside a word only when the first is too long for the room alone.
+fn elide_at_words(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
+    const ELLIPSIS: char = '\u{2026}';
+    let cut = elide_text(ui, text, font, room);
+    let Some(kept) = cut.strip_suffix(ELLIPSIS) else {
+        return cut;
+    };
+    let rest = &text[kept.len()..];
+    let before = |boundary: &str| {
+        if rest.starts_with(boundary) {
+            Some(kept)
+        } else {
+            kept.rfind(boundary).map(|at| &kept[..at])
+        }
+    };
+    let head = before(" \u{b7} ")
+        .or_else(|| before(" "))
+        .unwrap_or_default()
+        .trim_end_matches([',', ';', ':', '\u{b7}', ' ']);
+    if head.is_empty() {
+        cut
+    } else {
+        format!("{head}{ELLIPSIS}")
+    }
+}
+
 /// Where a cell's words landed, and whether they were cut short to fit.
 #[derive(Debug, Clone, Copy)]
 struct Painted {
@@ -1745,7 +1784,7 @@ fn paint_words(
         return None;
     }
     let mark_room = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
-    let shown = elide_text(ui, text, &font, (span.span() - mark_room).max(0.0));
+    let shown = elide_at_words(ui, text, &font, (span.span() - mark_room).max(0.0));
     let elided = shown != text;
     let galley = ui.painter().layout_no_wrap(shown, font, color);
     let text_width = galley.size().x;
