@@ -335,3 +335,107 @@ fn safe_mode_page_heading_is_one_title_and_its_start_is_truthful() {
         }
     }
 }
+
+/// What the project's open, save, close, recovery and revision history say
+/// is in the reader's words: none of their messages speaks of a canonical
+/// file, an authority, a journal, a baseline or a working tree.
+#[test]
+fn lifecycle_messages_use_the_readers_words() {
+    const SOURCES: [(&str, &str); 10] = [
+        (
+            "rspice-project/src/lifecycle.rs",
+            include_str!("../../../../rspice-project/src/lifecycle.rs"),
+        ),
+        (
+            "rspice-project/src/lifecycle/save.rs",
+            include_str!("../../../../rspice-project/src/lifecycle/save.rs"),
+        ),
+        (
+            "rspice-project/src/lifecycle/dirty.rs",
+            include_str!("../../../../rspice-project/src/lifecycle/dirty.rs"),
+        ),
+        (
+            "revision_history.rs",
+            include_str!(
+                "../../../../rspice-app-project/src/workbench/project/revision_history.rs"
+            ),
+        ),
+        (
+            "autosave.rs",
+            include_str!(
+                "../../../../rspice-app-services/src/workbench/app_state/session/autosave.rs"
+            ),
+        ),
+        (
+            "lifecycle/recovery.rs",
+            include_str!("../../../../rspice-app-services/src/workbench/lifecycle/recovery.rs"),
+        ),
+        (
+            "project_launcher.rs",
+            include_str!("../../../../rspice-app-project/src/workbench/tools/project_launcher.rs"),
+        ),
+        (
+            "project_launcher/recovery.rs",
+            include_str!(
+                "../../../../rspice-app-project/src/workbench/tools/project_launcher/recovery.rs"
+            ),
+        ),
+        (
+            "project_launcher/recent_rows.rs",
+            include_str!(
+                "../../../../rspice-app-project/src/workbench/tools/project_launcher/recent_rows.rs"
+            ),
+        ),
+        (
+            "surfaces/project/landing.rs",
+            include_str!(
+                "../../../../rspice-app-project/src/workbench/surfaces/project/landing.rs"
+            ),
+        ),
+    ];
+    const WORDS: [&str; 5] = [
+        "canonical",
+        "authority",
+        "journal",
+        "baseline",
+        "working tree",
+    ];
+
+    let mut found = Vec::new();
+    for (name, source) in SOURCES {
+        let source = source.replace("\r\n", "\n");
+        let shipped = source
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        for (number, line) in shipped.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            // A message is a string literal with a space in it; a key or an
+            // identifier has none.
+            for literal in string_literals(line).filter(|text| text.contains(' ')) {
+                let lower = literal.to_lowercase();
+                for word in WORDS.iter().filter(|word| lower.contains(**word)) {
+                    found.push(format!("{name}:{}: {word}: {literal}", number + 1));
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
+
+/// The string literals on one line of source, escapes left as written.
+fn string_literals(line: &str) -> impl Iterator<Item = &str> {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        let start = at + line.get(at..)?.find('"')? + 1;
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b'"' {
+            end += if bytes[end] == b'\\' { 2 } else { 1 };
+        }
+        at = (end + 1).min(bytes.len());
+        line.get(start..end.min(bytes.len()))
+    })
+}

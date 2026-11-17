@@ -258,8 +258,8 @@ impl ProjectFile {
     pub fn validate(&self) -> Result<(), ProjectIoError> {
         if !self.version.is_compatible() {
             return Err(ProjectIoError::IncompatibleVersion {
-                file_version: self.version.to_string(),
-                app_version: ProjectVersion::current().to_string(),
+                file_version: self.version,
+                app_version: ProjectVersion::current(),
             });
         }
         self.workspace
@@ -1450,8 +1450,8 @@ pub enum ProjectIoError {
     Cancelled,
     NotFound(PathBuf),
     IncompatibleVersion {
-        file_version: String,
-        app_version: String,
+        file_version: ProjectVersion,
+        app_version: ProjectVersion,
     },
     ParseError(String),
     SerializeError(String),
@@ -1465,13 +1465,23 @@ impl std::fmt::Display for ProjectIoError {
             #[cfg(not(target_arch = "wasm32"))]
             Self::Cancelled => f.write_str("Operation cancelled"),
             Self::NotFound(path) => write!(f, "Project file not found: {}", path.display()),
+            // Which side is newer decides what the reader can do about it.
+            Self::IncompatibleVersion {
+                file_version,
+                app_version,
+            } if file_version.major > app_version.major => write!(
+                f,
+                "This project was saved by a newer RSpice (file format {file_version}; this \
+                 version reads {app_version}). Update RSpice to open it."
+            ),
             Self::IncompatibleVersion {
                 file_version,
                 app_version,
             } => write!(
                 f,
-                "Project version {} is not compatible with app version {}",
-                file_version, app_version
+                "This project was saved by an older RSpice (file format {file_version}; this \
+                 version reads {app_version}) and cannot be converted. Open it in the RSpice \
+                 that saved it."
             ),
             Self::ParseError(error) => write!(f, "Project parse error: {}", error),
             Self::SerializeError(error) => write!(f, "Project serialize error: {}", error),

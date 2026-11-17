@@ -430,7 +430,7 @@ fn discover_candidate(original: PathBuf, checkpoint: PathBuf) -> Option<Recovery
                 .and_then(|bytes| parse_checkpoint_bytes(&bytes, &checkpoint));
             let integrity = match recovered {
                 Err(error) => RecoveryIntegrity::Invalid(format!(
-                    "Checkpoint failed integrity validation: {error}"
+                    "The autosave could not be read intact: {error}"
                 )),
                 Ok(recovered) => {
                     let components = recovered.document().components.len();
@@ -449,11 +449,12 @@ fn discover_candidate(original: PathBuf, checkpoint: PathBuf) -> Option<Recovery
                             baseline_note: match relation {
                                 SourceSnapshotRelation::Exact => None,
                                 SourceSnapshotRelation::Changed => Some(
-                                    "Saved baseline changed after this checkpoint was committed"
+                                    "The saved drawing changed after this autosave was written"
                                         .to_owned(),
                                 ),
                                 SourceSnapshotRelation::Unrecorded => Some(
-                                    "Checkpoint has no recorded saved-source identity".to_owned(),
+                                    "The autosave does not record which saved version it came from"
+                                        .to_owned(),
                                 ),
                             },
                         },
@@ -462,7 +463,9 @@ fn discover_candidate(original: PathBuf, checkpoint: PathBuf) -> Option<Recovery
                             components,
                             wires,
                             changed_objects: None,
-                            baseline_note: Some(format!("Saved baseline unavailable: {error}")),
+                            baseline_note: Some(format!(
+                                "The saved drawing could not be read: {error}"
+                            )),
                         },
                     }
                 }
@@ -612,7 +615,7 @@ fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> 
     #[cfg(target_arch = "wasm32")]
     {
         let _ = candidate;
-        Err("Native recovery checkpoints are unavailable in this browser".to_owned())
+        Err("Autosaves are not kept in this browser".to_owned())
     }
 }
 
@@ -766,13 +769,13 @@ pub fn recovery_replacement_block_reason(model: &Model) -> Option<String> {
     if differences.results {
         changed.push("simulation result history or selection");
     }
-    let baseline = if model.workspace.content.project.path.is_some() {
+    let saved = if model.workspace.content.project.path.is_some() {
         "the last saved project snapshot"
     } else {
         "pristine unsaved-project defaults"
     };
     Some(format!(
-        "Recovery comparison is blocked because {} differ from {baseline}. Save or close the current project before opening recovery work.",
+        "Recovery comparison is blocked because {} differ from {saved}. Save or close the current project before opening recovery work.",
         changed.join(" and ")
     ))
 }
@@ -803,20 +806,20 @@ pub fn prepare_comparison(
         Ok((baseline, SourceSnapshotRelation::Changed)) => (
             Some(baseline),
             Some(
-                "The saved project changed after this recovery checkpoint was written; the comparison uses the project as it is saved now"
+                "The saved drawing changed after this autosave was written; the comparison uses the drawing as it is saved now"
                     .to_owned(),
             ),
         ),
         Ok((baseline, SourceSnapshotRelation::Unrecorded)) => (
             Some(baseline),
             Some(
-                "This older checkpoint does not record which saved version it came from; the comparison uses the project as it is saved now"
+                "This older autosave does not record which saved version it came from; the comparison uses the drawing as it is saved now"
                     .to_owned(),
             ),
         ),
         Err(error) => (
             None,
-            Some(format!("Saved recovery baseline is unavailable: {error}")),
+            Some(format!("The saved drawing could not be read: {error}")),
         ),
     };
     let workspace = build_comparison_workspace(&candidate.display_name, baseline, recovered)?;
@@ -850,7 +853,7 @@ pub fn reset_comparison_execution(model: &mut Model) {
 /// Why a recovery comparison cannot open here.
 #[cfg(target_arch = "wasm32")]
 pub fn comparison_unavailable() -> String {
-    "Native recovery checkpoints are unavailable in this browser".to_owned()
+    "Autosaves are not kept in this browser".to_owned()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -858,11 +861,11 @@ fn reopen_candidate(candidate: &RecoveryCandidate) -> Result<SchematicState, Str
     let binding = candidate
         .binding
         .as_ref()
-        .ok_or_else(|| "Recovery checkpoint has no verified content identity".to_owned())?;
+        .ok_or_else(|| "RSpice cannot tell that this autosave is whole".to_owned())?;
     let bytes = read_bound_checkpoint(&candidate.original, &candidate.checkpoint, binding)
-        .map_err(|error| format!("Recovery checkpoint could not be reopened: {error}"))?;
+        .map_err(|error| format!("The autosave could not be reopened: {error}"))?;
     parse_checkpoint_bytes(&bytes, &candidate.checkpoint)
-        .map_err(|error| format!("Recovery checkpoint could not be reopened: {error}"))
+        .map_err(|error| format!("The autosave could not be reopened: {error}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -872,10 +875,10 @@ fn reopen_baseline(
     let binding = candidate
         .binding
         .as_ref()
-        .ok_or_else(|| "Recovery checkpoint has no verified content identity".to_owned())?;
+        .ok_or_else(|| "RSpice cannot tell that this autosave is whole".to_owned())?;
     let (bytes, relation) = read_source_snapshot(&candidate.original, binding)?;
     let baseline = parse_checkpoint_bytes(&bytes, &candidate.original)
-        .map_err(|error| format!("Saved recovery baseline could not be opened: {error}"))?;
+        .map_err(|error| format!("The saved drawing could not be opened: {error}"))?;
     Ok((baseline, relation))
 }
 
@@ -903,7 +906,7 @@ fn build_comparison_workspace(
         .map_err(|error| format!("Recovery project identity is invalid: {error}"))?;
     workspace.content.project.path = None;
     workspace.content.project.description =
-        "Unsaved recovery comparison. Original source and checkpoint are retained.".to_owned();
+        "Unsaved recovery comparison. The saved drawing and its autosave are kept.".to_owned();
 
     recovered.session.current_file = None;
     recovered.session.is_dirty = true;
@@ -917,8 +920,8 @@ fn build_comparison_workspace(
         // Library/cell/view identifiers are persisted slash-delimited keys and
         // therefore follow the same alphanumeric/underscore contract as the
         // library dialogs. Keep the human-readable role in metadata below.
-        const BASELINE_LIBRARY: &str = "recovery_baseline";
-        const BASELINE_CELL: &str = "saved_baseline";
+        const BASELINE_LIBRARY: &str = "recovery_saved";
+        const BASELINE_CELL: &str = "saved_drawing";
         const BASELINE_VIEW: &str = "schematic";
         let mut cell = Cell::new(BASELINE_CELL);
         cell.add_view(View::new(BASELINE_VIEW, ViewType::Schematic));
@@ -927,10 +930,10 @@ fn build_comparison_workspace(
         library.read_only = true;
         library
             .metadata
-            .insert("role".to_owned(), "immutable recovery baseline".to_owned());
+            .insert("role".to_owned(), "immutable saved drawing".to_owned());
         library
             .metadata
-            .insert("display_name".to_owned(), "Recovery baseline".to_owned());
+            .insert("display_name".to_owned(), "Saved drawing".to_owned());
         libraries.add_library(library);
 
         baseline.session.is_dirty = false;
@@ -966,18 +969,18 @@ pub fn discard_checkpoint(candidate: &RecoveryCandidate) -> Result<String, Strin
         let binding = candidate
             .binding
             .as_ref()
-            .ok_or_else(|| "Recovery checkpoint has no verified content identity".to_owned())?;
+            .ok_or_else(|| "RSpice cannot tell that this autosave is whole".to_owned())?;
         discard_bound_checkpoint(&candidate.original, &candidate.checkpoint, binding)
-            .map_err(|error| format!("Recovery checkpoint could not be discarded: {error}"))?;
+            .map_err(|error| format!("The autosave could not be discarded: {error}"))?;
         Ok(format!(
-            "Discarded recovery checkpoint for '{}'",
+            "Discarded the autosave of '{}'",
             candidate.display_name
         ))
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = candidate;
-        Err("Native recovery checkpoints are unavailable in this browser".to_owned())
+        Err("Autosaves are not kept in this browser".to_owned())
     }
 }
 
@@ -1248,7 +1251,7 @@ mod tests {
         assert_eq!(comparison.workspace.content.open_views.len(), 2);
         let baseline_library = comparison
             .libraries
-            .get_library("recovery_baseline")
+            .get_library("recovery_saved")
             .expect("baseline library exists");
         assert!(baseline_library.read_only);
         assert!(comparison.workspace.any_dirty());

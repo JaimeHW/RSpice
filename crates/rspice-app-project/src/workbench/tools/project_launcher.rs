@@ -985,21 +985,19 @@ pub fn show_discard_confirmation(ctx: &Context, platform: &mut PlatformState) {
     let Some(candidate) = platform.recovery_catalog.pending_discard.clone() else {
         return;
     };
-    let choice = Dialog::new("Discard recovery checkpoint?", "Discard checkpoint")
-    .description(
-        "Confirm permanent deletion of the selected autosave checkpoint without modifying its saved source.",
-    )
-    .size(DialogSize::Transaction)
-    .destructive()
-    .ghost("Keep checkpoint")
-    .hint("The saved source is not modified.")
-    .show(ctx, |ui| {
-        ui.label(format!(
-            "Discard the autosave checkpoint for '{}'? This removes only '{}'.",
-            candidate.display_name,
-            candidate.checkpoint.display()
-        ));
-    });
+    let choice = Dialog::new("Discard autosave?", "Discard autosave")
+        .description("The autosave is deleted for good. The saved drawing is not changed.")
+        .size(DialogSize::Transaction)
+        .destructive()
+        .ghost("Keep autosave")
+        .hint("The saved drawing is not changed.")
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "Discard the autosave of '{}'? Only '{}' is deleted.",
+                candidate.display_name,
+                candidate.checkpoint.display()
+            ));
+        });
 
     match choice {
         DialogChoice::None => {}
@@ -1802,11 +1800,11 @@ mod tests {
         );
         assert_eq!(
             integrity_summary(&verified(true, Some("changed"), Some(2))),
-            "3 components · 1 wire · 2 structural changes · saved baseline changed or unrecorded"
+            "3 components · 1 wire · 2 structural changes · saved version changed since"
         );
         assert_eq!(
             integrity_summary(&verified(false, Some("unavailable"), None)),
-            "3 components · 1 wire · change count unavailable · baseline unavailable"
+            "3 components · 1 wire · change count unavailable · saved version unavailable"
         );
     }
 

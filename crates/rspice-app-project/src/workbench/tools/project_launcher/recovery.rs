@@ -141,14 +141,14 @@ pub(super) fn recovery_page(
                     }
         });
 
-    const NO_MANIFEST_ADVISORY: &str = "Checkpoint ownership cannot be proven without its manifest; open it non-destructively instead";
+    const NO_MANIFEST_ADVISORY: &str = "RSpice cannot tell that it wrote this autosave, so it is not deleted from here. Open the comparison instead.";
 
     let selected = cx.platform.recovery_catalog.selected().cloned();
     launcher_page_footer(ui, layout, regions.footer, |ui| {
         let can_discard = selected
             .as_ref()
             .is_some_and(RecoveryCandidate::can_discard);
-        let discard = Button::new("Discard selected checkpoint…")
+        let discard = Button::new("Discard selected autosave…")
             .enabled(can_discard)
             .show(ui);
         let discard = if selected
@@ -191,7 +191,7 @@ pub(super) fn recovery_page(
         let response = if let Some(reason) = replacement_block_reason {
             response.on_disabled_hover_text(reason)
         } else if !recoverable && selected.is_some() {
-            response.on_disabled_hover_text("The selected checkpoint failed integrity validation")
+            response.on_disabled_hover_text("The selected autosave could not be read intact")
         } else {
             response
         };
@@ -275,8 +275,8 @@ pub(super) fn recovery_row(
                         ),
                     );
                 }
-                // "review" is the ordinary state of a checkpoint and is
-                // neutral; a blocked one earns a failure mark.
+                // An autosave that reads intact is the ordinary row and says
+                // nothing; one that does not earns a failure mark.
                 let (state, problem) = candidate_state(candidate.integrity.is_recoverable());
                 let (cell, _) = ui.allocate_exact_size(
                     vec2(if layout.compact { 64.0 } else { 70.0 }, 54.0),
@@ -318,7 +318,7 @@ pub(super) fn recovery_row(
             egui::WidgetType::RadioButton,
             ui.is_enabled(),
             selected,
-            format!("Select recovery checkpoint for {}", candidate.display_name),
+            format!("Select the autosave of {}", candidate.display_name),
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -328,13 +328,13 @@ pub(super) fn recovery_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A recovery checkpoint's state word and the mark it earns: one that can be
-/// reviewed is the ordinary case, one that is blocked is a failure.
+/// An autosave's state word and the mark it earns: one that reads intact is
+/// the ordinary case and says nothing, one that does not is a failure.
 fn candidate_state(recoverable: bool) -> (&'static str, Option<Problem>) {
     if recoverable {
-        ("review", None)
+        ("", None)
     } else {
-        ("blocked", Some(Problem::Failure))
+        ("unreadable", Some(Problem::Failure))
     }
 }
 
@@ -342,9 +342,9 @@ pub(super) fn recovery_summary(candidate: &RecoveryCandidate) -> String {
     integrity_summary(&candidate.integrity)
 }
 
-/// What the checkpoint holds, plus the baseline only when it is not the
-/// ordinary exact match. A checkpoint that is listed as recoverable passed its
-/// integrity check, so saying "verified" would only report success.
+/// What the autosave holds, plus the saved version only when it is not the
+/// ordinary exact match. An autosave listed as recoverable read intact, so
+/// saying "verified" would only report success.
 pub(super) fn integrity_summary(integrity: &RecoveryIntegrity) -> String {
     let count =
         |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
@@ -366,9 +366,9 @@ pub(super) fn integrity_summary(integrity: &RecoveryIntegrity) -> String {
                 count(*wires, "wire", "wires"),
             );
             if !baseline_available {
-                summary.push_str(" · baseline unavailable");
+                summary.push_str(" · saved version unavailable");
             } else if baseline_note.is_some() {
-                summary.push_str(" · saved baseline changed or unrecorded");
+                summary.push_str(" · saved version changed since");
             }
             summary
         }
@@ -396,18 +396,18 @@ pub(super) fn recovery_contract(
                 &candidate.original.display().to_string(),
                 layout,
             );
-            // The checkpoint's own path was a UUID-named file inside RSpice's
-            // bookkeeping; the list above picks a candidate by its age.
+            // The autosave's own path is a UUID-named file inside RSpice's
+            // bookkeeping; the list above picks one by its age.
             match &candidate.integrity {
                 RecoveryIntegrity::Verified { baseline_note, .. } => {
                     // "Recommended action" said what the two buttons under it
-                    // already do. Only an unexpected baseline has a row.
+                    // already do. Only an unexpected saved version has a row.
                     if let Some(note) = baseline_note {
-                        recovery_contract_row(ui, "Saved baseline", note, layout);
+                        recovery_contract_row(ui, "Saved version", note, layout);
                     }
                 }
                 RecoveryIntegrity::Invalid(error) => {
-                    recovery_contract_row(ui, "Integrity", error, layout);
+                    recovery_contract_row(ui, "Problem", error, layout);
                 }
             }
         });

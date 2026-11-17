@@ -30,41 +30,39 @@ pub enum ProjectLifecycleError {
     #[error("safe mode opened this project read-only; project writes are blocked for this launch")]
     SafeModeReadOnly,
     #[error(
-        "a local simulation is running; stop it before replacing project-owned plan, model, or result state"
+        "a simulation is running; stop it before replacing the project's plans, models or results"
     )]
     ActiveRun,
-    #[error("the active document has no accepted project baseline to restore")]
+    #[error("the active document has no saved version to revert to")]
     NoAcceptedBaseline,
-    #[error(
-        "the active document cannot be closed because it is the only presented design document"
-    )]
+    #[error("the active document cannot be closed: it is the only design document open")]
     LastPresentedDocument,
     #[error(
         "the project changed while the file picker was open; the replacement was cancelled to preserve newer edits"
     )]
     ReplacementChanged,
-    #[error("another project lifecycle operation is already in progress")]
+    #[error("the project is already being opened, saved or closed")]
     TransactionInProgress,
     #[cfg(not(target_arch = "wasm32"))]
     #[error(
-        "the canonical project could not be accepted at startup ({0}); use Save as project copy to preserve it"
+        "the project file could not be read at startup ({0}); use Save as project copy to keep this work"
     )]
     UnreadableCanonical(String),
     #[cfg(not(target_arch = "wasm32"))]
     #[error(
-        "a project copy cannot replace the active project's canonical file; choose a different destination"
+        "a project copy cannot replace the open project's own file; choose a different destination"
     )]
     CopyDestinationIsCanonical,
     #[error(
-        "browser canonical-binding restoration or promotion is still in progress; wait for it to finish before saving"
+        "the browser is still reconnecting this project to its saved copy; wait for it to finish before saving"
     )]
     BrowserBindingRestorePending,
     #[error(
-        "the canonical browser project changed outside RSpice; reopen it or save an independent project copy"
+        "the project saved in this browser changed outside RSpice; reopen it or save a project copy"
     )]
     BrowserExternalChange,
     #[error(
-        "the active document or accepted project changed while the revert review was open; nothing was reverted"
+        "the active document or the saved project changed while the revert review was open; nothing was reverted"
     )]
     RevertReviewStale,
     #[error("project state is invalid: {0}")]

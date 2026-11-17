@@ -72,7 +72,7 @@ pub fn autosave_tick(
             model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
-                "Autosave is writing checkpoints again.",
+                "Autosave is working again.",
             );
         }
         Err(_) | Ok(_) => {}
@@ -112,30 +112,28 @@ pub fn restore_dialog(
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string());
-    let age = checkpoint_age(candidate.binding.identity.modified_unix_ms);
+    let modified = candidate.binding.identity.modified_unix_ms;
+    let age = autosave_age(modified);
+    let time = autosave_time(modified);
     let can_discard = candidate.can_discard();
 
     let choice = Dialog::new("Restore autosave?", "Restore")
         .description(
-            "Review an interrupted autosave checkpoint and choose whether to restore it, keep it, or discard it when safe.",
+            "An interrupted session left an autosave of this drawing. Restore it, keep it, or discard it.",
         )
         .size(DialogSize::Transaction)
         .ghost(if can_discard {
             "Discard"
         } else {
-            "Keep checkpoint"
+            "Keep autosave"
         })
-        .hint("Esc opens the file and keeps the checkpoint.")
+        .hint("Esc opens the saved file and keeps the autosave.")
         .show(ctx, |ui| {
             let c = Tokens::get(ui.ctx()).color;
             ui.label(
-                egui::RichText::new(format!(
-                    "An interrupted autosave of '{file_name}' from {age} is available. \
-                     Restore its exact reviewed bytes, or open the saved file and keep \
-                     the checkpoint."
-                ))
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(c.text_dim),
+                egui::RichText::new(restore_sentence(&file_name, &time, &age))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(c.text_dim),
             );
         });
 
@@ -149,7 +147,7 @@ pub fn restore_dialog(
             )
             .and_then(|bytes| {
                 let text = std::str::from_utf8(&bytes)
-                    .map_err(|error| format!("checkpoint is not UTF-8 JSON: {error}"))?;
+                    .map_err(|error| format!("the autosave is not UTF-8 JSON: {error}"))?;
                 crate::io::schematic_io::load_schematic_text(text, Some(&path))
                     .map_err(|error| error.to_string())
             });
@@ -168,7 +166,7 @@ pub fn restore_dialog(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!(
-                            "Autosave restore failed because the checkpoint changed or could not be verified: {error}"
+                            "The autosave could not be restored: it changed or could not be read: {error}"
                         ),
                     );
                     None
@@ -188,7 +186,7 @@ pub fn restore_dialog(
                             LogSeverity::Error,
                             LogSource::Studio,
                             format!(
-                                "Autosave discard failed; the checkpoint was not deleted: {error}"
+                                "The autosave could not be discarded and is still on disk: {error}"
                             ),
                         );
                         None
@@ -211,11 +209,41 @@ pub fn restore_dialog(
     }
 }
 
-/// Coarse human age of a checkpoint ("3 min ago"), from the modification
+/// What the dialog says the autosave is: the drawing, when it was saved on
+/// the reader's clock, and how long ago.
+fn restore_sentence(file_name: &str, time: &str, age: &str) -> String {
+    format!(
+        "Restore the autosaved drawing from {time} ({age}), or open the saved \
+         '{file_name}' and keep the autosave."
+    )
+}
+
+/// When the autosave was written, on the reader's clock: an autosave is this
+/// computer's own record of its interrupted work.
+fn autosave_time(modified_unix_ms: u64) -> String {
+    (modified_unix_ms != 0)
+        .then(|| crate::time_compat::local_date_time(modified_unix_ms))
+        .flatten()
+        .map_or_else(
+            || "an earlier session".to_owned(),
+            |stamp| {
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    stamp.year(),
+                    u8::from(stamp.month()),
+                    stamp.day(),
+                    stamp.hour(),
+                    stamp.minute()
+                )
+            },
+        )
+}
+
+/// Coarse human age of an autosave ("3 min ago"), from the modification
 /// time read once when it was found and offered: the dialog asks the clock,
 /// never the file.
 #[cfg(not(target_arch = "wasm32"))]
-fn checkpoint_age(modified_unix_ms: u64) -> String {
+fn autosave_age(modified_unix_ms: u64) -> String {
     let elapsed = crate::time_compat::checked_unix_time_ms()
         .ok()
         .filter(|_| modified_unix_ms != 0)
@@ -223,5 +251,30 @@ fn checkpoint_age(modified_unix_ms: u64) -> String {
     match elapsed {
         None => "an earlier session".to_owned(),
         Some(age) => crate::time_compat::relative_age(std::time::Duration::from_millis(age)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dialog names what it restores and when, in the reader's words:
+    /// the autosaved drawing, at a time on the clock.
+    #[test]
+    fn the_restore_sentence_names_the_autosaved_drawing_and_its_time() {
+        let sentence = restore_sentence(
+            "amp.rsch",
+            &autosave_time(1_760_000_000_000),
+            &autosave_age(1_760_000_000_000),
+        );
+        assert!(
+            sentence.starts_with("Restore the autosaved drawing from 20"),
+            "{sentence}"
+        );
+        assert!(sentence.contains("'amp.rsch'"), "{sentence}");
+        for internal in ["reviewed bytes", "checkpoint"] {
+            assert!(!sentence.contains(internal), "{sentence}");
+        }
+        assert_eq!(autosave_time(0), "an earlier session");
     }
 }

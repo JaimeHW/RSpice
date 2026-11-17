@@ -433,9 +433,9 @@ fn revision_history_builds_its_rows_when_it_opens_not_every_frame() {
     assert_eq!(builds(), 0);
 }
 
-/// "Restore autosave?" states the checkpoint's age from the time it was
-/// found with, not from the file on every frame: the file is gone here, and
-/// the dialog still says how old the autosave is.
+/// "Restore autosave?" states the autosave's time and age from when it was
+/// found, not from the file on every frame: the file is gone here, and the
+/// dialog still says how old the autosave is.
 #[test]
 fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
     let root = unique_temp_dir("autosave-age");
@@ -461,7 +461,11 @@ fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
     for _ in 0..=IDLE_FRAMES {
         text = painted(&app_frame(&ctx, &mut app, Vec::new()));
     }
-    assert!(text.contains("from 7 min ago"), "{text}");
+    assert!(
+        text.contains("Restore the autosaved drawing from "),
+        "{text}"
+    );
+    assert!(text.contains("(7 min ago)"), "{text}");
     assert_eq!(take_disk_reads(), DiskReads::default());
     let _ = std::fs::remove_dir_all(root);
 }

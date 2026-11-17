@@ -219,10 +219,10 @@ impl SaveContinuationEvent {
 
     pub fn failure_message(&self) -> Option<&str> {
         match self {
-            Self::Cancelled(_) => Some("The canonical save was cancelled."),
-            Self::Conflict(_) => Some(
-                "The canonical project changed outside RSpice; reopen it or save an independent project copy.",
-            ),
+            Self::Cancelled(_) => Some("The save was cancelled."),
+            Self::Conflict(_) => {
+                Some("The project file changed outside RSpice; reopen it or save a project copy.")
+            }
             Self::Failed(_, message) | Self::PublishedButNotAdopted(_, message) => Some(message),
             Self::Saved(_) | Self::SavedWithNewerChanges(_) => None,
         }

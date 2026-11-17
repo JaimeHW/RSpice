@@ -96,7 +96,7 @@ pub(crate) fn open_project_revision_history(
             expected_journal: model.schematic.document().validated_revisions.clone(),
             authority: Some(SchematicEditAuthority::capture(model)),
             error: Some(format!(
-                "The validated schematic revision journal failed integrity validation: {error}"
+                "The schematic's revision history could not be read intact: {error}"
             )),
             ..ProjectRevisionHistoryDialogState::default()
         };
@@ -295,8 +295,7 @@ fn restore_selected_revision(cx: &mut Cx<'_, ProjectFeature>, rows: &[ProjectAud
         }
         if dialog.expected_journal != cx.model.schematic.document().validated_revisions {
             return Err(
-                "The validated revision journal changed. Close and reopen revision history."
-                    .to_owned(),
+                "The revision history changed since it opened. Close and reopen it.".to_owned(),
             );
         }
         let selected = rows
@@ -349,9 +348,7 @@ fn history_authority_error(
     dialog
         .authority
         .as_ref()
-        .ok_or_else(|| {
-            "Revision-history authority is unavailable. Close and reopen the workflow.".to_owned()
-        })
+        .ok_or_else(|| "Revision history is out of date. Close and reopen it.".to_owned())
         .and_then(|authority| authority.validate(model, "Project revision history"))
         .err()
 }
@@ -644,7 +641,7 @@ fn append_schematic_rows(
             time: format_revision_time(record.created_unix_ms()),
             actor: record.author().to_owned(),
             change: if record.is_accepted_baseline() {
-                "Accepted schematic baseline".to_owned()
+                "Schematic accepted".to_owned()
             } else {
                 record.revision_note().to_owned()
             },
@@ -1451,9 +1448,7 @@ mod tests {
             if journal_moved {
                 assert_eq!(
                     dialog.error.as_deref(),
-                    Some(
-                        "The validated revision journal changed. Close and reopen revision history."
-                    )
+                    Some("The revision history changed since it opened. Close and reopen it.")
                 );
                 assert_eq!(
                     model.schematic.document().components.len(),
