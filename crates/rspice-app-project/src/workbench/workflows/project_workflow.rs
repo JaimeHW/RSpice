@@ -512,6 +512,25 @@ pub fn save_native_scope(
         }
         Err(error) => {
             let message = error.to_string();
+            // A file changed since this window opened it is a question, not a
+            // failure: what differs is shown, and the reader chooses.
+            if let Some(conflict) = crate::workbench::lifecycle::project_lifecycle::conflict_for(
+                &parts.lifecycle,
+                &error,
+                path,
+                authority,
+            ) {
+                parts.lifecycle.model.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!(
+                        "Not saved: {} changed on disk after this window opened it.",
+                        path.display()
+                    ),
+                );
+                parts.lifecycle.platform.project_lifecycle.save_conflict = Some(conflict);
+                return Err(message);
+            }
             report_lifecycle_error(
                 parts.lifecycle.model,
                 parts.workbench,

@@ -550,6 +550,18 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     },
     #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {
+        key: DialogKey("services.save_conflict"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| state.platform.project_lifecycle.save_conflict.is_some()),
+        render: |app, ctx| {
+            crate::workbench::app_state::services_access::process_save_conflict_dialog(
+                &mut app.state,
+                ctx,
+            );
+        },
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    DialogSpec {
         key: DialogKey("services.autosave_restore"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.platform.pending_autosave_restore.is_some()),

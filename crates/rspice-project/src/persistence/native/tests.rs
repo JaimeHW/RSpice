@@ -331,6 +331,36 @@ fn native_open_accepts_only_the_snapshot_read_after_recovery() {
 }
 
 #[test]
+fn a_folder_that_cannot_be_written_is_read_as_it_stands() {
+    let path = Path::new("canonical.rspiceproj");
+    let file = project();
+    let (bytes, digest) = serialized_project(&file).unwrap();
+    let storage = Storage {
+        bytes: RefCell::new(Some(bytes)),
+        recovery_error: RefCell::new(Some(PersistenceError::NotWritable(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )))),
+        ..Storage::default()
+    };
+    let (decoded, binding) = NativeBinding::open(&storage, path, NoSourceFiles)
+        .expect("a project in a folder that cannot be written still opens");
+    assert_eq!(
+        decoded.file.workspace.project.id(),
+        file.workspace.project.id()
+    );
+    assert_eq!(binding.accepted_digest, digest);
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+
+    // Any other failure to reconcile still stops the open before the read.
+    *storage.recovery_error.borrow_mut() = Some(PersistenceError::LeaseBusy(path.to_path_buf()));
+    assert!(matches!(
+        NativeBinding::open(&storage, path, NoSourceFiles),
+        Err(PersistenceError::LeaseBusy(_))
+    ));
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile"]);
+}
+
+#[test]
 fn native_restore_checks_receipt_recovery_bytes_and_decoded_identity_in_order() {
     let path = Path::new("canonical.rspiceproj");
     let file = project();

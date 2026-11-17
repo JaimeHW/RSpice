@@ -104,9 +104,7 @@ pub(super) fn session_block_reason(
         );
     }
     if model.safe_mode.project_read_only() {
-        return Some(
-            "This project is open read-only in safe mode, so it cannot receive an instance.",
-        );
+        return Some("This project is open read-only, so it cannot receive an instance.");
     }
     if matches!(route, PlaceRoute::Retain { .. }) && state.models_view.model_import_in_progress {
         return Some("Another model-source operation is still running.");

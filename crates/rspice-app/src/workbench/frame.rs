@@ -153,6 +153,15 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     }
     rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
     rspice_app_workbench::workbench::chrome::toolbar::show(root, app, layout);
+    // Why the project is read-only, and the action that changes it, hang
+    // under the toolbar in every workspace.
+    if rspice_app_project::workbench::project::ProjectFeature::show_read_only_notice(
+        &mut features::cx(app),
+        root,
+        layout,
+    ) {
+        app.after_contribution();
+    }
     // egui allocates same-edge side panels from the outside inward in call
     // order. Reserve the canonical 51 px activity rail first, then place the
     // navigator between that rail and the active document surface.
@@ -944,6 +953,13 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     }
     rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
     rspice_app_workbench::workbench::chrome::toolbar::show(root, app, layout);
+    if rspice_app_project::workbench::project::ProjectFeature::show_read_only_notice(
+        &mut features::cx(app),
+        root,
+        layout,
+    ) {
+        app.after_contribution();
+    }
     if layout.show_activity_rail {
         rspice_app_workbench::workbench::chrome::activity_rail::show(root, app);
     }

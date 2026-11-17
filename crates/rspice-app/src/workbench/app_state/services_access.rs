@@ -140,6 +140,12 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
     project_lifecycle::reset_for_new_project(state);
 }
 
+/// Take the project another window holds for writing all the same.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn open_anyway(state: &mut AppState) -> bool {
+    project_lifecycle::open_anyway(state)
+}
+
 /// Close the open project, after resetting what the features kept of it.
 pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.models.on_project_changed();
@@ -562,6 +568,40 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
             state
                 .workbench
                 .activate(rspice_app_state::workbench::workspace::Workspace::Project);
+        }
+    }
+}
+
+/// Ask what to do with a save that met its file changed since this window
+/// opened it, and do it: keep the work as a new project, replace the saved
+/// file, open the saved file in its place, or write nothing.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn process_save_conflict_dialog(state: &mut AppState, ctx: &egui::Context) {
+    use rspice_app_project::workbench::app::dialogs::project::save_conflict::{
+        SaveConflictAnswer, save_conflict_dialog,
+    };
+    let Some(conflict) = state.platform.project_lifecycle.save_conflict.as_ref() else {
+        return;
+    };
+    let Some(answer) = save_conflict_dialog(conflict, ctx) else {
+        return;
+    };
+    let Some(conflict) = state.platform.project_lifecycle.save_conflict.take() else {
+        return;
+    };
+    match answer {
+        SaveConflictAnswer::SaveCopy => {
+            state.save_project_copy();
+        }
+        SaveConflictAnswer::SaveOver => {
+            project_lifecycle::accept_saved_file_for_overwrite(state, &conflict);
+            let _ = state.save_project_scope(project_lifecycle::SaveScope::AllDocuments);
+        }
+        SaveConflictAnswer::OpenSaved => {
+            state.load_project_from_path(&conflict.path);
+        }
+        SaveConflictAnswer::Keep => {
+            state.prompt("Nothing was saved; the changes here are still unsaved.");
         }
     }
 }

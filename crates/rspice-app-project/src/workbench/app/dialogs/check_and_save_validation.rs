@@ -121,13 +121,13 @@ impl CheckAndSaveValidationReport {
                 "No project is open.",
             );
         }
-        if reads.model.safe_mode.project_read_only() {
+        if let Some(reason) = reads.model.safe_mode.read_only_reason() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "authority",
-                "safe-mode-read-only",
-                "Safe mode opened this project read-only.",
+                "project-read-only",
+                reason,
             );
         }
         if reads.model.schematic.session.read_only || reads.model.active_view_read_only() {

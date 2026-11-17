@@ -26,13 +26,15 @@ impl NativeBinding {
 
 impl NativeBinding {
     /// Explicit opening accepts the exact bytes read after recovery completes.
+    /// A folder that cannot be written is read as it stands: no publication
+    /// can be completed there from here, and the project opens read-only.
     pub fn open(
         storage: &impl NativeProjectStorage,
         path: &Path,
         source_files: impl HierarchySourceFiles,
     ) -> Result<(DecodedProject, Self), PersistenceError> {
         let canonical_path = storage.normalize_path(path)?;
-        storage.reconcile_publication(&canonical_path)?;
+        reconcile_where_writable(storage, &canonical_path)?;
         let bytes = storage.read_project(&canonical_path)?;
         let accepted_digest = bytes.digest();
         let project = bytes.decode(Some(&canonical_path), source_files)?;
@@ -57,7 +59,7 @@ impl NativeBinding {
         receipt.validate_session_project(session_project_id)?;
         let canonical_path = storage.normalize_path(path)?;
         receipt.validate_canonical_path(&canonical_path)?;
-        storage.reconcile_publication(&canonical_path)?;
+        reconcile_where_writable(storage, &canonical_path)?;
         let Some(project) = storage.read_project(&canonical_path)?.decode_if_digest(
             receipt.accepted_digest,
             Some(&canonical_path),
@@ -74,6 +76,19 @@ impl NativeBinding {
                 accepted_digest: receipt.accepted_digest,
             },
         ))
+    }
+}
+
+/// Complete an interrupted publication before the file is read, where this
+/// window can write. Where it cannot, the file is read as it stands; the
+/// evidence stays for a window that can.
+fn reconcile_where_writable(
+    storage: &impl NativeProjectStorage,
+    canonical_path: &Path,
+) -> Result<(), PersistenceError> {
+    match storage.reconcile_publication(canonical_path) {
+        Ok(()) | Err(PersistenceError::NotWritable(_)) => Ok(()),
+        Err(error) => Err(error),
     }
 }
 

@@ -27,8 +27,10 @@ pub enum SaveScope {
 pub enum ProjectLifecycleError {
     #[error("no project is open")]
     NoProject,
-    #[error("safe mode opened this project read-only; project writes are blocked for this launch")]
-    SafeModeReadOnly,
+    /// The project is open read-only: safe mode opened it so, or this window
+    /// cannot or should not write its file. The text says which.
+    #[error("{0}")]
+    ReadOnly(String),
     #[error(
         "a simulation is running; stop it before replacing the project's plans, models or results"
     )]

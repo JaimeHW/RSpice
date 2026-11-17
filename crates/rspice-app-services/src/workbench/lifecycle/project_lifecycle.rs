@@ -7,9 +7,15 @@
 
 mod accepted_project;
 mod dirty_answer;
+#[cfg(not(target_arch = "wasm32"))]
+mod open_access;
 mod persistence;
 mod result_cache;
+#[cfg(not(target_arch = "wasm32"))]
+mod save_conflict;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use open_access::open_anyway;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::{
     start_browser_checkpoint_delete, start_browser_checkpoint_list,
@@ -20,6 +26,10 @@ pub(crate) use persistence::{
 pub use rspice_project::persistence::native::DestinationAuthority;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::{NativeCopyDestination, NativeSaveDestination};
+#[cfg(not(target_arch = "wasm32"))]
+pub use save_conflict::{
+    ConflictDifference, ConflictSide, SaveConflict, accept_saved_file_for_overwrite, conflict_for,
+};
 use std::rc::Rc;
 mod registry;
 mod source;
@@ -106,6 +116,13 @@ pub struct ProjectLifecycleState {
     accepted_binding: Option<PersistenceBinding>,
     #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
+    /// This window's hold on the open project's file, while it has one.
+    #[cfg(not(target_arch = "wasm32"))]
+    open_lease: Option<Rc<crate::io::durable_file::open_lease::OpenLease>>,
+    /// A save that met its file changed since this window opened it, waiting
+    /// for the reader's answer.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub save_conflict: Option<SaveConflict>,
     pub result_cache: result_cache::ResultCache,
     /// The dirty comparison held for the working state it was made for.
     dirty_answer: dirty_answer::DirtyAnswer,
@@ -530,6 +547,7 @@ pub fn bind_restored_project(state: &mut dyn LifecycleSourceMut) {
                             .platform
                             .project_lifecycle
                             .restore_project(baseline, binding);
+                        open_access::claim(state);
                         state.platform.browser_project_binding_receipt = None;
                     }
                     Err(error) => {
@@ -734,6 +752,7 @@ pub fn accept_loaded_project(
     #[cfg(not(target_arch = "wasm32"))]
     {
         state.platform.project_lifecycle.unreadable_native_binding = None;
+        open_access::claim(state);
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -780,6 +799,7 @@ pub fn reset_for_new_project(state: &mut dyn LifecycleSourceMut) {
         authority,
         ..ProjectLifecycleState::default()
     };
+    state.model.safe_mode.opened_read_only = None;
     state
         .platform
         .project_lifecycle
@@ -819,6 +839,7 @@ pub fn mark_project_closed(state: &mut dyn LifecycleSourceMut) {
         authority,
         ..ProjectLifecycleState::default()
     };
+    state.model.safe_mode.opened_read_only = None;
     state
         .platform
         .project_lifecycle
@@ -954,7 +975,7 @@ pub fn save_native(
     let (destination, scope) = {
         let state = &mut state.lifecycle_parts();
         require_open_project(state.platform)?;
-        require_project_writable(state.model)?;
+        require_destination_writable(state.model, state.platform, path, authority)?;
         let destination = NativeSaveDestination::new(
             &persistence::NativeStorage,
             path,
@@ -1081,7 +1102,11 @@ pub fn begin_results_save(
 ) -> Result<Option<TransactionId>, ProjectLifecycleError> {
     let state = &mut state.lifecycle_parts();
     require_open_project(state.platform)?;
-    require_project_writable(state.model)?;
+    let authority = match &then {
+        AfterResultsKept::Save { authority, .. } => *authority,
+        AfterResultsKept::SaveCopy { .. } => DestinationAuthority::UserSelected,
+    };
+    require_destination_writable(state.model, state.platform, path, authority)?;
     let results = state
         .platform
         .project_lifecycle
@@ -1206,7 +1231,12 @@ pub fn save_project_copy_native(
 ) -> Result<(), ProjectLifecycleError> {
     let state = &mut state.lifecycle_parts();
     require_open_project(state.platform)?;
-    require_project_writable(state.model)?;
+    require_destination_writable(
+        state.model,
+        state.platform,
+        path,
+        DestinationAuthority::UserSelected,
+    )?;
     let destination = NativeCopyDestination::new(
         &persistence::NativeStorage,
         path,
@@ -1669,6 +1699,7 @@ fn adopt_successful_save(
     {
         state.platform.native_project_binding_receipt = Some(native_receipt);
         state.platform.browser_project_binding_receipt = None;
+        open_access::follow_save(state);
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -2169,9 +2200,35 @@ pub fn require_open_project(platform: &PlatformState) -> Result<(), ProjectLifec
 }
 
 fn require_project_writable(model: &Model) -> Result<(), ProjectLifecycleError> {
-    (!model.safe_mode.project_read_only())
-        .then_some(())
-        .ok_or(ProjectLifecycleError::SafeModeReadOnly)
+    match model.safe_mode.read_only_reason() {
+        Some(reason) => Err(ProjectLifecycleError::ReadOnly(reason)),
+        None => Ok(()),
+    }
+}
+
+/// A save to a file the reader picked may leave a project opened read-only
+/// for a place this window can write: that is how a project on a read-only
+/// share, or one another window holds, is kept. Safe mode writes nothing,
+/// and the open file itself stays as read-only as it was opened.
+#[cfg(not(target_arch = "wasm32"))]
+fn require_destination_writable(
+    model: &Model,
+    platform: &PlatformState,
+    path: &Path,
+    authority: DestinationAuthority,
+) -> Result<(), ProjectLifecycleError> {
+    let opened_read_only_elsewhere = model.safe_mode.opened_read_only.is_some()
+        && !(model.safe_mode.active && model.safe_mode.applied.open_project_read_only);
+    if authority == DestinationAuthority::UserSelected && opened_read_only_elsewhere {
+        let canonical = platform.project_lifecycle.canonical_native_path();
+        let same_file = canonical.is_some_and(|canonical| {
+            persistence::normalize_native_path(path).is_ok_and(|picked| picked == canonical)
+        });
+        if !same_file {
+            return Ok(());
+        }
+    }
+    require_project_writable(model)
 }
 
 /// How the model's part of a cell-view revert left the view.

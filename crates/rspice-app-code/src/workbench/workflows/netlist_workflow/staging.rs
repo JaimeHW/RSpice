@@ -701,8 +701,8 @@ pub fn owned_netlist_profile_candidate(
     if !project_open {
         return Err("Open the project before reviewing its netlist profile.".to_owned());
     }
-    if model.safe_mode.project_read_only() {
-        return Err("The project is read-only in the current safe mode.".to_owned());
+    if let Some(reason) = model.safe_mode.read_only_reason() {
+        return Err(reason);
     }
     let descriptor = model
         .workspace

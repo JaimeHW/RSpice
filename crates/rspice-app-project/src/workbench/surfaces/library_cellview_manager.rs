@@ -679,7 +679,7 @@ fn project_write_block_reason(cx: &Cx<'_, ProjectFeature>) -> Option<&'static st
     if !cx.platform.project_lifecycle.is_open() {
         Some("Open a project before authoring symbols.")
     } else if cx.model.safe_mode.project_read_only() {
-        Some("The project is read-only in local safe mode.")
+        Some("The project is open read-only.")
     } else if !cx
         .model
         .library_manager

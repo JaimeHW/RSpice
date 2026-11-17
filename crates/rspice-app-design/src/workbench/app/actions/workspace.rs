@@ -359,9 +359,12 @@ pub fn hierarchy_master_for_component(
 /// Names the owner of the refusal, in the order
 /// [`Model::active_view_read_only`] consults them.
 pub(crate) fn read_only_master_message(model: &Model) -> String {
-    if model.safe_mode.project_read_only() {
+    if model.safe_mode.safe_mode_read_only() {
         return "Safe mode opened this project read-only - restart without safe mode to edit"
             .to_owned();
+    }
+    if let Some(opened) = &model.safe_mode.opened_read_only {
+        return opened.sentence();
     }
     if model.workspace.content.active_read_only_reference() {
         return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
@@ -382,8 +385,10 @@ pub fn deny_read_only_edit(model: &Model, wb: &mut WorkbenchSession) -> bool {
         .schematic_views
         .get(&model.workspace.content.active_key())
         .cloned();
-    let message = if model.safe_mode.project_read_only() {
+    let message = if model.safe_mode.safe_mode_read_only() {
         "Safe mode is read-only; no design data was changed.".to_owned()
+    } else if let Some(opened) = &model.safe_mode.opened_read_only {
+        format!("{} No design data was changed.", opened.sentence())
     } else if model.active_view_read_only() {
         read_only_master_message(model)
     } else if let Some(holder) = live_lock_holder {

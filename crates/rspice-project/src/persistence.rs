@@ -103,6 +103,11 @@ pub enum PersistenceError {
     #[cfg(not(target_arch = "wasm32"))]
     #[error("another RSpice writer owns the destination lease: {0}")]
     LeaseBusy(PathBuf),
+    /// The project's folder cannot be written from here, as a read-only
+    /// share, medium or folder answers.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("the project's folder cannot be written: {0}")]
+    NotWritable(std::io::Error),
     #[cfg(not(target_arch = "wasm32"))]
     #[error(transparent)]
     Io(#[from] std::io::Error),

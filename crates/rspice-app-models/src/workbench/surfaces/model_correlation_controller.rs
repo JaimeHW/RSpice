@@ -398,7 +398,7 @@ fn preflight_mutation(cx: &Cx<'_, ModelsFeature>) -> Result<(), String> {
     }
     if cx.model.safe_mode.project_read_only() {
         return Err(
-            "Measurement correlation cannot be changed while safe mode keeps the project read-only"
+            "Measurement correlation cannot be changed while the project is open read-only"
                 .to_owned(),
         );
     }

@@ -23,6 +23,11 @@ fn native_storage_error(error: CompareExchangeError) -> PersistenceError {
             recovery_paths,
         },
         CompareExchangeError::LeaseBusy(path) => PersistenceError::LeaseBusy(path),
+        CompareExchangeError::Io(error)
+            if crate::io::durable_file::open_lease::is_not_writable(&error) =>
+        {
+            PersistenceError::NotWritable(error)
+        }
         CompareExchangeError::Io(error) => PersistenceError::Io(error),
         // Publication maps this to ExternalChange at its call site. Retain
         // the existing diagnostic if another storage operation reports it.

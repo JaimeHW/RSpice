@@ -125,7 +125,9 @@ fn safe_mode_read_only_policy_blocks_native_project_writes_before_publication() 
     )
     .expect_err("read-only safe mode must reject project writes");
 
-    assert!(matches!(error, ProjectLifecycleError::SafeModeReadOnly));
+    assert!(
+        matches!(&error, ProjectLifecycleError::ReadOnly(reason) if reason == "Safe mode opened this project read-only.")
+    );
     assert!(!path.exists());
 }
 

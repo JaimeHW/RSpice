@@ -125,6 +125,11 @@ impl OpenLease {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Whether this is the lease of the project at `project`.
+    pub fn covers(&self, project: &Path) -> bool {
+        open_lease_path(project) == self.path
+    }
 }
 
 impl std::fmt::Debug for OpenLease {

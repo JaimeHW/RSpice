@@ -11,6 +11,7 @@ pub(crate) mod dependency_status;
 pub mod health;
 pub mod library_dialogs;
 mod new_project;
+pub mod read_only_notice;
 mod revision_history;
 pub mod workspace_state;
 

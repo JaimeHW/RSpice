@@ -212,8 +212,8 @@ impl SelectionBulkEditAuthority {
 
     fn validate_commit(&self, model: &Model) -> Result<(), String> {
         self.active.validate(model, TITLE)?;
-        if model.safe_mode.project_read_only() {
-            return Err("Safe mode has opened the project read-only.".to_owned());
+        if let Some(reason) = model.safe_mode.read_only_reason() {
+            return Err(reason);
         }
         if let Some(reason) = self.stale_reason(model) {
             return Err(reason);

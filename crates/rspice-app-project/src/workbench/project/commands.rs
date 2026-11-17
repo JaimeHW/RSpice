@@ -453,6 +453,9 @@ pub enum ProjectRequest {
     OpenCreateHierarchy,
     /// Save the validated revision the open Check and save dialog reviewed.
     CommitCheckAndSave,
+    /// Take the project another window holds for writing all the same, as
+    /// the read-only notice offers.
+    OpenAnyway,
     /// Save a copy of the project that keeps its current technology, which
     /// the technology attachment dialog offers in place of a migration, and
     /// log it once it is saved.

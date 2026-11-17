@@ -89,7 +89,7 @@ impl SymbolInPlaceRefusal {
             Self::CellNotLoaded => "the instance's library cell is not loaded",
             Self::ModuleWithoutSymbol => "the Verilog-A module has no symbol view",
             Self::NoSymbolView => "the cell has no symbol view",
-            Self::SafeMode => "safe mode opened this project read-only",
+            Self::SafeMode => "the project is open read-only",
             Self::ReadOnlyLibrary => "the symbol's library is read-only",
             Self::UnloadableSymbol => "the symbol view does not load",
         }
@@ -105,7 +105,7 @@ impl SymbolInPlaceRefusal {
             Self::CellNotLoaded => "The instance's library cell is not loaded",
             Self::ModuleWithoutSymbol => "The Verilog-A module has no symbol view",
             Self::NoSymbolView => "The cell has no symbol view",
-            Self::SafeMode => "Safe mode opened this project read-only",
+            Self::SafeMode => "The project is open read-only",
             Self::ReadOnlyLibrary => "The symbol's library is read-only",
             Self::UnloadableSymbol => "The symbol view does not load",
         }

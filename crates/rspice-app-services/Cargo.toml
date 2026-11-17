@@ -14,7 +14,7 @@ doctest = false
 [features]
 # The services' test helpers and fixtures, for the application's own tests.
 # Enabled only through rspice-app's dev-dependency.
-test-support = ["rspice-app-state/test-support", "dep:rspice-simulation-contract"]
+test-support = ["rspice-app-state/test-support", "dep:rspice-simulation-contract", "rspice-output/test-support"]
 # The project format's generated Verilog-A binding test, as rspice-app's
 # feature of the same name runs it.
 generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog", "rspice-simulation/generated-veriloga-catalog"]

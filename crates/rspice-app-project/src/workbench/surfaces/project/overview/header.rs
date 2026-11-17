@@ -168,7 +168,7 @@ pub(super) fn overview_header(
                         .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
                             reason
                         } else if cx.model.safe_mode.project_read_only() {
-                            "Safe mode opened this project read-only."
+                            "The project is open read-only."
                         } else if !has_writable_library {
                             "Create a writable design library first."
                         } else {
