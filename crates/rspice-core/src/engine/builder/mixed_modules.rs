@@ -303,6 +303,12 @@ pub(super) fn try_build_mixed_signal_instance(
     // in-design discipline boundary joins to a continuous net, or a variable
     // a SPICE leaf reads. It converts as a deck-level port does.
     for port in &artifact.hir.hoisted_ports {
+        if let Some(discipline) = &port.discipline {
+            circuit.port_disciplines.insert(
+                (element.name.clone(), port.signal.to_string()),
+                discipline.to_string(),
+            );
+        }
         let node = super::hdl_spice_leaves::hoisted_node(circuit, element, artifact, &port.net)
             .ok_or_else(|| {
                 refuse(

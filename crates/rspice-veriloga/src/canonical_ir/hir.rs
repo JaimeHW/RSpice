@@ -1201,6 +1201,11 @@ pub struct HirHoistedPort {
     /// The way the port faces, from the design's side.
     pub direction: crate::ast::PortDirection,
     pub net: HirExternalNet,
+    /// The port's discrete discipline, declared or resolved from the ports
+    /// it joins below (Annex F.2.1); `None` for the default. The connect
+    /// statement that converts the port is the one that names it.
+    #[serde(default)]
+    pub discipline: Option<SmolStr>,
 }
 
 /// One SPICE leaf of the design: an instance of a deck cell, or of an Annex E

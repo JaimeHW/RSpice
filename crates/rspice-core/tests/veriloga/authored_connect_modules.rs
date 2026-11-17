@@ -468,6 +468,69 @@ endconnectrules
     assert!((voltage(&result, "y", 15e-9) - 2.0 * 1.1).abs() < 1e-6);
 }
 
+/// A discrete port that meets a continuous net inside the design, and a
+/// `reg` that drives a deck cell's port, are each converted by a shipped
+/// module the deck materializes; each selects with its own discipline at the
+/// circuit node: the `cmos2` statement's 2.2 V, not the default family's
+/// 3.3 V statement they took when the deck saw every such port as `logic`.
+#[test]
+fn a_port_linked_inside_a_design_converts_through_its_own_family() {
+    const FAMILIES: &str = r#"
+`timescale 1ns/1ps
+discipline cmos1; domain discrete; enddiscipline
+discipline cmos2; domain discrete; enddiscipline
+connectrules fam;
+  connect d2a #(.vsup(1.1)) input cmos1, output electrical;
+  connect d2a #(.vsup(2.2)) input cmos2, output electrical;
+  connect d2a #(.vsup(3.3));
+endconnectrules
+"#;
+    let boundary = Source::new(&format!(
+        "{FAMILIES}
+module drv(out); output out; cmos2 out; reg out; initial begin out = 0; #10 out = 1; end endmodule
+module ld(a, y); inout a; electrical a; output y; electrical y;
+  analog begin I(a) <+ V(a) / 1e6; V(y) <+ V(a); end
+endmodule
+module top(y); output y; electrical y; electrical n; drv d(n); ld l(n, y); endmodule
+"
+    ));
+    let leaf = Source::new(&format!(
+        "{FAMILIES}
+module top(y); output y; electrical y;
+  cmos2 q; reg q; initial begin q = 0; #10 q = 1; end
+  sense u(q, y);
+endmodule
+"
+    ));
+    for (label, deck) in [
+        (
+            "boundary",
+            format!(
+                "* hoisted family port\nXT y top\nRY y 0 1k\n.va \"{}\" top module=top\n.end\n",
+                boundary.path()
+            ),
+        ),
+        (
+            "leaf",
+            format!(
+                "* reg on a deck cell\n.subckt sense a y\nR1 a 0 1meg\nE1 y 0 a 0 1\n.ends\n\
+                 XT y top\nRY y 0 1k\n.hdl \"{}\" module=top\n.end\n",
+                leaf.path()
+            ),
+        ),
+    ] {
+        let deck = Netlist::parse(&deck).unwrap();
+        let result = Engine::default().run_tran(&deck, 20e-9, 100e-12).unwrap();
+        assert!(voltage(&result, "y", 5e-9).abs() < 1e-9, "{label}");
+        // The shipped d2a's 20 ohm into the 1 Mohm load.
+        let high = voltage(&result, "y", 15e-9);
+        assert!(
+            (high - 2.2 * 1e6 / (1e6 + 20.0)).abs() < 1e-6,
+            "{label}: {high}"
+        );
+    }
+}
+
 /// Section 7.8.4 insertion rule 3: the ports on one net that select one
 /// connect module in `merged` mode (section 7.8.3's default) share one
 /// instance, which reads their resolved drive; in `split` mode each has its

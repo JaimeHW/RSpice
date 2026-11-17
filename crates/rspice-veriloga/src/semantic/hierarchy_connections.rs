@@ -179,7 +179,7 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
 /// Figure 7-3's `digital_blk` joins `cmos1`, `cmos2` and its `twoblks`
 /// child's port, itself resolved to `cmos3`, and its port resolves to
 /// `cmos1`: the discipline the connect statement that converts it names.
-fn resolved_interconnect(
+pub(super) fn resolved_interconnect(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
     source: &Module,

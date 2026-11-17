@@ -440,6 +440,10 @@ pub(super) struct HoistedConnection {
     pub signal: SmolStr,
     pub real: bool,
     pub direction: PortDirection,
+    /// The port's discrete discipline; see [`HirHoistedPort::discipline`].
+    ///
+    /// [`HirHoistedPort::discipline`]: crate::canonical_ir::HirHoistedPort::discipline
+    pub discipline: Option<SmolStr>,
     pub span: Span,
 }
 
@@ -519,6 +523,27 @@ struct HierarchyFrame {
 }
 
 impl DigitalElaborator<'_> {
+    /// The discrete discipline of port `port` of `child` where it meets a
+    /// continuous net: the one it declares, or the one its interconnect
+    /// resolves to (Annex F.2.1); `None` for the default.
+    fn hoisted_discipline(&self, child: &AnalyzedModule, port: &str) -> Option<SmolStr> {
+        let source = self.source_modules.get(&child.name).copied()?;
+        super::hierarchy_connections::resolved_interconnect(
+            self.analyzed,
+            self.source_modules,
+            source,
+            child,
+            port,
+            0,
+        )
+        .filter(|discipline| {
+            self.analyzed
+                .disciplines
+                .get_discipline(discipline)
+                .is_some_and(|discipline| discipline.domain == crate::disciplines::Domain::Discrete)
+        })
+    }
+
     fn append_instances(&mut self, source: &Module, scope: Scope) -> CompileResult<()> {
         let mut stack = vec![HierarchyFrame {
             key: SpecializationKey::root(source)?,
@@ -900,6 +925,7 @@ impl DigitalElaborator<'_> {
                     signal: own.clone(),
                     real: declared.width == 0,
                     direction: port.direction,
+                    discipline: self.hoisted_discipline(child, &port.name),
                     span: identifier.span,
                 });
                 form = None;

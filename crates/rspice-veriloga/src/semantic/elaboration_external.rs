@@ -54,6 +54,7 @@ impl HierarchyElaborator<'_> {
                 bit: (!connection.real).then_some(0),
                 direction: connection.direction,
                 net,
+                discipline: connection.discipline,
             });
         }
         for leaf in &source.external_leaves {
@@ -194,12 +195,29 @@ impl HierarchyElaborator<'_> {
             // A port of the root is already linked on the deck's node.
             return Ok(HirExternalNet::Port(PortId::from(index)));
         }
+        // The variable's own discrete discipline selects its converter.
+        let discipline = self
+            .analyzed
+            .modules
+            .get(&source.name)
+            .and_then(|module| {
+                crate::semantic::hierarchy_connections::declared_discipline(source, module, name)
+            })
+            .filter(|discipline| {
+                self.analyzed
+                    .disciplines
+                    .get_discipline(discipline)
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Discrete
+                    })
+            });
         let net = HirExternalNet::Net(signal.clone());
         self.hoist(HirHoistedPort {
             signal,
             bit: Some(0),
             direction: PortDirection::Output,
             net: net.clone(),
+            discipline,
         });
         Ok(net)
     }

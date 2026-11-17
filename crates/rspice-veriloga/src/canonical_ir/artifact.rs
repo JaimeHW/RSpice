@@ -982,11 +982,12 @@ fn hir_summary(hir: &HirModel) -> String {
     for port in &hir.hoisted_ports {
         writeln!(
             out,
-            "hoisted_port signal={} bit={:?} direction={:?} net={}",
+            "hoisted_port signal={} bit={:?} direction={:?} net={} discipline={:?}",
             enc_str(&port.signal),
             port.bit,
             port.direction,
-            external_net(&port.net)
+            external_net(&port.net),
+            port.discipline.as_deref()
         )
         .expect("write to string");
     }

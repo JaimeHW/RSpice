@@ -284,7 +284,11 @@ use smol_str::SmolStr;
 /// Version 195 marks a named event's storage (`DigitalSignal::event`), which
 /// a value change dump declares as an `event`. An earlier artifact's dump
 /// declared it as a `reg`.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 195;
+/// Version 196 carries a hoisted discrete port's discipline
+/// (`HirHoistedPort::discipline`), which selects the connect statement that
+/// converts it at its circuit node. An earlier artifact selected every one
+/// as `logic`.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 196;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
