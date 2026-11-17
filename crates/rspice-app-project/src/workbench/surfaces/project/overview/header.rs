@@ -73,6 +73,7 @@ pub(super) fn overview_header(
                 }
                 ui.painter()
                     .galley(text_rect.min, title_galley, tokens.color.text);
+                theme::paint_focus_ring(ui, &name_response, name_rect);
                 name_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Link,
