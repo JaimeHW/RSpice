@@ -7997,6 +7997,12 @@ mod simparam {
     include_str!("../../rspice-veriloga-runtime/src/simparam.rs"),
     r#"
 }
+mod analog_files {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/analog_files.rs"),
+    r#"
+}
+pub use analog_files::AnalogFileTable;
 mod analog_effects {
 "#,
     include_str!("../../rspice-veriloga-runtime/src/analog_effects.rs"),
