@@ -211,6 +211,13 @@ impl Model {
             design_management_changed |=
                 receipt.affected_sheet_catalogs > 0 || receipt.remapped_annotation_objects > 0;
         }
+        // The library's Verilog, Verilog-A and Verilog-AMS views go with it,
+        // and so do the sources they own.
+        let mut candidate_sources = self.workspace.content.project_sources.clone();
+        let removed_sources = cells
+            .iter()
+            .flat_map(|cell| candidate_sources.remove_cell_view_bundles(library, cell, None))
+            .collect::<Vec<_>>();
         let project_mutation = self.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::DeleteLibrary {
                 library: library.to_owned(),
@@ -222,6 +229,10 @@ impl Model {
             .ok_or_else(|| format!("Library '{library}' disappeared during the deletion"))?;
         if design_management_changed {
             self.workspace.content.design_management = candidate_design_management;
+        }
+        if !removed_sources.is_empty() {
+            self.workspace.content.project_sources = candidate_sources;
+            self.workspace.content.project_sources_dirty = true;
         }
         let owned_layouts = self
             .workspace
@@ -236,7 +247,10 @@ impl Model {
                 .content
                 .remove_physical_layout_document(owner);
         }
-        let pruned = self.prune_workspace_after_library_deleted(library);
+        let pruned = WorkspacePruned {
+            void_veriloga_evidence: removed_sources,
+            ..self.prune_workspace_after_library_deleted(library)
+        };
 
         Ok(LibraryRemoval {
             cells: cells.len(),
@@ -277,7 +291,6 @@ impl Model {
                 if references == 1 { "" } else { "s" }
             ));
         }
-        require_no_owned_sources(self, library)?;
         // Layouts this library owns go with it; a layout elsewhere that places
         // one of its masters would be left dangling, so that one blocks.
         let foreign_masters = self
@@ -378,47 +391,4 @@ fn require_no_configuration_roots(
     Err(format!(
         "Configuration set roots still reference {scope} ({listed}). Rebind or remove those configurations first."
     ))
-}
-
-/// Refuse a library deletion while it owns a project source bundle or a
-/// Verilog-A view, because every Verilog-A view must own exactly one persisted
-/// source closure and a deleted library takes both with it.
-fn require_no_owned_sources(model: &Model, library: &str) -> Result<(), String> {
-    let bundles = model
-        .workspace
-        .content
-        .project_sources
-        .iter_bundles()
-        .filter(|bundle| {
-            matches!(
-                bundle.owner(),
-                crate::state::ProjectSourceOwner::CellView { reference }
-                    if reference.library == library
-            )
-        })
-        .count();
-    if bundles > 0 {
-        return Err(format!(
-            "Library '{library}' owns {bundles} project source bundle{}. Delete those views first.",
-            if bundles == 1 { "" } else { "s" }
-        ));
-    }
-    let veriloga_views = model
-        .library_manager
-        .get_library(library)
-        .map_or(0, |library| {
-            library
-                .cells
-                .values()
-                .flat_map(|cell| cell.views.values())
-                .filter(|view| view.view_type.is_hdl_source())
-                .count()
-        });
-    if veriloga_views > 0 {
-        return Err(format!(
-            "Library '{library}' owns {veriloga_views} Verilog-A view{}. Delete those views first.",
-            if veriloga_views == 1 { "" } else { "s" }
-        ));
-    }
-    Ok(())
 }

@@ -396,6 +396,80 @@ fn deleting_a_library_undoes_as_one_step() {
     });
 }
 
+/// A library of behavioural models takes its Verilog, Verilog-A and
+/// Verilog-AMS views and the sources they own with it in one deletion, which
+/// one step of Undo puts back.
+#[test]
+fn deleting_a_library_of_source_views_takes_their_sources_and_undoes_as_one_step() {
+    let mut app = app_with_parts();
+    let mut models = Library::new("models");
+    let languages = [
+        ("cmp", ViewType::VerilogA, "cmp.va"),
+        ("sar", ViewType::Verilog, "sar.v"),
+        ("pll", ViewType::VerilogAms, "pll.vams"),
+    ];
+    for (cell, view_type, _) in languages {
+        let mut entry = Cell::new(cell);
+        entry.add_view(View::new("behaviour", view_type));
+        models.add_cell(entry);
+    }
+    app.state.model.library_manager.add_library(models);
+    for (cell, _, root) in languages {
+        let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+            rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+                "models",
+                cell,
+                "behaviour",
+            )),
+            rspice_app_state::state::ProjectSourceLanguage::VerilogA,
+            root.to_owned(),
+            format!("module {cell}(p, n); inout p, n; endmodule"),
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .expect("a valid source bundle");
+        app.state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .insert_bundle(bundle)
+            .expect("a unique source owner");
+    }
+    assert_eq!(app.state.model.library_deletion_blocker("models"), None);
+    let owned = |app: &RSpiceApp| {
+        app.state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .iter_bundles()
+            .filter(|bundle| {
+                matches!(
+                    bundle.owner(),
+                    rspice_app_state::state::ProjectSourceOwner::CellView { reference }
+                        if reference.library == "models"
+                )
+            })
+            .count()
+    };
+    assert_eq!(owned(&app), 3);
+
+    one_step(app, "deleting a library of source views", |app| {
+        app.state
+            .delete_library("models")
+            .expect("the library is deleted with its sources");
+        assert!(
+            app.state
+                .model
+                .library_manager
+                .get_library("models")
+                .is_none()
+        );
+        assert_eq!(owned(app), 0, "the sources its views owned go with it");
+    });
+}
+
 #[test]
 fn creating_a_cell_undoes_as_one_step() {
     one_step(app_with_parts(), "creating a cell", |app| {

@@ -155,9 +155,10 @@ pub struct LibraryDeletionImpact {
     pub views: usize,
     pub open_views: usize,
     pub instance_references: usize,
-    source_bundles: usize,
+    /// The library's source views by language, as the review names them:
+    /// "12 Verilog-A, 1 Verilog-AMS", or "none".
+    source_views: String,
     configuration_roots: usize,
-    project_root: bool,
 }
 
 fn library_deletion_impact(model: &Model, library: &str) -> LibraryDeletionImpact {
@@ -173,19 +174,7 @@ fn library_deletion_impact(model: &Model, library: &str) -> LibraryDeletionImpac
             .filter(|open| open.reference.library == library)
             .count(),
         instance_references: model.external_instance_references_to_library(library),
-        source_bundles: model
-            .workspace
-            .content
-            .project_sources
-            .iter_bundles()
-            .filter(|bundle| {
-                matches!(
-                    bundle.owner(),
-                    crate::state::ProjectSourceOwner::CellView { reference }
-                        if reference.library == library
-                )
-            })
-            .count(),
+        source_views: source_views(owned),
         configuration_roots: model
             .workspace
             .content
@@ -194,7 +183,31 @@ fn library_deletion_impact(model: &Model, library: &str) -> LibraryDeletionImpac
             .iter()
             .filter(|configuration| configuration.root().library == library)
             .count(),
-        project_root: model.workspace.content.project.root_library == library,
+    }
+}
+
+/// The source views of `library` by language, in the order the languages
+/// are listed: "12 Verilog-A, 1 Verilog-AMS", or "none".
+fn source_views(library: Option<&crate::state::Library>) -> String {
+    let views = library
+        .into_iter()
+        .flat_map(|library| library.cells.values())
+        .flat_map(|cell| cell.views.values())
+        .map(|view| view.view_type)
+        .filter(crate::state::ViewType::is_hdl_source)
+        .collect::<Vec<_>>();
+    let counted = crate::state::ViewType::ALL
+        .into_iter()
+        .filter(crate::state::ViewType::is_hdl_source)
+        .filter_map(|language| {
+            let count = views.iter().filter(|view| **view == language).count();
+            (count > 0).then(|| format!("{count} {}", language.caption()))
+        })
+        .collect::<Vec<_>>();
+    if counted.is_empty() {
+        "none".to_owned()
+    } else {
+        counted.join(", ")
     }
 }
 
@@ -369,13 +382,11 @@ impl ProjectFeature {
         let views = impact.views.to_string();
         let open_views = impact.open_views.to_string();
         let references = impact.instance_references.to_string();
-        let bundles = impact.source_bundles.to_string();
         let roots = impact.configuration_roots.to_string();
-        let project_root = if impact.project_root { "yes" } else { "no" };
 
         let choice = Dialog::new("Delete library", "Delete")
             .description(
-                "Remove this library with every cell and view in it, and close their tabs.",
+                "Remove this library with every cell and view in it, the sources its views own, and close their tabs.",
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
@@ -387,9 +398,8 @@ impl ProjectFeature {
                 kv_row(ui, "Views removed", &views);
                 kv_row(ui, "Open views", &open_views);
                 kv_row(ui, "Placements outside this library", &references);
-                kv_row(ui, "Owned source bundles", &bundles);
+                kv_row(ui, "Source views", &impact.source_views);
                 kv_row(ui, "Configuration roots", &roots);
-                kv_row(ui, "Project root", project_root);
 
                 ui.add_space(8.0);
                 let t = Tokens::get(ui.ctx());

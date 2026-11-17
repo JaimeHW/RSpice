@@ -162,7 +162,29 @@ fn the_deletion_review_counts_what_the_library_owns() {
     assert_eq!(impact.views, 1);
     assert_eq!(impact.open_views, 1);
     assert_eq!(impact.instance_references, 1);
-    assert_eq!(impact.source_bundles, 0);
+    assert_eq!(impact.source_views, "none");
     assert_eq!(impact.configuration_roots, 0);
-    assert!(!impact.project_root);
+}
+
+/// The review names each source language the library's views are written
+/// in, rather than calling every one of them Verilog-A.
+#[test]
+fn the_deletion_review_names_each_source_language_it_takes() {
+    let mut harness = harness_with_writable_work_library();
+    let mut library = Library::new("models");
+    for (cell, view_type) in [
+        ("cmp", ViewType::VerilogA),
+        ("dac", ViewType::VerilogA),
+        ("sar", ViewType::Verilog),
+        ("pll", ViewType::VerilogAms),
+    ] {
+        let mut entry = Cell::new(cell);
+        entry.add_view(View::new(view_type.display_name(), view_type));
+        library.add_cell(entry);
+    }
+    harness.model.library_manager.add_library(library);
+
+    let impact = library_deletion_impact(&harness.model, "models");
+
+    assert_eq!(impact.source_views, "1 Verilog, 2 Verilog-A, 1 Verilog-AMS");
 }
