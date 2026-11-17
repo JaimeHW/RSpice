@@ -32,10 +32,29 @@ fn window_mean(a: f64, b: f64) -> f64 {
     INPUT_AMPLITUDE / (w * (b - a)) * ((w * a).cos() - (w * b).cos())
 }
 
-/// `code_k = 500 + 250·v̄_{k−1}`: ones = 250 + 125·v̄ for ±2 V feedback over
-/// 500 clocks, code = 2·ones. The code read at `t` was latched from the window
-/// that closed at the latch before `t`; at the design's sample times
-/// (150 µs + k·100 µs) that window is `[t − 150 µs + 0.1 µs, +100 µs]`.
+/// The clock period.
+const CLOCK: f64 = 0.2e-6;
+
+/// Decisions a window's code counts. The divider latches the counter at the
+/// clock that ends a window (0.1 µs + m·100 µs) and holds it in reset for the
+/// next clock period (d_fdiv's one high cycle, delayed 50 ns), so that clock
+/// is not counted: 499 of the window's 500 clocks are.
+const COUNTED: f64 = 499.0;
+
+/// `code = (2·499 − 1)·(1/2 + v̄/4)` in expectation. Counter bit 1 (J = dv,
+/// K = dvb) holds the decision its clock reads, and bits 2–10 count the
+/// clocks at which bit 1 held a one, so the latched code is twice the ones
+/// among the window's first 498 counted decisions plus the last one, which
+/// counts once. The ones fraction is `1/2 + v̄/4` (±2 V differential
+/// feedback against the input mean v̄), so the 499 decisions give
+/// `997·(1/2 + v̄/4)`. ngspice-46 (`oracle/xs.tran.ngspice.cir`, its control
+/// nets saved) gives this count exactly in all 19 windows. Each counted clock
+/// reads the decision of the clock before it (dv changes 2 ns after the
+/// counter's clock), so the decisions run from the clock the reset swallows
+/// to the clock before the latch, and their feedback spans
+/// `[latch + 1 clock, next latch]`. The code read at `t` (150 µs + k·100 µs)
+/// was latched at `t − 50 µs + 0.1 µs`, so v̄ is the input mean over
+/// `[t − 150 µs + 0.1 µs + 1 clock, t − 50 µs + 0.1 µs]`.
 fn code(context: &Context<'_>) -> Result<Expected, String> {
     let grid = context
         .quantity
@@ -46,8 +65,9 @@ fn code(context: &Context<'_>) -> Result<Expected, String> {
         .times()
         .into_iter()
         .map(|time| {
-            let start = time - 1.5 * WINDOW + FIRST_CLOCK;
-            500.0 + 250.0 * window_mean(start, start + WINDOW)
+            let latch = time - 0.5 * WINDOW + FIRST_CLOCK;
+            let start = latch - COUNTED * CLOCK;
+            (2.0 * COUNTED - 1.0) * (0.5 + window_mean(start, latch) / 4.0)
         })
         .collect();
     Ok(values(expected))
@@ -95,5 +115,9 @@ mod tests {
         // A full-scale positive window gives the top code.
         assert!((500.0_f64 + 250.0 * 0.5 - 625.0).abs() < 1e-12);
         assert!(window_mean(0.0, 2e-3).abs() < 1e-12);
+        // The counted decisions span 99.8 µs, from one clock after a latch
+        // to the next latch; a zero input mean gives 997/2.
+        assert!((COUNTED * CLOCK - 99.8e-6).abs() < 1e-15);
+        assert!(((2.0 * COUNTED - 1.0) * 0.5 - 498.5).abs() < 1e-12);
     }
 }

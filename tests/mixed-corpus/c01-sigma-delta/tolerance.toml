@@ -14,53 +14,35 @@ oracle = "O6"
 expect = "c01::code"
 abs = 3.0
 rel = 0.0
-why = "first-order ΣΔ: ones-count error ≤ ±1 per window → ±2 codes (code = 2·ones); +1 for window alignment"
+why = "code = 2·(ones among the window's first 498 counted decisions) + the last decision, against 997·(1/2 + v̄/4) (analytic/c01.rs): the first-order ΣΔ keeps the ones count within ±1 of 498·(1/2 + v̄/4) → ±2 codes, and the last decision is within 1 of its mean → ±1. Was 500 + 250·v̄ over 500 clocks, which missed the clock the counter's reset swallows and counted the last decision twice: 1.5 to 2.5 codes high against ngspice and Icarus+ngspice alike"
 
-# xs against ngspice-46. The clock's 2 ns ramp crosses adc_buff's 0.5 V
-# threshold 1 ns after its breakpoint. 734 of RSpice's 9,999 rising edges put
-# an accepted point exactly there: 0.5 V in exact arithmetic, and 0.5 V
-# +/- 2.5e-13 to 4.6e-11 V (2,245 to 4.2e5 ulps) once the time is rounded.
-# Both simulators test `in <= in_low` first (ngspice-46
-# icm/digital/adc_bridge/cfunc.mod:222, 237), so that rounding decides each of
-# these edges: 440 read low and fire on the next point, 0.5 ns later; 294 read
-# high and fire on the crossing. ngspice-46 never lands on the crossing. The
-# outcome is deterministic. One-ulp nudges of the clock's amplitude, delay,
-# edge time and frequency and of the input's amplitude change none of the
-# 8,404 dv events. It moves only when the engine's step arithmetic changes
-# (7950364593 flipped one decision). Moving the threshold by 1 nV decides
-# every tie low, or every tie high, and touches no other sample (the nearest
-# is 50 mV away). Between those two extremes the codes move by up to 2, one
-# decision. RSpice's deviation from ref over the 19 windows is 2 as run, 2
-# with every tie low and 1 with every tie high. ngspice-46 refined 10x
-# (0.1 ns ceiling) moves ref by 1. As the paranoia delta-sigma gates do, the
-# tolerance is twice the larger of the two.
+# The code gates against the independent oracles, set before any RSpice run
+# from the oracles alone: allowed = max |O1 − O2| over the windows and both
+# variants, plus one code (the quantizer's LSB). O1 (ngspice-46, the xs
+# deck; ref/xs.tran.O1.out serves vams too) and O2 (ngspice-46 + d_cosim +
+# Icarus, the vams deck; ref/vams.tran.O2.out) read the same code in all 19
+# windows, so max |O1 − O2| = 0 and allowed = 0 + 1 = 1 code. The LSB covers
+# ngspice's own step dependence: refined 10x (0.1 ns ceiling) it moves O1 by
+# one code. xs carries a tie the oracles never meet: the clock's 2 ns ramp
+# crosses adc_buff's 0.5 V threshold 1 ns after its breakpoint, RSpice puts
+# an accepted point exactly there on 734 of its 9,999 rising edges, and the
+# rounding of that point's time decides each such edge (both simulators test
+# `in <= in_low` first, ngspice-46 icm/digital/adc_bridge/cfunc.mod:222,
+# 237); ngspice-46 never lands on the crossing. vams dates the clock at its
+# crossing, so no edge waits on a tie.
 [[q]]
 id = "code"
 analysis = "tran"
-variants = ["xs"]
+variants = ["xs", "vams"]
 kind = "held_at"
 signal = "v(adaclout)"
 times = { start = 1.5e-4, step = 1e-4, count = 19 }
 scale = 1024.0
 oracle = "O1"
 ref = "ref/xs.tran.O1.out"
-abs = 4.0
+abs = 1.0
 rel = 0.0
-why = "twice the larger of ngspice's own 10x movement (1 code) and RSpice's deviation over both tie outcomes (2 codes). Was 2.0, which the tie rounding alone reaches"
-
-[[q]]
-id = "code"
-analysis = "tran"
-variants = ["vams"]
-kind = "held_at"
-signal = "v(adaclout)"
-times = { start = 1.5e-4, step = 1e-4, count = 19 }
-scale = 1024.0
-oracle = "O1"
-ref = "ref/xs.tran.O1.out"
-abs = 2.0
-rel = 0.0
-why = "one decision flip per window between simulators (vams dates the clock at its crossing, so no edge waits on a tie)"
+why = "max |O1 − O2| = 0 codes over the 19 windows, plus one LSB (derivation above)"
 
 [[q]]
 id = "code"
@@ -72,9 +54,9 @@ times = { start = 1.5e-4, step = 1e-4, count = 19 }
 scale = 1024.0
 oracle = "O2"
 ref = "ref/vams.tran.O2.out"
-abs = 2.0
+abs = 1.0
 rel = 0.0
-why = "one decision flip per window between simulators"
+why = "max |O1 − O2| = 0 codes over the 19 windows, plus one LSB (derivation above)"
 
 [[q]]
 id = "lattice"
