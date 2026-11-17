@@ -189,7 +189,11 @@ impl<'a> Lexer<'a> {
             .is_some_and(|before| before.is_alphanumeric() || before == '_')
     }
 
-    /// Skip horizontal whitespace (spaces and tabs, not newlines)
+    /// Skip horizontal whitespace (every separator but the newline).
+    ///
+    /// A no-break space or a Unicode next-line character pasted from a
+    /// document separates fields like a space: the reader cannot tell them
+    /// apart on screen.
     ///
     /// `\x1A` is the DOS end-of-file marker. Model files written on DOS-era
     /// tooling still carry it — vendor libraries in the wild routinely end
@@ -199,7 +203,7 @@ impl<'a> Lexer<'a> {
     fn skip_whitespace(&mut self) {
         while self.pos < self.input.len() {
             let c = self.input[self.pos..].chars().next().unwrap();
-            if c == ' ' || c == '\t' || c == '\r' || c == '\u{1a}' {
+            if is_field_separator(c) {
                 self.pos += c.len_utf8();
             } else {
                 break;
@@ -654,6 +658,58 @@ fn is_other_token_char(c: char) -> bool {
     !c.is_whitespace() && !c.is_control()
 }
 
+/// Whether a character separates the fields of one card: any whitespace but
+/// the newline that ends it, and the DOS end-of-file marker.
+pub fn is_field_separator(c: char) -> bool {
+    (c.is_whitespace() && c != '\n') || c == '\u{1a}'
+}
+
+/// A character as an error names it: quoted when it shows, by code point and
+/// name when it does not (`U+200B zero-width space`), so a reader can find a
+/// character pasted from a document that the editor draws as nothing.
+pub fn describe_character(c: char) -> String {
+    let name = match c {
+        '\u{00a0}' => "no-break space",
+        '\u{0085}' => "next line",
+        '\u{00ad}' => "soft hyphen",
+        '\u{061c}' => "Arabic letter mark",
+        '\u{180e}' => "Mongolian vowel separator",
+        '\u{2000}' => "en quad",
+        '\u{2001}' => "em quad",
+        '\u{2002}' => "en space",
+        '\u{2003}' => "em space",
+        '\u{2004}' => "three-per-em space",
+        '\u{2005}' => "four-per-em space",
+        '\u{2006}' => "six-per-em space",
+        '\u{2007}' => "figure space",
+        '\u{2008}' => "punctuation space",
+        '\u{2009}' => "thin space",
+        '\u{200a}' => "hair space",
+        '\u{200b}' => "zero-width space",
+        '\u{200c}' => "zero-width non-joiner",
+        '\u{200d}' => "zero-width joiner",
+        '\u{200e}' => "left-to-right mark",
+        '\u{200f}' => "right-to-left mark",
+        '\u{2028}' => "line separator",
+        '\u{2029}' => "paragraph separator",
+        '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => "text direction control",
+        '\u{202f}' => "narrow no-break space",
+        '\u{205f}' => "medium mathematical space",
+        '\u{2060}' => "word joiner",
+        '\u{2061}'..='\u{2064}' => "invisible operator",
+        '\u{3000}' => "ideographic space",
+        '\u{feff}' => "byte order mark",
+        '\t' => "tab",
+        '\r' => "carriage return",
+        '\n' => "line feed",
+        ' ' => "space",
+        _ if c.is_control() => "control character",
+        _ if c.is_whitespace() => "space",
+        _ => return format!("'{c}'"),
+    };
+    format!("U+{:04X} {name}", u32::from(c))
+}
+
 /// Return whether a character is legal inside an Xyce DEV token.
 ///
 /// Xyce permits punctuation-rich element names while reserving commas,
@@ -725,7 +781,12 @@ impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LexError::UnexpectedChar(c, line) => {
-                write!(f, "Unexpected character '{}' at line {}", c, line)
+                write!(
+                    f,
+                    "Unexpected character {} at line {}",
+                    describe_character(*c),
+                    line
+                )
             }
             LexError::InvalidNumber(s, line) => {
                 write!(f, "Invalid number '{}' at line {}", s, line)
@@ -748,7 +809,9 @@ impl LexError {
     /// reports the card's source line says where it is instead.
     pub(crate) fn message(&self) -> String {
         match self {
-            LexError::UnexpectedChar(c, _) => format!("Unexpected character '{c}'"),
+            LexError::UnexpectedChar(c, _) => {
+                format!("Unexpected character {}", describe_character(*c))
+            }
             LexError::InvalidNumber(s, _) => format!("Invalid number '{s}'"),
             LexError::UnterminatedExpression(_) => "Unterminated expression".to_string(),
             LexError::UnterminatedString(_) => "Unterminated string".to_string(),
@@ -1649,6 +1712,53 @@ mod tests {
         assert!(tokens.iter().any(|token| {
             token.kind == TokenKind::Ident("GND!".to_string()) && token.lexeme == "GND!"
         }));
+    }
+
+    #[test]
+    fn a_no_break_space_or_next_line_separates_fields_like_a_space() {
+        for separator in ['\u{a0}', '\u{85}', '\u{2009}', '\u{3000}'] {
+            let card = format!("R1 a{separator}0 1k\n");
+            let tokens = tokenize(&card).expect("a pasted space is a separator");
+            let lexemes = tokens
+                .iter()
+                .filter(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::Eof))
+                .map(|token| token.lexeme.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(lexemes, ["R1", "a", "0", "1k"], "{separator:?}");
+        }
+    }
+
+    #[test]
+    fn a_deck_with_a_no_break_space_in_a_card_parses_like_one_with_a_space() {
+        let pasted = crate::netlist::Netlist::parse(
+            "title\nV1 in\u{a0}0 1\nR1 in\u{a0}out\u{a0}1k\nR2 out 0\u{85}1k\n.op\n.end\n",
+        )
+        .expect("a no-break space separates fields");
+        let typed = crate::netlist::Netlist::parse(
+            "title\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+        )
+        .expect("plain deck parses");
+        assert_eq!(
+            format!("{:?}", pasted.elements),
+            format!("{:?}", typed.elements)
+        );
+    }
+
+    #[test]
+    fn an_error_names_an_invisible_character_by_its_code_point() {
+        assert_eq!(describe_character('\u{200b}'), "U+200B zero-width space");
+        assert_eq!(describe_character('\u{a0}'), "U+00A0 no-break space");
+        assert_eq!(describe_character('\u{7}'), "U+0007 control character");
+        assert_eq!(describe_character('\u{feff}'), "U+FEFF byte order mark");
+        assert_eq!(describe_character('\u{3a9}'), "'\u{3a9}'");
+        assert_eq!(
+            LexError::UnexpectedChar('\u{200b}', 3).to_string(),
+            "Unexpected character U+200B zero-width space at line 3"
+        );
+        assert_eq!(
+            crate::netlist::expr::ExprError::UnexpectedChar('\u{2060}').to_string(),
+            "Unexpected character: U+2060 word joiner"
+        );
     }
 
     #[test]

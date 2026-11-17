@@ -29,7 +29,11 @@ impl std::fmt::Display for ExprError {
             // The parser reports running out of input as a NUL character;
             // printing it put a raw control byte in the diagnostic (`{}`).
             ExprError::UnexpectedChar('\0') => write!(f, "Unexpected end of expression"),
-            ExprError::UnexpectedChar(c) => write!(f, "Unexpected character: '{}'", c),
+            ExprError::UnexpectedChar(c) => write!(
+                f,
+                "Unexpected character: {}",
+                crate::netlist::lexer::describe_character(*c)
+            ),
             ExprError::MissingCloseParen => write!(f, "Missing closing parenthesis"),
             ExprError::MissingCloseQuote => write!(f, "Missing closing single quote"),
             ExprError::TrailingInput(s) => write!(f, "Trailing input: {}", s),
