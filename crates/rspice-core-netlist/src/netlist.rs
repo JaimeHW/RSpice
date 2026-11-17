@@ -60,6 +60,7 @@ mod replay_source;
 mod source_defaults;
 pub mod source_map;
 pub(crate) mod spectre_adapter;
+pub use spectre_adapter::is_spectre_source;
 mod spectre_statistics;
 pub mod spef;
 mod startup;

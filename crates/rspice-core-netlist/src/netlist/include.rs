@@ -1236,8 +1236,7 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         self.begin_source_operation();
-        let native_spectre =
-            super::spectre_adapter::is_native_spectre_source(current_path, content);
+        let native_spectre = super::spectre_adapter::is_spectre_source(current_path, content);
         let source = PreparedSource::new(current_path, Arc::from(content), abort)?;
         let mut expanded = self.expand_content_from_mapped_with_abort(
             &source,

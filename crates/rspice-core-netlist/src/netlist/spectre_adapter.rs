@@ -14,6 +14,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::Range;
 use std::path::Path;
 
 mod names;
@@ -126,14 +127,18 @@ struct SpectreSymbols {
     declares_veriloga_modules: bool,
 }
 
-/// Adapt a supported Spectre model-library source without changing its line
-/// count. Plain SPICE sources are returned by reference.
-pub(crate) fn is_native_spectre_source(path: &Path, source: &str) -> bool {
-    let is_scs = path
-        .extension()
+/// Whether `path` names a `.scs` file, which is Spectre from its first line.
+pub(crate) fn is_scs_path(path: &Path) -> bool {
+    path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("scs"));
-    if is_scs {
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("scs"))
+}
+
+/// Whether the Spectre front end reads the source at `path` holding `source`:
+/// a `.scs` file, or one with a `simulator lang=` line outside its comments.
+/// Such a source has no title line.
+pub fn is_spectre_source(path: &Path, source: &str) -> bool {
+    if is_scs_path(path) {
         return true;
     }
 
@@ -177,6 +182,7 @@ pub(crate) fn is_native_spectre_source(path: &Path, source: &str) -> bool {
                     && (character as u8).to_ascii_lowercase() == BOUNDARY[count])
                     .then_some(count + 1);
             },
+            |_| {},
         );
         matched == Some(BOUNDARY.len())
     })
@@ -196,7 +202,7 @@ pub(crate) fn adapt_spectre_source<'a>(
     path: &Path,
     source: &'a str,
 ) -> Result<(Cow<'a, str>, Option<SpectreSourceNames>), SpectreModelAdapterError> {
-    if !is_native_spectre_source(path, source) {
+    if !is_spectre_source(path, source) {
         return Ok((Cow::Borrowed(source), None));
     }
 
@@ -838,19 +844,22 @@ fn strip_spectre_comments_from_line(
         line_number,
         block_start_line,
         |character| output.push(character),
+        |_| {},
     );
     output
 }
 
 /// Read one physical line under Spectre's comment rules, handing every
-/// character outside a comment to `keep` in order. A block comment that opens
-/// after kept text other than whitespace keeps one separating space.
+/// character outside a comment to `keep` in order, and the byte range of each
+/// comment on the line to `comment`. A block comment that opens after kept
+/// text other than whitespace keeps one separating space.
 fn scan_spectre_comments_in_line(
     line: &str,
     in_block_comment: &mut bool,
     line_number: usize,
     mut block_start_line: Option<&mut usize>,
     mut keep: impl FnMut(char),
+    mut comment: impl FnMut(Range<usize>),
 ) {
     let mut last_kept = None;
     let mut push = |character: char, last_kept: &mut Option<char>| {
@@ -860,12 +869,16 @@ fn scan_spectre_comments_in_line(
     let mut characters = line.char_indices().peekable();
     let mut quote = None;
     let mut escaped = false;
-    while let Some((_, character)) = characters.next() {
+    // Where the open block comment starts on this line: its start, or the
+    // line's when it opened on an earlier one.
+    let mut block_start = 0;
+    while let Some((index, character)) = characters.next() {
         let next = characters.peek().map(|(_, character)| *character);
         if *in_block_comment {
             if character == '*' && next == Some('/') {
                 characters.next();
                 *in_block_comment = false;
+                comment(block_start..index + 2);
             }
             continue;
         }
@@ -884,10 +897,12 @@ fn scan_spectre_comments_in_line(
             quote = Some(character);
             push(character, &mut last_kept);
         } else if character == '/' && next == Some('/') {
-            break;
+            comment(index..line.len());
+            return;
         } else if character == '/' && next == Some('*') {
             characters.next();
             *in_block_comment = true;
+            block_start = index;
             if let Some(start) = block_start_line.as_deref_mut() {
                 *start = line_number;
             }
@@ -896,6 +911,113 @@ fn scan_spectre_comments_in_line(
             }
         } else {
             push(character, &mut last_kept);
+        }
+    }
+    if *in_block_comment {
+        comment(block_start..line.len());
+    }
+}
+
+/// Where a Spectre comment starts on one line read alone, with no block
+/// comment open before it: a `//` or `/*` outside quotes, or a `*` that opens
+/// the text the comment pass keeps, which makes the rest of the line a
+/// comment.
+pub(crate) fn spectre_comment_start(line: &str) -> Option<usize> {
+    let mut ranges = Vec::new();
+    scan_spectre_comments_in_line(
+        line,
+        &mut false,
+        0,
+        None,
+        |_| {},
+        |range| {
+            ranges.push(range);
+        },
+    );
+    star_comment_start(line, &ranges)
+        .into_iter()
+        .chain(ranges.first().map(|range| range.start))
+        .min()
+}
+
+/// The `*` that opens a Spectre line's kept text, which the front end hands on
+/// as a comment card, given the line's other comments.
+fn star_comment_start(line: &str, comments: &[Range<usize>]) -> Option<usize> {
+    line.char_indices()
+        .find(|(index, character)| {
+            !character.is_whitespace() && !comments.iter().any(|range| range.contains(index))
+        })
+        .filter(|(_, character)| *character == '*')
+        .map(|(index, _)| index)
+}
+
+/// Every comment the front end drops from `lines` (each a line of a source,
+/// with its byte offset in it), as byte ranges of the source in order, read
+/// as [`preprocess_spectre_comments`] reads them: Spectre's `//`, `/* */` and
+/// `*` comments while the language is Spectre or a block comment is open, and
+/// `spice_comment_start` on a line of SPICE. A `simulator lang=` line switches
+/// the language; `in_spectre` is the language of the first line.
+pub(crate) fn source_comment_ranges<'a>(
+    lines: impl Iterator<Item = (usize, &'a str)>,
+    in_spectre: bool,
+    spice_comment_start: impl Fn(&str) -> Option<usize>,
+    ranges: &mut Vec<Range<usize>>,
+) {
+    let mut language = if in_spectre {
+        Language::Spectre
+    } else {
+        Language::Spice
+    };
+    let mut in_block_comment = false;
+    let mut line_ranges = Vec::new();
+    for (offset, raw) in lines {
+        let mut boundary_block = false;
+        let is_boundary = strip_spectre_comments_from_line(raw, &mut boundary_block, 0, None)
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("simulator lang=");
+        line_ranges.clear();
+        let kept = if language == Language::Spectre || in_block_comment || is_boundary {
+            let mut kept = String::with_capacity(raw.len());
+            scan_spectre_comments_in_line(
+                raw,
+                &mut in_block_comment,
+                0,
+                None,
+                |character| kept.push(character),
+                |range| line_ranges.push(range),
+            );
+            if language == Language::Spectre && !is_boundary {
+                if let Some(star) = star_comment_start(raw, &line_ranges) {
+                    line_ranges.retain(|range| range.start < star);
+                    line_ranges.push(star..raw.len());
+                }
+            } else if language == Language::Spice && !is_boundary {
+                // The SPICE parser reads what the block comment leaves.
+                let tail = line_ranges.last().map_or(0, |range| range.end);
+                if let Some(start) = spice_comment_start(&raw[tail..]) {
+                    line_ranges.push(tail + start..raw.len());
+                }
+            }
+            Some(kept)
+        } else {
+            if let Some(start) = spice_comment_start(raw) {
+                line_ranges.push(start..raw.len());
+            }
+            None
+        };
+        ranges.extend(
+            line_ranges
+                .iter()
+                .filter(|range| !range.is_empty())
+                .map(|range| offset + range.start..offset + range.end),
+        );
+        if let Some(kept) = kept {
+            match kept.trim().to_ascii_lowercase().as_str() {
+                "simulator lang=spectre" => language = Language::Spectre,
+                "simulator lang=spice" => language = Language::Spice,
+                _ => {}
+            }
         }
     }
 }
@@ -2964,32 +3086,32 @@ mod tests {
 
     #[test]
     fn native_spectre_detection_is_case_insensitive_and_comment_aware() {
-        assert!(is_native_spectre_source(
+        assert!(is_spectre_source(
             Path::new("model.SCS"),
             "model junction diode is=1e-14\n"
         ));
-        assert!(is_native_spectre_source(
+        assert!(is_spectre_source(
             Path::new("model.lib"),
             "SiMuLaToR LaNg=SpEcTrE\n"
         ));
-        assert!(!is_native_spectre_source(
+        assert!(!is_spectre_source(
             Path::new("model.lib"),
             "// simulator lang=spectre\n/*\nsimulator lang=spectre\n*/\n* simulator lang=spectre\n"
         ));
         // Without a block comment the bytes decide; with one, the kept text.
-        assert!(!is_native_spectre_source(
+        assert!(!is_spectre_source(
             Path::new("model.lib"),
             "* plain deck\nR1 a 0 1k\nsimulator  lang=spectre\n"
         ));
-        assert!(is_native_spectre_source(
+        assert!(is_spectre_source(
             Path::new("model.lib"),
             "* plain deck\r\n  simulator lang=spectre\r\n"
         ));
-        assert!(is_native_spectre_source(
+        assert!(is_spectre_source(
             Path::new("model.lib"),
             "simulator/* a comment */lang=spectre\n"
         ));
-        assert!(!is_native_spectre_source(
+        assert!(!is_spectre_source(
             Path::new("model.lib"),
             "R1 a 0 1k simulator lang=spectre\n"
         ));

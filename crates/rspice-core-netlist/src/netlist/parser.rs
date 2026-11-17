@@ -194,6 +194,7 @@ use freq_synthesis::*;
 pub(in crate::netlist) use laplace_synthesis::TransferExpression;
 use laplace_synthesis::*;
 use line::*;
+pub use line::{SourceKind, comment_ranges, comment_start};
 use pspice_stim::*;
 pub(in crate::netlist) use root_scans::RootScansCell;
 use scoping::*;

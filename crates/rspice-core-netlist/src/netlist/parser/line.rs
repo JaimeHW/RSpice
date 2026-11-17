@@ -94,6 +94,90 @@ fn is_pspice_reserved_node_name(after_dollar: &str) -> bool {
     chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.next() == Some('_')
 }
 
+/// How the engine reads a source's comments, and whether its first line is a
+/// title.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceKind {
+    /// A SPICE deck run as the root: its first line is the title, which no
+    /// card is read from.
+    DeckRoot,
+    /// SPICE text with no title line: a file a deck's `.include` or `.lib`
+    /// reads, or a deck a `simulator lang=` line hands to the Spectre front
+    /// end, which reads the Spectre parts of it by Spectre's rules.
+    Included,
+    /// A `.scs` file: Spectre from its first line, with `//`, `/* */` and
+    /// line-opening `*` comments, and no title.
+    Spectre,
+}
+
+impl SourceKind {
+    /// How the engine reads the source at `path` holding `text`, read as the
+    /// root deck when `root`.
+    #[must_use]
+    pub fn of(path: &std::path::Path, text: &str, root: bool) -> Self {
+        if crate::netlist::spectre_adapter::is_scs_path(path) {
+            Self::Spectre
+        } else if root && !crate::netlist::spectre_adapter::is_spectre_source(path, text) {
+            Self::DeckRoot
+        } else {
+            Self::Included
+        }
+    }
+}
+
+/// Where the comment on one line of a source starts, as a byte offset, by the
+/// parser's own rules. In SPICE: a line opening with `*` or `#`, and a `;`
+/// outside quotes, a `$` after a space, comma or tab that does not open a
+/// PSpice `$G_`/`$N_` name, or a `//` after a space. In Spectre: `//` and
+/// `/*` outside quotes, and a line opening with `*`.
+///
+/// The line is read on its own. A root deck's title line, a Spectre block
+/// comment opened on an earlier line, and a `simulator lang=` switch are
+/// [`comment_ranges`]'s to see.
+#[must_use]
+pub fn comment_start(line: &str, kind: SourceKind) -> Option<usize> {
+    match kind {
+        SourceKind::DeckRoot | SourceKind::Included => spice_comment_start(line),
+        SourceKind::Spectre => crate::netlist::spectre_adapter::spectre_comment_start(line),
+    }
+}
+
+/// Every stretch of `text` no card is read from: its comments and a root
+/// deck's title line, as byte ranges in order. A range never covers a line
+/// break: a block comment over several lines is one range per line.
+#[must_use]
+pub fn comment_ranges(text: &str, kind: SourceKind) -> Vec<std::ops::Range<usize>> {
+    let mut lines = text.split('\n').scan(0, |offset, line| {
+        let start = *offset;
+        *offset += line.len() + 1;
+        Some((start, line.strip_suffix('\r').unwrap_or(line)))
+    });
+    let mut ranges = Vec::new();
+    if kind == SourceKind::DeckRoot
+        && let Some((_, title)) = lines.next()
+        && !title.is_empty()
+    {
+        ranges.push(0..title.len());
+    }
+    crate::netlist::spectre_adapter::source_comment_ranges(
+        lines,
+        kind == SourceKind::Spectre,
+        spice_comment_start,
+        &mut ranges,
+    );
+    ranges
+}
+
+/// Where the comment on one line of SPICE starts.
+fn spice_comment_start(line: &str) -> Option<usize> {
+    let indent = line.len() - line.trim_start().len();
+    if line[indent..].starts_with(['*', '#']) {
+        return Some(indent);
+    }
+    let kept = strip_inline_semicolon_comment_with_non_semicolon_comments(line, true).len();
+    (kept < line.len()).then_some(kept)
+}
+
 /// Every directive spelling that compiles a Verilog-A source into a deck.
 ///
 /// `.va` and `.veriloga` are RSpice's own; `.hdl`, `.vams`, `.verilog` and
@@ -1599,5 +1683,124 @@ R1 a 0 1k
         );
         let error = xyce.expect_err("Xyce has no N element").to_string();
         assert!(error.contains("Unknown element type: N"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod comment_rule_tests {
+    use std::path::Path;
+
+    use super::{SourceKind, comment_ranges, comment_start};
+
+    fn comments(text: &str, kind: SourceKind) -> Vec<&str> {
+        comment_ranges(text, kind)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect()
+    }
+
+    #[test]
+    fn a_spice_line_is_a_comment_from_where_the_parser_stops_reading_it() {
+        for (line, comment) in [
+            ("R5 $N_0001 0 1k", None),
+            ("U1 NAND(2) $G_DPWR $G_DGND a b y", None),
+            ("R1 1 0 1k $load", Some("$load")),
+            ("V1 1 0 'a;b'", None),
+            ("R1 1 0 1k ; x", Some("; x")),
+            ("R1 1 0 1k // x", Some("// x")),
+            ("A1 m file=https://example.test/model", None),
+            ("# hash", Some("# hash")),
+            ("  * star", Some("* star")),
+            ("  #indented", Some("#indented")),
+        ] {
+            for kind in [SourceKind::DeckRoot, SourceKind::Included] {
+                assert_eq!(
+                    comment_start(line, kind).map(|start| &line[start..]),
+                    comment,
+                    "{line}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_comments_are_what_the_parse_does_not_read() {
+        let deck = "PSpice export\nV1 $N_0001 0 1\nR1 $N_0001 0 1k $load\n.op\n.end\n";
+        let netlist = crate::Netlist::parse(deck).expect("the deck parses");
+        assert_eq!(netlist.title, "PSpice export");
+        assert!(
+            netlist.elements[1].nodes[0].eq_ignore_ascii_case("$N_0001"),
+            "{:?}",
+            netlist.elements[1].nodes
+        );
+        assert_eq!(
+            comments(deck, SourceKind::DeckRoot),
+            ["PSpice export", "$load"]
+        );
+    }
+
+    #[test]
+    fn only_a_root_decks_first_line_is_a_title() {
+        let text = "R1 a 0 1k\r\nR2 a 0 1k\r\n";
+        assert_eq!(comments(text, SourceKind::DeckRoot), ["R1 a 0 1k"]);
+        assert!(comments(text, SourceKind::Included).is_empty());
+    }
+
+    #[test]
+    fn spectre_comments_are_the_front_ends_comment_pass() {
+        let source = "// header\n\
+                      simulator lang=spectre\n\
+                      r1 (a b) resistor r=1k // load\n\
+                      /* block\n   still */ c1 (a 0) capacitor c=1p\n\
+                      * star line\n\
+                      v1 (a 0) vsource dc=1 /* inline */ type=dc\n\
+                      simulator lang=spice\n\
+                      R2 a 0 1k ; spice\n";
+        assert_eq!(
+            comments(source, SourceKind::Spectre),
+            [
+                "// header",
+                "// load",
+                "/* block",
+                "   still */",
+                "* star line",
+                "/* inline */",
+                "; spice"
+            ]
+        );
+        assert_eq!(
+            comment_start("c1 (a 0) capacitor // x", SourceKind::Spectre),
+            Some(19)
+        );
+        assert_eq!(comment_start("  * star", SourceKind::Spectre), Some(2));
+        assert_eq!(
+            comment_start("r1 (a b) resistor r=1k ; no", SourceKind::Spectre),
+            None
+        );
+    }
+
+    #[test]
+    fn a_spectre_switch_in_a_spice_file_reads_the_rest_as_spectre() {
+        let source = "* models\nsimulator lang=spectre\nmodel d1 diode is=1e-14 // spectre\n";
+        let kind = SourceKind::of(Path::new("models.lib"), source, true);
+        assert_eq!(kind, SourceKind::Included);
+        assert_eq!(comments(source, kind), ["* models", "// spectre"]);
+    }
+
+    #[test]
+    fn a_source_kind_is_read_from_its_path_and_text() {
+        let spice = "* deck\nR1 a 0 1k\n";
+        assert_eq!(
+            SourceKind::of(Path::new("amp.SCS"), spice, true),
+            SourceKind::Spectre
+        );
+        assert_eq!(
+            SourceKind::of(Path::new("amp.sp"), spice, true),
+            SourceKind::DeckRoot
+        );
+        assert_eq!(
+            SourceKind::of(Path::new("amp.sp"), spice, false),
+            SourceKind::Included
+        );
     }
 }
