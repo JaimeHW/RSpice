@@ -647,6 +647,9 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 scope,
             } => {
                 let simulation_results = capture_prepared_result_history(&[run], true);
+                // A stored run is captured as references to its segments, not its samples. That
+                // is safe only in-process: the native resolver reads the segment the retained run
+                // keeps open, and a browser build, whose worker gets these bytes, stores no run.
                 Self::Results {
                     source_key,
                     project_id,
