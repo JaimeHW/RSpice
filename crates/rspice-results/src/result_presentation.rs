@@ -561,7 +561,7 @@ impl MarkerKind {
 /// The anchor is a *signal*, not one solve of it: `y` is resampled from the
 /// trace every frame, so a marker survives zoom, pan, and retained-vector
 /// reordering without drifting onto a different dataset or curve.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResultMarker {
     /// Stable per-project id. Renders as `M{id}`.
     pub id: u32,
@@ -697,7 +697,7 @@ pub struct DeclaredExpressionUnit {
 /// Authored quick-view annotations about retained datasets. These are never
 /// part of immutable solver evidence. One value crosses snapshot, save,
 /// acceptance, and restoration boundaries so they cannot omit a field.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResultPresentation {
     #[serde(
         default,

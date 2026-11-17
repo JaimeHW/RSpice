@@ -1109,10 +1109,8 @@ fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
 fn project_load_rejects_duplicate_open_view_keys() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    workspace
-        .content
-        .open_views
-        .push(workspace.content.open_views[0].clone());
+    let first = workspace.content.open_views[0].clone();
+    workspace.content.open_views.push(first);
     let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("duplicate fixture serializes");
 

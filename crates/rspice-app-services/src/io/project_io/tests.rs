@@ -402,12 +402,13 @@ fn project_file_serializes_to_versioned_json() {
 fn project_file_round_trips_configuration_execution_authority() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let root = workspace.content.active_view.clone();
     workspace
         .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Browser-qualified release".to_owned(),
-            root: workspace.content.active_view.clone(),
+            root,
             dut_path: "/XDUT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
@@ -469,10 +470,11 @@ fn project_file_round_trips_design_management_authority() {
 fn project_file_rejects_unsupported_design_management_schema() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let key = workspace.content.active_view.key();
     workspace
         .content
         .design_management
-        .bootstrap_for_cell_view(&workspace.content.active_view.key(), "Main", [11])
+        .bootstrap_for_cell_view(&key, "Main", [11])
         .expect("design-management fixture");
     let project = ProjectSnapshot::new(workspace, libraries);
     let mut value = serde_json::to_value(project).expect("project JSON value");

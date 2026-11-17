@@ -62,6 +62,7 @@ fn saved_output(name: &str, expression: &str) -> rspice_app_state::state::SavedO
 #[test]
 fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
     let (mut app, id) = component_app();
+    let root = app.state.model.workspace.content.active_view.clone();
     let configuration = app
         .state
         .model
@@ -70,7 +71,7 @@ fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
         .configuration_sets
         .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
-            root: app.state.model.workspace.content.active_view.clone(),
+            root,
             dut_path: "/R1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),

@@ -22,7 +22,9 @@ pub mod references;
 pub mod resolved_symbol;
 pub mod rf_ports;
 pub mod schematic;
-pub mod stamped;
+/// Stamped values live with the other shared value contracts, below every
+/// crate that stamps one.
+pub use rspice_vocabulary::stamped;
 pub mod symbol;
 #[cfg(feature = "symbol-artwork")]
 pub mod symbol_artwork;

@@ -84,7 +84,7 @@ fn full_digest(
     fields: ResultFingerprintFields<'_>,
 ) -> Result<ContentDigest, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
-    RESULT_FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
+    super::fingerprints::observe(&RESULT_FINGERPRINT_PASSES);
     let ResultFingerprintFields {
         markers,
         log_y_panes,

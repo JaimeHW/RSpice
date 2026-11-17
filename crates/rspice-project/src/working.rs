@@ -52,6 +52,8 @@ impl ProjectWorkingSet<'_> {
         execution_context: impl FnOnce() -> Result<ProjectExecutionContext, ProjectLifecycleError>,
         presentation: impl FnOnce() -> ResultPresentation,
     ) -> Result<ProjectFile, ProjectLifecycleError> {
+        #[cfg(any(test, feature = "document-fingerprint-observation"))]
+        crate::registry::observe(&crate::registry::PROJECT_CAPTURES);
         let mut workspace = self.workspace.clone();
         if matches!(
             workspace.active_view_type(),

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use rspice_design::library::{Cell, Library, LibraryCatalog, View};
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_vocabulary::stamped::Stamped;
 
 mod bootstrap;
 
@@ -14,7 +15,10 @@ mod tests;
 /// The project format's library record over one governed catalog.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectLibraries {
-    catalog: LibraryCatalog,
+    /// Stamped, so every edit — and every runtime marker set on a view —
+    /// names the catalog it leaves behind, process-wide: unlike the
+    /// persisted revision, a stamp is never carried by another catalog.
+    catalog: Stamped<LibraryCatalog>,
     pub selected_library: Option<String>,
     pub selected_cell: Option<String>,
     pub selected_view: Option<String>,
@@ -54,7 +58,7 @@ impl<'de> Deserialize<'de> for ProjectLibraries {
         }
         let record = Record::deserialize(deserializer)?;
         Ok(Self {
-            catalog: LibraryCatalog::from_persisted(record.libraries, record.revision),
+            catalog: LibraryCatalog::from_persisted(record.libraries, record.revision).into(),
             selected_library: record.selected_library,
             selected_cell: record.selected_cell,
             selected_view: record.selected_view,
@@ -80,6 +84,12 @@ impl ProjectLibraries {
     /// Content revision, for caches over library listings.
     pub fn revision(&self) -> u64 {
         self.catalog.revision()
+    }
+
+    /// The stamp of the catalog as it stands: equal stamps, equal catalogs.
+    /// See [`rspice_vocabulary::stamped`].
+    pub const fn content_stamp(&self) -> u64 {
+        self.catalog.stamp()
     }
 
     /// Add a library

@@ -112,6 +112,13 @@ impl<T: PartialEq> PartialEq for Stamped<T> {
 
 impl<T: Eq> Eq for Stamped<T> {}
 
+/// Hashed as the content, as it is compared.
+impl<T: std::hash::Hash> std::hash::Hash for Stamped<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
 impl<T: serde::Serialize> serde::Serialize for Stamped<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.value.serialize(serializer)

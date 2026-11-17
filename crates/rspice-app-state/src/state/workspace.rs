@@ -117,7 +117,12 @@ pub use super::project_sources::{ProjectSourceLanguage, ProjectSourceRegistry};
 /// Application editor sessions over the project-owned workspace.
 #[derive(Debug, Clone)]
 pub struct ProjectWorkspace {
-    pub content: rspice_project::ProjectWorkspace,
+    /// The project's content, stamped: every mutable access names the
+    /// content it leaves behind, so the answers derived from the whole of it
+    /// — whether anything is unsaved — are reused exactly until it changes.
+    /// Write a field only when its value changes: an access that changes
+    /// nothing still costs the next query a capture of the whole project.
+    pub content: rspice_vocabulary::stamped::Stamped<rspice_project::ProjectWorkspace>,
     pub session: WorkspaceSession,
 }
 
@@ -152,7 +157,7 @@ impl Default for ProjectWorkspace {
         let schematic_sessions =
             HashMap::from([(content.active_view.key(), SchematicState::default().session)]);
         Self {
-            content,
+            content: content.into(),
             session: WorkspaceSession {
                 schematic_sessions,
                 ..Default::default()
@@ -166,11 +171,14 @@ impl ProjectWorkspace {
         content: rspice_project::ProjectWorkspace,
         session: WorkspaceSession,
     ) -> Self {
-        Self { content, session }
+        Self {
+            content: content.into(),
+            session,
+        }
     }
     #[cfg(any(test, feature = "test-support"))]
     pub fn into_parts(self) -> (rspice_project::ProjectWorkspace, WorkspaceSession) {
-        (self.content, self.session)
+        (self.content.into_inner(), self.session)
     }
 
     /// Who owns the source bundle a language's editor is showing.

@@ -15,6 +15,38 @@ use std::collections::{HashMap, HashSet};
 thread_local! {
     /// Full document fingerprint passes, including retained sample scans.
     pub static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Whole working-project captures: one per
+    /// [`crate::ProjectWorkingSet::capture`].
+    pub static PROJECT_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Set while a check recomputes work that was already counted.
+    static UNOBSERVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Count one pass of `counter`, unless it runs inside [`unobserved`].
+#[cfg(any(test, feature = "document-fingerprint-observation"))]
+pub(crate) fn observe(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
+    if !UNOBSERVED.with(std::cell::Cell::get) {
+        counter.with(|count| count.set(count.get() + 1));
+    }
+}
+
+/// Run `work` without counting its captures and fingerprint passes, so the
+/// counts stay what the application itself asked for. For a check that
+/// recomputes an answer it is about to compare with one already counted.
+pub fn unobserved<R>(work: impl FnOnce() -> R) -> R {
+    #[cfg(any(test, feature = "document-fingerprint-observation"))]
+    {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                UNOBSERVED.with(|flag| flag.set(self.0));
+            }
+        }
+        let _restore = Restore(UNOBSERVED.with(|flag| flag.replace(true)));
+        work()
+    }
+    #[cfg(not(any(test, feature = "document-fingerprint-observation")))]
+    work()
 }
 
 pub fn document_fingerprints(project: &ProjectFile) -> Result<DocumentFingerprints, String> {
@@ -47,7 +79,7 @@ fn document_digests_with_results_cache(
     results_cache: Option<&ResultFingerprintCache>,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
-    FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
+    observe(&FINGERPRINT_PASSES);
     let mut documents = HashMap::new();
     let mut plan_payloads = project
         .workspace

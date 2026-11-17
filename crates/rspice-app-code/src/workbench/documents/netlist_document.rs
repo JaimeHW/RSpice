@@ -1932,6 +1932,7 @@ pub(crate) fn retain_active_top_deck(model: &mut Model) -> Result<(), String> {
         return Err("The active top-deck source projection is inconsistent.".to_owned());
     }
     model.workspace.content.netlist_source = None;
+    let source_path = model.workspace.content.netlist_source_path.take();
     model
         .workspace
         .content
@@ -1939,7 +1940,7 @@ pub(crate) fn retain_active_top_deck(model: &mut Model) -> Result<(), String> {
         .push(crate::state::RetainedOwnedNetlistDeck {
             descriptor,
             document,
-            source_path: model.workspace.content.netlist_source_path.take(),
+            source_path,
         });
     Ok(())
 }

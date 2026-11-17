@@ -23,7 +23,10 @@ use std::collections::BTreeSet;
 /// under still prints as it did, and a hashed set prints in its hasher's order.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationSetup {
-    document: crate::setup_document::SimulationSetupDocument,
+    /// The persisted plan, stamped: every mutable access, through any method
+    /// or the `DerefMut` below, names the content it leaves behind, so what
+    /// is derived from the plan can be reused exactly until it changes.
+    document: rspice_vocabulary::stamped::Stamped<crate::setup_document::SimulationSetupDocument>,
     /// Enabled analysis indices.
     pub enabled: BTreeSet<usize>,
     /// Stable execution order. Enabled analyses absent from this vector are
@@ -110,13 +113,19 @@ impl<'de> serde::Deserialize<'de> for SimulationSetup {
                 deserializer,
             )?;
         Ok(Self {
-            document,
+            document: document.into(),
             ..Self::default()
         })
     }
 }
 
 impl SimulationSetup {
+    /// The stamp of the persisted plan as it stands: equal stamps, equal
+    /// plans. See [`rspice_vocabulary::stamped`].
+    pub const fn content_stamp(&self) -> u64 {
+        self.document.stamp()
+    }
+
     /// Fresh setup with the conventional default run set — a transient —
     /// so a new project's Run button works out of the box (the engine no
     /// longer falls back to the selected row on an empty set).

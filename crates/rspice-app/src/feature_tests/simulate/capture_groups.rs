@@ -63,11 +63,12 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
         // A directly named output is a decision made elsewhere; the editor must
         // carry it through untouched however the rules change.
         group.members.push(member);
+        let plan = plan_id(&app.state.model);
         app.state
             .model
             .workspace
             .content
-            .replace_capture_group(plan_id(&app.state.model), id, group)
+            .replace_capture_group(plan, id, group)
             .expect("the plan accepts a second rule");
     }
 

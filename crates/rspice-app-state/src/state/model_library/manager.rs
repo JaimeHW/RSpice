@@ -22,6 +22,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rspice_vocabulary::stamped::Stamped;
+
 use rspice_core::library::SpiceLibraryIndex;
 #[cfg(test)]
 use rspice_model_library::{
@@ -65,9 +67,12 @@ const fn model_validation_platform() -> &'static str {
 /// Manager for all model libraries
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelLibraryManager {
-    /// All libraries
+    /// All libraries. This and the two records below are what a project
+    /// saves of the manager, so each is stamped: a mutable access to it
+    /// issues a new stamp, and what is derived from them is reused exactly
+    /// until one does.
     #[serde(rename = "libraries")]
-    catalog: rspice_model_library::ModelCatalog,
+    catalog: Stamped<rspice_model_library::ModelCatalog>,
     /// Currently selected library
     pub selected_library: Option<String>,
     /// Search filter
@@ -77,9 +82,9 @@ pub struct ModelLibraryManager {
     /// Durable project decisions for contested executable definitions. The
     /// map key is the canonical `scope:name` identity repeated by each value.
     #[serde(default)]
-    resolution_records: ModelResolutionRecords,
+    resolution_records: Stamped<ModelResolutionRecords>,
     #[serde(default)]
-    validation_receipt: Option<ModelValidationReceipt>,
+    validation_receipt: Stamped<Option<ModelValidationReceipt>>,
     /// Index over the shipped model packs, when one was found on disk.
     ///
     /// Held rather than loaded: the packs carry around 199,000 definitions, so
@@ -133,8 +138,19 @@ impl ModelLibraryManager {
         self.validation_receipt.as_ref()
     }
 
+    /// The stamps of what a project saves of the manager, as they stand:
+    /// equal stamps, equal catalog, resolution records and receipt. See
+    /// [`rspice_vocabulary::stamped`].
+    pub const fn content_stamp(&self) -> [u64; 3] {
+        [
+            self.catalog.stamp(),
+            self.resolution_records.stamp(),
+            self.validation_receipt.stamp(),
+        ]
+    }
+
     pub(crate) fn invalidate_model_validation_receipt(&mut self) {
-        self.validation_receipt = None;
+        *self.validation_receipt = None;
     }
 
     pub fn restore_model_validation_receipt(
@@ -144,7 +160,7 @@ impl ModelLibraryManager {
         if let Some(receipt) = receipt.as_ref() {
             receipt.verify()?;
         }
-        self.validation_receipt = receipt;
+        *self.validation_receipt = receipt;
         Ok(())
     }
 
@@ -172,7 +188,7 @@ impl ModelLibraryManager {
                 format!("system clock cannot timestamp model validation: {error}")
             })?,
         })?;
-        self.validation_receipt = Some(receipt.clone());
+        *self.validation_receipt = Some(receipt.clone());
         Ok(receipt)
     }
 
@@ -782,7 +798,7 @@ impl ModelLibraryManager {
     #[cfg(any(test, feature = "test-support"))]
     pub fn clear(&mut self) {
         self.catalog.clear();
-        self.resolution_records = ModelResolutionRecords::default();
+        *self.resolution_records = ModelResolutionRecords::default();
         self.selected_library = None;
     }
 

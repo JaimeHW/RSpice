@@ -2,10 +2,12 @@
 
 mod fingerprints;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
-pub use fingerprints::FINGERPRINT_PASSES;
+pub(crate) use fingerprints::observe;
+#[cfg(any(test, feature = "document-fingerprint-observation"))]
+pub use fingerprints::{FINGERPRINT_PASSES, PROJECT_CAPTURES};
 pub use fingerprints::{
     content_digest, document_digests, document_fingerprints,
-    document_fingerprints_with_results_cache,
+    document_fingerprints_with_results_cache, unobserved,
 };
 
 pub mod result_fingerprint;
@@ -152,6 +154,26 @@ impl DocumentFingerprints {
 
     pub fn content_digest(&self) -> ContentDigest {
         self.content
+    }
+
+    /// The documents whose identity differs between `self` and `other`,
+    /// including any present in only one, in stable-key order.
+    pub fn differing_documents(&self, other: &Self) -> Vec<ProjectDocumentId> {
+        let mut differing = self
+            .documents
+            .iter()
+            .filter(|(id, digest)| other.documents.get(*id) != Some(*digest))
+            .map(|(id, _)| id.clone())
+            .chain(
+                other
+                    .documents
+                    .keys()
+                    .filter(|id| !self.documents.contains_key(*id))
+                    .cloned(),
+            )
+            .collect::<Vec<_>>();
+        differing.sort_by_key(ProjectDocumentId::stable_key);
+        differing
     }
 }
 
