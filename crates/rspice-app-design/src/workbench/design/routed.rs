@@ -615,7 +615,7 @@ fn cancel_step(state: &DesignState, model: &Model, wb: &WorkbenchSession) -> Opt
         } else {
             CancelStep::SymbolDraft
         }
-    } else if wb.workspace == Workspace::Design && wb.inline_edit.session().is_some() {
+    } else if wb.workspace == Workspace::Design && wb.inline_edit.is_open() {
         CancelStep::InlineEdit
     } else if state.interaction.drag.owner.is_some() {
         CancelStep::SchematicDrag
@@ -651,7 +651,7 @@ fn cancel(cx: &mut Cx<'_, DesignFeature>) {
             super::navigation(cx).request_symbol_in_place_exit(SymbolInPlaceExit::Parent);
         }
         CancelStep::SymbolDraft => finish_cancel(&mut cx.state.symbol.editor),
-        CancelStep::InlineEdit => cx.wb.inline_edit.end(),
+        CancelStep::InlineEdit => cx.wb.inline_edit.discard_all(),
         CancelStep::SchematicDrag => {
             cx.state.interaction.drag.cancel_schematic_drag(cx.model);
         }

@@ -22,8 +22,8 @@ use symbol_document::{SymbolUiState, project_active_symbol_session};
 
 pub use history::{
     DesignHistoryParts, HistoryDirection, HistoryStepParts, commit_inline_component_edit,
-    commit_pending_inspector_edit, inline_edit_authority, project_step_comes_first,
-    take_history_step,
+    commit_inline_session, commit_pending_inspector_edit, inline_edit_authority,
+    leave_inline_field, project_step_comes_first, take_history_step,
 };
 pub use navigation::NavigationParts;
 

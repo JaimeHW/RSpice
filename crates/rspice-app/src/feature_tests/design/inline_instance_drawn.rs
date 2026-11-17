@@ -181,19 +181,61 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
     }
 }
 
+/// A refused field keeps its text and its reason, outlined in its own field,
+/// while Tab or a click takes the reader on to the next one, which takes what
+/// is typed there. Going back resumes the refused text; correcting it commits.
+///
+/// The refused field used to take focus back, so every keystroke meant for
+/// the next field was silently dropped until the first was corrected.
 #[test]
-fn a_rejected_field_keeps_its_text_and_focus_until_repaired_or_cancelled() {
+fn a_refused_field_keeps_its_text_while_the_next_field_takes_what_is_typed() {
     let mut editor = Editor::new();
+    let instance = InlineEditField::Instance;
     editor.edit("Instance", "not a designator");
-    editor.click("Value");
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    editor.pass(Vec::new());
     let session = editor.app.state.workbench.inline_edit.session().unwrap();
-    assert_eq!(session.field, InlineEditField::Instance);
+    assert_eq!(session.field, instance);
+    assert_eq!(
+        editor.ctx.memory(|memory| memory.focused()),
+        session.widget,
+        "Enter on refused text keeps the reader in the field"
+    );
+    editor.pass(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
+    editor.replace("12");
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    let component = &editor.app.state.model.schematic.document().components[0];
+    assert_eq!(component.value, "12", "the next field took what was typed");
+    assert_eq!(
+        component.name, "V1",
+        "the refused text never reached the design"
+    );
+    let inline_edit = &editor.app.state.workbench.inline_edit;
+    assert!(inline_edit.session().is_none());
+    assert_eq!(
+        inline_edit.buffer_for(editor.id, &instance),
+        Some("not a designator")
+    );
+    assert!(inline_edit.error_for(editor.id, &instance).is_some());
+    assert!(
+        editor.app.state.commit_inline_component_edit().is_err(),
+        "a command still refuses while the field shows text the design does not hold"
+    );
+
+    editor.click("Note");
+    editor.replace("kept");
+    editor.click("Instance");
+    let inline_edit = &editor.app.state.workbench.inline_edit;
+    let session = inline_edit.session().unwrap();
+    assert_eq!(session.field, instance);
     assert_eq!(session.buffer, "not a designator");
     assert!(session.error.is_some());
-    assert_eq!(editor.ctx.memory(|memory| memory.focused()), session.widget);
+    assert!(inline_edit.refused().is_empty());
     assert_eq!(
-        editor.app.state.model.schematic.document().components[0].name,
-        "V1"
+        rspice_app_state::state::parse_params_string(
+            &editor.app.state.model.schematic.document().components[0].params
+        )["note"],
+        "kept"
     );
     editor.replace("V9");
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
@@ -201,7 +243,7 @@ fn a_rejected_field_keeps_its_text_and_focus_until_repaired_or_cancelled() {
         editor.app.state.model.schematic.document().components[0].name,
         "V9"
     );
-    assert!(editor.app.state.workbench.inline_edit.session().is_none());
+    assert!(!editor.app.state.workbench.inline_edit.is_open());
 }
 
 #[test]

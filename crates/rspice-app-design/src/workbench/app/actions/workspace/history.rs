@@ -46,12 +46,44 @@ pub fn inline_edit_authority(model: &Model) -> InlineEditAuthority {
     }
 }
 
-/// Used by focus changes, document navigation, and commands before they
-/// read or replace the design. A failed commit retains the complete draft.
+/// Used by document navigation and commands before they read or replace the
+/// design. A failed commit retains the complete draft, and a refused draft
+/// the reader moved on from refuses as the open one does: the field still
+/// shows text the design does not hold.
 pub fn commit_inline_component_edit(
     model: &mut Model,
     wb: &mut WorkbenchSession,
 ) -> Result<bool, String> {
+    let committed = commit_inline_session(model, wb)?;
+    match wb.inline_edit.refused().first() {
+        Some(refused) => Err(refused
+            .error
+            .clone()
+            .unwrap_or_else(|| "Correct the inspector field before applying it.".to_owned())),
+        None => Ok(committed),
+    }
+}
+
+/// Finish the field the reader is leaving for another one: commit its text,
+/// or, when the text is refused, set it aside outlined in its own field so
+/// the next field can be typed into. Holds the reader only when the design
+/// changed under the edit; returns whether the next field may open.
+pub fn leave_inline_field(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
+    if commit_inline_session(model, wb).is_ok() {
+        return true;
+    }
+    let current = wb
+        .inline_edit
+        .session()
+        .is_some_and(|session| session.authority == inline_edit_authority(model));
+    if current {
+        wb.inline_edit.set_aside();
+    }
+    current
+}
+
+/// Commit the open session alone. A failed commit retains the complete draft.
+pub fn commit_inline_session(model: &mut Model, wb: &mut WorkbenchSession) -> Result<bool, String> {
     let Some(session) = wb.inline_edit.session().cloned() else {
         return Ok(false);
     };

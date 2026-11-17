@@ -127,10 +127,15 @@ pub fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: 
     }
     sheet_row(ui, cx.model, component.id);
     if editable {
+        let editing = editing_identity_field(cx.wb, component.id);
         rejection_slot(
             ui,
-            editing_identity_field(cx.wb, component.id),
-            instance_rejection.as_deref().or(value_rejection.as_deref()),
+            editing,
+            group_rejection(
+                cx.wb,
+                editing,
+                instance_rejection.as_deref().or(value_rejection.as_deref()),
+            ),
         );
     }
 
@@ -844,10 +849,11 @@ pub fn parameters_section(
         );
         rejection = rejection.or(raw_rejection);
         if editable {
+            let editing = editing_parameter_field(cx.wb, component.id);
             rejection_slot(
                 ui,
-                editing_parameter_field(cx.wb, component.id),
-                rejection.as_deref(),
+                editing,
+                group_rejection(cx.wb, editing, rejection.as_deref()),
             );
         }
         return;
@@ -912,10 +918,11 @@ pub fn parameters_section(
         }
     }
     if editable {
+        let editing = editing_parameter_field(cx.wb, component.id);
         rejection_slot(
             ui,
-            editing_parameter_field(cx.wb, component.id),
-            rejection.as_deref(),
+            editing,
+            group_rejection(cx.wb, editing, rejection.as_deref()),
         );
     }
     if let Some(key) = removed
@@ -964,6 +971,22 @@ pub fn supports_instance_temperature(model: &Model, component: &Component) -> bo
                 .iter()
                 .any(|name| name.eq_ignore_ascii_case(TEMPERATURE_PARAM))
         })
+}
+
+/// What a group's validation strip states: the reason the field being typed
+/// into refuses its text, when it is one of the group's (`editing`), and
+/// otherwise the group's first refused field the reader moved on from, whose
+/// own outline marks it.
+fn group_rejection<'a>(
+    wb: &'a WorkbenchSession,
+    editing: bool,
+    first: Option<&'a str>,
+) -> Option<&'a str> {
+    let live = editing
+        .then(|| wb.inline_edit.session())
+        .flatten()
+        .and_then(|session| session.error.as_deref());
+    live.or(first)
 }
 
 /// `true` while one of the identity group's editable fields holds the open

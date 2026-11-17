@@ -213,19 +213,40 @@ pub struct InlineEditSession {
 
 /// An inspector field remains a draft until Enter or a successful focus change.
 /// Escape discards it without mutating the design or its history.
+///
+/// A field whose text was refused does not hold the reader there: moving on
+/// to another field sets its draft aside, still outlined in its own field
+/// with its reason, until it is corrected or discarded.
 #[derive(Debug, Clone, Default)]
 pub struct InlineEdit {
     session: Option<InlineEditSession>,
+    refused: Vec<InlineEditSession>,
 }
 
 impl InlineEdit {
-    /// The buffer for `target`, or `None` when a different field (or no
-    /// field) owns the session.
-    pub fn buffer_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
+    /// The open session or set-aside refusal for `component`'s `field`.
+    fn draft_for(&self, component: u64, field: &InlineEditField) -> Option<&InlineEditSession> {
+        let edits = |session: &&InlineEditSession| {
+            session.expected.id == component && session.field == *field
+        };
         self.session
             .as_ref()
-            .filter(|session| session.expected.id == component && session.field == *field)
+            .filter(edits)
+            .or_else(|| self.refused.iter().find(edits))
+    }
+
+    /// The buffer for `target`, or `None` when it holds neither the session
+    /// nor a refused draft.
+    pub fn buffer_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
+        self.draft_for(component, field)
             .map(|session| session.buffer.as_str())
+    }
+
+    /// Whether `component`'s `field` holds the open session.
+    pub fn is_editing(&self, component: u64, field: &InlineEditField) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.expected.id == component && session.field == *field)
     }
 
     /// Which of `component`'s fields holds the open session, if any.
@@ -240,12 +261,50 @@ impl InlineEdit {
             .map(|session| &session.field)
     }
 
-    /// Why the open session's text was rejected, if it was.
+    /// Why the field's text was rejected, if it was.
     pub fn error_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
-        self.session
-            .as_ref()
-            .filter(|session| session.expected.id == component && session.field == *field)
+        self.draft_for(component, field)
             .and_then(|session| session.error.as_deref())
+    }
+
+    /// The refused drafts the reader has moved on from, oldest first.
+    pub fn refused(&self) -> &[InlineEditSession] {
+        &self.refused
+    }
+
+    /// Whether anything typed is still waiting: the open session or a
+    /// refused draft.
+    pub fn is_open(&self) -> bool {
+        self.session.is_some() || !self.refused.is_empty()
+    }
+
+    /// Set the open session's refused draft aside, so another field can be
+    /// typed into while this one stays outlined with its reason.
+    pub fn set_aside(&mut self) {
+        if let Some(session) = self.session.take() {
+            self.refused.retain(|refused| {
+                refused.expected.id != session.expected.id || refused.field != session.field
+            });
+            self.refused.push(session);
+        }
+    }
+
+    /// Take back the refused draft of `component`'s `field`, to resume it.
+    pub fn take_refused(
+        &mut self,
+        component: u64,
+        field: &InlineEditField,
+    ) -> Option<InlineEditSession> {
+        let at = self
+            .refused
+            .iter()
+            .position(|session| session.expected.id == component && session.field == *field)?;
+        Some(self.refused.remove(at))
+    }
+
+    /// Keep only the refused drafts `keep` accepts.
+    pub fn retain_refused(&mut self, keep: impl FnMut(&InlineEditSession) -> bool) {
+        self.refused.retain(keep);
     }
 
     pub fn session(&self) -> Option<&InlineEditSession> {
@@ -289,5 +348,11 @@ impl InlineEdit {
     /// Release a committed or explicitly cancelled draft.
     pub fn end(&mut self) {
         self.session = None;
+    }
+
+    /// Discard the open draft and every refused one.
+    pub fn discard_all(&mut self) {
+        self.session = None;
+        self.refused.clear();
     }
 }

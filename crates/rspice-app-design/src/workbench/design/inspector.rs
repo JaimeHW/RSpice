@@ -33,8 +33,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
 use crate::workbench::app::actions::workspace::{
-    commit_inline_component_edit, commit_pending_inspector_edit, inline_edit_authority,
-    sync_active_schematic,
+    commit_inline_component_edit, commit_inline_session, commit_pending_inspector_edit,
+    inline_edit_authority, leave_inline_field, sync_active_schematic,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::design::DesignFeature;
@@ -310,22 +310,37 @@ fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
 /// shows. An edit whose instance changed under it ends silently when nothing
 /// typed would be lost; one the selection has moved off is committed, and
 /// when that fails its instance is selected again and held in the inspector
-/// so the edit can be corrected. A symbol's inspector holds no inline edit.
+/// so the edit can be corrected. A refused draft the reader moved on from
+/// holds its instance the same way, and goes only with its instance or its
+/// document. A symbol's inspector holds no inline edit.
 pub fn prepare(cx: &mut Cx<'_, DesignFeature>) {
     cx.state.inspector_holds_failed_edit = None;
     if cx.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         return;
     }
-    let Some(session) = cx.wb.inline_edit.session() else {
-        return;
-    };
-    if inline_edit_is_stale(cx.model, session) {
-        if session.candidate.as_ref() == Some(&session.expected) {
-            cx.wb.inline_edit.end();
+    let authority = inline_edit_authority(cx.model);
+    let read_only = cx.model.schematic_edit_read_only();
+    let components = &cx.model.schematic.document().components;
+    cx.wb.inline_edit.retain_refused(|refused| {
+        refused.authority == authority
+            && !read_only
+            && components
+                .iter()
+                .any(|component| component.id == refused.expected.id)
+    });
+    let editing = match cx.wb.inline_edit.session() {
+        Some(session) if inline_edit_is_stale(cx.model, session) => {
+            if session.candidate.as_ref() == Some(&session.expected) {
+                cx.wb.inline_edit.end();
+            }
+            return;
         }
-        return;
-    }
-    let editing = session.expected.id;
+        Some(session) => session.expected.id,
+        None => match cx.wb.inline_edit.refused().first() {
+            Some(refused) => refused.expected.id,
+            None => return,
+        },
+    };
     let sheet = sheet_connectivity(cx.model);
     if subject(cx.model, &sheet.nets) == DesignSubject::Component(editing) {
         return;

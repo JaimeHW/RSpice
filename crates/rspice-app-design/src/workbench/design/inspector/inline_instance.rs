@@ -322,6 +322,10 @@ fn edited_component(
     Ok(component)
 }
 /// Finish the previous field before opening a draft against the live component.
+///
+/// A previous field whose text is refused is set aside, outlined with its
+/// reason, rather than holding the reader there. A field with its own refused
+/// draft resumes it, read again against the component as it is now.
 pub fn begin_edit(
     cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
@@ -330,12 +334,13 @@ pub fn begin_edit(
     if cx.model.schematic_edit_read_only() {
         return false;
     }
-    if cx.wb.inline_edit.buffer_for(component_id, &field).is_some() {
+    if cx.wb.inline_edit.is_editing(component_id, &field) {
         return true;
     }
-    if commit_inline_component_edit(cx.model, cx.wb).is_err() {
+    if !leave_inline_field(cx.model, cx.wb) {
         return false;
     }
+    let refused = cx.wb.inline_edit.take_refused(component_id, &field);
     let Some(component) = cx
         .model
         .schematic
@@ -358,6 +363,9 @@ pub fn begin_edit(
         widget: None,
     };
     cx.wb.inline_edit.begin(session);
+    if let Some(refused) = refused {
+        update_edit(cx, refused.buffer);
+    }
     true
 }
 
@@ -510,11 +518,19 @@ pub fn edit_row_with_hint(
             update_edit(cx, buffer);
         }
     }
-    if response.lost_focus()
-        && cx.wb.inline_edit.buffer_for(component.id, &field).is_some()
-        && commit_inline_component_edit(cx.model, cx.wb).is_err()
-    {
-        restore_edit_focus(ui.ctx(), cx);
+    // Enter on refused text keeps the reader in the field; moving on to
+    // another field or the canvas sets it aside, outlined with its reason,
+    // so what is typed next lands where it was typed.
+    if response.lost_focus() && cx.wb.inline_edit.is_editing(component.id, &field) {
+        let entered = ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let left = if entered {
+            commit_inline_session(cx.model, cx.wb).is_ok()
+        } else {
+            leave_inline_field(cx.model, cx.wb)
+        };
+        if !left {
+            restore_edit_focus(ui.ctx(), cx);
+        }
     }
     let rejection = cx
         .wb
