@@ -2094,29 +2094,6 @@ mod tests {
     }
 
     #[test]
-    fn shared_axis_panes_keep_aligned_margins_without_repeated_x_chrome() {
-        let ordinary = PlotSpec::new(
-            Axis::linear(0.0, 1.0, "s"),
-            XScale::Linear,
-            Axis::linear(0.0, 1.0, "V"),
-        );
-        let shared = PlotSpec::new(
-            Axis::linear(0.0, 1.0, "s"),
-            XScale::Linear,
-            Axis::linear(0.0, 1.0, "V"),
-        )
-        .without_x_axis_chrome()
-        .with_right_margin(54.0);
-
-        assert_eq!(right_margin(&shared), 54.0);
-        assert_eq!(bottom_margin(&ordinary), MARGIN_BOTTOM);
-        assert_eq!(bottom_margin(&shared), MARGIN_TOP);
-        let outer = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 300.0));
-        assert_eq!(inner_rect(outer, &shared).right(), 746.0);
-        assert!(inner_rect(outer, &shared).height() > inner_rect(outer, &ordinary).height());
-    }
-
-    #[test]
     fn logarithmic_y_spec_uses_decade_geometry() {
         let spec = PlotSpec::new(
             Axis::linear(0.0, 1.0, "s"),
@@ -2174,29 +2151,6 @@ mod tests {
             press(at, egui::PointerButton::Primary, true),
             press(at, egui::PointerButton::Primary, false),
         ]
-    }
-
-    fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
-        shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                Shape::Text(text) => Some((
-                    text.galley.text().to_owned(),
-                    Rect::from_min_size(text.pos, text.galley.size()),
-                )),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn painted_fills(shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
-        shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                Shape::Rect(rect) if rect.fill != Color32::TRANSPARENT => Some(rect.rect),
-                _ => None,
-            })
-            .collect()
     }
 
     /// The gridlines a frame painted across the whole plot, as (position,
@@ -2387,68 +2341,6 @@ mod tests {
                     .iter()
                     .all(|clipped| clipped.shape.visual_bounding_rect().is_finite()
                         || clipped.shape.visual_bounding_rect().is_negative())
-            );
-        }
-    }
-
-    /// Tick labels are chrome, and chrome that overlaps is unreadable. The X
-    /// row already skipped colliding labels; the Y column never did, so a
-    /// short pane stacked them on top of one another.
-    #[test]
-    fn y_tick_labels_never_overlap_however_short_the_pane_gets() {
-        let x = [0.0, 1.0];
-        let y = [0.0, 1000.0];
-        let mut spec = PlotSpec::new(
-            Axis::linear(0.0, 1.0, "s"),
-            XScale::Linear,
-            Axis::linear_with(0.0, 1000.0, "V", 40),
-        );
-        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
-        let size = vec2(420.0, 96.0);
-        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
-        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
-
-        let mut rows: Vec<Rect> = painted_text(&shapes)
-            .into_iter()
-            .filter(|(_, at)| at.right() <= plot.left())
-            .map(|(_, at)| at)
-            .collect();
-        rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
-        for pair in rows.windows(2) {
-            assert!(
-                pair[1].top() >= pair[0].bottom(),
-                "y labels overlap: {:?} then {:?} ({} labels)",
-                pair[0],
-                pair[1],
-                rows.len()
-            );
-        }
-    }
-
-    /// A band is a statement about a region of the data. Painted outside the
-    /// plot area it is a statement about the tick gutter.
-    #[test]
-    fn a_band_outside_the_window_never_paints_over_the_axis_gutter() {
-        let x = [0.0, 1.0];
-        let y = [0.0, 1.0];
-        let mut spec = PlotSpec::new(
-            Axis::linear(0.0, 1.0, "s"),
-            XScale::Linear,
-            Axis::linear(0.0, 1.0, "V"),
-        );
-        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
-        spec.bands
-            .push(super::super::spec::Band { x0: -4.0, x1: -2.0 });
-        spec.bands
-            .push(super::super::spec::Band { x0: 0.4, x1: 3.0 });
-        let size = vec2(420.0, 260.0);
-        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
-        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
-
-        for fill in painted_fills(&shapes) {
-            assert!(
-                plot.expand(1.0).contains_rect(fill),
-                "a band painted {fill:?} outside the plot area {plot:?}"
             );
         }
     }

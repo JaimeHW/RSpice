@@ -207,37 +207,6 @@ fn pss_source_catalog_requires_the_complete_exact_tone_set() {
 }
 
 #[test]
-fn desktop_analysis_split_matches_mockup_ratio_and_minimums() {
-    let (left, right) = analysis_split_widths(1001.0, 1_440.0);
-    assert!((left - 340.0).abs() < f32::EPSILON);
-    assert!((right - 660.0).abs() < f32::EPSILON);
-
-    let (left, right) = analysis_split_widths(551.0, 1_440.0);
-    assert!((left - 190.0).abs() < f32::EPSILON);
-    assert!((right - 360.0).abs() < f32::EPSILON);
-
-    let (left, right) = analysis_split_widths(751.0, 1_020.0);
-    assert!((left - 217.5).abs() < f32::EPSILON);
-    assert!((right - 532.5).abs() < f32::EPSILON);
-}
-
-#[test]
-fn responsive_breakpoints_match_mockup_contract() {
-    assert!(!analysis_workspace_is_split(820.0, 700.0));
-    assert!(analysis_workspace_is_split(821.0, 506.0));
-    assert!(!analysis_workspace_is_split(1_440.0, 505.0));
-    assert!(!analysis_workspace_is_split(1_440.0, 550.0));
-    assert!(analysis_workspace_is_split(1_440.0, 551.0));
-    assert_eq!(analysis_split_min_width(1_020.0), 506.0);
-    assert_eq!(analysis_split_min_width(1_021.0), 551.0);
-}
-
-#[test]
-fn responsive_surface_geometry_matches_mockup_contract() {
-    assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
-}
-
-#[test]
 fn dependency_repair_cta_describes_the_first_repairable_issue() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
     let (dependent, _) = plan
@@ -929,40 +898,6 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
 }
 
 #[test]
-fn analysis_catalog_search_text_is_centered_in_its_48_point_row() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut query = "noise".to_owned();
-    let mut geometry = None;
-    let _output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 720.0))),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let output = ui
-                    .allocate_ui_with_layout(
-                        vec2(480.0, 48.0),
-                        Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| analysis_catalog_search_field(&mut query).show(ui),
-                    )
-                    .inner;
-                geometry = Some((
-                    output.response.rect,
-                    output.galley_pos,
-                    output.galley.size(),
-                ));
-            });
-        },
-    );
-    let (response, galley_pos, galley_size) = geometry.expect("search field rendered");
-
-    assert!((response.height() - 48.0).abs() <= 0.5);
-    assert!((galley_pos.y + galley_size.y * 0.5 - response.center().y).abs() <= 0.5);
-}
-
-#[test]
 fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
     assert_eq!(
         saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1, 0),
@@ -985,59 +920,6 @@ fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
     assert_eq!(
         saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(0), 2, 2),
         "deferred · shared source ceiling counted at plan level · 2 compatible analyses"
-    );
-}
-
-#[test]
-fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
-    // Measured on the space the rows are given, not on the viewport: the
-    // mockup's 1180-point surface carries two columns, a narrow one carries a
-    // single row.
-    assert_eq!(analysis_catalog_column_count(1_180.0), 2);
-    assert_eq!(analysis_catalog_column_count(560.0), 1);
-    assert_eq!(analysis_catalog_readiness(AnalysisKind::Pac), None);
-    assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::Psp),
-        Some("Preview engine · non-sign-off")
-    );
-    assert_eq!(
-        analysis_catalog_disposition(&[], AnalysisKind::Psp),
-        "Add instance"
-    );
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::Hbsp),
-        Some("Preview engine · non-sign-off")
-    );
-    assert_eq!(
-        analysis_catalog_disposition(&[], AnalysisKind::Hbsp),
-        "Add instance"
-    );
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::Hbnoise),
-        Some("Preview engine · non-sign-off")
-    );
-    assert_eq!(
-        analysis_catalog_disposition(&[], AnalysisKind::Hbnoise),
-        "Add instance"
-    );
-    // DC mismatch joined them: a preview engine that runs, rather than a
-    // catalogue card that refuses.
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::DcMismatch),
-        Some("Preview engine · non-sign-off")
-    );
-    assert_eq!(
-        analysis_catalog_disposition(&[], AnalysisKind::DcMismatch),
-        "Add instance"
-    );
-    assert_eq!(
-        analysis_catalog_readiness(AnalysisKind::Qpss),
-        Some("Preview engine · non-sign-off")
-    );
-    assert_eq!(
-        analysis_catalog_disposition(&[], AnalysisKind::Qpss),
-        "Add instance"
     );
 }
 

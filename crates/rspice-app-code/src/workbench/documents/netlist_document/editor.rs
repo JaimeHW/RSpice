@@ -37,8 +37,6 @@ use super::{
     diagnostics::{parser_diagnostics, unknown_reference_diagnostics},
     highlight,
 };
-#[cfg(test)]
-use crate::state::netlist_diagnostics::line_column_for_span;
 use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
 use crate::workbench::documents::editor_font;
 
@@ -502,91 +500,6 @@ fn commit_owned_source_edit(
         runs.manual_run.edited_lines.insert(cursor_line);
     }
     true
-}
-
-#[cfg(test)]
-const DIAGNOSTIC_STRIP_TEXT_X: f32 = 26.0;
-#[cfg(test)]
-const DIAGNOSTIC_STRIP_RIGHT_PADDING: f32 = 8.0;
-#[cfg(test)]
-const DIAGNOSTIC_STRIP_CHAR_WIDTH: f32 = 7.0;
-
-#[cfg(test)]
-fn diagnostic_strip_text(diagnostic: &Diagnostic, buffer: &str, width: f32) -> String {
-    let location = diagnostic_location(diagnostic, buffer);
-    let primary = format!(
-        "{}{location}{}",
-        diagnostic_label(diagnostic.severity),
-        diagnostic.message
-    );
-    let with_fix = diagnostic
-        .fix
-        .as_ref()
-        .map(|fix| format!("{primary} · fix: {}", fix.label));
-
-    if let Some(text) = with_fix
-        && diagnostic_strip_text_fits(&text, width)
-    {
-        return text;
-    }
-    if diagnostic_strip_text_fits(&primary, width) {
-        return primary;
-    }
-    truncate_diagnostic_strip_text(&primary, width)
-}
-
-#[cfg(test)]
-fn diagnostic_strip_text_fits(text: &str, width: f32) -> bool {
-    text.chars().count() <= diagnostic_strip_char_budget(width)
-}
-
-#[cfg(test)]
-fn truncate_diagnostic_strip_text(text: &str, width: f32) -> String {
-    let budget = diagnostic_strip_char_budget(width);
-    if text.chars().count() <= budget {
-        return text.to_string();
-    }
-    if budget <= 3 {
-        return text.chars().take(budget).collect();
-    }
-    let mut truncated: String = text.chars().take(budget - 3).collect();
-    truncated.push_str("...");
-    truncated
-}
-
-#[cfg(test)]
-fn diagnostic_strip_char_budget(width: f32) -> usize {
-    ((width - DIAGNOSTIC_STRIP_TEXT_X - DIAGNOSTIC_STRIP_RIGHT_PADDING).max(0.0)
-        / DIAGNOSTIC_STRIP_CHAR_WIDTH)
-        .floor() as usize
-}
-
-#[cfg(test)]
-fn diagnostic_location(diagnostic: &Diagnostic, buffer: &str) -> String {
-    let derived = diagnostic
-        .span
-        .as_ref()
-        .map(|span| line_column_for_span(buffer, span.start));
-    let line = diagnostic.line.or_else(|| derived.map(|(line, _)| line));
-    let column = diagnostic
-        .column
-        .or_else(|| derived.map(|(_, column)| column));
-
-    match (line, column) {
-        (Some(line), Some(column)) => format!("line {}:{} · ", line + 1, column + 1),
-        (Some(line), None) => format!("line {} · ", line + 1),
-        _ => String::new(),
-    }
-}
-
-#[cfg(test)]
-fn diagnostic_label(severity: DiagnosticSeverity) -> &'static str {
-    match severity {
-        DiagnosticSeverity::Hint => "hint · ",
-        DiagnosticSeverity::Error => "error · ",
-        DiagnosticSeverity::Warning => "warning · ",
-        DiagnosticSeverity::Info => "info · ",
-    }
 }
 
 /// The gutter mark a diagnostic earns: a warning or an error, and nothing for

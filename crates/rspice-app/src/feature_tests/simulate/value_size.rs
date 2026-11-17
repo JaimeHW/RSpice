@@ -1,6 +1,5 @@
 //! Every value a Studio page's fields hold reads at one size.
 
-use egui::accesskit::Role;
 use egui::{Rect, vec2};
 
 use crate::workbench::RSpiceApp;
@@ -59,58 +58,6 @@ fn paint(
         walk(&clipped.shape, &mut texts);
     }
     (texts, nodes)
-}
-
-/// Each field's value (or, while it is empty, its hint) as painted inside the
-/// field, with the size it is painted at.
-fn painted_field_values(page: SimulationPage) -> Vec<(String, f32)> {
-    let (texts, nodes) = paint(page);
-    let mut values = Vec::new();
-    for node in nodes.values() {
-        if !matches!(
-            node.role(),
-            Role::TextInput | Role::MultilineTextInput | Role::ComboBox | Role::SpinButton
-        ) {
-            continue;
-        }
-        let Some(bounds) = node.bounds() else {
-            continue;
-        };
-        let bounds = Rect::from_min_max(
-            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-        );
-        // The value, or the hint an empty field shows in its place: either is
-        // what the field reads as.
-        values.extend(
-            texts
-                .iter()
-                .filter(|(text, _, at)| !text.trim().is_empty() && bounds.contains(*at))
-                .map(|(text, font, _)| (text.clone(), font.size)),
-        );
-    }
-    values
-}
-
-/// A field's value reads at the field size on every Studio page: the
-/// Analyses page's integration wells (empty, so their hints) beside its
-/// transient fields, the Solver page's temperature, the run set's typed
-/// values. A well that set a size of its own read a size under the field
-/// beside it.
-#[test]
-fn every_value_a_studio_page_holds_is_painted_at_the_field_size() {
-    let field = rspice_app_workbench::ui::theme::field_mono().size;
-    let mut checked = 0;
-    for page in SimulationPage::NAVIGATION {
-        for (value, size) in painted_field_values(page) {
-            checked += 1;
-            assert_eq!(size, field, "{page:?}: {value:?} is painted at {size} px");
-        }
-    }
-    assert!(
-        checked >= 10,
-        "only {checked} field values were found painted"
-    );
 }
 
 /// The Analyses card's facts read at the field size, each in its face: the

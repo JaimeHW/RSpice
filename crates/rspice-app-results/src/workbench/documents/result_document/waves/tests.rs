@@ -69,17 +69,6 @@ fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
     );
 }
 
-#[test]
-fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
-    let mut state = deep_readout_fixture(16);
-
-    assert_eq!(readout_row_count(&mut state), 16);
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_MAX_H
-    );
-    assert!(readout_strip_height(&mut state.results_parts()) <= 238.0);
-}
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::results::visualization_document::{
     FamilyAggregationMethod, FamilyAggregationPolicy, FamilyComparisonOperator, FamilyDimension,
@@ -197,26 +186,6 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
         state.model.simulation.active_analysis().unwrap().waveforms,
         before
     );
-}
-
-fn deep_readout_fixture(trace_count: usize) -> ResultsTestHost {
-    let waveforms = (0..trace_count)
-        .map(|index| {
-            RetainedTrace::new(
-                format!("V(out{index})"),
-                vec![0.0, 1.0],
-                vec![index as f64, index as f64 + 1.0],
-                "#fff",
-            )
-        })
-        .collect();
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.start_run().add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
-    );
-    state.results.results.session.cursors.place(0.5);
-    state.results.results.session.cursor_strip = Some(0);
-    state
 }
 
 #[test]

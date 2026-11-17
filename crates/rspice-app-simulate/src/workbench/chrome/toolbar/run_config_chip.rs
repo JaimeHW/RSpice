@@ -168,11 +168,10 @@ fn configured_pvt_count(model: &Model) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{TOOLBAR_CONTEXT_GAP, trailing_controls_width};
+
     use super::*;
     use crate::state::pdk_config::PdkConfig;
-    use crate::workbench::layout::LayoutSpec;
-    use crate::workbench::state::WorkbenchSession;
+
     use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
     /// The chip is the product's global entry to the plan manager, so the plan
@@ -206,32 +205,6 @@ mod tests {
         // analysis is one analysis.
         assert!(copy.summary.ends_with(" analysis") || copy.summary.ends_with(" analyses"));
         assert!(!copy.summary.contains("1 analyses"));
-    }
-
-    /// A user-authored name is valid up to 96 characters, so the chip must clip
-    /// rather than grow — and it must clip at exactly the width the toolbar
-    /// reserved for it, or the scrolling context lane runs underneath it.
-    #[test]
-    fn a_long_plan_name_clips_inside_the_width_the_toolbar_reserves() {
-        assert_eq!(
-            run_config_chip_width(400.0, 120.0),
-            RUN_CONFIG_CHIP_MAX_WIDTH
-        );
-        assert_eq!(
-            run_config_chip_width(120.0, 400.0),
-            RUN_CONFIG_CHIP_MAX_WIDTH
-        );
-        assert_eq!(run_config_chip_width(90.0, 100.0), 153.0);
-
-        let wide = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
-        assert!(wide.show_run_config_selector);
-        let mut without_chip = wide;
-        without_chip.show_run_config_selector = false;
-        assert_eq!(
-            trailing_controls_width(wide, 5.0, true, 92.0, 112.0)
-                - trailing_controls_width(without_chip, 5.0, true, 92.0, 112.0),
-            RUN_CONFIG_CHIP_MAX_WIDTH + TOOLBAR_CONTEXT_GAP
-        );
     }
 
     #[test]

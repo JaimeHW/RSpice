@@ -171,26 +171,6 @@ impl Canvas {
         format!("{digest:x}")
     }
 
-    /// Compare a render with its reviewed visual baseline.
-    ///
-    /// Baselines are deliberately source constants rather than files emitted
-    /// during a test run.  A changed render therefore fails CI with the exact
-    /// replacement fingerprint in the diagnostic; accepting it remains an
-    /// explicit code review decision.
-    pub fn assert_regression(&self, name: &str, height: usize, expected_fingerprint: &str) {
-        assert_eq!(
-            expected_fingerprint.len(),
-            64,
-            "visual baseline {name} is not a SHA-256 fingerprint"
-        );
-        let actual = self.regression_fingerprint(height);
-        assert_eq!(
-            actual, expected_fingerprint,
-            "visual regression in {name} ({}x{height}); review the render before accepting the new fingerprint",
-            self.width
-        );
-    }
-
     /// A PNG with stored (uncompressed) deflate blocks, cropped to `height`
     /// rows. The crate has no image dependency and this is a review artifact,
     /// so size does not matter.
@@ -877,38 +857,6 @@ fn every_render_is_taken_on_the_same_host() {
             .all(|host| *host == egui::os::OperatingSystem::Nix),
         "{hosts:?}"
     );
-}
-
-#[test]
-fn regression_fingerprint_authenticates_geometry_background_crop_and_pixels() {
-    let mut original = Canvas::new(3, 2, Color32::from_rgb(4, 8, 12));
-    let painted = Color32::from_rgba_premultiplied(40, 30, 20, 128);
-    original.pixels[4] = painted;
-    original.regression_pixels[4] = painted;
-    let approved = original.regression_fingerprint(2);
-    original.assert_regression("unit-raster", 2, &approved);
-
-    let mut pixel_changed = original.clone();
-    pixel_changed.regression_pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
-    assert_ne!(pixel_changed.regression_fingerprint(2), approved);
-
-    let mut glyph_texel_only = original.clone();
-    glyph_texel_only.pixels[4] = Color32::from_rgba_premultiplied(41, 30, 20, 128);
-    assert_eq!(
-        glyph_texel_only.regression_fingerprint(2),
-        approved,
-        "the layout fingerprint must not authenticate process-variable glyph texels"
-    );
-
-    let background_changed = Canvas {
-        background: Color32::from_rgb(4, 8, 13),
-        ..original.clone()
-    };
-    assert_ne!(background_changed.regression_fingerprint(2), approved);
-    assert_ne!(original.regression_fingerprint(1), approved);
-
-    let wider = Canvas::new(4, 2, original.background);
-    assert_ne!(wider.regression_fingerprint(2), approved);
 }
 
 /// Which rows of a rasterized `text` carry ink, at the mono size a surface

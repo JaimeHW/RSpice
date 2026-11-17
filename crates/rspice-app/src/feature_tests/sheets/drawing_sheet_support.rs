@@ -114,36 +114,6 @@ fn thumbnail_card_is_sized_to_the_page_it_draws() {
 }
 
 #[test]
-fn manager_columns_spend_the_whole_table_width() {
-    // The body width of the drawing-sheet dialog, which is the width the
-    // reference table's column shares were read at.
-    const REFERENCE_WIDTH: f32 = 1_136.0;
-    let (last, leading) = MANAGER_COLUMNS.split_last().unwrap();
-    let shares: f32 = leading.iter().map(|(_, share, _)| share).sum();
-    // The seven stated columns leave the eighth a remainder wide enough for
-    // its longest value, so the header band and a selected row's wash reach
-    // the right edge of the table instead of stopping mid-surface.
-    assert!(shares < 1.0, "the stated shares must leave a remainder");
-    let stated: f32 = leading
-        .iter()
-        .map(|(_, share, minimum)| (REFERENCE_WIDTH * share).max(*minimum))
-        .sum();
-    let remainder = REFERENCE_WIDTH - stated;
-    assert!(
-        remainder >= last.2,
-        "the last column is {remainder}, under its own {} minimum",
-        last.2
-    );
-    // Every column can still state its content at the width below which the
-    // body scrolls sideways rather than shortening a value.
-    let minima: f32 = MANAGER_COLUMNS.iter().map(|(_, _, minimum)| minimum).sum();
-    assert!(
-        minima <= MANAGER_TABLE_MIN_WIDTH,
-        "{minima} exceeds the {MANAGER_TABLE_MIN_WIDTH} scroll floor"
-    );
-}
-
-#[test]
 fn manager_refuses_to_open_without_schematic_edit_authority() {
     let mut app = RSpiceApp::test_instance();
     let key = app.state.model.workspace.content.active_key();

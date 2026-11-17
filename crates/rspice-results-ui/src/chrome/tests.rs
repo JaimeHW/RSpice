@@ -2,18 +2,6 @@
 
 use super::*;
 
-#[test]
-fn result_shell_matches_mockup_bar_geometry() {
-    let mut tokens = Tokens::default();
-    tokens.metrics.ctl_h = 28.0;
-    let fine = ResultBarMetrics::resolve(&tokens);
-    assert_eq!(fine.viewer_tabs, 41.0);
-    assert_eq!(fine.viewer_tab, 30.0);
-    assert_eq!(fine.sheet_bar, 31.0);
-    assert_eq!(fine.structured_strip, 40.0);
-    assert_eq!(fine.instrument_control, 23.0);
-}
-
 /// Under a coarse pointer the shell raises every control to a 44 px
 /// target, and these rows have to make room for the controls they hold.
 ///

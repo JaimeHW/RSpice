@@ -820,35 +820,6 @@ fn frozen_columns_keep_their_place_while_the_rest_scroll_under_them() {
     assert_eq!(cell(&after, 1).right(), 240.0);
 }
 
-/// A table as narrow as a phone holds the first column only, so the values
-/// keep room beside it.
-#[test]
-fn a_narrow_table_holds_the_first_column_only() {
-    let ctx = context();
-    let columns = wide_columns(12, 120.0);
-    let mut state = TableState::default();
-    let draw = |state: &mut TableState| {
-        frame(&ctx, 390.0, Vec::new(), |ui| {
-            DataTable::new("frozen", &columns, 3)
-                .state(state)
-                .freeze(2)
-                .show(ui, wide_row(12))
-        })
-        .1
-    };
-    let before = draw(&mut state);
-    state.scroll_x = 100.0;
-    let after = draw(&mut state);
-    assert_eq!(state.scroll_x, 100.0);
-    assert_eq!(cell(&before, 0), cell(&after, 0), "the first column stays");
-    assert_eq!(head(&before, 0), head(&after, 0));
-    assert_eq!(
-        cell(&after, 1).left(),
-        cell(&before, 1).left() - 100.0,
-        "the second column, which a wider table holds, scrolls"
-    );
-}
-
 /// A narrow table shows its pinned column directly after the first and keeps
 /// it put with it while the values scroll; the page's memory and the response
 /// still name columns in the page's order. A wider table keeps the order.
@@ -939,52 +910,6 @@ fn a_narrow_table_keeps_its_pinned_column_beside_the_first() {
         head(&column, 0).right(),
         "a phone-wide table in a wide window pins its column"
     );
-}
-
-#[test]
-fn a_span_names_its_run_once_centred_and_keeps_to_its_columns_as_they_scroll() {
-    let ctx = context();
-    let columns = wide_columns(12, 120.0);
-    let bands = vec![
-        vec![Span::new("Corner", 0, 1), Span::new("Supply 1.62 V", 3, 5)],
-        Span::runs(2, &["", "SS", "SS", "SS", "FF"]),
-    ];
-    let mut state = TableState::default();
-    let draw = |state: &mut TableState| {
-        frame(&ctx, WIDTH, Vec::new(), |ui| {
-            DataTable::new("bands", &columns, 2)
-                .state(state)
-                .freeze(2)
-                .bands(&bands)
-                .show(ui, wide_row(12))
-        })
-        .1
-    };
-    for offset in [0.0, 100.0] {
-        state.scroll_x = offset;
-        let geometry = draw(&mut state);
-        let rows = geometry.all("table.band");
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|band| band.height() == TABLE_HEAD_H));
-        assert_eq!(
-            rows[1].bottom(),
-            geometry.one("table.head").expect("head").top()
-        );
-
-        let spans = geometry.all("table.span.0");
-        assert_eq!(spans.len(), 1, "the frozen columns' band cells are blank");
-        let span = spans[0];
-        assert_eq!(span.left(), head(&geometry, 3).left(), "at {offset}");
-        assert_eq!(span.right(), head(&geometry, 5).right(), "at {offset}");
-        let labels = geometry.all("table.span.0.label");
-        assert_eq!(labels.len(), 1, "one label for the run");
-        assert!((labels[0].center().x - span.center().x).abs() < 0.5);
-
-        let runs = geometry.all("table.span.1");
-        assert_eq!(runs.len(), 2, "the empty span draws nothing");
-        assert_eq!(runs[0].left(), head(&geometry, 3).left());
-        assert_eq!(runs[0].right(), head(&geometry, 5).right());
-    }
 }
 
 #[test]

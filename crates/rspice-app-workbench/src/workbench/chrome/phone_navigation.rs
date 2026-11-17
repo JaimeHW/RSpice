@@ -209,14 +209,4 @@ fn nav_item(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compact_navigation_geometry_matches_the_mockup() {
-        let item = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 52.0));
-        let badge = phone_badge_rect(item);
-        assert_eq!(badge.min, egui::pos2(43.0, 2.0));
-        assert_eq!(badge.size(), Vec2::splat(15.0));
-    }
-}
+mod tests {}

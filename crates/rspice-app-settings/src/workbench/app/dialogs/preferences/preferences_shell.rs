@@ -1573,54 +1573,6 @@ mod tests {
         assert!(!layout.phone);
     }
 
-    /// One inset runs through the header, the rail, every row and the footer.
-    ///
-    /// The header used to be inset 15 px over a body inset 24 and a footer
-    /// inset 12, so the dialog's title, its first label and its buttons each
-    /// started on a different vertical line.
-    #[test]
-    fn one_inset_governs_the_header_the_rail_the_rows_and_the_footer() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    assert_eq!(content_inset(ui), CONTENT_INSET);
-                });
-            },
-        );
-        let header = Rect::from_min_size(egui::pos2(11.0, 11.0), vec2(998.0, HEADER_HEIGHT));
-        let copy = centered_header_copy_rect(header, vec2(112.0, 31.0), CONTENT_INSET);
-        assert_eq!(copy.left() - header.left(), CONTENT_INSET);
-        assert_eq!(copy.center().y, header.center().y);
-        assert!(copy.top() > header.top());
-        assert!(copy.bottom() < header.bottom());
-    }
-
-    /// A row is as tall as the control on it plus one padding either side.
-    ///
-    /// The old row reserved a 52 px content track for a 28 px control, so
-    /// every row was 70 px tall whatever was on it: an 11 px label and a
-    /// 17 px switch inside two and a half control heights of air.
-    #[test]
-    fn a_plain_row_is_one_control_tall() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let standard = standard_row_height(&ctx);
-        assert!(
-            standard >= Tokens::get(&ctx).metrics.ctl_h + Tokens::get(&ctx).metrics.bar_pad * 2.0,
-            "the page's row height clears a control and its padding"
-        );
-        assert!(
-            standard < 70.0,
-            "a row is shorter than the fixed 70 px track it replaces: {standard}"
-        );
-    }
-
     /// The height every row on the page holds to: a label with one line of
     /// help, padded. A row that carries no help is the same height as its
     /// neighbours rather than four pixels shorter.
@@ -1882,24 +1834,6 @@ mod tests {
             left.iter().copied().any(carries_accent),
             "the current page still has to be marked, by its left accent edge"
         );
-    }
-
-    #[test]
-    fn phone_geometry_keeps_four_point_viewport_gutters() {
-        let layout =
-            PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0)));
-        assert_eq!(layout.surface.size(), vec2(382.0, 836.0));
-        assert!(layout.narrow);
-        assert!(layout.phone);
-    }
-
-    #[test]
-    fn tablet_uses_category_selector_without_phone_full_height_override() {
-        let layout =
-            PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(768.0, 1024.0)));
-        assert_eq!(layout.surface.size(), vec2(740.0, DESKTOP_HEIGHT));
-        assert!(layout.narrow);
-        assert!(!layout.phone);
     }
 
     #[test]

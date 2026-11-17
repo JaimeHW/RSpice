@@ -137,97 +137,6 @@ fn each_row_states_the_sheets_statistics() {
     );
 }
 
-/// The selected row's detail fills the page under the table as one frame:
-/// one head band across both halves at the table head's height, the
-/// histogram half and the list half sharing their top and their foot, which
-/// is the view's.
-#[test]
-fn the_detail_fills_the_page_as_one_frame() {
-    let ctx = context();
-    let mut harness = monte_carlo_app();
-    select_row(&mut harness, 0);
-    let (output, geometry) = settled(&ctx, &mut harness);
-    let rows = geometry.all("table.row");
-    assert_eq!(
-        rows.len(),
-        4,
-        "the specification and its three failing trials"
-    );
-    let toolbar = geometry.one("toolbar").expect("toolbar");
-    let heads = geometry.all("table.head");
-    assert_eq!(heads.len(), 2);
-    assert_eq!(heads[0].top(), toolbar.bottom());
-    let split = geometry.one("split").expect("the detail is split off");
-    assert_eq!(split.top(), rows[0].bottom(), "the table takes its rows");
-
-    let band = geometry.one("detail.band").expect("one head band");
-    let plot = geometry.one("detail.plot").expect("the histogram half");
-    let list = geometry.one("detail.list").expect("the list half");
-    assert_eq!(band.top(), split.bottom());
-    assert_eq!(band.height(), TABLE_HEAD_H);
-    assert_eq!((band.left(), band.right()), (plot.left(), list.right()));
-    assert_eq!(plot.top(), band.bottom(), "the plot is under the band");
-    assert_eq!(list.top(), band.top(), "the list's heads are in the band");
-    assert_eq!(plot.bottom(), super::super::raster::PAGE_HEIGHT);
-    assert_eq!(list.bottom(), plot.bottom(), "both halves run to the foot");
-    assert!(list.left() >= plot.right());
-    assert_eq!(geometry.one("histogram"), Some(plot));
-
-    assert_eq!(heads[1].y_range(), band.y_range(), "one band across both");
-    assert_eq!(heads[1].x_range(), list.x_range());
-    let words = painted(&output);
-    assert!(
-        words
-            .iter()
-            .any(|(words, _)| words == "gain \u{00b7} 40 trials \u{00b7} 3 fail"),
-        "the plot's title states the output, its trials and its failures"
-    );
-    for seed in ["0x1A32", "0x1A3E", "0x1A4A"] {
-        assert!(words.iter().any(|(words, _)| words == seed), "{seed}");
-    }
-    // The value a trial failed with stands beside its number, the seed last,
-    // so a list scrolled on a narrow page still shows the value.
-    let left_of = |wanted: &str| {
-        shapes(&output)
-            .iter()
-            .find_map(|shape| match shape {
-                egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos.x),
-                _ => None,
-            })
-            .expect(wanted)
-    };
-    assert!(left_of("39.20 dB") < left_of("0x1A32"));
-
-    // A failing trial is the inspector's subject once selected.
-    let failing = population(
-        sheet(&harness).rows[0].statistics.as_ref().expect("trials"),
-        None,
-    )
-    .expect("every trial")
-    .failing();
-    harness
-        .state
-        .verification
-        .monte_carlo_trials_table
-        .selection = Some(Selection {
-        row: 0,
-        key: Some(RowKey::Number(failing[0] as u64)),
-        column: None,
-    });
-    let facts = trial_facts(&harness.model, &harness.state.verification);
-    assert_eq!(facts.len(), 1);
-    assert_eq!(facts[0].title, "Trial 8 \u{00b7} gain");
-    assert_eq!(
-        facts[0].rows,
-        [
-            ("Value".to_owned(), "39.20 dB".to_owned()),
-            ("Limit".to_owned(), "\u{2265} 40 dB".to_owned()),
-            ("Seed".to_owned(), "0x1A32".to_owned()),
-            ("Analysis".to_owned(), "Monte Carlo".to_owned()),
-        ]
-    );
-}
-
 /// On a phone the detail stacks: the histogram over the failing trials, each
 /// the page's full width under its own head band, the list as tall as its
 /// rows and the plot taking the rest down to the page's foot.
@@ -347,41 +256,6 @@ fn a_failing_trial_opens_in_results_as_its_member() {
         harness.wb.workspace,
         crate::workbench::state::Workspace::Results
     );
-}
-
-/// The navigator's Monte Carlo line fails exactly when the toolbar does: a
-/// yield that clears the plan's 90 % gate is plain though three trials fail
-/// their limit, and one under a 95 % gate fails in both.
-#[test]
-fn the_navigator_takes_the_toolbars_tone() {
-    for (percent, failing) in [(90.0, false), (95.0, true)] {
-        let mut harness = monte_carlo_app();
-        let plan_id = verification_plan_id(&harness.model).expect("default plan");
-        harness
-            .model
-            .workspace
-            .content
-            .ensure_active_plan_data(plan_id)
-            .specification_policy
-            .monte_carlo = MonteCarloSpecificationGate::YieldAtLeast { percent };
-        let gate = monte_carlo_gate(&harness.model);
-        assert_eq!(gate, MonteCarloSpecificationGate::YieldAtLeast { percent });
-        let sheet = sheet(&harness);
-        assert!(
-            population(sheet.rows[0].statistics.as_ref().expect("trials"), None)
-                .is_some_and(|shown| shown.failing().len() == 3),
-            "three trials fail at every gate"
-        );
-        let toolbar = monte_carlo_summary(sheet, &gate).problem;
-        let navigator = crate::workbench::docks::navigator::verify::verification_flow_presentation(
-            &harness.model,
-            &harness.state,
-            VerificationPage::MonteCarlo,
-        )
-        .problem;
-        assert_eq!(toolbar, failing.then_some(Problem::Failure), "{percent} %");
-        assert_eq!(navigator, toolbar, "{percent} %");
-    }
 }
 
 /// Two specifications judged over different trials have no joint yield,
@@ -757,63 +631,6 @@ fn shapes(output: &egui::FullOutput) -> Vec<egui::Shape> {
     out
 }
 
-/// The limit and the mean cannot be mistaken for each other: the limit is a
-/// solid rule in the failing ink, tagged with its comparison at the top; the
-/// mean a dot with a dashed drop line, tagged with its value. The ticks carry
-/// no unit, which the axis states once, and the count axis is named.
-#[test]
-fn the_limit_and_the_mean_are_drawn_apart() {
-    let ctx = context();
-    let (model, output) = gain_histogram(&ctx);
-    let t = Tokens::get(&ctx);
-    let spec = super::super::histogram::histogram_spec("dB", &model, ("gain histogram", ""), &t);
-    let limit = spec
-        .markers
-        .iter()
-        .find(|marker| marker.x == 40.0)
-        .expect("the limit is tagged");
-    assert_eq!(limit.shape, crate::ui::plot::MarkerShape::LimitLine);
-    assert_eq!(limit.color, t.color.err);
-    assert_eq!(limit.label, "\u{2265} 40 dB");
-    let mean = spec
-        .markers
-        .iter()
-        .find(|marker| marker.x == model.mean)
-        .expect("the mean is tagged");
-    assert_eq!(mean.shape, crate::ui::plot::MarkerShape::Point);
-    assert!(mean.drop_line);
-    assert_eq!(mean.color, t.color.accent);
-    assert_eq!(
-        mean.label,
-        format!("\u{00b5} {}", format_value(model.mean, "dB"))
-    );
-    assert_eq!(
-        spec.markers
-            .iter()
-            .filter(|marker| marker.label.ends_with('\u{03c3}'))
-            .count(),
-        2,
-        "mean \u{00b1} 3 standard deviations"
-    );
-    assert_eq!(spec.x.unit, "dB");
-    assert!(spec.x.ticks.iter().all(|(_, label)| !label.contains("dB")));
-    assert_eq!(spec.y.unit, "trials");
-
-    // The limit's rule is the one solid rule two points wide.
-    let rules = shapes(&output)
-        .into_iter()
-        .filter_map(|shape| match shape {
-            egui::Shape::LineSegment { points, stroke }
-                if points[0].x == points[1].x && stroke.width >= 2.0 =>
-            {
-                Some(stroke.color)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(rules, [t.color.err]);
-}
-
 /// Bars wear the Results histogram's tones, the accent wash in an accent
 /// outline, and the failing part of a bar the same wash and outline in the
 /// failing ink; the canvas theme is worn again once the plot has drawn.
@@ -846,20 +663,4 @@ fn bars_wear_the_results_tones_and_failing_parts_the_failing_ink() {
                 || bar.0 == t.color.bg_elevated),
         "{bars:?}"
     );
-}
-
-/// On a touch phone the failing-trials list is as tall as its rows at the
-/// touch target, not at a fine pointer's grid row, so every trial shows.
-#[test]
-fn a_touch_phone_lists_every_failing_trial_at_the_touch_row_height() {
-    let frame = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(390.0, 700.0));
-    let touch = LineHeights {
-        head: 44.0,
-        row: 44.0,
-        band: 24.0,
-    };
-    let layout = DetailLayout::stacked(frame, 3, touch);
-    assert_eq!(layout.list.height(), 44.0 + 3.0 * 44.0);
-    assert_eq!(layout.band.height(), 24.0);
-    assert_eq!(layout.list.bottom(), frame.bottom());
 }

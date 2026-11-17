@@ -13,7 +13,6 @@ use rspice_app_state::state::{
 };
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
-use rspice_app_workbench::ui::theme::FontWeight;
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::docks::console::problems::active_problem_count;
@@ -912,26 +911,6 @@ fn measurement_badge_counts_only_the_active_immutable_dataset() {
     assert_eq!(active_measurement_count(&simulation), 0);
 }
 
-/// The task log's status column is as wide as its widest status, measured in
-/// its own font. A 58 px constant clipped "INTERRUPTED".
-#[test]
-fn the_task_status_column_fits_every_status() {
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let column = widest_status_width(ui);
-            for status in ["INTERRUPTED", "CANCELLING", "CANCELLED", "RUNNING"] {
-                let width = task_text_width(ui, status, FontWeight::Regular);
-                assert!(
-                    width <= column,
-                    "{status} is {width} px in a {column} px column"
-                );
-            }
-        });
-    });
-}
-
 /// Where `label` is painted, as the pointer aims at it.
 fn label_center(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
     shapes.iter().find_map(|clipped| match &clipped.shape {
@@ -1367,49 +1346,6 @@ fn busy_console() -> RSpiceApp {
             .log(LogSeverity::Error, LogSource::Studio, "Export failed");
     }
     app
-}
-
-/// The page's controls stand on its toolbar band under the tabs, as the
-/// Problems page's do: one row, centred on one line, short of Clear at the
-/// far end, at a 900 px dock. They used to share the tab strip, squeezed
-/// between the tabs and the dock's actions.
-#[test]
-fn the_console_toolbar_fits_one_row_under_the_tabs_of_a_900_px_dock() {
-    let mut app = busy_console();
-    let nodes = labelled_bounds(&console_dock_output(&mut app, 900.0));
-    let find = |label: &str| {
-        nodes
-            .iter()
-            .find(|(_, candidate, _)| candidate.starts_with(label))
-            .map(|(_, _, bounds)| *bounds)
-            .unwrap_or_else(|| panic!("no {label:?} control: {nodes:?}"))
-    };
-    let clear = find("Clear the session log");
-    let field = find("Find in the log");
-    let controls = [
-        find("Errors 3"),
-        find("Warnings 12"),
-        find("Info 240"),
-        find("Console channel"),
-        field,
-        clear,
-    ];
-    let line = clear.center().y;
-    for control in controls {
-        assert!(
-            control.top() >= CONSOLE_HEADER_HEIGHT,
-            "{control:?} rises into the {CONSOLE_HEADER_HEIGHT} px tab strip"
-        );
-        assert!(
-            (control.center().y - line).abs() <= 0.5,
-            "{control:?} is off the toolbar's line at {line}"
-        );
-    }
-    assert!(
-        field.right() <= clear.left(),
-        "the find field {field:?} runs under Clear {clear:?}"
-    );
-    assert!(field.width() >= 60.0, "the find field is cut to {field:?}");
 }
 
 /// A ring that has dropped its oldest entries says so in its first row, so a

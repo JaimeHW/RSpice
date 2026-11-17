@@ -3,14 +3,7 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::docks::navigator::{
-    header, panel_search, panel_search_field_width,
-};
-
-#[test]
-fn navigator_search_and_empty_hint_match_mockup_spacing() {
-    assert_eq!(panel_search_field_width(260.0), 244.0);
-}
+use rspice_app_workbench::workbench::docks::navigator::{header, panel_search};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]

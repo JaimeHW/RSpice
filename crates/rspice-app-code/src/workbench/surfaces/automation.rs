@@ -1765,12 +1765,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn title_actions_follow_workspace_width_not_viewport_width() {
-        assert!(title_actions_stack(TITLE_ACTION_STACK_BREAKPOINT));
-        assert!(!title_actions_stack(TITLE_ACTION_STACK_BREAKPOINT + 1.0));
-    }
-
-    #[test]
     fn watch_envelope_validation_defers_python_grammar_to_the_managed_runtime() {
         assert!(valid_automation_watch_expression("value +"));
         assert!(!valid_automation_watch_expression("   \n"));

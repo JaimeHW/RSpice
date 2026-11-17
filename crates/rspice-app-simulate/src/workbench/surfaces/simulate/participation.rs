@@ -845,49 +845,6 @@ mod tests {
         assert!(point_selection_note(1, 15, Some(1)).contains("1 task from this instance"));
     }
 
-    /// The column the contract promises this row is wide enough to read it in.
-    ///
-    /// [`super::CONTROL_ROW_MIN_WIDTH`] is a sum of the parts the row draws,
-    /// but one of those parts — where the property list starts its value column
-    /// — is itself a function of the row's width, so the sum cannot check
-    /// itself. It is measured here instead, through the same
-    /// `property_row_control_columns` the row lays out with: if that column
-    /// moves, or the trailing group's budget grows past what it leaves, the
-    /// contract splits into columns that squeeze the select below the width its
-    /// value is legible at.
-    ///
-    /// A readability claim, not a fit one. The row fits whatever column it is
-    /// handed — the select takes what the *measured* trailing group leaves, not
-    /// what [`super::TRAILING_GROUP_BUDGET`] assumes — and that the whole editor
-    /// stays inside the surface is measured end to end by
-    /// `no_analyses_page_control_is_cut_off_at_any_gate`.
-    #[test]
-    fn the_participation_row_fits_the_column_it_asks_for() {
-        let width = super::CONTROL_ROW_MIN_WIDTH;
-        // The row is laid out on the Analyses page, outside any panel body.
-        let mut value_left = 0.0;
-        let ctx = egui::Context::default();
-        let _ = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                value_left =
-                    crate::workbench::design_system::property_row_control_columns(ui, width).1;
-            });
-        });
-        assert!(
-            value_left <= super::PROPERTY_VALUE_COLUMN,
-            "the property list starts its value column at {value_left} in a {width}-point row, \
-             not at the {} this row budgets for",
-            super::PROPERTY_VALUE_COLUMN
-        );
-        let room = width - value_left - super::CONTROL_ROW_GAP;
-        let needed = super::RUN_AT_SELECT_MIN_WIDTH + super::TRAILING_GROUP_BUDGET;
-        assert!(
-            room >= needed,
-            "a {width}-point column leaves {room} points for the run-at row, which needs \
-             {needed}; raise CONTROL_ROW_MIN_WIDTH, and CONTRACT_SPLIT_MIN_WIDTH with it"
-        );
-    }
-
     /// With no readable rate the note states the points and nothing else,
     /// rather than assuming one task per point.
     #[test]

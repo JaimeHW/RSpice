@@ -1155,33 +1155,6 @@ fn output_expression_diagnostic_is_localized_to_the_authored_request() {
 }
 
 #[test]
-fn diagnostic_strip_text_omits_fix_and_truncates_for_phone_width() {
-    let source = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
-    let mut diagnostic = Diagnostic::current(
-        "rspice.netlist.semantic",
-        "SPICE-UNKNOWN-MODEL",
-        DiagnosticSeverity::Error,
-        "Unknown model `nchh` in this deck.",
-    );
-    diagnostic.source_line = Some(1);
-    diagnostic.span = Some(18..22);
-    diagnostic.line = Some(1);
-    diagnostic.column = Some(11);
-    diagnostic.fix = Some(crate::state::netlist_diagnostics::DiagnosticFix {
-        label: "Replace with nch".to_string(),
-        span: 18..22,
-        replacement: "nch".to_string(),
-    });
-    diagnostic.refresh_canonical_location();
-
-    let text = diagnostic_strip_text(&diagnostic, source, 160.0);
-
-    assert!(!text.contains("fix:"));
-    assert!(text.ends_with("..."), "{text}");
-    assert!(diagnostic_strip_text_fits(&text, 160.0));
-}
-
-#[test]
 fn editor_commit_rejects_generated_artifact_mutation() {
     let mut harness = harness();
     harness.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();

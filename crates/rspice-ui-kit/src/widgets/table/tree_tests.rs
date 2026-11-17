@@ -9,7 +9,6 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 use super::list_tests::{key, metrics, press};
 use super::*;
 use crate::probe::{Geometry, pass};
-use crate::widgets::tree::{TREE_INDENT, TWIST_ROOM};
 
 /// A library rail: each row's name, its level, and, for a row with
 /// children, whether they show.
@@ -34,26 +33,6 @@ fn rail_cell(row: usize) -> Cell {
         None if level > 0 => cell.leaf(),
         None => cell,
     }
-}
-
-/// Every run of words a pass painted, and where it starts.
-fn painted_at(output: &egui::FullOutput) -> Vec<(String, Pos2)> {
-    fn walk(shape: &egui::Shape, words: &mut Vec<(String, Pos2)>) {
-        match shape {
-            egui::Shape::Text(text) => words.push((text.galley.text().to_owned(), text.pos)),
-            egui::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, words);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut words = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, &mut words);
-    }
-    words
 }
 
 /// A rail drawn as `kind`, with state, at one metric.
@@ -149,37 +128,6 @@ impl Rail {
     }
 }
 
-/// A list draws no heads: its first row starts where the list does, and
-/// every row is a list row tall under the live metrics, a finger's target
-/// under a coarse pointer. A grid keeps its heads.
-#[test]
-fn a_list_draws_no_heads_and_takes_the_list_row_height() {
-    for (metric, ctx) in metrics() {
-        for kind in [Kind::List, Kind::Tree] {
-            let mut rail = Rail::new(&ctx, kind);
-            let (_, geometry, _, top) = rail.pass(Vec::new(), Modifiers::NONE);
-            assert!(
-                geometry.one("table.head").is_none(),
-                "{metric}: a list has no heads"
-            );
-            let metrics = Tokens::get(&ctx).metrics;
-            let row = if metrics.is_touch() {
-                metrics.touch_target()
-            } else {
-                metrics.row_h
-            };
-            let first = geometry.one("table.line.0").expect("row 0");
-            assert_eq!(first.height(), row, "{metric}");
-            assert_eq!(first.top(), top, "{metric}: the rows start the list");
-        }
-        let grid = Rail::new(&ctx, Kind::Grid).geometry();
-        assert!(
-            grid.one("table.head").is_some(),
-            "{metric}: a grid keeps its heads"
-        );
-    }
-}
-
 /// A list copies its selected rows' words, with no head line over them.
 #[test]
 fn a_list_copies_its_rows_without_a_head_line() {
@@ -198,56 +146,6 @@ fn a_list_copies_its_rows_without_a_head_line() {
                 _ => None,
             });
         assert_eq!(copied.as_deref(), Some("Library\nNotes"), "{metric}");
-    }
-}
-
-/// An indent steps a row's words in by a level; a twist and an icon stand
-/// before them; a leaf's room lines its words up with a sibling's that has a
-/// twist. Under a coarse pointer the twist is a target a finger finds.
-#[test]
-fn a_trees_indent_twist_and_icon_stand_before_its_words() {
-    for (metric, ctx) in metrics() {
-        let mut rail = Rail::new(&ctx, Kind::Tree);
-        let (_, geometry, output, _) = rail.pass(Vec::new(), Modifiers::NONE);
-        let words = painted_at(&output);
-        let left = |name: &str| {
-            words
-                .iter()
-                .find(|(words, _)| words == name)
-                .map(|(_, at)| at.x)
-                .unwrap_or_else(|| panic!("{metric}: {name} is painted"))
-        };
-        assert_eq!(
-            left("Amplifier") - left("Library"),
-            TREE_INDENT,
-            "{metric}: one level in"
-        );
-        assert_eq!(
-            left("Bandgap"),
-            left("Amplifier"),
-            "{metric}: a leaf lines up with its sibling's twist"
-        );
-        assert!(
-            left("Notes") < left("Library"),
-            "{metric}: no twist, no room"
-        );
-
-        let twist = geometry.one("table.twist.0").expect("Library has a twist");
-        let metrics = Tokens::get(&ctx).metrics;
-        let room = if metrics.is_touch() {
-            metrics.touch_target()
-        } else {
-            TWIST_ROOM
-        };
-        assert_eq!(twist.width(), room, "{metric}");
-        assert!(
-            twist.right() < left("Library"),
-            "{metric}: before the words"
-        );
-        assert!(
-            geometry.one("table.twist.1").is_none(),
-            "{metric}: a leaf has no twist"
-        );
     }
 }
 

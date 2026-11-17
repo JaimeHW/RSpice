@@ -2432,8 +2432,6 @@ pub(super) fn paint_control_row_label(ui: &mut Ui, label: &str, row_width: f32) 
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures;
-#[cfg(any(test, feature = "test-support"))]
-pub mod page_raster;
 #[cfg(test)]
 pub(crate) mod page_tests;
 #[cfg(test)]

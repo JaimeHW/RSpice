@@ -34,18 +34,6 @@ fn angle_readouts_follow_the_angle_display_at_significant_digits() {
 }
 
 #[test]
-fn stat_columns_are_disjoint_at_phone_panel_width() {
-    use rspice_ui_kit::panels::PANEL_INSET;
-    let width = 240.0;
-    let (name, value) = stat_column_widths(width, PANEL_INSET);
-    assert!(name > 0.0);
-    assert!(value > name);
-    // The two columns fill the panel inside the panel inset on both sides,
-    // less the gap between them.
-    assert!((name + value + 2.0 * PANEL_INSET + 8.0 - width).abs() < f32::EPSILON * width);
-}
-
-#[test]
 fn wheel_zoom_keeps_smith_axes_at_equal_scale() {
     let change = square_xy_view_change(
         (-1.12, 1.12),

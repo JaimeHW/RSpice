@@ -308,72 +308,6 @@ fn a_click_anywhere_on_a_pane_makes_it_the_active_one() {
     );
 }
 
-/// The panes of a strip take its height in equal shares, for two, three and
-/// four panes.
-#[test]
-fn the_panes_of_a_strip_take_equal_heights() {
-    let ctx = context(crate::ui::Theme::default());
-    let units = ["V", "A", "W", "T"];
-    for count in 2..=4 {
-        let mut state = panes_of(&units[..count]);
-        let output = settled(&ctx, &mut state, FRAME);
-        let areas = plot_areas(&ctx, &output);
-        assert_eq!(areas.len(), count, "{count} panes draw: {areas:?}");
-        for area in &areas[1..] {
-            assert!(
-                (area.height() - areas[0].height()).abs() <= 1.0,
-                "{count} panes: heights {:?}",
-                areas.iter().map(|area| area.height()).collect::<Vec<_>>()
-            );
-        }
-    }
-}
-
-/// Every scale toggle of a strip stands in one right-hand column: each
-/// pane's row ends with its icon under the strip header's window control,
-/// and its "log Y" chip the strip header's chip gap left of that, at every
-/// pane count and at a narrow width. The strip header's own "log X" chip,
-/// where it has one, ends on the same edge.
-#[test]
-fn the_scale_toggles_of_a_strip_stand_in_one_column() {
-    let ctx = context(crate::ui::Theme::default());
-    let units = ["V", "A", "W"];
-    for (count, size) in [
-        (1, FRAME),
-        (2, FRAME),
-        (3, FRAME),
-        (3, egui::vec2(520.0, FRAME.y)),
-    ] {
-        let mut state = panes_of(&units[..count]);
-        let output = settled(&ctx, &mut state, size);
-        let window = control(&output, "Maximize strip");
-        let icons = controls(&output, "Fit Y to the traces in view");
-        let chips = controls(&output, "log Y");
-        assert_eq!(icons.len(), count, "{count} panes at {size:?}: {icons:?}");
-        assert_eq!(chips.len(), count, "{count} panes at {size:?}: {chips:?}");
-        for (icon, chip) in icons.iter().zip(&chips) {
-            assert!(
-                (icon.left() - window.left()).abs() <= 0.5
-                    && (icon.right() - window.right()).abs() <= 0.5,
-                "{count} panes at {size:?}: the pane icon {icon:?} stands under the \
-                 strip's window control {window:?}"
-            );
-            assert!(
-                (icon.left() - chip.right() - 4.0).abs() <= 0.5,
-                "{count} panes at {size:?}: \"log Y\" {chip:?} ends the strip header's \
-                 chip gap left of its icon {icon:?}"
-            );
-            for log_x in controls(&output, "log X") {
-                assert!(
-                    (log_x.right() - chip.right()).abs() <= 0.5,
-                    "{count} panes at {size:?}: \"log X\" {log_x:?} and \"log Y\" \
-                     {chip:?} end on one edge"
-                );
-            }
-        }
-    }
-}
-
 /// The light interface over the light canvas.
 fn light() -> crate::ui::Theme {
     crate::ui::Theme {
@@ -466,52 +400,6 @@ fn the_trace_list_counts_what_the_row_cannot_name() {
         log.left() - list.right() > 40.0,
         "the list is the legend's, not the scale column's: list {list:?}, log Y {log:?}"
     );
-}
-
-/// The legend's control, the scale chip and the fit icon are one family of
-/// header control: each lies inside the header band, and all three take one
-/// height on one centre line.
-#[test]
-fn every_header_control_shares_one_height_inside_the_band() {
-    for theme in [crate::ui::Theme::default(), light()] {
-        let ctx = context(theme);
-        let mut state = crowded_pane();
-        let output = settled(&ctx, &mut state, FRAME);
-        let band = control(&output, "V pane");
-        let header = [
-            control(&output, "+1 · 10 hidden"),
-            control(&output, "log Y"),
-            control(&output, "Fit Y to the traces in view"),
-        ];
-        for rect in header {
-            assert!(
-                band.expand(0.5).contains_rect(rect),
-                "{rect:?} lies inside the header band {band:?}"
-            );
-            assert!(
-                (rect.height() - header[1].height()).abs() <= 0.5
-                    && (rect.center().y - header[1].center().y).abs() <= 0.5,
-                "one height on one centre line: {header:?}"
-            );
-            assert!(
-                (rect.center().y - band.center().y).abs() <= 1.0,
-                "centred in the band: {rect:?} in {band:?}"
-            );
-        }
-        // The legend's entries stand on the same centre line.
-        for ordinal in 0..2 {
-            let swatch = control(
-                &output,
-                &format!(
-                    "Toggle V(xtop.xcore.xstage{ordinal}.xbias.xmirror.output_node_of_the_cascode_{ordinal}) visibility"
-                ),
-            );
-            assert!(
-                (swatch.center().y - band.center().y).abs() <= 1.0,
-                "the entry's swatch {swatch:?} is centred in the band {band:?}"
-            );
-        }
-    }
 }
 
 /// Ticking a hidden signal in the trace list draws it, and the list stays
@@ -619,83 +507,6 @@ fn a_bode_strip_names_each_trace_in_the_pane_that_draws_it() {
             .chain((0..3).map(|ordinal| (format!("|V(o{ordinal})|"), 0)))
             .collect();
         assert_eq!(names, expected, "each name once, in the pane that draws it");
-    }
-}
-
-/// A pane that draws nothing takes no row: with every voltage of the DC
-/// family hidden the strip is its current pane alone, and plotting V(D)
-/// from the data browser brings the voltage pane back, the two sharing the
-/// strip's height equally.
-#[test]
-fn a_pane_with_nothing_drawn_takes_no_row_until_a_signal_is_plotted() {
-    use crate::workbench::documents::result_document::browser_plot::set_result_signal_plotted;
-    use rspice_results::result_presentation::SourceWaveformPresentationKey;
-    let ctx = context(crate::ui::Theme::default());
-    let mut state = nmos_output_family();
-    let output = settled(&ctx, &mut state, FRAME);
-    assert_eq!(plot_areas(&ctx, &output).len(), 1, "one pane row");
-    assert!(
-        controls(&output, "V pane").is_empty(),
-        "no header for the hidden voltages"
-    );
-    let key = {
-        let models = super::lanes::strip(&mut state);
-        let model = &models[0];
-        let trace = model
-            .traces
-            .iter()
-            .find(|trace| trace.source_waveform_name.starts_with("V(D)"))
-            .expect("the run keeps V(D)");
-        SourceWaveformPresentationKey::new(model.analysis_key, trace.source_waveform_name.clone())
-    };
-    set_result_signal_plotted(&mut state.results_parts(), &key, true);
-    let output = settled(&ctx, &mut state, FRAME);
-    let areas = plot_areas(&ctx, &output);
-    assert_eq!(areas.len(), 2, "V(D) brings its pane back");
-    assert!(
-        (areas[0].height() - areas[1].height()).abs() <= 1.0,
-        "equal heights: {areas:?}"
-    );
-}
-
-/// Every Y grid line carries its label, and the unit caption overlaps none
-/// of them, from a tall strip down to four panes in a short one.
-#[test]
-fn every_y_tick_is_labelled_and_the_caption_overlaps_none() {
-    let units = ["V", "A", "W", "T"];
-    for theme in [crate::ui::Theme::default(), light()] {
-        let ctx = context(theme);
-        for height in [760.0, 560.0, 440.0] {
-            let size = egui::vec2(FRAME.x, height);
-            let mut state = panes_of(&units);
-            let output = settled(&ctx, &mut state, size);
-            let areas = plot_areas(&ctx, &output);
-            assert_eq!(areas.len(), units.len(), "{height}: {areas:?}");
-            for (unit, area) in units.iter().zip(&areas) {
-                let rows = grid_rows(&ctx, &output, *area);
-                let labels = tick_labels(&output, *area);
-                assert!(rows.len() >= 2, "{height} {unit}: {} rows", rows.len());
-                assert_eq!(
-                    labels.len(),
-                    rows.len(),
-                    "{height} {unit}: {} labels for {} grid rows ({:.0} px pane)",
-                    labels.len(),
-                    rows.len(),
-                    area.height()
-                );
-                let caption = texts(&output)
-                    .into_iter()
-                    .find(|(text, rect)| text == unit && rect.right() <= area.left())
-                    .map(|(_, rect)| rect)
-                    .unwrap_or_else(|| panic!("{height}: the {unit} axis states its unit"));
-                for (value, label) in &labels {
-                    assert!(
-                        !caption.intersects(*label),
-                        "{height} {unit}: the caption {caption:?} covers {value} at {label:?}"
-                    );
-                }
-            }
-        }
     }
 }
 

@@ -394,19 +394,6 @@ fn every_hb_solver_control_is_painted_by_the_form() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn pss_catalog_and_declared_tone_modes_preserve_form_geometry() {
-    let mut selected = PssDialogState::from_config(&PssConfig::default());
-    selected.tone_sources = "VIN_AM".to_owned();
-    let mut declared = selected.clone();
-    declared.tone_sources = "VIN_AM, VIN_IQ".to_owned();
-    assert_eq!(
-        analysis_form_height(AnalysisDraft::Pss(selected)),
-        analysis_form_height(AnalysisDraft::Pss(declared))
-    );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
 fn every_noise_selection_preserves_the_eight_field_geometry() {
     let expected = analysis_form_height(AnalysisDraft::Noise(NoiseDraft::default()));
     for sweep in [

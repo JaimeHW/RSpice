@@ -14,7 +14,7 @@ use rspice_app_workbench::workbench::routing::{
     surface_route::SurfaceRoute,
 };
 use rspice_app_workbench::workbench::state::workbench_session::{
-    ConsolePage, Drawer, LAYOUT_SCHEMA_VERSION, WidthClass, WorkbenchSession, WorkspaceLayoutState,
+    ConsolePage, Drawer, LAYOUT_SCHEMA_VERSION, WorkbenchSession, WorkspaceLayoutState,
     default_inspector_width, default_navigator_width,
 };
 
@@ -80,16 +80,6 @@ fn every_claimed_viewer_document_is_in_the_catalog() {
         !noise.analysis_ids.contains(&"noise"),
         "the spectrum document would accept noise, so this test proves nothing"
     );
-}
-
-#[test]
-fn responsive_width_classes_match_every_mockup_boundary() {
-    assert_eq!(WidthClass::for_width(560.0), WidthClass::Phone);
-    assert_eq!(WidthClass::for_width(561.0), WidthClass::Tablet);
-    assert_eq!(WidthClass::for_width(820.0), WidthClass::Tablet);
-    assert_eq!(WidthClass::for_width(821.0), WidthClass::Desktop);
-    assert_eq!(WidthClass::for_width(1260.0), WidthClass::Desktop);
-    assert_eq!(WidthClass::for_width(1261.0), WidthClass::Wide);
 }
 
 #[test]

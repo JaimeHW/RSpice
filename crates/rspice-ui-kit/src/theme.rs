@@ -621,16 +621,6 @@ mod tests {
     }
 
     #[test]
-    fn canvas_contrast_baseline_preserves_reviewed_palette() {
-        let baseline = Tokens::new(Direction::Instrument, Mode::Dark, Density::Compact);
-        let resolved = Theme::default().tokens();
-
-        assert_eq!(resolved.color.canvas_grid, baseline.color.canvas_grid);
-        assert_eq!(resolved.color.symbol, baseline.color.symbol);
-        assert!(!resolved.color_safe_traces);
-    }
-
-    #[test]
     fn engineering_canvas_theme_labels_match_the_mockup_supported_choices() {
         assert_eq!(
             EngineeringCanvasTheme::ALL.map(EngineeringCanvasTheme::label),

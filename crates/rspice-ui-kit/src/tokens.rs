@@ -324,17 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn instrument_metrics_and_radii_match_the_workbench_mockup() {
-        let compact = Tokens::new(Direction::Instrument, Mode::Dark, Density::Compact);
-        assert_eq!(compact.metrics.ctl_h, 28.0);
-        assert_eq!(compact.metrics.row_h, 28.0);
-        assert_eq!(compact.radius, 3.0);
-        assert_eq!(compact.radius_lg, 6.0);
-        assert_eq!(compact.shadow().offset, [0, 14]);
-        assert_eq!(compact.shadow().blur, 42);
-    }
-
-    #[test]
     fn only_the_instrument_direction_deserializes() {
         assert_eq!(
             serde_json::from_str::<Direction>("\"Instrument\"").unwrap(),

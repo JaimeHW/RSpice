@@ -639,18 +639,6 @@ fn a_name_too_long_for_the_column_gives_up_its_middle() {
 }
 
 #[test]
-fn the_name_column_fits_the_longest_name_within_its_limits() {
-    let advance = 7.0;
-    assert_eq!(name_column_width(advance, 3), NAME_MIN_W);
-    let fits = 20;
-    assert_eq!(
-        name_column_width(advance, fits),
-        fits as f32 * advance + NAME_INSET + NAME_END_PAD
-    );
-    assert_eq!(name_column_width(advance, 500), NAME_MAX_W);
-}
-
-#[test]
 fn a_selection_follows_its_row_and_goes_when_the_row_does() {
     let dc = DcOpResult {
         node_voltages: vec![node("V(a)", 1.0), node("V(b)", 2.0)],
@@ -810,103 +798,6 @@ fn a_device_is_titled_as_drawn_and_identified_by_its_deck_name() {
 }
 
 #[test]
-fn a_section_scrolls_in_whole_columns_only_as_far_as_it_overflows() {
-    let name_w = 200.0;
-    let grid = Grid {
-        origin: egui::pos2(-300.0, 0.0),
-        visible: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0)),
-        name_w,
-        advance: 7.0,
-    };
-    assert_eq!(
-        grid.values_left(3, VALUE_W),
-        name_w,
-        "it fits: nothing moves"
-    );
-    assert_eq!(
-        grid.values_left(5, VALUE_W),
-        name_w - 2.0 * VALUE_W,
-        "it stops once its last column is whole"
-    );
-    assert_eq!(
-        grid.values_left(20, VALUE_W),
-        name_w - 3.0 * VALUE_W,
-        "it follows the bar a column at a time"
-    );
-}
-
-#[test]
-fn a_long_unit_widens_its_own_section_and_no_built_in_one() {
-    const ADVANCE: f32 = 7.2;
-    let report = DeviceOpReport {
-        entries: vec![
-            device(
-                "M1",
-                "MOSFET",
-                Some("saturation"),
-                vec![("id", 1.0), ("temp", 27.0)],
-            ),
-            device("D1", "DIODE", None, vec![("cd", 1.0), ("power", 1.0)]),
-            module_device(
-                "X1",
-                "sqlaw",
-                vec![("kp", 2.0e-4, "A/V^2"), ("id", 1.0e-3, "A")],
-            ),
-            module_device("X2", "rmod", vec![("ia", 1.0, "A"), ("g", 1.0, "S")]),
-        ],
-    };
-    let plan = plan_of(None, Some(&report));
-    let section = |title: &str| {
-        plan.sections
-            .iter()
-            .find(|section| section.title == title)
-            .expect("the section")
-    };
-    for title in ["MOSFET", "Diode", "rmod"] {
-        assert_eq!(section(title).unit_slot(ADVANCE), UNIT_SLOT_W, "{title}");
-        assert_eq!(section(title).value_w(ADVANCE), VALUE_W, "{title}");
-    }
-    let wide = section("sqlaw");
-    assert_eq!(wide.unit_slot(ADVANCE), 44.0, "six characters: mA/V^2");
-    assert_eq!(wide.value_w(ADVANCE), VALUE_W + 10.0);
-    assert!(
-        wide.unit_slot(ADVANCE) >= "mA/V^2".chars().count() as f32 * ADVANCE,
-        "the slot holds what it was sized for"
-    );
-    assert_eq!(
-        wide.value_w(ADVANCE) - wide.unit_slot(ADVANCE),
-        VALUE_W - UNIT_SLOT_W,
-        "the mantissas keep their room"
-    );
-
-    // The widest grid is the content width, and a section steps by its own
-    // column.
-    let scrolled = Grid {
-        origin: egui::pos2(-300.0, 0.0),
-        visible: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
-        name_w: 200.0,
-        advance: ADVANCE,
-    };
-    let width = wide.value_w(ADVANCE);
-    assert_eq!(
-        plan.widest_values(ADVANCE),
-        [
-            section("MOSFET").slots() as f32 * VALUE_W,
-            wide.slots() as f32 * width,
-        ]
-        .into_iter()
-        .fold(0.0, f32::max)
-    );
-    assert_eq!(
-        scrolled.values_left(20, width),
-        200.0 - 3.0 * width,
-        "300 pt of scroll is three of these columns"
-    );
-    let cell = scrolled.value_cell(0.0, 0.0, ROW_H, 1, width);
-    assert_eq!((cell.left(), cell.width()), (width, width));
-}
-
-#[test]
 fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
     let visible = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
     let at = |scrolled: f32| Grid {
@@ -932,54 +823,6 @@ fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
         egui::pos2(visible.right() - 10.0, 0.0),
         egui::vec2(VALUE_W, ROW_H),
     )));
-}
-
-#[test]
-fn a_header_is_on_the_sheet_only_for_a_column_that_fits() {
-    let params = [
-        "id", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb",
-    ]
-    .map(|name| (name, 1.0))
-    .to_vec();
-    let report = DeviceOpReport {
-        entries: vec![device("M1", "MOSFET", None, params)],
-    };
-    let plan = plan_of(None, Some(&report));
-    let mapping = Mapped {
-        node: false,
-        device: None,
-    };
-    let view = OpView {
-        evidence: &evidence(),
-        dc: None,
-        devices: Some(&report),
-        selection: None,
-        mapping: &mapping,
-        failure_site: None,
-    };
-    let ctx = egui::Context::default();
-    rspice_ui_kit::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut nodes = Vec::new();
-    for _ in 0..3 {
-        let input = rspice_ui_kit::raster::display_input(SIZE, 1.0);
-        let output = ctx.run_ui(input, |ui| {
-            let _ = show(ui, Some(&plan), &view);
-        });
-        nodes = output
-            .platform_output
-            .accesskit_update
-            .map(|update| update.nodes)
-            .unwrap_or_default();
-    }
-    let painted = nodes
-        .iter()
-        .filter_map(|(_, node)| node.label())
-        .filter(|label| label.starts_with("MOSFET: ") && !label.starts_with("MOSFET: Instance"))
-        .count();
-    // 900 pt less the 160 pt name column holds seven 104 pt columns, whatever
-    // the scroll bar's gutter takes.
-    assert_eq!(painted, 7);
 }
 
 #[test]

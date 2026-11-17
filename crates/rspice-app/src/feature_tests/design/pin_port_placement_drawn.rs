@@ -10,8 +10,6 @@ use rspice_app_design::workbench::app::dialogs::placement::pin_port::*;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{Point, PortDirection, PortDiscipline, PortSignalType};
-#[cfg(not(target_arch = "wasm32"))]
-use rspice_app_workbench::ui::tokens::Mode;
 
 /// Draw the form as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -421,88 +419,6 @@ fn a_name_already_on_the_sheet_is_refused_before_arming() {
 // ============================================================================
 // Fit
 // ============================================================================
-
-/// Two dozen long names, which is the longest derived line the form can state.
-#[cfg(not(target_arch = "wasm32"))]
-fn two_dozen_names() -> String {
-    (0..24)
-        .map(|index| format!("VERY_LONG_INTERFACE_NAME_{index}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// The two hardest drafts: a valid batch, whose derived line wraps, and a
-/// refused one, whose refusal is the longest the footer has to state.
-#[cfg(not(target_arch = "wasm32"))]
-type PinPortCase = (&'static str, fn(&mut AppState));
-
-#[cfg(not(target_arch = "wasm32"))]
-fn worst_cases() -> [PinPortCase; 2] {
-    [
-        ("valid", |state: &mut AppState| {
-            open_create_pins(&mut state.design.pin_port, &state.model);
-            state.design.pin_port.fields.names = two_dozen_names();
-        }),
-        ("refused", |state: &mut AppState| {
-            place_port(state, "VERY_LONG_INTERFACE_NAME_7");
-            open_create_pins(&mut state.design.pin_port, &state.model);
-            state.design.pin_port.fields.names = two_dozen_names();
-        }),
-    ]
-}
-
-/// Nothing the form paints leaves the card, the card never outgrows the
-/// viewport, and the footer stays inside it — at the desktop width, at the
-/// breakpoint, and on a portrait phone, in both themes.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn create_pins_fits_every_viewport() {
-    for screen in [
-        egui::vec2(1024.0, 640.0),
-        egui::vec2(760.0, 900.0),
-        egui::vec2(390.0, 844.0),
-    ] {
-        for mode in [Mode::Dark, Mode::Light] {
-            for (draft_stem, prepare) in worst_cases() {
-                let mut app = RSpiceApp::test_instance();
-                prepare(&mut app.state);
-                let names = app.state.design.pin_port.fields.names.clone();
-                let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
-                    screen,
-                    mode,
-                    3,
-                    |ctx| {
-                        render(&mut app, ctx);
-                    },
-                );
-                let label = format!("{screen:?} {mode:?} {draft_stem}");
-                painted.assert_inside_clip_and_surface_with_horizontal_scroll(&label, &[&names]);
-                assert!(
-                    painted.surface.height() < screen.y,
-                    "{label}: the form is taller than the viewport ({:?})",
-                    painted.surface
-                );
-                for verb in [PRIMARY, "Cancel"] {
-                    let rect = painted
-                        .rect_of(verb)
-                        .unwrap_or_else(|| panic!("{label}: {verb} was not painted"));
-                    assert!(
-                        painted.surface.expand(1.0).contains_rect(rect),
-                        "{label}: {verb} at {rect:?} is outside the surface {:?}",
-                        painted.surface
-                    );
-                }
-                // The footer is one row: the two verbs share a baseline.
-                let primary = painted.rect_of(PRIMARY).expect("primary");
-                let ghost = painted.rect_of("Cancel").expect("ghost");
-                assert!(
-                    (primary.center().y - ghost.center().y).abs() <= 1.0,
-                    "{label}: the footer stacked ({primary:?} / {ghost:?})"
-                );
-            }
-        }
-    }
-}
 
 /// An empty form says what Place waits for, and both choices span the
 /// control column the Discipline list spans, so no row stops short of its

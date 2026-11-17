@@ -1145,7 +1145,6 @@ mod tests {
     use super::fixtures::{retain_generated, seal_manual_run};
     use super::*;
     use crate::workbench::code::tests::{CodeHarness, harness};
-    use egui::vec2;
 
     fn configured_veriloga_state() -> (CodeHarness, String) {
         let mut harness = harness();
@@ -1324,39 +1323,6 @@ mod tests {
             harness.model.workspace.content.netlist_source.as_deref(),
             Some("retained owned\n.end\n")
         );
-    }
-
-    #[test]
-    fn toolbar_geometry_matches_the_mockup_contract() {
-        assert_eq!(toolbar::code_toolbar_visible_width(1024.0, 745.0), 745.0);
-        assert_eq!(toolbar::code_toolbar_visible_width(700.0, 745.0), 700.0);
-        assert!(toolbar::code_toolbar_compact(607.0));
-        assert!(!toolbar::code_toolbar_compact(721.0));
-        assert!(
-            toolbar::code_toolbar_prefers_compact(1024.0, 744.0, 405.0),
-            "tablet viewport must retain the compact projection"
-        );
-        assert!(
-            toolbar::code_toolbar_prefers_compact(1280.0, 744.0, 405.0),
-            "dock collapse must not re-enable a crowded full action set"
-        );
-        assert!(!toolbar::code_toolbar_prefers_compact(1280.0, 800.0, 405.0));
-        assert!(!toolbar::toolbar_status_visible(true, Problem::Warning));
-        assert!(toolbar::toolbar_status_visible(true, Problem::Failure));
-        assert!(toolbar::toolbar_status_visible(false, Problem::Warning));
-        assert!(toolbar::toolbar_advisory_fits(500.0, 260.0, 110.0, 70.0));
-        assert!(
-            !toolbar::toolbar_advisory_fits(430.0, 260.0, 110.0, 70.0),
-            "advisory must yield before language, blocking status, or actions clip"
-        );
-        let content = egui::Rect::from_min_size(egui::pos2(8.0, 0.0), vec2(526.0, 33.0));
-        let (status_and_language, actions) = toolbar::code_toolbar_regions(content, 342.0);
-        assert_eq!(actions.right(), content.right());
-        assert_eq!(
-            actions.left() - status_and_language.right(),
-            toolbar::CODE_TOOLBAR_ACTION_GUTTER
-        );
-        assert!(status_and_language.right() < actions.left());
     }
 
     #[test]

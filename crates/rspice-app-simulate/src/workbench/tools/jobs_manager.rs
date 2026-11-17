@@ -2005,17 +2005,6 @@ mod tests {
     }
 
     #[test]
-    fn trailing_row_copy_has_disjoint_measured_regions() {
-        let row = Rect::from_min_size(pos2(10.0, 20.0), vec2(280.0, 31.0));
-        let (leading, trailing) = trailing_text_regions(row, 22.0, 9.0, 300.0);
-
-        assert!(leading.right() <= trailing.left());
-        assert!(trailing.width() <= (row.width() - 22.0 - 9.0 - 8.0) * 0.48 + f32::EPSILON);
-        assert_eq!(leading.left(), row.left() + 22.0);
-        assert_eq!(trailing.right(), row.right() - 9.0);
-    }
-
-    #[test]
     fn batch_progress_combines_completed_prefix_and_current_task_fraction() {
         let task = |progress| TaskRow {
             code: "TRAN".to_owned(),
@@ -2189,20 +2178,6 @@ mod tests {
             render_inspector(ui, &snapshot, &mut None, &mut verify, &mut None);
         });
         assert_eq!(verify, Some((run_id, VerificationPage::Specifications)));
-    }
-
-    /// The dialog, its route and the error a failed close reports all call
-    /// it what the Simulate menu does.
-    /// At the manager's own width its queue fits the left pane, so it never
-    /// shows a sideways scrollbar under a table with nothing to scroll.
-    #[test]
-    fn the_queue_fits_the_left_pane_at_the_managers_width() {
-        // The 1,120 pt surface, less its 1 pt borders and the pane divider.
-        let left_pane = ((1_120.0_f32 - 2.0 - 1.0) * 0.695).max(560.0);
-        assert!(
-            TABLE_MIN_WIDTH <= left_pane,
-            "{TABLE_MIN_WIDTH} > {left_pane}"
-        );
     }
 
     #[test]

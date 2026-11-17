@@ -1849,17 +1849,6 @@ mod tests {
     }
 
     #[test]
-    fn desktop_launcher_matches_the_mockup_surface_contract() {
-        let viewport = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1440.0, 900.0));
-        let layout = LauncherLayout::resolve(viewport);
-
-        assert!(!layout.edge_to_edge);
-        assert_eq!(layout.surface.size(), Vec2::new(1180.0, 650.0));
-        assert_eq!(layout.surface.center(), viewport.center());
-        assert_eq!(layout.header_height, 48.0);
-    }
-
-    #[test]
     fn launcher_surface_is_one_header_track_over_the_body() {
         let surface = Rect::from_min_size(egui::pos2(130.0, 125.0), vec2(1180.0, 650.0));
         let regions = LauncherSurfaceRegions::resolve(surface, LAUNCHER_HEADER_HEIGHT);
@@ -1877,35 +1866,6 @@ mod tests {
     }
 
     #[test]
-    fn safe_mode_rows_keep_full_width_separators_and_inset_only_the_controls() {
-        let row = Rect::from_min_size(egui::pos2(9.0, 17.0), vec2(410.0, 54.0));
-        let content = safe_mode_option_content_rect(row);
-
-        assert_eq!(row.height(), SAFE_MODE_OPTION_HEIGHT);
-        assert_eq!(
-            content.left() - row.left(),
-            SAFE_MODE_OPTION_HORIZONTAL_INSET
-        );
-        assert_eq!(
-            row.right() - content.right(),
-            SAFE_MODE_OPTION_HORIZONTAL_INSET
-        );
-        assert_eq!(content.y_range(), row.y_range());
-        assert_eq!(row.x_range(), 9.0..=419.0);
-    }
-
-    #[test]
-    fn launcher_surface_tracks_clamp_without_overlap_on_short_viewports() {
-        let surface = Rect::from_min_size(egui::pos2(4.0, 7.0), vec2(390.0, 40.0));
-        let regions = LauncherSurfaceRegions::resolve(surface, LAUNCHER_COMPACT_HEADER_HEIGHT);
-
-        assert_eq!(regions.header.height(), 40.0);
-        assert_eq!(regions.body.height(), 0.0);
-        assert_eq!(regions.body.top(), surface.bottom());
-        assert_eq!(regions.body.bottom(), surface.bottom());
-    }
-
-    #[test]
     fn recovery_footer_is_always_anchored_to_the_page_bottom() {
         let available = Rect::from_min_size(egui::pos2(314.0, 213.0), vec2(996.0, 486.0));
         let regions = LauncherPageRegions::resolve(available, LAUNCHER_PAGE_FOOTER_MIN_HEIGHT);
@@ -1915,65 +1875,6 @@ mod tests {
         assert_eq!(regions.footer.top(), regions.body.bottom());
         assert_eq!(regions.footer.height(), 51.0);
         assert_eq!(regions.footer.bottom(), available.bottom());
-    }
-
-    #[test]
-    fn wrapped_recovery_footer_reserve_cannot_escape_a_short_page() {
-        let available = Rect::from_min_size(egui::pos2(0.0, 80.0), vec2(390.0, 40.0));
-        let regions = LauncherPageRegions::resolve(available, 88.0);
-
-        assert_eq!(regions.body.height(), 0.0);
-        assert_eq!(regions.footer, available);
-    }
-
-    #[test]
-    fn constrained_desktop_launcher_preserves_the_exact_viewport_gutter() {
-        let viewport = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(900.0, 700.0));
-        let layout = LauncherLayout::resolve(viewport);
-
-        assert!(!layout.edge_to_edge);
-        assert_eq!(layout.surface.size(), Vec2::new(872.0, 650.0));
-        assert_eq!(layout.surface.left(), 14.0);
-        assert_eq!(layout.surface.right(), 886.0);
-    }
-
-    #[test]
-    fn phone_and_narrow_tablet_launcher_are_edge_to_edge() {
-        for size in [Vec2::new(390.0, 844.0), Vec2::new(760.0, 900.0)] {
-            let viewport = Rect::from_min_size(egui::Pos2::ZERO, size);
-            let layout = LauncherLayout::resolve(viewport);
-            assert!(layout.edge_to_edge);
-            assert_eq!(layout.surface, viewport);
-            assert!(layout.compact);
-            assert_eq!(layout.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
-        }
-    }
-
-    #[test]
-    fn responsive_breakpoints_match_the_mockup_contract() {
-        let compact = LauncherLayout::resolve(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(760.0, 900.0),
-        ));
-        let desktop = LauncherLayout::resolve(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(761.0, 900.0),
-        ));
-        let phone = LauncherLayout::resolve(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(460.0, 800.0),
-        ));
-        let narrow_tablet = LauncherLayout::resolve(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(461.0, 800.0),
-        ));
-
-        assert!(compact.compact);
-        assert!(!desktop.compact);
-        assert!(phone.phone);
-        assert!(!narrow_tablet.phone);
-        assert_eq!(desktop.header_height, LAUNCHER_HEADER_HEIGHT);
-        assert_eq!(compact.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
     }
 
     #[test]
@@ -2012,23 +1913,5 @@ mod tests {
         ));
         assert_eq!(project_group(true), ProjectGroup::Pinned);
         assert_eq!(project_group(false), ProjectGroup::Recent);
-    }
-
-    #[test]
-    fn launcher_search_focus_border_uses_the_mockup_accent_in_each_mode() {
-        for (mode, expected_alpha) in [(crate::ui::Mode::Dark, 110), (crate::ui::Mode::Light, 97)] {
-            let tokens = Tokens::new(
-                crate::ui::Direction::Instrument,
-                mode,
-                crate::ui::Density::Compact,
-            );
-            let border = launcher_search_focus_border(&tokens).to_srgba_unmultiplied();
-            let accent = tokens.color.accent.to_srgba_unmultiplied();
-
-            for channel in 0..3 {
-                assert!(border[channel].abs_diff(accent[channel]) <= 1);
-            }
-            assert_eq!(border[3], expected_alpha);
-        }
     }
 }

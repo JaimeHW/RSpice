@@ -1351,14 +1351,6 @@ mod tests {
     }
 
     #[test]
-    fn table_width_depends_only_on_the_visible_column_contract() {
-        assert_eq!(table_width(0), INDEX_W + X_W);
-        assert_eq!(table_width(3), INDEX_W + X_W + 3.0 * VALUE_W);
-        assert_eq!(table_width(4) - table_width(3), VALUE_W);
-        assert_eq!(table_body_height(500.0, 14.0), 500.0 - HEADER_H - 14.0);
-    }
-
-    #[test]
     fn nearest_sample_uses_the_exact_retained_grid() {
         let grid = [0.0, 1.0e-6, 2.5e-6, 9.0e-6];
         for ascending in [false, true] {

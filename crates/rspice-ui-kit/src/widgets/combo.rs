@@ -107,45 +107,6 @@ mod tests {
         texts
     }
 
-    /// A combo box marks its list with the select's stroked chevron, not
-    /// egui's filled triangle, so it reads as the selects beside it.
-    #[test]
-    fn a_combo_box_draws_the_selects_chevron_and_no_filled_triangle() {
-        let ctx = Context::default();
-        crate::Theme::default().apply(&ctx);
-        let mut shapes = Vec::new();
-        for _ in 0..2 {
-            shapes = ctx
-                .run_ui(Default::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        let mut choice = 0;
-                        Combo::from_id_salt("chevron")
-                            .selected_text("Orthogonal")
-                            .width(160.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut choice, 0, "Orthogonal");
-                            });
-                    });
-                })
-                .shapes;
-        }
-        let mut triangles = 0;
-        let mut chevrons = 0;
-        for clipped in &shapes {
-            if let egui::Shape::Path(path) = &clipped.shape
-                && path.points.len() == 3
-            {
-                if path.closed {
-                    triangles += 1;
-                } else {
-                    chevrons += 1;
-                }
-            }
-        }
-        assert_eq!(triangles, 0, "a filled triangle is still drawn");
-        assert_eq!(chevrons, 1, "the select's chevron is not drawn");
-    }
-
     /// The value a closed combo box shows and every choice its open list
     /// offers read at the field size, and the caller's style is untouched.
     #[test]

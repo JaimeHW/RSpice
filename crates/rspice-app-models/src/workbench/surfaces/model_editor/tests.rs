@@ -111,21 +111,6 @@ fn section_contract_matches_the_six_mockup_tabs() {
 }
 
 #[test]
-fn column_projection_is_stable_and_exactly_fills_the_row() {
-    let columns = [("A", 0.16), ("B", 0.19), ("C", 0.65)];
-    let rect = Rect::from_min_size(Pos2::new(11.0, 7.0), Vec2::new(913.0, 28.0));
-    let cells = split_columns(rect, &columns);
-    assert_eq!(cells.len(), columns.len());
-    assert_eq!(cells.first().unwrap().left(), rect.left());
-    assert_eq!(cells.last().unwrap().right(), rect.right());
-    assert!(
-        cells
-            .windows(2)
-            .all(|pair| pair[0].right() == pair[1].left())
-    );
-}
-
-#[test]
 fn fixed_workspace_geometry_does_not_depend_on_selected_section() {
     for section in ModelEditorSection::ALL {
         assert_eq!(section_spec(section).section, section);

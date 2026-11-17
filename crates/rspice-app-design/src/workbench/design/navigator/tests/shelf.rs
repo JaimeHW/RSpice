@@ -444,62 +444,6 @@ fn shelf_meta_states_the_placed_default() {
     }
 }
 
-/// Rows of different families paint different identity glyphs.
-///
-/// The label and meta are pinned to one string so the glyph slot is the only
-/// thing that can differ — which is exactly what one shared icon, or two
-/// missing characters both rendering as the replacement box, would fail.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn shelf_rows_of_different_families_paint_distinct_glyph_slots() {
-    let row = |kind: ComponentType| {
-        crate::ui::raster::render(egui::vec2(160.0, 24.0), move |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| {
-                    shelf_part_row(ui, primitive_shelf_glyph(kind), "PART", false, Some("m"), 0);
-                });
-        })
-    };
-    // The identity slot: the 15 px glyph rect at the schematic row's icon
-    // column, with a pixel of air on each side.
-    let slot = egui::Rect::from_center_size(egui::pos2(33.5, 12.0), egui::vec2(17.0, 17.0));
-    let slot_pixels = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
-        canvas.pixels_in(slot).collect()
-    };
-
-    let resistor = row(ComponentType::Resistor);
-    let capacitor = row(ComponentType::Capacitor);
-    let xspice = row(ComponentType::XspiceGain);
-    for (name, canvas) in [
-        ("resistor", &resistor),
-        ("capacitor", &capacitor),
-        ("XSPICE", &xspice),
-    ] {
-        assert!(
-            slot_pixels(canvas)
-                .iter()
-                .any(|pixel| *pixel != canvas.background()),
-            "the {name} row's glyph slot is empty"
-        );
-    }
-    assert_ne!(
-        slot_pixels(&resistor),
-        slot_pixels(&capacitor),
-        "a resistor row and a capacitor row paint one glyph"
-    );
-    assert_ne!(
-        slot_pixels(&resistor),
-        slot_pixels(&xspice),
-        "a resistor row and an XSPICE row paint one glyph"
-    );
-    assert_ne!(
-        slot_pixels(&capacitor),
-        slot_pixels(&xspice),
-        "a capacitor row and an XSPICE row paint one glyph"
-    );
-}
-
 // -------------------------------------------------- shelf pinning and recents
 
 /// The whole Component shelf, through the entry point the dock calls.

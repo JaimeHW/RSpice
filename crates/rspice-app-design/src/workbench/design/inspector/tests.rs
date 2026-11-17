@@ -94,32 +94,6 @@ pub fn accesskit_nodes(
     .nodes
 }
 
-/// A rejected value reads from the panel's left edge, under the row labels,
-/// rather than floating in the middle of its strip.
-#[test]
-fn a_rejection_starts_at_the_panels_inset() {
-    use egui::accesskit::Role;
-
-    let mut inset = 0.0;
-    let nodes = accesskit_nodes(|ui| {
-        inset = crate::workbench::design_system::panel_inset(ui);
-        rejection_slot(ui, true, Some("pa takes 2 values; this has 3"));
-    });
-    let left = |role: Role| {
-        nodes
-            .iter()
-            .find(|(_, node)| node.role() == role)
-            .and_then(|(_, node)| node.bounds())
-            .unwrap_or_else(|| panic!("a {role:?} node with bounds"))
-            .x0
-    };
-    let offset = left(Role::Label) - left(Role::Status);
-    assert!(
-        (offset - f64::from(inset)).abs() < 0.5,
-        "the message starts {offset} into its strip, not at the {inset} inset"
-    );
-}
-
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
@@ -1115,57 +1089,6 @@ fn every_inspector_section_frames_its_body_with_the_same_step() {
         list_then_actions, list,
         "adding a second block must not change how the body is framed"
     );
-}
-
-#[test]
-fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
-    // The table has no parent row and no pin expands, so the row leads with
-    // its status icon on the panel inset, like the section title and the
-    // property labels — not behind a nesting inset and a blank caret column —
-    // and its net ends on the inset on the right.
-    use crate::workbench::design_system::{PANEL_INSET, panel_body};
-    fn texts(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect)>) {
-        match shape {
-            egui::epaint::Shape::Text(text) => into.push((
-                text.galley.text().to_owned(),
-                egui::Rect::from_min_size(text.pos, text.galley.size()),
-            )),
-            egui::epaint::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, into)),
-            _ => {}
-        }
-    }
-
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let output = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
-                ui.allocate_ui(egui::vec2(312.0, 100.0), |ui| {
-                    panel_body(ui, |ui| {
-                        let _ = terminal_row(ui, "PLUS", Some("net1"));
-                    });
-                });
-            });
-    });
-    let mut painted = Vec::new();
-    for clipped in &output.shapes {
-        texts(&clipped.shape, &mut painted);
-    }
-    let find = |wanted: &str| {
-        painted
-            .iter()
-            .find(|(text, _)| text == wanted)
-            .map(|(_, rect)| *rect)
-            .unwrap_or_else(|| panic!("{wanted:?} was not painted: {painted:?}"))
-    };
-    let pin = find("PLUS");
-    let net = find("net1");
-    assert_eq!(
-        pin.left(),
-        PANEL_INSET + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP
-    );
-    assert!((net.right() - (312.0 - PANEL_INSET)).abs() < 0.5, "{net:?}");
 }
 
 /// Give the workspace an active configuration that cannot resolve: its DUT

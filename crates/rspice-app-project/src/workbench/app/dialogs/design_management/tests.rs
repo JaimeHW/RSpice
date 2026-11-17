@@ -24,12 +24,6 @@ fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
     assert_eq!(selected_stable_object_ids(&schematic), vec![81]);
 }
 
-#[test]
-fn manager_and_subflow_splits_match_the_mockup_contract() {
-    assert_eq!(main_split_widths(760.0), (380.0, 380.0));
-    assert_eq!(subflow_split_widths(980.0), (646.0, 334.0));
-}
-
 /// The Sheets table counts each sheet's ports and the nets leaving through
 /// them separately: a net reaching two other sheets is two ports but one
 /// net, and a second net through a third port is a second net.

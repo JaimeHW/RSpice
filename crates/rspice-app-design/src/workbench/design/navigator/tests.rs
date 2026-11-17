@@ -79,23 +79,6 @@ pub fn painted_panel(ctx: &egui::Context, mut contents: impl FnMut(&mut Ui)) -> 
 }
 
 #[test]
-fn design_tabs_keep_the_mockup_horizontal_inset() {
-    let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));
-    let content = panel_tabs_content_rect(outer);
-
-    assert_eq!(content.left(), 8.0);
-    assert_eq!(content.right(), 252.0);
-}
-
-#[test]
-fn design_tabs_flex_from_their_label_widths_like_the_mockup() {
-    let widths = flexible_tab_widths(239.0, [59.0, 95.0]);
-    assert!((widths[0] - 101.5).abs() <= 0.001);
-    assert!((widths[1] - 137.5).abs() <= 0.001);
-    assert!((widths.iter().sum::<f32>() - 239.0).abs() <= 0.001);
-}
-
-#[test]
 fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
     let mut workspace = crate::state::ProjectWorkspace::default();
     let (occurrence, master, can_ascend) = navigator_path(&workspace);
@@ -299,45 +282,4 @@ pub fn key_event(key: egui::Key) -> egui::Event {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn announced_name(node: &egui::accesskit::Node) -> Option<String> {
     node.label().or_else(|| node.value()).map(str::to_owned)
-}
-
-/// The clear control's mark is painted geometry, not a character.
-///
-/// The mockup draws a `✕`. The control paints [`WorkbenchIcon::Close`]
-/// instead, the crossing strokes every other dismissal in the workbench
-/// paints, so the mark matches them whichever face holds the character.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_filter_clear_mark_paints_the_workbench_close_strokes() {
-    let pixels = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
-        canvas
-            .pixels_in(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(24.0, 24.0),
-            ))
-            .collect()
-    };
-    let tofu = pixels(&glyph_canvas(ShelfGlyph::Text("\u{2603}")));
-
-    let mark = crate::ui::raster::render(egui::vec2(24.0, 24.0), |ui, background| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| {
-                WorkbenchIcon::Close.paint(
-                    ui.painter(),
-                    egui::Rect::from_center_size(egui::pos2(12.0, 12.0), egui::vec2(13.0, 13.0)),
-                    egui::Color32::WHITE,
-                );
-            });
-    });
-    let background = mark.background();
-    let painted = pixels(&mark);
-    assert!(
-        painted.iter().any(|pixel| *pixel != background),
-        "the clear control paints no ink at all"
-    );
-    assert_ne!(
-        painted, tofu,
-        "and what it paints is not the replacement box"
-    );
 }

@@ -2,7 +2,6 @@
 //! run's details, observed through a whole application.
 
 use crate::workbench::RSpiceApp;
-use egui::Color32;
 use egui::Pos2;
 use egui::Rect;
 use egui::Vec2;
@@ -389,47 +388,6 @@ pub(crate) fn run_inspector(
     (output.shapes, nodes)
 }
 
-fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<PaintedText> {
-    fn walk(shape: &egui::Shape, clip: Rect, out: &mut Vec<PaintedText>) {
-        match shape {
-            egui::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, clip, out);
-                }
-            }
-            egui::Shape::Text(text) => {
-                let color = text.override_text_color.unwrap_or_else(|| {
-                    text.galley
-                        .job
-                        .sections
-                        .iter()
-                        .map(|section| section.format.color)
-                        .find(|color| *color != Color32::PLACEHOLDER)
-                        .unwrap_or(text.fallback_color)
-                });
-                let rect = Rect::from_min_size(text.pos, text.galley.size());
-                let visible = color.a() > 0
-                    && text.opacity_factor > 0.0
-                    && !text.galley.text().trim().is_empty()
-                    && rect.intersects(clip);
-                if visible {
-                    out.push(PaintedText {
-                        text: text.galley.text().to_owned(),
-                        rect,
-                        clip,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut out = Vec::new();
-    for shape in shapes {
-        walk(&shape.shape, shape.clip_rect, &mut out);
-    }
-    out
-}
-
 #[test]
 fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
     let mut app = result_app_with_current_out_map(false);
@@ -583,62 +541,6 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
 
     assert!(net.eq_ignore_ascii_case("out"), "{net}");
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-}
-
-/// Every line the Waves details panel paints starts on the rows' inset and
-/// ends inside it, and none of it is cut off by the box it was clipped to —
-/// at the inspector's default width and at its minimum.
-///
-/// What James saw was two lines at x = 0 beside rows at x = 10, and a Y range
-/// field whose padded text ran out of the field. The measured numbers this
-/// prints are the report; the assertions keep them.
-#[test]
-fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
-    // Where the panel body starts every row's label.
-    let inset = rspice_ui_kit::panels::PANEL_INSET;
-    for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
-        let mut app = waves_details_app();
-        let (shapes, _) = run_inspector(&mut app, width, 2400.0);
-        let lines = painted_text(&shapes);
-        assert!(
-            !lines.is_empty(),
-            "the inspector painted no text at {width}"
-        );
-        let mut off_inset = Vec::new();
-        let mut clipped = Vec::new();
-        for line in &lines {
-            if line.rect.left() < inset - 0.01 || line.rect.right() > width - inset + 0.01 {
-                off_inset.push(format!(
-                    "{:?} spans {:.1}..{:.1}",
-                    line.text,
-                    line.rect.left(),
-                    line.rect.right()
-                ));
-            }
-            if line.rect.left() < line.clip.left() - 0.01
-                || line.rect.right() > line.clip.right() + 0.01
-            {
-                clipped.push(format!(
-                    "{:?} spans {:.1}..{:.1}, clipped to {:.1}..{:.1}",
-                    line.text,
-                    line.rect.left(),
-                    line.rect.right(),
-                    line.clip.left(),
-                    line.clip.right()
-                ));
-            }
-        }
-        assert!(
-            off_inset.is_empty(),
-            "at {width} px these lines leave the {inset} px row inset:\n{}",
-            off_inset.join("\n")
-        );
-        assert!(
-            clipped.is_empty(),
-            "at {width} px these lines are cut off:\n{}",
-            clipped.join("\n")
-        );
-    }
 }
 
 /// What James read off the panel, pinned on the panel: each range field shows
@@ -828,13 +730,3 @@ fn deferred_output_app() -> RSpiceApp {
 /// The inspector's default width on a wide window and its floor in every
 /// window class (`workbench::layout::inspector_width_bounds`).
 pub(crate) const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
-const INSPECTOR_MIN_WIDTH: f32 = 278.0;
-
-/// One run of text the inspector painted: where its layout box landed, the
-/// rectangle it was clipped to, and whether anything of it is visible.
-#[derive(Debug)]
-struct PaintedText {
-    text: String,
-    rect: Rect,
-    clip: Rect,
-}

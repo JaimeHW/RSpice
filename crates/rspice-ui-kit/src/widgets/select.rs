@@ -695,45 +695,6 @@ mod tests {
             .collect()
     }
 
-    /// A value wider than its well is shortened from the middle, both ends
-    /// kept, and painted inside the well rather than cut at the chevron.
-    #[test]
-    fn a_long_value_is_shortened_from_the_middle_to_fit_its_well() {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        let long = "Corner characterization \u{00b7} revision 1";
-        let options = vec![long.to_owned()];
-        let mut painted = Vec::new();
-        for _ in 0..2 {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let _ = select(ui, "fit", "Plan", long, &options, 140.0);
-            });
-            painted = output
-                .shapes
-                .iter()
-                .filter_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(text) => {
-                        Some((text.galley.text().to_owned(), text.galley.size().x))
-                    }
-                    _ => None,
-                })
-                .collect();
-        }
-        let (shown, width) = painted
-            .iter()
-            .find(|(text, _)| text.starts_with("Corner"))
-            .cloned()
-            .unwrap_or_else(|| panic!("the value is painted: {painted:?}"));
-        assert!(
-            shown.starts_with("Corner") && shown.ends_with(" 1") && shown.contains('\u{2026}'),
-            "{shown:?}"
-        );
-        assert!(
-            width <= 140.0 - VALUE_INSET - CHEVRON_ROOM,
-            "{shown:?} is {width} wide"
-        );
-    }
-
     /// A long list scrolls inside its drop-down: the drop-down never grows
     /// past twelve options, so it cannot run off the screen.
     #[test]

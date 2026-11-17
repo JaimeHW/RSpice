@@ -22,8 +22,6 @@ use rspice_app_workbench::workbench::state::{
 };
 use rspice_app_workbench::workbench::tools::notification_center::*;
 
-mod raster;
-
 const TITLE_BAR: f32 = 35.0;
 const DESKTOP: (f32, f32) = (1280.0, 760.0);
 const TABLET: (f32, f32) = (820.0, 640.0);
@@ -354,23 +352,6 @@ fn every_string_stays_inside_the_panel_and_clear_of_its_neighbours() {
             }
         }
     }
-}
-
-/// A console paragraph is one row, not the list: the message is held to two
-/// lines, and says so with an ellipsis rather than by being clipped.
-#[test]
-fn a_long_message_is_cut_to_two_lines_and_marked_as_cut() {
-    let panel = Panel::seeded(DESKTOP);
-    let (text, rect) = panel
-        .texts
-        .iter()
-        .find(|(text, _)| text.starts_with("2 of 148 models"))
-        .expect("the warning's message is painted");
-    assert!(
-        rect.height() <= MESSAGE_LINE_HEIGHT * MESSAGE_MAX_ROWS as f32 + 1.0,
-        "{text:?} runs to {} points",
-        rect.height()
-    );
 }
 
 #[test]

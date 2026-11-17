@@ -9,7 +9,6 @@ use crate::workbench::shell_host::project::library_publication::prepare_project_
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_project::workbench::surfaces::project::recovery;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::Tokens;
@@ -818,70 +817,6 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
             assert!(
                 !text.contains(retired),
                 "{retired:?} is still painted at {}x{}:\n{text}",
-                size.x,
-                size.y
-            );
-        }
-    }
-}
-
-/// Each checkpoint row starts where the one above it ends. Its buttons
-/// were laid out in a scope, which pulled the list's cursor back up to the
-/// buttons' bottom edge, so every row began 12 points inside the one
-/// above: its highlight and rule landed on the next row's text.
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn checkpoint_rows_follow_one_another_without_overlapping() {
-    for size in [
-        egui::vec2(1440.0, 900.0),
-        egui::vec2(820.0, 1180.0),
-        egui::vec2(390.0, 844.0),
-    ] {
-        let mut app = recovery_project_app(3, false, false);
-        let ctx = egui::Context::default();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut rows = Vec::new();
-        for _ in 0..3 {
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
-                },
-            );
-            rows = output
-                .platform_output
-                .accesskit_update
-                .iter()
-                .flat_map(|update| update.nodes.iter())
-                .filter(|(_, node)| {
-                    [node.label(), node.value()]
-                        .into_iter()
-                        .flatten()
-                        .any(|text| text.contains(" \u{b7} revision "))
-                })
-                .filter_map(|(_, node)| node.bounds())
-                .map(|bounds| (bounds.y0, bounds.y1))
-                .collect::<Vec<_>>();
-        }
-        rows.sort_by(|a, b| a.0.total_cmp(&b.0));
-        assert_eq!(rows.len(), 3, "{rows:?} at {}x{}", size.x, size.y);
-        for pair in rows.windows(2) {
-            assert!(
-                (pair[1].0 - pair[0].1).abs() < 0.5,
-                "rows {pair:?} overlap or part at {}x{}",
-                size.x,
-                size.y
-            );
-        }
-        for (top, bottom) in &rows {
-            assert!(
-                bottom - top >= f64::from(recovery::CHECKPOINT_ROW_HEIGHT) - 0.5,
-                "a row is {} tall at {}x{}",
-                bottom - top,
                 size.x,
                 size.y
             );

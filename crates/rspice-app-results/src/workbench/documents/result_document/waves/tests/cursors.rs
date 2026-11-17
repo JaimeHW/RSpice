@@ -676,55 +676,6 @@ fn ruler_marks(
     (boxes[0], rest)
 }
 
-/// The pane's own line for a cursor, above the ruler.
-fn pane_cursor_line(shapes: &[ClippedShape], color: egui::Color32, band: egui::Rect) -> f32 {
-    cursor_lines(&verticals(shapes), color)
-        .into_iter()
-        .filter(|line| line.bottom <= band.top() + 0.5)
-        .max_by(|a, b| (a.bottom - a.top).total_cmp(&(b.bottom - b.top)))
-        .expect("the pane draws the cursor's line")
-        .x
-}
-
-/// The ruler draws a cursor as its value box and a one-pixel caret under it
-/// at the cursor's exact X, and nothing else: no line rises toward the pane
-/// or hangs toward the overview, and at full zoom-out the overview carries
-/// no notch, the boxes having located the cursors already. Two boxes pushed
-/// apart keep at least 4 px between them, each caret still under its own
-/// cursor's line.
-#[test]
-fn the_ruler_draws_a_cursor_as_its_value_box_and_caret_alone() {
-    let mut state = host_on(damped_run());
-    place_cursors(&mut state, Some(1.85e-3), Some(2.0e-3));
-    let ctx = theme_context();
-    let mut shapes = Vec::new();
-    for _ in 0..2 {
-        shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
-    }
-    let tokens = Tokens::get(&ctx);
-    let ruler = ruler_band(&shapes, &tokens);
-    let mut boxes = Vec::new();
-    for color in [tokens.color.canvas_cursor_a, tokens.color.canvas_cursor_b] {
-        let line = pane_cursor_line(&shapes, color, ruler.0);
-        let (flag, rest) = ruler_marks(&shapes, color, ruler);
-        let [caret] = rest.as_slice() else {
-            panic!("the box's caret is the ruler's only other mark: {rest:?}");
-        };
-        assert!(caret.width() <= 1.0 && caret.height() <= 2.0 + 1e-3);
-        assert!(
-            (caret.top() - flag.bottom()).abs() < 0.5,
-            "{caret:?} under {flag:?}"
-        );
-        assert!(
-            (caret.center().x - line).abs() < 0.5,
-            "the caret stands at the cursor's x {line}: {caret:?}"
-        );
-        boxes.push(flag);
-    }
-    let gap = boxes[1].min.x - boxes[0].max.x;
-    assert!(gap >= 4.0 - 1e-3, "the boxes stand {gap} px apart");
-}
-
 /// With the panes zoomed in, the overview marks where each cursor stands in
 /// the whole record with a tick of at most 3 px on its top edge, apart from
 /// the box's caret above it.

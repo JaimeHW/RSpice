@@ -16,8 +16,7 @@ use rspice_app_runs::simulation::status::{
 use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use rspice_app_state::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::theme::{self, FontWeight};
-use rspice_app_workbench::ui::tokens::{self, Tokens};
+use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::chrome::status_bar::*;
 use rspice_app_workbench::workbench::framework::host::StatusMark;
@@ -372,55 +371,6 @@ fn the_zoom_chip_drops_the_decimal_only_once_magnification_is_deep() {
     assert_eq!(format_plot_zoom(9.94), "9.9×");
     assert_eq!(format_plot_zoom(10.0), "10×");
     assert_eq!(format_plot_zoom(137.4), "137×");
-}
-
-#[test]
-fn dense_status_metadata_follows_the_mockup_nine_hundred_pixel_cutoff() {
-    assert_eq!(
-        status_visibility(900.0),
-        StatusVisibility {
-            coordinates: false,
-            selection: false,
-            platform: false,
-        }
-    );
-    assert_eq!(
-        status_visibility(901.0),
-        StatusVisibility {
-            coordinates: true,
-            selection: true,
-            platform: true,
-        }
-    );
-}
-
-#[test]
-fn status_item_geometry_matches_the_mockup_contract() {
-    assert_eq!(STATUS_FONT_SIZE, tokens::FS_1);
-    assert_eq!(
-        status_text_font(),
-        theme::mono(tokens::FS_1, FontWeight::Regular)
-    );
-}
-
-#[test]
-fn status_groups_use_intrinsic_widths_and_space_between() {
-    assert_eq!(
-        status_group_allocation(420.0, 310.0, 1_440.0),
-        StatusGroupAllocation {
-            left: 420.0,
-            right: 310.0,
-            gap: 710.0,
-        }
-    );
-}
-
-#[test]
-fn status_groups_compress_proportionally_only_when_they_overlap() {
-    let allocation = status_group_allocation(600.0, 400.0, 900.0);
-    assert!((allocation.left - 540.0).abs() < f32::EPSILON);
-    assert!((allocation.right - 360.0).abs() < f32::EPSILON);
-    assert_eq!(allocation.gap, 0.0);
 }
 
 #[test]

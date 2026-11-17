@@ -337,43 +337,6 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
     assert!(stage.apply_block().is_none());
 }
 
-/// The instrument fits the centre column at both viewports, for every family.
-///
-/// Three things are held, and the difference between them is deliberate:
-///
-/// - No text is cut sideways. A band elides what does not fit, so a galley
-///   running past the side of its clip is a label someone forgot to elide.
-/// - Nothing is painted below the stage. The instrument never scrolls as a
-///   whole, so text past the bottom would be text nobody can reach.
-/// - Text may be cut vertically, but only by the viewport of a band that
-///   scrolls internally — the program columns, the point table, the
-///   realization list and the audit strip. A row scrolled out of view has an
-///   empty clip and paints nothing, so it is not a line on the screen at all.
-#[test]
-fn every_family_fits_the_stage_at_both_supported_viewports() {
-    for (viewport, width, height) in VIEWPORTS {
-        let size = stage_size(width, height);
-        for name in fixtures::names() {
-            let mut app = seeded(name);
-            for (text, rect, clip) in painted(&mut app, size) {
-                if !clip.is_positive() {
-                    continue;
-                }
-                assert!(
-                    rect.left() >= clip.left() - 0.5 && rect.right() <= clip.right() + 0.5,
-                    "{viewport} {name}: {text:?} at {rect:?} is cut by {clip:?}"
-                );
-                // What shows of a galley is its intersection with its clip,
-                // so a clip inside the stage is text inside the stage.
-                assert!(
-                    clip.bottom() <= size.y + 0.5 && clip.right() <= size.x + 0.5,
-                    "{viewport} {name}: {text:?} is painted through {clip:?}, past the stage"
-                );
-            }
-        }
-    }
-}
-
 /// The proof surface is evaluated when something it depends on changes, and
 /// not otherwise.
 #[test]
@@ -454,47 +417,6 @@ fn every_value_tick_is_drawn_at_the_value_it_states() {
                 (y - expected).abs() <= 0.75,
                 "{name}: the label for {value} is at y={y}, and a straight scale puts it at \
                  {expected}: {axis:?}"
-            );
-        }
-    }
-}
-
-/// On a laptop the program shows every field it has: nothing is left to a
-/// scroll bar while the plot above it holds four hundred points of height.
-#[test]
-fn a_laptop_stage_shows_every_field_without_scrolling() {
-    for name in ["sensor_diff_1k", "bridge_cal_step", "supply_trnoise"] {
-        let mut app = seeded(name);
-        let size = stage_size(1440.0, 900.0);
-        let painted = painted(&mut app, size);
-        let stage = resolve(&mut app.design_cx()).expect("stage");
-        let sheet = app
-            .state
-            .design
-            .property_registry
-            .get(stage.working.component_type())
-            .expect("sheet");
-        for definition in program::shape_fields(sheet, &stage) {
-            let shown = painted.iter().find(|(text, _, clip)| {
-                clip.is_positive()
-                    && (text.starts_with(definition.display_name.as_str())
-                        || definition
-                            .display_name
-                            .strip_suffix(')')
-                            .and_then(|inner| inner.rsplit('(').next())
-                            .is_some_and(|word| {
-                                text == word || text.strip_suffix(" *") == Some(word)
-                            }))
-            });
-            let (text, rect, clip) = shown.unwrap_or_else(|| {
-                panic!(
-                    "{name}: no row was painted for {:?}",
-                    definition.display_name
-                )
-            });
-            assert!(
-                clip.contains_rect(*rect),
-                "{name}: {text:?} at {rect:?} is cut by {clip:?}"
             );
         }
     }

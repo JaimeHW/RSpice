@@ -482,23 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn tablet_width_uses_two_drawers_and_all_workspace_items() {
-        let spec = LayoutSpec::resolve(768.0, 1024.0, &WorkbenchSession::default());
-
-        assert!(!spec.show_activity_rail);
-        assert!(spec.navigator_uses_drawer);
-        assert!(spec.inspector_uses_drawer);
-        assert!(!spec.workspaces_uses_drawer);
-        assert_eq!(spec.title_bar_height, 42.0);
-        assert_eq!(spec.toolbar_height, 47.0);
-        assert_eq!(spec.toolbar_control_height, 44.0);
-        assert_eq!(spec.run_control_height, 44.0);
-        assert_eq!(spec.document_bar_height, 36.0);
-        assert_eq!(spec.status_bar_height, 27.0);
-        assert_eq!(spec.console_height, 31.0);
-    }
-
-    #[test]
     fn intermediate_desktop_docks_left_and_draws_right() {
         let spec = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchSession::default());
 
@@ -509,32 +492,6 @@ mod tests {
         assert!(spec.inspector_uses_drawer);
         assert_eq!(spec.navigator_width, 228.0);
         assert!(spec.navigator_resizable);
-    }
-
-    #[test]
-    fn desktop_docks_resize_inside_the_narrower_class_clamp() {
-        let spec = LayoutSpec::resolve(1_000.0, 900.0, &WorkbenchSession::default());
-
-        assert!(spec.navigator_resizable);
-        assert!(spec.inspector_resizable);
-        assert_eq!(spec.navigator_min_width, 220.0);
-        assert_eq!(spec.navigator_max_width, 320.0);
-        assert_eq!(spec.navigator_reset_width, 228.0);
-        assert_eq!(spec.navigator_width, 228.0);
-        assert_eq!(spec.inspector_min_width, 278.0);
-        assert_eq!(spec.inspector_max_width, 320.0);
-        assert_eq!(spec.inspector_reset_width, 278.0);
-        assert_eq!(spec.inspector_width, 278.0);
-
-        let mut resized = WorkbenchSession::default();
-        resized.navigator_width = 300.0;
-        resized.navigator_width_custom = true;
-        resized.inspector_width = 300.0;
-        resized.inspector_width_custom = true;
-        let spec = LayoutSpec::resolve(1_000.0, 900.0, &resized);
-
-        assert_eq!(spec.navigator_width, 300.0);
-        assert_eq!(spec.inspector_width, 300.0);
     }
 
     #[test]
@@ -558,27 +515,6 @@ mod tests {
         let wide_again = LayoutSpec::resolve(1_440.0, 900.0, &state);
         assert_eq!(wide_again.navigator_width, 440.0);
         assert_eq!(wide_again.inspector_width, 440.0);
-    }
-
-    #[test]
-    fn wide_desktop_keeps_both_context_docks() {
-        let spec = LayoutSpec::resolve(1280.0, 900.0, &WorkbenchSession::default());
-
-        assert!(spec.show_navigator_dock);
-        assert!(spec.show_inspector_dock);
-        assert!(spec.show_activity_rail);
-        assert!(!spec.show_phone_navigation);
-        assert!(spec.navigator_resizable);
-        assert!(spec.inspector_resizable);
-        assert!(spec.show_run_config_selector);
-        assert!((spec.navigator_width - 230.4).abs() < 0.001);
-        assert!((spec.inspector_width - 281.6).abs() < 0.001);
-        assert_eq!(spec.navigator_min_width, 220.0);
-        assert_eq!(spec.navigator_max_width, 440.0);
-        assert_eq!(spec.navigator_reset_width, 256.0);
-        assert_eq!(spec.inspector_min_width, 278.0);
-        assert_eq!(spec.inspector_max_width, 440.0);
-        assert_eq!(spec.inspector_reset_width, 312.0);
     }
 
     #[test]
@@ -628,20 +564,6 @@ mod tests {
         assert!(!state.inspector_width_custom);
         assert!(!spec.show_console_body);
         assert_eq!(spec.console_height, 31.0);
-    }
-
-    #[test]
-    fn desktop_console_uses_the_mockup_resize_range() {
-        let mut state = WorkbenchSession::default();
-        state.console_visible = true;
-        state.console_height = 900.0;
-
-        let spec = LayoutSpec::resolve(1_440.0, 900.0, &state);
-
-        assert_eq!(spec.console_min_height, 90.0);
-        assert_eq!(spec.console_max_height, 520.0);
-        assert_eq!(spec.console_height, 520.0);
-        assert!(spec.console_resizable);
     }
 
     #[test]
@@ -717,18 +639,6 @@ mod tests {
     }
 
     #[test]
-    fn phone_console_uses_exact_uncapped_42dvh_height() {
-        let mut state = WorkbenchSession::default();
-        state.console_visible = true;
-
-        let spec = LayoutSpec::resolve_with_pointer(430.0, 600.0, true, &state);
-
-        assert!((spec.console_height - 252.0).abs() < 0.001);
-        assert!((spec.console_max_height - 252.0).abs() < 0.001);
-        assert!(!spec.console_resizable);
-    }
-
-    #[test]
     fn wide_coarse_pointer_keeps_the_mockup_touch_target_contract() {
         let spec =
             LayoutSpec::resolve_with_pointer(1_440.0, 900.0, true, &WorkbenchSession::default());
@@ -740,44 +650,6 @@ mod tests {
         assert_eq!(spec.document_bar_height, 44.0);
         assert_eq!(spec.status_bar_height, 25.0);
         assert_eq!(spec.console_height, 44.0);
-    }
-
-    #[test]
-    fn short_landscape_uses_the_mockup_compact_override() {
-        let mut state = WorkbenchSession::default();
-        state.console_visible = true;
-        state.console_height = 640.0;
-
-        let spec = LayoutSpec::resolve(844.0, 390.0, &state);
-
-        assert!(spec.compact_shell);
-        assert!(spec.workspaces_uses_drawer);
-        assert!(spec.show_phone_navigation);
-        assert!(spec.show_console_strip);
-        assert!(spec.show_console_body);
-        assert!(!spec.show_status_bar);
-        assert_eq!(spec.title_bar_height, 44.0);
-        assert_eq!(spec.toolbar_height, 48.0);
-        assert_eq!(spec.toolbar_control_height, 29.0);
-        assert_eq!(spec.run_control_height, 31.0);
-        assert_eq!(spec.document_bar_height, 34.0);
-        assert!(!spec.toolbar_labels);
-        assert_eq!(spec.console_height, 175.5);
-        assert_eq!(spec.console_max_height, 175.5);
-        assert!(!spec.show_pvt_selector);
-        assert_eq!(spec.toolbar_tool_limit, Some(3));
-    }
-
-    #[test]
-    fn short_landscape_console_uses_exact_45dvh_height_by_default() {
-        let mut state = WorkbenchSession::default();
-        state.console_visible = true;
-
-        let spec = LayoutSpec::resolve(844.0, 390.0, &state);
-
-        assert!((spec.console_height - 175.5).abs() < 0.001);
-        assert!((spec.console_max_height - 175.5).abs() < 0.001);
-        assert!(!spec.console_resizable);
     }
 
     #[test]

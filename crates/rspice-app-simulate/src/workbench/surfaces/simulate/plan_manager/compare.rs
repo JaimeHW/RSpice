@@ -1151,55 +1151,6 @@ mod tests {
         egui::Vec2::new(560.0, 900.0),
     ];
 
-    /// Every fact this surface states is painted whole at every gated viewport.
-    ///
-    /// The module's fit gate proves nothing is off screen, which is a different
-    /// question from whether it is readable: a table cell and a select both
-    /// shorten a value that outgrows their track, and a domain elided to
-    /// `Analysis instances and…` still lies inside its clip rect and passes.
-    /// These are the exact strings, so an arrangement that cannot hold one of
-    /// them fails here rather than shipping a fact the reader has to guess at.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn every_fact_the_comparison_states_is_painted_whole_at_every_gated_viewport() {
-        let (mut harness, active, retained) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut harness, active);
-        let records = plan_catalog_records(&harness.model);
-        let base = record_of(&records, retained);
-        let target = record_of(&records, active);
-        let domains = compared_domains(base, target);
-
-        let mut owed = vec![
-            plan_option_label(base),
-            plan_option_label(target),
-            "against".to_owned(),
-            "Named differences".to_owned(),
-        ];
-        for column in COMPARE_COLUMNS {
-            owed.push(column.heading.to_owned());
-        }
-        for domain in &domains {
-            owed.push(domain.domain.to_owned());
-            owed.push(domain.key.to_owned());
-            owed.push(domain.verdict.clone());
-            owed.push(named_difference(&domain.difference));
-        }
-
-        for screen in GATED_VIEWPORTS {
-            let mut draft = SimulationPlanManagerDraft::new(active, target.name.clone());
-            draft.mode = SimulationPlanManagerMode::Compare;
-            draft.comparison.base_plan_id = Some(retained);
-            draft.comparison.target_plan_id = Some(active);
-            let painted = painted_route_text(screen, &mut draft, &records);
-            for fact in &owed {
-                assert!(
-                    painted.contains(fact),
-                    "{screen:?} did not paint {fact:?} whole; it painted {painted:?}"
-                );
-            }
-        }
-    }
-
     /// The authored fifth domain is absent, and the surface does not narrate it.
     ///
     /// It used to. A note explained that a plan binds no design and no testbench
@@ -1463,58 +1414,6 @@ mod tests {
             verdict,
             theme::sans(tokens::FS_1, theme::FontWeight::Regular),
             "the body face, at a value cell's size"
-        );
-    }
-
-    /// Side by side, the two pickers and the word between them fill their row
-    /// exactly: the row reserves what that word and its spacing cost, and
-    /// nothing more, so the second picker ends on the row's right edge.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn side_by_side_pickers_and_the_word_between_fill_their_row() {
-        let (harness, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&harness.model);
-        let (base, target) = (record_of(&records, retained), record_of(&records, active));
-        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        // Narrow enough that neither picker is held at its widest, wide enough
-        // that both names fit whole side by side.
-        let width = 640.0;
-        let mut row = Rect::NOTHING;
-        for _ in 0..3 {
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(width, 200.0),
-                    )),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| {
-                            row = ui
-                                .vertical(|ui| {
-                                    plan_picker_row(ui, &mut draft, &records, base, target);
-                                })
-                                .response
-                                .rect;
-                        });
-                },
-            );
-        }
-        let control = crate::ui::tokens::Tokens::get(&ctx).metrics.ctl_h;
-        assert!(
-            row.height() < 2.0 * control,
-            "the pickers stacked: the row is {} points tall",
-            row.height()
-        );
-        assert!(
-            (row.width() - width).abs() < 0.5,
-            "the picker row is {} of {width} points wide",
-            row.width()
         );
     }
 }

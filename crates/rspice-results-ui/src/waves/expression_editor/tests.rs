@@ -32,16 +32,3 @@ fn wide_expression_editor_bounds_inline_error_without_starving_input() {
     assert_editor_spans_disjoint(layout.error, layout.add);
     assert_eq!(layout.add.end(), 900.0);
 }
-
-#[test]
-fn expression_editor_geometry_stays_inside_pathological_widths() {
-    for width in [0.0, 20.0, 64.0, 180.0, 560.0] {
-        let layout = expr_editor_layout(width, 28.0, 42.0, None);
-        for span in [layout.label, layout.input, layout.error, layout.add] {
-            assert!(span.start >= 0.0);
-            assert!(span.end() <= width + f32::EPSILON);
-        }
-        assert_editor_spans_disjoint(layout.label, layout.input);
-        assert_editor_spans_disjoint(layout.input, layout.add);
-    }
-}

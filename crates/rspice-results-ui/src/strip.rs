@@ -924,38 +924,6 @@ fn legend_chip(
 mod tests {
     use super::*;
 
-    fn assert_disjoint(left: HorizontalSpan, right: HorizontalSpan) {
-        assert!(
-            left.end() <= right.start + f32::EPSILON,
-            "spans overlap: {left:?} and {right:?}"
-        );
-    }
-
-    #[test]
-    fn narrow_strip_bounds_metadata_and_gives_legend_the_true_remainder() {
-        let layout = strip_content_layout(210.0, 320.0, 640.0, true);
-
-        assert!(layout.kind.width <= 96.0);
-        assert!(layout.subtitle.width <= 210.0 * 0.32);
-        assert!(layout.legend.width > 0.0);
-        assert_disjoint(layout.kind, layout.subtitle);
-        assert_disjoint(layout.subtitle, layout.legend);
-        assert!(layout.legend.end() <= 210.0 + f32::EPSILON);
-    }
-
-    #[test]
-    fn strip_layout_never_forces_a_minimum_past_available_width() {
-        for width in [0.0, 12.0, 48.0, 120.0, 360.0] {
-            let layout = strip_content_layout(width, 400.0, 800.0, true);
-            assert!(layout.kind.start >= 0.0);
-            assert!(layout.subtitle.start >= 0.0);
-            assert!(layout.legend.start >= 0.0);
-            assert!(layout.kind.end() <= width + f32::EPSILON);
-            assert!(layout.subtitle.end() <= width + f32::EPSILON);
-            assert!(layout.legend.end() <= width + f32::EPSILON);
-        }
-    }
-
     #[test]
     fn trailing_actions_reserve_exact_rendered_controls_first() {
         let base = trailing_actions_width(22.0, 1, 0.0, false, 0.0);

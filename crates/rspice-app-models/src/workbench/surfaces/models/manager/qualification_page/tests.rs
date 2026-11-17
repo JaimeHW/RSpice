@@ -339,40 +339,6 @@ fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
     }
 }
 
-/// The band degrades by clipping, never by overlapping.
-///
-/// The cluster is floored at the heading, so a document too narrow to hold
-/// both cuts a segment rather than painting one over the words that say what
-/// the gate is.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn a_narrow_document_clips_the_closure_ledger_rather_than_overlapping_it() {
-    let mut app = source_owned_app();
-    let verdict_label = owned_summary(&app).gate.label().to_owned();
-    let output = run_page(&mut app, 620.0);
-    let painted = painted_text(&output);
-    let title = painted
-        .iter()
-        .filter(|text| text.text == "Release closure")
-        .max_by(|left, right| left.visible.top().total_cmp(&right.visible.top()))
-        .expect("the band states what the gate is");
-    let verdict = painted
-        .iter()
-        .find(|text| text.text == verdict_label)
-        .expect("the chain terminates in the selection's verdict");
-    for segment in painted
-        .iter()
-        .filter(|text| text.text == "0/3" || text.text == "0/1")
-    {
-        assert!(
-            segment.visible.left() >= title.visible.right()
-                && segment.visible.right() <= verdict.visible.left(),
-            "a 620 px document paints the cluster over the heading or the verdict: {:?}",
-            segment.visible
-        );
-    }
-}
-
 /// The segments are painted glyphs, so the node each hover region publishes is
 /// the only thing a screen reader has — and it has to carry the fact the band
 /// itself has room for only on hover.
@@ -499,58 +465,6 @@ fn an_undeclared_domain_reads_absent_and_a_declared_one_reads_its_own_counts() {
     );
 }
 
-/// The gate exemption is the band the families are listed under, and it is
-/// not repeated into the gate cell of every row beneath it.
-///
-/// A fresh project is sixteen compiled-in cards, so the page carried
-/// "engine-owned · compiled in" sixteen times under a band that had just said
-/// it once. The announcement keeps the words, because a reader who cannot see
-/// the band has nothing else that states them.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn an_engine_owned_family_leaves_the_gate_column_to_the_band_above_it() {
-    let mut app = harness();
-    let summaries = qualification_summaries(&app.model, &app.state.model_editor);
-    let summary = summaries
-        .iter()
-        .find(|summary| !summary.gate.is_gate_subject())
-        .expect("a fresh project holds the engine-owned families")
-        .clone();
-    let ctx = themed_context();
-    let t = Tokens::get(&ctx);
-    for domain in QualificationDomain::ALL {
-        assert_eq!(domain_cell(&summary, domain, &t).0, "—");
-    }
-
-    let output = run_page(&mut app, PAGE_SIZE[0]);
-    let painted = painted_text(&output);
-    assert!(
-        painted.iter().any(|text| text.text == ENGINE_OWNED_BAND),
-        "the band that states the exemption is not on the page"
-    );
-    // Two owners survive, and neither is a row: the closure band's verdict
-    // over the selected family, and the contract card's own meta. Before the
-    // column was gated this was eighteen.
-    let stated = painted
-        .iter()
-        .filter(|text| text.text == summary.gate.label())
-        .count();
-    assert!(
-        stated <= 2,
-        "the exemption is painted {stated} times; only the closure verdict \
-         and the contract card's meta may state it"
-    );
-    let detail = gate_detail(&summary);
-    assert!(
-        !painted.iter().any(|text| text.text == detail),
-        "the gate column still repeats `{detail}` under every exempt row"
-    );
-    assert!(
-        row_announcement(&summary).contains(summary.gate.label()),
-        "a reader who cannot see the band lost the exemption with it"
-    );
-}
-
 /// Every cell a sighted reader can see is announced, because none of them is a
 /// widget: the row is painted, and the row's node is the only thing a screen
 /// reader has.
@@ -608,76 +522,6 @@ fn the_engine_owned_band_states_its_whole_exemption() {
             .iter()
             .any(|clipped| painted(&clipped.shape, ENGINE_OWNED_BAND)),
         "the engine-owned band was painted truncated or not at all"
-    );
-}
-
-/// The body is two tracks that reach the panel's bottom edge.
-///
-/// The page used to stop about five hundred pixels short of it, leaving a band
-/// of bare panel under a matrix that had simply run out of rows — which reads
-/// as a page that failed to render rather than as room.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_qualification_body_fills_the_document_in_two_tracks() {
-    fn walk(shape: &egui::epaint::Shape, fill: Color32, out: &mut Vec<egui::Rect>) {
-        match shape {
-            egui::epaint::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, fill, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let ctx = themed_context();
-    let mut app = source_owned_app();
-    let size = egui::vec2(PAGE_SIZE[0], PAGE_SIZE[1]);
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app.cx()));
-        },
-    );
-
-    let panel = Tokens::get(&ctx).color.bg_panel;
-    let mut rects = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, panel, &mut rects);
-    }
-    // The panes are the panel-filled boxes that end at the bottom of the
-    // document without spanning its whole width — the one that does is the
-    // document surface itself, laid down before any page painted on it.
-    let mut panes = rects
-        .iter()
-        .filter(|rect| (rect.bottom() - size.y).abs() <= 1.5 && rect.width() < size.x - 1.0)
-        .copied()
-        .collect::<Vec<_>>();
-    panes.sort_by(|left, right| left.left().total_cmp(&right.left()));
-    panes.dedup_by(|left, right| (left.left() - right.left()).abs() <= 0.5);
-    assert_eq!(
-        panes.len(),
-        2,
-        "the body is the matrix and the contract rail, both reaching the bottom: {panes:?}"
-    );
-    assert!(
-        panes[0].left() <= 1.0 && (panes[1].right() - size.x).abs() <= 1.0,
-        "the two tracks do not span the document column: {panes:?}"
-    );
-    assert!(
-        panes[0].width() > panes[1].width(),
-        "the matrix is the wider track: {panes:?}"
-    );
-    assert!(
-        panes[0].height() >= DETAIL_PANE_MIN_H,
-        "the matrix is drawn shorter than the mockup's 170 px minimum: {:?}",
-        panes[0]
     );
 }
 

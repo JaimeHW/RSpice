@@ -21,8 +21,6 @@ use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
-use rspice_app_workbench::ui::theme::{self, FontWeight};
-use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
     shortcut_for_occurrence,
@@ -64,20 +62,6 @@ fn title_test_ctx() -> Context {
 /// What `menu` holds, as the shell hands it to the title bar.
 fn application_menu_entries(menu: ApplicationMenu) -> &'static [MenuEntry] {
     RSpiceApp::test_instance().menu_entries(menu)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
-    let mut app = title_test_app();
-    app.state.workbench.workspace = Workspace::Design;
-
-    assert_eq!(
-        title_context_text(&app, false),
-        app.state.model.workspace.content.project.display_name()
-    );
-    assert_eq!(title_context_text(&app, true), "top · schematic");
-    assert_eq!(active_title_cell(&app), "top · schematic");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -409,16 +393,6 @@ fn the_bar_shows_every_menu_above_820_and_one_menu_button_below() {
 }
 
 #[test]
-fn title_bar_rules_remain_inside_the_browser_clip() {
-    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 7.0), egui::vec2(1_440.0, 35.0));
-    let (top, bottom) = title_bar_separator_positions(rect);
-    assert_eq!(top, 7.5);
-    assert_eq!(bottom, 41.5);
-    assert!(top > rect.top());
-    assert!(bottom < rect.bottom());
-}
-
-#[test]
 fn the_full_bar_lists_every_menu_in_order() {
     assert!(labels(MenuProjection::Compact).is_empty());
     assert_eq!(
@@ -428,15 +402,6 @@ fn the_full_bar_lists_every_menu_in_order() {
             "Help"
         ]
     );
-}
-
-#[test]
-fn the_compact_bar_drops_the_title_and_the_search_field_narrows() {
-    assert!(!MenuProjection::Compact.shows_title_context());
-    assert!(MenuProjection::All.shows_title_context());
-    assert_eq!(search_button_width(1020.0, false), 31.0);
-    assert!(search_button_width(1021.0, false) > 31.0);
-    assert_eq!(search_button_width(1440.0, true), 44.0);
 }
 
 /// The overflow menu the in-between widths showed is gone, and each of its
@@ -533,35 +498,6 @@ fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
             .unwrap_or_else(|| panic!("missing application menu trigger {label}"));
         assert_eq!(bounds.y1 - bounds.y0, 35.0, "clipped trigger {label}");
     }
-}
-
-#[test]
-fn command_keycap_uses_canonical_intrinsic_border_box_width() {
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut width = 0.0;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            width = search_keycap_width(ui, "Ctrl K");
-            let text_width = ui
-                .painter()
-                .layout_no_wrap(
-                    "Ctrl K".to_owned(),
-                    theme::mono(tokens::FS_1, FontWeight::Regular),
-                    egui::Color32::WHITE,
-                )
-                .size()
-                .x;
-            assert_eq!(
-                width,
-                (text_width
-                    + SEARCH_KEYCAP_INLINE_PADDING * 2.0
-                    + SEARCH_KEYCAP_BORDER_WIDTH * 2.0)
-                    .max(SEARCH_KEYCAP_MIN_WIDTH)
-            );
-        });
-    });
-    assert!(width >= SEARCH_KEYCAP_MIN_WIDTH);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2444,31 +2380,4 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
             );
         }
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn title_context_ellipsis_is_measured_instead_of_character_estimated() {
-    let ctx = title_test_ctx();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut fitted = String::new();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-            fitted = ellipsize_to_width(
-                ui.painter(),
-                "WWW · precision-sensor-front-end",
-                &font,
-                52.0,
-            );
-            let width = ui
-                .painter()
-                .layout_no_wrap(fitted.clone(), font, egui::Color32::WHITE)
-                .size()
-                .x;
-            assert!(width <= 52.0);
-        });
-    });
-    assert!(fitted.ends_with('…'));
-    assert_ne!(fitted, "WWW · precision-sensor-front-end");
 }

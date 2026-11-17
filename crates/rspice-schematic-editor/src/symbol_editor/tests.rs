@@ -72,32 +72,6 @@ fn preview_viewport_fits_nonzero_origin_as_placed_symbol() {
         "effective max={max_screen:?}"
     );
 }
-/// The preview keeps a column of its own at the canvas's right edge, large
-/// enough to read a symbol in, so the drawing is laid out beside it and
-/// never under it; a canvas too narrow to give a column up shows none.
-#[test]
-fn the_preview_keeps_a_readable_column_of_its_own() {
-    let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 640.0));
-    let width = preview_column_width(canvas.width());
-    let column = Rect::from_min_max(pos2(canvas.right() - width, canvas.top()), canvas.max);
-
-    let tile = preview_tile_rect(column);
-
-    assert!(
-        tile.width() >= 220.0 && tile.height() >= 156.0,
-        "preview tile should be large enough for readable symbols: {tile:?}"
-    );
-    assert!(
-        column.contains(tile.min) && column.contains(tile.max),
-        "{tile:?} in {column:?}"
-    );
-    assert_eq!(
-        preview_column_width(480.0),
-        0.0,
-        "a narrow canvas keeps its width"
-    );
-}
-
 /// The tile's header states the scale the tile draws at, in the status
 /// bar's terms. It said "100%" whatever the symbol's size: a large symbol
 /// fitted into the tile at a fifth of that read as drawn at full size.

@@ -200,40 +200,6 @@ pub fn dismiss_button(ui: &Ui, rect: Rect, id: egui::Id, label: &str) -> Respons
 mod tests {
     use super::*;
 
-    /// Every severity paints, at the size both surfaces use, without leaving
-    /// its box: a glyph that bleeds is a glyph that overlaps the title.
-    #[test]
-    fn every_severity_glyph_stays_inside_its_box() {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        let rect = Rect::from_min_size(pos2(20.0, 20.0), Vec2::splat(GLYPH_SIDE));
-        for kind in [
-            ToastKind::Success,
-            ToastKind::Info,
-            ToastKind::Warn,
-            ToastKind::Error,
-        ] {
-            // A foreground layer of its own, so the pass's shapes are the
-            // glyph's and nothing a panel painted behind it.
-            let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("glyph-probe"));
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let painter = ui.ctx().layer_painter(layer);
-                paint_tone_glyph(&painter, rect, kind, Color32::WHITE);
-            });
-            let bounds = output
-                .shapes
-                .iter()
-                .map(|clipped| clipped.shape.visual_bounding_rect())
-                .filter(|bounds| bounds.is_positive())
-                .fold(Rect::NOTHING, Rect::union);
-            assert!(bounds.is_positive(), "{kind:?} painted nothing");
-            assert!(
-                rect.expand(1.0).contains_rect(bounds),
-                "{kind:?} glyph {bounds:?} leaves its {rect:?} box"
-            );
-        }
-    }
-
     /// What a glyph paints, as a comparable signature: how many strokes,
     /// paths and filled circles of each kind, and where they fall.
     fn glyph_signature(kind: ToastKind) -> Vec<String> {

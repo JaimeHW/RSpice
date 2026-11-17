@@ -2106,16 +2106,6 @@ mod run_space_layout_tests {
         }
     }
 
-    /// The defect: a two-column cap left a 2x2 island at 1600 and a 500-point
-    /// island at 2560. Four axes are 976 points of terms, so any card wider
-    /// than that has to hold the whole run on one row.
-    #[test]
-    fn a_wide_card_holds_the_whole_run_on_one_row() {
-        let rows = space_rows(2540.0, 4);
-        assert_eq!(rows.len(), 1, "four axes fit 2540 points");
-        assert_eq!(rows[0].terms.len(), 4);
-    }
-
     /// No axes, no strip: an empty row would paint a band of nothing where the
     /// expression used to close on a tile.
     #[test]

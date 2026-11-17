@@ -41,12 +41,6 @@ pub(super) const SECTION_BAR_CONTENT_H: f32 = 40.0;
 /// Vertical padding the bar's frame adds above and below that content
 /// (`padding: 5px 12px`).
 const SECTION_BAR_PAD_Y: i8 = 5;
-/// The whole bar, frame included — the band the surface test measures its
-/// page actions against.
-#[cfg(test)]
-pub(in crate::workbench::surfaces::models) const SECTION_BAR_H: f32 =
-    SECTION_BAR_CONTENT_H + SECTION_BAR_PAD_Y as f32 * 2.0;
-
 /// One page bar: title and live subtitle on the left, the page's own actions
 /// hard against the right.
 ///

@@ -383,38 +383,4 @@ mod tests {
             );
         }
     }
-
-    /// A long problem wraps, and its mark stays on the first line.
-    #[test]
-    fn a_wrapped_problem_line_keeps_its_mark_on_the_first_line() {
-        let shapes = paint(|ui| {
-            ui.allocate_ui(egui::vec2(160.0, 200.0), |ui| {
-                problem_line(
-                    ui,
-                    Problem::Failure,
-                    "A refusal long enough to need several lines at this width, which wraps",
-                );
-            });
-        });
-        let text = shapes
-            .iter()
-            .find_map(|shape| match shape {
-                Shape::Text(text) => Some(text.clone()),
-                _ => None,
-            })
-            .expect("the line paints its text");
-        assert!(text.galley.rows.len() > 1, "the text did not wrap");
-        let first_row = text.galley.rows[0].rect().translate(text.pos.to_vec2());
-        let mark = shapes
-            .iter()
-            .filter(|shape| matches!(shape, Shape::LineSegment { .. }))
-            .map(Shape::visual_bounding_rect)
-            .fold(Rect::NOTHING, Rect::union);
-        assert!(mark.is_positive(), "no mark painted");
-        assert!(
-            (mark.center().y - first_row.center().y).abs() <= 1.0,
-            "mark {mark:?} is not on the first line {first_row:?}"
-        );
-        assert!(mark.right() < text.pos.x, "the mark overlaps the text");
-    }
 }

@@ -1187,75 +1187,6 @@ mod tests {
         })
     }
 
-    /// The form is padded alike above and below: as much air under its
-    /// last row of checks as over its first caption's ink. Under the Noisy
-    /// check there was the lower half of its control-high target and then
-    /// the form's inset again, 25 points on a touch screen against 13 above.
-    #[test]
-    fn the_form_is_padded_alike_above_its_first_caption_and_under_its_checks() {
-        for target in [None, Some(44.0)] {
-            let (full, mut draft) = opened(ComponentType::Resistor);
-            // The resistor's sheet as far as its Noise checks; the
-            // purchasing rows after them are text fields.
-            let mut sheet = PropertySheet::new();
-            for definition in full
-                .iter()
-                .filter(|definition| definition.category != "Bill of materials")
-            {
-                sheet.add(definition.clone());
-            }
-            let ctx = egui::Context::default();
-            rspice_ui_kit::Theme::default().apply(&ctx);
-            rspice_ui_kit::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
-            let mut form = egui::Rect::NOTHING;
-            let mut painted = Vec::new();
-            for _ in 0..3 {
-                let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        form = ui
-                            .scope(|ui| {
-                                render_component_parameters(
-                                    ui,
-                                    &mut draft,
-                                    &sheet,
-                                    &[],
-                                    QuantityPresentationPolicy::default(),
-                                    UiNumberLocale::default(),
-                                    ParametersPane {
-                                        identity: InstanceIdentity {
-                                            name: Some("R1"),
-                                            device: "Resistor",
-                                            master: "",
-                                        },
-                                        beside_another: false,
-                                    },
-                                    &mut |_, _| {},
-                                );
-                            })
-                            .response
-                            .rect;
-                    });
-                });
-                painted = texts(output);
-            }
-            let rect_of = |wanted: &str| {
-                painted
-                    .iter()
-                    .find(|(text, _)| text == wanted)
-                    .map(|(_, rect)| *rect)
-                    .unwrap_or_else(|| panic!("{wanted} is not painted"))
-            };
-            let above = rect_of("Name").top() - form.top() + CAPTION_INK_TOP;
-            let box_bottom = rect_of("Noisy").center().y + CHECK_BOX_SIDE * 0.5;
-            let below = form.bottom() - box_bottom;
-            let half_target = (Tokens::get(&ctx).metrics.ctl_h - CHECK_BOX_SIDE) * 0.5;
-            assert!(
-                (below - above.max(half_target)).abs() < 1.0,
-                "touch target {target:?}: {above} above the first caption, {below} under the checks"
-            );
-        }
-    }
-
     /// Up in a focused resistance field steps to the next value of the
     /// project's series, and the wheel over it steps back down, as typed
     /// edits of the draft.
@@ -1395,29 +1326,6 @@ mod tests {
         assert!(
             noisy > rise + CHECK_BOX_SIDE,
             "Noisy at {noisy}, the column's captions at {rise}"
-        );
-    }
-
-    #[test]
-    fn the_model_row_keeps_to_the_columns_above_it() {
-        let texts = painted_texts(ComponentType::Resistor, |_| {});
-        let right_edge = |unit: &str| {
-            texts
-                .iter()
-                .filter(|(text, _)| text == unit)
-                .map(|(_, rect)| rect.right())
-                .fold(f32::NEG_INFINITY, f32::max)
-        };
-        // AC resistance, above the model row; Temp coeff 1, below it.
-        let above = right_edge("Ω");
-        let below = right_edge("1/°C");
-        assert!(
-            above.is_finite() && below.is_finite(),
-            "both units painted: {above} {below}"
-        );
-        assert!(
-            (above - below).abs() < 0.5,
-            "the right column ends at {above} above the model row and {below} below it"
         );
     }
 

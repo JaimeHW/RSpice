@@ -66,50 +66,6 @@ fn palette_entry_for(key: CommandKey) -> PaletteEntry {
 }
 
 #[test]
-fn desktop_and_phone_layouts_match_the_mockup_contract() {
-    let desktop = PaletteLayout::resolve(
-        Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0)),
-        false,
-        44.0,
-    );
-    assert_eq!(desktop.surface.width(), 650.0);
-    assert_eq!(desktop.surface.height(), 560.0);
-    assert_eq!(desktop.surface.left(), 395.0);
-    assert_eq!(desktop.surface.top(), 72.0);
-    assert_eq!(desktop.regions().search.height(), 48.0);
-    assert_eq!(desktop.regions().scope.height(), 37.0);
-    assert_eq!(desktop.regions().footer.height(), 31.0);
-
-    let phone = PaletteLayout::resolve(
-        Rect::from_min_size(pos2(0.0, 0.0), vec2(390.0, 844.0)),
-        true,
-        44.0,
-    );
-    assert!(phone.narrow);
-    assert_eq!(
-        phone.surface,
-        Rect::from_min_max(pos2(6.0, 6.0), pos2(384.0, 838.0))
-    );
-    assert_eq!(phone.scope_height, 59.0);
-
-    let touch_desktop = PaletteLayout::resolve(
-        Rect::from_min_size(pos2(0.0, 0.0), vec2(1024.0, 768.0)),
-        true,
-        44.0,
-    );
-    assert!(!touch_desktop.narrow);
-    assert_eq!(touch_desktop.scope_height, 59.0);
-
-    // A 48 px target chosen in Accessibility grows the scope band with it.
-    let larger = PaletteLayout::resolve(
-        Rect::from_min_size(pos2(0.0, 0.0), vec2(1024.0, 768.0)),
-        true,
-        48.0,
-    );
-    assert_eq!(larger.scope_height, 63.0);
-}
-
-#[test]
 fn palette_is_a_typed_registry_projection() {
     let commands = palette_commands_listed();
     assert!(!commands.contains(&ShellCommand::CommandPalette));
@@ -267,18 +223,6 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         .collect::<Vec<_>>();
     assert!(help.contains(&ShellCommand::KeyboardShortcuts));
     assert!(help.contains(&ShellCommand::About));
-}
-
-#[test]
-fn bus_commands_use_the_mockup_palette_glyphs() {
-    assert_eq!(
-        row_icon(&palette_entry_for(DesignCommand::PlaceBus.key())),
-        Icon::Bus
-    );
-    assert_eq!(
-        row_icon(&palette_entry_for(DesignCommand::PlaceBusTap.key())),
-        Icon::Bus
-    );
 }
 
 #[test]

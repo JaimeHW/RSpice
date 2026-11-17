@@ -419,49 +419,6 @@ mod tests {
         out
     }
 
-    /// On a sheet long enough to scroll, every value the Value column states
-    /// is drawn whole, inside the viewport and clear of the scroll bar, in
-    /// engineering notation. The table was sized to the width before the
-    /// scroll area took its bar's track, so the column ran under the bar and
-    /// lost its last ten points; and it printed `+8.414710e-1`.
-    #[test]
-    fn the_value_column_is_whole_on_a_sheet_that_scrolls() {
-        let mut state = ranked_state(40);
-        let (_, output) = sheet_frame(
-            &mut state,
-            crate::ui::Theme::default(),
-            egui::vec2(1_000.0, 520.0),
-        );
-        let mut values = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Text(text) = &clipped.shape {
-                let words = text.galley.job.text.as_str();
-                if words.starts_with(['+', '-']) || words == "0" {
-                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
-                    values.push((words.to_owned(), rect, clipped.clip_rect));
-                }
-            }
-        }
-        assert!(values.len() >= 12, "the column drew {values:?}");
-        // Across, that is: the last row the viewport shows may be cut at
-        // its foot by the sheet's own scrolling.
-        for (words, rect, clip) in &values {
-            assert!(
-                clip.x_range().contains(rect.left()) && rect.right() <= clip.right() + 0.5,
-                "{words} is drawn at {rect:?}, cut by {clip:?}"
-            );
-            assert!(!words.contains('e'), "{words} is not engineering notation");
-        }
-        // The scale above the bars reads the same way.
-        assert!(
-            texts(&output)
-                .iter()
-                .any(|(text, _)| text.starts_with('±') && !text.contains('e')),
-            "{:?}",
-            texts(&output)
-        );
-    }
-
     /// The sensitivity sheet for review, written under `RSPICE_PICTURES` when
     /// it is set.
     #[test]

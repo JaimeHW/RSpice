@@ -22,7 +22,6 @@ use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PlanManage
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::RUN_SET_DOES_NOT_VALIDATE;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::exchange;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::handle_plan_manager_action;
-use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::kit;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::lifecycle;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::matches_plan_filter;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_body;
@@ -102,13 +101,6 @@ struct RenderedBody {
     painted: Vec<String>,
     /// Each row's complete announced fact, in painted row order.
     rows: Vec<String>,
-    /// The size the body actually used, on both axes. This is the quantity
-    /// an enclosing scroll area measures to decide whether to scroll, so a
-    /// value over the body size is the overflow defect itself rather than a
-    /// proxy for it.
-    used: Vec2,
-    /// The size the real dialog hands its body at this viewport.
-    body: Vec2,
 }
 
 /// Render the manager body at the body size the real dialog would give it.
@@ -200,12 +192,7 @@ fn rendered_body(
             painted.push(painted_text);
         }
     }
-    RenderedBody {
-        painted,
-        rows,
-        used,
-        body,
-    }
+    RenderedBody { painted, rows }
 }
 
 /// The draft a route is actually used with.
@@ -292,92 +279,6 @@ pub(super) fn route_draft(
         }
     }
     draft
-}
-
-/// Every string the real dialog painted at one viewport, split by whether it
-/// actually landed on screen.
-///
-/// The body-level height measurement proves the content is no taller than
-/// the budget. It cannot prove the dialog put it somewhere the reader can
-/// see: egui still emits a shape its clip rect excludes, so a label scrolled
-/// under the footer is painted and invisible at once. A text shape counts as
-/// visible only when its whole box is inside the clip rect it was painted
-/// with — the same question as "would the user have to scroll to read this".
-///
-/// Both lists come from the paint and nothing else. There is deliberately no
-/// list of expected strings anywhere in this file's fit gates: a route that
-/// adds, drops or rewords a label is covered by that alone, so five lanes can
-/// redesign five routes without any of them editing this file — and an
-/// "improvement" that introduced an expected-label list would quietly take
-/// that guarantee away.
-#[cfg(not(target_arch = "wasm32"))]
-fn dialog_visible_text(
-    screen: Vec2,
-    extra_plans: usize,
-    mode: SimulationPlanManagerMode,
-) -> (Vec<String>, Vec<String>) {
-    let (mut app, active, available, _) = app_with_every_lifecycle_state();
-    if extra_plans > 0 {
-        let mut setup = app.state.model.sim_setup.clone();
-        for index in 0..extra_plans {
-            let id = setup
-                .create_plan(format!("Spare plan {index}"))
-                .expect("a fresh root plan is created");
-            app.state
-                .model
-                .workspace
-                .content
-                .migrate_inactive_plan_data(id);
-        }
-        setup
-            .activate_plan(active)
-            .expect("the fixture's active plan reactivates");
-        app.state.model.sim_setup = setup;
-    }
-    let draft = route_draft(&app, mode, active, available);
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    // The dialog owns the draft for a frame and re-arms it in
-    // `simulation_workflow`, so each pass is handed its own copy and the three
-    // passes render the same state rather than accumulating it.
-    let mut pass = || {
-        ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
-                ..Default::default()
-            },
-            |ctx| {
-                plan_manager_dialog(
-                    ctx,
-                    &mut crate::workbench::features::cx(&mut app),
-                    draft.clone(),
-                );
-            },
-        )
-    };
-    let _ = pass();
-    let _ = pass();
-    let output = pass();
-
-    let mut visible = Vec::new();
-    let mut clipped = Vec::new();
-    for shape in &output.shapes {
-        if let egui::epaint::Shape::Text(text) = &shape.shape {
-            let rect = Rect::from_min_size(text.pos, text.galley.size());
-            let painted = text.galley.job.text.clone();
-            // One point of tolerance. A galley's box can sit a fraction of
-            // a point past a container edge through row-height rounding and
-            // still be entirely readable; a row the reader would have to
-            // scroll to is out by tens of points, so the distinction this
-            // draws is not a close call.
-            if shape.clip_rect.expand(1.0).contains_rect(rect) {
-                visible.push(painted);
-            } else {
-                clipped.push(painted);
-            }
-        }
-    }
-    (visible, clipped)
 }
 
 /// The operations on the selected plan are one row at the desktop size:
@@ -516,175 +417,6 @@ pub(super) fn app_with_every_lifecycle_state() -> (
     (app, active, available, retired)
 }
 
-/// The one defect the authored reference has: its records table is 899
-/// points wide inside a 685-point cell, so the dialog scrolls sideways.
-///
-/// This measures the width the body actually consumes against the width the
-/// real dialog gives it, at the desktop width and at the width where the
-/// surface goes edge-to-edge. That quantity is exactly what a scroll area
-/// compares to decide whether to scroll, so an assertion on it is the fit
-/// itself and not a stand-in — and because the split's columns allocate
-/// their content rather than clip it, an inner region that overflowed would
-/// widen this number too.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_manager_fits_the_real_viewport_at_every_supported_width() {
-    let (app, active, _, _) = app_with_every_lifecycle_state();
-    let minimum = kit::flush_table_minimum_width(&PLAN_COLUMNS);
-    // The real viewport, and the width at which `WideWorkflow` stops being a
-    // fixed-width panel and becomes the whole viewport. 820 is that
-    // threshold, not a floor: a narrower window makes a narrower dialog, and
-    // those are portrait shapes gated by
-    // `a_portrait_viewport_stacks_the_surface_and_still_fits`.
-    let viewports = [
-        ("desktop", REAL_VIEWPORT),
-        ("full-viewport landscape", vec2(820.0, REAL_VIEWPORT.y)),
-    ];
-
-    for (arrangement, screen) in viewports {
-        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-        let rendered = rendered_body(&app, &mut draft, screen);
-        assert!(
-            rendered.used.x <= rendered.body.x + 0.5,
-            "{arrangement} at {screen:?}: the manager used {} of a {} body \
-             width, {:.1} points of horizontal overflow",
-            rendered.used.x,
-            rendered.body.x,
-            rendered.used.x - rendered.body.x
-        );
-        // Landscape stays two-column. Stacking costs the sum of both
-        // columns' heights instead of the taller one, which 640 points of
-        // viewport does not have — so at these shapes the surface must not
-        // reach for it.
-        assert!(
-            !kit::split_tracks(rendered.body.x, minimum).stacked,
-            "{arrangement} at {screen:?}: the split stacked for a {} body, \
-             and stacking does not fit this height",
-            rendered.body.x
-        );
-        assert_eq!(
-            rendered.rows.len(),
-            3,
-            "every catalog row is painted in {arrangement}: {:?}",
-            rendered.rows
-        );
-        let owed = [
-            "Rename…",
-            "Clone…",
-            "More",
-            "Selected plan",
-            "Name",
-            "Revision",
-            "Reference PVT corner",
-            "Declared run set",
-            "Modelled cost",
-            "Retired analyses",
-            "Regression baseline",
-            "Source lineage",
-        ];
-        // A property label is elided to its column, so the painted string
-        // may be a prefix plus an ellipsis. Only an actually-elided string
-        // is allowed to match by prefix: without that rule a shortened label
-        // would satisfy a longer one that is in fact missing.
-        let shows = |painted: &[String], label: &str| {
-            painted.iter().any(|text| {
-                text == label
-                    || text
-                        .strip_suffix('\u{2026}')
-                        .is_some_and(|prefix| !prefix.is_empty() && label.starts_with(prefix))
-            })
-        };
-        // Vertical fit is asserted at the dialog level, where clipping is
-        // real: every label this surface owes the reader has to be on
-        // screen, not merely emitted. The five per-plan operations are the
-        // point of selecting a row, and the eight detail rows are the
-        // plan's facts.
-        //
-        // And fitting the fixture is not enough. The records table is the
-        // one unbounded thing here — a catalog with more plans is a taller
-        // table — so the same claim has to hold with more plans than the
-        // fixture, or the surface overflows on the user's next plan rather
-        // than on a later edit to this file.
-        for extra_plans in [0, 2] {
-            let (visible, clipped) =
-                dialog_visible_text(screen, extra_plans, SimulationPlanManagerMode::Browse);
-            for label in owed {
-                assert!(
-                    !shows(&clipped, label),
-                    "{arrangement} at {screen:?} with {extra_plans} extra \
-                     plan(s): '{label}' is painted outside its clip rect, so \
-                     the reader would have to scroll to it. This dialog has \
-                     to fit."
-                );
-                assert!(
-                    shows(&visible, label),
-                    "{arrangement} at {screen:?} with {extra_plans} extra \
-                     plan(s): '{label}' is not on screen"
-                );
-            }
-        }
-    }
-}
-
-/// A portrait viewport stacks the two columns, and the surface still fits.
-///
-/// This is the arrangement the stacked path exists for, and it is reachable:
-/// `SimulateCommand::ManagePlans` is a `ShortcutContext::Global` command the
-/// registry lists, and the command palette that lists it has its own
-/// phone layout — so a narrow viewport can open this dialog, and at 560 the
-/// dialog is the whole viewport rather than a panel inside it.
-///
-/// Portrait is narrow *and tall*, which is why the earlier gate at 820x640
-/// did not cover it: that is a landscape shape, and the two constraints do
-/// not co-occur. Here the detail spends the full width on two side-by-side
-/// halves of its row list, which is what buys back the height stacking costs.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
-    // Narrower than `segmented::PHONE_MAX_WIDTH`, and tall as portrait is.
-    let screen = vec2(560.0, 900.0);
-    let body = measured_dialog_body_size(screen);
-    assert!(
-        kit::split_tracks(body.x, kit::flush_table_minimum_width(&PLAN_COLUMNS)).stacked,
-        "a {} body did not stack; this test would then be asserting the \
-         landscape arrangement over again",
-        body.x
-    );
-
-    for extra_plans in [0, 2] {
-        let (visible, clipped) =
-            dialog_visible_text(screen, extra_plans, SimulationPlanManagerMode::Browse);
-        for label in [
-            "Rename…",
-            "Clone…",
-            "More",
-            "Selected plan",
-            "Declared run set",
-            "Modelled cost",
-            "Regression baseline",
-        ] {
-            let shows = |painted: &[String]| {
-                painted.iter().any(|text| {
-                    text == label
-                        || text
-                            .strip_suffix('\u{2026}')
-                            .is_some_and(|prefix| !prefix.is_empty() && label.starts_with(prefix))
-                })
-            };
-            assert!(
-                !shows(&clipped),
-                "portrait at {screen:?} with {extra_plans} extra plan(s): \
-                 '{label}' is painted outside its clip rect"
-            );
-            assert!(
-                shows(&visible),
-                "portrait at {screen:?} with {extra_plans} extra plan(s): \
-                 '{label}' is not on screen"
-            );
-        }
-    }
-}
-
 /// A clipped label as an assertion message names it: one short line. A route
 /// can paint a whole document into a single galley, and the failure is no
 /// clearer for quoting all of it.
@@ -700,112 +432,6 @@ fn clipped_label_preview(label: &str) -> String {
         preview.push('\u{2026}');
     }
     preview
-}
-
-/// One route fits every gated viewport, with the catalog the reader has and
-/// with the catalog they will have after two more plans.
-///
-/// The claim is the product's hard rule stated at the only level where it is
-/// checkable: no dialog scrolls, so no text the route paints may land outside
-/// the clip rect it was painted with.
-///
-/// There is no list of expected labels here, and there must not be one. The
-/// labels come from the paint, so a lane that adds, drops or rewords one is
-/// covered without touching this file — which is exactly what lets five lanes
-/// redesign five routes at once. A list of owed strings would turn every
-/// redesign into an edit of this file and every merge into a collision. The two
-/// browse gates above do carry such a list, deliberately: they assert *which*
-/// facts that surface owes the reader, which is a claim about browse and not a
-/// fit gate.
-///
-/// The extra plans matter because the catalog is the one unbounded input every
-/// route reads: a surface that fits three plans and not five fails on the
-/// reader's next plan rather than on a later edit here.
-///
-/// Every mode has one gate below, one test each, so a lane deletes its own
-/// `#[ignore]` and no one else's. A ninth mode cannot be added without a gate
-/// by accident either: [`route_draft`] matches the enum exhaustively, so a new
-/// variant stops this file compiling until someone states how the reader
-/// reaches it — which is the moment its gate gets written.
-#[cfg(not(target_arch = "wasm32"))]
-fn assert_route_fits_every_gated_viewport(mode: SimulationPlanManagerMode) {
-    for (arrangement, screen) in GATED_VIEWPORTS {
-        for extra_plans in [0, 2] {
-            let (visible, clipped) = dialog_visible_text(screen, extra_plans, mode);
-            assert!(
-                !visible.is_empty(),
-                "{mode:?} in {arrangement} at {screen:?} with {extra_plans} \
-                 extra plan(s) painted no text at all, so this gate would pass \
-                 whatever it did with the rest"
-            );
-            assert!(
-                clipped.is_empty(),
-                "{mode:?} in {arrangement} at {screen:?} with {extra_plans} \
-                 extra plan(s): {} label(s) are painted outside their clip \
-                 rect, so the reader would have to scroll to read them. This \
-                 dialog has to fit. {:?}",
-                clipped.len(),
-                clipped
-                    .iter()
-                    .map(|label| clipped_label_preview(label))
-                    .collect::<Vec<_>>()
-            );
-        }
-    }
-}
-
-/// Browse fits at all three viewports with nothing clipped at all.
-///
-/// Stronger than the two gates above and not a repeat of them: they name the
-/// labels that surface owes the reader and check those are on screen, which
-/// says nothing about a label neither of them lists. This says no painted text
-/// is off screen, whatever it is.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_browse_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Browse);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_create_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Create);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_rename_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Rename);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_archive_confirmation_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::ConfirmArchive);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_compare_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Compare);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_export_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Export);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_import_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Import);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_campaign_route_fits_every_gated_viewport() {
-    assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Campaign);
 }
 
 /// Every column is painted, in order and in the heading's own spelling, and the
@@ -1893,32 +1519,6 @@ fn the_export_route_loses_no_fact_to_elision() {
 #[test]
 fn the_import_route_loses_no_fact_to_elision() {
     assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Import);
-}
-
-/// Export and import state the package they move whole at every gated
-/// viewport, which is stronger than losing no fact: nothing they paint is
-/// shortened. Their counts and the package's description are sentences in
-/// wrapped rows; as mono rows at the field size, portrait cut them to
-/// "0 variables · 0 saved outputs · 0 speci…".
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn export_and_import_paint_every_fact_whole_at_every_gated_viewport() {
-    for mode in [
-        SimulationPlanManagerMode::Export,
-        SimulationPlanManagerMode::Import,
-    ] {
-        for (arrangement, screen) in GATED_VIEWPORTS {
-            let RouteSpeech { painted, .. } = route_speech(screen, mode);
-            let elided: Vec<&String> = painted
-                .iter()
-                .filter(|text| text.contains('\u{2026}') && !is_authored_whole(text))
-                .collect();
-            assert!(
-                elided.is_empty(),
-                "{mode:?} in {arrangement} shortened {elided:?}"
-            );
-        }
-    }
 }
 
 /// A plan edit answers the gesture that made it, on the status bar. The

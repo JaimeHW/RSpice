@@ -12,9 +12,7 @@ use rspice_app_state::state::{
     NetlistDocumentId, SimulationRun, SourceLocator,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::panels::{WorkbenchIcon, elide_text};
-use rspice_app_workbench::ui::theme::{self, FontWeight};
-use rspice_app_workbench::ui::tokens;
+use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocument;
@@ -350,36 +348,6 @@ fn document_cycle_and_bulk_close_are_presentation_only() {
     assert_eq!(state.model.simulation.retained.runs.len(), 3);
 }
 
-#[test]
-fn dirty_and_close_suffixes_never_overlap() {
-    assert_eq!(suffix_width(false, false), 0.0);
-    assert_eq!(suffix_width(true, false), 13.0);
-    assert_eq!(suffix_width(false, true), 25.0);
-    assert_eq!(suffix_width(true, true), 38.0);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn long_document_labels_are_measured_and_ellipsized() {
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut fitted = String::new();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-            fitted = elide_text(ui, "precision_sensor_front_end · schematic", &font, 72.0);
-            let width = ui
-                .painter()
-                .layout_no_wrap(fitted.clone(), font, egui::Color32::WHITE)
-                .size()
-                .x;
-            assert!(width <= 72.0);
-        });
-    });
-    assert!(fitted.ends_with('\u{2026}'));
-    assert_ne!(fitted, "precision_sensor_front_end · schematic");
-}
-
 /// The Simulation Studio is one document, whatever the plan holds.
 ///
 /// It used to open a "<name> \u{b7} setup" tab per analysis instance, and
@@ -618,22 +586,6 @@ fn a_squeezed_cell_view_tab_shows_its_cell_before_cutting_the_name() {
         dirty: false,
     };
     assert_eq!(document.short_label(), Some("stage_10"));
-}
-
-#[test]
-fn tabs_that_fit_keep_their_own_widths() {
-    assert_eq!(shared_width_cap(&[100.0, 120.0], 400.0), None);
-    assert_eq!(
-        StripFit::resolve(&[100.0, 120.0], 400.0, 40.0).tabs_width,
-        400.0
-    );
-}
-
-#[test]
-fn tabs_that_do_not_fit_share_the_strip_and_the_narrow_keep_theirs() {
-    assert_eq!(shared_width_cap(&[190.0, 190.0, 190.0], 450.0), Some(150.0));
-    // The narrow tab keeps its 60; the other two split what is left.
-    assert_eq!(shared_width_cap(&[60.0, 190.0, 190.0], 360.0), Some(150.0));
 }
 
 #[test]

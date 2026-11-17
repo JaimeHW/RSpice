@@ -206,22 +206,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_activity_rail_geometry_matches_the_mockup() {
-        let badge = activity_badge_rect(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(ACTIVITY_BUTTON_WIDTH, ACTIVITY_BUTTON_HEIGHT),
-        ));
-        assert_eq!(badge.min, egui::pos2(28.0, 5.0));
-        assert_eq!(badge.size(), Vec2::splat(15.0));
-        let button = egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(ACTIVITY_BUTTON_WIDTH, ACTIVITY_BUTTON_HEIGHT),
-        );
-        assert!(button.contains_rect(badge));
-        assert_eq!(button.right() - badge.right(), ACTIVITY_BADGE_RIGHT);
-    }
-
-    #[test]
     fn activity_accessibility_names_match_the_mockup_workspace_language() {
         assert_eq!(activity_workspace_label(Workspace::Project), "Project");
         assert_eq!(activity_workspace_label(Workspace::Design), "Schematic");

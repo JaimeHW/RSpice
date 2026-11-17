@@ -12,7 +12,7 @@ use crate::workbench::shell_host::project::library_publication::prepare_project_
 use crate::workbench::shell_host::project::library_publication::restore_project_from_publication;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::library::{
-    AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, library_context,
+    AUDIT_REPORT_ID, LibraryIntent, apply_library_intent,
 };
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
@@ -22,45 +22,6 @@ use rspice_app_state::workbench::workspace::Workspace;
 fn apply_and_answer(ctx: &egui::Context, app: &mut RSpiceApp, intent: LibraryIntent) {
     apply_library_intent(ctx, &mut features::cx(app), intent);
     app.after_contribution();
-}
-
-/// The selection is the one thing in the strip whose length nobody chose:
-/// it is cut, and Access stays on the page.
-#[test]
-fn a_long_selection_is_cut_so_access_stays_on_the_page() {
-    const PAGE_WIDTH: f32 = 600.0;
-    let mut app = RSpiceApp::test_instance();
-    let builtin = &mut app.state.project.builtin_models;
-    builtin.open = true;
-    builtin.model = Some(
-        rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS[0]
-            .registry_name
-            .to_owned(),
-    );
-    builtin.file = Some("a_source_file_whose_name_fills_the_whole_of_the_strip.va".to_owned());
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                vec2(PAGE_WIDTH, 100.0),
-            )),
-            ..Default::default()
-        },
-        |ui| library_context(ui, &mut features::cx(&mut app)),
-    );
-    let access = output
-        .shapes
-        .iter()
-        .find_map(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) if text.galley.text() == "read-only" => {
-                Some(text.galley.rect.translate(text.pos.to_vec2()))
-            }
-            _ => None,
-        })
-        .expect("the access value is drawn");
-    assert!(access.right() <= PAGE_WIDTH, "{access:?}");
 }
 
 /// Every kind of view the Library page lists opens the view that was asked

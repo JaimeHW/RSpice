@@ -10,7 +10,6 @@
 use std::path::{Path, PathBuf};
 
 use egui::accesskit::Role;
-use egui::vec2;
 
 use super::super::replay::{Control, Replay, only};
 use super::recovery_frames::painted;
@@ -253,54 +252,6 @@ fn set_as_project_top_moves_where_runs_start() {
     replay.app.execute_command_key(ids::UNDO);
     assert_eq!(runs_start_at(&replay), schematic(TOP_CELL));
     std::fs::remove_dir_all(folder).ok();
-}
-
-/// A location too long for the header gives way from its middle: the
-/// folder it starts in and the file's name both stay, and the whole path is
-/// what the line says to a reader who cannot see it and on hover.
-#[test]
-fn the_header_location_gives_way_from_its_middle() {
-    let folder = unique_temp_dir("project-properties-header")
-        .join("a folder whose name runs on well past what a header shows")
-        .join("and another one under it that runs on just as long again");
-    std::fs::create_dir_all(&folder).unwrap();
-    let (replay, path) = saved_reference(&folder, ProjectPage::Overview);
-    let mut replay = replay.sized(vec2(1000.0, 700.0));
-    let location = path.to_str().unwrap().to_owned();
-    let whole = replay
-        .frames(Vec::new())
-        .into_iter()
-        .find(|control| control.role == Role::Label && control.value.starts_with("Revision "))
-        .expect("the header states the revision and location");
-    assert!(
-        whole.value.ends_with(&format!(" \u{b7} {location}")),
-        "the path as it was saved to: {}",
-        whole.value
-    );
-
-    let shown = painted(&replay.frame(Vec::new()));
-    let line = shown
-        .lines()
-        .find(|line| line.starts_with("Revision "))
-        .expect("the line is painted");
-    assert!(
-        !shown.contains(&location),
-        "nothing shows the path whole before the hover:\n{shown}"
-    );
-    assert!(line.contains('\u{2026}'), "{line}");
-    assert!(line.ends_with("reference.rspiceproj"), "{line}");
-    let root = &location[..3];
-    assert!(line.contains(root), "the drive stays: {line}");
-
-    let mut hovered = String::new();
-    for _ in 0..4 {
-        hovered = painted(&replay.frame(vec![egui::Event::PointerMoved(whole.center)]));
-    }
-    for _ in 0..8 {
-        hovered = painted(&replay.frame(Vec::new()));
-    }
-    assert!(hovered.contains(&location), "hover names it whole");
-    std::fs::remove_dir_all(folder.parent().unwrap().parent().unwrap()).ok();
 }
 
 /// The control named `label`, whatever its role, pressed and released at

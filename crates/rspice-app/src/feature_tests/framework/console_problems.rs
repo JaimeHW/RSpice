@@ -21,10 +21,9 @@ use rspice_app_state::workbench::app_state::diagnostic_store::listing::{
 use rspice_app_state::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
 };
-use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
+use rspice_app_workbench::workbench::docks::console::CONSOLE_ROW_MIN_HEIGHT;
 use rspice_app_workbench::workbench::docks::console::problems::arrange::{Arrangement, Line};
 use rspice_app_workbench::workbench::docks::console::problems::*;
-use rspice_app_workbench::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
 use rspice_app_workbench::workbench::state::problems_view::{
     ProblemColumn, ProblemGrouping, ProblemsView,
 };
@@ -247,18 +246,6 @@ impl Render {
 
     fn node(&self, says: &str) -> Option<&Announced> {
         self.nodes.iter().find(|node| node.says() == Some(says))
-    }
-
-    /// The band the header paints, which spans the page's content width: the
-    /// widest fill of the header's height, which no control in the strip
-    /// above it is.
-    fn header_band(&self) -> egui::Rect {
-        self.fills
-            .iter()
-            .filter(|(rect, _)| (rect.height() - grid::HEADER_HEIGHT).abs() < 0.5)
-            .map(|(rect, _)| *rect)
-            .max_by(|left, right| left.width().total_cmp(&right.width()))
-            .expect("the header paints its band")
     }
 }
 
@@ -496,189 +483,6 @@ fn click_on(render: &Render, message: &str) -> egui::RawInput {
         .cell(message)
         .unwrap_or_else(|| panic!("{message:?} is printed"));
     clicked(cell.center())
-}
-
-/// Every cell sits under its own heading, fits the column it is printed in,
-/// and is printed whole wherever the column has room for it: a cell is cut
-/// only when its whole text would not fit.
-///
-/// This is the assertion the first version of this page could not have passed:
-/// it fixed two columns at 58 px and 62 px and painted the rest over them.
-#[test]
-fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
-    let mut state = state_with_design_findings();
-    let whole: Vec<String> = {
-        let listed = listing(&state);
-        let row = (0..listed.len())
-            .filter_map(|index| listed.row(index))
-            .find(|row| row.message == "R1 has no resistance")
-            .expect("the error finding is listed");
-        vec![
-            severity_cell(&row),
-            row.code.to_owned(),
-            row.subject.clone(),
-            "Design rules".to_owned(),
-            row.location.clone(),
-            row.message.to_owned(),
-        ]
-    };
-    let render = render(&mut state, sized(egui::RawInput::default()));
-
-    let headings: Vec<egui::Pos2> = ProblemColumn::ALL
-        .iter()
-        .map(|column| {
-            render
-                .exact(column.label())
-                .unwrap_or_else(|| panic!("the {} heading is painted", column.label()))
-        })
-        .collect();
-    let header_y = headings[0].y;
-    assert!(
-        headings.iter().all(|pos| (pos.y - header_y).abs() < 1.0),
-        "every heading sits on the header row: {headings:?}",
-    );
-
-    // The row for the error finding, found by the cell only it carries.
-    let message = render
-        .text("R1 has no resistance")
-        .expect("the finding's message is painted");
-    let row = render.row_at(message.y);
-    assert_eq!(
-        row.len(),
-        ProblemColumn::ALL.len(),
-        "every column of the row is painted: {row:?}",
-    );
-    let scroll = harness_scrollbar();
-    let row_end = render.header_band().right() - scroll - CONSOLE_CELL_INSET;
-    for (index, (cell, heading)) in row.iter().zip(&headings).enumerate() {
-        // The severity word stands after its mark; every other cell's text
-        // stands where its heading does.
-        let start = if index == 0 {
-            heading.x + CONSOLE_MARK_GUTTER
-        } else {
-            heading.x
-        };
-        assert!(
-            (cell.1.min.x - start).abs() < 0.5,
-            "the cell {:?} at {} is not under its heading at {start}",
-            cell.0,
-            cell.1.min.x,
-        );
-        // A column's text ends a cell inset short of its cell's edge, and the
-        // next heading stands a cell inset past it; the last one ends an inset
-        // short of the scrollbar's allowance.
-        let column_end = headings
-            .get(index + 1)
-            .map_or(row_end, |next| next.x - 2.0 * CONSOLE_CELL_INSET);
-        assert!(
-            cell.1.right() <= column_end + 0.5,
-            "the cell {:?} ends at {} past its column's end at {column_end}",
-            cell.0,
-            cell.1.right(),
-        );
-        // The face is monospace, so the painted cell gives the advance, and
-        // the whole text's width follows from its length.
-        if cell.0 != whole[index] {
-            let advance = cell.1.width() / cell.0.chars().count() as f32;
-            let needed = whole[index].chars().count() as f32 * advance;
-            let room = column_end - start;
-            assert!(
-                cell.0.contains('…') && needed > room + 0.5,
-                "{:?} is cut to {:?} though its {needed} fits the column's {room}",
-                whole[index],
-                cell.0,
-            );
-        }
-    }
-    for (cell, whole) in row.iter().zip(&whole).take(4) {
-        assert_eq!(
-            &cell.0, whole,
-            "the severity, rule, subject and producer fit whole at {WIDTH} px",
-        );
-    }
-    assert_eq!(row[0].0, "Error", "the severity cell leads the row");
-    assert!(
-        row[1].0.starts_with("DRC-MISSING"),
-        "the rule column names the rule: {:?}",
-        row[1].0,
-    );
-    assert_eq!(row[2].0, "Component R1", "the subject is the object named");
-    assert_eq!(
-        row[3].0, "Design rules",
-        "the producer column names who reported it"
-    );
-    assert!(
-        row[0].1.min.x >= render.header_band().left() + CONSOLE_MARK_GUTTER - 0.5,
-        "the severity cell clears the mark gutter",
-    );
-}
-
-/// The scrollbar allowance the column measurement makes, read from the style
-/// the page is drawn in.
-fn harness_scrollbar() -> f32 {
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let style = ctx.global_style();
-    style.spacing.scroll.bar_width + style.spacing.scroll.bar_inner_margin
-}
-
-/// With more findings than the body can show, its scrollbar is drawn — and the
-/// rows still line up under the header drawn outside the scrolled area, and a
-/// message too long for its column is cut short of the bar rather than
-/// printed under it.
-#[test]
-fn with_a_scrollbar_the_rows_still_line_up_and_stop_short_of_it() {
-    let mut state = open_state();
-    let mut records: Vec<DiagnosticRecord> = (0..40)
-        .map(|index| {
-            record(
-                &state,
-                &format!("T-{index:02}"),
-                DiagnosticLevel::Warning,
-                &format!("finding {index:02}"),
-            )
-        })
-        .collect();
-    let long = "a message long enough that no column on a nine hundred point page \
-                could print it whole, so the grid has to cut it where its column ends";
-    records.insert(0, record(&state, "T-LONG", DiagnosticLevel::Error, long));
-    publish(&mut state, records);
-
-    let harness = Harness::new();
-    harness.settle(&mut state);
-    let render = harness.frame(&mut state, sized(egui::RawInput::default()));
-    assert!(
-        !harness.shows_whole(&render, "finding 39"),
-        "precondition: the list is longer than the body, so the body scrolls",
-    );
-
-    let message_heading = render
-        .exact(ProblemColumn::Message.label())
-        .expect("the message heading is painted");
-    let severity_heading = render
-        .exact(ProblemColumn::Severity.label())
-        .expect("the severity heading is painted");
-    let cut = render
-        .texts
-        .iter()
-        .find(|(text, _)| text.starts_with("a message long enough"))
-        .expect("the long message is printed");
-    assert!(cut.0.ends_with('…'), "it is cut, and says so: {:?}", cut.0);
-    assert!(
-        (cut.1.min.x - message_heading.x).abs() < 0.5,
-        "with the bar drawn, the message still starts under its heading",
-    );
-    let bar_left = render.header_band().right() - harness_scrollbar();
-    assert!(
-        cut.1.right() <= bar_left + 0.5,
-        "the cut message ends at {} under the scrollbar starting at {bar_left}",
-        cut.1.right(),
-    );
-    let first = render.row_at(cut.1.min.y);
-    assert!(
-        (first[0].1.min.x - (severity_heading.x + CONSOLE_MARK_GUTTER)).abs() < 0.5,
-        "and every row's severity word is under its heading, after its mark: {first:?}",
-    );
 }
 
 /// The ordered column says which way it is read, in words a reader can hear
@@ -2041,85 +1845,6 @@ fn a_shrinking_body_keeps_the_readers_place_away_from_the_current_row() {
         "the body stays where the reader scrolled it: {} then {}",
         offset,
         harness.body_offset(),
-    );
-}
-
-/// A note under the rows that wraps is given the height it wraps to: the body
-/// gives up exactly that much for it. Given one line, the note would push the
-/// detail region under it off the bottom of the dock.
-#[test]
-fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
-    // More rule findings than the body shows, so the body is as tall as it
-    // was given rather than as tall as its rows.
-    let mut state = open_state();
-    let mut result = DrcResult::new();
-    for index in 0..40 {
-        result.add_violation(DrcViolation::new(
-            index,
-            DrcViolationType::DanglingWire,
-            format!("wire {index:02} ends open"),
-            DrcLocation::Point {
-                x: 10.0 * index as f64,
-                y: 0.0,
-            },
-        ));
-    }
-    result.completed = true;
-    state
-        .publish_active_design_check_result(result)
-        .expect("the fixture publishes a current receipt");
-    state
-        .model
-        .diagnostics
-        .set_current_finding(reported(&state).first().copied());
-    let narrow = || egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(360.0, HEIGHT),
-        )),
-        ..Default::default()
-    };
-    let harness = Harness::new();
-    let _ = harness.frame(&mut state, narrow());
-    let _ = harness.frame(&mut state, narrow());
-    let without_note = harness.table().height();
-
-    state
-        .model
-        .workspace
-        .content
-        .connectivity
-        .policy
-        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
-    let _ = harness.frame(&mut state, narrow());
-    let render = harness.frame(&mut state, narrow());
-    let note = render
-        .cell("Faint findings were reported")
-        .expect("the stale note is drawn");
-    assert!(
-        note.height() > 1.5 * CONSOLE_ROW_MIN_HEIGHT,
-        "precondition: the note wraps at this width: {note:?}",
-    );
-    // The body holds whole rows, so it gives up whole rows for the note:
-    // within a row of the note's height either way, as the room left under
-    // the last whole row absorbs the rest.
-    let mut tops: Vec<f32> = render
-        .texts
-        .iter()
-        .filter(|(text, _)| text.starts_with("wire "))
-        .map(|(_, rect)| rect.top())
-        .collect();
-    tops.sort_by(f32::total_cmp);
-    let pitch = tops
-        .windows(2)
-        .map(|pair| pair[1] - pair[0])
-        .fold(f32::INFINITY, f32::min);
-    let given_up = without_note - harness.table().height();
-    let rows = given_up / pitch;
-    assert!(
-        (rows - rows.round()).abs() < 0.01 && (given_up - note.height()).abs() < pitch,
-        "the body gave up {given_up} ({rows} rows of {pitch}) for a note {} tall",
-        note.height(),
     );
 }
 

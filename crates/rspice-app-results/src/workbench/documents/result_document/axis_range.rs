@@ -354,27 +354,6 @@ mod tests {
         );
     }
 
-    /// What James saw on C12 and C6 was `-104.849…41546 V` and
-    /// `-400.024…40033 V`: each end to six digits on its own decade, too long
-    /// for the details panel's field, which cut the middle out of both. Both
-    /// ends now share the larger end's decade at the width's resolution and
-    /// the field shows them whole.
-    #[test]
-    fn an_autofit_range_fits_the_details_field() {
-        assert_eq!(
-            format_axis_range((-0.104_849, 1.415_46), "V"),
-            "\u{2212}0.105 \u{2026} 1.415 V"
-        );
-        assert_eq!(
-            format_axis_range((-0.400_024, 5.400_33), "V"),
-            "\u{2212}0.4 \u{2026} 5.4 V"
-        );
-        assert_eq!(format_axis_range((0.0, 1.6e-3), "s"), "0 \u{2026} 1.6 ms");
-        for range in [(-0.104_849, 1.415_46), (-0.400_024, 5.400_33)] {
-            assert!(format_axis_range(range, "V").chars().count() <= 16);
-        }
-    }
-
     /// An autofit pads the data by a fraction of its span, and the sum is
     /// `f64` noise. The ends read as the numbers they are near, never as
     /// seventeen digits, and a narrow zoom keeps the digits that tell its

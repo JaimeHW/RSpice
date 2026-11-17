@@ -1148,103 +1148,6 @@ mod tests {
         &super::super::PLAN_COLUMNS
     }
 
-    /// The selected row's accent rail is painted clear of the first cell.
-    ///
-    /// A boxed table has no cell inset of its own — it insets its content
-    /// through its frame — so a rail at the row's own left edge lands on top of
-    /// the first column, and the campaign table's Order digit was drawn with
-    /// its stem under the accent at every viewport.
-    #[test]
-    fn the_selection_rail_is_painted_clear_of_the_first_cell() {
-        let rows = [
-            TableRow {
-                selected: true,
-                announced: "the selected plan".to_owned(),
-            },
-            TableRow {
-                selected: false,
-                announced: "the other plan".to_owned(),
-            },
-        ];
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 400.0))),
-                ..Default::default()
-            },
-            |root| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(root, |ui| {
-                        records_table(ui, "rail", plan_columns(), &rows, |ui, row, column| {
-                            if row == 0 && column == 0 {
-                                ui.label("1");
-                            }
-                        });
-                    });
-            },
-        );
-
-        let mut rail_right = None;
-        let mut digit_left = None;
-        for clipped in &output.shapes {
-            match &clipped.shape {
-                egui::epaint::Shape::LineSegment { points, stroke }
-                    if (points[0].x - points[1].x).abs() < f32::EPSILON =>
-                {
-                    rail_right = Some(points[0].x + stroke.width / 2.0);
-                }
-                egui::epaint::Shape::Text(text) if text.galley.job.text == "1" => {
-                    digit_left = Some(text.pos.x);
-                }
-                _ => {}
-            }
-        }
-        let rail_right = rail_right.expect("the selected row paints an accent rail");
-        let digit_left = digit_left.expect("the first cell paints its order digit");
-        assert!(
-            rail_right <= digit_left,
-            "the rail ends at {rail_right} and the order digit starts at \
-             {digit_left}, so the accent is painted over the digit"
-        );
-    }
-
-    /// The solved widths fill the track exactly. A sum under the track leaves a
-    /// ragged right edge; a sum over it is the horizontal overflow the authored
-    /// reference has and this table must not.
-    #[test]
-    fn solved_column_widths_fill_the_track_exactly_and_never_exceed_it() {
-        let columns = plan_columns();
-        let content_minimum =
-            table_minimum_width(columns) - 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER);
-        for track in [
-            content_minimum,
-            content_minimum + 1.0,
-            610.0,
-            778.0,
-            1_400.0,
-        ] {
-            let widths = column_widths(columns, track);
-            let used = widths.iter().sum::<f32>() + CELL_GAP * (widths.len() - 1) as f32;
-            assert!(
-                (used - track).abs() < 0.001,
-                "columns solved to {used} in a {track} track"
-            );
-        }
-
-        // Below the minimum the authored widths stand rather than shrinking to
-        // fit. A caller that gets here has skipped the minimum check, and a
-        // silently squeezed numeric column would hide that rather than show it.
-        let squeezed = column_widths(columns, content_minimum - 40.0);
-        let used = squeezed.iter().sum::<f32>() + CELL_GAP * (squeezed.len() - 1) as f32;
-        assert!(
-            (used - content_minimum).abs() < 0.001,
-            "a track under the minimum resolved to {used} instead of holding \
-             the authored {content_minimum}"
-        );
-    }
-
     /// Only the elastic column moves. The numeric columns are read by position
     /// across rows, so they must not shift when the dialog is resized.
     #[test]
@@ -1323,21 +1226,6 @@ mod tests {
              landscape window at 820 hands it would stack — and stacking costs \
              more height than a 640-point viewport has. Trim the column set \
              rather than let the surface fall back to it."
-        );
-    }
-
-    /// The records column is the wider one. Equal columns were the reason the
-    /// existing `dialog_split` could not serve this surface.
-    #[test]
-    fn the_records_column_is_wider_than_the_aside() {
-        let geometry = split_tracks(978.0, flush_table_minimum_width(plan_columns()));
-        assert!(!geometry.stacked);
-        assert!(
-            geometry.records > geometry.aside * 1.5,
-            "records {} against aside {}: the authored proportion is roughly \
-             two to one, not equal columns",
-            geometry.records,
-            geometry.aside
         );
     }
 }

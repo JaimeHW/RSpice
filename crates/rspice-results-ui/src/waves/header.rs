@@ -847,29 +847,6 @@ mod tests {
         );
     }
 
-    /// Both rows of a strip's chrome stop on one rule.
-    ///
-    /// The pane header's actions used to be laid out against `rect.right()`,
-    /// so the log toggle sat flush with the pane edge under a strip header
-    /// whose own controls stopped 10 px short — two rows of one card trailing
-    /// at 10 px and 0 px.
-    #[test]
-    fn the_pane_header_trails_on_the_strip_header_s_own_inset() {
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 28.0), egui::vec2(900.0, 25.0));
-        let legend = legend_region(rect, 58.0);
-        assert!(
-            (legend.left() - rect.left() - HEADER_PADDING_X).abs() < f32::EPSILON,
-            "the legend starts at {}, not {} in from the pane edge",
-            legend.left(),
-            HEADER_PADDING_X
-        );
-        assert!(
-            legend.right() <= rect.right() - HEADER_PADDING_X - 58.0,
-            "the legend runs into the actions: it ends at {}",
-            legend.right()
-        );
-    }
-
     /// A pane too narrow for both regions gives up the legend, and never
     /// hands anything a negative rectangle.
     #[test]

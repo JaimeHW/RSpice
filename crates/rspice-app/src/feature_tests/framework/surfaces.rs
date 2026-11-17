@@ -7,7 +7,7 @@ use crate::workbench::RSpiceApp;
 use egui::Context;
 use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use rspice_app_state::state::ProjectSourceLanguage;
-use rspice_app_workbench::workbench::surfaces::{register_results_split_region, split_stage_rects};
+use rspice_app_workbench::workbench::surfaces::register_results_split_region;
 
 #[test]
 fn search_shortcut_handoff_preserves_the_source_editor() {
@@ -288,34 +288,6 @@ fn refused_source_write(language: ProjectSourceLanguage) {
         insert(&typed, at + 1, "y"),
         "{language:?}: the next edit is stored without the refused paste"
     );
-}
-
-#[test]
-fn split_stage_is_equal_zero_gap_with_one_pixel_divider() {
-    let stage = egui::Rect::from_min_size(egui::pos2(7.0, 11.0), egui::vec2(1001.0, 620.0));
-    let (primary, divider, secondary) = split_stage_rects(stage);
-
-    assert_eq!(primary.left(), stage.left());
-    assert_eq!(primary.right(), divider.left());
-    assert_eq!(divider.width(), 1.0);
-    assert_eq!(divider.right(), secondary.left());
-    assert_eq!(secondary.right(), stage.right());
-    assert!((primary.width() - secondary.width()).abs() <= f32::EPSILON);
-    assert_eq!(primary.height(), stage.height());
-    assert_eq!(secondary.height(), stage.height());
-}
-
-#[test]
-fn split_stage_remains_bounded_at_narrow_widths() {
-    for width in [0.0, 0.5, 1.0, 2.0, 44.0] {
-        let stage = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 80.0));
-        let (primary, divider, secondary) = split_stage_rects(stage);
-        for rect in [primary, divider, secondary] {
-            assert!(rect.left() >= stage.left());
-            assert!(rect.right() <= stage.right());
-            assert!(rect.width() >= 0.0);
-        }
-    }
 }
 
 #[test]

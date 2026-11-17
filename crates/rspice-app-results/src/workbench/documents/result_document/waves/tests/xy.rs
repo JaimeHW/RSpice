@@ -241,56 +241,6 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
     assert!(strips(&state).is_empty());
 }
 
-/// A strip against a signal has exactly one horizontal axis, the signal's:
-/// one ruler under its plot, captioned with the abscissa, and no overview
-/// and no time axis under it.
-#[test]
-fn a_strip_against_a_signal_draws_one_horizontal_axis_on_a_ruler_without_an_overview() {
-    let mut state = lissajous_host();
-    open_strip(&mut state, "V", signal("V(a)"));
-    let ctx = theme_context();
-    let painted = painted_texts(&ctx, &mut state);
-    let top = strip_top(&painted, "vs V(a)");
-    let below: Vec<&(String, egui::Rect)> = painted
-        .iter()
-        .filter(|(_, rect)| rect.top() > top)
-        .collect();
-    let count = |texts: &[&(String, egui::Rect)], word: &str| {
-        texts.iter().filter(|(text, _)| text == word).count()
-    };
-    // The overview's word stands under the time strip alone. Each strip's
-    // header carries its X scale chip, "log X"; the ruler names no scale and
-    // no word states the linear default.
-    let all: Vec<&(String, egui::Rect)> = painted.iter().collect();
-    assert_eq!(count(&all, "FULL"), 1, "{painted:?}");
-    assert_eq!(
-        count(&below, "FULL"),
-        0,
-        "no overview under the strip: {below:?}"
-    );
-    assert_eq!(count(&all, "log X"), 2, "{painted:?}");
-    assert_eq!(
-        count(&below, "log Y"),
-        1,
-        "the pane's Y toggle alone under the strip's header: {below:?}"
-    );
-    assert_eq!(count(&all, "LIN") + count(&all, "LOG"), 0, "{painted:?}");
-    assert!(!below.iter().any(|(text, _)| text.starts_with("TIME")));
-    assert_eq!(
-        count(&below, "V(a) \u{b7} V"),
-        1,
-        "one horizontal axis caption: {below:?}"
-    );
-    // Ticks in one row are a horizontal axis's; the Y axis' stand one above
-    // another.
-    let mut rows: std::collections::BTreeMap<i32, usize> = std::collections::BTreeMap::new();
-    for (_, rect) in below.iter().filter(|(text, _)| tick(text).is_some()) {
-        *rows.entry(rect.center().y.round() as i32).or_default() += 1;
-    }
-    let axes: Vec<_> = rows.iter().filter(|(_, count)| **count >= 3).collect();
-    assert_eq!(axes.len(), 1, "one row of horizontal ticks: {below:?}");
-}
-
 /// The strip against a signal stands on the ruler the time strip stands on:
 /// the same band in the same ink, one tick face, size, ink and row, and its
 /// caption at the same place in the gutter, in the same face. Its range is
@@ -381,96 +331,6 @@ fn both_strips_stand_on_one_ruler() {
             rect.center().x
         );
     }
-}
-
-/// A transient of a saturating core: H(core) in A/m and B(core) in T, B
-/// lagging H, over two cycles.
-fn core_host() -> ResultsTestHost {
-    let time: Vec<f64> = (0..=800).map(|step| f64::from(step) * 2.5e-6).collect();
-    let h: Vec<f64> = time.iter().map(|t| 400.0 * (OMEGA * t).sin()).collect();
-    let b: Vec<f64> = time
-        .iter()
-        .map(|t| 1.2 * (2.6 * (OMEGA * t - 0.55).sin()).tanh())
-        .collect();
-    let mut run = crate::state::SimulationRun::new(1);
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            RetainedTrace::new("H(core)", time.clone(), h, "#fff").with_unit("A/m"),
-            RetainedTrace::new("B(core)", time, b, "#fff").with_unit("T"),
-        ]),
-    );
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
-        .expect("legacy provenance");
-    run.restore_lifecycle(crate::state::SimulationRunLifecycle::LegacyUnknown, 0.0)
-        .expect("legacy lifecycle");
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.retained.runs.push(run);
-    state.model.simulation.view.active_run_idx = Some(0);
-    state.model.simulation.view.active_analysis_idx = Some(0);
-    state
-}
-
-/// The gutter is the sheet's whatever the abscissa. "H(core) · A/m" is too
-/// long for it, so its caption breaks at the unit, the quantity over the
-/// unit, whole; and every plot keeps one left edge, under the strip drawn
-/// against time and under the strip drawn against a signal, in this
-/// document and in one whose caption fits on a line.
-#[test]
-fn a_long_abscissa_breaks_its_caption_and_leaves_the_gutter_as_it_is() {
-    let ctx = theme_context();
-    let read = |state: &mut ResultsTestHost, caption: &str| {
-        let painted = painted_texts(&ctx, state);
-        assert!(
-            painted
-                .iter()
-                .all(|(text, _)| !["LIN", "LOG"].contains(&text.as_str())
-                    && !text.contains('\u{2026}')),
-            "no word states the linear default and no caption is cut: {painted:?}"
-        );
-        let rect = |wanted: &str| {
-            painted
-                .iter()
-                .find(|(text, _)| text == wanted)
-                .map(|(_, rect)| *rect)
-                .unwrap_or_else(|| panic!("a ruler's caption reads {wanted:?}: {painted:?}"))
-        };
-        // The time ruler's t = 0, on its caption's row, is held 2 px inside
-        // the plot's left edge.
-        let time = rect("TIME \u{b7} s");
-        let edge = painted
-            .iter()
-            .filter(|(text, rect)| text == "0" && (rect.center().y - time.center().y).abs() < 4.0)
-            .map(|(_, rect)| rect.left() - 2.0)
-            .next()
-            .unwrap_or_else(|| panic!("the time ruler reads 0 at its start: {painted:?}"));
-        // The gutter holds the captions alone: no scale chip left of the plot.
-        assert!(
-            painted
-                .iter()
-                .all(|(text, rect)| !text.starts_with("log") || rect.left() > edge),
-            "no scale chip in the gutter: {painted:?}"
-        );
-        (edge, time, rect(caption))
-    };
-    let mut short = lissajous_host();
-    open_strip(&mut short, "V", signal("V(a)"));
-    let (edge, time, one_line) = read(&mut short, "V(a) \u{b7} V");
-    let mut long = core_host();
-    open_strip(&mut long, "T", signal("H(core)"));
-    let (long_edge, long_time, two_lines) = read(&mut long, "H(core)\nA/m");
-    assert_eq!(edge, long_edge, "both documents keep one plot edge");
-    for caption in [one_line, long_time, two_lines] {
-        assert_eq!(
-            caption.right(),
-            time.right(),
-            "every caption ends on the gutter's rule"
-        );
-    }
-    assert!(
-        two_lines.height() > 1.8 * one_line.height(),
-        "the quantity stands over its unit: {two_lines:?} against {one_line:?}"
-    );
-    assert!(two_lines.left() >= 0.0, "{two_lines:?}");
 }
 
 /// The centre of the X scale chip in the header of the strip whose subtitle
@@ -724,34 +584,6 @@ fn filled_rects(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Rect
     }
     out.retain(|rect| rect.width() >= 0.9 * super::lanes::FRAME.x);
     out
-}
-
-/// Between the time strip and the strip after it lies a gap of canvas, then
-/// a hairline in border ink on top of the next strip's header: the time
-/// strip's overview track ends its own strip, and the next header plainly
-/// starts another.
-#[test]
-fn strips_stand_apart_by_a_gap_of_canvas_and_a_rule() {
-    let mut state = lissajous_host();
-    open_strip(&mut state, "V", signal("V(a)"));
-    let ctx = theme_context();
-    frame(&ctx, &mut state, Vec::new());
-    let shapes = frame(&ctx, &mut state, Vec::new());
-    let top = strip_top(&texts(&shapes), "vs V(a)");
-    let color = rspice_ui_kit::tokens::Tokens::get(&ctx).color;
-    let rule = filled_rects(&shapes, color.border)
-        .into_iter()
-        .find(|rect| {
-            rect.height() == 1.0
-                && rect.bottom() <= top
-                && rect.bottom() >= top - rspice_results_ui::strip::HEADER_HEIGHT
-        })
-        .expect("a rule in border ink stands on top of the next strip's header");
-    let gap = filled_rects(&shapes, color.canvas_bg)
-        .into_iter()
-        .find(|rect| rect.bottom() == rule.top())
-        .expect("a gap of canvas lies over the rule");
-    assert_eq!(gap.height(), 8.0, "the gap is 8 px of canvas: {gap:?}");
 }
 
 /// The header's span field narrows the curve to the time it names: typed

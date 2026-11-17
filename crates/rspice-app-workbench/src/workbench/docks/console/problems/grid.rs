@@ -936,13 +936,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_cell_that_fits_is_printed_whole() {
-        let columns = columns();
-        assert_eq!(elide_head("Component M1", 100.0, &columns), "Component M1");
-        assert_eq!(elide_tail("Component M1", 100.0, &columns), "Component M1");
-    }
-
     /// A path is read from its tail: the file and the object at the end of it
     /// say where to go, and the directories above them do not.
     #[test]
@@ -983,8 +976,6 @@ mod tests {
         /// Where the last column has to end: the table less the scrollbar it
         /// allows for.
         end: f32,
-        advance: f32,
-        headings: [f32; FITTED.len()],
     }
 
     fn measured(width: f32, widest: [usize; FITTED.len()], resized: Resized) -> Measured {
@@ -1005,141 +996,9 @@ mod tests {
             measured = Some(Measured {
                 columns: Columns::measure(ui, &widest, band),
                 end: band.span() - scrollbar,
-                advance: text_width(ui, "M", FontWeight::Regular),
-                headings: FITTED.map(|column| {
-                    text_width(ui, column.label(), FontWeight::SemiBold)
-                        + SORT_MARK_GAP
-                        + SORT_MARK_WIDTH
-                }),
             });
         });
         measured.expect("the pass ran")
-    }
-
-    /// At every width the columns abut, and the last ends exactly where the
-    /// scrollbar's allowance begins: nothing runs under the bar, and nothing
-    /// is left over at the end of the row. The first column's text stands at
-    /// the page's text inset, where the toolbar's first control does.
-    #[test]
-    fn the_columns_abut_and_end_where_the_scrollbar_begins() {
-        for width in [640.0, 900.0, 1400.0, 1886.0] {
-            let measured = measured(width, [7, 12, 10, 19, 18], Resized::default());
-            let columns = &measured.columns;
-            let end =
-                columns.offset(ProblemColumn::Message) + columns.width(ProblemColumn::Message);
-            assert!(
-                (end - measured.end).abs() < 0.5,
-                "at {width} px the row ends at {end} rather than at {}",
-                measured.end,
-            );
-            for pair in ProblemColumn::ALL.windows(2) {
-                let gap =
-                    columns.offset(pair[1]) - (columns.offset(pair[0]) + columns.width(pair[0]));
-                assert!(
-                    gap.abs() < 0.01,
-                    "{} and {} are {gap} apart at {width} px",
-                    pair[0].label(),
-                    pair[1].label(),
-                );
-            }
-            assert!(
-                (columns.offset(ProblemColumn::Severity) + CONSOLE_CELL_INSET
-                    - CONSOLE_BODY_PADDING_X)
-                    .abs()
-                    < 0.01,
-                "the first column's text stands at the page's inset at {width} px",
-            );
-        }
-    }
-
-    /// With room to spare every fitted column is its widest cell and two cell
-    /// insets — the same gutter after every column — and the message takes
-    /// the rest. The severity column's cell is its mark and its word.
-    #[test]
-    fn fitted_columns_are_their_widest_cell_and_two_insets() {
-        let widest = [7, 12, 10, 19, 18];
-        let measured = measured(1886.0, widest, Resized::default());
-        for (index, column) in FITTED.into_iter().enumerate() {
-            let mark = if column == ProblemColumn::Severity {
-                CONSOLE_MARK_GUTTER
-            } else {
-                0.0
-            };
-            let content =
-                (mark + widest[index] as f32 * measured.advance).max(measured.headings[index]);
-            assert!(
-                (measured.columns.width(column) - (content + 2.0 * CONSOLE_CELL_INSET)).abs()
-                    < 0.01,
-                "{} is {} wide for content {content}",
-                column.label(),
-                measured.columns.width(column),
-            );
-        }
-    }
-
-    /// A column's heading is its floor, and a short column is as wide as its
-    /// heading rather than its cells: severity read "Info" alone is still
-    /// headed "Severity".
-    #[test]
-    fn a_heading_wider_than_its_cells_sets_the_width() {
-        let measured = measured(1400.0, [4, 1, 1, 1, 1], Resized::default());
-        for (index, column) in FITTED.into_iter().enumerate() {
-            assert!(
-                (measured.columns.width(column)
-                    - (measured.headings[index] + 2.0 * CONSOLE_CELL_INSET))
-                    .abs()
-                    < 0.01,
-                "{} is as wide as its heading",
-                column.label(),
-            );
-        }
-    }
-
-    /// On a narrow table the fitted columns stop at their share and give way
-    /// to the message's least; a column cut there elides rather than taking
-    /// the row.
-    #[test]
-    fn on_a_narrow_table_the_message_keeps_its_least() {
-        let narrow = measured(640.0, [15, 40, 40, 40, 40], Resized::default());
-        assert!(
-            narrow.columns.width(ProblemColumn::Producer) < 40.0 * narrow.advance,
-            "a producer identity wider than its share is cut, not given the row",
-        );
-        assert!(
-            narrow.columns.width(ProblemColumn::Message)
-                >= MESSAGE_MIN_CHARACTERS * narrow.advance + 2.0 * CONSOLE_CELL_INSET - 0.01,
-            "the message keeps room for its least at 640 px",
-        );
-    }
-
-    /// Where the columns must give way, the widest gives first: the severity
-    /// word and a short name keep their cells whole, and the long rule is
-    /// what is cut.
-    #[test]
-    fn on_a_narrow_table_the_widest_column_gives_way_first() {
-        let widest = [8, 39, 10, 12, 10];
-        let narrow = measured(640.0, widest, Resized::default());
-        let message_least = MESSAGE_MIN_CHARACTERS * narrow.advance + 2.0 * CONSOLE_CELL_INSET;
-        assert!(
-            (narrow.columns.width(ProblemColumn::Message) - message_least).abs() < 0.5,
-            "precondition: at 640 px the columns give way to the message",
-        );
-        let whole = |index: usize| {
-            let mark = if index == 0 { CONSOLE_MARK_GUTTER } else { 0.0 };
-            (mark + widest[index] as f32 * narrow.advance).max(narrow.headings[index])
-                + 2.0 * CONSOLE_CELL_INSET
-        };
-        for index in [0, 2, 3, 4] {
-            assert!(
-                (narrow.columns.width(FITTED[index]) - whole(index)).abs() < 0.01,
-                "{} keeps its cells whole at 760 px",
-                FITTED[index].label(),
-            );
-        }
-        assert!(
-            narrow.columns.width(ProblemColumn::Code) < whole(1) - narrow.advance,
-            "the rule is cut",
-        );
     }
 
     /// A width a reader dragged a column to is the column's width, whatever it

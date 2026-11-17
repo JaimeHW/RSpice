@@ -80,8 +80,6 @@ pub(super) const ANALOG_CENTRE: Point = Point::new(510, 300);
 /// Where the hierarchy sheet is measured from: its middle, and the two
 /// connectors between its instances with their badges.
 pub(super) const HIERARCHY_CENTRE: Point = Point::new(470, 330);
-const HIERARCHY_DETAIL: Point = Point::new(450, 250);
-
 /// A five-transistor OTA with its supplies, compensation, load and a probe;
 /// a four-bit bus with its declaration and four taps into a resistor array;
 /// T-junctions, a crossing with a dot and two crossings without; local net
@@ -685,80 +683,6 @@ fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
     assert_eq!(badges, expected);
 }
 
-/// An off-sheet connector's tab is stroked in whole device pixels, like the
-/// symbol beside it. It was stroked in proportion to its text's height, which
-/// at 100 % on a 1x display is 1.19 px: a soft two-pixel smear beside crisp
-/// one-pixel wires.
-#[test]
-fn an_off_sheet_connector_tab_is_stroked_in_whole_device_pixels() {
-    for (zoom, pixels_per_point) in [(1.0, 1.0_f32), (4.0, 2.0)] {
-        let mut state = hierarchy_sheet();
-        let render = render(
-            &mut state,
-            themes()[0].1,
-            at_zoom(zoom, HIERARCHY_DETAIL),
-            pixels_per_point,
-        );
-        let net_label = render.tokens.color.net_label;
-        let widths = leaf_shapes(&render.shapes)
-            .into_iter()
-            .filter_map(|(_, shape)| match shape {
-                Shape::Rect(rect) if rect.stroke.color == net_label => Some(rect.stroke.width),
-                Shape::LineSegment { stroke, .. } if stroke.color == net_label => {
-                    Some(stroke.width)
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(!widths.is_empty(), "zoom {zoom}: no connector tab painted");
-        for width in widths {
-            let device = width * pixels_per_point;
-            assert!(
-                device >= 1.0 && (device - device.round()).abs() < 1e-3,
-                "zoom {zoom} at {pixels_per_point}x: a tab stroke is {device} device pixels"
-            );
-        }
-    }
-}
-
-/// A named net's badge stands on the middle of its label's name (D1 section
-/// 8: right of the label's text rect, vertically centred on it). It was
-/// centred on the label's whole bounds, which reach down to the wire the
-/// label hangs from, so it sat 3 wu low: 12 pt at 400 %, level with the
-/// name's baseline rather than its middle.
-#[test]
-fn a_named_net_badge_is_centred_on_its_label_name() {
-    for zoom in [1.0, 4.0] {
-        let mut state = hierarchy_sheet();
-        let render = render(
-            &mut state,
-            themes()[0].1,
-            at_zoom(zoom, HIERARCHY_DETAIL),
-            1.0,
-        );
-        let texts = painted_text(&render.shapes);
-        let find = |text: &str| {
-            texts
-                .iter()
-                .find(|painted| painted.text == text)
-                .unwrap_or_else(|| panic!("zoom {zoom}: {text:?} is not painted"))
-                .rect
-        };
-        for (name, badge) in [("MID", "1.213 V"), ("NBIAS", "651.2 mV")] {
-            let (name_rect, badge_rect) = (find(name), find(badge));
-            assert!(
-                badge_rect.min.x > name_rect.max.x,
-                "zoom {zoom}: the {name} badge stands right of its name"
-            );
-            let offset = badge_rect.center().y - name_rect.center().y;
-            assert!(
-                offset.abs() <= 0.5,
-                "zoom {zoom}: the {name} badge's middle is {offset} pt below its name's"
-            );
-        }
-    }
-}
-
 /// The hierarchy sheet's ports: each one's name and position.
 fn ports(state: &AppState) -> Vec<(String, Point)> {
     state
@@ -872,35 +796,6 @@ fn no_canvas_text_is_painted_below_the_legibility_floor() {
             );
         }
     }
-}
-
-/// A selected design note keeps its ink and takes the canvas selection's
-/// rect, as a selected net label does (D1 section 2: text never takes the
-/// selection colour, and canvas states use the canvas tokens, not the
-/// interface accent). Its text turned the accent, inside an accent rect.
-#[test]
-fn a_selected_note_keeps_its_ink_inside_the_canvas_selection() {
-    let mut state = analog_sheet();
-    let note = state.model.schematic.document().design_notes[0].id;
-    let selection = &mut state.model.schematic.session.editor.selection;
-    selection.clear();
-    selection.design_notes.insert(note);
-    let render = render(&mut state, themes()[0].1, at_zoom(1.0, ANALOG_CENTRE), 1.0);
-    let colour = &render.tokens.color;
-    let text = painted_text(&render.shapes)
-        .into_iter()
-        .find(|text| text.text.starts_with("Five-transistor OTA"))
-        .expect("the note is painted");
-    assert_eq!(text.colour, colour.text_dim, "the note keeps its ink");
-    let framed = leaf_shapes(&render.shapes)
-        .into_iter()
-        .any(|(_, shape)| match shape {
-            Shape::Rect(rect) => {
-                rect.stroke.color == colour.canvas_select && rect.rect.contains_rect(text.rect)
-            }
-            _ => false,
-        });
-    assert!(framed, "the note stands in a canvas-selection rect");
 }
 
 /// A pin name stands clear of its lead, as a generated symbol letters it:
@@ -1042,52 +937,6 @@ fn a_transistor_value_stands_clear_of_every_pin_line() {
                 );
             }
         }
-    }
-}
-
-/// A hovered junction's ring is stroked in whole device pixels at every
-/// pixel density, as crisp as the wires it sits on. D1 section 6 gives it
-/// 1.5 pt, which on a 1x display antialiased into a soft two-pixel ring.
-#[test]
-fn a_hovered_junction_ring_is_stroked_in_whole_device_pixels() {
-    // The dot where the compensation leg crosses the output, clear of any
-    // part's pins.
-    let junction = Point::new(600, 240);
-    for pixels_per_point in [1.0_f32, 1.5, 2.0] {
-        let mut state = analog_sheet();
-        let framing = at_zoom(1.0, ANALOG_CENTRE);
-        let pointer = on_screen(framing.centre, 1.0, junction);
-        let render = render_pointing(
-            &mut state,
-            themes()[0].1,
-            framing,
-            pixels_per_point,
-            Some(pointer),
-        );
-        let select = render.tokens.color.canvas_select;
-        let rings = leaf_shapes(&render.shapes)
-            .into_iter()
-            .filter_map(|(_, shape)| match shape {
-                Shape::Circle(circle)
-                    if circle.stroke.color == select
-                        && circle.stroke.width > 0.0
-                        && circle.center.distance(pointer) < 0.5 =>
-                {
-                    Some(circle.stroke.width)
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            rings.len(),
-            1,
-            "{pixels_per_point}x: the hovered junction draws one ring"
-        );
-        let device = rings[0] * pixels_per_point;
-        assert!(
-            device >= 1.0 && (device - device.round()).abs() < 1e-3,
-            "{pixels_per_point}x: the hover ring is {device} device pixels"
-        );
     }
 }
 

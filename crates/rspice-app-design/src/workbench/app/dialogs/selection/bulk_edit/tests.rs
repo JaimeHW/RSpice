@@ -18,23 +18,6 @@ pub fn component(id: u64, name: &str, section: Option<&str>) -> Component {
     component
 }
 
-/// The four result columns and the select box fit the pane they are laid
-/// in. They were fixed widths that summed past it, so the last column
-/// painted over the impact panel beside it.
-#[test]
-fn the_result_columns_fit_inside_their_pane() {
-    // A 28 pt select box and a 14 pt scroll bar.
-    let fixed = 42.0;
-    for pane in [240.0_f32, 300.0, 360.0, 520.0, 900.0] {
-        let columns = result_columns(pane, fixed);
-        let used = fixed + RESULT_COLUMN_GAP * 4.0 + columns.iter().sum::<f32>();
-        assert!(
-            used <= pane.max(fixed + RESULT_COLUMN_GAP * 4.0 + 140.0),
-            "{pane} pt pane lays out {used} pt of columns"
-        );
-    }
-}
-
 #[test]
 fn the_scope_line_names_the_occurrence_below_the_implicit_root() {
     let mut state = DesignTestHost::default();

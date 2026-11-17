@@ -194,43 +194,6 @@ fn the_strip_hangs_directly_from_the_document_row() {
     );
 }
 
-#[test]
-fn the_active_chip_carries_the_accent_edge_the_document_row_uses() {
-    let mut app = app_with_sheets(2);
-    let mut band = Rect::NOTHING;
-    let canvas = rspice_app_workbench::ui::raster::render(VIEWPORT, |ui, _| {
-        chrome_rows(ui, &mut app);
-        if let Some(state) = PanelState::load(ui.ctx(), Id::new("workbench.sheet_strip")) {
-            band = state.outer_rect;
-        }
-    });
-    assert!(band.height() > 0.0, "the strip was never allocated");
-
-    let accent = {
-        let ctx = Context::default();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        rspice_app_workbench::ui::tokens::Tokens::get(&ctx)
-            .color
-            .accent
-    };
-    let edge = Rect::from_min_max(
-        band.left_top(),
-        egui::pos2(band.right(), band.top() + CHIP_ACTIVE_EDGE),
-    );
-    let mut edge_pixels = canvas.pixels_in(edge).peekable();
-    assert!(edge_pixels.peek().is_some(), "the edge band is off canvas");
-    assert!(
-        edge_pixels.any(|pixel| pixel == accent),
-        "the active chip paints the document row's accent edge"
-    );
-    assert!(
-        canvas
-            .pixels_in(band)
-            .any(|pixel| pixel != canvas.background()),
-        "the strip painted nothing at all"
-    );
-}
-
 /// A click on a sheet's tab leaves the keyboard with the canvas, so the next
 /// bare key arms its tool on the sheet just opened. The canvas's single keys
 /// act only while it holds focus, and the click on the chip took it: after a

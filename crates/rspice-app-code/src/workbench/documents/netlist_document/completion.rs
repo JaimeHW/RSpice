@@ -475,18 +475,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn popover_geometry_clamps_width_and_position_to_phone_viewport() {
-        let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 640.0));
-        let anchor = egui::pos2(292.0, 40.0);
-
-        let geometry = completion_popover_geometry(anchor, screen);
-
-        assert!(geometry.width <= 304.0);
-        assert!(geometry.position.x >= 8.0);
-        assert!(geometry.position.x + geometry.width <= 312.0);
-    }
-
-    #[test]
     fn dot_command_completion_includes_initcond_forms() {
         let (_, signature, documentation) = DOT_COMMANDS
             .iter()

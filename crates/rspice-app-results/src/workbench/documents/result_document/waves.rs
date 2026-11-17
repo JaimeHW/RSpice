@@ -13,7 +13,7 @@ use crate::ui::plot::{CursorPair, SampleInterpolation};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
 #[cfg(test)]
-use rspice_results_ui::session::{ExprEditor, MarkerView};
+use rspice_results_ui::session::MarkerView;
 use rspice_results_ui::waves::cursor_interpolation;
 use rspice_results_ui::waves::header as pane_header;
 use rspice_results_ui::waves::navigation::shared_axis_viewport_fraction;

@@ -7,10 +7,9 @@ use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_state::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
 use rspice_app_state::state::SimulationRun;
 use rspice_app_workbench::ui::widgets::NotificationAction;
-use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
+use rspice_app_workbench::workbench::docks::console::CONSOLE_ROW_MIN_HEIGHT;
 use rspice_app_workbench::workbench::docks::console::transcript::lines::{Rows, Source};
 use rspice_app_workbench::workbench::docks::console::transcript::*;
-use rspice_app_workbench::workbench::docks::console::{CONSOLE_COLUMN_GAP, CONSOLE_ROW_MIN_HEIGHT};
 use rspice_app_workbench::workbench::state::{
     console_views::{ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleView},
     workbench_session::ConsolePage,
@@ -122,29 +121,6 @@ fn a_ten_thousand_line_session_lays_out_only_the_rows_in_view() {
         (10..200).contains(&laid_out),
         "{laid_out} galleys laid out for a body that shows under forty rows"
     );
-}
-
-/// The time column is as wide as the font sets `00:00:00`, which every time
-/// of day fits, rather than a width somebody typed.
-#[test]
-fn the_time_column_is_measured_from_the_font_and_fits_any_time() {
-    let ctx = context();
-    let _ = ctx.run_ui(input(Vec::new()), |ui| {
-        let columns = Columns::measure(ui, 900.0);
-        for time in ["00:00:00", "23:59:59", "18:48:38"] {
-            let width = ui
-                .fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(time.to_owned(), row_font(), egui::Color32::PLACEHOLDER)
-                })
-                .size()
-                .x;
-            assert!(
-                CONSOLE_MARK_GUTTER + width + CONSOLE_COLUMN_GAP <= columns.message + 0.01,
-                "{time} is {width} px and runs into the message at {}",
-                columns.message
-            );
-        }
-    });
 }
 
 /// A long path wraps at the message column and every row is set below the

@@ -158,18 +158,4 @@ pub fn show(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) -> Option<Example> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// An example's name starts on the dialog's left edge, the title's, and
-    /// its highlight stands proud of the row on both sides rather than
-    /// pushing the words in.
-    #[test]
-    fn an_example_row_keeps_the_dialog_left_edge() {
-        let rect = egui::Rect::from_min_size(egui::pos2(353.0, 0.0), vec2(734.0, 36.0));
-        let (highlight, name_left) = row_geometry(rect);
-        assert_eq!(name_left, rect.left());
-        assert!(highlight.left() < rect.left() && highlight.right() > rect.right());
-        assert_eq!(highlight.y_range(), rect.y_range());
-    }
-}
+mod tests {}

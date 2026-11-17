@@ -83,9 +83,6 @@ use catalog_scan::sort_catalog_rows;
 // The shared painters, re-exported at this module's own path so every page
 // under it keeps naming them through its `use super::*` — the split moved
 // where they are written, not what any caller says.
-/// The page bar's height, which the surface test measures its band against.
-#[cfg(test)]
-pub(super) use paint::SECTION_BAR_H;
 use paint::*;
 
 /// Both scale counters live in the modules that own the work they count; the

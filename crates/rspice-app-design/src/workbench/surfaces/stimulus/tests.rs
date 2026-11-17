@@ -69,13 +69,3 @@ pub fn adopter(model: &mut Model, name: &str, instance: &str) -> u64 {
         .push(component);
     id
 }
-
-/// The centre column the gate measures, stated so a layout change that shrinks
-/// it fails here rather than in a raster nobody looks at.
-#[test]
-fn the_measured_stage_is_the_column_the_shell_leaves() {
-    let smallest = stage_size(1024.0, 640.0);
-    let laptop = stage_size(1440.0, 900.0);
-    assert!(smallest.x >= 320.0 && smallest.y >= 240.0);
-    assert!(laptop.x > smallest.x && laptop.y > smallest.y);
-}

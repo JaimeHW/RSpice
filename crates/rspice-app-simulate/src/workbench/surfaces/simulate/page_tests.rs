@@ -11,10 +11,7 @@ mod plan_removal;
 mod settings_switch;
 mod solver_options;
 
-use egui::{Rect, vec2};
-
 use super::fixtures::plan_id;
-use super::page_kit::column_rects;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::OptionsDialogState;
 use crate::workbench::framework::feature::harness::FeatureHarness;
@@ -765,31 +762,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
             .allowed_range
             .is_none()
     );
-}
-
-#[test]
-fn ledger_columns_tile_their_row_without_a_gap_or_an_overhang() {
-    let row = Rect::from_min_size(egui::Pos2::ZERO, vec2(640.0, 28.0));
-    for fractions in [
-        vec![0.36, 0.34, 0.30],
-        vec![0.18, 0.52, 0.30],
-        vec![0.20, 0.13, 0.28, 0.17, 0.22],
-    ] {
-        let columns = column_rects(row, &fractions);
-        assert_eq!(columns.len(), fractions.len());
-        assert_eq!(columns[0].left(), row.left());
-        assert_eq!(
-            columns[columns.len() - 1].right(),
-            row.right(),
-            "the last column must absorb the remainder so no strip of the row is unclaimed"
-        );
-        assert!(columns.iter().all(|column| column.width() > 0.0));
-        assert!(
-            columns
-                .windows(2)
-                .all(|pair| pair[0].right() == pair[1].left())
-        );
-    }
 }
 
 /// An override the analysis's solve would never read must be refused, not

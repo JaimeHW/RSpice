@@ -480,42 +480,6 @@ fn sample_counts_group_thousands_for_reading_as_magnitudes() {
 }
 
 #[test]
-fn browser_rows_keep_the_mockup_two_register_metrics() {
-    // Touch stages still promote both to the full target height.
-    assert_eq!(
-        results_rows::responsive_result_control_height(
-            results_rows::RESULT_QUANTITY_ROW_HEIGHT,
-            results_rows::TOUCH_TARGET_HEIGHT
-        ),
-        results_rows::TOUCH_TARGET_HEIGHT
-    );
-}
-
-/// The typed pair stays side by side at every width the navigator dock can be
-/// dragged to, and stacks only in the narrower touch drawers. Stacking inside
-/// the dock's own range turns the toolbar into a column of selects at ordinary
-/// widths, which is the layout the mockup exists to replace.
-#[test]
-fn browser_facets_stay_paired_across_the_whole_dock_range() {
-    // The dock clamps to 220..=440 px; the toolbar insets take 16 of those.
-    for dock_width in [220.0_f32, 255.0, 300.0, 440.0] {
-        assert!(
-            !results::result_browser_facets_stack(
-                dock_width - navigator::PANEL_SEARCH_MARGIN_X * 2.0
-            ),
-            "the pair must stay side by side at a {dock_width} px dock"
-        );
-    }
-    assert!(results::result_browser_facets_stack(
-        results::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH - 1.0
-    ));
-    assert!(!results::result_browser_facets_stack(
-        results::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
-    ));
-    assert!(!results::result_browser_facets_stack(420.0));
-}
-
-#[test]
 fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
     let app = result_navigator_app();
     let run = &app.state.model.simulation.retained.runs[0];

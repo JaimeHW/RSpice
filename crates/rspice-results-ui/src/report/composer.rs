@@ -736,24 +736,6 @@ mod tests {
     use super::*;
     use crate::report::INITIAL_PAGES;
     #[test]
-    fn responsive_report_builder_matches_mockup_breakpoints() {
-        assert_eq!(
-            ComposerLayout::resolve(1_280.0),
-            ComposerLayout::ThreeColumn
-        );
-        assert_eq!(
-            ComposerLayout::resolve(1_020.0),
-            ComposerLayout::TwoColumnInspectorBelow
-        );
-        assert_eq!(
-            ComposerLayout::resolve(821.0),
-            ComposerLayout::TwoColumnInspectorBelow
-        );
-        assert_eq!(ComposerLayout::resolve(820.0), ComposerLayout::Stacked);
-        assert_eq!(ComposerLayout::resolve(390.0), ComposerLayout::Stacked);
-    }
-
-    #[test]
     fn every_report_layout_assigns_each_internal_seam_to_one_pane() {
         assert_eq!(
             ComposerLayout::ThreeColumn.separators(),

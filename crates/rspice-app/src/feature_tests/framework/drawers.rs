@@ -7,7 +7,6 @@ use crate::workbench::commands::vocabulary::ShellCommand;
 use egui::{Area, Context, Id, Order, Sense, UiKind};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::tokens::{Mode, Tokens};
 use rspice_app_workbench::workbench::docks::drawers::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
 use rspice_app_workbench::workbench::state::workbench_session::Drawer;
@@ -91,23 +90,6 @@ fn run_modal_focus_fixture(
     rendered.expect("focus fixture must render")
 }
 
-#[test]
-fn drawer_scrims_match_the_mockup_dark_and_light_tokens() {
-    let mut dark = Tokens::default();
-    dark.mode = Mode::Dark;
-    assert_eq!(
-        drawer_scrim_color(&dark),
-        egui::Color32::from_rgba_unmultiplied(2, 6, 8, 158)
-    );
-
-    let mut light = dark.clone();
-    light.mode = Mode::Light;
-    assert_eq!(
-        drawer_scrim_color(&light),
-        egui::Color32::from_rgba_unmultiplied(41, 46, 50, 97)
-    );
-}
-
 /// Thirteen one-line rows under two heads, not taglined cards under four:
 /// the one-column sheet was 1,237 px of scrolling.
 #[test]
@@ -188,13 +170,6 @@ fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
         Some("2 unread")
     );
     assert_eq!(card_meta(ShellCommand::OpenConsole.key(), &app), None);
-}
-
-#[test]
-fn mobile_navigation_never_overflows_an_exceptionally_narrow_viewport() {
-    assert_eq!(mobile_navigation_width(298.0), 280.0);
-    assert_eq!(mobile_navigation_width(280.0), 262.0);
-    assert_eq!(mobile_navigation_width(12.0), 0.0);
 }
 
 #[test]

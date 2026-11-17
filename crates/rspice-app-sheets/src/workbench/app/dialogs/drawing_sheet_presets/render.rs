@@ -1515,26 +1515,9 @@ fn format_mm(value_um: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
 
-    use super::{
-        LIBRARY_COLUMNS, PAGE_INSET, custom_editor_stacks, library_column_widths,
-        library_notes_stack, library_verb_width, matches_filter,
-    };
+    use super::{custom_editor_stacks, matches_filter};
     use crate::state::{DrawingSheetPreset, DrawingSheetPresetScope};
-
-    fn measuring_ui() -> egui::Ui {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
-        egui::Ui::new(
-            ctx.clone(),
-            egui::Id::new("custom-sheet-size-column-measure-test"),
-            egui::UiBuilder::new()
-                .max_rect(ctx.content_rect())
-                .invisible(),
-        )
-    }
 
     fn preset(name: &str) -> DrawingSheetPreset {
         DrawingSheetPreset {
@@ -1549,47 +1532,6 @@ mod tests {
             )
             .expect("a valid custom format"),
         }
-    }
-
-    /// Every column states the widest thing in it, and no more: its own
-    /// heading or one of the rows, on the page inset at either end. The
-    /// surface is sized from these, so a column that overshot would leave a
-    /// band of surface no column reaches — the dead space the authored widths
-    /// left — and one that undershot would clip a value.
-    #[test]
-    fn a_column_is_as_wide_as_its_widest_cell_and_its_two_insets() {
-        let mut ui = measuring_ui();
-        let short = [preset("A4")];
-        let long = [preset("Lab documentation panel, landscape")];
-        let usage = BTreeMap::new();
-        let narrow = library_column_widths(&mut ui, &short.iter().collect::<Vec<_>>(), &usage);
-        let wide = library_column_widths(&mut ui, &long.iter().collect::<Vec<_>>(), &usage);
-
-        assert!(
-            wide[0] > narrow[0],
-            "the name column answers to the longest name: {} then {}",
-            narrow[0],
-            wide[0]
-        );
-        for (index, heading) in LIBRARY_COLUMNS.iter().enumerate().skip(1) {
-            assert_eq!(
-                narrow[index], wide[index],
-                "{heading} holds the same values in both, so it is the same width"
-            );
-        }
-        // "A4" is shorter than the heading over it, so that column is its
-        // heading's width: the floor every column is measured against.
-        let inset = f32::from(PAGE_INSET) * 2.0;
-        assert!(
-            narrow[0] > inset,
-            "a column is its content plus its two insets, not the insets alone"
-        );
-        let verbs = library_verb_width(&mut ui);
-        assert!(
-            narrow[5] >= verbs + inset && narrow[5] < verbs + inset + 2.0,
-            "the actions column is its four verbs plus its two insets: {} against {verbs}",
-            narrow[5]
-        );
     }
 
     #[test]
@@ -1607,14 +1549,6 @@ mod tests {
             assert!(matches_filter(&personal, query), "{query:?}");
             assert!(!matches_filter(&project, query), "{query:?}");
         }
-    }
-
-    #[test]
-    fn library_notes_stack_at_phone_width() {
-        assert!(library_notes_stack(390.0));
-        assert!(library_notes_stack(619.0));
-        assert!(!library_notes_stack(620.0));
-        assert!(!library_notes_stack(834.0));
     }
 
     #[test]

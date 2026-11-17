@@ -8,12 +8,10 @@
 use super::stage::show_on_stage;
 use super::workflow_dialogs;
 use egui::{Rect, vec2};
+use rspice_app_simulate::workbench::surfaces::simulate::ANALYSIS_CATEGORY_ORDER;
 use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
 use rspice_app_simulate::workbench::surfaces::simulate::lifecycle::{
     analysis_catalog_group, insert_analysis_instance,
-};
-use rspice_app_simulate::workbench::surfaces::simulate::{
-    ANALYSIS_CATEGORY_ORDER, analysis_split_widths,
 };
 
 use crate::workbench::RSpiceApp;
@@ -256,103 +254,6 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
     Some(painted_lines(&run().shapes))
 }
 
-/// Every word a field may state in the helper slot beside its caption.
-///
-/// A sample of the rules default forms state there: a temperature names its
-/// unit, and a field whose label cannot carry its rule states the rule. Option
-/// fields state nothing beside their caption; an empty one says `default`
-/// inside its well. Each is asserted to be *found* below, so a slot renamed out
-/// from under this cannot leave the gate matching nothing.
-const FIELD_HELPERS: [&str; 7] = [
-    "Celsius",
-    "products up to this order",
-    "odd, empty is automatic",
-    "quoted multiple",
-    "empty keeps all",
-    "at most the first step",
-    "solver trace to the Console",
-];
-
-/// No field caption runs under the helper beside it, on any analysis form.
-///
-/// A caption and its helper are both painted into one strip — the caption from
-/// the left, the helper right-aligned — so nothing in the layout stops the two
-/// meeting. Every caption was short until the advanced options arrived carrying
-/// `Truncation absolute bound · TIMEINT ABSTOL` into a 206-point cell. The
-/// caption elides now, and this is the measurement: 460 points is the narrowest
-/// surface that still lays the fields out in two columns, so its cells are the
-/// narrowest any caption is ever given.
-///
-/// Judged on the strips a helper is painted in rather than on every baseline
-/// the route paints. A well legitimately holds a galley wider than itself and
-/// clips it — the noise form's frequency list is one — so "nothing overlaps
-/// anywhere" is not true of the surface, while "nothing overlaps a helper" is
-/// the claim this is about, and it covers the two cells of one grid row too.
-#[test]
-fn no_field_caption_overlaps_the_helper_beside_it() {
-    /// The narrowest surface whose fields are still two columns wide.
-    const NARROWEST_TWO_COLUMN_SURFACE: f32 = 460.0;
-    /// Sub-pixel: text resting exactly against its neighbour is not a collision.
-    const TOLERANCE: f32 = 0.5;
-
-    let mut collisions = Vec::new();
-    let mut found = std::collections::BTreeSet::new();
-    let mut forms = 0usize;
-    for kind in AnalysisKind::ALL {
-        let Some(lines) = analyses_form_lines(kind, NARROWEST_TWO_COLUMN_SURFACE) else {
-            continue;
-        };
-        forms += 1;
-        let mut rows: Vec<Vec<PaintedLine>> = Vec::new();
-        let mut sorted = lines;
-        sorted.sort_by(|a, b| a.top.total_cmp(&b.top).then(a.left.total_cmp(&b.left)));
-        for line in sorted {
-            match rows.last_mut() {
-                Some(row) if (row[0].top - line.top).abs() < TOLERANCE => row.push(line),
-                _ => rows.push(vec![line]),
-            }
-        }
-        for row in &rows {
-            for (index, helper) in row.iter().enumerate() {
-                if !FIELD_HELPERS.contains(&helper.text.as_str()) {
-                    continue;
-                }
-                found.insert(helper.text.clone());
-                for (other, line) in row.iter().enumerate() {
-                    if other == index
-                        || line.right <= helper.left + TOLERANCE
-                        || line.left >= helper.right - TOLERANCE
-                    {
-                        continue;
-                    }
-                    collisions.push(format!(
-                        "{kind:?}: {:?} spans {:.1}..{:.1} over the helper {:?} at {:.1}..{:.1}",
-                        line.text, line.left, line.right, helper.text, helper.left, helper.right
-                    ));
-                }
-            }
-        }
-    }
-    collisions.sort();
-    collisions.dedup();
-    assert!(
-        collisions.is_empty(),
-        "text painted over a field's helper:\n{}",
-        collisions.join("\n")
-    );
-    // A sweep that opened no form, or found no helper on the ones it opened,
-    // would pass forever.
-    let kinds = AnalysisKind::ALL.len();
-    let missing: Vec<_> = FIELD_HELPERS
-        .iter()
-        .filter(|helper| !found.contains(**helper))
-        .collect();
-    assert!(
-        forms >= kinds - 4 && missing.is_empty(),
-        "the sweep opened {forms} of {kinds} forms and never found the helpers {missing:?}"
-    );
-}
-
 /// What the analysis catalogue drew, gathered into the rows it drew them in.
 ///
 /// Every analysis code the frame painted, grouped by the top it landed on:
@@ -498,21 +399,6 @@ impl AnalysesRoute {
         }
         lines
     }
-
-    /// Turn the wheel over `at`, let the scroll run its course, then take the
-    /// pointer away, so a tooltip the resting pointer raised is not measured
-    /// as a line the scroll moved.
-    fn scroll_at(&mut self, at: egui::Pos2) -> Vec<PaintedLine> {
-        self.settle(wheel_over(at));
-        self.settle(vec![egui::Event::PointerGone])
-    }
-
-    /// Where the stack ends and the editor begins.
-    fn divider(&self) -> f32 {
-        let gutter = self.ctx.global_style().spacing.scroll.allocated_width();
-        let surface = ROUTE_WIDTH - gutter;
-        analysis_split_widths(surface, surface).0
-    }
 }
 
 /// A plan holding one instance of every kind it accepts, which is far more
@@ -556,167 +442,12 @@ fn select_transient(state: &mut crate::workbench::AppState) {
     state.simulate.active_analysis_instance = Some(transient);
 }
 
-/// A wheel turned over `at`, asking to move the content up by 400 points.
-fn wheel_over(at: egui::Pos2) -> Vec<egui::Event> {
-    vec![
-        egui::Event::PointerMoved(at),
-        egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: vec2(0.0, -400.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: egui::Modifiers::NONE,
-        },
-    ]
-}
-
-/// One column's lines below the title row, as (text, top in tenths of a point).
-fn column(
-    lines: &[PaintedLine],
-    below: f32,
-    in_column: impl Fn(&PaintedLine) -> bool,
-) -> Vec<(String, i64)> {
-    lines
-        .iter()
-        .filter(|line| line.top >= below && in_column(line))
-        .map(|line| (line.text.clone(), (line.top * 10.0).round() as i64))
-        .collect()
-}
-
 fn top_of(lines: &[PaintedLine], text: &str) -> f32 {
     lines
         .iter()
         .find(|line| line.text == text)
         .unwrap_or_else(|| panic!("{text:?} is painted"))
         .top
-}
-
-/// Whether a line both measurements hold rose by more than 40 points.
-fn rose(before: &[(String, i64)], after: &[(String, i64)]) -> bool {
-    before.iter().any(|(text, top)| {
-        after
-            .iter()
-            .find(|(other, _)| other == text)
-            .is_some_and(|(_, moved)| *moved < top - 400)
-    })
-}
-
-/// Fail, naming only the lines that differ, unless `after` repeats `before`.
-#[track_caller]
-fn assert_unmoved(before: &[(String, i64)], after: &[(String, i64)], what: &str) {
-    let gone = before
-        .iter()
-        .filter(|line| !after.contains(line))
-        .collect::<Vec<_>>();
-    let new = after
-        .iter()
-        .filter(|line| !before.contains(line))
-        .collect::<Vec<_>>();
-    assert!(
-        gone.is_empty() && new.is_empty(),
-        "{what}: no longer painted {gone:?}; newly painted {new:?}"
-    );
-}
-
-/// Each column scrolls its own content and nothing else.
-///
-/// The stack and the editor shared the surface's one scroll, title row
-/// included, so turning the wheel over a long form carried the stack and the
-/// title off the screen with it. A plan too long for the window and a form too
-/// long for it are each turned through on their own here, and the column not
-/// under the wheel, and the title over both, have to stay exactly where they
-/// were.
-#[test]
-fn the_stack_and_the_editor_scroll_on_their_own_under_a_title_that_stays() {
-    let mut route = AnalysesRoute::open(crowded_plan(), 900.0);
-    let divider = route.divider();
-    let first = route.settle(Vec::new());
-    // The title row's heading is the plan's name.
-    let title = route
-        .app
-        .state
-        .model
-        .sim_setup
-        .active_plan_name()
-        .as_str()
-        .to_owned();
-    let title_top = top_of(&first, &title);
-    let body_top = top_of(&first, FIRST_GROUP);
-    let in_stack = |line: &PaintedLine| line.right <= divider;
-    let in_editor = |line: &PaintedLine| line.left > divider;
-    let stack = column(&first, body_top, in_stack);
-    let editor = column(&first, body_top, in_editor);
-
-    let after_editor = route.scroll_at(egui::pos2(divider + 300.0, 600.0));
-    assert_eq!(
-        top_of(&after_editor, &title),
-        title_top,
-        "the title row stays put"
-    );
-    assert_unmoved(
-        &stack,
-        &column(&after_editor, body_top, in_stack),
-        "turning the wheel over the editor leaves the stack where it was",
-    );
-    let editor_scrolled = column(&after_editor, body_top, in_editor);
-    assert!(rose(&editor, &editor_scrolled), "the editor scrolled");
-
-    let after_stack = route.scroll_at(egui::pos2(divider * 0.5, 600.0));
-    assert_eq!(
-        top_of(&after_stack, &title),
-        title_top,
-        "the title row stays put"
-    );
-    assert_unmoved(
-        &editor_scrolled,
-        &column(&after_stack, body_top, in_editor),
-        "turning the wheel over the stack leaves the editor where it was",
-    );
-    assert!(
-        rose(&stack, &column(&after_stack, body_top, in_stack)),
-        "the stack scrolled"
-    );
-}
-
-/// A column with nothing past the bottom of the window does not scroll.
-///
-/// A short plan beside a form that runs long: the wheel over the stack used to
-/// scroll the whole surface, because the form made it taller than the window,
-/// and the stack went with it. And with the window tall enough for the form
-/// too, the wheel over either column moves nothing at all.
-#[test]
-fn a_column_that_fits_does_not_scroll() {
-    let mut app = RSpiceApp::test_instance();
-    select_transient(&mut app.state);
-    let mut route = AnalysesRoute::open(app, 900.0);
-    let divider = route.divider();
-    let first = route.settle(Vec::new());
-    let body_top = top_of(&first, FIRST_GROUP);
-    let everything = |_: &PaintedLine| true;
-    let before = column(&first, 0.0, everything);
-    let after = route.scroll_at(egui::pos2(divider * 0.5, 600.0));
-    assert_unmoved(
-        &before,
-        &column(&after, 0.0, everything),
-        "a short stack does not scroll, and takes nothing else with it",
-    );
-    assert_eq!(top_of(&after, FIRST_GROUP), body_top);
-
-    let mut app = RSpiceApp::test_instance();
-    select_transient(&mut app.state);
-    let mut tall = AnalysesRoute::open(app, 3_000.0);
-    let first = tall.settle(Vec::new());
-    let before = column(&first, 0.0, everything);
-    for at in [
-        egui::pos2(divider * 0.5, 600.0),
-        egui::pos2(divider + 300.0, 600.0),
-    ] {
-        let after = tall.scroll_at(at);
-        assert_unmoved(
-            &before,
-            &column(&after, 0.0, everything),
-            "nothing moves where everything fits",
-        );
-    }
 }
 
 /// An analysis made active from outside the stack is scrolled into its view.

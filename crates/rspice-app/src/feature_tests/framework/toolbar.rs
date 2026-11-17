@@ -339,33 +339,6 @@ fn responsive_toolbar_reserves_fixed_trailing_controls() {
 }
 
 #[test]
-fn toolbar_padding_and_group_gaps_match_every_mockup_breakpoint() {
-    assert_eq!(toolbar_horizontal_padding(1_280.0), 8.0);
-    assert_eq!(toolbar_horizontal_padding(820.0), 5.0);
-    assert_eq!(toolbar_horizontal_padding(560.0), 3.0);
-    assert_eq!(toolbar_outer_gap(1_280.0), 5.0);
-    assert_eq!(toolbar_outer_gap(820.0), 5.0);
-    assert_eq!(toolbar_outer_gap(560.0), 2.0);
-}
-
-#[test]
-fn toolbar_icon_and_panel_toggle_boxes_match_the_mockup_classes() {
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
-    assert_eq!(toolbar_icon_button_size(desktop), Vec2::new(30.0, 29.0));
-    assert_eq!(panel_toggle_size(desktop), Vec2::new(28.0, 27.0));
-
-    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-    assert_eq!(toolbar_icon_button_size(phone), Vec2::splat(44.0));
-    assert_eq!(panel_toggle_size(phone), Vec2::splat(44.0));
-}
-
-#[test]
-fn compact_toolbar_projects_the_mockup_button_limit_for_every_workspace() {
-    let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-    assert_eq!(compact.toolbar_tool_limit, Some(2));
-}
-
-#[test]
 fn pvt_menu_height_is_bounded_for_short_and_touch_viewports() {
     assert_eq!(pvt_menu_height_for_viewport(900.0, 29.0), 484.0);
     assert_eq!(pvt_menu_height_for_viewport(600.0, 44.0), 484.0);

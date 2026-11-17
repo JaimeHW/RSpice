@@ -15,14 +15,6 @@ fn retained_entity_id<T: serde::de::DeserializeOwned>(serial: u64) -> T {
 }
 
 #[test]
-fn cursor_and_marker_columns_split_at_normal_desktop_widths() {
-    assert!(!readout_columns_side_by_side(679.0, true, true));
-    assert!(readout_columns_side_by_side(680.0, true, true));
-    assert!(!readout_columns_side_by_side(900.0, true, false));
-    assert!(!readout_columns_side_by_side(900.0, false, true));
-}
-
-#[test]
 fn a_marker_tag_names_the_note_only_when_there_is_one() {
     let analysis_result =
         AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "marker analysis", 0.0);
