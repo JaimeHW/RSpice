@@ -167,20 +167,63 @@ fn parse_time_or_frequency(
     unit: &'static str,
     policy: QuantityPresentationPolicy,
 ) -> Result<f64, QuantityInputError> {
+    let infer = policy.time_frequency_input == TimeFrequencyInput::InferFromFieldQuantity;
     if suffix.is_empty() {
-        return if policy.time_frequency_input == TimeFrequencyInput::InferFromFieldQuantity {
+        return if infer {
             Ok(value)
         } else {
             Err(QuantityInputError::MissingUnit(unit))
         };
     }
-    let prefix = strip_unit(suffix, unit, policy.engineering_suffixes)
-        .ok_or_else(|| QuantityInputError::UnexpectedUnit(suffix.to_owned()))?;
-    Ok(scaled_decimal(
-        number,
-        value,
-        parse_prefix(prefix, unit, policy.engineering_suffixes)?,
-    ))
+    if let Some(prefix) = strip_unit(suffix, unit, policy.engineering_suffixes) {
+        return Ok(scaled_decimal(
+            number,
+            value,
+            parse_prefix(prefix, unit, policy.engineering_suffixes)?,
+        ));
+    }
+    match bare_scale(number, value, suffix, unit) {
+        Some(read) if infer => read,
+        _ => Err(QuantityInputError::UnexpectedUnit(suffix.to_owned())),
+    }
+}
+
+/// The scale a suffix typed without the field's unit names, the way a SPICE
+/// deck writes a time: `49n`, `2.5p`, `10meg`, `1m`.
+///
+/// Read as the engine reads the same text, case folded, so a value typed here
+/// and the same characters in a deck are one number. The exceptions are the
+/// micro sign, which the engine has no reading for and nobody means anything
+/// else by, and `M`/`m` in a frequency: SPICE reads both as milli while every
+/// other tool reads `10M` as ten megahertz, and a millihertz source is rare
+/// enough that either guess would be wrong for someone. In a time `m` is only
+/// ever milli. `None` when the suffix is no scale at all.
+fn bare_scale(
+    number: &str,
+    value: f64,
+    suffix: &str,
+    unit: &str,
+) -> Option<Result<f64, QuantityInputError>> {
+    let multiplier = match suffix.to_ascii_lowercase().as_str() {
+        "f" => 1e-15,
+        "p" => 1e-12,
+        "n" => 1e-9,
+        "u" | "µ" => 1e-6,
+        "m" if unit == "Hz" => {
+            return Some(Err(QuantityInputError::AmbiguousScale {
+                typed: format!("{number}{suffix}"),
+                mega: format!("{number} M{unit}"),
+                milli: format!("{} {unit}", scaled_decimal(number, value, 1e-3)),
+            }));
+        }
+        "m" => 1e-3,
+        "k" => 1e3,
+        "meg" => 1e6,
+        "g" => 1e9,
+        "t" => 1e12,
+        _ => return None,
+    };
+    Some(Ok(scaled_decimal(number, value, multiplier)))
 }
 
 /// `suffix` without the field's `unit` at its end. SPICE spelling folds case,
@@ -373,6 +416,13 @@ pub enum QuantityInputError {
     /// Strict spelling refuses a prefix and unit the engine reads as another
     /// value (`mHz` is megahertz to SPICE).
     SpiceReadsDifferently(String),
+    /// A frequency typed with a bare `M` or `m`, which SPICE reads as milli
+    /// and everything else as mega. Carries both spellings it could mean.
+    AmbiguousScale {
+        typed: String,
+        mega: String,
+        milli: String,
+    },
     AmbiguousDecimalSeparator,
     UnsupportedDecimalSeparator(char),
     BelowAbsoluteZero,
@@ -395,6 +445,9 @@ impl fmt::Display for QuantityInputError {
                     "SPICE reads {spelling} as another value; use an exponent"
                 )
             }
+            Self::AmbiguousScale { typed, mega, milli } => {
+                write!(f, "{typed}: write {mega} or {milli}")
+            }
             Self::AmbiguousDecimalSeparator => f.write_str("ambiguous decimal separator"),
             Self::UnsupportedDecimalSeparator(separator) => {
                 write!(f, "unsupported locale decimal separator: {separator}")
@@ -413,7 +466,10 @@ mod tests {
 
     #[test]
     fn strict_time_and_frequency_fields_require_explicit_units() {
-        let policy = QuantityPresentationPolicy::default();
+        let policy = QuantityPresentationPolicy {
+            time_frequency_input: TimeFrequencyInput::StrictUnitsRequired,
+            ..QuantityPresentationPolicy::default()
+        };
         assert_eq!(
             parse_ui_quantity(
                 "10",
@@ -476,6 +532,67 @@ mod tests {
                     UiNumberLocale::default()
                 )
                 .is_err()
+            );
+        }
+    }
+
+    /// A time field reads a SPICE scale suffix with no unit the way a deck
+    /// does, so `49n` typed into a pulse width is 49 ns. A frequency reads the
+    /// same suffixes but refuses `M` and `m`, which SPICE takes for milli and
+    /// every other tool for mega, and says what to write instead. Requiring
+    /// the unit refuses them all.
+    #[test]
+    fn a_time_or_frequency_takes_a_spice_scale_suffix_without_its_unit() {
+        let infer = QuantityPresentationPolicy::default();
+        let strict = QuantityPresentationPolicy {
+            time_frequency_input: TimeFrequencyInput::StrictUnitsRequired,
+            ..infer
+        };
+        let parse =
+            |text, kind, policy| parse_ui_quantity(text, kind, policy, UiNumberLocale::default());
+        for (text, seconds) in [
+            ("49n", 49e-9),
+            ("1u", 1e-6),
+            ("1U", 1e-6),
+            ("1µ", 1e-6),
+            ("2.5p", 2.5e-12),
+            ("1m", 1e-3),
+            ("1M", 1e-3),
+            ("3f", 3e-15),
+            ("2k", 2e3),
+            ("1meg", 1e6),
+            ("1G", 1e9),
+            ("1t", 1e12),
+            ("100 n", 100e-9),
+        ] {
+            assert_eq!(
+                parse(text, QuantityInputKind::Time, infer),
+                Ok(seconds),
+                "{text}"
+            );
+            assert!(
+                parse(text, QuantityInputKind::Time, strict).is_err(),
+                "{text} needs its unit when units are required"
+            );
+        }
+        for (text, hertz) in [("10k", 10e3), ("10meg", 10e6), ("10MEG", 10e6), ("2G", 2e9)] {
+            assert_eq!(
+                parse(text, QuantityInputKind::Frequency, infer),
+                Ok(hertz),
+                "{text}"
+            );
+        }
+        for (text, said) in [
+            ("10M", "10M: write 10 MHz or 0.01 Hz"),
+            ("10m", "10m: write 10 MHz or 0.01 Hz"),
+        ] {
+            let refused = parse(text, QuantityInputKind::Frequency, infer).unwrap_err();
+            assert_eq!(refused.to_string(), said);
+        }
+        for text in ["49x", "1mil", "1a"] {
+            assert!(
+                parse(text, QuantityInputKind::Time, infer).is_err(),
+                "{text}"
             );
         }
     }

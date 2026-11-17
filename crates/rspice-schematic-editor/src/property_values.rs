@@ -97,8 +97,9 @@ pub fn step_standard_value(
 
 /// Whether the editor's own text carries this property's unit.
 ///
-/// The unit-safe parser refuses a bare number for these kinds, so the unit is
-/// part of the value's syntax rather than metadata about it. The well reads
+/// The unit-safe parser reads these kinds by their unit, and refuses a bare
+/// number for them when the reader requires units, so the unit is part of the
+/// value's syntax rather than metadata about it. The well reads
 /// the same predicate and states no unit beside such a value, so the unit is
 /// presented exactly once.
 pub fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {

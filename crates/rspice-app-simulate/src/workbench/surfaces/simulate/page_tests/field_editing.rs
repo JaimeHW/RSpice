@@ -8,17 +8,17 @@
 
 /// The two input policies a reader can be working under.
 ///
-/// `StrictUnitsRequired` is the default and makes a bare number invalid in a
-/// time or frequency field; `InferFromFieldQuantity` accepts one. Both reach
-/// the same normalization, and each makes a different half of it reachable, so
+/// `StrictUnitsRequired` makes a bare number invalid in a time or frequency
+/// field; `InferFromFieldQuantity`, the default, accepts one. Both reach the
+/// same normalization, and each makes a different half of it reachable, so
 /// both are asked.
 fn policies() -> [crate::quantity::QuantityPresentationPolicy; 2] {
     use crate::quantity::QuantityPresentationPolicy;
     use rspice_vocabulary::quantity::TimeFrequencyInput;
-    let strict = QuantityPresentationPolicy::default();
-    let inferring = QuantityPresentationPolicy {
-        time_frequency_input: TimeFrequencyInput::InferFromFieldQuantity,
-        ..strict
+    let inferring = QuantityPresentationPolicy::default();
+    let strict = QuantityPresentationPolicy {
+        time_frequency_input: TimeFrequencyInput::StrictUnitsRequired,
+        ..inferring
     };
     [strict, inferring]
 }

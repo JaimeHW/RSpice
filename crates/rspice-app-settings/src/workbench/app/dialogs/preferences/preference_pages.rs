@@ -575,8 +575,8 @@ fn units(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
         state,
         ChoicePreference::TimeFrequencyInput,
         "Time and frequency input",
-        "Strict: time and frequency fields need a unit (5ns, 2GHz). Infer: a bare number takes the field's unit.",
-        &["Strict units required", "Infer from field quantity"],
+        "Infer: a bare number or SPICE suffix takes the field's unit (49n is 49 ns). Always: the unit is typed (5ns, 2GHz).",
+        &["Always require a unit", "Infer from field quantity"],
     );
     choice_row(
         ui,

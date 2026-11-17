@@ -115,12 +115,14 @@ wire_enum! {
 }
 
 wire_enum! {
-    /// Whether bare time/frequency numbers are accepted in typed UI fields.
+    /// How a typed time or frequency field reads a value without its unit.
+    /// Inferring takes the field's unit, so `5` is five seconds and `49n`,
+    /// written the SPICE way, is 49 ns; the strict choice requires the unit.
     pub enum TimeFrequencyInput for "time-frequency-input" {
         StrictUnitsRequired,
         InferFromFieldQuantity
     }
-    default StrictUnitsRequired;
+    default InferFromFieldQuantity;
 }
 
 wire_enum! {
