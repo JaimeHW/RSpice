@@ -12,6 +12,7 @@ use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
 use crate::ui::widgets::{field_label, name_control, text_field};
+use crate::workbench::app::dialogs::project::{TechnologyChange, TechnologyChangeInFlight};
 use crate::workbench::app_state::Model;
 use crate::workbench::project::commands::ProjectRequest;
 
@@ -40,6 +41,8 @@ pub(super) struct TechnologyPrimaryState {
     pub(super) enabled: bool,
 }
 
+/// The attach button: held while the checkpoint before a change is written,
+/// which the dialog's one pending line states.
 pub(super) const fn technology_primary_state(
     has_candidate: bool,
     checkpoint_pending: bool,
@@ -47,7 +50,7 @@ pub(super) const fn technology_primary_state(
 ) -> TechnologyPrimaryState {
     if checkpoint_pending {
         TechnologyPrimaryState {
-            label: TECHNOLOGY_DIALOG_PENDING,
+            label: TECHNOLOGY_DIALOG_PRIMARY,
             enabled: false,
         }
     } else if selected_is_attached {
@@ -362,13 +365,14 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     );
 
     let mut create_migration_copy = false;
-    let choice = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
+    let dialog = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
     .description(
         "Choose a model library and one validated PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
     )
     .size(DialogSize::Transaction)
     .ghost("Cancel")
-    .primary_enabled(primary.enabled)
+    .primary_enabled(primary.enabled);
+    let choice = technology_change_hint(dialog, checkpoint_pending, validation_error.as_deref())
     .show(ctx, |ui| {
         technology_warning(ui);
         technology_dialog_label(ui, "Model library");
@@ -572,22 +576,12 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                 ui.add_space(6.0);
             }
         }
-        if checkpoint_pending {
-            muted(
-                ui,
-                "Writing and read-back verifying the full-project recovery checkpoint…",
-            );
-        }
         if let Some(error) = selected_binding_error.as_deref() {
             ui.add_space(8.0);
             technology_error(
                 ui,
                 &format!("Selected PDK cannot be attached: {error}"),
             );
-        }
-        if let Some(error) = validation_error.as_deref() {
-            ui.add_space(8.0);
-            technology_error(ui, error);
         }
     });
 
@@ -619,11 +613,10 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                     )
                 });
             match result {
-                Ok(receipt) => {
-                    if technology_checkpoint_pending(cx.state) {
-                        cx.wb.prompt(receipt);
-                        return;
-                    }
+                // Its checkpoint is being written; the change commits when
+                // that is in.
+                Ok(None) => {}
+                Ok(Some(receipt)) => {
                     cx.state.technology_attachment.close();
                     cx.model
                         .record(LogSeverity::Info, LogSource::Studio, receipt);
@@ -642,69 +635,250 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     }
 }
 
+/// A technology dialog's one line beside its buttons, where it stays in view
+/// however far the body is scrolled: the checkpoint being written, else why
+/// the last attempt was refused.
+pub(super) fn technology_change_hint<'a>(
+    dialog: Dialog<'a>,
+    pending: bool,
+    error: Option<&str>,
+) -> Dialog<'a> {
+    if pending {
+        dialog.hint(TECHNOLOGY_CHECKPOINT_PENDING)
+    } else if let Some(error) = error {
+        dialog
+            .hint(error)
+            .hint_tone(crate::ui::widgets::DialogHintTone::Error)
+    } else {
+        dialog
+    }
+}
+
+/// Attach `binding`: proven against its pinned sources and the reviewed
+/// migration, then committed once the checkpoint before it is written.
+/// `Some` is the receipt of a change that had nothing to do; `None` says
+/// the checkpoint is being written.
 pub(super) fn attach_technology_binding(
     ctx: &Context,
     cx: &mut Cx<'_, ProjectFeature>,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
     migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
-) -> Result<String, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = ctx;
+) -> Result<Option<String>, String> {
     verify_pinned_technology_contract(&binding, cx.model)?;
     validate_migration_evidence_for_binding(cx.model, &binding, migration_evidence.as_ref())?;
     let label = binding.display_label();
     if cx.model.workspace.content.project.technology_binding() == Some(&binding)
         && cx.model.workspace.content.project.technology.as_deref() == Some(label.as_str())
     {
-        return Ok(format!(
+        return Ok(Some(format!(
             "{} is already attached at project revision {}; nothing was changed.",
             label,
             cx.model.workspace.content.project.revision().get()
-        ));
+        )));
     }
+    start_technology_change(
+        ctx,
+        cx,
+        TechnologyChange::Attach {
+            binding,
+            migration_evidence,
+        },
+        authority,
+    )?;
+    Ok(None)
+}
 
+/// Start `change`: the whole project is read off the model here, and its
+/// checkpoint written and read back off the frame, the browser's in its
+/// store and the desktop's on a background thread. The change commits on
+/// the first frame after the checkpoint is in.
+pub(super) fn start_technology_change(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    change: TechnologyChange,
+    authority: crate::state::ProjectTechnologyChangeAuthority,
+) -> Result<(), String> {
+    if cx.state.technology_attachment.in_flight.is_some() {
+        return Err("A project recovery checkpoint is already being written".to_owned());
+    }
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    let expected_revision = cx.model.workspace.content.project.revision().get();
+    let reason =
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyChange;
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let checkpoint = crate::workbench::lifecycle::project_checkpoint::create(
-            &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
-            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyChange,
+    let job = {
+        use crate::workbench::app::dialogs::project::{
+            CheckpointJob, CheckpointJobAnswer, CheckpointJobKind,
+        };
+        let capture = crate::workbench::lifecycle::project_checkpoint::capture(
+            &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+            reason,
         )?;
-        commit_technology_after_checkpoint(cx, binding, authority, migration_evidence, &checkpoint)
-    }
-
+        CheckpointJob::start(
+            ctx,
+            CheckpointJobKind::Create,
+            &cx.state.project_checkpoint_recovery,
+            move || CheckpointJobAnswer::Created(Box::new(capture.publish())),
+        )
+    };
     #[cfg(target_arch = "wasm32")]
     {
-        start_browser_technology_checkpoint(ctx, cx, binding, authority, migration_evidence)?;
-        Ok("Writing and verifying the full-project recovery checkpoint…".to_owned())
+        let queued_project_id = project_id.clone();
+        let repaint = ctx.clone();
+        crate::workbench::lifecycle::project_checkpoint::start_create(
+            &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+            reason,
+            move |result| {
+                BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
+                    queue
+                        .borrow_mut()
+                        .push_back(BrowserTechnologyCheckpointCompletion {
+                            project_id: queued_project_id,
+                            result,
+                        });
+                });
+                repaint.request_repaint();
+            },
+        )?;
+    }
+    // Stamped on the frame the checkpoint read the project on.
+    let captured = crate::workbench::lifecycle::project_lifecycle::working_stamp(
+        &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    );
+    let dialog = &mut cx.state.technology_attachment;
+    dialog.in_flight = Some(TechnologyChangeInFlight {
+        project_id,
+        expected_revision,
+        change,
+        authority,
+        captured,
+        #[cfg(not(target_arch = "wasm32"))]
+        job,
+    });
+    dialog.validation_error = None;
+    Ok(())
+}
+
+/// Take the checkpoint a technology change waits on once it is written, and
+/// commit the change against it. A project that changed meanwhile keeps its
+/// technology, and the dialog says why.
+pub(super) fn poll_technology_change(cx: &mut Cx<'_, ProjectFeature>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let written = {
+        use crate::workbench::app::dialogs::project::CheckpointJobAnswer;
+        let Some(in_flight) = cx.state.technology_attachment.in_flight.as_ref() else {
+            return;
+        };
+        let Some(answer) = in_flight.job.take_answer() else {
+            return;
+        };
+        match answer {
+            CheckpointJobAnswer::Created(created) => (*created).map(|created| {
+                if let Some(warning) = created.retention_warning {
+                    cx.model
+                        .record(LogSeverity::Warning, LogSource::Studio, warning);
+                }
+                created.summary
+            }),
+            _ => Err("The recovery checkpoint was not written".to_owned()),
+        }
+    };
+    #[cfg(target_arch = "wasm32")]
+    let written = {
+        let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
+            .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+        let Some(in_flight) = cx.state.technology_attachment.in_flight.as_ref() else {
+            return;
+        };
+        let Some(completion) = completions
+            .into_iter()
+            .rev()
+            .find(|completion| completion.project_id == in_flight.project_id)
+        else {
+            return;
+        };
+        completion.result
+    };
+    let Some(in_flight) = cx.state.technology_attachment.in_flight.take() else {
+        return;
+    };
+    let project = &cx.model.workspace.content.project;
+    let result = if project.id().to_string() != in_flight.project_id
+        || project.revision().get() != in_flight.expected_revision
+    {
+        Err(
+            "The project changed while its recovery checkpoint was being written; its technology was not changed"
+                .to_owned(),
+        )
+    } else {
+        written.and_then(|checkpoint| {
+            commit_technology_change(
+                cx,
+                in_flight.change,
+                in_flight.authority,
+                &checkpoint,
+                &in_flight.captured,
+            )
+        })
+    };
+    match result {
+        Ok(receipt) => {
+            cx.state.technology_attachment.close();
+            cx.model
+                .record(LogSeverity::Info, LogSource::Studio, receipt);
+        }
+        Err(error) => cx.state.technology_attachment.validation_error = Some(error),
     }
 }
 
-pub(super) fn commit_technology_after_checkpoint(
+/// Commit `change` as one project revision whose technology receipt names
+/// `checkpoint`, which must still hold the project as it is: the project
+/// `captured` stamped when the checkpoint read it.
+pub(super) fn commit_technology_change(
     cx: &mut Cx<'_, ProjectFeature>,
-    binding: ProjectTechnologyBinding,
+    change: TechnologyChange,
     authority: crate::state::ProjectTechnologyChangeAuthority,
-    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    captured: &crate::workbench::lifecycle::project_lifecycle::WorkingStamp,
 ) -> Result<String, String> {
-    verify_pinned_technology_contract(&binding, cx.model)?;
-    validate_migration_evidence_for_binding(cx.model, &binding, migration_evidence.as_ref())?;
-    let previous_revision = cx.model.workspace.content.project.revision();
-    if checkpoint.project_revision() != previous_revision.get()
+    let context = technology_change_context(cx, authority, checkpoint, captured)?;
+    match change {
+        TechnologyChange::Attach {
+            binding,
+            migration_evidence,
+        } => {
+            commit_technology_after_checkpoint(cx, binding, context, migration_evidence, checkpoint)
+        }
+    }
+}
+
+/// The receipt's evidence for a change made over `checkpoint`, which must
+/// still hold the project exactly as it is. The project is compared by the
+/// stamps its owners issue, not by serialising it again: the frame stays
+/// free, and a catalogue whose maps iterate in another order is still the
+/// same project.
+fn technology_change_context(
+    cx: &Cx<'_, ProjectFeature>,
+    authority: crate::state::ProjectTechnologyChangeAuthority,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    captured: &crate::workbench::lifecycle::project_lifecycle::WorkingStamp,
+) -> Result<crate::state::ProjectTechnologyChangeContext, String> {
+    let current = crate::workbench::lifecycle::project_lifecycle::working_stamp(
+        &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    );
+    if checkpoint.project_revision() != cx.model.workspace.content.project.revision().get()
         || checkpoint.project_name() != cx.model.workspace.content.project.name()
-        || !crate::workbench::lifecycle::project_checkpoint::matches_current_state(
-            checkpoint,
-            &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
-        )?
+        || current != *captured
     {
         return Err(
-            "Project changed after its recovery checkpoint was captured; attachment was not committed"
+            "The project changed after its recovery checkpoint was captured; its technology was not changed"
                 .to_owned(),
         );
     }
     let checkpoint_revision = crate::product::ObjectRevision::new(checkpoint.project_revision())
         .map_err(|error| format!("Recovery checkpoint revision is invalid: {error}"))?;
-    let mut change_context = crate::state::ProjectTechnologyChangeContext::new(
+    crate::state::ProjectTechnologyChangeContext::new(
         authority,
         checkpoint.checkpoint_id(),
         checkpoint_revision,
@@ -712,7 +886,19 @@ pub(super) fn commit_technology_after_checkpoint(
         checkpoint.snapshot_digest(),
         checkpoint.snapshot_byte_len(),
     )
-    .map_err(|error| format!("Technology change authority is invalid: {error}"))?;
+    .map_err(|error| format!("Technology change authority is invalid: {error}"))
+}
+
+fn commit_technology_after_checkpoint(
+    cx: &mut Cx<'_, ProjectFeature>,
+    binding: ProjectTechnologyBinding,
+    mut change_context: crate::state::ProjectTechnologyChangeContext,
+    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) -> Result<String, String> {
+    verify_pinned_technology_contract(&binding, cx.model)?;
+    validate_migration_evidence_for_binding(cx.model, &binding, migration_evidence.as_ref())?;
+    let previous_revision = cx.model.workspace.content.project.revision();
     if let Some(evidence) = migration_evidence {
         change_context = change_context
             .with_migration_evidence(evidence)
@@ -743,94 +929,7 @@ pub(super) fn commit_technology_after_checkpoint(
 pub(super) fn technology_checkpoint_pending(
     dialogs: &crate::workbench::slots::ProjectState,
 ) -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        dialogs.technology_attachment.checkpoint_pending
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = dialogs;
-        false
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn start_browser_technology_checkpoint(
-    ctx: &Context,
-    cx: &mut Cx<'_, ProjectFeature>,
-    binding: ProjectTechnologyBinding,
-    authority: crate::state::ProjectTechnologyChangeAuthority,
-    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
-) -> Result<(), String> {
-    if cx.state.technology_attachment.checkpoint_pending {
-        return Err("A project recovery checkpoint is already being written".to_owned());
-    }
-    let project_id = cx.model.workspace.content.project.id().to_string();
-    let expected_revision = cx.model.workspace.content.project.revision().get();
-    let queued_project_id = project_id.clone();
-    let queued_binding = binding.clone();
-    let repaint = ctx.clone();
-    crate::workbench::lifecycle::project_checkpoint::start_create(
-        &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
-        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyChange,
-        move |result| {
-            BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
-                queue
-                    .borrow_mut()
-                    .push_back(BrowserTechnologyCheckpointCompletion {
-                        project_id: queued_project_id,
-                        expected_revision,
-                        binding: queued_binding,
-                        authority,
-                        migration_evidence,
-                        result,
-                    });
-            });
-            repaint.request_repaint();
-        },
-    )?;
-    cx.state.technology_attachment.checkpoint_pending = true;
-    cx.state.technology_attachment.validation_error = None;
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn poll_browser_technology_checkpoint(_: &Context, cx: &mut Cx<'_, ProjectFeature>) {
-    let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
-        .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
-    for completion in completions {
-        if cx.model.workspace.content.project.id().to_string() != completion.project_id
-            || cx.model.workspace.content.project.revision().get() != completion.expected_revision
-        {
-            cx.state.technology_attachment.checkpoint_pending = false;
-            cx.state.technology_attachment.validation_error = Some(
-                "Project changed while its recovery checkpoint was being written; attachment was not committed"
-                    .to_owned(),
-            );
-            continue;
-        }
-        let result = completion.result.and_then(|checkpoint| {
-            verify_pinned_technology_contract(&completion.binding, cx.model)?;
-            commit_technology_after_checkpoint(
-                cx,
-                completion.binding,
-                completion.authority,
-                completion.migration_evidence,
-                &checkpoint,
-            )
-        });
-        cx.state.technology_attachment.checkpoint_pending = false;
-        match result {
-            Ok(receipt) => {
-                cx.state.technology_attachment.close();
-                cx.model
-                    .record(LogSeverity::Info, LogSource::Studio, receipt);
-            }
-            Err(error) => {
-                cx.state.technology_attachment.validation_error = Some(error);
-            }
-        }
-    }
+    dialogs.technology_attachment.in_flight.is_some()
 }
 
 #[cfg(target_arch = "wasm32")]

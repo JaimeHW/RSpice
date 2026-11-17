@@ -30,7 +30,7 @@ use super::{LifecycleSource, LifecycleView, ProjectLifecycleError};
 /// stamp its owner issues on every mutable access, the two with no stamp of
 /// their own by content. Equal stamps, equal working content.
 #[derive(Debug, Clone, PartialEq)]
-struct WorkingStamp {
+pub struct WorkingStamp {
     /// The workspace content: every buffered schematic, the project
     /// descriptor, configurations, plan payloads, sources, layouts, reports,
     /// result documents, hardcopy setups, open views and their dirty marks.
@@ -55,7 +55,7 @@ struct WorkingStamp {
 }
 
 impl WorkingStamp {
-    fn of(state: &LifecycleView<'_>) -> Self {
+    pub(super) fn of(state: &LifecycleView<'_>) -> Self {
         let model = state.model;
         Self {
             workspace: model.workspace.content.stamp(),

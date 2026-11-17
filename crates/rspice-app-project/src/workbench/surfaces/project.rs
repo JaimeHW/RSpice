@@ -40,9 +40,10 @@ use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
 use crate::workbench::project::workspace_state::ProjectPage;
 use technology::open_technology_attachment_dialog;
-pub use technology::show_technology_attachment_dialog;
 #[cfg(target_arch = "wasm32")]
-use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
+use technology::poll_browser_recovery_completions;
+use technology::poll_technology_change;
+pub use technology::show_technology_attachment_dialog;
 
 const PROJECT_TAB_HEIGHT: f32 = 24.0;
 /// The unsaved mark a tab or row carries, the document bar's dot, and the
@@ -92,15 +93,12 @@ const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
 const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
 const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach binding";
 const TECHNOLOGY_DIALOG_CURRENT: &str = "Binding already attached";
-const TECHNOLOGY_DIALOG_PENDING: &str = "Writing checkpoint\u{2026}";
+/// The one line a technology change states while its checkpoint is written.
+const TECHNOLOGY_CHECKPOINT_PENDING: &str = "Writing the recovery checkpoint\u{2026}";
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserTechnologyCheckpointCompletion {
     project_id: String,
-    expected_revision: u64,
-    binding: ProjectTechnologyBinding,
-    authority: crate::state::ProjectTechnologyChangeAuthority,
-    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     result:
         Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary, String>,
 }
@@ -132,9 +130,9 @@ thread_local! {
 /// Take what background work finished writing or reading for this
 /// workspace before it draws, on whichever page is in front.
 pub fn poll_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    poll_technology_change(cx);
     #[cfg(target_arch = "wasm32")]
     {
-        poll_browser_technology_checkpoint(ctx, cx);
         poll_browser_recovery_completions(ctx, cx);
         recovery::poll_browser_checkpoint_changes(cx);
         recovery::poll_browser_checkpoint_reads(cx);
@@ -891,7 +889,7 @@ mod tests {
             TECHNOLOGY_DIALOG_TITLE,
             TECHNOLOGY_DIALOG_PRIMARY,
             TECHNOLOGY_DIALOG_CURRENT,
-            TECHNOLOGY_DIALOG_PENDING,
+            TECHNOLOGY_CHECKPOINT_PENDING,
         ] {
             let copy = copy.to_ascii_lowercase();
             assert!(!copy.contains("qualified"));

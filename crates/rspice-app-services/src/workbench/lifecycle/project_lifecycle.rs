@@ -30,6 +30,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) use crate::product::TransactionId;
+pub use dirty_answer::WorkingStamp;
 #[cfg(any(test, feature = "test-support"))]
 pub use dirty_answer::{hold_accepted_answer, without_audit};
 #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
@@ -188,6 +189,13 @@ pub fn accepted_active_schematic(
 /// a different save, import, or binding restoration has completed.
 pub const fn accepted_generation(platform: &PlatformState) -> u64 {
     platform.project_lifecycle.authority.accepted_generation()
+}
+
+/// The working project as its owners stamp it: equal stamps, equal working
+/// content. Work that captures the project on one frame and commits on a
+/// later one compares it to know the project did not move in between.
+pub fn working_stamp(state: &dyn LifecycleSource) -> WorkingStamp {
+    WorkingStamp::of(&state.lifecycle_view())
 }
 
 pub fn snapshot(state: &dyn LifecycleSource) -> Result<ProjectSnapshot, ProjectLifecycleError> {

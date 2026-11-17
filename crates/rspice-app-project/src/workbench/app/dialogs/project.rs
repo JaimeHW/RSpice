@@ -26,8 +26,34 @@ pub struct TechnologyAttachmentDialogState {
     pub(crate) reason: String,
     pub(crate) migration_reviewed: bool,
     pub(crate) validation_error: Option<String>,
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) checkpoint_pending: bool,
+    /// The change waiting on its checkpoint, while that is written.
+    pub(crate) in_flight: Option<TechnologyChangeInFlight>,
+}
+
+/// What a technology transaction does once its checkpoint is written.
+#[derive(Debug, Clone)]
+pub(crate) enum TechnologyChange {
+    Attach {
+        binding: crate::state::ProjectTechnologyBinding,
+        migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+    },
+}
+
+/// A technology change waiting on the whole-project checkpoint written
+/// before it, off the frame: the project it was asked of, at the revision
+/// the checkpoint captures, and the change with who made it.
+#[derive(Debug, Clone)]
+pub(crate) struct TechnologyChangeInFlight {
+    pub(crate) project_id: String,
+    pub(crate) expected_revision: u64,
+    pub(crate) change: TechnologyChange,
+    pub(crate) authority: crate::state::ProjectTechnologyChangeAuthority,
+    /// The working project as the checkpoint captured it: the change
+    /// commits only onto that project.
+    pub(crate) captured: crate::workbench::lifecycle::project_lifecycle::WorkingStamp,
+    /// The checkpoint being written on a background thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) job: CheckpointJob,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -301,8 +327,7 @@ impl TechnologyAttachmentDialogState {
             reason: String::new(),
             migration_reviewed: false,
             validation_error: None,
-            #[cfg(target_arch = "wasm32")]
-            checkpoint_pending: false,
+            in_flight: None,
         };
     }
 
