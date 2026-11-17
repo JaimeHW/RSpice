@@ -1329,11 +1329,19 @@ pub fn reveal_directory(directory: &Path) -> Result<(), String> {
 /// this process and this moment, for a test that writes recovery files.
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub fn unique_temp_dir(label: &str) -> PathBuf {
+    // The clock alone repeats: tests that start on the same tick of it, on
+    // threads of one process, were handed one folder, and the first to
+    // finish removed it under the others. The count never repeats.
+    static TAKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let taken = TAKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("rspice-{label}-{}-{nonce}", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "rspice-{label}-{}-{nonce}-{taken}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&path).expect("create fixture directory");
     path
 }
