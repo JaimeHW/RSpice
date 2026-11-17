@@ -1,17 +1,31 @@
 * C2 charge-pump PLL, variant mx, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
-* ngspice's d_osc for the VCO, XSPICE divide-by-2, d_cosim(div20_pfd.v), and
-* dac_bridge 0/vcc + 20 ohm into loopf_mx (the built-in converters' levels).
-.include ../../net/vco_sub_new.cir
+* net/vco_pwl.va's integrating VCO as an ngspice phase integrator, XSPICE
+* divide-by-2, d_cosim(div20_pfd.v), and dac_bridge 0/vcc + 20 ohm into
+* loopf_mx (the built-in converters' levels). The VCO was d_osc, which times
+* each half period from the period at the control voltage of that instant
+* rather than integrating the frequency: in ngspice the two lock 0.15 us
+* apart (5.703 us with d_osc, 5.551 us integrating).
 .include ../../net/loopf_mx.cir
 .include ../../net/pll-models.cir
 .param vcc=3.3
 .param fref=10e6
 .param r1v=300 c1v=10n
-vdd dd 0 dc 'vcc'
 vref ref 0 dc 0 pulse(0 'vcc' 10n 1n 1n  '1/fref/2' '1/fref')
 abridgeref [ref] [d_ref] adc_ref
 .model adc_ref adc_bridge(in_low = 0.5 in_high = 0.5)
-xvco buf d_vco cont dd d_osc_vco
+* The VCO: the phase, in cycles, on a 1 F capacitor charged at vco_pwl.va's
+* frequency (its points, linear between them and extrapolated past the
+* ends), from idtmod's initial 0.5. Its output is high while the phase's
+* fraction is at least 0.5, as the deck's transition() is, crossing 0.5 V
+* where the phase crosses a half cycle; adc_bridge reads it as the deck's
+* A/D does, 50 ps later, where the deck's 100 ps transition() edge crosses
+* 0.5 V (without that, lock comes 0.34 ns later).
+bfreq 0 vph i = '(v(cont) < 1.0 ? 879.0820e6 + (v(cont) - 0.5) * (747.2197e6 - 879.0820e6) / 0.5 : (v(cont) < 1.5 ? 747.2197e6 + (v(cont) - 1.0) * (579.9500e6 - 747.2197e6) / 0.5 : (v(cont) < 2.0 ? 579.9500e6 + (v(cont) - 1.5) * (377.2727e6 - 579.9500e6) / 0.5 : 377.2727e6 + (v(cont) - 2.0) * (161.1650e6 - 377.2727e6) / 0.5)))'
+cph vph 0 1 ic=0.5
+bvco vco_out 0 v = '0.5 - 0.5 * sin(2 * pi * v(vph))'
+abridgevco [vco_out] [d_vco0] adc_ref
+abufvco d_vco0 d_vco dbuf50
+.model dbuf50 d_buffer(rise_delay = 50p fall_delay = 50p)
 adiv2 d_vco d_div2 div2
 .model div2 d_fdiv(div_factor = 2 high_cycles = 1
 + i_count = 0 rise_delay = 1e-10
@@ -25,6 +39,13 @@ rupn upn_h up_n 20
 rdn dn_h dn 20
 xlf up_n dn cont loopf_mx
 iinj xlf.dra 0 dc 0 ac 1
-.tran 0.1n 25u uic
+* Step capped at 70 ps, to 12 us: the lock time moves 1.1 ns from the
+* 100 ps cap to 70 ps, and ngspice-46 with d_cosim stops on "timestep too
+* small" in the pump (xlf.vss) at 16.4 us with 70 ps to 25 us, at 5.7 us
+* with 100 ps to 25 us, and at 3.8 us with 50 ps; it locks at 5.55 us and
+* the locked mean is read over [10, 12] us. The pump's dac_bridge edges
+* (100 ps) against 1 ps move the lock time 0.63 ns.
+* rspice-full-rows: 5.54e-6 5.56e-6
+.tran 0.1n 12u 0 0.07n uic
 .save v(cont)
 .end

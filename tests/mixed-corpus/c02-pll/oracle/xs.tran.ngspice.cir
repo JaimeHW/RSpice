@@ -5,6 +5,10 @@
 .include ../net/loop-filter-2.cir
 .include ../net/pll-models.cir
 .param r1v=300 c1v=10n
-.tran 0.1n 25u uic
+* Step capped at 10 ps: the lock time is 5.661078 us at the deck's own
+* 100 ps cap, 5.658290 us at 10 ps and 5.658273 us at 5 ps (converged to
+* 0.02 ns).
+* rspice-full-rows: 5.65e-6 5.67e-6
+.tran 0.1n 25u 0 0.01n uic
 .save v(cont)
 .end

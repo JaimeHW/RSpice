@@ -32,11 +32,11 @@ analysis = "tran"
 variants = ["mx"]
 kind = "mean"
 signal = "v(cont)"
-window = [2.0e-5, 2.5e-5]
+window = [1.0e-5, 1.2e-5]
 oracle = "O2"
 ref = "ref/mx.tran.O2.out"
 abs = 0.010
-why = "the same locked loop in both simulators"
+why = "the same locked loop in both simulators, over [10, 12] us: O2 stops at 12 us (oracle/mx.o2/deck.cir), 6 us after lock"
 
 [[q]]
 id = "fdiv"
@@ -72,23 +72,13 @@ band = 0.030
 window = [0.0, 2.5e-5]
 oracle = "O1"
 ref = "ref/xs.tran.O1.out"
-rel = 0.10
-why = "same loop; acquisition time to ±30 mV"
+abs = 3e-9
+why = "O1 is captured step-converged (10 ps cap: 5.658290 us, 5 ps 5.658273 us); at the deck's own 100 ps cap ngspice locks at 5.661078 us, 2.8 ns late, the error a SPICE solve at the deck's step makes here: allowed 2.8 ns, rounded up to 3 ns. Was 10 %, which a 1 % error passed"
 
-[[q]]
-id = "tlock"
-analysis = "tran"
-variants = ["mx"]
-kind = "settle"
-signal = "v(cont)"
-target = 1.94394
-band = 0.030
-window = [0.0, 2.5e-5]
-oracle = "O1"
-ref = "ref/xs.tran.O1.out"
-rel = 0.15
-why = "mx PFD reset 100 ps and A/D threshold 1.65 V vs 0.5 V"
-
+# mx's lock time is held to O2 alone: O1 runs the xs loop, whose d_osc VCO
+# times each half period from the control voltage of that instant, while
+# vco_pwl.va integrates its frequency, and ngspice locks the two 0.11 us
+# apart (O1 5.658 us, O2 5.551 us).
 [[q]]
 id = "tlock"
 analysis = "tran"
@@ -100,8 +90,8 @@ band = 0.030
 window = [0.0, 2.5e-5]
 oracle = "O2"
 ref = "ref/mx.tran.O2.out"
-rel = 0.05
-why = "the same mx loop with the Verilog in Icarus"
+abs = 2e-9
+why = "O2 is the mx loop with vco_pwl.va's integrating VCO and the Verilog in Icarus (oracle/mx.o2/deck.cir), locking at 5.5505 us. It cannot be refined past a 70 ps cap (ngspice-46 + d_cosim stops on timestep too small), where it moves 1.09 ns from the 100 ps cap; its pump D/A edges (100 ps against 1 ps) move it 0.63 ns: allowed 1.72 ns, rounded up to 2 ns. Was 5 % against a twin whose d_osc VCO locked 0.15 us later"
 
 [[q]]
 id = "vlock"
