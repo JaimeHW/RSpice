@@ -2885,6 +2885,37 @@ endmodule
             "th={th}: V(in) - th in the falling event: {}",
             e[e.len() - 1]
         );
+        // Each event fires at a landing strictly past its root: the closed
+        // forms th * 100 ns rising and 200 ns - th * 100 ns falling. The
+        // event's own point reads the left limit and the count steps at the
+        // completion 1 ps on, so the event is the point before `n` steps.
+        // An off-grid root lands within the crossing's default tolerance, 64
+        // ulps of the root. A root sitting exactly on an accepted grid point
+        // has no interior to land in: the event fires at the first point the
+        // solver can take past it, one floor (1e-20 s) on and rounded to a
+        // representable instant, which is acceptable although wider than
+        // that tolerance.
+        let level: f64 = th.parse().expect("threshold");
+        let roots = [level * 100.0e-9, 200.0e-9 - level * 100.0e-9];
+        let events: Vec<f64> = (1..n.len())
+            .filter(|&index| n[index] != n[index - 1])
+            .map(|index| times[index - 1])
+            .collect();
+        assert_eq!(events.len(), 2, "th={th}: two event points: {events:?}");
+        for (event, root) in events.into_iter().zip(roots) {
+            let on_grid = times
+                .iter()
+                .any(|time| (time - root).abs() <= f64::EPSILON * root);
+            let bound = if on_grid {
+                rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR + f64::EPSILON * root
+            } else {
+                64.0 * f64::EPSILON * root
+            };
+            assert!(
+                event > root && event - root <= bound,
+                "th={th}: the event at {event:e} for the root at {root:e} (on grid: {on_grid})"
+            );
+        }
     }
 
     let _ = std::fs::remove_file(model);
