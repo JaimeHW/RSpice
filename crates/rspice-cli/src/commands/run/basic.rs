@@ -1706,9 +1706,10 @@ fn finish_transient_products(
                                 .as_ref()
                                 .map(|events| events as &dyn rspice_core::execution::EventSource),
                         );
-                        crate::hdf5::write_streamed_transient_to_writer(
+                        crate::hdf5::write_streamed_to_writer(
                             writer,
                             data,
+                            "transient",
                             points,
                             |variable, out| {
                                 cursor

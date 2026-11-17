@@ -646,7 +646,7 @@ pub(crate) fn write_hdf5_to_writer(
     rspice_core::io::write_hdf5(writer, &document).map_err(Hdf5Error::from)
 }
 
-/// Why [`write_streamed_transient_to_writer`] stopped.
+/// Why [`write_streamed_to_writer`] stopped.
 pub(crate) enum Hdf5StreamFailure<E> {
     /// The document, or the writer, refused.
     Hdf5(Hdf5Error),
@@ -654,18 +654,20 @@ pub(crate) enum Hdf5StreamFailure<E> {
     Source(E),
 }
 
-/// [`write_hdf5_to_writer`] of `data`, whose transient section holds no values but stands for
-/// `rows` in its coordinate and in each signal, which `column` writes (0 the coordinate, then
-/// each signal in order) as the little-endian bytes of its values while the file is written.
-/// The file is the one [`write_hdf5_to_writer`] writes for the same values.
-pub(crate) fn write_streamed_transient_to_writer<E>(
+/// [`write_hdf5_to_writer`] of `data`, whose waveform section of type `section_type` (a run's
+/// `transient`, a converted `table`) holds no values but stands for `rows` in its coordinate
+/// and in each signal, which `column` writes (0 the coordinate, then each signal in order) as
+/// the little-endian bytes of its values while the file is written. The file is the one
+/// [`write_hdf5_to_writer`] writes for the same values.
+pub(crate) fn write_streamed_to_writer<E>(
     writer: &mut dyn std::io::Write,
     data: &Hdf5SimulationData,
+    section_type: &str,
     rows: usize,
     column: impl FnMut(usize, &mut dyn std::io::Write) -> std::result::Result<(), E>,
 ) -> std::result::Result<(), Hdf5StreamFailure<E>> {
     let mut document = build_hdf5(data).map_err(Hdf5StreamFailure::Hdf5)?;
-    let transient = Hdf5Attribute::Text("transient".to_owned());
+    let section = Hdf5Attribute::Text(section_type.to_owned());
     let group = document
         .groups
         .iter_mut()
@@ -673,12 +675,12 @@ pub(crate) fn write_streamed_transient_to_writer<E>(
             group
                 .attributes
                 .iter()
-                .any(|(name, value)| name == "section_type" && *value == transient)
+                .any(|(name, value)| name == "section_type" && *value == section)
         })
         .ok_or_else(|| {
-            Hdf5StreamFailure::Hdf5(Hdf5Error::InvalidSchema(
-                "a streamed transient document has no transient section".to_owned(),
-            ))
+            Hdf5StreamFailure::Hdf5(Hdf5Error::InvalidSchema(format!(
+                "a streamed document has no {section_type} section"
+            )))
         })?;
     for (_, values) in &mut group.datasets {
         *values = rspice_core::io::Hdf5Values::Streamed(rows);

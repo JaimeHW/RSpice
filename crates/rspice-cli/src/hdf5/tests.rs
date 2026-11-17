@@ -661,3 +661,61 @@ fn distortion_reads_legacy_and_complete_two_tone_populations() {
         assert!(incomplete.validate().is_err());
     }
 }
+
+/// A converted table's document written with its datasets streamed is the one written from the
+/// whole table, byte for byte.
+#[test]
+fn a_streamed_table_is_the_whole_table_byte_for_byte() {
+    use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
+
+    let table = |scale: Vec<f64>, columns: [Vec<f64>; 3]| {
+        let [voltage, current, digital] = columns;
+        let column = |name: &str, var_type: &str, unit: Option<&str>, values| ExportColumn {
+            unit: unit.map(str::to_owned),
+            name: name.to_owned(),
+            var_type: var_type.to_owned(),
+            data: ColumnData::Real(values),
+        };
+        ExportTable {
+            scale_unit: None,
+            analysis: "transient".to_owned(),
+            plot_name: "Transient Analysis".to_owned(),
+            scale_name: "time".to_owned(),
+            scale_type: "time".to_owned(),
+            logarithmic: false,
+            scale,
+            columns: vec![
+                column("V(out)", "voltage", Some("V"), voltage),
+                column("I(V1)", "current", Some("A"), current),
+                column("D(q)", "logic", None, digital),
+            ],
+        }
+    };
+    let time = vec![0.0, 1.0e-9, 2.5e-9, 4.0e-9];
+    let values = [
+        vec![0.0, 0.25, -1.5, 3.0],
+        vec![1.0e-3, 2.0e-3, 0.0, -4.0e-6],
+        vec![0.0, 1.0, 0.5, 1.0],
+    ];
+    let whole = table(time.clone(), values.clone());
+    let mut expected = Vec::new();
+    write_hdf5_to_writer(&mut expected, &table_data(&whole, None)).expect("whole table");
+
+    let header = table(Vec::new(), [Vec::new(), Vec::new(), Vec::new()]);
+    let columns = std::iter::once(&time).chain(&values).collect::<Vec<_>>();
+    let mut streamed = Vec::new();
+    let written = write_streamed_to_writer(
+        &mut streamed,
+        &table_data(&header, None),
+        "table",
+        time.len(),
+        |variable, out| -> std::io::Result<()> {
+            for value in columns[variable] {
+                out.write_all(&value.to_le_bytes())?;
+            }
+            Ok(())
+        },
+    );
+    assert!(written.is_ok(), "the streamed table writes");
+    assert_eq!(streamed, expected);
+}

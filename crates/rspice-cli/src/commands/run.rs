@@ -38,7 +38,7 @@ mod restart;
 mod shared;
 mod sources;
 mod stored_transient;
-pub(crate) use stored_transient::{Column, RowCursor, plan_columns};
+pub(crate) use stored_transient::{Column, ColumnStop, RowCursor, plan_columns};
 mod xyce_files;
 
 pub(crate) use crate::commands::export_table as export;

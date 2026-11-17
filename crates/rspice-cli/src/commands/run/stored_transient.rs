@@ -1737,7 +1737,7 @@ pub(crate) struct RowCursor<'r> {
 }
 
 /// Why [`RowCursor::write_column`] stopped.
-pub(super) enum ColumnStop {
+pub(crate) enum ColumnStop {
     /// The value at this output row is not finite.
     NonFinite(usize),
     /// A read or the write failed.
@@ -1847,7 +1847,7 @@ impl<'r> RowCursor<'r> {
 
     /// Write variable `variable` (as [`Self::value`] numbers it) of output rows `0..rows` to
     /// `out` as the little-endian bytes of its values, a chunk's worth at a time.
-    pub(super) fn write_column(
+    pub(crate) fn write_column(
         &mut self,
         variable: usize,
         rows: usize,

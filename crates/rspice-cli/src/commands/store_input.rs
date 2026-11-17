@@ -15,7 +15,7 @@ use rspice_results_store::{FileIo, SegmentReader, StoreDir, StoreError};
 
 use crate::cli::{CliError, ConvertArgs, InputFormat, NumericBound, OutputFormat};
 use crate::commands::export_table::{ExportTable, scalar_table};
-use crate::commands::run::{Column, RowCursor, plan_columns};
+use crate::commands::run::{Column, ColumnStop, RowCursor, plan_columns};
 use crate::commands::run_signals::ScalarSignal;
 use crate::commands::waveform_io::{MIN_RESULT_SAMPLES, conversion_error};
 
@@ -87,7 +87,7 @@ pub(crate) fn load_table(
 }
 
 /// Convert a store as [`load_table`]'s table converts, reading it a chunk at a time, to a
-/// rawfile or a delimited table. `Ok(false)` when it cannot, and the whole table converts
+/// rawfile, a delimited table or HDF5. `Ok(false)` when it cannot, and the whole table converts
 /// instead: another target, a column that is neither one of the store's nor sampled from an
 /// event trace, a selection the table refuses, a time or a value the table refuses as not
 /// finite, fewer rows than a table holds, or a range that keeps more than one run of rows.
@@ -95,9 +95,15 @@ pub(crate) fn convert_streamed(
     args: &ConvertArgs,
     limits: rspice_core::ResourceLimits,
 ) -> Result<bool, CliError> {
+    // A JSON document is built whole, so it converts from the whole table until the store has a
+    // reader that serializes one lazily.
     if !matches!(
         args.to,
-        OutputFormat::Raw | OutputFormat::RawAscii | OutputFormat::Csv | OutputFormat::Tsv
+        OutputFormat::Raw
+            | OutputFormat::RawAscii
+            | OutputFormat::Csv
+            | OutputFormat::Tsv
+            | OutputFormat::Hdf5
     ) {
         return Ok(false);
     }
@@ -179,13 +185,41 @@ pub(crate) fn convert_streamed(
     let dir = path.to_path_buf();
     crate::commands::publish::artifact(output, |writer| {
         let mut cursor = RowCursor::over(&dir, &mut reader, &columns, Some(&events), first);
-        table.write_streamed_to(writer, output, args.to, points, |row, variable| {
-            cursor.value(row, variable)
-        })?;
+        if args.to == OutputFormat::Hdf5 {
+            write_hdf5(writer, output, &table, points, &mut cursor)?;
+        } else {
+            table.write_streamed_to(writer, output, args.to, points, |row, variable| {
+                cursor.value(row, variable)
+            })?;
+        }
         cursor.finish(output)
     })
     .map_err(|error| crate::cli::map_atomic_output_error(output, error))?;
     Ok(true)
+}
+
+/// Write `table`'s HDF5 document, the one [`ExportTable::write`] writes, with each of its
+/// `points` rows' values read from `cursor` a dataset at a time.
+fn write_hdf5(
+    writer: &mut dyn std::io::Write,
+    output: &Path,
+    table: &ExportTable,
+    points: usize,
+    cursor: &mut RowCursor<'_>,
+) -> Result<(), CliError> {
+    let data = crate::hdf5::table_data(table, None);
+    crate::hdf5::write_streamed_to_writer(writer, &data, "table", points, |variable, out| {
+        cursor
+            .write_column(variable, points, out, output)
+            .map_err(|stop| match stop {
+                ColumnStop::NonFinite(_) => crate::commands::export_table::invalid_samples(output),
+                ColumnStop::Failed(error) => error,
+            })
+    })
+    .map_err(|failure| match failure {
+        crate::hdf5::Hdf5StreamFailure::Hdf5(error) => crate::hdf5::map_output_error(output, error),
+        crate::hdf5::Hdf5StreamFailure::Source(error) => error,
+    })
 }
 
 /// The rows `[lo, hi]` keeps, as `(first row, rows)`, having read every time and every value of
