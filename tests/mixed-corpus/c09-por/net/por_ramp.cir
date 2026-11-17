@@ -1,0 +1,21 @@
+* C9 power-on reset, ramp stimulus (RSpice-authored; corpus design C9): the
+* controller and counter of net/por.cir with vdd held at 3.3 V and hi and
+* lo_n driven by straight PWL ramps in place of the tanh comparators, so each
+* converter crossing of the fixed 0.5 * vdd = 1.65 V is th/k on its ramp:
+* hi rises through it at 50 us, falls at 305 us and rises at 325 us; lo_n
+* rises at 40 us, falls at 306 us and rises at 324 us.
+vdd vdd 0 dc 3.3
+vhi hi 0 pwl(0 0 100u 3.3 300u 3.3 310u 0 320u 0 330u 3.3)
+vlo lo_n 0 pwl(0 0 80u 3.3 300u 3.3 312u 0 318u 0 330u 3.3)
+xpor hi lo_n por_n rst_n tie_hi clk por_ctrl
+* counter clear: por_n read back through an XSPICE A/D and inverted
+abpor [por_n] [porn_d] adc_por
+.model adc_por adc_bridge(in_low = 1.65 in_high = 1.65)
+ainv porn_d cnt_rst inv1
+.model inv1 d_inverter(rise_delay = 1n fall_delay = 1n)
+* ripple up-counter: each stage toggles on the rise of the previous stage's nout
+adff0 q0b clk null cnt_rst q0 q0b dff1
+adff1 q1b q0b null cnt_rst q1 q1b dff1
+adff2 q2b q1b null cnt_rst q2 q2b dff1
+adff3 q3b q2b null cnt_rst q3 q3b dff1
+.model dff1 d_dff(clk_delay = 1n set_delay = 1n reset_delay = 1n ic = 0)

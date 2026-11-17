@@ -1,0 +1,18 @@
+// C8 variant sh (RSpice-authored; corpus design C8): a sample-and-hold rung.
+// A timer samples V(in) every 1 us from 0.5 us into s, and the output slews
+// to each sample at 1 V/us. The sample is the input at the timer's instant,
+// so the output holds the previous sample up to that instant and only then
+// starts to move.
+`include "disciplines.vams"
+module sh_slew(in, out);
+  input in; output out; electrical in, out;
+  parameter real first = 0.5e-6;
+  parameter real period = 1e-6;
+  parameter real rate = 1e6;
+  real s;
+  analog begin
+    @(initial_step) s = 0.0;
+    @(timer(first, period)) s = V(in);
+    V(out) <+ slew(s, rate, -rate);
+  end
+endmodule

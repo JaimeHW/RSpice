@@ -27,6 +27,7 @@ pub const REGISTRY: Registry = &[
     ("rstn", rstn),
     ("thr_hi", thr_hi),
     ("thr_lo", thr_lo),
+    ("ramp_por", ramp_por),
 ];
 
 const STATIC_SUPPLY: f64 = 3.3;
@@ -127,6 +128,62 @@ fn supply_at(time: f64) -> f64 {
         }
     }
     SUPPLY[SUPPLY.len() - 1].1
+}
+
+/// `p3ramp`'s straight ramps (net/por_ramp.cir), `(time, volts)` corners,
+/// read against the fixed threshold `0.5 · 3.3 V`.
+const RAMP_HI: [(f64, f64); 6] = [
+    (0.0, 0.0),
+    (100e-6, 3.3),
+    (300e-6, 3.3),
+    (310e-6, 0.0),
+    (320e-6, 0.0),
+    (330e-6, 3.3),
+];
+const RAMP_LO_N: [(f64, f64); 6] = [
+    (0.0, 0.0),
+    (80e-6, 3.3),
+    (300e-6, 3.3),
+    (312e-6, 0.0),
+    (318e-6, 0.0),
+    (330e-6, 3.3),
+];
+
+/// Where a straight-segment PWL passes through `level` in the direction
+/// `rising`, first within `[start, stop]`: `t0 + (level − v0)/k` on the
+/// segment of slope `k`.
+fn ramp_crossing(
+    corners: &[(f64, f64)],
+    level: f64,
+    rising: bool,
+    [start, stop]: [f64; 2],
+) -> Option<f64> {
+    corners.windows(2).find_map(|pair| {
+        let ((t0, v0), (t1, v1)) = (pair[0], pair[1]);
+        if (v1 > v0) != rising || (v0 - level) * (v1 - level) >= 0.0 {
+            return None;
+        }
+        let time = t0 + (level - v0) / ((v1 - v0) / (t1 - t0));
+        (start..=stop).contains(&time).then_some(time)
+    })
+}
+
+/// `p3ramp`: por_n rises where hi rises through the A/D threshold (the
+/// controller's `@(posedge hi)`) and falls where lo_n falls through it
+/// (`@(negedge lo_n)`), each at th/k on its ramp, in the quantity's window.
+fn ramp_por(context: &Context<'_>) -> Result<Expected, String> {
+    let measure = &context.quantity.measure;
+    let rising = measure.edge.as_deref() != Some("fall");
+    let window = measure.window.ok_or("c09::ramp_por needs the window")?;
+    let ramp = if rising { &RAMP_HI } else { &RAMP_LO_N };
+    ramp_crossing(ramp, 0.5 * STATIC_SUPPLY, rising, window)
+        .map(|time| values(vec![time]))
+        .ok_or_else(|| {
+            format!(
+                "c09::ramp_por: no crossing in [{:e}, {:e}]",
+                window[0], window[1]
+            )
+        })
 }
 
 /// The first clock rise strictly after `time`.
@@ -314,5 +371,19 @@ mod tests {
         assert!(!reads_high("base", 0.0, HI_THRESHOLD));
         assert_eq!(da_level("base", 3.0), 3.3);
         assert_eq!(da_level("live", 3.0), 3.0);
+    }
+
+    #[test]
+    fn the_ramps_cross_the_threshold_at_th_over_k() {
+        let at = |corners: &[(f64, f64)], rising: bool, window: [f64; 2]| {
+            ramp_crossing(corners, 1.65, rising, window).unwrap()
+        };
+        assert!((at(&RAMP_HI, true, [0.0, 2e-4]) - 50e-6).abs() < 1e-15);
+        assert!((at(&RAMP_HI, false, [2e-4, 3.2e-4]) - 305e-6).abs() < 1e-15);
+        assert!((at(&RAMP_HI, true, [3.2e-4, 5e-4]) - 325e-6).abs() < 1e-15);
+        assert!((at(&RAMP_LO_N, true, [0.0, 2e-4]) - 40e-6).abs() < 1e-15);
+        assert!((at(&RAMP_LO_N, false, [2e-4, 3.2e-4]) - 306e-6).abs() < 1e-15);
+        assert!((at(&RAMP_LO_N, true, [3.2e-4, 5e-4]) - 324e-6).abs() < 1e-15);
+        assert!(ramp_crossing(&RAMP_HI, 1.65, false, [0.0, 2e-4]).is_none());
     }
 }

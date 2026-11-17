@@ -1,0 +1,10 @@
+* C9 power-on reset, variant p3ramp, tran
+* The authored supply-sensitive connect modules of net/por_ctrl_p3.vams, whose
+* A/D sets d = V(a) >= 0.5 * V(vsup) in the body of the above() that crossed,
+* read straight ramps through a fixed threshold (net/por_ramp.cir), rising
+* and falling.
+.hdl "../net/por_ctrl_p3.vams" module=por_ctrl
+.include ../net/por_ramp.cir
+.options connectrules=por_supply
+.tran 10n 500u
+.end

@@ -17,7 +17,7 @@ use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
 use crate::suites::mixed::measure::{Measured, evaluate};
 
-pub const REGISTRY: Registry = &[("ovs", ovs), ("codes", codes), ("ach", ach)];
+pub const REGISTRY: Registry = &[("ovs", ovs), ("codes", codes), ("ach", ach), ("sh", sh)];
 
 const F0: f64 = 1e4;
 const STEP_AT: f64 = 20e-6;
@@ -211,9 +211,54 @@ fn ach(context: &Context<'_>) -> Result<Expected, String> {
     Ok(complex(expected))
 }
 
+/// Rung `sh` (net/sh_slew.va): the input ramp, its sampling timer and the
+/// output's slew rate.
+const SH_RAMP: f64 = 0.1e6;
+const SH_FIRST: f64 = 0.5e-6;
+const SH_PERIOD: f64 = 1e-6;
+const SH_RATE: f64 = 1e6;
+
+/// The `sh` output at `time`: zero until the first sample, then from each
+/// sample instant t_k a slew at 1 V/µs from the previous sample s_{k−1} up to
+/// s_k = 0.1 V/µs · t_k (the input rises, so every slew rises).
+fn sh_output(time: f64) -> f64 {
+    if time < SH_FIRST {
+        return 0.0;
+    }
+    let k = ((time - SH_FIRST) / SH_PERIOD).floor();
+    let instant = SH_FIRST + k * SH_PERIOD;
+    let previous = if k >= 1.0 {
+        SH_RAMP * (instant - SH_PERIOD)
+    } else {
+        0.0
+    };
+    (previous + SH_RATE * (time - instant)).min(SH_RAMP * instant)
+}
+
+/// Rung `sh` at the quantity's sample times.
+fn sh(context: &Context<'_>) -> Result<Expected, String> {
+    let grid = context
+        .quantity
+        .measure
+        .times
+        .ok_or("c08::sh needs the sample time grid")?;
+    Ok(values(grid.times().into_iter().map(sh_output).collect()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sample_and_hold_slews_from_each_sample_instant() {
+        // At 1.5 µs the output still holds the 0.5 µs sample, 0.05 V; 50 ns
+        // later it is halfway to 0.15 V, and by 2 µs it holds it.
+        assert!((sh_output(1.5e-6) - 0.05).abs() < 1e-12);
+        assert!((sh_output(1.55e-6) - 0.1).abs() < 1e-12);
+        assert!((sh_output(2.0e-6) - 0.15).abs() < 1e-12);
+        assert!((sh_output(0.55e-6) - 0.05).abs() < 1e-12);
+        assert_eq!(sh_output(0.4e-6), 0.0);
+    }
 
     #[test]
     fn step_overshoot_and_settling_match_the_design() {
