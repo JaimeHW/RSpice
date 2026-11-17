@@ -1,0 +1,13 @@
+// C4 comparator monitor (RSpice-authored; corpus design C4): counts V(x)'s
+// rising crossings of th with an analog cross() and holds the count on na.
+`include "disciplines.vams"
+module cross_cnt(x, na);
+  input x; output na; electrical x, na;
+  parameter real th = 0.9;
+  integer n;
+  analog begin
+    @(initial_step) n = 0;
+    @(cross(V(x) - th, +1)) n = n + 1;
+    V(na) <+ n;
+  end
+endmodule

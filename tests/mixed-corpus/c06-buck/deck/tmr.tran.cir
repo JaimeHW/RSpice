@@ -1,0 +1,14 @@
+* C6 digitally controlled buck, variant tmr (the timer twin), tran
+* A mixed module's analog timer sample (net/tmr_rc.vams) driving an RC
+* (1 kOhm, 100 nF: tau = 100 us) and an idt() at 0.01 V/us, where the vams
+* variant reads its sample only digitally; a digital reg set at the same
+* instant drives the control RC.
+.hdl "../net/tmr_rc.vams"
+vin in 0 dc 1
+xt in a b c tmr_rc
+ra a ca 1k
+c1 ca 0 100n
+rc c cc 1k
+c2 cc 0 100n
+.tran 1u 2m
+.end

@@ -1,0 +1,10 @@
+* C9 power-on reset, variant aramp, tran
+* hi's straight ramp (net/por_ramp.cir's corners) into a Verilog-AMS input
+* (net/a2d_dates.vams) through the default A/D at vcc/2 = 1.65 V: rising at
+* 50 and 325 us, falling at 305 us.
+.hdl "../net/a2d_dates.vams"
+.param vcc=3.3
+vhi hi 0 pwl(0 0 100u 3.3 300u 3.3 310u 0 320u 0 330u 3.3)
+xd hi rt ft a2d_dates
+.tran 10n 500u
+.end

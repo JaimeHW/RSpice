@@ -1,0 +1,21 @@
+// C6 timer twin (RSpice-authored; corpus design C6): a mixed module like the
+// vams controller, whose analog timer sample drives analog contributions
+// instead of being read digitally. A timer at 500 us samples V(in) into s;
+// V(a) <+ s drives an RC, and V(b) <+ idt(1e4 * s) integrates it, 0.01 V/us.
+// The control, V(c), steps from a digital reg set at the same instant.
+// Until 500 us all three hold 0.
+`include "disciplines.vams"
+`timescale 1us/1ps
+module tmr_rc(in, a, b, c);
+  input in; output a, b, c; electrical in, a, b, c;
+  real s;
+  reg d;
+  initial begin d = 0; #500 d = 1; end
+  analog begin
+    @(initial_step) s = 0.0;
+    @(timer(500e-6)) s = V(in);
+    V(a) <+ s;
+    V(b) <+ idt(1e4 * s, 0.0);
+    V(c) <+ (d ? 1.0 : 0.0);
+  end
+endmodule

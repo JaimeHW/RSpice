@@ -1,0 +1,15 @@
+// C4 comparator monitor (RSpice-authored; corpus design C4): counts the
+// rises of c, which reaches it through the default A/D at vcc/2, and
+// toggles q, which leaves through the default D/A, on each one. The count
+// is on nd.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module cmp_mon(c, q, nd);
+  input c; wire c;
+  output q; reg q;
+  output nd; electrical nd;
+  integer cnt;
+  initial begin cnt = 0; q = 0; end
+  always @(posedge c) begin cnt = cnt + 1; q = ~q; end
+  analog V(nd) <+ cnt;
+endmodule

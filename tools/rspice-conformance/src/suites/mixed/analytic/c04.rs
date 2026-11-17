@@ -17,6 +17,7 @@ pub const REGISTRY: Registry = &[
     ("vec", vec),
     ("acc", acc),
     ("nz", nz),
+    ("mon", mon),
 ];
 
 /// The staircase's codes, in conversion order (`net/vin_codes.cir`).
@@ -94,9 +95,46 @@ fn nz(context: &Context<'_>) -> Result<Expected, String> {
     ))
 }
 
+/// Variant `mon` (deck/mon.tran.cir): the comparator's input
+/// 0.1 + 0.5·sin(2π·10 MHz·t), which falls through 0 first at
+/// (π + asin(0.2))/ω and then once a period; the output rises through vcc/2
+/// there, a few ns later through the 5 ns pole.
+const MON_FREQUENCY: f64 = 10e6;
+const MON_OFFSET_OVER_AMPLITUDE: f64 = 0.1 / 0.5;
+
+/// The comparator output's rises up to `time`.
+fn mon_rises(time: f64) -> f64 {
+    let omega = 2.0 * std::f64::consts::PI * MON_FREQUENCY;
+    let first = (std::f64::consts::PI + MON_OFFSET_OVER_AMPLITUDE.asin()) / omega;
+    if time < first {
+        0.0
+    } else {
+        ((time - first) * MON_FREQUENCY).floor() + 1.0
+    }
+}
+
+/// `mon`'s two counters at the quantity's sample times: both count every
+/// rise once.
+fn mon(context: &Context<'_>) -> Result<Expected, String> {
+    let grid = context
+        .quantity
+        .measure
+        .times
+        .ok_or("c04::mon needs the sample time grid")?;
+    Ok(values(grid.times().into_iter().map(mon_rises).collect()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_monitor_counts_ten_rises_a_microsecond() {
+        assert_eq!(mon_rises(50e-9), 0.0);
+        assert_eq!(mon_rises(60e-9), 1.0);
+        assert_eq!(mon_rises(1.005e-6), 10.0);
+        assert_eq!(mon_rises(10.005e-6), 100.0);
+    }
 
     #[test]
     fn comparator_constants_match_the_design() {

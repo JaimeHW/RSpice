@@ -26,6 +26,8 @@ pub const REGISTRY: Registry = &[
     ("tau_r", tau_r),
     ("tau_r_ramp", tau_r_ramp),
     ("tau_f", tau_f),
+    ("tmr_rc", tmr_rc),
+    ("tmr_idt", tmr_idt),
 ];
 
 const VIN: f64 = 5.0;
@@ -228,9 +230,55 @@ fn tau_f(context: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![window_period(context)? + R_LOW * C_GATE]))
 }
 
+/// Variant `tmr` (net/tmr_rc.vams): the timer's instant, the RC's time
+/// constant and idt()'s slope.
+const TMR_INSTANT: f64 = 500e-6;
+const TMR_TAU: f64 = 1e3 * 100e-9;
+const TMR_SLOPE: f64 = 1e4;
+
+/// `tmr`'s RC (and its digital control): 0 up to the timer's instant, then
+/// 1 − exp(−(t − 500 µs)/τ) toward the 1 V sample.
+fn tmr_rc_at(time: f64) -> f64 {
+    if time <= TMR_INSTANT {
+        0.0
+    } else {
+        1.0 - (-(time - TMR_INSTANT) / TMR_TAU).exp()
+    }
+}
+
+/// `tmr`'s idt(1e4·s): 0 up to the timer's instant, then 0.01 V/µs.
+fn tmr_idt_at(time: f64) -> f64 {
+    TMR_SLOPE * (time - TMR_INSTANT).max(0.0)
+}
+
+fn tmr_grid(context: &Context<'_>, at: fn(f64) -> f64) -> Result<Expected, String> {
+    let grid = context
+        .quantity
+        .measure
+        .times
+        .ok_or("c06::tmr_rc/tmr_idt need the sample time grid")?;
+    Ok(values(grid.times().into_iter().map(at).collect()))
+}
+
+fn tmr_rc(context: &Context<'_>) -> Result<Expected, String> {
+    tmr_grid(context, tmr_rc_at)
+}
+
+fn tmr_idt(context: &Context<'_>) -> Result<Expected, String> {
+    tmr_grid(context, tmr_idt_at)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_timer_twin_starts_at_the_timer_instant() {
+        assert_eq!(tmr_rc_at(500e-6), 0.0);
+        assert!((tmr_rc_at(600e-6) - (1.0 - (-1.0f64).exp())).abs() < 1e-12);
+        assert_eq!(tmr_idt_at(499e-6), 0.0);
+        assert!((tmr_idt_at(600e-6) - 1.0).abs() < 1e-9);
+    }
 
     #[test]
     fn ripple_and_regulation_match_the_derivation() {

@@ -1,0 +1,19 @@
+* C4 8-bit SAR ADC, variant mon (a comparator monitor), tran
+* C4's comparator (net/cmp_va.va) on a 10 MHz sine. Its output is read by a
+* Verilog-AMS counter through the default A/D at vcc/2, whose posedge block
+* drives q through the default D/A, and by an analog cross() on the same
+* node at the same threshold. The SAR's own comparator node cannot carry
+* this: the top plate is grounded while the input is sampled, which holds
+* the comparator's output at vcc/2, the threshold itself.
+.hdl "../net/cmp_va.va"
+.hdl "../net/cmp_mon.vams"
+.hdl "../net/cross_cnt.va"
+.param vcc=1.8
+vdd vdd 0 1.8
+vs x 0 sin(0.1 0.5 10meg)
+xcmp x 0 cmp vdd 0 cmp_va
+xmon cmp q nd cmp_mon
+rq q 0 1k
+xcc cmp na cross_cnt th=0.9
+.tran 1n 10.02u
+.end

@@ -1,0 +1,18 @@
+// C9 default-converter dating (RSpice-authored; corpus design C9): a reads
+// the module through the default A/D at vcc/2, rising through its vthi and
+// falling through its vtlo. The module holds $realtime at the latest rise
+// on rt and at the latest fall on ft, in microseconds; -1 before the first.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module a2d_dates(a, rt, ft);
+  input a; wire a;
+  output rt, ft; electrical rt, ft;
+  real tr, tf;
+  initial begin tr = -1.0; tf = -1.0; end
+  always @(posedge a) tr = $realtime / 1000.0;
+  always @(negedge a) tf = $realtime / 1000.0;
+  analog begin
+    V(rt) <+ tr;
+    V(ft) <+ tf;
+  end
+endmodule
