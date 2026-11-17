@@ -609,7 +609,8 @@ fn a_measurement_must_reduce_to_a_number() {
 }
 
 /// A transient of a mixed run: the analog net `V(a)`, and the digital nets
-/// `clk` and `q` as their event histories (value code 2 is X).
+/// `clk` and `q` as their event histories (value code 2 is X), named in upper
+/// case as the engine keeps them.
 fn mixed_run(id: u64) -> SimulationRun {
     use rspice_app_state::state::{
         AnalysisResultPayload, DigitalEventPointEvidence, DigitalEventTraceEvidence,
@@ -634,8 +635,8 @@ fn mixed_run(id: u64) -> SimulationRun {
         voltage_impulses: None,
         current_impulses: None,
         digital_traces: vec![
-            net("clk", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
-            net("q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
+            net("CLK", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
+            net("Q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
         ],
         real_traces: Vec::new(),
         digital_buses: Vec::new(),
@@ -667,7 +668,9 @@ fn measurements_over_a_fresh_result_name_their_nets_and_reopen() {
     let analog = "max(V(a))";
     let preview = measurement_preview(&mut app, analog);
     assert_eq!(preview.refusal, None);
-    for net in ["V(a)", "D(clk)", "D(q)"] {
+    // Nothing is drawn here, so the nets keep the engine's spelling; an
+    // expression reads them in any case.
+    for net in ["V(a)", "D(CLK)", "D(Q)"] {
         assert!(preview.signals.iter().any(|signal| signal == net), "{net}");
     }
     commit_open_dialog(&mut app.state.results_parts());

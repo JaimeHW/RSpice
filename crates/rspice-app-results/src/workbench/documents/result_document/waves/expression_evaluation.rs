@@ -181,7 +181,9 @@ impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::Evaluat
 
 /// The exact history of the bus or logic net `D(name)` names: one of the
 /// reader's buses, a bus the run declared (with or without its range), or a
-/// single net.
+/// single net. A name matches whatever its case, as SPICE and `.MEASURE`
+/// read it: the engine keeps a logic net as `CLK` where the drawing labels
+/// it `clk`.
 pub(in crate::workbench::documents::result_document) fn event_word(
     analysis: &AnalysisResult,
     lanes: Option<&EventLaneLayout>,
@@ -207,7 +209,7 @@ pub(in crate::workbench::documents::result_document) fn event_word(
     let history = |net: &str| {
         digital_traces
             .iter()
-            .find(|trace| trace.node_name == net)
+            .find(|trace| trace.node_name.eq_ignore_ascii_case(net))
             .map(|trace| {
                 trace
                     .points
@@ -220,13 +222,13 @@ pub(in crate::workbench::documents::result_document) fn event_word(
         lanes
             .user_buses
             .iter()
-            .find(|bus| bus.name == name)
+            .find(|bus| bus.name.eq_ignore_ascii_case(name))
             .map(|bus| (bus.name.clone(), bus.members.clone()))
     });
     let declared = || {
         digital_buses.iter().find_map(|bus| {
             let label = format!("{}[{}:{}]", bus.name, bus.msb, bus.lsb);
-            (bus.name == name || label == name).then(|| {
+            (bus.name.eq_ignore_ascii_case(name) || label.eq_ignore_ascii_case(name)).then(|| {
                 (
                     label,
                     bus.members

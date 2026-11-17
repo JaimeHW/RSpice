@@ -140,7 +140,8 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
     // A run's label already names it ("Run 1 (8:31:04 PM)"), as the
     // navigator shows it; a number in front would name it twice.
     let pane = pane.unwrap_or_else(|| format!("{} · {}", run.label, analysis.label));
-    let signals = analysis_signals(analysis);
+    let notations = crate::state::bus_notations(&state.model.workspace, &state.model.schematic);
+    let signals = analysis_signals(analysis, &notations);
     let signal_units = signals.iter().map(|name| unit_of(name)).collect();
     MeasurementPreview {
         pane,
@@ -156,8 +157,12 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
 /// The signals an expression over `analysis` can read, by the names it
 /// reads them by: each analog waveform (`|V(out)|` is `V(out)`, whose phase
 /// comes with it), then each digital net and bus as `D(name)`, read from its
-/// event history as `.MEASURE` reads it.
-fn analysis_signals(analysis: &AnalysisResult) -> Vec<String> {
+/// event history as `.MEASURE` reads it and spelled as the drawing spells
+/// it (`D(clk)` for the engine's `CLK`).
+fn analysis_signals(
+    analysis: &AnalysisResult,
+    notations: &crate::state::BusNotations,
+) -> Vec<String> {
     let mut signals: Vec<String> = Vec::new();
     let mut offer = |name: String| {
         if !signals.contains(&name) {
@@ -181,10 +186,10 @@ fn analysis_signals(analysis: &AnalysisResult) -> Vec<String> {
     }) = analysis.result_payload.as_ref()
     {
         for trace in digital_traces {
-            offer(format!("D({})", trace.node_name));
+            offer(format!("D({})", notations.display(&trace.node_name)));
         }
         for bus in digital_buses {
-            offer(format!("D({})", bus.name));
+            offer(format!("D({})", notations.display(&bus.name)));
         }
     }
     signals
@@ -537,7 +542,9 @@ mod tests {
     /// A digital net is measured from its event history, as `.MEASURE` reads
     /// `D(name)`: each crossing is dated at the step that makes it, and an
     /// unknown stretch is looked through, so q's 0→X→1 rises where X becomes
-    /// 1. The form used to refuse any `D()` with "Identifier not found".
+    /// one. The name matches in any case, as `.MEASURE` matches it: the
+    /// engine keeps the net as `CLK` where the drawing labels it `clk`, and
+    /// the form refused `D(clk)` with "Identifier not found: D(clk)".
     #[test]
     fn a_measurement_reads_a_digital_net_as_measure_does() {
         use crate::state::{DigitalEventPointEvidence, DigitalEventTraceEvidence, RetainedTrace};
@@ -560,9 +567,10 @@ mod tests {
             voltage_impulses: None,
             current_impulses: None,
             digital_traces: vec![
-                trace("clk", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
+                // The engine keeps a logic net's name in upper case.
+                trace("CLK", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
                 // 2 is X.
-                trace("q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
+                trace("Q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
             ],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
