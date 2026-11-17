@@ -1812,6 +1812,11 @@ fn show_library_usage_report(ctx: &Context) {
         .description(&description)
         .size(DialogSize::Transaction)
         .show(ctx, |ui| {
+            // With nothing to list, the answer is the summary itself, in
+            // the body: the description is not shown on every screen.
+            if report.placements.is_empty() && report.layouts.is_empty() {
+                ui.add(egui::Label::new(&description).wrap());
+            }
             if !report.placements.is_empty() {
                 property_card(ui, "Schematic placements", |ui| {
                     for (schematic, instance) in &report.placements {
@@ -1881,7 +1886,7 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                 .show(ui, |ui| {
                     if receipts.is_empty() && publications.is_empty() {
                         property_card(ui, "No retained mutations", |ui| {
-                            property_row(
+                            crate::workbench::design_system::property_row_wrapped(
                                 ui,
                                 "Status",
                                 "The project has no audited library changes or publications.",
