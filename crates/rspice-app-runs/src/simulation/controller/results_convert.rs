@@ -46,7 +46,6 @@ impl SimulationController {
                 data,
                 color: String::new(),
                 visible: true,
-                display_cache: None,
             }),
         }
     }

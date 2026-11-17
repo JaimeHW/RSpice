@@ -79,6 +79,50 @@ fn a_window_starting_between_rows_holds_its_start_and_the_value_there() {
 }
 
 #[test]
+fn a_range_of_a_window_reads_only_its_rows_keeps_nothing_and_matches_the_whole_read() {
+    let time = Column::new("time", vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    let wave = Column::new("v(out)", vec![10.0, 20.0, 40.0, 80.0, 160.0, 320.0]);
+    for (column, lead) in [
+        (&time, WindowLead::None),
+        (&time, WindowLead::Value(1.5)),
+        (&wave, WindowLead::Interpolated(0.25)),
+    ] {
+        let whole = WaveformValues::stored(column.clone(), window(2, 4, lead)).unwrap();
+        let expected = whole.try_values().unwrap().clone();
+        let ranged = WaveformValues::stored(column.clone(), window(2, 4, lead)).unwrap();
+        for start in 0..=expected.len() {
+            for end in start..=expected.len() {
+                let read = ranged.read_range(start..end).unwrap();
+                assert_eq!(
+                    read.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
+                    expected[start..end]
+                        .iter()
+                        .map(|value| value.to_bits())
+                        .collect::<Vec<_>>(),
+                    "{lead:?} {start}..{end}"
+                );
+            }
+        }
+        // Each range read the source again: nothing was kept.
+        let before = column.reads.load(Ordering::SeqCst);
+        ranged.read_range(1..3).unwrap();
+        assert_eq!(column.reads.load(Ordering::SeqCst), before + 1);
+        // A window of another length is unequal without being read.
+        assert_ne!(ranged, WaveformValues::from(vec![0.0; 3]));
+        assert_eq!(column.reads.load(Ordering::SeqCst), before + 1);
+    }
+    let unreadable = Arc::new(Column {
+        name: "v(unreadable_range_test)",
+        values: vec![1.0; 3],
+        reads: AtomicUsize::new(0),
+        fail: true,
+    });
+    let values = WaveformValues::stored(unreadable, window(0, 3, WindowLead::None)).unwrap();
+    let failure = values.read_range(0..2).unwrap_err();
+    assert_eq!(failure.column, "v(unreadable_range_test)");
+}
+
+#[test]
 fn a_window_past_its_column_or_interpolating_before_its_first_row_is_refused() {
     let column = Column::new("v(a)", vec![0.0; 4]);
     let past = WaveformValues::stored(column.clone(), window(2, 3, WindowLead::None));

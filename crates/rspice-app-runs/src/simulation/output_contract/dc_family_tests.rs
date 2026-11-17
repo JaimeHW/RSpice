@@ -273,7 +273,7 @@ fn dc_family_materialization_is_atomic_when_the_last_member_collides() {
 }
 
 #[test]
-fn deferred_dc_family_shares_each_exact_source_and_rebuilds_every_display_cache() {
+fn deferred_dc_family_shares_each_exact_source() {
     for spec in [spec(true, false), spec(false, true)] {
         let mut output = output(SavedOutputKind::RawVoltageOrCurrent, "Chosen", "V(out)");
         output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
@@ -321,7 +321,6 @@ fn deferred_dc_family_shares_each_exact_source_and_rebuilds_every_display_cache(
                 &waveform.y,
                 &source.y
             ));
-            assert!(waveform.display_cache.is_some());
         }
         let names = analysis.saved_output_receipts[0]
             .status
@@ -418,8 +417,7 @@ fn dc_family_receipts_round_trip_every_member() {
         analysis
             .waveforms
             .iter()
-            .all(|waveform| waveform.display_cache.is_some()
-                && waveform.unit.as_deref() == Some("A"))
+            .all(|waveform| waveform.unit.as_deref() == Some("A"))
     );
 }
 

@@ -7,9 +7,7 @@ use super::RetainedWaveform;
 pub trait OutputWaveform: AsRef<RetainedWaveform> + AsMut<RetainedWaveform> + Clone {
     fn from_retained(data: RetainedWaveform) -> Self;
 
-    fn reset_display_cache(&mut self) {}
     fn set_visible(&mut self, _visible: bool) {}
-    fn rebuild_output_display_cache(&mut self) {}
     fn adopt_presentation(&mut self, _source: Self) {}
 
     fn into_output_preview(self, maximum_samples: usize) -> Result<Self, String>;

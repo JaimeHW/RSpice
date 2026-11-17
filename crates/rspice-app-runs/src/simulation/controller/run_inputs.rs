@@ -159,7 +159,6 @@ struct RunSetReads {
         rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     operating_points: Vec<Result<AnalysisSpec, String>>,
     checkpoint_resumes: Vec<CheckpointResume>,
-    display_waveform_cache_samples: usize,
     design_checks: ContentDigest,
 }
 
@@ -194,7 +193,6 @@ struct LiveInputs<'a> {
     imported_checkpoints: &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
     imported_transient_checkpoints:
         &'a rspice_results::transient_checkpoint::TransientCheckpointLibrary,
-    display_waveform_cache_samples: usize,
     design_checks: rspice_design::drc::DrcConfig,
     schematic: &'a rspice_design::schematic::document::SchematicDocument,
     schematic_topology_revision: u64,
@@ -220,7 +218,6 @@ impl<'a> LiveInputs<'a> {
             schematic_topology_revision,
             imported_checkpoints,
             imported_transient_checkpoints,
-            display_waveform_cache_samples,
             max_parallel_workers,
             library_folders,
             compilation,
@@ -272,7 +269,6 @@ impl<'a> LiveInputs<'a> {
             stimulus_library,
             imported_checkpoints,
             imported_transient_checkpoints,
-            display_waveform_cache_samples,
             design_checks,
             schematic,
             schematic_topology_revision,
@@ -299,7 +295,6 @@ impl RunInputIdentity {
                 .into_iter()
                 .map(CheckpointResume::held)
                 .collect(),
-            display_waveform_cache_samples: live.display_waveform_cache_samples,
             design_checks: design_check_digest(&live.design_checks),
         }));
         Self::holding(live, reads)
@@ -480,10 +475,6 @@ impl RunSetReads {
                     &checkpoint_resume_reads(model, live),
                 ),
                 "the retained runs a checkpoint resumes from",
-            ),
-            (
-                self.display_waveform_cache_samples == live.display_waveform_cache_samples,
-                "the solver limits",
             ),
             (
                 self.design_checks == design_check_digest(&live.design_checks),

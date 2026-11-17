@@ -56,11 +56,10 @@ pub struct RunPreparationInputs<'a, R, A> {
         &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
     pub imported_transient_checkpoints:
         &'a rspice_results::transient_checkpoint::TransientCheckpointLibrary,
-    pub display_waveform_cache_samples: usize,
-    /// Ceiling on concurrent solver workers for this run, device-local like
-    /// the cache size above. `None` keeps the ceiling this build ships; the
-    /// engine takes the smaller of whatever it ends up with and the
-    /// parallelism the host reports.
+    /// Ceiling on concurrent solver workers for this run, device-local.
+    /// `None` keeps the ceiling this build ships; the engine takes the
+    /// smaller of whatever it ends up with and the parallelism the host
+    /// reports.
     pub max_parallel_workers: Option<usize>,
     /// Folders this host searches for a deck's `.include` and `.lib` files
     /// after the project's own include search paths. Device-local like the
@@ -307,7 +306,6 @@ where
             tasks.iter().map(|task| (task.instance_id(), task.run_at())),
         ),
         &inputs.analysis.sim_setup.save_policy,
-        inputs.display_waveform_cache_samples,
     )?;
     let tasks = attach_saved_output_contracts(tasks, &effective_saved_outputs)?;
     if tasks.is_empty() {
@@ -1358,7 +1356,6 @@ mod tests {
                 schematic_topology_revision: 0,
                 imported_checkpoints: &self.monte_carlo,
                 imported_transient_checkpoints: &self.transient,
-                display_waveform_cache_samples: 0,
                 max_parallel_workers: None,
                 library_folders: &[],
                 compilation: None,

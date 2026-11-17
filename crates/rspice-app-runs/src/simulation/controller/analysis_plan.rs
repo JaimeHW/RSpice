@@ -71,7 +71,6 @@ impl SimulationController {
                     tasks
                         .iter()
                         .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
-                    crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
                 )
             })
             .collect()

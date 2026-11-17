@@ -251,7 +251,6 @@ mod tests {
         );
         materialize_deferred_saved_output(&mut analysis, 0).expect("deferred materializes");
         assert_eq!(analysis.waveforms.len(), 2);
-        assert!(analysis.waveforms[1].display_cache.is_some());
     }
 
     #[test]
@@ -318,7 +317,6 @@ mod tests {
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].name, "output_voltage");
         assert!(projected[0].x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-        assert!(projected[0].display_cache.is_some());
         assert!(source.saved_output_receipts.is_empty());
     }
 
@@ -438,11 +436,7 @@ mod tests {
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[contract]);
-        let report = preflight_saved_output(
-            &deferred,
-            [(analysis_id, &transient_spec())],
-            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-        );
+        let report = preflight_saved_output(&deferred, [(analysis_id, &transient_spec())]);
 
         assert_eq!(analysis.waveforms.len(), 1);
         assert_eq!(
@@ -492,11 +486,7 @@ mod tests {
                 },
             ],
         };
-        let report = preflight_saved_output(
-            &output,
-            [(AnalysisInstanceId::new(), &spec)],
-            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-        );
+        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
         assert!(matches!(
             report.semantic_status(),
             SavedOutputSemanticStatus::RuntimeBound { reason } if reason.contains("elaborated circuit")

@@ -119,11 +119,6 @@ fn prepare_output<W: OutputWaveform>(
             contract.display_intent()
                 == rspice_results::saved_output::SavedOutputDisplayIntent::Plot,
         );
-        if contract.precision() == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-            || contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-        {
-            waveform.rebuild_output_display_cache();
-        }
     }
     Ok(output)
 }

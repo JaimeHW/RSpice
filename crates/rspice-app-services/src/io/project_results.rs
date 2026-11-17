@@ -1,7 +1,6 @@
 //! Application capture and restoration of portable project results.
 use crate::state::{AnalysisResult, RetainedTrace, SimulationRun, SimulationState};
 use rspice_formats::project_results::*;
-use std::collections::HashSet;
 
 pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {
     if state.retained.runs.is_empty() {
@@ -109,34 +108,7 @@ fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, S
             data: waveform.into_waveform(),
             color,
             visible,
-            display_cache: None,
         }
     })?;
-    let mut analysis = AnalysisResult { data };
-    let cached_names = analysis
-        .data
-        .saved_output_receipts
-        .iter()
-        .filter(|receipt| {
-            receipt.stored_precision
-                == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-                || receipt.streaming
-                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-        })
-        .flat_map(|receipt| {
-            receipt
-                .status
-                .materialized_waveforms()
-                .map(|(name, _)| name)
-        })
-        .collect::<HashSet<_>>();
-    if !cached_names.is_empty() {
-        for waveform in &mut analysis.data.waveforms {
-            if cached_names.contains(waveform.name.as_str()) {
-                waveform
-                    .rebuild_display_cache(crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-            }
-        }
-    }
-    Ok(analysis)
+    Ok(AnalysisResult { data })
 }

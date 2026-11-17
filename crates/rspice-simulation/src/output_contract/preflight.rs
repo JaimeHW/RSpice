@@ -13,7 +13,7 @@ pub enum SavedOutputSemanticStatus {
     Invalid { reason: String },
 }
 
-/// Additional retained waveform/cache bytes attributable to one candidate
+/// Additional retained waveform bytes attributable to one candidate
 /// output across all enabled compatible prepared tasks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SavedOutputStorageEstimate {
@@ -123,7 +123,6 @@ pub fn retained_engine_source_upper_bound_bytes(analysis_count: usize) -> u64 {
 pub fn preflight_saved_output<'a>(
     output: &SavedOutput,
     analyses: impl IntoIterator<Item = (AnalysisInstanceId, &'a AnalysisSpec)>,
-    display_cache_sample_limit: usize,
 ) -> SavedOutputPreflightReport {
     let analyses = analyses.into_iter().collect::<Vec<_>>();
     let contracts = match compile_saved_output_contracts(output, analyses.iter().copied()) {
@@ -135,8 +134,7 @@ pub fn preflight_saved_output<'a>(
     if let SavedOutputSemanticStatus::Invalid { reason } = &semantic_status {
         return SavedOutputPreflightReport::invalid(reason.clone());
     }
-    let (storage_estimate, bytes_by_analysis) =
-        storage_estimate(&contracts, &analyses, display_cache_sample_limit);
+    let (storage_estimate, bytes_by_analysis) = storage_estimate(&contracts, &analyses);
     let retained_engine_source_analysis_ids =
         if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
             contracts
@@ -219,7 +217,6 @@ fn semantic_status(
 fn storage_estimate(
     contracts: &[PreparedSavedOutput],
     analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-    display_cache_sample_limit: usize,
 ) -> (SavedOutputStorageEstimate, Vec<(AnalysisInstanceId, u64)>) {
     let mut by_analysis: Vec<(AnalysisInstanceId, u64)> = Vec::new();
     let mut total = 0_u64;
@@ -266,22 +263,9 @@ fn storage_estimate(
         } else {
             2_u64
         };
-        let source_bytes = sample_count
+        let Some(output_bytes) = sample_count
             .checked_mul(source_values)
-            .and_then(|values| values.checked_mul(std::mem::size_of::<f64>() as u64));
-        let cache_bytes = if contract.precision
-            == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-            || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-        {
-            sample_count
-                .min(display_cache_sample_limit as u64)
-                .checked_mul(2)
-                .and_then(|values| values.checked_mul(std::mem::size_of::<f32>() as u64))
-        } else {
-            Some(0)
-        };
-        let Some(output_bytes) =
-            source_bytes.and_then(|source| cache_bytes.and_then(|cache| source.checked_add(cache)))
+            .and_then(|values| values.checked_mul(std::mem::size_of::<f64>() as u64))
         else {
             return (
                 indeterminate(
@@ -511,7 +495,6 @@ fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    const DISPLAY_CACHE_SAMPLE_LIMIT: usize = 4096;
     fn output(policy: SavedOutputPolicy, precision: SavedOutputPrecision) -> SavedOutput {
         SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
@@ -555,8 +538,7 @@ mod tests {
                 points_per_unit,
                 sweep,
             };
-            let report =
-                preflight_saved_output(&output, [(analysis_id, &spec)], DISPLAY_CACHE_SAMPLE_LIMIT);
+            let report = preflight_saved_output(&output, [(analysis_id, &spec)]);
             assert_eq!(report.compatible_analysis_count(), 1);
             assert_eq!(
                 report.storage_estimate(),
@@ -576,11 +558,7 @@ mod tests {
             SavedOutputPrecision::FullSourcePrecision,
         );
         let spec = transient_spec();
-        let report = preflight_saved_output(
-            &output,
-            [(AnalysisInstanceId::new(), &spec)],
-            DISPLAY_CACHE_SAMPLE_LIMIT,
-        );
+        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
         assert!(matches!(
             report.storage_estimate(),
             SavedOutputStorageEstimate::Indeterminate { reason }
@@ -595,18 +573,14 @@ mod tests {
             SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         );
         let spec = transient_spec();
-        let report = preflight_saved_output(
-            &output,
-            [(AnalysisInstanceId::new(), &spec)],
-            DISPLAY_CACHE_SAMPLE_LIMIT,
-        );
+        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
 
-        // 0 through 1 at 0.25 is five retained samples.  A real voltage
-        // waveform stores an f64 x/y pair and the requested display cache
-        // stores an f32 x/y pair for each sample.
+        // 0 through 1 at 0.25 is five retained samples, each an f64 x/y
+        // pair. A display-decimated output keeps no drawing copy: its views
+        // read the store's tiles.
         assert_eq!(
             report.storage_estimate(),
-            &SavedOutputStorageEstimate::ExactBytes(5 * ((2 * 8) + (2 * 4)))
+            &SavedOutputStorageEstimate::ExactBytes(5 * 2 * 8)
         );
     }
 

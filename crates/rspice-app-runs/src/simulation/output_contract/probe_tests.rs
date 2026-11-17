@@ -268,11 +268,7 @@ fn dc_output_forecasts_count_authored_modes_and_both_retrace_members() {
                 },
             };
             let output = output(SavedOutputKind::RawVoltageOrCurrent, "V(pos)", "V(pos)");
-            let report = preflight_saved_output(
-                &output,
-                [(AnalysisInstanceId::new(), &spec)],
-                crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-            );
+            let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
             assert_eq!(
                 report.storage_estimate(),
                 &SavedOutputStorageEstimate::ExactBytes(count * multiplier * 16),
@@ -571,7 +567,6 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
                 .iter()
                 .find(|wave| wave.name == name)
                 .unwrap();
-            assert!(wave.display_cache.is_some());
             assert_eq!(wave.unit.as_deref(), Some("V"));
             for (&x, &y) in wave.x.iter().zip(wave.y.iter()) {
                 assert_close(y, if is_ac { 1.0 } else { -x });

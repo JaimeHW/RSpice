@@ -34,7 +34,6 @@ pub(crate) fn evaluated_waveform(
         data: rspice_results::calculator::retained::evaluated_waveform(value, name, scalar_axis)?,
         color: "#f5b700".to_owned(),
         visible: true,
-        display_cache: None,
     })
 }
 

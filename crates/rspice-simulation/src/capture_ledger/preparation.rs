@@ -75,17 +75,10 @@ pub fn validate_plan_saved_output_budget<'a>(
     tasks: impl Iterator<Item = (AnalysisInstanceId, &'a AnalysisSpec)> + Clone,
     workload: &crate::capture_ledger::CaptureWorkload,
     policy: &SimulationSavePolicy,
-    display_cache_samples: usize,
 ) -> Result<(), PreparationError> {
     let reports = outputs
         .iter()
-        .map(|output| {
-            crate::output_contract::preflight_saved_output(
-                output,
-                tasks.clone(),
-                display_cache_samples,
-            )
-        })
+        .map(|output| crate::output_contract::preflight_saved_output(output, tasks.clone()))
         .collect::<Vec<_>>();
     let ledger = CaptureLedger::resolve(
         groups,

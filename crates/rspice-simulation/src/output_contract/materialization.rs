@@ -8,17 +8,20 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::calculator;
 use rspice_results::calculator::evaluator::CalcValue;
 use rspice_results::saved_output::{
-    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputStreaming,
 };
-use rspice_results::waveform::RetainedWaveform;
+use rspice_results::waveform::{RetainedWaveform, WaveformValues};
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::ops::Range;
 use std::sync::Arc;
 
 mod bindings;
 mod dc_family;
 mod materialize;
 mod probe;
+#[cfg(test)]
+mod resample_tests;
 pub use materialize::{
     apply_saved_output_policy, materialize_deferred_saved_output, materialize_live_saved_outputs,
     materialize_saved_outputs, retain_plan_saved_outputs,
@@ -215,28 +218,94 @@ fn waveform_matches_requested<W: OutputWaveform>(waveform: &W, requested: &str) 
 fn clone_with_name<W: OutputWaveform>(source: &W, name: &str) -> W {
     let mut waveform = source.clone();
     waveform.as_mut().name = name.to_owned();
-    waveform.reset_display_cache();
     waveform
 }
 
+/// Rows of each column a resample holds at once: a stored run's columns are read a block at a
+/// time, never whole.
+const RESAMPLE_BLOCK_ROWS: usize = 1 << 16;
+
+/// Blocks of `count` rows, each sharing its last row with the next, so every pair of
+/// neighbouring rows sits in one block.
+fn overlapping_blocks(count: usize) -> impl Iterator<Item = Range<usize>> {
+    (0..count.saturating_sub(1).max(1))
+        .step_by(RESAMPLE_BLOCK_ROWS)
+        .map(move |start| start..(start + RESAMPLE_BLOCK_ROWS + 1).min(count))
+}
+
+fn read_rows(values: &WaveformValues, rows: Range<usize>) -> Result<Cow<'_, [f64]>, String> {
+    values
+        .read_range(rows)
+        .map_err(|failure| failure.to_string())
+}
+
+/// `values` over `axis` at the ascending `targets`, all inside the axis, interpolated block by
+/// block. A target falls in the first block that spans it, and the interpolator's answer there
+/// is the one it gives over the whole axis: the interval around a target and the knots it lands
+/// on are the same rows.
+fn resample_blocks(
+    axis: &WaveformValues,
+    values: &WaveformValues,
+    targets: &[f64],
+) -> Result<Vec<f64>, String> {
+    if values.len() != axis.len() {
+        return Err(rspice_results::interpolation::InterpolationError::LengthMismatch.to_string());
+    }
+    let mut resampled = Vec::with_capacity(targets.len());
+    for rows in overlapping_blocks(axis.len()) {
+        if resampled.len() == targets.len() {
+            break;
+        }
+        let x = read_rows(axis, rows.clone())?;
+        let last = *x.last().expect("a block holds a row");
+        let taken = targets[resampled.len()..].partition_point(|target| *target <= last);
+        if taken == 0 {
+            continue;
+        }
+        let y = read_rows(values, rows)?;
+        let interpolator = rspice_results::interpolation::WaveformInterpolator::new(&x, &y)
+            .map_err(|error| error.to_string())?;
+        let next = resampled.len();
+        for &target in &targets[next..next + taken] {
+            resampled.push(
+                interpolator
+                    .interpolate_at(target)
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+    }
+    if resampled.len() != targets.len() {
+        return Err(rspice_results::interpolation::InterpolationError::OutsideDomain.to_string());
+    }
+    Ok(resampled)
+}
+
+/// Resample onto the selection grid and its exact final point. A stored run's columns are read
+/// a block at a time, so the output costs its own samples and a block of each source column.
 pub fn resample_selected_and_final<W: OutputWaveform>(
     waveform: &W,
     grid: TransientSelectionGrid,
 ) -> Result<W, String> {
     validate_selection_grid(grid)?;
-    if waveform.as_ref().x.is_empty() || waveform.as_ref().x.len() != waveform.as_ref().y.len() {
+    let source = waveform.as_ref();
+    let count = source.x.len();
+    if count == 0 || count != source.y.len() {
         return Err("source waveform has no aligned samples".to_owned());
     }
-    if waveform
-        .as_ref()
-        .x
-        .windows(2)
-        .any(|window| !window[0].is_finite() || window[1] <= window[0])
-    {
-        return Err("source waveform axis is not strictly increasing".to_owned());
+    // A stored run's time axis was checked to ascend strictly as the run ended.
+    if !source.x.is_ascending_axis() {
+        for rows in overlapping_blocks(count) {
+            if read_rows(&source.x, rows)?
+                .windows(2)
+                .any(|window| !window[0].is_finite() || window[1] <= window[0])
+            {
+                return Err("source waveform axis is not strictly increasing".to_owned());
+            }
+        }
     }
-    let first = waveform.as_ref().x[0];
-    let last = *waveform.as_ref().x.last().expect("non-empty checked");
+    let Some((first, last)) = source.x.ends() else {
+        return Err("source waveform has no aligned samples".to_owned());
+    };
     let start = grid.start.max(first);
     let stop = grid.stop.min(last);
     if stop < start {
@@ -253,17 +322,12 @@ pub fn resample_selected_and_final<W: OutputWaveform>(
     {
         x.push(stop);
     }
-    let resample = |values: &[f64]| {
-        rspice_results::interpolation::WaveformInterpolator::new(&waveform.as_ref().x, values)
-            .and_then(|source| source.resample(&x))
-            .map_err(|error| error.to_string())
-    };
-    let y = resample(&waveform.as_ref().y)?;
-    let mut result = RetainedWaveform::new(&waveform.as_ref().name, x.clone(), y);
-    result.as_mut().unit = waveform.as_ref().unit.clone();
-    if let Some(complex) = &waveform.as_ref().complex {
-        let real = resample(&complex.real)?;
-        let imag = resample(&complex.imag)?;
+    let y = resample_blocks(&source.x, &source.y, &x)?;
+    let mut result = RetainedWaveform::new(&source.name, x.clone(), y);
+    result.as_mut().unit = source.unit.clone();
+    if let Some(complex) = &source.complex {
+        let real = resample_blocks(&source.x, &complex.real, &x)?;
+        let imag = resample_blocks(&source.x, &complex.imag, &x)?;
         result.as_mut().y = real
             .iter()
             .zip(&imag)
@@ -274,6 +338,5 @@ pub fn resample_selected_and_final<W: OutputWaveform>(
     }
     let mut output = waveform.clone();
     *output.as_mut() = result;
-    output.reset_display_cache();
     Ok(output)
 }

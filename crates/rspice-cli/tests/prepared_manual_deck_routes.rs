@@ -120,7 +120,6 @@ fn prepared_manual_snapshot(
         schematic_topology_revision: 0,
         imported_checkpoints: &Default::default(),
         imported_transient_checkpoints: &Default::default(),
-        display_waveform_cache_samples: 0,
         max_parallel_workers: None,
         library_folders: &[],
         compilation: None,

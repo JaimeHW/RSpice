@@ -10,6 +10,7 @@
 //! least and greatest value of the rows in it), the rows around a cursor, its extent, and the ends
 //! of a time axis come from the store's summaries and the few rows they name.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::{Deref, Range};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -390,6 +391,41 @@ impl Stored {
         Some(crate::sampling::sample_at_with(&x, &y, at, interpolation))
     }
 
+    /// Samples `range` of the window: from its values when something has read them, otherwise
+    /// read from the source for this caller alone and not kept.
+    fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
+        assert!(
+            range.start <= range.end && range.end <= self.len(),
+            "samples {range:?} of a window of {}",
+            self.len()
+        );
+        if let Some(values) = self.values.get() {
+            return Ok(Cow::Borrowed(&values[range]));
+        }
+        if let Some(failure) = self.failure.get() {
+            return Err(failure.clone());
+        }
+        if range.is_empty() {
+            return Ok(Cow::Borrowed(&[]));
+        }
+        let lead = usize::from(self.window.lead != WindowLead::None);
+        let mut out = vec![0.0; range.len()];
+        let skip = usize::from(range.start < lead);
+        if skip == 1 {
+            out[0] = self.lead().unwrap_or(f64::NAN);
+            if let Some(failure) = self.failure.get() {
+                return Err(failure.clone());
+            }
+        }
+        let first = self.window.first + (range.start + skip - lead) as u64;
+        if let Err(cause) = self.source.read(first, &mut out[skip..]) {
+            let failure = self.failed(cause);
+            self.fail(failure.clone());
+            return Err(failure);
+        }
+        Ok(Cow::Owned(out))
+    }
+
     fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
         if let Some(failure) = self.failure.get() {
             return Err(failure.clone());
@@ -557,6 +593,15 @@ impl WaveformValues {
         }
     }
 
+    /// Samples `range`, without keeping a stored window in memory: a pass over a long window
+    /// reads it a block at a time. A window something has already read gives its values.
+    pub fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
+        match &self.0 {
+            Repr::Memory(values) => Ok(Cow::Borrowed(&values[range])),
+            Repr::Stored(stored) => stored.read_range(range),
+        }
+    }
+
     /// The values to change, held in memory from now on.
     pub fn make_mut(&mut self) -> &mut Vec<f64> {
         if let Repr::Stored(stored) = &self.0 {
@@ -642,7 +687,8 @@ impl FromIterator<f64> for WaveformValues {
 /// samples.
 impl PartialEq for WaveformValues {
     fn eq(&self, other: &Self) -> bool {
-        Self::ptr_eq(self, other) || **self == **other
+        // Lengths first: a stored window of another length is unequal without being read.
+        Self::ptr_eq(self, other) || (self.len() == other.len() && **self == **other)
     }
 }
 

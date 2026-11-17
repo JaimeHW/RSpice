@@ -335,14 +335,13 @@ fn analysis(kind: AnalysisType) -> AnalysisResult {
 }
 
 #[test]
-fn analysis_digest_is_deterministic_and_ignores_presentation_cache() {
+fn analysis_digest_is_deterministic_and_ignores_presentation() {
     let source = analysis(AnalysisType::Ac);
     let mut presentation_changed = source.clone();
     presentation_changed.label = "renamed".to_owned();
     presentation_changed.timestamp += 100.0;
     presentation_changed.waveforms[0].color = "#ff0000".to_owned();
     presentation_changed.waveforms[0].visible = false;
-    presentation_changed.waveforms[0].rebuild_display_cache(2);
 
     assert_eq!(
         source.result_data_digest(),
@@ -431,23 +430,16 @@ fn canonical_float_encoding_normalizes_signed_zero_and_nan_payloads() {
 }
 
 #[test]
-fn retained_storage_count_covers_authoritative_samples_and_display_cache() {
-    let without_cache = analysis(AnalysisType::Transient);
-    let mut with_cache = without_cache.clone();
-    with_cache.waveforms[0].rebuild_display_cache(2);
+fn retained_storage_count_covers_authoritative_samples_and_not_presentation() {
+    let source = analysis(AnalysisType::Transient);
+    let mut presentation_changed = source.clone();
+    presentation_changed.waveforms[0].color = "#ff0000".to_owned();
+    presentation_changed.waveforms[0].visible = false;
 
-    let base = without_cache.retained_storage_bytes();
-    let cached = with_cache.retained_storage_bytes();
-
-    assert!(base >= 4 * std::mem::size_of::<f64>() as u64);
+    assert!(source.retained_storage_bytes() >= 4 * std::mem::size_of::<f64>() as u64);
     assert_eq!(
-        cached - base,
-        4 * std::mem::size_of::<f32>() as u64 + std::mem::size_of::<usize>() as u64
-    );
-    assert_eq!(
-        without_cache.result_data_digest(),
-        with_cache.result_data_digest(),
-        "presentation caches remain outside immutable content identity"
+        source.retained_storage_bytes(),
+        presentation_changed.retained_storage_bytes()
     );
 }
 

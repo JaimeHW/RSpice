@@ -50,7 +50,6 @@ pub(super) fn present_imported_waveforms(
                 data,
                 color: String::new(),
                 visible: true,
-                display_cache: None,
             })
             .collect(),
         family_metadata: None,
