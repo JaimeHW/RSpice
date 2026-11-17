@@ -289,16 +289,17 @@ fn every_state_bearing_cfg_kind_is_scheduled_at_newton_scope() {
 module every_operator(p, n);
   inout p, n;
   electrical p, n;
-  real filtered;
+  real filtered, hits;
   analog begin
     filtered = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1e-6, 0.0);
+    @(cross(V(p, n) - 1.0, 1)) hits = hits + 1.0;
+    @(above(V(p, n), 1.0)) hits = hits + 1.0;
     I(p, n) <+ ddt(V(p, n))
              + idt(V(p, n), 0.0)
              + idtmod(V(p, n), 0.0, 2.0, 0.0)
              + absdelay(V(p, n), 1e-9)
              + slew(V(p, n), 1e6)
-             + cross(V(p, n) - 1.0, 1)
-             + above(V(p, n), 1.0)
+             + hits
              + last_crossing(V(p, n) - 2.0, 1)
              + laplace_nd(V(p, n), '{1.0}, '{1.0, 1e-9})
              + filtered;

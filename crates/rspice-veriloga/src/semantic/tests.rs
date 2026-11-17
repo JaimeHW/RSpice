@@ -178,10 +178,7 @@ fn stateful_analog_operator_guards_are_checked_as_one_complete_family() {
         ("absdelay", "absdelay(V(p, n), 1.0e-9)"),
         ("transition", "transition(V(p, n))"),
         ("slew", "slew(V(p, n))"),
-        ("cross", "cross(V(p, n))"),
-        ("above", "above(V(p, n))"),
         ("last_crossing", "last_crossing(V(p, n))"),
-        ("timer", "timer(1.0e-9)"),
         ("laplace_zp", "laplace_zp(V(p, n), '{0.0}, '{1.0})"),
         ("laplace_zd", "laplace_zd(V(p, n), '{0.0}, '{1.0})"),
         ("laplace_np", "laplace_np(V(p, n), '{1.0}, '{1.0})"),
@@ -236,23 +233,54 @@ fn stateful_analog_operator_guards_are_checked_as_one_complete_family() {
     }
 }
 
+/// `cross`, `above` and `timer` are analog event functions (Verilog-AMS LRM
+/// 2.4 section 5.10.3): the grammar admits them only in an event expression,
+/// so a value use is refused wherever it stands rather than read as zero.
 #[test]
-fn event_calls_reject_invalid_null_argument_dependencies() {
-    for (expression, expected) in [
-        ("cross(V(p, n), , 1.0e-9)", "tolerances require"),
-        ("cross(V(p, n), 1, , 1.0e-3)", "expr_tol requires"),
-        ("above(V(p, n), , 1.0e-3)", "expr_tol requires"),
-        ("cross(, 1)", "argument 1 may not be null"),
+fn event_functions_are_refused_as_values() {
+    for (name, body) in [
+        ("cross", "analog I(p, n) <+ cross(V(p, n), 1);"),
+        ("cross", "analog I(p, n) <+ cross(V(p, n), , 1.0e-9);"),
+        (
+            "above",
+            "real y; analog begin y = above(V(p, n) - 0.5); I(p, n) <+ y; end",
+        ),
+        (
+            "timer",
+            "integer k; analog begin k = timer(1.0e-9, 1.0e-9); I(p, n) <+ k; end",
+        ),
+        (
+            "cross",
+            "analog begin if (cross(V(p, n))) I(p, n) <+ 1.0; end",
+        ),
+        (
+            "above",
+            "real y; analog begin @(cross(above(V(p, n)) - 0.5)) y = 1.0; I(p, n) <+ y; end",
+        ),
+        (
+            "timer",
+            "analog function real tick; input t; real t; tick = timer(t); endfunction\n\
+             analog I(p, n) <+ tick(1.0e-9);",
+        ),
+        (
+            "cross",
+            "reg q; initial q = 0; always @(cross(V(p, n), 1)) q = cross(V(p, n), 1);",
+        ),
     ] {
-        let source = module_src(&format!("analog I(p, n) <+ {expression};"));
-        let diagnostic = analyze(&source)
-            .expect_err("invalid event call unexpectedly passed semantic analysis")
+        let diagnostic = analyze(&module_src(body))
+            .expect_err("an event function used as a value must not compile")
             .to_string();
         assert!(
-            diagnostic.contains(expected),
-            "{expression} produced the wrong diagnostic: {diagnostic}"
+            diagnostic.contains(&format!("{name}() used as a value"))
+                && diagnostic.contains("5.10.3")
+                && diagnostic.contains("@(...)"),
+            "{body}: {diagnostic}"
         );
     }
+    analyze(&module_src(
+        "real y; analog begin y = 0.0; @(cross(V(p, n), 1) or above(V(p, n) - 0.5) or timer(1.0e-9)) y = 1.0; I(p, n) <+ y; end",
+    ))
+    .expect("the same functions in an event expression compile");
 }
 
 #[test]

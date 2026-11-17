@@ -10459,57 +10459,6 @@ endmodule
     }
 
     #[test]
-    fn keeps_canonical_constant_above_as_stateful_event() {
-        let source = r#"
-module mir_constant_above(p, n);
-  inout p, n;
-  electrical p, n;
-  analog begin
-    I(p, n) <+ above(2.0, 1.0);
-  end
-endmodule
-"#;
-        let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler.compile(source).expect("compile bytecode model");
-        let artifact = compiler
-            .compile_canonical_ir(source)
-            .expect("compile canonical IR");
-        let equation_id = crate::canonical_ir::EquationId::new(0);
-        let bytecode_program = &model.stamp_programs[0].value_program;
-        let above_slots = canonical_state_slots_for_equation(
-            "mir_constant_above".into(),
-            &artifact.mir,
-            equation_id,
-            bytecode_program,
-            CanonicalStateOperator::Above,
-        )
-        .expect("map canonical above to bytecode detector slot");
-
-        assert_eq!(above_slots.len(), 1);
-
-        let program = NativeProgram::from_mir_equation(
-            "mir_constant_above",
-            EntryKind::StampValue,
-            &artifact.mir,
-            equation_id,
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_above_slots(&above_slots),
-        )
-        .expect("lower canonical constant above to native program");
-
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::Const(2.0),
-                NativeOp::Const(1.0),
-                NativeOp::Const(0.0),
-                NativeOp::Const(1.0),
-                NativeOp::AboveState(0),
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 4);
-    }
-
-    #[test]
     fn lowers_canonical_constant_min_to_literal() {
         let source = r#"
 module mir_constant_min(p, n);

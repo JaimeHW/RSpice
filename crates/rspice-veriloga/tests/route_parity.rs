@@ -651,7 +651,11 @@ fn cross_agrees_across_lowerings() {
 module route_cross(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ cross(V(p, n), 0, 0.0, 0.1, 1.0);
+    real k;
+    analog begin
+        @(cross(V(p, n), 0, 0.0, 0.1, 1.0)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#,
         &[1, 0],
@@ -668,7 +672,11 @@ fn above_agrees_across_lowerings() {
 module route_above(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ above(V(p, n) - 0.5, 0.0, 0.0, 1.0);
+    real k;
+    analog begin
+        @(above(V(p, n) - 0.5, 0.0, 0.0, 1.0)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#,
         &[1, 0],
@@ -685,7 +693,11 @@ fn timer_agrees_across_lowerings() {
 module route_timer(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ timer(1.0, 0.5, 0.0, 1.0);
+    real k;
+    analog begin
+        @(timer(1.0, 0.5, 0.0, 1.0)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#,
         &[1, 0],

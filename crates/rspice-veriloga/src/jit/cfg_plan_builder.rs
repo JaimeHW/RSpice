@@ -2283,39 +2283,53 @@ endmodule
         use crate::jit::expr::NativeOp;
         use crate::jit::plan_program::PlanProgram;
 
+        // An event's count acts from the point after the one that finds it,
+        // which solves its left limit; `last_crossing` is a value.
         for (expression, operation, expected) in [
             (
-                "cross(x,1,1n,1p,1)",
+                "@(cross(x,1,1n,1p,1)) y=y+1;",
                 NativeOp::CrossState(0),
-                [0.0, 1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0],
             ),
             (
-                "cross(x,-1,1n,1p,1)",
+                "@(cross(x,-1,1n,1p,1)) y=y+1;",
                 NativeOp::CrossState(0),
-                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
             ),
-            ("cross(x,1,1n,1p,0)", NativeOp::CrossState(0), [0.0; 4]),
             (
-                "above(x,1n,1p,1)",
+                "@(cross(x,1,1n,1p,0)) y=y+1;",
+                NativeOp::CrossState(0),
+                [0.0; 4],
+            ),
+            (
+                "@(above(x,1n,1p,1)) y=y+1;",
                 NativeOp::AboveState(0),
-                [0.0, 1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0],
             ),
-            ("above(x,1n,1p,0)", NativeOp::AboveState(0), [0.0; 4]),
             (
-                "timer(0.5,0.5,1n,1)",
+                "@(above(x,1n,1p,0)) y=y+1;",
+                NativeOp::AboveState(0),
+                [0.0; 4],
+            ),
+            (
+                "@(timer(0.5,0.5,1n,1)) y=y+1;",
                 NativeOp::TimerState(0),
-                [0.0, 1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0],
             ),
-            ("timer(0.5,0.5,1n,0)", NativeOp::TimerState(0), [0.0; 4]),
             (
-                "last_crossing(x,1)",
+                "@(timer(0.5,0.5,1n,0)) y=y+1;",
+                NativeOp::TimerState(0),
+                [0.0; 4],
+            ),
+            (
+                "y=last_crossing(x,1);",
                 NativeOp::LastCrossingState(0),
                 [-1.0, 0.25, 0.25, 0.875],
             ),
         ] {
             let source = format!(
                 "module native_events(p,n); inout p,n; electrical p,n; real x,y;
-                 analog begin x=V(p,n); y={expression}; I(p,n)<+y; end endmodule"
+                 analog begin x=V(p,n); {expression} I(p,n)<+y; end endmodule"
             );
             let report = VerilogACompiler::default()
                 .compile_runtime(&source, None)

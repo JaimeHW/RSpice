@@ -370,7 +370,7 @@ module native_above_assignment(p, n);
     electrical p, n;
     real gate;
     analog begin
-        gate = above(V(p, n) - 1.5);
+        @(above(V(p, n) - 1.5)) gate = gate + 1.0;
         I(p, n) <+ gate;
     end
 endmodule
@@ -387,7 +387,7 @@ module native_timer_assignment(p, n);
     electrical p, n;
     real tick;
     analog begin
-        tick = timer(1.0, 0.5);
+        @(timer(1.0, 0.5)) tick = tick + 1.0;
         I(p, n) <+ tick;
     end
 endmodule
@@ -455,7 +455,7 @@ module native_cross_assignment(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = cross(V(p, n), 1);
+        @(cross(V(p, n), 1)) y = y + 1.0;
         I(p, n) <+ y;
     end
 endmodule
@@ -2831,7 +2831,11 @@ fn native_device_with_canonical_ir_executes_cross_current_without_fallback() {
 module native_canonical_cross_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ cross(V(p, n), 1);
+    real k;
+    analog begin
+        @(cross(V(p, n), 1)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2852,8 +2856,15 @@ endmodule
     assert_eq!(dc_currents[0], 0.0);
 
     device.try_begin_analysis(2).unwrap();
-    for (time, voltage, expected) in [(0.0, -1.0, 0.0), (0.5, 1.0, 1.0), (1.0, 2.0, 0.0)] {
+    // The point at the crossing, a step past the last one, solves its left
+    // limit; the count acts from the next point on.
+    for (time, step, voltage, expected) in [
+        (0.0, 0.0, -1.0, 0.0),
+        (0.5, 0.5, 1.0, 0.0),
+        (1.0, 0.5, 2.0, 1.0),
+    ] {
         device.set_time(time);
+        device.set_timestep(step);
         device.update_voltages(&[voltage]);
         let currents = device
             .try_evaluate()
@@ -2874,7 +2885,11 @@ fn native_device_with_canonical_ir_executes_above_current_without_fallback() {
 module native_canonical_above_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ above(V(p, n) - 1.5);
+    real k;
+    analog begin
+        @(above(V(p, n) - 1.5)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2910,7 +2925,11 @@ fn native_device_with_canonical_ir_executes_timer_current_without_fallback() {
 module native_canonical_timer_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ timer(1.0, 0.5);
+    real k;
+    analog begin
+        @(timer(1.0, 0.5)) k = k + 1.0;
+        I(p, n) <+ k;
+    end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2925,17 +2944,21 @@ endmodule
     device.set_analysis_type(2);
     device.set_timestep(0.01);
 
+    // The point at each tick solves its left limit; the count acts from the
+    // next point on.
     for (time, expected) in [
         (0.75, 0.0_f64),
-        (1.0, 1.0_f64),
-        (1.25, 0.0_f64),
+        (1.0, 0.0_f64),
+        (1.25, 1.0_f64),
         (1.5, 1.0_f64),
+        (1.75, 2.0_f64),
     ] {
         device.set_time(time);
         let currents = device
             .try_evaluate()
             .expect("canonical timer current evaluation succeeds");
         assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
+        device.try_advance_state().unwrap();
     }
 }
 
@@ -3984,7 +4007,15 @@ fn native_device_executes_timer_assignments_without_fallback() {
     device.set_analysis_type(2);
     device.set_timestep(0.01);
 
-    for (time, expected) in [(0.75, 0.0), (1.0, 1.0), (1.25, 0.0), (1.5, 1.0)] {
+    // The point at each tick solves its left limit; the count acts from the
+    // next point on.
+    for (time, expected) in [
+        (0.75, 0.0),
+        (1.0, 0.0),
+        (1.25, 1.0),
+        (1.5, 1.0),
+        (1.75, 2.0),
+    ] {
         device.set_time(time);
         let currents = device
             .try_evaluate()
@@ -3992,6 +4023,7 @@ fn native_device_executes_timer_assignments_without_fallback() {
         observe(&mut device, &artifact);
         assert_eq!(device.variable("tick"), Some(expected), "time: {time}");
         assert_eq!(currents[0].to_bits(), expected.to_bits(), "time: {time}");
+        device.try_advance_state().unwrap();
     }
 }
 
@@ -4161,9 +4193,16 @@ fn native_device_executes_cross_assignments_without_fallback() {
     assert_eq!(device.variable("y"), Some(0.0));
     assert_eq!(dc_currents[0], 0.0);
 
+    // The point at the crossing, a step past the last one, solves its left
+    // limit; the count acts from the next point on.
     device.set_analysis_type(2);
-    for (time, voltage, expected) in [(0.0, -1.0, 0.0), (0.5, 1.0, 1.0), (1.0, 2.0, 0.0)] {
+    for (time, step, voltage, expected) in [
+        (0.0, 0.0, -1.0, 0.0),
+        (0.5, 0.5, 1.0, 0.0),
+        (1.0, 0.5, 2.0, 1.0),
+    ] {
         device.set_time(time);
+        device.set_timestep(step);
         device.update_voltages(&[voltage]);
         let currents = device
             .try_evaluate()

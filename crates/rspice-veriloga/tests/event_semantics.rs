@@ -67,7 +67,11 @@ fn cross_enable_disables_events_without_freezing_history() {
 module disabled_cross(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ cross(V(p, n), 0, 0.0, 0.0, 0.0);
+    real hits;
+    analog begin
+        @(cross(V(p, n), 0, 0.0, 0.0, 0.0)) hits = hits + 1.0;
+        I(p, n) <+ hits;
+    end
 endmodule
 "#,
     );
@@ -79,6 +83,8 @@ endmodule
     );
     device.advance_state();
     assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 0.0_f64.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 0.0_f64.to_bits());
 }
 
 #[test]
@@ -136,7 +142,11 @@ fn above_fires_on_same_time_dc_sweep_crossings() {
 module dc_sweep_above(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ above(V(p, n));
+    real highs;
+    analog begin
+        @(above(V(p, n))) highs = highs + 1.0;
+        I(p, n) <+ highs;
+    end
 endmodule
 "#,
     );
@@ -154,7 +164,11 @@ endmodule
     device.advance_state();
 
     device.update_voltages(&[2.0]);
-    assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0],
+        1.0,
+        "no second event while the sweep stays above"
+    );
 }
 
 #[test]

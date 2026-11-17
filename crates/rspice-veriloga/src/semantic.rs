@@ -8073,6 +8073,14 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::Call(call) => {
+                // An event control reaches here only through its arguments:
+                // its own call is built from the event expression after them.
+                if matches!(call.name.as_str(), "cross" | "above" | "timer")
+                    && self.user_function_for_call(call).is_none()
+                    && !self.digital_function_names.contains(&call.name)
+                {
+                    return Err(analog_event_function_as_value(call));
+                }
                 self.validate_builtin_call_arity(call)?;
                 self.validate_null_arguments(call)?;
                 if let Some(stripped) = self.strip_integral_operator_options(call)? {
@@ -12035,6 +12043,26 @@ fn absdelta_outside_digital_event(span: Span, event: bool) -> CompileError {
     ))
 }
 
+/// `cross`, `above` and `timer` are analog event functions (Verilog-AMS LRM
+/// 2.4 section 5.10.3): the grammar admits them only in an event expression,
+/// not among the primaries (A.8.4), so they have no value to read.
+fn analog_event_function_as_value(call: &CallExpr) -> CompileError {
+    CompileError::Semantic(SemanticError::new(
+        SemanticErrorKind::InvalidAnalogOperator(analog_event_function_value_message(&call.name)),
+        call.span,
+    ))
+}
+
+/// The refusal of an analog event function read as a value, in an analog
+/// or a discrete-domain expression alike.
+fn analog_event_function_value_message(name: &str) -> String {
+    format!(
+        "{name}() used as a value: Verilog-AMS LRM 2.4 section 5.10.3 makes {name} an analog \
+         event function, allowed only in an event expression @(...), and it has no value; \
+         write @({name}(...)) before the statement the event runs"
+    )
+}
+
 fn is_zi_operator_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -12054,10 +12082,7 @@ fn stateful_analog_operator_call_name(name: &str) -> Option<&'static str> {
         "absdelay" => "absdelay",
         "transition" => "transition",
         "slew" => "slew",
-        "cross" => "cross",
-        "above" => "above",
         "last_crossing" => "last_crossing",
-        "timer" => "timer",
         "laplace_zp" => "laplace_zp",
         "laplace_zd" => "laplace_zd",
         "laplace_np" => "laplace_np",

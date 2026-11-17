@@ -86,9 +86,31 @@ module state_layout_mixed(p, n);
              + transition(V(p, n) > 1.0 ? 1.0 : 0.0, 0.0, 1e-9, 1e-9)
              + absdelay(V(p, n), 1e-9)
              + slew(V(p, n), 1e6)
-             + cross(V(p, n) - 1.0, 1)
-             + above(V(p, n), 1.0)
              + last_crossing(V(p, n) - 2.0, 1);
+  end
+endmodule
+"#;
+
+/// [`MIXED`] with a `cross` and an `above` event beside it. An event's
+/// detector is a record in the layout, but it guards a statement rather than
+/// feeding a contribution, so it is not in the stamp's value program.
+const MIXED_WITH_EVENTS: &str = r#"
+module state_layout_events(p, n);
+  inout p, n;
+  electrical p, n;
+  real hits;
+  analog begin
+    @(cross(V(p, n) - 1.0, 1)) hits = hits + 1.0;
+    @(above(V(p, n), 1.0)) hits = hits + 1.0;
+    I(p, n) <+ ddt(V(p, n))
+             + idt(V(p, n), 0.0)
+             + idtmod(V(p, n), 0.0, 2.0, 0.0)
+             + ddt(V(p, n) * 2.0)
+             + transition(V(p, n) > 1.0 ? 1.0 : 0.0, 0.0, 1e-9, 1e-9)
+             + absdelay(V(p, n), 1e-9)
+             + slew(V(p, n), 1e6)
+             + last_crossing(V(p, n) - 2.0, 1)
+             + hits;
   end
 endmodule
 "#;
@@ -148,7 +170,7 @@ fn layout_numbering_matches_the_bytecode_allocation_family_by_family() {
 fn every_state_site_is_classified_and_keyed_by_its_operator_expression() {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let artifact = compiler
-        .compile_canonical_ir(MIXED)
+        .compile_canonical_ir(MIXED_WITH_EVENTS)
         .expect("compile canonical IR");
     let layout = CanonicalStateLayout::from_hir(&artifact.hir);
 

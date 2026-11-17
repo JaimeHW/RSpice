@@ -3769,13 +3769,19 @@ impl SemanticAnalyzer {
                 if self.check_function_call(call, signals, index) {
                     return;
                 }
-                self.record_error_at(
+                // An event's own call is the term of its control, not an
+                // expression of the process, so one here is read as a value.
+                let kind = if matches!(call.name.as_str(), "cross" | "above" | "timer") {
+                    SemanticErrorKind::InvalidAnalogOperator(
+                        super::analog_event_function_value_message(&call.name),
+                    )
+                } else {
                     SemanticErrorKind::UnsupportedFeature(format!(
                         "call to `{}` inside a discrete-domain expression is not supported yet",
                         call.name
-                    )),
-                    call.span,
-                );
+                    ))
+                };
+                self.record_error_at(kind, call.span);
                 for argument in &call.args {
                     self.check_digital_expression(argument, signals, index);
                 }

@@ -491,9 +491,10 @@ fn single_argument_cross_expression_gets_the_either_direction_default() {
 module cross_default(p, n);
     inout p, n;
     electrical p, n;
+    real hits;
     analog begin
-        if (cross(V(p, n)))
-            I(p, n) <+ 1.0;
+        @(cross(V(p, n))) hits = hits + 1.0;
+        I(p, n) <+ hits;
     end
 endmodule
 "#,
@@ -515,14 +516,12 @@ endmodule
 /// A guarded event operator is a real difference between the two levels, not a
 /// different spelling of one thing.
 ///
-/// The front end refuses a stateful analog operator under a guard whose value
-/// can move during an analysis, so the only guards left are instance-static
-/// ones — and under those the flat form still folds the operator into
-/// `guard ? cross(...) : previous`. Every evaluator of that form computes both
-/// arms, so an `cross` under a false static guard still advances its detector
-/// and still asks the transient engine for the breakpoints it finds. In the
-/// graph the operator is inside the branch and an untaken arm evaluates
-/// nothing.
+/// Under an instance-static guard the flat form folds the event into
+/// conditional values: its own predicate and every write of its body.
+/// Every evaluator of that form computes both arms, so a `cross` under a
+/// false static guard still advances its detector and still asks the
+/// transient engine for the breakpoints it finds. In the graph the operator
+/// is inside the branch and an untaken arm evaluates nothing.
 ///
 /// Which is right is not in question — the graph is. This test exists so the
 /// difference is recorded where a migration will trip over it, rather than
@@ -536,9 +535,8 @@ module gated(p, n);
     parameter real mode = 1.0;
     real hit;
     analog begin
-        hit = 0.0;
         if (mode > 0.5) begin
-            hit = cross(V(p, n) - 0.5, 0);
+            @(cross(V(p, n) - 0.5, 0)) hit = hit + 1.0;
         end
         I(p, n) <+ 1.0e-3 * (hit + V(p, n));
     end
@@ -546,8 +544,7 @@ endmodule
 "#;
     let artifact = artifact(source);
 
-    // The flat form: the guarded write is a select, and the operator sits in
-    // one of its arms.
+    // The flat form: the event body's write is a select.
     let folded = artifact
         .hir
         .statements
@@ -615,9 +612,10 @@ module skipped(p, n);
     inout p, n;
     electrical p, n;
     parameter real on = 1.0;
+    real hits;
     analog begin
-        if (cross(V(p, n) - 0.5, 1, 1.0e-9, , on))
-            I(p, n) <+ 1.0;
+        @(cross(V(p, n) - 0.5, 1, 1.0e-9, , on)) hits = hits + 1.0;
+        I(p, n) <+ hits;
     end
 endmodule
 "#,

@@ -93,7 +93,11 @@ fn disabled_timer_neither_fires_nor_limits_the_stepper() {
 module disabled_timer(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ timer(1.0, 0.5, 1.0e-12, 0.0);
+    real ticks;
+    analog begin
+        @(timer(1.0, 0.5, 1.0e-12, 0.0)) ticks = ticks + 1.0;
+        I(p, n) <+ ticks;
+    end
 endmodule
 "#,
     );
@@ -101,6 +105,9 @@ endmodule
 
     assert_eq!(evaluate(&mut device, 0.0, 0.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), None);
+    device.advance_state();
     assert_eq!(evaluate(&mut device, 1.0, 1.0).to_bits(), 0.0_f64.to_bits());
     assert_eq!(device.transient_bound_step(), None);
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.5, 0.5).to_bits(), 0.0_f64.to_bits());
 }

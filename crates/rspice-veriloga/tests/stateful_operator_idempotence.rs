@@ -436,7 +436,11 @@ fn crossing_remains_visible_for_every_newton_reevaluation() {
 module cross_idempotent(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ cross(V(p, n), +1);
+    real count;
+    analog begin
+        @(cross(V(p, n), +1)) count = count + 1.0;
+        I(p, n) <+ count;
+    end
 endmodule
 "#,
     );
@@ -445,11 +449,17 @@ endmodule
     assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
     device.advance_state();
 
+    // The point at the crossing, a step past the last one, solves its left
+    // limit as often as Newton asks; the event's count acts from the next
+    // point on, once.
     device.set_analysis_type(2);
+    device.set_timestep(1.0);
     let first = evaluate(&mut device, 1.0, 1.0);
     let repeated = evaluate(&mut device, 1.0, 1.0);
-    assert_eq!(first.to_bits(), 1.0_f64.to_bits());
+    assert_eq!(first.to_bits(), 0.0_f64.to_bits());
     assert_eq!(first.to_bits(), repeated.to_bits());
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 2.0, 2.0).to_bits(), 1.0_f64.to_bits());
 }
 
 /// A reactive stamp between the value pass and acceptance leaves the `ddt`
