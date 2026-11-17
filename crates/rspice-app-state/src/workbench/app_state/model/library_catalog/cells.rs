@@ -59,7 +59,6 @@ impl Model {
             ..self.restore_valid_workspace_focus_after_prune(
                 removal.active_removed,
                 removal.hierarchy_pruned,
-                removal.project_root_removed,
                 true,
             )
         }
@@ -74,9 +73,6 @@ impl Model {
         let prompt = self.sync_active_schematic_to_workspace();
         let deleted = CellViewRef::new(library, cell, view);
         let active_removed = self.workspace.content.active_view == deleted;
-        let project_root_removed = self.workspace.content.project.root_library == library
-            && self.workspace.content.project.top_cell == cell
-            && view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
         self.workspace.remove_schematic_editor(&deleted.key());
         self.workspace
             .content
@@ -102,7 +98,6 @@ impl Model {
                 active_removed,
                 hierarchy_pruned,
                 preferred,
-                project_root_removed,
                 true,
             )
         }
@@ -112,14 +107,12 @@ impl Model {
         &mut self,
         active_removed: bool,
         hierarchy_pruned: bool,
-        repoint_project_root: bool,
         clear_execution_context: bool,
     ) -> WorkspacePruned {
         self.restore_valid_workspace_focus_with_preferred(
             active_removed,
             hierarchy_pruned,
             None,
-            repoint_project_root,
             clear_execution_context,
         )
     }
@@ -127,12 +120,15 @@ impl Model {
     /// Bring the workspace's focus back to a view the catalog still holds,
     /// and hand back the editor's reload and the execution context's
     /// retirement for the caller to carry out after it.
+    ///
+    /// The focus falls back to the preferred view, else an open tab, else
+    /// the project top's schematic, which a deletion never takes. The
+    /// project top itself is never moved here: it is chosen, not guessed.
     fn restore_valid_workspace_focus_with_preferred(
         &mut self,
         active_removed: bool,
         hierarchy_pruned: bool,
         preferred: Option<CellViewRef>,
-        repoint_project_root: bool,
         clear_execution_context: bool,
     ) -> WorkspacePruned {
         let libraries = &self.library_manager;
@@ -159,6 +155,16 @@ impl Model {
                         .find(|open| reference_exists_in(&self.library_manager, &open.reference))
                         .map(|open| open.reference.clone())
                 })
+                .or_else(|| {
+                    let project = &self.workspace.content.project;
+                    let top = CellViewRef::new(
+                        &project.root_library,
+                        &project.top_cell,
+                        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+                    );
+                    reference_exists_in(&self.library_manager, &top).then_some(top)
+                })
+                .or_else(|| first_schematic_reference_in(&self.library_manager))
                 .unwrap_or_else(|| self.create_fallback_schematic_cell())
         };
         // Every survivor above is a view the catalog holds; the only other
@@ -191,9 +197,6 @@ impl Model {
         if is_schematic_like(fallback_type) {
             self.workspace.ensure_active_buffer();
         }
-        if repoint_project_root {
-            self.repoint_project_root_to_surviving_schematic(&fallback, fallback_type);
-        }
         WorkspacePruned {
             restore_active_schematic: true,
             clear_execution_context,
@@ -201,32 +204,8 @@ impl Model {
         }
     }
 
-    fn repoint_project_root_to_surviving_schematic(
-        &mut self,
-        fallback: &CellViewRef,
-        fallback_type: ViewType,
-    ) {
-        let root = if is_schematic_like(fallback_type)
-            && reference_exists_in(&self.library_manager, fallback)
-        {
-            fallback.clone()
-        } else {
-            self.workspace
-                .content
-                .open_views
-                .iter()
-                .find(|open| {
-                    is_schematic_like(open.view_type)
-                        && reference_exists_in(&self.library_manager, &open.reference)
-                })
-                .map(|open| open.reference.clone())
-                .or_else(|| first_schematic_reference_in(&self.library_manager))
-                .unwrap_or_else(|| self.create_fallback_schematic_cell())
-        };
-        self.workspace.content.project.root_library = root.library;
-        self.workspace.content.project.top_cell = root.cell;
-    }
-
+    /// A new, empty schematic cell for the focus to rest on when the catalog
+    /// holds no schematic at all.
     fn create_fallback_schematic_cell(&mut self) -> CellViewRef {
         let library_name = crate::state::workspace::DEFAULT_PROJECT_LIBRARY.to_string();
         let view_name = crate::state::workspace::DEFAULT_SCHEMATIC_VIEW.to_string();
@@ -256,8 +235,6 @@ impl Model {
         }
 
         let reference = CellViewRef::new(library_name, cell_name, view_name);
-        self.workspace.content.project.root_library = reference.library.clone();
-        self.workspace.content.project.top_cell = reference.cell.clone();
         if !self
             .workspace
             .content

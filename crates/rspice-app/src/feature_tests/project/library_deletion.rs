@@ -627,9 +627,99 @@ fn deleting_hierarchy_ancestor_resets_invalid_breadcrumb_path() {
     );
 }
 
+/// The project top is chosen, never guessed: deleting the top cell, or the
+/// schematic it runs from, is refused with a pointer to Set as project top,
+/// and nothing is removed.
 #[test]
-fn deleting_default_top_cell_does_not_recreate_deleted_design() {
-    let mut app = app_with_state(crate::workbench::app_state::AppState::default());
+fn deleting_the_project_top_or_its_schematic_is_refused_with_a_pointer_to_set_as_project_top() {
+    for view in [None, Some("schematic")] {
+        let mut app = app_with_state(default_project_with_active_keep_cell());
+        let target = match view {
+            None => LibraryDeletionTarget::Cell {
+                library: "user".to_owned(),
+                cell: "top".to_owned(),
+            },
+            Some(view) => LibraryDeletionTarget::View {
+                library: "user".to_owned(),
+                cell: "top".to_owned(),
+                view: view.to_owned(),
+            },
+        };
+        app.state
+            .project
+            .open_library_deletions_review(&app.state.model, vec![target.clone()])
+            .expect("the review opens and states the refusal");
+        let refused = app
+            .state
+            .project
+            .confirm_library_deletion_review(
+                &app.state.model,
+                DeletionInstanceResolution::KeepUnresolved,
+            )
+            .expect_err("the review does not confirm a deletion of the top");
+        assert!(
+            refused.contains("Set as project top"),
+            "{target:?}: {refused}"
+        );
+        app.state.project.library_deletion_review.close();
+
+        match view {
+            None => app.state.project.pending_delete_cell = Some(("user".into(), "top".into())),
+            Some(view) => {
+                app.state.project.pending_delete_view =
+                    Some(("user".into(), "top".into(), view.into()));
+            }
+        }
+        process_pending(&mut app);
+
+        assert!(
+            app.state
+                .model
+                .library_manager
+                .get_library("user")
+                .and_then(|library| library.get_cell("top"))
+                .and_then(|cell| cell.get_view("schematic"))
+                .is_some(),
+            "{target:?}: the top's schematic stays"
+        );
+        let project = &app.state.model.workspace.content.project;
+        assert_eq!(
+            (project.root_library.as_str(), project.top_cell.as_str()),
+            ("user", "top")
+        );
+        let prompt = app
+            .state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str());
+        assert!(
+            prompt.is_some_and(
+                |text| text.contains("project top") && text.contains("Set as project top")
+            ),
+            "{target:?}: {prompt:?}"
+        );
+    }
+}
+
+/// Once another cell is the top, the former top deletes like any other cell:
+/// the top stays the cell the reader chose, and the editor comes to rest on
+/// the top's schematic rather than on a cell made up for it.
+#[test]
+fn a_former_top_deletes_once_another_is_chosen_and_the_chosen_top_stays() {
+    let mut state = default_project_with_active_keep_cell();
+    let top_ref = CellViewRef::new("user", "top", "schematic");
+    state.model.workspace.content.open_views =
+        vec![OpenCellView::new(top_ref.clone(), ViewType::Schematic)];
+    state.model.workspace.content.active_view = top_ref.clone();
+    state.model.workspace.content.hierarchy_stack = vec![top_ref];
+    let mut app = app_with_state(state);
+    app.state
+        .model
+        .set_project_top("user", "keep")
+        .expect("keep has a drawing to run from");
+    let original_epoch = app.state.model.design_execution_epoch;
+    let cells_before = app.state.model.library_manager.total_cell_count();
     app.state.project.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
 
     process_pending(&mut app);
@@ -641,109 +731,22 @@ fn deleting_default_top_cell_does_not_recreate_deleted_design() {
             .get_library("user")
             .and_then(|library| library.get_cell("top"))
             .is_none(),
-        "deleted default top cell should not be recreated as fallback"
+        "the former top is deleted"
     );
-    assert_ne!(
-        app.state.model.workspace.content.active_view,
-        CellViewRef::new("user", "top", "schematic")
-    );
-    assert!(
-        app.state
-            .model
-            .workspace
-            .active_context_schematic()
-            .is_some()
-    );
-}
-
-#[test]
-fn deleting_default_top_schematic_view_does_not_recreate_deleted_view() {
-    let mut app = app_with_state(crate::workbench::app_state::AppState::default());
-    app.state.project.pending_delete_view = Some((
-        "user".to_string(),
-        "top".to_string(),
-        "schematic".to_string(),
-    ));
-
-    process_pending(&mut app);
-
-    assert!(
-        app.state
-            .model
-            .library_manager
-            .get_library("user")
-            .and_then(|library| library.get_cell("top"))
-            .and_then(|cell| cell.get_view("schematic"))
-            .is_none(),
-        "deleted default top schematic view should not be recreated as fallback"
-    );
-    assert_ne!(
-        app.state.model.workspace.content.active_view,
-        CellViewRef::new("user", "top", "schematic")
-    );
-    assert!(
-        app.state
-            .model
-            .workspace
-            .active_context_schematic()
-            .is_some()
-    );
-}
-
-#[test]
-fn deleting_non_active_project_top_cell_repoints_root_and_invalidates_runs() {
-    let mut app = app_with_state(default_project_with_active_keep_cell());
-    let original_epoch = app.state.model.design_execution_epoch;
-    app.state.project.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
-
-    process_pending(&mut app);
-
-    assert!(
-        app.state
-            .model
-            .library_manager
-            .get_library("user")
-            .and_then(|library| library.get_cell("top"))
-            .is_none(),
-        "deleted project top cell should stay deleted"
-    );
-    assert_eq!(app.state.model.workspace.content.active_view.cell, "keep");
     assert_eq!(
-        app.state.model.workspace.content.project.root_library,
-        "user"
+        app.state.model.library_manager.total_cell_count(),
+        cells_before - 1,
+        "no cell is made up to rest on"
     );
-    assert_eq!(app.state.model.workspace.content.project.top_cell, "keep");
-    assert_ne!(app.state.model.design_execution_epoch, original_epoch);
-}
-
-#[test]
-fn deleting_non_active_project_top_schematic_repoints_root_and_invalidates_runs() {
-    let mut app = app_with_state(default_project_with_active_keep_cell());
-    let original_epoch = app.state.model.design_execution_epoch;
-    app.state.project.pending_delete_view = Some((
-        "user".to_string(),
-        "top".to_string(),
-        "schematic".to_string(),
-    ));
-
-    process_pending(&mut app);
-
-    assert!(
-        app.state
-            .model
-            .library_manager
-            .get_library("user")
-            .and_then(|library| library.get_cell("top"))
-            .and_then(|cell| cell.get_view("schematic"))
-            .is_none(),
-        "deleted project top schematic should stay deleted"
-    );
-    assert_eq!(app.state.model.workspace.content.active_view.cell, "keep");
+    let project = &app.state.model.workspace.content.project;
     assert_eq!(
-        app.state.model.workspace.content.project.root_library,
-        "user"
+        (project.root_library.as_str(), project.top_cell.as_str()),
+        ("user", "keep")
     );
-    assert_eq!(app.state.model.workspace.content.project.top_cell, "keep");
+    assert_eq!(
+        app.state.model.workspace.content.active_view,
+        CellViewRef::new("user", "keep", "schematic")
+    );
     assert_ne!(app.state.model.design_execution_epoch, original_epoch);
 }
 

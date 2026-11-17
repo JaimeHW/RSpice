@@ -325,12 +325,7 @@ impl Model {
             .retain_valid_occurrences(|reference| reference.library != library);
         WorkspacePruned {
             prompt,
-            ..self.restore_valid_workspace_focus_after_prune(
-                active_removed,
-                hierarchy_pruned,
-                false,
-                true,
-            )
+            ..self.restore_valid_workspace_focus_after_prune(active_removed, hierarchy_pruned, true)
         }
     }
 }

@@ -236,7 +236,6 @@ impl ProjectFeature {
         let reference_count = placements.to_string();
         let source_count = impact.source_bundles.to_string();
         let root_count = impact.configuration_roots.to_string();
-        let project_root = if impact.project_root { "yes" } else { "no" };
         let stale_error = (!revision_current).then(|| {
             "The library catalog changed after this review opened. Cancel and review the deletion again.".to_owned()
         });
@@ -306,7 +305,6 @@ impl ProjectFeature {
             kv_row(ui, "Placements in this project", &reference_count);
             kv_row(ui, "Owned source bundles", &source_count);
             kv_row(ui, "Configuration roots", &root_count);
-            kv_row(ui, "Project root", project_root);
 
             let t = Tokens::get(ui.ctx());
             if let Some(question) = &placement_question {
@@ -629,6 +627,20 @@ fn can_delete(
     resolution: Option<DeletionInstanceResolution>,
 ) -> Result<(), String> {
     validate_library_deletion_target(model, target)?;
+    // The top cell is chosen, never guessed: it goes only once another cell
+    // has been chosen in its place.
+    if impact.project_root {
+        let what = match target.view() {
+            Some(_) => format!(
+                "View '{}' is the schematic the project top runs from.",
+                target.display_path()
+            ),
+            None => format!("Cell '{}' is the project top.", target.display_path()),
+        };
+        return Err(format!(
+            "{what} Choose another cell with Set as project top before deleting it."
+        ));
+    }
     let roots = model.workspace.content.configuration_sets.roots_in_scope(
         target.library(),
         target.cell(),

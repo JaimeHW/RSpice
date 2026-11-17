@@ -229,8 +229,6 @@ impl Model {
     ) -> CellRemovalScope {
         let active_removed = self.workspace.content.active_view.library == library
             && self.workspace.content.active_view.cell == cell;
-        let project_root_removed = self.workspace.content.project.root_library == library
-            && self.workspace.content.project.top_cell == cell;
         let prefix = format!("{library}/{cell}/");
         self.workspace
             .content
@@ -269,18 +267,16 @@ impl Model {
             });
         CellRemovalScope {
             active_removed,
-            project_root_removed,
             hierarchy_pruned,
         }
     }
 }
 
-/// What taking one cell out of the workspace left undecided: the focus, the
-/// project root, and the occurrence trail all name cell views, and any of the
-/// three can have named the cell that just went.
+/// What taking one cell out of the workspace left undecided: the focus and
+/// the occurrence trail both name cell views, and either can have named the
+/// cell that just went. The project top cannot: it is never deleted.
 pub struct CellRemovalScope {
     pub active_removed: bool,
-    pub project_root_removed: bool,
     pub hierarchy_pruned: bool,
 }
 
