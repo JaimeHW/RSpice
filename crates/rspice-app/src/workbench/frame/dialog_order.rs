@@ -270,6 +270,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
+        key: DialogKey("project.properties"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.properties"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.properties")),
+    },
+    DialogSpec {
         key: DialogKey("code.source_document"),
         modality: Modality::Modeless,
         is_open: None,

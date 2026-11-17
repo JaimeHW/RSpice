@@ -126,7 +126,7 @@ impl NewProjectParams {
 }
 
 /// Why the project file refuses `name`, as a sentence.
-fn project_name_refusal(error: rspice_project::ProjectDescriptorError) -> String {
+pub(crate) fn project_name_refusal(error: rspice_project::ProjectDescriptorError) -> String {
     use rspice_project::ProjectDescriptorError as Refusal;
     match error {
         Refusal::EmptyName => "Type a project name.".to_owned(),

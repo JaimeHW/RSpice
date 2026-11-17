@@ -494,6 +494,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::RuleSetup.key(),
     DesignCommand::ReviewComments.key(),
     ProjectCommand::RevisionHistory.key(),
+    ProjectCommand::Properties.key(),
     SheetsCommand::NextSheet.key(),
     SheetsCommand::PreviousSheet.key(),
     SheetsCommand::NewSheet.key(),

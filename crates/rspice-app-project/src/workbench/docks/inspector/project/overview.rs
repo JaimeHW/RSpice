@@ -86,6 +86,11 @@ pub(super) fn project_overview(
 
     section_header(ui, "Project actions", None);
     let mut action = None;
+    if inspector_action(ui, "Project properties\u{2026}") {
+        action = Some(ProjectInspectorAction::Execute(
+            ProjectCommand::Properties.key(),
+        ));
+    }
     if inspector_action(ui, "Revision history\u{2026}") {
         action = Some(ProjectInspectorAction::Execute(
             ProjectCommand::RevisionHistory.key(),

@@ -123,9 +123,10 @@ pub(in crate::workbench) const fn application_menu_entries(
 /// File makes, opens, closes, keeps, brings in and sends out: the project,
 /// its cells and the documents open on them.
 ///
-/// Its 23 rows have 21 letters among their labels to give as access keys:
-/// Save all (which has its key) and Live session (shown only to a signed-in
-/// account) go without.
+/// Its 24 rows have 21 letters among their labels to give as access keys:
+/// Save all (which has its key), Project properties (whose every letter an
+/// earlier row holds) and Live session (shown only to a signed-in account) go
+/// without.
 const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::NewProject).access('N'),
     project(ProjectCommand::NewCell).access('W'),
@@ -152,6 +153,7 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::SaveAll),
     command(ShellCommand::RevertActiveDocument).access('D'),
     project(ProjectCommand::RevisionHistory).access('Y'),
+    project(ProjectCommand::Properties),
     Separator,
     MenuEntry::submenu("Import", IMPORT_MENU).access('I'),
     MenuEntry::submenu("Export", EXPORT_MENU).access('E'),

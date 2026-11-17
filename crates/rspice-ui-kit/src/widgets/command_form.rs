@@ -1681,6 +1681,13 @@ impl<'a> CommandForm<'a> {
         self
     }
 
+    /// The 600-point reading column, for the properties of a whole object,
+    /// whose values are paths and prose the narrower cards would elide.
+    pub fn reading_column(mut self) -> Self {
+        self.size = DialogSize::AccountManager;
+        self
+    }
+
     /// Hold Cancel off while the command is finishing what it started — a
     /// save in flight — so leaving cannot abandon it half-done. Esc still
     /// reports [`DialogChoice::Cancelled`]; the caller ignores it meanwhile.

@@ -49,6 +49,8 @@ pub enum ProjectCommand {
     /// New View on the cell in front, preset to a symbol.
     CreateSymbol,
     RevisionHistory,
+    /// The open project's name, description, top cell and include paths.
+    Properties,
     CheckAndSave,
 }
 
@@ -128,7 +130,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -149,6 +151,7 @@ impl ProjectCommand {
         Self::Annotate,
         Self::CreateSymbol,
         Self::RevisionHistory,
+        Self::Properties,
         Self::CheckAndSave,
     ];
 
@@ -178,6 +181,7 @@ impl ProjectCommand {
             Self::Annotate => CommandKey::new("annotate-reference-designators"),
             Self::CreateSymbol => CommandKey::new("create-symbol-from-schematic"),
             Self::RevisionHistory => CommandKey::new("revision-history"),
+            Self::Properties => CommandKey::new("project-properties"),
             Self::CheckAndSave => CommandKey::new("check-and-save"),
         }
     }
@@ -255,6 +259,7 @@ impl ProjectCommand {
                 NONE,
             ),
             Self::RevisionHistory => ("Revision history\u{2026}", "File", open, global, NONE),
+            Self::Properties => ("Project properties\u{2026}", "File", open, global, NONE),
             Self::CheckAndSave => (
                 "Check and save\u{2026}",
                 "Design",

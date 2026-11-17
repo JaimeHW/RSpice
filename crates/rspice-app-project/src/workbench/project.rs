@@ -71,6 +71,7 @@ impl Feature for ProjectFeature {
         ids::OPEN_NETLIST,
         ProjectCommand::NewCell.key(),
         ProjectCommand::RevisionHistory.key(),
+        ProjectCommand::Properties.key(),
         ProjectCommand::Page(ProjectPage::Library).key(),
         ProjectCommand::Page(ProjectPage::Dependencies).key(),
         ProjectCommand::Page(ProjectPage::Recovery).key(),
@@ -94,7 +95,7 @@ impl Feature for ProjectFeature {
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by, in that order: New project, Check and save, Design
-/// management, Revision history, the configuration dialogs, New Cell, New
+/// management, Revision history, Project properties, the configuration dialogs, New Cell, New
 /// View, Copy Cell, Rename Cell, the deletion review and the staged
 /// deletion. Then the library and view membership dialogs the Library
 /// surface draws, which hold a modal gate while open. Each is open while its
@@ -122,6 +123,11 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         key: DialogKey("project.project_revision_history"),
         is_open: |project| project.project_revision_history.open,
         render: ProjectFeature::render_project_revision_history_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("project.properties"),
+        is_open: |project| project.project_properties.is_open(),
+        render: ProjectFeature::render_project_properties_dialog,
     },
     FeatureDialog {
         key: DialogKey("project.configuration"),
@@ -609,7 +615,7 @@ impl CommandSet for ProjectCommand {
                 schematic_in_front(reads) && open,
                 "open a schematic or testbench",
             ),
-            Self::RevisionHistory => (open, "open a project"),
+            Self::RevisionHistory | Self::Properties => (open, "open a project"),
             // A symbol in front is checked and saved with the project: its
             // checks are advice, so they never stand between it and the save.
             Self::CheckAndSave if symbol_in_front(reads) => (
@@ -692,6 +698,7 @@ impl CommandSet for ProjectCommand {
                 cx.model,
                 cx.platform,
             ),
+            Self::Properties => cx.state.project_properties.open(cx.model, cx.platform),
             // Saving a symbol in front runs its checks, so Check and save
             // there is the save itself.
             Self::CheckAndSave
