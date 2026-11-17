@@ -336,7 +336,7 @@ pub(crate) fn new_project() -> (User, CellViewRef) {
     );
     user.app.state.project.new_project.name = "Verilog-A flow".to_owned();
     user.settle();
-    user.click("Create project");
+    user.click("Create");
     assert!(
         !user.app.state.project.new_project.open,
         "the project is created"

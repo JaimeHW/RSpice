@@ -135,8 +135,8 @@ mod written_at_creation {
     }
 
     /// A folder that already holds files is not written into: Create is
-    /// refused beside the fields, the open project stays, and nothing is
-    /// written.
+    /// refused with the reason the Location field gives, the open project
+    /// stays, and nothing is written.
     #[test]
     fn a_new_project_is_refused_a_folder_that_already_holds_files() {
         let location = unique_temp_dir("new-project-occupied");
@@ -155,9 +155,9 @@ mod written_at_creation {
             .error
             .clone()
             .expect("the dialog states the refusal");
-        assert!(
-            refusal.contains("already exists and is not empty"),
-            "{refusal}"
+        assert_eq!(
+            refusal,
+            "\u{201c}Amp\u{201d} already exists here and is not empty."
         );
         assert!(app.state.project.new_project.open, "the dialog stays open");
         assert_eq!(app.state.model.workspace.content.project.name(), before);
@@ -166,6 +166,79 @@ mod written_at_creation {
             std::fs::read_to_string(occupied.join("notes.txt")).unwrap(),
             "kept"
         );
+    }
+
+    /// File > New project... opened, a name typed and Enter, through whole
+    /// frames: the dialog opens on the name it offers, selected, so typing
+    /// replaces it; the library follows; Enter creates the project and
+    /// writes its file.
+    #[test]
+    fn a_name_typed_as_new_project_opens_and_enter_create_the_project() {
+        use crate::feature_tests::replay::Replay;
+        use egui::accesskit::Role;
+        use egui::{Key, Modifiers};
+
+        let mut replay = Replay::new();
+        replay.click("File", Role::MenuItem);
+        replay.click("New project\u{2026}", Role::MenuItem);
+        replay.type_text("Sensor bridge");
+        let dialog = replay.app.state.project.new_project.clone();
+        assert_eq!(
+            dialog.name, "Sensor bridge",
+            "the offered name was typed over"
+        );
+        assert_eq!(
+            dialog.library, "sensor_bridge",
+            "the library follows the name"
+        );
+        let file = dialog.project_file().expect("a whole location is offered");
+
+        replay.key(Key::Enter, Modifiers::NONE);
+
+        assert!(
+            !replay.app.state.project.new_project.open,
+            "Enter created it"
+        );
+        let project = &replay.app.state.model.workspace.content.project;
+        assert_eq!(project.name(), "Sensor bridge");
+        assert_eq!(project.root_library, "sensor_bridge");
+        assert!(file.is_file(), "the project file is written at once");
+    }
+
+    /// Enter does not create while a field refuses what it holds, and
+    /// Escape leaves New project with nothing created or written.
+    #[test]
+    fn enter_waits_on_a_refused_field_and_escape_creates_nothing() {
+        use crate::feature_tests::replay::Replay;
+        use egui::accesskit::Role;
+        use egui::{Key, Modifiers};
+
+        let mut replay = Replay::new();
+        let before = replay.app.state.model.workspace.content.project.id();
+        replay.click("File", Role::MenuItem);
+        replay.click("New project\u{2026}", Role::MenuItem);
+        let location = std::path::PathBuf::from(&replay.app.state.project.new_project.location);
+        // The offered name is selected: one Backspace empties the field.
+        replay.key(Key::Backspace, Modifiers::NONE);
+        assert_eq!(replay.app.state.project.new_project.name, "");
+
+        replay.key(Key::Enter, Modifiers::NONE);
+        let dialog = &replay.app.state.project.new_project;
+        assert!(dialog.open, "Enter waits on the empty name");
+        assert_eq!(dialog.footer().as_deref(), Some("Type a project name."));
+
+        replay.type_text("Discarded");
+        replay.key(Key::Escape, Modifiers::NONE);
+        assert!(
+            !replay.app.state.project.new_project.open,
+            "Escape closed it"
+        );
+        assert_eq!(
+            replay.app.state.model.workspace.content.project.id(),
+            before,
+            "the open project stays"
+        );
+        assert!(!location.join("Discarded").exists(), "nothing is written");
     }
 
     /// The location starts where the last project lives: beside its own

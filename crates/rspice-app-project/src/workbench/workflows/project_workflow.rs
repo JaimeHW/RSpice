@@ -150,7 +150,9 @@ pub(crate) fn project_name_refusal(error: rspice_project::ProjectDescriptorError
     }
 }
 
-fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
+/// Why `value` cannot name a project's `field` (its library or top cell), as
+/// one sentence.
+pub(crate) fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
     use rspice_design_model::cell_view::CellViewNameError;
     crate::state::workspace::validate_cell_view_name_segment(value).map_err(|error| match error {
         CellViewNameError::Empty => format!("Type a {field} name."),
@@ -215,6 +217,55 @@ pub fn refuse_new_project(
         return Err(error);
     }
     Ok(())
+}
+
+/// Why New project cannot make a project's folder in `location`, as the line
+/// under the Location field says it: the folder is not there, is a file, or
+/// cannot be written to. Writing is tried, not inferred from permissions,
+/// since a share or a medium can refuse what the attributes allow.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn new_project_location_refusal(location: &Path) -> Option<String> {
+    use crate::io::durable_file::open_lease::write_refusal;
+    match std::fs::metadata(location) {
+        Ok(metadata) if !metadata.is_dir() => {
+            return Some("This is a file, not a folder.".to_owned());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Some("This folder does not exist.".to_owned());
+        }
+        Err(error) => return Some(format!("This folder could not be read: {error}.")),
+    }
+    // The probe is made beside a name in the folder, so it lands in the
+    // folder itself.
+    match write_refusal(&location.join("project")) {
+        Ok(None) => None,
+        Ok(Some(_)) => Some("This folder cannot be written to.".to_owned()),
+        Err(error) => Some(format!("This folder could not be written to: {error}.")),
+    }
+}
+
+/// Why New project cannot use the project's own folder, which `file` is
+/// written in: something of that name is already in the location.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn new_project_folder_refusal(file: &Path) -> Option<String> {
+    let folder = file.parent()?;
+    let name = folder.file_name()?.to_string_lossy();
+    let metadata = std::fs::metadata(folder).ok()?;
+    if !metadata.is_dir() {
+        return Some(format!(
+            "A file named \u{201c}{name}\u{201d} is already here."
+        ));
+    }
+    match std::fs::read_dir(folder) {
+        Ok(mut entries) => entries
+            .next()
+            .is_some()
+            .then(|| format!("\u{201c}{name}\u{201d} already exists here and is not empty.")),
+        Err(_) => Some(format!(
+            "\u{201c}{name}\u{201d} is already here and cannot be read."
+        )),
+    }
 }
 
 /// Make the folder New project writes `file` in. A folder that already holds

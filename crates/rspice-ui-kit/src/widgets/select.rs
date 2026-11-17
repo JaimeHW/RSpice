@@ -12,6 +12,8 @@ const VALUE_INSET: f32 = 8.0;
 const CHEVRON_ROOM: f32 = 24.0;
 /// Options a drop-down shows before its list scrolls.
 const SELECT_VISIBLE_OPTIONS: usize = 12;
+/// Least air between a choice's name and the detail set at its row's end.
+const DETAIL_GAP: f32 = 12.0;
 
 /// The open chevron a select draws at its trailing edge, centred on `center`.
 /// Stroked, not filled: egui's own filled triangle is what set an old combo
@@ -94,6 +96,7 @@ pub fn select_with_disabled_response(
         width,
         false,
         disabled,
+        &[],
         None,
     )
     .0
@@ -116,6 +119,37 @@ pub fn select_with_response(
         width,
         false,
         &[],
+        &[],
+        None,
+    )
+    .0
+}
+
+/// [`select_with_response`] whose choices each carry a detail set dim at the
+/// row's end, as a version beside the name it qualifies: `details[i]` goes
+/// with `options[i]`, and an empty one leaves its row plain. The chosen
+/// one's detail stands in the well too, before the chevron. Where a row
+/// cannot hold both whole, the detail gives way and the name keeps the room:
+/// a name cut short to fit its version reads as another name.
+pub fn select_with_details(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    details: &[String],
+    width: f32,
+) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        false,
+        &[],
+        details,
         None,
     )
     .0
@@ -140,6 +174,7 @@ pub fn select_mono_with_response(
         options,
         width,
         true,
+        &[],
         &[],
         None,
     )
@@ -251,6 +286,7 @@ pub fn editable_select_mono(
                 &current,
                 options,
                 &[],
+                &[],
                 &value_font,
             );
         });
@@ -288,6 +324,7 @@ pub fn select_with_switch(
         width,
         false,
         &[],
+        &[],
         Some(switch),
     );
     (output.picked, switched)
@@ -306,6 +343,7 @@ fn select_with_font(
     width: f32,
     mono: bool,
     disabled: &[(usize, &'static str)],
+    details: &[String],
     switch: Option<SelectSwitch<'_>>,
 ) -> (SelectOutput, bool) {
     let t = Tokens::get(ui.ctx());
@@ -324,6 +362,12 @@ fn select_with_font(
     let hover =
         ui.ctx()
             .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
+    let value_room = (rect.width() - VALUE_INSET - CHEVRON_ROOM).max(1.0);
+    let selected_detail = options
+        .iter()
+        .position(|option| option == selected)
+        .and_then(|index| details.get(index));
+    let selected_detail = fitting_detail(ui, selected, selected_detail, &value_font, value_room);
     // A value wider than the well is shortened from the middle and named
     // whole on hover: cut at the chevron, it read as complete.
     let shown = super::middle_elided(
@@ -331,7 +375,7 @@ fn select_with_font(
         selected,
         &value_font,
         c.text,
-        (rect.width() - VALUE_INSET - CHEVRON_ROOM).max(1.0),
+        value_room - selected_detail.map_or(0.0, |(_, room)| room),
     );
     let response = if shown == selected {
         response
@@ -346,6 +390,15 @@ fn select_with_font(
         Stroke::new(1.0, theme::mix(c.border, c.border_strong, hover)),
         egui::StrokeKind::Inside,
     );
+    if let Some((detail, _)) = selected_detail {
+        painter.text(
+            egui::pos2(rect.right() - CHEVRON_ROOM, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            detail,
+            value_font.clone(),
+            c.text_dim,
+        );
+    }
     painter
         .with_clip_rect(egui::Rect::from_min_max(
             rect.left_top(),
@@ -408,6 +461,7 @@ fn select_with_font(
                 selected,
                 options,
                 disabled,
+                details,
                 &value_font,
             ) {
                 picked = Some(index);
@@ -448,7 +502,11 @@ fn select_with_font(
 /// The list a select opens: one row per option, the current one in the
 /// accent and an unavailable one faint with its reason on hover, scrolling
 /// once it holds more than [`SELECT_VISIBLE_OPTIONS`]. Returns the option
-/// clicked this frame.
+/// clicked this frame. A row's detail stands dim at its end while the row
+/// holds it and the option whole.
+// The select hands its list each thing the caller supplied it: identity,
+// choices, unavailable ones, details and face.
+#[expect(clippy::too_many_arguments)]
 fn option_list(
     ui: &mut Ui,
     id_salt: &str,
@@ -456,6 +514,7 @@ fn option_list(
     selected: &str,
     options: &[String],
     disabled: &[(usize, &'static str)],
+    details: &[String],
     value_font: &egui::FontId,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
@@ -486,12 +545,14 @@ fn option_list(
                             Sense::click()
                         },
                     );
+                    let room = (row.width() - 2.0 * VALUE_INSET).max(1.0);
+                    let detail = fitting_detail(ui, option, details.get(index), value_font, room);
                     let shown = super::middle_elided(
                         ui,
                         option,
                         value_font,
                         c.text,
-                        (row.width() - 2.0 * VALUE_INSET).max(1.0),
+                        room - detail.map_or(0.0, |(_, room)| room),
                     );
                     let row_response = if let Some(reason) = unavailable {
                         row_response.on_hover_text(reason)
@@ -511,10 +572,27 @@ fn option_list(
                     ui.ctx().accesskit_node_builder(row_response.id, |node| {
                         node.set_role(egui::accesskit::Role::ListBoxOption);
                         node.set_selected(is_current);
+                        if let Some(detail) = details.get(index).filter(|detail| !detail.is_empty())
+                        {
+                            node.set_description(detail.as_str());
+                        }
                     });
                     let painter = ui.painter();
                     if row_response.hovered() {
                         painter.rect_filled(row, t.radius, c.bg_hover);
+                    }
+                    if let Some((detail, _)) = detail {
+                        painter.text(
+                            egui::pos2(row.right() - VALUE_INSET, row.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            detail,
+                            value_font.clone(),
+                            if unavailable.is_some() {
+                                c.text_faint
+                            } else {
+                                c.text_dim
+                            },
+                        );
                     }
                     painter.text(
                         egui::pos2(row.left() + VALUE_INSET, row.center().y),
@@ -547,6 +625,27 @@ fn option_list(
             node.set_label(accessible_label);
         });
     picked
+}
+
+/// `detail` with the room it takes at the end of a row `room` wide, when the
+/// row holds it beside the whole of `name`; `None` when there is no detail or
+/// the name needs the room.
+fn fitting_detail<'a>(
+    ui: &Ui,
+    name: &str,
+    detail: Option<&'a String>,
+    font: &egui::FontId,
+    room: f32,
+) -> Option<(&'a str, f32)> {
+    let detail = detail.filter(|detail| !detail.is_empty())?;
+    let width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    let taken = width(detail) + DETAIL_GAP;
+    (width(name) + taken <= room).then_some((detail.as_str(), taken))
 }
 
 fn keyboard_selection(

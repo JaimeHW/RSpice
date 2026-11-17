@@ -75,7 +75,7 @@ pub use searchable_select::{SelectGroup, searchable_select};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{
     EditableSelectOutput, SelectSwitch, editable_select_mono, select_mono_with_response,
-    select_with_disabled, select_with_response, select_with_switch,
+    select_with_details, select_with_disabled, select_with_response, select_with_switch,
 };
 pub use select::{SelectOutput, select};
 pub use status_mark::{

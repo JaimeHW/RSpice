@@ -490,9 +490,8 @@ fn new_cell_view_adds_to_the_cell_just_created_without_views() {
     let mut replay = super::super::replay::Replay::new();
     replay.click("File", Role::MenuItem);
     replay.click("New project\u{2026}", Role::MenuItem);
-    replay.click("Project name", Role::TextInput);
     replay.type_text("sar");
-    replay.click("Create project", Role::Button);
+    replay.click("Create", Role::Button);
     let before = replay.app.state.model.workspace.content.active_view.clone();
     replay.click("File", Role::MenuItem);
     replay.click("New cell\u{2026}", Role::MenuItem);

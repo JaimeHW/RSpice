@@ -23,10 +23,11 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::LifecycleSourc
 use rspice_app_state::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
-/// Open the transaction with the default location, library and top cell,
-/// and the technologies this session can attach. The project name starts
-/// empty because it is the one field with no defensible default: requiring
-/// it is the point of the dialog.
+/// Open the transaction with the default location, name, library and top
+/// cell, and the technologies this session can attach. The name is the
+/// default project name, numbered past any folder of it in the location, and
+/// the dialog opens on it selected, so typing a name replaces it and Enter
+/// takes it as it is.
 pub(crate) fn open_new_project_dialog(state: &mut AppState) {
     state.project.new_project = NewProjectDialogState {
         open: true,
@@ -36,6 +37,7 @@ pub(crate) fn open_new_project_dialog(state: &mut AppState) {
         technologies: attachable_technologies(&state.model),
         ..NewProjectDialogState::default()
     };
+    state.project.new_project.offer_free_name();
 }
 
 /// Where New project offers to make the project's folder: where the most
@@ -63,10 +65,27 @@ fn default_project_location(recent_files: &[RecentFile]) -> String {
             }
             .map(std::path::Path::to_path_buf)
         })
-        .or_else(dirs::document_dir)
-        .or_else(dirs::home_dir)
+        .or_else(documents_folder)
         .map(|folder| folder.display().to_string())
         .unwrap_or_default()
+}
+
+/// The reader's documents folder, else their home folder.
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+fn documents_folder() -> Option<std::path::PathBuf> {
+    dirs::document_dir().or_else(dirs::home_dir)
+}
+
+/// A test's documents folder is a fresh one of its own: a project created
+/// in a test would otherwise be written among the developer's documents,
+/// and the next run's would be refused the folder the last one left.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+fn documents_folder() -> Option<std::path::PathBuf> {
+    Some(
+        rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir(
+            "new-project-documents",
+        ),
+    )
 }
 
 /// The browser writes a project where its first save is asked to.

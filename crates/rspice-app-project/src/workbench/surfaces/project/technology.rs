@@ -115,6 +115,11 @@ pub struct AttachableTechnology {
     pub pdk_package: String,
     /// What the binding is called wherever the project names its technology.
     pub label: String,
+    /// What a list of technologies to choose from calls it: the package and
+    /// its process node.
+    pub name: String,
+    /// The PDK package's revision, which a list sets apart from the name.
+    pub version: String,
 }
 
 /// Every pairing of an installed model library with a validated PDK package
@@ -156,10 +161,19 @@ pub fn attachable_technologies(model: &Model) -> Vec<AttachableTechnology> {
                 .validate_project_binding(&binding)
                 .is_ok()
             {
+                let name = match binding.technology_node() {
+                    Some(node) => format!("{} \u{b7} {node}", binding.package_name()),
+                    None => binding.package_name().to_owned(),
+                };
                 technologies.push(AttachableTechnology {
                     model_library: binding.model_library().to_owned(),
                     pdk_package: pdk_package_key(package),
                     label: binding.display_label(),
+                    name,
+                    version: binding
+                        .pdk_package()
+                        .map(|pin| format!("PDK {}", pin.revision()))
+                        .unwrap_or_default(),
                 });
             }
         }

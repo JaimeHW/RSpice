@@ -187,7 +187,8 @@ fn a_dialog_s_field_names_and_values_are_mirrored() {
     }
     let seen = projection(&frame(&ctx, &mut app, DESKTOP));
     let dialog = seen.dialog.expect("the dialog is open");
-    assert_eq!(dialog.title, "Create RSpice project");
+    assert_eq!(dialog.title, "New project");
+    let location = app.state.project.new_project.location.clone();
     let inputs: Vec<(&str, &str)> = dialog
         .fields
         .iter()
@@ -197,17 +198,18 @@ fn a_dialog_s_field_names_and_values_are_mirrored() {
     assert_eq!(
         inputs,
         vec![
-            ("Project name", ""),
-            ("Library", "user"),
+            ("Name", "Untitled Project"),
+            ("Location", location.as_str()),
+            ("Library", "untitled_project"),
             ("Top cell", "top")
         ]
     );
     let create = dialog
         .fields
         .iter()
-        .find(|field| field.name == "Create project")
+        .find(|field| field.name == "Create")
         .expect("the dialog's confirm button");
-    assert!(create.disabled, "no name has been typed yet");
+    assert!(!create.disabled, "the name offered can be created as it is");
     assert!(
         !dialog.fields.iter().any(|field| field.name == dialog.title),
         "the heading is the title, not a field"

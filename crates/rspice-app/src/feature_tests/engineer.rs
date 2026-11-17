@@ -90,9 +90,9 @@ impl Engineer {
         };
         engineer.press("File", Role::MenuItem);
         engineer.press("New project\u{2026}", Role::MenuItem);
-        engineer.press("Project name", Role::TextInput);
+        // The dialog opens on the name it offers, selected: typing replaces it.
         engineer.type_text(name);
-        engineer.press("Create project", Role::Button);
+        engineer.key(Key::Enter, Modifiers::NONE);
         engineer
     }
 
