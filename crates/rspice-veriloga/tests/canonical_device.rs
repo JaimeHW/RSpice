@@ -4935,8 +4935,21 @@ for initial in [true,false] {
 
 #[test]
 fn generated_static_dae_event_bodies_retain_the_settled_candidate() {
+    // The step events of `fixtures/static_dae_events.va`; its `timer`,
+    // `cross` and `above` are refused on this route.
     let (state, stamp, noise) = generated_parts(
-        include_str!("fixtures/static_dae_events.va"),
+        r#"
+module static_dae_events(p, n, c);
+    inout p, n, c;
+    electrical p, n, c;
+    real starts = 0.0, ends = 0.0;
+    analog begin
+        @(initial_step("tran")) starts = starts + 1.0;
+        @(final_step("tran")) ends = ends + 1.0;
+        I(p,n) <+ 2.0*V(p,n) + starts + 10.0*ends + ddt(3.0*V(p,n));
+    end
+endmodule
+"#,
         "static DAE event observation",
     );
     let body = r#"
@@ -4945,7 +4958,7 @@ instance.finalize_parameters().unwrap();
 runtime::set_event_analysis(true, false);
 for (time, voltage, initial, final_step, expected) in [
     (0.0, -1.0, true, false, -1.0),
-    (0.5, 1.0, false, true, 11113.0),
+    (0.5, 1.0, false, true, 13.0),
 ] {
     runtime::set_analysis_steps(initial, final_step);
     let voltages = [voltage, 0.0, 0.0];
@@ -6088,158 +6101,6 @@ for direction in [-2.0, 2.0, 0.5] {
 }
 
 #[test]
-fn generated_cross_above_and_timer_are_transactional_and_checkpointed() {
-    let (state, stamp, noise) = generated_parts(
-        r#"
-module generated_event_controls(p, n);
-    inout p, n;
-    electrical p, n;
-    real count;
-    analog begin
-        @(cross(V(p, n), 1, 0.0, 0.0, 1)) count = count + 1.0;
-        @(above(V(p, n), 0.0, 0.0, 1)) count = count + 10.0;
-        @(timer(1.0, 2.0, 0.0, 1)) count = count + 100.0;
-        I(p, n) <+ count;
-    end
-endmodule
-"#,
-        "transactional generated event controls",
-    );
-    let body = r#"
-fn stamp(instance: &mut device::state::Instance, voltage: f64) -> f64 {
-    let voltages = [voltage, 0.0];
-    let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
-    let mut sink = [0.0; 12];
-    let mut stamper = runtime::GeneratedStamper { sink: Some(&mut sink) };
-    instance.stamp(&ctx, &mut stamper);
-    sink[0]
-}
-
-let inactive = runtime::GeneratedDdtCoefficients::inactive();
-
-// `above` is true at a positive equilibrium point, and repeated static probes
-// are evaluations from accepted state rather than accumulations.
-runtime::set_event_analysis(false, true);
-let mut static_instance = device::state::Instance::new(&[0, 1]);
-static_instance.finalize_parameters().unwrap();
-static_instance.set_timepoint(0.0, 0.0, inactive);
-static_instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut static_instance, 0.5), 10.0);
-let static_trial = static_instance.capture_rollback_state();
-assert_eq!(static_instance.capture_persistent_state().event_variables[0], 0.0);
-static_instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut static_instance, 0.5), 10.0);
-assert_eq!(static_instance.capture_rollback_state(), static_trial);
-static_instance.validate_advance_state().unwrap();
-static_instance.apply_validated_advance_state();
-assert_eq!(static_instance.capture_persistent_state().event_variables[0], 10.0);
-
-runtime::set_event_analysis(true, false);
-let mut instance = device::state::Instance::new(&[0, 1]);
-instance.finalize_parameters().unwrap();
-instance.set_timepoint(0.0, 0.0, inactive);
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, -1.0), 0.0);
-assert_eq!(instance.transient_event_refinement_time(), None);
-assert_eq!(instance.transient_timer_event_time(), None,
-    "a speculative timer target must not become externally schedulable before acceptance");
-let speculative_initial = instance.capture_persistent_state();
-assert_eq!(speculative_initial.event_variables[0], 0.0);
-assert_eq!(*speculative_initial.event_variables.last().unwrap(), f64::INFINITY,
-    "a speculative timer request leaked into accepted checkpoint state");
-instance.validate_advance_state().unwrap();
-instance.apply_validated_advance_state();
-let accepted_initial = instance.capture_persistent_state();
-assert_eq!(accepted_initial.event_variables[0], 0.0);
-assert_eq!(*accepted_initial.event_variables.last().unwrap(), 1.0);
-assert_eq!(instance.transient_timer_event_time(), Some(1.0));
-
-// A malformed detector lane is rejected with its generated slot provenance.
-let mut malformed_side = accepted_initial.clone();
-malformed_side.event_variables[1 + 2] = 2.0;
-let error = device::state::Instance::new(&[0, 1])
-    .restore_persistent_state(&malformed_side)
-    .expect_err("malformed crossing side must fail");
-assert!(error.contains("slot 0") && error.contains("side"), "{error}");
-let mut malformed_initialized = accepted_initial.clone();
-malformed_initialized.event_variables[1 + 5] = 0.5;
-let error = device::state::Instance::new(&[0, 1])
-    .restore_persistent_state(&malformed_initialized)
-    .expect_err("fractional crossing initialized flag must fail");
-assert!(error.contains("initialized flag") && error.contains("finite integer"), "{error}");
-
-instance.set_timepoint(1.0, 1.0, inactive);
-instance.begin_stateful_evaluation();
-let accepted_endpoint = instance.capture_rollback_state();
-assert_eq!(stamp(&mut instance, 1.0), 111.0);
-let refinement = f64::from_bits(0.5f64.to_bits() + 1);
-assert_eq!(instance.transient_event_refinement_time(), Some(refinement));
-assert_eq!(instance.transient_timer_event_time(), Some(1.0),
-    "a trial endpoint must not replace the accepted absolute timer target");
-let positive_trial = instance.capture_rollback_state();
-assert_eq!(instance.capture_persistent_state(), accepted_initial,
-    "cross/above/timer candidates changed the accepted checkpoint image");
-
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, 1.0), 111.0);
-assert_eq!(instance.capture_rollback_state(), positive_trial,
-    "repeated Newton evaluation changed the event candidate");
-
-instance.restore_rollback_state(&accepted_endpoint);
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, -0.5), 100.0,
-    "a rejected positive endpoint consumed cross/above state");
-assert_eq!(instance.transient_event_refinement_time(), None);
-
-instance.restore_rollback_state(&accepted_endpoint);
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, 1.0), 111.0);
-assert_eq!(instance.capture_rollback_state(), positive_trial,
-    "rollback did not preserve the exact accepted/candidate event transaction");
-
-// Accept the refined zero endpoint, then take the timer endpoint. The crossing
-// is consumed only at the accepted root and the periodic next bound advances.
-instance.restore_rollback_state(&accepted_endpoint);
-instance.set_timepoint(refinement, refinement, inactive);
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, 0.0), 11.0);
-assert_eq!(instance.transient_event_refinement_time(), None);
-instance.validate_advance_state().unwrap();
-instance.apply_validated_advance_state();
-assert_eq!(instance.capture_persistent_state().event_variables[0], 11.0);
-
-instance.set_timepoint(1.0, 1.0 - refinement, inactive);
-instance.begin_stateful_evaluation();
-assert_eq!(stamp(&mut instance, 1.0), 111.0);
-assert_eq!(instance.transient_event_refinement_time(), None);
-instance.validate_advance_state().unwrap();
-instance.apply_validated_advance_state();
-let accepted = instance.capture_persistent_state();
-assert_eq!(accepted.event_variables[0], 111.0);
-assert_eq!(*accepted.event_variables.last().unwrap(), 3.0);
-
-let accepted_rollback = instance.capture_rollback_state();
-let mut restored = device::state::Instance::new(&[0, 1]);
-restored.restore_persistent_state(&accepted).unwrap();
-assert_eq!(restored.transient_timer_event_time(), Some(3.0),
-    "the persisted absolute timer target must be usable before evaluation time is re-primed on resume");
-restored.set_timepoint(1.0, 0.0, inactive);
-assert_eq!(restored.capture_persistent_state(), accepted);
-assert_eq!(restored.capture_rollback_state(), accepted_rollback);
-"#;
-    run_generated_main(
-        "transactional generated event controls",
-        &state,
-        &stamp,
-        &noise,
-        body,
-    )
-    .unwrap_or_else(|report| {
-        panic!("transactional generated event-control probe failed:\n{report}")
-    });
-}
-
-#[test]
 fn generated_one_step_split_capability_rejects_dynamic_control_and_idt() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -7019,7 +6880,7 @@ module controlled(p,n);
    if(V(p,n)>0.0) $discontinuity(degree);
   end
   if(V(p,n)>1.0) $discontinuity(-1);
-  @(timer(1.0,2.0)) ticks=ticks+1;
+  @(initial_step) ticks=ticks+1;
   I(p,n)<+V(p,n)*1e-3;
  end
 endmodule
@@ -7107,7 +6968,7 @@ module controlled(p,n);
  analog begin
   for(i=1;i<=passes;i=i+1) $bound_step(i*1e-9);
   if(V(p,n)>0.0) $bound_step(ddx(V(p,n)*V(p,n),V(p,n))*1e-10);
-  @(timer(1.0,2.0)) ticks=ticks+1;
+  @(initial_step) ticks=ticks+1;
   I(p,n)<+V(p,n)*1e-3;
  end
 endmodule
@@ -8112,22 +7973,6 @@ module guarded_stage_export(p, n);
 endmodule
 "#,
         ),
-        (
-            "generated event controls",
-            r#"
-module generated_event_controls(p, n);
-    inout p, n;
-    electrical p, n;
-    real count;
-    analog begin
-        @(cross(V(p, n), 1, 0.0, 0.0, 1)) count = count + 1.0;
-        @(above(V(p, n), 0.0, 0.0, 1)) count = count + 10.0;
-        @(timer(1.0, 2.0, 0.0, 1)) count = count + 100.0;
-        I(p, n) <+ count;
-    end
-endmodule
-"#,
-        ),
     ]
 }
 
@@ -9013,19 +8858,12 @@ fn generated_models_state_whether_harmonic_balance_can_sample_them() {
         (5, "", "I(p,n) <+ idt(V(p,n), 0.0);", None, "Integral"),
         (
             6,
-            "real s;",
-            "@(cross(V(p,n), 1)) s = 1.0; I(p,n) <+ V(p,n);",
+            "",
+            "I(p,n) <+ V(p,n) + 1.0e-3*last_crossing(V(p,n), 1);",
             Some(
-                "it uses `cross`, which schedules events in time that a harmonic-balance \
+                "it uses `last_crossing`, which schedules events in time that a harmonic-balance \
                  spectrum does not carry; transient analysis runs it",
             ),
-            "",
-        ),
-        (
-            7,
-            "real s;",
-            "@(timer(1.0e-9)) s = 1.0; I(p,n) <+ V(p,n);",
-            Some("it uses `timer`"),
             "",
         ),
         (

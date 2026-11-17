@@ -1934,6 +1934,70 @@ endmodule
     }
 }
 
+/// An analog event takes effect at its instant: the point that finds it
+/// solves the left limit and its body runs once at the accepted solution. The
+/// direct generated-Rust backend would run the body inside the trial that
+/// finds it, so it refuses each event control by name rather than emit a
+/// device that silently differs from the interpreter and the native routes.
+#[test]
+fn generated_rust_refuses_analog_events_by_name() {
+    use rspice_veriloga::canonical_ir::CfgValueKind;
+
+    /// Spelling, event statement, the canonical kind it must reach.
+    type EventCase = (&'static str, &'static str, fn(&CfgValueKind) -> bool);
+    let cases: [EventCase; 3] = [
+        ("cross", "@(cross(V(p, n), 1)) s = 1.0;", |kind| {
+            matches!(kind, CfgValueKind::Cross { .. })
+        }),
+        ("above", "@(above(V(p, n) - 0.5)) s = 1.0;", |kind| {
+            matches!(kind, CfgValueKind::Above { .. })
+        }),
+        ("timer", "@(timer(1.0e-9)) s = 1.0;", |kind| {
+            matches!(kind, CfgValueKind::Timer { .. })
+        }),
+    ];
+    for (name, event, kind) in cases {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module generated_rust_{name}_event(p, n);
+    inout p, n;
+    electrical p, n;
+    real s;
+    analog begin
+        {event}
+        I(p, n) <+ s * V(p, n);
+    end
+endmodule
+"#
+        );
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("{name} must compile to canonical IR: {error}"));
+        let cfg = rspice_veriloga::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir)
+            .unwrap_or_else(|diagnostics| panic!("{name} must lower to a CFG: {diagnostics:?}"));
+        assert!(
+            cfg.function.values.iter().any(|value| kind(&value.kind)),
+            "{name} must reach its own canonical kind"
+        );
+        let error = rspice_veriloga::rust_backend::RustTranspiler::default()
+            .transpile(&artifact)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("a {name} event must not be emitted by the direct Rust backend")
+            });
+        assert!(
+            error.kind == rspice_veriloga::rust_backend::RustBackendErrorKind::Unsupported,
+            "{name}: error={error:?}"
+        );
+        let expected = format!("the {name} event control");
+        assert!(
+            error.message.contains(&expected) && error.message.contains("at its instant"),
+            "{name}: error={error:?} does not name `{expected}`"
+        );
+    }
+}
+
 #[test]
 fn generated_rust_supports_stateless_slew_passthrough() {
     let source = r#"

@@ -6233,6 +6233,28 @@ fn reject_unsupported_kinds(
                     ),
                 ));
             }
+            // An analog event takes effect at its instant: the point that
+            // finds it solves the left limit, its body runs once at the
+            // accepted solution, and what the body assigns acts from the
+            // next trial. The VM, the native JIT and the WebAssembly JIT
+            // defer the body that way; this backend would run it inside the
+            // trial that finds it, and so give a different waveform.
+            CfgValueKind::Cross { operator, .. }
+            | CfgValueKind::Above { operator, .. }
+            | CfgValueKind::Timer { operator, .. } => {
+                let family = match &value.kind {
+                    CfgValueKind::Cross { .. } => "cross",
+                    CfgValueKind::Above { .. } => "above",
+                    _ => "timer",
+                };
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "the {} event control in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the event takes effect at its instant",
+                        operator_spelling(artifact, *operator, family)
+                    ),
+                ));
+            }
             CfgValueKind::Zi { operator, .. } | CfgValueKind::ZiDerivative { operator, .. } => {
                 return Err(unsupported(
                     artifact,

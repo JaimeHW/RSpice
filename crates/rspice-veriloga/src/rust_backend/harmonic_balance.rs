@@ -108,26 +108,14 @@ fn operator_refusal(cfg: &CfgModel) -> Option<String> {
                 .to_owned(),
         );
     }
-    for (operator, wanted) in [
-        (
-            "cross",
-            (|kind: &CfgValueKind| matches!(kind, CfgValueKind::Cross { .. }))
-                as fn(&CfgValueKind) -> bool,
-        ),
-        ("above", |kind| matches!(kind, CfgValueKind::Above { .. })),
-        ("last_crossing", |kind| {
-            matches!(kind, CfgValueKind::LastCrossing { .. })
-        }),
-        ("timer", |kind| matches!(kind, CfgValueKind::Timer { .. })),
-    ] {
-        if used(wanted) {
-            return Some(format!(
-                "it uses `{operator}`, which schedules events in time that a harmonic-balance \
-                 spectrum does not carry; transient analysis runs it"
-            ));
-        }
-    }
-    None
+    // `cross`, `above` and `timer` never reach this backend
+    // (`reject_unsupported_kinds`); `last_crossing` keeps a crossing
+    // detector's history and fires no event.
+    used(|kind| matches!(kind, CfgValueKind::LastCrossing { .. })).then(|| {
+        "it uses `last_crossing`, which schedules events in time that a harmonic-balance \
+         spectrum does not carry; transient analysis runs it"
+            .to_owned()
+    })
 }
 
 /// Every value the residual, an equation's activation or a branch condition
