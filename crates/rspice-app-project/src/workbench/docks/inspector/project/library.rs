@@ -8,7 +8,7 @@ use rspice_ui_kit::panels::section_header;
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::DesignCheckStatus;
-use crate::workbench::design_system::property_row;
+use crate::workbench::design_system::{property_row, property_row_path};
 use crate::workbench::project::commands::ProjectRequest;
 
 use super::{ProjectInspector, ProjectInspectorAction, inspector_action_enabled};
@@ -88,8 +88,8 @@ pub fn project_library(
     };
 
     // The library browser beside this panel shows the library, the cell and
-    // the view; what the panel adds is what opening the selection does, and
-    // where the library lives.
+    // the view; what the panel adds is what opening the selection does, what
+    // the cell is for and where the library lives.
     section_header(
         ui,
         "Selection",
@@ -98,6 +98,26 @@ pub fn project_library(
             .then_some("read-only"),
     );
     property_row(ui, "View type", view_type);
+    // The band cuts the path to the width its controls leave; here it is whole,
+    // with the cell's description and the file the view is kept in.
+    if let Some((reference, _)) = &open_target {
+        property_row_path(
+            ui,
+            "Path",
+            &format!(
+                "{}/{}/{}",
+                reference.library, reference.cell, reference.view
+            ),
+        );
+    }
+    if let Some(cell) = model.library_manager.current_cell()
+        && !cell.description.trim().is_empty()
+    {
+        property_row(ui, "Description", cell.description.trim());
+    }
+    if let Some(file) = view.and_then(|item| item.file_path.as_ref()) {
+        property_row_path(ui, "File", &file.display().to_string());
+    }
 
     section_header(ui, "Library", None);
     if technology != "unbound" {
