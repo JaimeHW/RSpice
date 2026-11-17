@@ -126,7 +126,9 @@ pub(crate) fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
+        state,
+    ) {
         return false;
     }
 
@@ -173,8 +175,9 @@ fn require_project_save_confirmation_if_dirty(
     ) {
         return true;
     }
-    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-        && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
+    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
+        state,
+    ) && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     {
         return false;
     }

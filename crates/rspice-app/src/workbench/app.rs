@@ -618,18 +618,28 @@ impl RSpiceApp {
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        // The tab's mark is written only when it moves: an idle frame leaves
+        // the project's stamp, and the dirty answer held for it, as it was.
+        let editor_dirty = self.state.model.schematic.session.is_dirty;
         if matches!(
             self.state.model.workspace.content.active_view_type(),
             Some(
                 rspice_app_state::state::ViewType::Schematic
                     | rspice_app_state::state::ViewType::Testbench
             )
-        ) {
+        ) && self
+            .state
+            .model
+            .workspace
+            .content
+            .active_dirty()
+            .is_some_and(|marked| marked != editor_dirty)
+        {
             self.state
                 .model
                 .workspace
                 .content
-                .set_active_dirty(self.state.model.schematic.session.is_dirty);
+                .set_active_dirty(editor_dirty);
         }
         self.sync_window_title(ctx);
         self.handle_image_export();
@@ -639,6 +649,10 @@ impl RSpiceApp {
     /// active document: `cell* — project — RSpice`, or `cell in place on
     /// X1* — project — RSpice` while a symbol is edited in place.
     fn sync_window_title(&mut self, ctx: &Context) {
+        // The answer held for the working state, made again whenever its
+        // stamp moves. The browser's before-unload guard arms from it too:
+        // the browser asks while the tab closes, when nothing can be
+        // captured, so the last frame's answer is the one there is.
         let project_has_unsaved_changes =
             rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
                 &self.state,

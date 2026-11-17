@@ -240,6 +240,14 @@ impl ProjectWorkspace {
         self.project_active_occurrence();
     }
 
+    /// The unsaved mark on the active document's tab, when it has one.
+    pub fn active_dirty(&self) -> Option<bool> {
+        self.open_views
+            .iter()
+            .find(|open| open.reference == self.active_view)
+            .map(|open| open.dirty)
+    }
+
     pub fn set_active_dirty(&mut self, dirty: bool) {
         if let Some(open) = self
             .open_views

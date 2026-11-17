@@ -6,6 +6,7 @@
 //! one tab from accidentally committing unrelated drafts.
 
 mod accepted_project;
+mod dirty_answer;
 mod persistence;
 mod result_cache;
 
@@ -27,6 +28,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) use crate::product::TransactionId;
+#[cfg(any(test, feature = "test-support"))]
+pub use dirty_answer::{hold_accepted_answer, without_audit};
 #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub use persistence::BrowserBindingBackend;
 #[cfg(target_arch = "wasm32")]
@@ -35,7 +38,7 @@ pub use persistence::{BrowserBindingReceipt, NativeBindingReceipt, PersistenceBi
 pub use registry::ProjectDocumentId;
 #[cfg(target_arch = "wasm32")]
 pub use rspice_project::lifecycle::BrowserOperationContext;
-use rspice_project::lifecycle::ProjectLifecycle;
+use rspice_project::lifecycle::{DirtyComparison, ProjectLifecycle};
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
 pub use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
@@ -99,6 +102,8 @@ pub struct ProjectLifecycleState {
     #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
     pub result_cache: result_cache::ResultCache,
+    /// The dirty comparison held for the working state it was made for.
+    dirty_answer: dirty_answer::DirtyAnswer,
     #[cfg(target_arch = "wasm32")]
     browser_reconnect_binding: Option<PersistenceBinding>,
     #[cfg(target_arch = "wasm32")]
@@ -249,15 +254,22 @@ pub fn generated_netlist_input_digest(
         .generated_netlist_input_digest()
 }
 
+/// Whether the project holds anything a save would keep, as held for the
+/// working state: for what is drawn and enabled. A decision that drops or
+/// keeps work reads [`has_unsaved_changes_fresh`].
 pub fn has_unsaved_changes(state: &dyn LifecycleSource) -> bool {
-    let state = &state.lifecycle_view();
-    state
-        .platform
-        .project_lifecycle
-        .authority
-        .has_unsaved_changes(|| {
-            capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
-        })
+    dirty_answer::read(
+        &state.lifecycle_view(),
+        DirtyComparison::has_unsaved_changes,
+    )
+}
+
+/// [`has_unsaved_changes`] from the working project as captured now.
+pub fn has_unsaved_changes_fresh(state: &dyn LifecycleSource) -> bool {
+    dirty_answer::fresh(
+        &state.lifecycle_view(),
+        DirtyComparison::has_unsaved_changes,
+    )
 }
 
 pub fn operation_in_progress(platform: &PlatformState) -> bool {
@@ -318,34 +330,48 @@ pub fn documents_saved_with_their_sheets(
     }
 }
 
+/// Whether the document in front holds anything a save would keep, as held
+/// for the working state. A decision reads
+/// [`active_document_is_dirty_fresh`].
 pub fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
-    let state = &state.lifecycle_view();
-    state
-        .platform
-        .project_lifecycle
-        .authority
-        .document_is_dirty(
-            || active_document(state),
-            || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
-        )
+    let view = state.lifecycle_view();
+    dirty_answer::read(&view, |comparison| {
+        comparison.document_is_dirty(&active_document(&view))
+    })
+}
+
+/// [`active_document_is_dirty`] from the working project as captured now.
+pub fn active_document_is_dirty_fresh(state: &dyn LifecycleSource) -> bool {
+    let view = state.lifecycle_view();
+    dirty_answer::fresh(&view, |comparison| {
+        comparison.document_is_dirty(&active_document(&view))
+    })
 }
 
 pub fn refresh_registry(state: &mut dyn LifecycleSourceMut) -> Result<(), ProjectLifecycleError> {
     let state = &mut state.lifecycle_parts();
-    let comparison = state
-        .platform
-        .project_lifecycle
-        .authority
-        .prepare_registry_refresh(|| {
+    let authority = &state.platform.project_lifecycle.authority;
+    // The working fingerprints held for the working state, when it was
+    // captured whole; a capture that failed is taken again for its error.
+    let held = authority.is_open().then(|| {
+        dirty_answer::working(&state.lifecycle_view(), |working| {
+            working
+                .ok()
+                .map(|working| authority.registry_from_working(working))
+        })
+    });
+    let comparison = held.flatten().unwrap_or_else(|| {
+        authority.prepare_registry_refresh(|| {
             capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
-        });
+        })
+    });
     let result = state
         .platform
         .project_lifecycle
         .authority
         .finish_registry_refresh(comparison);
     if state.platform.project_lifecycle.is_open() {
-        apply_registry_dirty_flags(state);
+        dirty_answer::across_marks(state, apply_registry_dirty_flags);
     }
     result
 }
@@ -392,26 +418,52 @@ fn apply_registry_dirty_flags(state: &mut LifecycleParts<'_>) {
             _ => None,
         })
         .collect::<Vec<_>>();
+    // Each mark below is written only when it moves: a refresh that changes
+    // none leaves the working stamp, and the dirty answer held for it, as it
+    // was.
     for (reference, dirty) in &cell_dirty {
-        if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&reference.key()) {
+        let key = reference.key();
+        if state
+            .model
+            .workspace
+            .schematic_editor(&key)
+            .is_some_and(|buffer| buffer.is_dirty() != *dirty)
+            && let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&key)
+        {
             buffer.editor.session.is_dirty = *dirty;
         }
-        if let Some(open) = state
+        if state
             .model
             .workspace
             .content
             .open_views
-            .iter_mut()
-            .find(|open| open.reference == *reference)
+            .iter()
+            .any(|open| open.reference == *reference && open.dirty != *dirty)
+            && let Some(open) = state
+                .model
+                .workspace
+                .content
+                .open_views
+                .iter_mut()
+                .find(|open| open.reference == *reference)
         {
             open.dirty = *dirty;
         }
-        let _ = state.model.library_manager.set_view_modified_runtime(
-            &reference.library,
-            &reference.cell,
-            &reference.view,
-            *dirty,
-        );
+        let marked = state
+            .model
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .map(|view| view.modified);
+        if marked.is_some_and(|marked| marked != *dirty) {
+            let _ = state.model.library_manager.set_view_modified_runtime(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+                *dirty,
+            );
+        }
     }
     if let Some((_, dirty)) = cell_dirty
         .iter()
@@ -423,14 +475,26 @@ fn apply_registry_dirty_flags(state: &mut LifecycleParts<'_>) {
     // no other time. A flag that only ever turned on left the unsaved marker
     // lit for the rest of the session, including after the save that published
     // the very edit that lit it.
-    state.model.workspace.content.project_metadata_dirty = state
+    let metadata_dirty = state
         .platform
         .project_lifecycle
         .authority
         .registry()
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
+    if state.model.workspace.content.project_metadata_dirty != metadata_dirty {
+        state.model.workspace.content.project_metadata_dirty = metadata_dirty;
+    }
     if let Some(accepted) = state.platform.project_lifecycle.accepted() {
-        accepted.apply_source_dirty_flags(&mut state.model.workspace.content);
+        let (netlist_source, project_sources) =
+            accepted.source_dirty_flags(&state.model.workspace.content);
+        let content = &state.model.workspace.content;
+        if (content.netlist_source_dirty, content.project_sources_dirty)
+            != (netlist_source, project_sources)
+        {
+            let content = &mut *state.model.workspace.content;
+            content.netlist_source_dirty = netlist_source;
+            content.project_sources_dirty = project_sources;
+        }
     }
 }
 
@@ -954,8 +1018,8 @@ fn record_saved_symbol_revisions(state: &mut dyn LifecycleSourceMut, scope: Save
             view.model.writable_symbol_views()
         } else {
             let documents = match scope {
-                SaveScope::AllDocuments => dirty_documents(&view),
-                SaveScope::ActiveDocument if active_document_is_dirty(&view) => {
+                SaveScope::AllDocuments => dirty_documents_fresh(&view),
+                SaveScope::ActiveDocument if active_document_is_dirty_fresh(&view) => {
                     vec![active_document(&view)]
                 }
                 SaveScope::ActiveDocument => Vec::new(),
@@ -1155,8 +1219,8 @@ pub fn saved_snapshot_authorizes_continuation(
     scope.authorizes_continuation(
         saved_document,
         || active_document(state),
-        || has_unsaved_changes(state),
-        || active_document_is_dirty(state),
+        || has_unsaved_changes_fresh(state),
+        || active_document_is_dirty_fresh(state),
     )
 }
 
@@ -1841,19 +1905,22 @@ pub fn finish_netlist_source_revert(model: &mut Model) {
 /// A project with no accepted baseline, or one whose comparison fails, has
 /// nothing to diff against: its configuration stands for the whole unsaved
 /// project, as one document.
+///
+/// As held for the working state: for what is drawn. A decision reads
+/// [`dirty_documents_fresh`].
 pub fn dirty_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> {
-    let state = &state.lifecycle_view();
-    state
-        .platform
-        .project_lifecycle
-        .authority
-        .dirty_documents(|| {
-            capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
-        })
+    dirty_answer::read(&state.lifecycle_view(), DirtyComparison::dirty_documents)
+}
+
+/// [`dirty_documents`] from the working project as captured now.
+pub fn dirty_documents_fresh(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> {
+    dirty_answer::fresh(&state.lifecycle_view(), DirtyComparison::dirty_documents)
 }
 
 pub fn dirty_document_count(state: &dyn LifecycleSource) -> usize {
-    dirty_documents(state).len()
+    dirty_answer::read(&state.lifecycle_view(), |comparison| {
+        comparison.dirty_documents().len()
+    })
 }
 
 pub fn can_close_active_document(state: &dyn LifecycleSource) -> bool {

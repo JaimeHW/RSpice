@@ -237,7 +237,13 @@ fn render_close_project_review(
     }
     if app.model().simulation.execution.has_active_execution() {
         render_close_blocked_by_run(app, ctx, &unsaved);
-    } else if documents.is_empty() && unsaved.is_empty() {
+    } else if documents.is_empty()
+        && unsaved.is_empty()
+        // Closing without asking drops whatever a held answer missed, so
+        // the project is captured again before it goes.
+        && crate::workbench::lifecycle::project_lifecycle::dirty_documents_fresh(app.session())
+            .is_empty()
+    {
         app.workbench_mut().project_review_dialog.close();
         app.close_project_discarding(destination);
     } else {

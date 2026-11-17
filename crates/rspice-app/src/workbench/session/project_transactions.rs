@@ -31,7 +31,7 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::DestinationAut
 use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
-    RevertReviewToken, has_unsaved_changes,
+    RevertReviewToken, has_unsaved_changes_fresh,
 };
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::TransactionId;
@@ -884,8 +884,10 @@ impl AppState {
                 .project
                 .configuration
                 .is_dirty(&self.model.workspace.content.configuration_sets)
-            && rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_documents(self)
-                .is_empty()
+            && rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_documents_fresh(
+                self,
+            )
+            .is_empty()
     }
 }
 
@@ -1110,7 +1112,7 @@ impl RSpiceApp {
     pub(crate) fn close_for_live_mirror(&mut self) {
         let state = &mut self.state;
         let destination = ProjectCloseDestination::LiveMirror;
-        if has_unsaved_changes(state) {
+        if has_unsaved_changes_fresh(state) {
             state
                 .workbench
                 .project_review_dialog
@@ -1353,7 +1355,9 @@ pub(crate) fn go_on_leaving(
         ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     };
     if !drafts
-        && !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+        && !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
+            state,
+        )
     {
         let (path, kind) = recent.unzip();
         return Some((action, path, kind));
@@ -1400,7 +1404,7 @@ pub(crate) fn open_confirmed(state: &mut AppState) {
 /// changes it has, as New project does.
 pub(crate) fn request_example(state: &mut AppState, example: Example) {
     let unsaved = state.platform.project_lifecycle.is_open()
-        && (rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+        && (rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
             state,
         ) || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
     if unsaved {

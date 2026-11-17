@@ -346,7 +346,7 @@ impl RSpiceApp {
         {
             return;
         }
-        if rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+        if rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
             &self.state,
         ) || (recent.kind == rspice_app_services::services::recent_files::RecentKind::Project
             && ModelsPort::model_editor_has_unsaved_changes(&*self.state.models))

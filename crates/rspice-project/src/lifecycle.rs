@@ -2,6 +2,7 @@
 
 mod dirty;
 mod save;
+pub use dirty::{DirtyBaseline, DirtyComparison};
 pub use save::{
     BrowserCanonicalSave, BrowserSavePublication, PreparedBrowserSave, SaveContinuationEvent,
     StagedBrowserSave,

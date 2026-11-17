@@ -39,15 +39,18 @@ impl AcceptedProject {
         Ok(candidate)
     }
 
-    pub fn apply_source_dirty_flags(&self, working: &mut crate::ProjectWorkspace) {
+    /// Whether `working`'s netlist source and its project sources each
+    /// differ from the accepted content, in that order.
+    pub fn source_dirty_flags(&self, working: &crate::ProjectWorkspace) -> (bool, bool) {
         let baseline = &self.baseline.workspace;
-        working.netlist_source_dirty = working.netlist_source != baseline.netlist_source
+        let netlist_source = working.netlist_source != baseline.netlist_source
             || working.netlist_source_path != baseline.netlist_source_path
             || working.netlist_document != baseline.netlist_document
             || working.netlist_descriptor != baseline.netlist_descriptor
             || working.retained_netlist_decks != baseline.retained_netlist_decks;
-        working.project_sources_dirty = !working
+        let project_sources = !working
             .project_sources
             .same_authored_content(&baseline.project_sources);
+        (netlist_source, project_sources)
     }
 }

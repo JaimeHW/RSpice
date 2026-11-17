@@ -5,6 +5,7 @@
 //! An unchanged lookup only clones the immutable result snapshot handle.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::io::ProjectSimulationResults;
 use crate::product::DatasetId;
@@ -13,8 +14,14 @@ use crate::state::{ExecutedDeckArchive, RunHistoryRevision, SimulationState};
 #[derive(Debug, Clone, Default)]
 pub struct ResultCache(RefCell<Option<CachedResults>>);
 
+/// Issues the stamp of each captured snapshot, unique for the process.
+static NEXT_SNAPSHOT_STAMP: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Debug, Clone)]
 struct CachedResults {
+    /// Names this snapshot: two caches holding the same stamp hold the same
+    /// snapshot, a clone of one capture.
+    stamp: u64,
     history: RunHistoryRevision,
     decks: ExecutedDeckArchive,
     imported_checkpoints: crate::state::MonteCarloCheckpointLibrary,
@@ -92,12 +99,28 @@ impl CachedResults {
 
 impl ResultCache {
     pub fn capture(&self, state: &SimulationState) -> ProjectSimulationResults {
+        self.with_current(state, |held| held.snapshot.clone())
+    }
+
+    /// The stamp of the snapshot `state` persists as: equal stamps, equal
+    /// persisted results. Captures the snapshot when the one held no longer
+    /// matches, as [`Self::capture`] would.
+    pub fn stamp(&self, state: &SimulationState) -> u64 {
+        self.with_current(state, |held| held.stamp)
+    }
+
+    fn with_current<R>(
+        &self,
+        state: &SimulationState,
+        read: impl FnOnce(&CachedResults) -> R,
+    ) -> R {
         let mut cached = self.0.borrow_mut();
         if let Some(held) = cached.as_ref().filter(|held| held.matches(state)) {
-            return held.snapshot.clone();
+            return read(held);
         }
         let snapshot = crate::io::capture_simulation_results(state);
-        *cached = Some(CachedResults {
+        read(cached.insert(CachedResults {
+            stamp: NEXT_SNAPSHOT_STAMP.fetch_add(1, Ordering::Relaxed),
             history: state.retained.runs.revision(),
             decks: state.retained.executed_decks.clone(),
             imported_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
@@ -107,8 +130,7 @@ impl ResultCache {
             active_run_idx: state.view.active_run_idx,
             active_analysis_idx: state.view.active_analysis_idx,
             overlay_dataset_ids: state.view.overlay_dataset_ids.clone(),
-            snapshot: snapshot.clone(),
-        });
-        snapshot
+            snapshot,
+        }))
     }
 }
