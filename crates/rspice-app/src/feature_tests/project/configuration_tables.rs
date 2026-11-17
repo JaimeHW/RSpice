@@ -55,7 +55,7 @@ fn forty_amps() -> RSpiceApp {
             .expect("the placed instance is retained")
             .name = format!("X{index}");
     }
-    let _ = app.state.sync_active_schematic_to_workspace();
+    app.state.sync_active_schematic_to_workspace();
     app.state
         .model
         .library_manager
