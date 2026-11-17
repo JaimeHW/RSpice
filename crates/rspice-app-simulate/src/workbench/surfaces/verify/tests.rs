@@ -1060,3 +1060,90 @@ fn a_phone_keeps_every_tables_verdict_in_view() {
         );
     }
 }
+
+/// Every Verify table sets its Limit as it sets the numbers beside it: right
+/// aligned, every limit ending on one edge as far inside its cell as the next
+/// column's numbers end inside theirs, on a desktop and on a phone.
+#[test]
+fn every_table_right_aligns_its_limits() {
+    use super::raster::{page_pass, seed_monte_carlo, seed_soa};
+    let tables: [(
+        VerificationPage,
+        &str,
+        usize,
+        fn(&mut crate::workbench::app_state::Model),
+    ); 4] = [
+        (
+            VerificationPage::Specifications,
+            "verify.specifications",
+            1,
+            seed_corner,
+        ),
+        (VerificationPage::Corners, "verify.corners", 1, seed_corner),
+        (
+            VerificationPage::MonteCarlo,
+            "verify.monte_carlo",
+            1,
+            seed_monte_carlo,
+        ),
+        (VerificationPage::Checks, "verify.checks", 3, seed_soa),
+    ];
+    for width in [super::raster::PAGE_WIDTH, 390.0] {
+        for (page, id, limit, seed) in tables {
+            // A phone turns Corners a point a row, with no Limit column.
+            if width < 768.0 && page == VerificationPage::Corners {
+                continue;
+            }
+            let mut harness = SimulateTestHost::harness();
+            seed(&mut harness.model);
+            harness
+                .wb
+                .activate(crate::workbench::state::Workspace::Verify);
+            harness.state.verification_page = page;
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut geometry = super::raster::PageGeometry::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, super::raster::PAGE_HEIGHT),
+                    )),
+                    ..Default::default()
+                };
+                geometry = page_pass(&ctx, input, |ui| {
+                    super::raster::refresh_verification(&mut harness.model);
+                    super::show(ui, &mut harness.cx());
+                })
+                .1;
+            }
+            let edges = geometry.right_edges();
+            let edge = |column: usize| {
+                let key = format!("table.right.{id}.{column}");
+                let found = edges
+                    .iter()
+                    .find(|(name, _)| *name == key)
+                    .map(|(_, edges)| edges.clone())
+                    .unwrap_or_else(|| panic!("{page:?} at {width}: {key} is right-aligned"));
+                assert_eq!(
+                    found.len(),
+                    1,
+                    "{page:?} at {width}: {key} ends on one edge"
+                );
+                let head = geometry
+                    .one(&format!("table.head.{column}"))
+                    .expect("the column's head");
+                head.right() - found[0]
+            };
+            let inset = edge(limit);
+            // A phone scrolls the next column out of view.
+            if width >= 768.0 {
+                assert_eq!(
+                    inset,
+                    edge(limit + 1),
+                    "{page:?}: the limits end as the numbers beside them do"
+                );
+            }
+        }
+    }
+}

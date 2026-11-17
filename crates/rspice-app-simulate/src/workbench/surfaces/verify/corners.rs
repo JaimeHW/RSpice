@@ -899,7 +899,7 @@ fn plain_table(
     let heads = point_heads(sheet);
     let mut columns = vec![
         Column::name("Specification", 160.0),
-        Column::words("Limit", 112.0),
+        Column::number("Limit", 112.0),
         Column::number("Min", 96.0),
         Column::number("Max", 96.0),
     ];

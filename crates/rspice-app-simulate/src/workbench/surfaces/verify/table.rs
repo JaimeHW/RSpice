@@ -108,12 +108,13 @@ impl Column {
         Self::with(head, min_width, 1.0, Align::Left)
     }
 
-    /// A fixed-width column of right-aligned numbers.
+    /// A fixed-width column of right-aligned numbers, and of limits, which
+    /// are numbers the values beside them are read against.
     pub(super) fn number(head: impl Into<String>, width: f32) -> Self {
         Self::with(head, width, 0.0, Align::Right)
     }
 
-    /// A fixed-width column of left-aligned words: a limit, a verdict.
+    /// A fixed-width column of left-aligned words: a verdict, a rule.
     pub(super) fn words(head: impl Into<String>, width: f32) -> Self {
         Self::with(head, width, 0.0, Align::Left)
     }

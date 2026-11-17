@@ -246,7 +246,7 @@ impl DataTable<'_> {
             {
                 super::super::raster::probe(
                     ui,
-                    &format!("table.right.{}.{column_index}", self.id),
+                    &format!("table.right.{}.{}", self.id, self.page_column(column_index)),
                     text,
                 );
             }

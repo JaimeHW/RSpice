@@ -633,7 +633,7 @@ pub(super) fn monte_carlo(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // points; the name column takes whatever is left.
     let columns = [
         Column::name("Specification", 120.0),
-        Column::words("Limit", 112.0)
+        Column::number("Limit", 112.0)
             .tooltip("The plan's limit on this measurement. Click to enter one."),
         Column::number("Yield", 76.0),
         Column::number("Mean", 88.0),
