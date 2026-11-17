@@ -473,7 +473,8 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             let search = ui.add_sized(
                 [search_width, t.metrics.ctl_h],
                 egui::TextEdit::singleline(&mut cx.state.project_library_filter)
-                    .hint_text("Find in every library\u{2026}"),
+                    .hint_text("Find in every library\u{2026}")
+                    .vertical_align(Align::Center),
             );
             ui.ctx().accesskit_node_builder(search.id, |node| {
                 node.set_label("Find cells in every library");
@@ -502,6 +503,13 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             if asked {
                 select_found(ui.ctx(), cx);
             }
+            // A strip too narrow for any of the path leaves the selection
+            // to the band and the inspector, rather than a label over none;
+            // the separator before it is counted in.
+            let separator = ui.spacing().item_spacing.x * 2.0;
+            if ui.available_width() - CONTEXT_FIXED_WIDTH - separator < MIN_SELECTION_ROOM {
+                return;
+            }
             ui.separator();
             let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(0.0);
             let font = theme::mono(tokens::FS_0, FontWeight::Regular);
@@ -518,6 +526,9 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
 /// What the context strip spends beside the selection's own text: its label,
 /// the separator and the access pair.
 const CONTEXT_FIXED_WIDTH: f32 = 190.0;
+
+/// The least of a path worth showing: a library's name and an ellipsis.
+const MIN_SELECTION_ROOM: f32 = 48.0;
 
 /// The view-type select's choice that asks for no type.
 const ANY_VIEW_TYPE: &str = "Any type";
@@ -931,6 +942,9 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
     let mut intent = None;
     let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
         ui.set_min_height(t.metrics.ctl_h);
+        // The buttons end at the visible edge, even where the page is
+        // wider than the screen and scrolls.
+        ui.set_max_width(visible_workspace_width(ui));
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if let Some((reference, view_type, _)) = &target.view
@@ -993,9 +1007,15 @@ fn selection_summary(ui: &mut Ui, target: &Target) {
     if *modified {
         tail += gap + width(ui, "modified", &body);
     }
+    // A band too narrow for any of the path keeps its buttons whole and
+    // leaves the selection to the inspector.
+    let room = ui.available_width() - tail;
+    if room < MIN_SELECTION_ROOM {
+        return;
+    }
     let path = reference.display_path();
     let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let shown = elide_text(ui, &path, &font, (ui.available_width() - tail).max(0.0));
+    let shown = elide_text(ui, &path, &font, room);
     let label = ui.label(egui::RichText::new(&shown).font(font).color(t.color.text));
     if shown != path {
         label.on_hover_text(path);

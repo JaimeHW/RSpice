@@ -395,3 +395,20 @@ fn a_cell_dragged_onto_a_library_opens_copy_cell_aimed_at_it() {
     assert_eq!(project.copy_cell_target_library, "analog");
     assert_eq!(project.copy_cell_name, "bias");
 }
+
+/// On a phone the page is wider than the screen, and the band still ends
+/// at the screen's edge: Open stands whole beside the two menus, and the
+/// selection's path, with no room left, gives way to them.
+#[test]
+fn on_a_phone_the_band_keeps_open_on_the_screen() {
+    let mut replay = library_page().sized(egui::vec2(390.0, 844.0));
+    replay.app.state.workbench.coarse_pointer = true;
+    let controls = replay.frames(Vec::new());
+    let open = only(&controls, "Open schematic", Role::Button);
+    assert!(
+        open.center.x <= 390.0 - 40.0,
+        "Open is whole on the screen: {:?}",
+        open.center
+    );
+    only(&controls, "Cell actions", Role::Button);
+}
