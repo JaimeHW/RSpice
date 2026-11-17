@@ -1599,7 +1599,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("io/project_io.rs", "fixtures"),
             ("lib.rs", "accessibility"),
             ("lib.rs", "app_state"),
-            ("lib.rs", "automation_runtime"),
             ("lib.rs", "autosave"),
             ("lib.rs", "background_alerts"),
             ("lib.rs", "browser"),

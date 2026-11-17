@@ -6,7 +6,6 @@ description = "The RSpice application's platform services: project lifecycle, pe
 license-file.workspace = true
 publish.workspace = true
 rust-version.workspace = true
-build = "build.rs"
 
 [lib]
 doctest = false
@@ -25,7 +24,6 @@ browser-qualification = ["egui/serde"]
 
 [dependencies]
 rspice-app-state.workspace = true
-rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
 rspice-vocabulary.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-project.workspace = true
@@ -34,7 +32,6 @@ rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "mon
 rspice-simulation-contract = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
-semver.workspace = true
 sha2 = "0.10"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
@@ -55,7 +52,6 @@ rspice-pack = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-output = { workspace = true, features = ["durable-file"] }
-rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
 dirs = "7.0"
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dev-dependencies]
@@ -94,10 +90,9 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 wasm-bindgen = "0.2"
-serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
 js-sys = "0.3"
 
 [lints]

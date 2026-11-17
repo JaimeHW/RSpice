@@ -2,7 +2,7 @@
 //!
 //! The project lifecycle and its document registry, the native and browser
 //! project persistence, autosave and crash recovery, project, schematic and
-//! waveform file I/O, the managed Automation runtime, recent files, and what
+//! waveform file I/O, recent files, and what
 //! the browser build has to do differently. They work on the shared model in
 //! `rspice-app-state` and the platform slot they own, and reach no feature.
 //!
@@ -22,11 +22,6 @@
 use rspice_app_state::results;
 use rspice_app_state::{diagnostics, product, state, time_compat};
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod automation_runtime;
-#[cfg(target_arch = "wasm32")]
-#[path = "automation_runtime_browser.rs"]
-pub mod automation_runtime;
 pub mod build_identity;
 pub mod io;
 

@@ -25,13 +25,6 @@ pub enum BrowserTextImportKind {
     EngineeringTableView,
     SymbolDefinition,
     VerilogA,
-    // This module is compiled on desktop only to exercise browser contracts;
-    // Automation imports themselves are a browser production route.
-    #[cfg_attr(
-        all(any(test, feature = "test-support"), not(target_arch = "wasm32")),
-        allow(dead_code)
-    )]
-    Automation,
 }
 
 #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
@@ -46,7 +39,6 @@ impl BrowserTextImportKind {
             Self::EngineeringTableView => "engineering table view",
             Self::SymbolDefinition => "symbol definition",
             Self::VerilogA => "Verilog-A/AMS source",
-            Self::Automation => "Automation source",
         }
     }
 
@@ -57,7 +49,7 @@ impl BrowserTextImportKind {
             Self::EngineeringTableView => 512 * 1024,
             Self::ResultDataset => crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
             Self::SymbolDefinition => crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
-            Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA | Self::Automation => {
+            Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
                 crate::io::project_io::MAX_PROJECT_FILE_BYTES
             }
         }
