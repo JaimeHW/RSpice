@@ -68,6 +68,7 @@ fn diode_event_smooth_composite_regions_retain_canonical_f_q_and_tangents() {
 #[test]
 fn diode_event_regularity_retains_constitutive_joins() {
     let mut diode = Diode::spice_defaults("d".into(), 1, 0);
+    diode.set_ngspice_compatibility(true);
     // Binary-exact voltage scales make the represented joins unambiguous.
     diode.vt = 0.125;
     diode.n = 1.0;
@@ -114,7 +115,9 @@ fn diode_event_regularity_retains_constitutive_joins() {
     for mode in 0..3 {
         diode.set_ngspice_compatibility(mode == 1);
         diode.set_xyce_compatibility(mode == 2);
-        assert!(!diode.physical_event_locally_c2(-0.375));
+        // LTspice's summed junction, which the default dialect follows, has
+        // no forward/reverse join there.
+        assert_eq!(diode.physical_event_locally_c2(-0.375), mode == 0);
     }
     diode.sidewall_cj0 = 1e-12;
     diode.sidewall_perimeter = 1.0;

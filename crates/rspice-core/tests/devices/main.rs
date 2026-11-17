@@ -24,6 +24,7 @@ mod controlled_sources_ext;
 mod cpl_telegrapher;
 mod cpl_time_scale;
 mod device_count_inventory;
+mod diode_ltspice_junction_law;
 mod diode_rectifier_oracle;
 mod ekv26_native;
 mod ekv3_native;

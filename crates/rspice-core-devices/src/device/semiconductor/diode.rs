@@ -216,6 +216,9 @@ pub struct ResolvedDiodeJunction {
     /// The default dialect's AREA*M/GMIN conductance limit; infinite in the
     /// other dialects and for the native diode, which limits its whole law.
     conductance_limit: Value,
+    /// LTspice's breakdown knee current (IBV scaled by AREA*M), which the
+    /// default dialect follows; `None` is the ngspice and Xyce law.
+    ltspice_breakdown_current: Option<Value>,
 }
 
 impl ResolvedDiodeJunction {
@@ -231,13 +234,15 @@ impl ResolvedDiodeJunction {
             breakdown: breakdown_voltage.map(|voltage| (voltage, breakdown_emission_voltage)),
             idealized: None,
             conductance_limit: Value::INFINITY,
+            ltspice_breakdown_current: None,
         }
     }
 
     /// Physical current from anode to cathode and its exact voltage
     /// derivative.  The three regions are Xyce/ngspice's forward
-    /// exponential, cubic reverse continuation, and avalanche breakdown; the
-    /// default dialect runs them on their tangent past AREA*M/GMIN.
+    /// exponential, cubic reverse continuation, and avalanche breakdown. The
+    /// default dialect sums LTspice's two exponentials at every bias instead
+    /// and runs them on their tangent past AREA*M/GMIN.
     #[doc(hidden)]
     pub fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
         if self.conductance_limit.is_finite() {
@@ -259,6 +264,9 @@ impl ResolvedDiodeJunction {
         if !(isat.is_finite() && isat > 0.0 && nvt.is_finite() && nvt > 0.0) {
             return (0.0, 0.0);
         }
+        if let Some(breakdown_current) = self.ltspice_breakdown_current {
+            return self.ltspice_current_and_conductance(voltage, breakdown_current);
+        }
 
         if voltage >= -3.0 * nvt {
             return Diode::exponential_current(isat, voltage, nvt);
@@ -278,6 +286,30 @@ impl ResolvedDiodeJunction {
         let mut argument = 3.0 * nvt / (voltage * std::f64::consts::E);
         argument = argument * argument * argument;
         (-isat * (1.0 + argument), isat * 3.0 * argument / voltage)
+    }
+
+    /// LTspice 17.2.4's junction: `IS*(exp(V/(N*Vt))-1) -
+    /// IBV*exp(-(V+BV)/(NBV*Vt))` at every bias, with neither SPICE2's cubic
+    /// reverse continuation nor its IBV matching of the breakdown voltage.
+    /// Its bare-diode sweeps from -12 V to 1.2 V fit this sum to 5e-5 in
+    /// forward, reverse and breakdown, and give -IBV*exp(-BV/(NBV*Vt)) at
+    /// zero bias.
+    fn ltspice_current_and_conductance(
+        self,
+        voltage: Value,
+        breakdown_current: Value,
+    ) -> (Value, Value) {
+        let (current, conductance) =
+            Diode::exponential_current(self.saturation_current, voltage, self.emission_voltage);
+        let Some((breakdown_voltage, breakdown_emission_voltage)) = self.breakdown else {
+            return (current, conductance);
+        };
+        let argument = -(breakdown_voltage + voltage) / breakdown_emission_voltage;
+        let (exponential, derivative) = Diode::limited_exp(argument, BREAKDOWN_EXP_ARG_MAX);
+        (
+            current - breakdown_current * exponential,
+            conductance + (breakdown_current / breakdown_emission_voltage) * derivative,
+        )
     }
 
     #[doc(hidden)]
@@ -414,8 +446,11 @@ pub struct Diode {
     pub rs: Value,
     /// Reverse breakdown voltage. `None` disables the breakdown branch.
     pub bv: Option<Value>,
-    /// Reverse current at breakdown knee.
+    /// Reverse current at breakdown knee: as given, or ngspice's and Xyce's
+    /// 1 mA. The default dialect takes LTspice's 1e-10 A for an omitted IBV.
     pub ibv: Value,
+    /// Whether IBV was given on the model card.
+    pub ibv_given: bool,
     /// Forward high-injection knee current (IKF/IK).
     pub forward_knee_current: Value,
     /// Reverse high-injection knee current (IKR).
@@ -773,6 +808,7 @@ impl Diode {
             rs: 0.568, // Series resistance
             bv: None,
             ibv: 1e-6,
+            ibv_given: true,
             forward_knee_current: 0.0,
             reverse_knee_current: 0.0,
             recombination_saturation_current: 0.0,
@@ -1121,6 +1157,7 @@ impl Diode {
         diode.n = 1.0;
         diode.rs = 0.0;
         diode.ibv = 1e-3;
+        diode.ibv_given = false;
         diode.cj0 = 0.0;
         diode.vj = 1.0;
         diode.m = 0.5;
@@ -1133,8 +1170,8 @@ impl Diode {
         diode.sidewall_vj = 1.0;
         diode.sidewall_m = 0.33;
         diode.sidewall_fc = 0.5;
-        diode.breakdown_emission_coefficient = diode.n;
         diode.breakdown_emission_given = false;
+        diode.apply_dialect_breakdown_emission_default();
         diode.recombination_saturation_current = 0.0;
         diode.recombination_emission_coefficient = 2.0;
         diode
@@ -1192,6 +1229,7 @@ impl Diode {
             && v > 0.0
         {
             self.ibv = v;
+            self.ibv_given = true;
         }
         if let Some(v) = params.get("IKF").or_else(|| params.get("IK")).copied() {
             self.forward_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
@@ -1429,9 +1467,7 @@ impl Diode {
         {
             self.tbv2 = v;
         }
-        if !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = self.n;
-        }
+        self.apply_dialect_breakdown_emission_default();
         // ngspice defaults the activation energy against TLEV, not against the
         // level: the TLEV=2 bandgap law is written around 1.16 eV while the
         // TLEV 0/1 laws are written around 1.11 eV.
@@ -1529,15 +1565,10 @@ impl Diode {
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_dialect = enabled;
-        // Xyce 7.10 Model::processParams replaces the registry default with N
-        // when NBV was omitted, just as ngspice does. Keep explicit NBV values
-        // when selecting the dialect before temperature and IBV/BV matching.
-        if !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = self.n;
-        }
         if enabled {
             self.ngspice_dialect = false;
         }
+        self.apply_dialect_breakdown_emission_default();
         self.rematch_temperature_breakdown_voltage();
     }
 
@@ -1545,13 +1576,46 @@ impl Diode {
     #[doc(hidden)]
     pub fn set_ngspice_compatibility(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;
-        if enabled && !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = self.n;
-        }
         if enabled {
             self.xyce_dialect = false;
         }
+        self.apply_dialect_breakdown_emission_default();
         self.rematch_temperature_breakdown_voltage();
+    }
+
+    /// An omitted NBV: N in ngspice and in Xyce 7.10, whose
+    /// Model::processParams replaces the registry default with N
+    /// (N_DEV_Diode.C:1628-1629), and 1 in LTspice 17.2.4, which the default
+    /// dialect follows. Keep explicit NBV values when selecting the dialect
+    /// before temperature and IBV/BV matching.
+    fn apply_dialect_breakdown_emission_default(&mut self) {
+        if !self.breakdown_emission_given {
+            self.breakdown_emission_coefficient = if self.follows_ltspice_junction_law() {
+                1.0
+            } else {
+                self.n
+            };
+        }
+    }
+
+    /// LTspice's junction law, which the default dialect follows: the IS
+    /// exponential and the IBV breakdown exponential summed at every bias,
+    /// with no IBV matching (see
+    /// [`ResolvedDiodeJunction::current_and_conductance`]).
+    fn follows_ltspice_junction_law(&self) -> bool {
+        !self.ngspice_dialect && !self.xyce_dialect
+    }
+
+    /// LTspice's breakdown knee current: IBV, 1e-10 A when omitted, scaled
+    /// by AREA*M. LTspice 17.2.4 sweeps show the omitted default and the
+    /// AREA=10 and M=10 scaling (ngspice's and Xyce's default is 1 mA,
+    /// diosetup.c:56 and N_DEV_Diode.C:328).
+    fn ltspice_breakdown_current(&self) -> Value {
+        if self.ibv_given {
+            self.ibv
+        } else {
+            1e-10 * self.area * self.multiplicity
+        }
     }
 
     /// Select Xyce's native transient device-convergence status policy for
@@ -1921,7 +1985,7 @@ impl Diode {
             idealized.scale_parallel(scale);
         }
         self.is *= scale;
-        self.ibv *= if self.xyce_dialect {
+        self.ibv *= if self.xyce_dialect || self.follows_ltspice_junction_law() {
             scale
         } else {
             match self.level {
@@ -2499,6 +2563,16 @@ impl Diode {
             return (0.0, 0.0);
         }
         let isat = self.sidewall_saturation_current * self.sidewall_perimeter;
+        if self.follows_ltspice_junction_law() {
+            // The default dialect's breakdown is the bottom junction's IBV
+            // term alone, so a sidewall runs its exponential at every bias.
+            let emission = if self.sidewall_emission_given {
+                self.sidewall_emission_coefficient
+            } else {
+                self.n
+            };
+            return Self::exponential_current(isat, vd, emission.max(EPSMIN) * self.vt);
+        }
         if self.sidewall_emission_given {
             // A sidewall split onto its own RSW node has no breakdown arm
             // (dioload.c:360: "breakdown, but not for separate sidewall diode").
@@ -2673,12 +2747,16 @@ impl Diode {
         saturation_current: Value,
         emission_coefficient: Value,
     ) -> ResolvedDiodeJunction {
-        ResolvedDiodeJunction::new(
+        let mut junction = ResolvedDiodeJunction::new(
             saturation_current,
             emission_coefficient.max(EPSMIN) * self.vt,
             self.active_breakdown_voltage(),
             self.breakdown_emission_coefficient.max(EPSMIN) * self.vt,
-        )
+        );
+        if self.follows_ltspice_junction_law() {
+            junction.ltspice_breakdown_current = Some(self.ltspice_breakdown_current());
+        }
+        junction
     }
 
     /// Temperature-resolved bottom-junction law used by exact HB.
@@ -2787,6 +2865,9 @@ impl Diode {
     }
 
     fn xbv_matched_breakdown_voltage(&self, bv: Value) -> Option<Value> {
+        if self.follows_ltspice_junction_law() {
+            return Some(bv);
+        }
         let vt = self.vt;
         let isat = self.matching_saturation_current().max(1e-300);
         let cbv = self.ibv;
@@ -3429,6 +3510,7 @@ mod tests {
     /// instance's `AREA=100p PJ=40u`, then temperature.
     fn gf180_instance(params: &std::collections::HashMap<String, Value>) -> Diode {
         let mut d = Diode::spice_defaults("dn1".to_string(), 1, 0).with_model_params(params);
+        d.set_ngspice_compatibility(true);
         d.apply_instance_scaling(100e-12, 1.0);
         d.set_sidewall_perimeter(40e-6);
         d.set_temperature(REFTEMP, REFTEMP);
@@ -3499,7 +3581,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_breakdown_emission_defaults_to_n_in_both_dialects() {
+    fn omitted_breakdown_emission_defaults_to_n_in_ngspice_and_xyce_and_to_one_by_default() {
         let params: std::collections::HashMap<String, Value> =
             [("N", 1.48), ("BV", 600.0), ("IBV", 1.0e-4)]
                 .into_iter()
@@ -3507,14 +3589,15 @@ mod tests {
                 .collect();
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
 
-        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
+        // LTspice, which the default dialect follows, takes NBV=1.
+        assert_eq!(diode.breakdown_emission_coefficient, 1.0);
         assert!(!diode.breakdown_emission_given);
 
         diode.set_xyce_compatibility(true);
         assert_eq!(diode.breakdown_emission_coefficient, 1.48);
 
         diode.set_xyce_compatibility(false);
-        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
+        assert_eq!(diode.breakdown_emission_coefficient, 1.0);
 
         diode.set_ngspice_compatibility(true);
         assert_eq!(diode.breakdown_emission_coefficient, 1.48);
@@ -3542,11 +3625,12 @@ mod tests {
         .map(|(name, value)| (name.to_string(), value))
         .collect();
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        diode.set_ngspice_compatibility(true);
         diode.sidewall_perimeter = 1.0;
         let temp = REFTEMP + 10.0;
         diode.set_temperature_xyce_7(temp, REFTEMP);
 
-        // Outside the Xyce dialect TBV1 is ngspice's TCV: `BV − TCV·dt`.
+        // In the ngspice dialect TBV1 is ngspice's TCV: `BV − TCV·dt`.
         let ngspice_shifted_bv = 5.0 - 1.0e-3 * 10.0;
         let ngspice_default = matched_breakdown_oracle(
             ngspice_shifted_bv,
@@ -3594,6 +3678,7 @@ mod tests {
         .map(|(name, value)| (name.to_string(), value))
         .collect();
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        diode.set_ngspice_compatibility(true);
         diode.set_temperature(REFTEMP, REFTEMP);
 
         let thermal = EPSMIN * diode.vt;
@@ -3922,12 +4007,33 @@ mod tests {
                     .map(|(name, value)| (name.to_string(), value))
                     .collect();
             let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+            d.set_ngspice_compatibility(true);
             d.apply_instance_scaling(4.0, 3.0);
             d.ibv
         };
 
         assert!((scale_ibv(1.0) - 1e-3 * 3.0).abs() <= 1e-18);
         assert!((scale_ibv(3.0) - 1e-3 * 12.0).abs() <= 1e-18);
+    }
+
+    /// LTspice, which the default dialect follows, scales IBV by AREA*M, and
+    /// an omitted IBV is its 1e-10 A: an AREA=10 or M=10 sweep through
+    /// breakdown matches only with the knee current scaled tenfold.
+    #[test]
+    fn default_breakdown_knee_current_scales_by_area_and_multiplicity() {
+        let ltspice_ibv = |ibv: Option<Value>| {
+            let params: std::collections::HashMap<String, Value> = [("BV", 10.0)]
+                .into_iter()
+                .chain(ibv.map(|ibv| ("IBV", ibv)))
+                .map(|(name, value)| (name.to_string(), value))
+                .collect();
+            let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+            d.apply_instance_scaling(4.0, 3.0);
+            d.ltspice_breakdown_current()
+        };
+
+        assert!((ltspice_ibv(Some(1e-3)) - 1e-3 * 12.0).abs() <= 1e-18);
+        assert!((ltspice_ibv(None) - 1e-10 * 12.0).abs() <= 1e-25);
     }
 
     /// LEVEL=3 derives AREA and PJ from the drawn rectangle of one device;
@@ -4121,6 +4227,7 @@ mod tests {
         params.insert("IBV".to_string(), 1.0e-3);
 
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 2).with_model_params(&params);
+        diode.set_xyce_compatibility(true);
         diode.set_temperature_xyce_7(273.15 - 55.0, REFTEMP);
         let breakdown = diode
             .active_breakdown_voltage()

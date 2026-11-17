@@ -165,6 +165,15 @@ impl Diode {
             return true;
         }
         let thermal = emission.max(EPSMIN) * self.vt;
+        if self.follows_ltspice_junction_law() {
+            // LTspice's sum has no region joins: only the exponent caps.
+            let breakdown_smooth = !breakdown
+                || self.active_breakdown_voltage().is_none_or(|voltage| {
+                    let thermal = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
+                    positive_normal(thermal) && -(voltage + vd) / thermal != BREAKDOWN_EXP_ARG_MAX
+                });
+            return positive_normal(thermal) && vd / thermal != MAX_EXP_ARG && breakdown_smooth;
+        }
         if !positive_normal(thermal) || vd == -3.0 * thermal {
             return false;
         }
