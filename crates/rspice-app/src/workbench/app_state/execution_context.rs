@@ -67,10 +67,10 @@ impl AppState {
         self.model.unsaved_pin_renames.clear();
         self.model.symbol_rewired_sheets.clear();
         self.model.generated_symbol_ports.clear();
-        // Problems and debugger evidence are project-scoped under the
-        // source-workspace contract. Clear them in the same transaction as
-        // documents and results so a replacement can never render one frame
-        // containing two designs' findings. The Console is not cleared: it
+        // Problems are project-scoped under the source-workspace contract.
+        // Clear them in the same transaction as documents and results so a
+        // replacement can never render one frame containing two designs'
+        // findings. The Console is not cleared: it
         // is the session's chronological record, and keeps the history from
         // before the replacement.
         self.model.diagnostics.clear();

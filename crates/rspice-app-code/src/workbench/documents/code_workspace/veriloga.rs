@@ -245,8 +245,8 @@ pub fn invalidate_veriloga_evidence(
     invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
 }
 
-/// [`invalidate_veriloga_evidence`], over the model and the Code &
-/// Automation page's state.
+/// [`invalidate_veriloga_evidence`], over the model and the Verilog-A
+/// editor's state.
 pub(crate) fn invalidate_veriloga_evidence_in(
     model: &mut Model,
     code: &mut CodeWorkspaceRuntimeState,

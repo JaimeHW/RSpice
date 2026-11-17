@@ -94,19 +94,6 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.4", &["self.state.workbench.theme.apply(ctx)"]),
     ("5.5", &["if initializing_frame", "ctx.request_repaint()"]),
     ("5.6", &["self.poll_code(ctx)"]),
-    ("5.13", &["self.poll_automation_workflow()"]),
-    (
-        "5.14",
-        &["code_workspace::settle_pending_python_execute(&mut self.code_workspace_parts(),)"],
-    ),
-    ("5.15", &["self.poll_managed_automation_runtime()"]),
-    (
-        "5.16",
-        &[
-            "automation.execution.is_active()",
-            "ctx.request_repaint_after(std::time::Duration::from_millis(50))",
-        ],
-    ),
     (
         "5.17",
         &["synchronize_browser_surface_navigation(&mut self.state)"],
@@ -1097,25 +1084,23 @@ const CLOUD_ACCOUNT_POLL: &[Step] = &[
 /// `CodeFeature::poll`, step 5.6 of the frame: what the code feature settles
 /// before any surface draws, in the order the frame settled it.
 const CODE_POLL: &[Step] = &[
-    ("5.6.1", &["Self::terminate_after_project_change(cx)"]),
-    ("5.6.2", &["cx.own.automation_runtime.poll_discovery()"]),
+    ("5.6.1", &["Self::reset_after_project_change(cx)"]),
     (
-        "5.6.3",
+        "5.6.2",
         &["poll_veriloga_import(cx.model, &mut cx.state.code_workspace, cx.wb)"],
     ),
     (
-        "5.6.4",
+        "5.6.3",
         &["poll_veriloga_compile(cx.model, &mut cx.state.code_workspace, cx.wb)"],
     ),
     (
-        "5.6.5",
+        "5.6.4",
         &[
             "let shown = cx.state.netlist_shown()",
             "consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, shown, ctx)",
         ],
     ),
-    ("5.6.6", &["refresh_symbol_standing("]),
-    ("5.6.7", &["poll_automation_source_import("]),
+    ("5.6.5", &["refresh_symbol_standing("]),
 ];
 
 /// `pump_live_session`, step 8 of the frame: the live-session engine's
@@ -1163,8 +1148,8 @@ const LIVE_SESSION_PUMP: &[Step] = &[
 
 /// `end_frame`, step 16 of the frame: the models feature's authoring
 /// recovery point is captured once the frame's edits and cross-probes have
-/// settled, and before a project the frame replaced takes its automation
-/// authority with it.
+/// settled, and before a project the frame replaced starts the code
+/// workspace over.
 const END_FRAME: &[Step] = &[
     (
         "16.1",
@@ -1179,10 +1164,7 @@ const END_FRAME: &[Step] = &[
         ],
     ),
     ("16.3", &["self.state.models.capture_authoring_recovery()"]),
-    (
-        "16.4",
-        &["self.terminate_code_runtime_after_project_change()"],
-    ),
+    ("16.4", &["self.reset_code_after_project_change()"]),
 ];
 
 /// `sync_window_title`, step 5.33 of the frame: the title's dirty mark and
@@ -1668,12 +1650,8 @@ fn the_code_feature_settles_its_frame_where_the_frame_did() {
             "CodeFeature::poll(&mut features::cx(self), ctx);",
         ),
         (
-            "fn terminate_code_runtime_after_project_change(",
-            "CodeFeature::terminate_after_project_change(&mut features::cx(self));",
-        ),
-        (
-            "fn terminate_code_runtime(",
-            "CodeFeature::terminate_runtime(&mut features::cx(self));",
+            "fn reset_code_after_project_change(",
+            "CodeFeature::reset_after_project_change(&mut features::cx(self));",
         ),
     ] {
         assert_eq!(

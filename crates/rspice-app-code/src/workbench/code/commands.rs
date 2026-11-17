@@ -15,7 +15,7 @@ use egui::Key;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{CellViewRef, LibraryCellInstance, ProjectSourceLanguage, ProjectSourceRole};
+use crate::state::{CellViewRef, LibraryCellInstance, ProjectSourceLanguage};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{
     Drain, EditorViewCommand, Request, SourceEditorRequest, StandardCommand, StructuralCommand,
@@ -256,10 +256,8 @@ impl Request for VerilogAStripRequest {
 /// application, which the shell carries out as the dialog's step returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceDocumentRequest {
-    /// Create the Automation workspace the draft describes.
-    CreateWorkspace,
-    /// A lifecycle choice on the Verilog-A or Automation document at
-    /// `logical_path`, then the dialog's close when the same frame closed it.
+    /// A lifecycle choice on the Verilog-A document at `logical_path`, then
+    /// the dialog's close when the same frame closed it.
     Document {
         action: LifecycleAction,
         language: ProjectSourceLanguage,
@@ -277,9 +275,9 @@ pub enum SourceDocumentRequest {
     CreateTopDeck,
 }
 
-/// What the source document dialog's body asked for of a Verilog-A or
-/// Automation document, applied after rendering so a transaction never
-/// mutates the project while its own rows are still on screen.
+/// What the source document dialog's body asked for of a Verilog-A
+/// document, applied after rendering so a transaction never mutates the
+/// project while its own rows are still on screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LifecycleAction {
     None,
@@ -289,11 +287,9 @@ pub enum LifecycleAction {
     SelectRevision(u64),
     Restore,
     CloseHistory,
-    Import,
     /// Replace this Verilog-A file's content from a picked file, through the
     /// import transaction's own confirmation. File > Import never does it.
     ReplaceFromFile,
-    AssignRole(Option<ProjectSourceRole>),
 }
 
 /// What the source document dialog's body asked for of the netlist page's

@@ -1,5 +1,5 @@
-//! Rename symbol, Go to definition and Find references for Verilog-A and
-//! Automation sources, from the caret of the source editor on screen.
+//! Rename symbol, Go to definition and Find references for Verilog-A
+//! sources, from the caret of the source editor on screen.
 //!
 //! Go to definition moves the caret to the definition, opening its file when
 //! it lives in another file of the bundle. Find references lists every
@@ -112,9 +112,7 @@ pub fn navigate_source_bundle(
                     logical_path: definition.logical_path.clone(),
                 });
             }
-            crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-                parts.code.automation.selected_file = Some(definition.logical_path.clone());
-            }
+            crate::state::ProjectSourceLanguage::RSpiceAutomation => {}
         }
     }
     // The page hands this to the editor it draws next, which is the

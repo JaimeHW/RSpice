@@ -164,9 +164,6 @@ pub(crate) struct VirtualEditorStyle<'a> {
     pub error: Color32,
     pub warning: Color32,
     pub edited_lines: &'a std::collections::HashSet<usize>,
-    pub breakpoints: &'a [usize],
-    pub breakpoints_enabled: bool,
-    pub current_line: Option<usize>,
     pub cross_probe_line: Option<usize>,
     /// The stretches of text findings cover, by line, each underlined in
     /// the shape of its severity.
@@ -211,7 +208,6 @@ pub(crate) struct VirtualEditorOutput {
     /// guess at a token.
     pub hover_char_index: Option<usize>,
     pub selected_char_range: Option<(usize, usize)>,
-    pub breakpoint_toggled: Option<usize>,
     /// Undo or Redo, when it was asked for and the editor's own history had
     /// no step to take. An owner with an older history of its own (a bulk
     /// replace, a rename) steps that one, so the request is never lost.
@@ -442,7 +438,6 @@ pub(crate) fn show_virtual_text_editor(
     );
 
     let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
-    let mut breakpoint_toggled = None;
     let mut caret_anchor = None;
     let mut hover_char_index = None;
     let mut requested_scroll = requested_line;
@@ -506,8 +501,8 @@ pub(crate) fn show_virtual_text_editor(
             };
             // A finger may be about to scroll, so only a mouse or a pen
             // places the caret as it goes down; a tap places it when it
-            // lifts. The gutter's breakpoints and fold marks take their
-            // own clicks, so a press there leaves the caret alone.
+            // lifts. The gutter's fold marks take their own clicks, so a
+            // press there leaves the caret alone.
             let gutter_right = origin.x + viewport.left() + style.gutter_width;
             if pressed
                 && !session.touch.is_touch()
@@ -637,24 +632,6 @@ pub(crate) fn show_virtual_text_editor(
                 session.preferred_column = None;
             }
 
-            if response.has_focus()
-                && style.breakpoints_enabled
-                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F9))
-            {
-                let cursor = session
-                    .model
-                    .selections()
-                    .last()
-                    .map_or(0, |selection| selection.cursor);
-                breakpoint_toggled = Some(
-                    session
-                        .model
-                        .line_column_for_char(cursor)
-                        .0
-                        .saturating_add(1),
-                );
-            }
-
             let viewport_lines = session.model.viewport(
                 first_row,
                 row_count,
@@ -710,11 +687,9 @@ pub(crate) fn show_virtual_text_editor(
                 let is_active = session.model.selections().iter().any(|selection| {
                     session.model.line_column_for_char(selection.cursor).0 == line.logical_line
                 });
-                // The debugger's current line and the cross-probed line are
-                // where the reader is, so they take the active-item accent.
-                if style.current_line == Some(one_based_line) {
-                    code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.12));
-                } else if style.cross_probe_line == Some(line.logical_line) {
+                // The cross-probed line is where the reader is, so it takes
+                // the active-item accent.
+                if style.cross_probe_line == Some(line.logical_line) {
                     code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.08));
                 } else if is_active {
                     code_painter.rect_filled(row_rect, 0.0, style.active_background);
@@ -802,20 +777,6 @@ pub(crate) fn show_virtual_text_editor(
                         style.accent,
                     );
                 }
-                if style.breakpoints.contains(&one_based_line) {
-                    ui.painter().circle_filled(
-                        egui::pos2(sticky_gutter_left + 7.0, row_rect.center().y),
-                        4.0,
-                        style.error,
-                    );
-                }
-                if style.current_line == Some(one_based_line) {
-                    ui.painter().circle_filled(
-                        egui::pos2(sticky_gutter_left + 18.0, row_rect.center().y),
-                        4.0,
-                        style.warning,
-                    );
-                }
                 if line.folded_line_count > 0 {
                     let marker = egui::Rect::from_center_size(
                         egui::pos2(sticky_gutter_left + 28.0, row_rect.center().y),
@@ -841,9 +802,7 @@ pub(crate) fn show_virtual_text_editor(
                 let (line, _) =
                     hit_test(&session.model, pointer, origin, viewport, style, char_width);
                 let local_x = pointer.x - sticky_gutter_left;
-                if local_x <= 14.0 && style.breakpoints_enabled {
-                    breakpoint_toggled = Some(line + 1);
-                } else if (20.0..=36.0).contains(&local_x) {
+                if (20.0..=36.0).contains(&local_x) {
                     session.model.unfold_at_line(line);
                 }
             }
@@ -960,7 +919,6 @@ pub(crate) fn show_virtual_text_editor(
         cursor_char_index,
         hover_char_index,
         selected_char_range,
-        breakpoint_toggled,
         unanswered_history,
         caret_anchor,
         response,
@@ -1895,7 +1853,6 @@ fn insert_smart_newline(model: &mut TextDocumentModel, syntax: EditorSyntax) -> 
                 .collect::<String>();
             let trimmed = prefix.trim_end();
             let opens_block = match syntax {
-                EditorSyntax::Python | EditorSyntax::Yaml => trimmed.ends_with(':'),
                 EditorSyntax::VerilogA => leaves_block_open(trimmed),
                 EditorSyntax::Spice => {
                     trimmed.split_ascii_whitespace().next().is_some_and(|head| {
@@ -2111,7 +2068,6 @@ fn handle_view_command(
 
 fn discover_fold_regions(model: &TextDocumentModel, syntax: EditorSyntax) -> Vec<(usize, usize)> {
     match syntax {
-        EditorSyntax::Python | EditorSyntax::Yaml => indentation_fold_regions(model),
         EditorSyntax::Toml => toml_fold_regions(model),
         EditorSyntax::Spice => delimited_fold_regions(
             model,
@@ -2126,49 +2082,6 @@ fn discover_fold_regions(model: &TextDocumentModel, syntax: EditorSyntax) -> Vec
         }
         EditorSyntax::VerilogA => veriloga_fold_regions(model),
     }
-}
-
-fn indentation_fold_regions(model: &TextDocumentModel) -> Vec<(usize, usize)> {
-    let indent = |line: &str| {
-        line.chars()
-            .take_while(|character| matches!(character, ' ' | '\t'))
-            .map(|character| if character == '\t' { 4 } else { 1 })
-            .sum::<usize>()
-    };
-    let mut regions = Vec::new();
-    let mut open = Vec::<(usize, usize)>::new();
-    let mut previous = None::<(usize, usize, bool)>;
-    for (line_index, line) in model.line_slices().enumerate() {
-        let line = line.to_string();
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let current_indent = indent(&line);
-        while open
-            .last()
-            .is_some_and(|(_, base_indent)| current_indent <= *base_indent)
-        {
-            let (start, _) = open.pop().expect("checked non-empty fold stack");
-            if line_index > start + 1 {
-                regions.push((start, line_index));
-            }
-        }
-        if let Some((previous_line, previous_indent, previous_can_open)) = previous
-            && previous_can_open
-            && current_indent > previous_indent
-        {
-            open.push((previous_line, previous_indent));
-        }
-        previous = Some((line_index, current_indent, !trimmed.starts_with('#')));
-    }
-    for (start, _) in open {
-        if model.line_count() > start + 1 {
-            regions.push((start, model.line_count()));
-        }
-    }
-    regions.sort_unstable();
-    regions
 }
 
 fn toml_fold_regions(model: &TextDocumentModel) -> Vec<(usize, usize)> {

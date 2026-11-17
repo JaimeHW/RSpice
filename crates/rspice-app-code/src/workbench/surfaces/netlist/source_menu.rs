@@ -1,5 +1,5 @@
-//! The source editor's right-click menu's rows on the code pages (the deck,
-//! Automation and Verilog-A pages), read from the code feature's context
+//! The source editor's right-click menu's rows on the code pages (the deck
+//! and the Verilog-A view), read from the code feature's context
 //! lent with its menus' answers while the menu is open.
 
 use egui::os::OperatingSystem;

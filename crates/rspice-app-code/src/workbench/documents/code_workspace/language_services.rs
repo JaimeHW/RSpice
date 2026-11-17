@@ -1,7 +1,6 @@
-//! Revision-bound language index for project-owned Verilog-A and Automation sources.
+//! Revision-bound language index for project-owned Verilog-A sources.
 //!
-//! The compiler and managed Python worker remain the syntax and semantic
-//! authorities. This index supplies bounded source navigation and conservative
+//! The compiler remains the syntax and semantic authority. This index supplies bounded source navigation and conservative
 //! refactors: it never edits comments/strings. A Verilog-A name is resolved
 //! through its file's [`VerilogASymbols`], so a rename reaches exactly the
 //! uses of the declaration under the caret; elsewhere rename is refused
@@ -25,13 +24,9 @@ const MAX_RENAME_EDITS: usize = 50_000;
 pub(crate) enum SourceSymbolKind {
     Module,
     Function,
-    Class,
     Parameter,
     Port,
     Net,
-    Variable,
-    Import,
-    Configuration,
     Discipline,
     Nature,
 }
@@ -158,7 +153,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
         )
     }) {
         return Err(format!(
-            "Rename would change governed read-only source '{logical_path}'. No project source was changed."
+            "Rename would change read-only source '{logical_path}'. No project source was changed."
         ));
     }
     let (occurrences, _) =
@@ -180,9 +175,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
                 state.index.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     let message = format!(
         "Renamed {} to {}: {}.",
@@ -225,7 +218,7 @@ fn current_language_transaction(
         &state.active_path,
     ) {
         return Err(format!(
-            "'{}' is governed as a read-only source. Create an editable project copy before applying source changes.",
+            "'{}' is read-only, so no source change was applied.",
             state.active_path
         ));
     }
@@ -299,22 +292,21 @@ pub fn format_language_document(
     Ok(message)
 }
 
-/// The formatter's whole-document edit, or why the source is refused. For
-/// every language: trailing blanks removed outside string literals and one
-/// final line break. Verilog-A is also laid out by its block structure.
+/// The formatter's whole-document edit, or why the source is refused:
+/// trailing blanks removed outside string literals, one final line break,
+/// and the Verilog-A laid out by its block structure.
 fn formatted_source(
     language: ProjectSourceLanguage,
     logical_path: &str,
     source: &str,
 ) -> Result<String, String> {
-    let syntax = document_syntax(language, logical_path);
-    validate_source_for_formatting(syntax, logical_path, source)?;
-    let protected = protected_string_lines(source, syntax);
+    if language != ProjectSourceLanguage::VerilogA {
+        return Err("Only a Verilog-A source can be formatted.".to_owned());
+    }
+    validate_source_for_formatting(logical_path, source)?;
+    let protected = protected_string_lines(source);
     let normalized = normalize_source_whitespace(source, &protected).0;
-    Ok(match syntax {
-        DocumentSyntax::VerilogA => super::veriloga_format::format_source(&normalized),
-        DocumentSyntax::Python | DocumentSyntax::Yaml | DocumentSyntax::Toml => normalized,
-    })
+    Ok(super::veriloga_format::format_source(&normalized))
 }
 
 #[cfg(test)]
@@ -338,9 +330,7 @@ fn write_language_document(
         ProjectSourceLanguage::VerilogA => {
             super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     Ok(())
 }
@@ -365,10 +355,8 @@ impl LanguageServiceIndex {
         let mut sources = BTreeMap::new();
         let mut veriloga = BTreeMap::new();
         for (logical_path, source) in documents {
-            let syntax = document_syntax(bundle.language(), logical_path);
-            let mut document_tokens = lex_identifiers(logical_path, source, syntax);
-            let definitions =
-                definitions_for_document(logical_path, source, syntax, &document_tokens);
+            let mut document_tokens = lex_veriloga_identifiers(logical_path, source);
+            let definitions = verilog_definitions(logical_path, source, &document_tokens);
             let definition_ranges = definitions
                 .iter()
                 .map(|symbol| (symbol.byte_range.start, symbol.byte_range.end))
@@ -376,17 +364,14 @@ impl LanguageServiceIndex {
             for token in &mut document_tokens {
                 token.definition =
                     definition_ranges.contains(&(token.byte_range.start, token.byte_range.end));
-                token.renamable =
-                    matches!(syntax, DocumentSyntax::Python | DocumentSyntax::VerilogA);
+                token.renamable = true;
             }
             symbols.extend(definitions);
             tokens.extend(document_tokens);
-            if syntax == DocumentSyntax::VerilogA {
-                veriloga.insert(
-                    crate::state::project_source_path_key(logical_path),
-                    VerilogASymbols::read(source),
-                );
-            }
+            veriloga.insert(
+                crate::state::project_source_path_key(logical_path),
+                VerilogASymbols::read(source),
+            );
             sources.insert(
                 crate::state::project_source_path_key(logical_path),
                 source.to_owned(),
@@ -926,120 +911,22 @@ fn place_of(source: &str, offset: usize) -> (usize, usize) {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DocumentSyntax {
-    VerilogA,
-    Python,
-    Yaml,
-    Toml,
+/// Why a Verilog-A source cannot be laid out: it does not lex. Layout is read
+/// from the tokens and keeps them all, so it needs no more than that they
+/// read: a header of macros is no module, and a module's directives are not
+/// yet expanded here.
+fn validate_source_for_formatting(logical_path: &str, source: &str) -> Result<(), String> {
+    let mut source_map = rspice_veriloga::SourceMap::new();
+    let source_id = source_map.add_source_mut(logical_path, source);
+    rspice_veriloga::Lexer::new(source, source_id)
+        .collect_tokens()
+        .map(|_| ())
+        .map_err(|error| format!("Formatting is blocked by Verilog-A lexing: {error}"))
 }
 
-fn document_syntax(language: ProjectSourceLanguage, logical_path: &str) -> DocumentSyntax {
-    match language {
-        ProjectSourceLanguage::VerilogA => DocumentSyntax::VerilogA,
-        ProjectSourceLanguage::RSpiceAutomation => {
-            let lower = logical_path.to_ascii_lowercase();
-            if lower.ends_with(".yaml") || lower.ends_with(".yml") {
-                DocumentSyntax::Yaml
-            } else if lower.ends_with(".toml") || lower.ends_with(".lock") {
-                DocumentSyntax::Toml
-            } else {
-                DocumentSyntax::Python
-            }
-        }
-    }
-}
-
-fn validate_source_for_formatting(
-    syntax: DocumentSyntax,
-    logical_path: &str,
-    source: &str,
-) -> Result<(), String> {
-    match syntax {
-        // Python grammar belongs exclusively to the exact managed CPython or
-        // Pyodide runtime. These actions only normalize whitespace outside
-        // strings, so a lagging convenience parser must not reject current
-        // Python syntax or be mistaken for execution evidence.
-        DocumentSyntax::Python => Ok(()),
-        DocumentSyntax::VerilogA => {
-            let mut source_map = rspice_veriloga::SourceMap::new();
-            let source_id = source_map.add_source_mut(logical_path, source);
-            // Layout is read from the tokens and keeps them all, so it needs
-            // no more than that they read: a header of macros is no module,
-            // and a module's directives are not yet expanded here.
-            rspice_veriloga::Lexer::new(source, source_id)
-                .collect_tokens()
-                .map(|_| ())
-                .map_err(|error| format!("Formatting is blocked by Verilog-A lexing: {error}"))
-        }
-        DocumentSyntax::Toml => toml::from_str::<toml::Value>(source)
-            .map(|_| ())
-            .map_err(|error| format!("Formatting is blocked by TOML parsing: {error}")),
-        DocumentSyntax::Yaml => validate_yaml_shape(source),
-    }
-}
-
-fn validate_yaml_shape(source: &str) -> Result<(), String> {
-    let mut flow = Vec::new();
-    let mut single_quote = false;
-    let mut double_quote = false;
-    let mut escaped = false;
-    for (offset, character) in source.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' && double_quote {
-            escaped = true;
-            continue;
-        }
-        if character == '\'' && !double_quote {
-            single_quote = !single_quote;
-            continue;
-        }
-        if character == '"' && !single_quote {
-            double_quote = !double_quote;
-            continue;
-        }
-        if single_quote || double_quote {
-            continue;
-        }
-        match character {
-            '[' | '{' => flow.push(character),
-            ']' if flow.pop() != Some('[') => {
-                return Err(format!(
-                    "Formatting is blocked by an unmatched ']' at byte {offset}."
-                ));
-            }
-            '}' if flow.pop() != Some('{') => {
-                return Err(format!(
-                    "Formatting is blocked by an unmatched '}}' at byte {offset}."
-                ));
-            }
-            '\t' => {
-                let line_start = source[..offset].rfind('\n').map_or(0, |line| line + 1);
-                if source[line_start..offset].chars().all(char::is_whitespace) {
-                    return Err(
-                        "Formatting is blocked because YAML indentation contains a tab.".to_owned(),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-    if single_quote || double_quote || !flow.is_empty() {
-        return Err(
-            "Formatting is blocked because the YAML document has an unterminated quote or flow collection."
-                .to_owned(),
-        );
-    }
-    Ok(())
-}
-
-fn protected_string_lines(source: &str, syntax: DocumentSyntax) -> BTreeSet<usize> {
+fn protected_string_lines(source: &str) -> BTreeSet<usize> {
     let mut protected = BTreeSet::new();
     let mut quote: Option<char> = None;
-    let mut triple = false;
     let mut escaped = false;
     let mut line = 0_usize;
     let mut chars = source.char_indices().peekable();
@@ -1059,19 +946,7 @@ fn protected_string_lines(source: &str, syntax: DocumentSyntax) -> BTreeSet<usiz
                 continue;
             }
             if Some(character) == quote {
-                if triple {
-                    let mut lookahead = chars.clone();
-                    if lookahead.next().is_some_and(|(_, next)| next == character)
-                        && lookahead.next().is_some_and(|(_, next)| next == character)
-                    {
-                        chars.next();
-                        chars.next();
-                        quote = None;
-                        triple = false;
-                    }
-                } else {
-                    quote = None;
-                }
+                quote = None;
             }
             continue;
         }
@@ -1080,38 +955,11 @@ fn protected_string_lines(source: &str, syntax: DocumentSyntax) -> BTreeSet<usiz
             continue;
         }
         if matches!(character, '\'' | '"') {
-            let mut lookahead = chars.clone();
-            triple = matches!(syntax, DocumentSyntax::Python)
-                && lookahead.next().is_some_and(|(_, next)| next == character)
-                && lookahead.next().is_some_and(|(_, next)| next == character);
-            if triple {
-                chars.next();
-                chars.next();
-            }
             quote = Some(character);
             protected.insert(line);
         }
     }
 
-    if matches!(syntax, DocumentSyntax::Yaml) {
-        let lines = source.lines().collect::<Vec<_>>();
-        let mut scalar_indent = None;
-        for (index, line_text) in lines.iter().enumerate() {
-            let indentation = line_text.len() - line_text.trim_start_matches(' ').len();
-            if scalar_indent
-                .is_some_and(|indent| !line_text.trim().is_empty() && indentation <= indent)
-            {
-                scalar_indent = None;
-            }
-            if scalar_indent.is_some() {
-                protected.insert(index);
-            }
-            let content = line_text.trim_end();
-            if content.ends_with('|') || content.ends_with('>') {
-                scalar_indent = Some(indentation);
-            }
-        }
-    }
     protected
 }
 
@@ -1157,89 +1005,6 @@ pub(super) fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<It
             .iter()
             .map(|file| (file.logical_path(), file.content())),
     )
-}
-
-fn lex_identifiers(logical_path: &str, source: &str, syntax: DocumentSyntax) -> Vec<IndexedToken> {
-    if syntax == DocumentSyntax::VerilogA {
-        return lex_veriloga_identifiers(logical_path, source);
-    }
-    let bytes = source.as_bytes();
-    let mut tokens = Vec::new();
-    let mut cursor = 0;
-    let mut line = 1;
-    let mut line_start = 0;
-    while cursor < bytes.len() {
-        if bytes[cursor] == b'\n' {
-            line += 1;
-            cursor += 1;
-            line_start = cursor;
-            continue;
-        }
-        // Python, YAML and TOML each comment from `#` to the end of the line.
-        if bytes[cursor] == b'#' {
-            while cursor < bytes.len() && bytes[cursor] != b'\n' {
-                cursor += 1;
-            }
-            continue;
-        }
-        if matches!(bytes[cursor], b'\'' | b'"') {
-            let quote = bytes[cursor];
-            let triple = matches!(syntax, DocumentSyntax::Python)
-                && bytes.get(cursor..cursor + 3) == Some(&[quote, quote, quote]);
-            cursor += if triple { 3 } else { 1 };
-            while cursor < bytes.len() {
-                if bytes[cursor] == b'\\' {
-                    cursor = (cursor + 2).min(bytes.len());
-                    continue;
-                }
-                if bytes[cursor] == b'\n' {
-                    line += 1;
-                    line_start = cursor + 1;
-                }
-                let closed = if triple {
-                    bytes.get(cursor..cursor + 3) == Some(&[quote, quote, quote])
-                } else {
-                    bytes[cursor] == quote
-                };
-                cursor += 1;
-                if closed {
-                    cursor += if triple { 2 } else { 0 };
-                    break;
-                }
-            }
-            continue;
-        }
-        let Some(character) = source[cursor..].chars().next() else {
-            break;
-        };
-        let identifier_start = character == '_' || character.is_alphabetic();
-        if identifier_start {
-            let start = cursor;
-            cursor += character.len_utf8();
-            while cursor < bytes.len() {
-                let Some(next) = source[cursor..].chars().next() else {
-                    break;
-                };
-                if next == '_' || next.is_alphanumeric() {
-                    cursor += next.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            tokens.push(IndexedToken {
-                name: source[start..cursor].to_owned(),
-                logical_path: logical_path.to_owned(),
-                byte_range: start..cursor,
-                line,
-                column: source[line_start..start].chars().count() + 1,
-                definition: false,
-                renamable: false,
-            });
-        } else {
-            cursor += character.len_utf8();
-        }
-    }
-    tokens
 }
 
 /// The names of a Verilog-A source, read through the compiler's own lexer.
@@ -1339,21 +1104,6 @@ fn push_identifier_words(
     }
 }
 
-fn definitions_for_document(
-    logical_path: &str,
-    source: &str,
-    syntax: DocumentSyntax,
-    tokens: &[IndexedToken],
-) -> Vec<SourceSymbol> {
-    match syntax {
-        DocumentSyntax::VerilogA => verilog_definitions(logical_path, source, tokens),
-        DocumentSyntax::Python => python_definitions(logical_path, source, tokens),
-        DocumentSyntax::Yaml | DocumentSyntax::Toml => {
-            configuration_definitions(logical_path, source, syntax, tokens)
-        }
-    }
-}
-
 fn verilog_definitions(
     logical_path: &str,
     source: &str,
@@ -1405,83 +1155,6 @@ fn verilog_definitions(
         }
     }
     deduplicate_symbols(symbols)
-}
-
-fn python_definitions(
-    logical_path: &str,
-    source: &str,
-    tokens: &[IndexedToken],
-) -> Vec<SourceSymbol> {
-    let mut symbols = Vec::new();
-    for (index, token) in tokens.iter().enumerate() {
-        let (offset, kind) = match token.name.as_str() {
-            "def" => (1, SourceSymbolKind::Function),
-            "class" => (1, SourceSymbolKind::Class),
-            "async" if tokens.get(index + 1).is_some_and(|next| next.name == "def") => {
-                (2, SourceSymbolKind::Function)
-            }
-            "import" | "from" => (1, SourceSymbolKind::Import),
-            _ => {
-                let remainder = source[token.byte_range.end..]
-                    .split_once('\n')
-                    .map_or(&source[token.byte_range.end..], |(line, _)| line)
-                    .trim_start();
-                if first_token_on_line(tokens, index) && assignment_starts(remainder) {
-                    symbols.push(symbol_from_token(
-                        logical_path,
-                        source,
-                        token,
-                        SourceSymbolKind::Variable,
-                    ));
-                }
-                continue;
-            }
-        };
-        if let Some(candidate) = tokens.get(index + offset) {
-            symbols.push(symbol_from_token(logical_path, source, candidate, kind));
-        }
-    }
-    deduplicate_symbols(symbols)
-}
-
-fn configuration_definitions(
-    logical_path: &str,
-    source: &str,
-    syntax: DocumentSyntax,
-    tokens: &[IndexedToken],
-) -> Vec<SourceSymbol> {
-    let mut symbols = Vec::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if !first_token_on_line(tokens, index) {
-            continue;
-        }
-        let remainder = source[token.byte_range.end..]
-            .split_once('\n')
-            .map_or(&source[token.byte_range.end..], |(line, _)| line)
-            .trim_start();
-        let defines_key = match syntax {
-            DocumentSyntax::Yaml => remainder.starts_with(':'),
-            DocumentSyntax::Toml => remainder.starts_with('=') || remainder.starts_with(']'),
-            _ => false,
-        };
-        if defines_key {
-            symbols.push(symbol_from_token(
-                logical_path,
-                source,
-                token,
-                SourceSymbolKind::Configuration,
-            ));
-        }
-    }
-    deduplicate_symbols(symbols)
-}
-
-fn first_token_on_line(tokens: &[IndexedToken], index: usize) -> bool {
-    index == 0 || tokens[index - 1].line != tokens[index].line
-}
-
-fn assignment_starts(remainder: &str) -> bool {
-    remainder.starts_with('=') && !remainder.starts_with("==")
 }
 
 fn verilog_type_keyword(name: &str) -> bool {
@@ -1548,28 +1221,7 @@ fn language_keyword(language: ProjectSourceLanguage, value: &str) -> bool {
                 | "begin"
                 | "end"
         ),
-        ProjectSourceLanguage::RSpiceAutomation => matches!(
-            value,
-            "def"
-                | "class"
-                | "async"
-                | "await"
-                | "import"
-                | "from"
-                | "return"
-                | "if"
-                | "else"
-                | "for"
-                | "while"
-                | "try"
-                | "except"
-                | "with"
-                | "match"
-                | "case"
-                | "True"
-                | "False"
-                | "None"
-        ),
+        ProjectSourceLanguage::RSpiceAutomation => false,
     }
 }
 
@@ -1594,11 +1246,7 @@ pub(super) fn source_line_preview(source: &str, one_based_line: usize) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
-        ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner, ProjectSourceRole,
-        ProjectSourceRoleBinding,
-    };
-    use crate::workbench::code::{CodeFeature, tests::harness};
+    use crate::state::{ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner};
 
     fn bundle(
         language: ProjectSourceLanguage,
@@ -1899,142 +1547,20 @@ mod tests {
     }
 
     #[test]
-    fn python_index_is_comment_string_safe_and_ambiguous_rename_fails_closed() {
-        let bundle = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "main.py",
-            "def evaluate(value):\n    return value\n# evaluate\nlabel = \"evaluate\"\nevaluate(1)\n",
-            vec![
-                ProjectSourceFile::try_new("helper.py", "def evaluate(other):\n    return other\n")
-                    .unwrap(),
-            ],
-        );
-        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
-        assert_eq!(index.definitions("evaluate").len(), 2);
-        assert_eq!(index.references("evaluate").len(), 3);
-        assert!(index.rename_preview("evaluate", "measure").is_err());
-        assert!(index.rename_preview("evaluate", "class").is_err());
-    }
-
-    #[test]
     fn language_index_uses_unicode_project_path_identity() {
-        let source = "def mesurer(value):  \n    return value\nmesurer(1)\n";
+        let source = "module mesurer;\nendmodule\n";
         let bundle = bundle(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "Flux/été.py",
+            ProjectSourceLanguage::VerilogA,
+            "Flux/été.va",
             source,
             Vec::new(),
         );
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
-        let alias = "FLUX/ÉTÉ.PY";
+        let alias = "FLUX/ÉTÉ.VA";
 
         assert_eq!(index.document_symbols(alias).len(), 1);
-        assert_eq!(index.symbol_at(alias, 6), Some("mesurer"));
-        assert_eq!(index.references("mesurer").len(), 2);
-        assert_eq!(index.rename_extent("mesurer"), (2, 1));
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn project_rename_is_atomic_when_an_arbitrary_path_has_a_governed_role() {
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let root_path = "flows/main.py";
-        let governed_path = "locks/arbitrary_name.py";
-        let root_source =
-            "def protected_name(value):\n    return value\n\nresult = protected_name(1)\n";
-        let governed_source = "locked_reference = protected_name\n";
-        let source_bundle = ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::code_workspace(language),
-            language,
-            root_path,
-            root_source,
-            [ProjectSourceFile::try_new(governed_path, governed_source).unwrap()],
-            [ProjectSourceDependency::try_new(root_path, governed_path).unwrap()],
-            [
-                ProjectSourceRoleBinding::try_new(root_path, ProjectSourceRole::AutomationEntry)
-                    .unwrap(),
-                ProjectSourceRoleBinding::try_new(
-                    governed_path,
-                    ProjectSourceRole::AutomationEnvironmentLock,
-                )
-                .unwrap(),
-            ],
-        )
-        .unwrap();
-        let bundle_id = source_bundle.id();
-
-        let mut harness = harness();
-        harness
-            .model
-            .workspace
-            .content
-            .remove_project_source(language);
-        harness
-            .model
-            .workspace
-            .content
-            .insert_project_source_bundle(source_bundle)
-            .unwrap();
-        let index = LanguageServiceIndex::build(
-            harness.model.workspace.content.project.id(),
-            harness
-                .model
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(bundle_id)
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(index.definitions("protected_name").len(), 1);
-        assert_eq!(
-            index
-                .rename_preview("protected_name", "renamed")
-                .unwrap()
-                .len(),
-            2
-        );
-        let before_revision = index.bundle_revision;
-        harness.state.code_workspace.language_tools = Some(CodeLanguageToolsState {
-            index,
-            active_path: root_path.to_owned(),
-            caret: 4,
-            query: "protected_name".to_owned(),
-            replacement: "renamed".to_owned(),
-            error: None,
-        });
-
-        let error = commit_language_rename(&mut CodeFeature::workspace_parts(&mut harness.cx()))
-            .unwrap_err();
-        assert!(error.contains(governed_path));
-        assert!(error.contains("No project source was changed"));
-        let unchanged = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap();
-        assert_eq!(unchanged.revision().get(), before_revision);
-        assert_eq!(unchanged.root().content(), root_source);
-        assert_eq!(unchanged.file_content(governed_path), Some(governed_source));
-    }
-
-    #[test]
-    fn formatting_preserves_literal_whitespace_without_claiming_python_authority() {
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let source = "def evaluate(value):   \n    label = \"keep   \"\n    return value   ";
-        let formatted = formatted_source(language, "main.py", source).unwrap();
-        assert!(formatted.contains("label = \"keep   \""));
-        assert!(!formatted.contains("return value   "));
-        assert!(formatted.ends_with('\n'));
-
-        // Python's grammar is the managed interpreter's to judge: a source
-        // it would refuse is left as it is, not refused here.
-        let malformed = "def broken(:\n";
-        assert_eq!(
-            formatted_source(language, "broken.py", malformed).unwrap(),
-            malformed
-        );
+        assert_eq!(index.symbol_at(alias, 7), Some("mesurer"));
+        assert_eq!(index.references("mesurer").len(), 1);
+        assert_eq!(index.rename_extent("mesurer"), (1, 1));
     }
 }

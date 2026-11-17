@@ -1504,10 +1504,7 @@ const SPECIFICATION_VERDICT_PATTERNS: &[&str] = &[
 
 /// Files that still judge a specification by its bare bounds, each with the
 /// reason it has not yet moved onto the sheet.
-const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[(
-    "workbench/documents/code_workspace/automation/evidence.rs",
-    "the automation page's run evidence, which goes with the page",
-)];
+const SPECIFICATION_VERDICT_SITES: &[(&str, &str)] = &[];
 
 #[test]
 fn specifications_are_judged_by_the_judge() {

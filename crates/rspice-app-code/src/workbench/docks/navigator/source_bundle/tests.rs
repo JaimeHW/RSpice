@@ -4,7 +4,7 @@
 //! ordinary source.
 
 use super::*;
-use crate::workbench::code::tests::harness;
+use crate::workbench::app::dialogs::source_file_form::tests::two_files;
 
 /// The defect this rail exists for: `selected_file` had no UI writer, so
 /// every file in a bundle except the root was unreachable. Assert the
@@ -12,12 +12,12 @@ use crate::workbench::code::tests::harness;
 /// changes the selection.
 #[test]
 fn every_file_in_the_bundle_is_offered_and_selectable() {
-    let mut harness = harness();
-    let language = ProjectSourceLanguage::RSpiceAutomation;
+    let mut harness = two_files();
+    let language = ProjectSourceLanguage::VerilogA;
     let rows = bundle_rows(&harness.model, language);
     assert!(
         rows.len() > 1,
-        "an automation bundle carries an entry, a run plan, a lock, and a manifest"
+        "the view's bundle carries its main file and the stage it includes"
     );
 
     let root = active_path(&harness.model, &harness.state.code_workspace, language)
@@ -45,17 +45,44 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
 /// from the filename.
 #[test]
 fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
-    let harness = harness();
+    let mut harness = two_files();
+    let id = harness
+        .model
+        .workspace
+        .active_source_bundle(ProjectSourceLanguage::VerilogA)
+        .expect("the open view's bundle")
+        .id();
+    harness
+        .model
+        .workspace
+        .content
+        .add_project_source_bundle_file_with_role(
+            id,
+            "gain.va",
+            crate::state::ProjectSourceFile::try_new("settings.toml", "").expect("a valid file"),
+            ProjectSourceRole::VerilogABuildProfile,
+        )
+        .expect("the bundle takes a build profile");
     let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-    let rows = bundle_rows(&harness.model, ProjectSourceLanguage::RSpiceAutomation);
-    let roles = rows
+    let rows = bundle_rows(&harness.model, ProjectSourceLanguage::VerilogA);
+    let stated = rows
         .iter()
-        .filter_map(|row| role_message(row.role))
-        .map(|role| messages.text(role))
-        .collect::<std::collections::BTreeSet<_>>();
+        .map(|row| {
+            (
+                row.label.clone(),
+                role_message(row.role).map(|role| messages.text(role)),
+            )
+        })
+        .collect::<Vec<_>>();
 
-    assert!(roles.contains("run plan"), "roles were {roles:?}");
-    assert!(roles.contains("permissions"), "roles were {roles:?}");
+    assert!(
+        stated.contains(&("settings.toml".to_owned(), Some("build profile".to_owned()))),
+        "rows were {stated:?}"
+    );
+    assert!(
+        stated.contains(&("stage.va".to_owned(), None)),
+        "rows were {stated:?}"
+    );
 }
 
 /// Ordinary source is what every file of a Verilog-A bundle is unless it is

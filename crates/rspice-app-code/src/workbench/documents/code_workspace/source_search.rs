@@ -347,9 +347,7 @@ pub fn commit_source_search_replace(parts: &mut CodeWorkspaceParts<'_>) -> Resul
                 search.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_search = None;
     let message = format!(
@@ -515,136 +513,8 @@ fn mask_source_comments(
     }
     match language {
         ProjectSourceLanguage::VerilogA => mask_verilog_comments(source),
-        ProjectSourceLanguage::RSpiceAutomation => {
-            let lower = logical_path.to_ascii_lowercase();
-            if lower.ends_with(".yaml") || lower.ends_with(".yml") {
-                mask_hash_comments(source, HashSyntax::Yaml)
-            } else if lower.ends_with(".toml") || lower.ends_with(".lock") {
-                mask_hash_comments(source, HashSyntax::Toml)
-            } else {
-                mask_hash_comments(source, HashSyntax::Python)
-            }
-        }
+        ProjectSourceLanguage::RSpiceAutomation => Ok(source.to_owned()),
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HashSyntax {
-    Python,
-    Yaml,
-    Toml,
-}
-
-fn mask_hash_comments(source: &str, syntax: HashSyntax) -> Result<String, String> {
-    let bytes = source.as_bytes();
-    let mut output = bytes.to_vec();
-    let protected = (syntax == HashSyntax::Yaml).then(|| yaml_block_scalar_ranges(source));
-    let mut protected_index = 0_usize;
-    let mut quote = None;
-    let mut triple = false;
-    let mut escaped = false;
-    let mut index = 0_usize;
-    while index < bytes.len() {
-        if let Some(ranges) = protected.as_ref() {
-            while protected_index < ranges.len() && index >= ranges[protected_index].end {
-                protected_index += 1;
-            }
-            if protected_index < ranges.len() && ranges[protected_index].contains(&index) {
-                quote = None;
-                triple = false;
-                escaped = false;
-                index = ranges[protected_index].end;
-                continue;
-            }
-        }
-        let byte = bytes[index];
-        if let Some(delimiter) = quote {
-            if triple
-                && index + 2 < bytes.len()
-                && bytes[index..index + 3] == [delimiter, delimiter, delimiter]
-            {
-                quote = None;
-                triple = false;
-                index += 3;
-                continue;
-            }
-            if !triple && byte == delimiter && !escaped {
-                if syntax == HashSyntax::Yaml
-                    && delimiter == b'\''
-                    && bytes.get(index + 1) == Some(&b'\'')
-                {
-                    index += 2;
-                    continue;
-                }
-                quote = None;
-                index += 1;
-                continue;
-            }
-            escaped = !escaped && byte == b'\\' && delimiter == b'"';
-            if byte != b'\\' {
-                escaped = false;
-            }
-            index += 1;
-            continue;
-        }
-        if matches!(byte, b'\'' | b'"') {
-            let supports_triple = matches!(syntax, HashSyntax::Python | HashSyntax::Toml);
-            triple = supports_triple
-                && index + 2 < bytes.len()
-                && bytes[index..index + 3] == [byte, byte, byte];
-            quote = Some(byte);
-            index += if triple { 3 } else { 1 };
-            continue;
-        }
-        let yaml_comment_boundary =
-            syntax != HashSyntax::Yaml || index == 0 || bytes[index - 1].is_ascii_whitespace();
-        if byte == b'#' && yaml_comment_boundary {
-            while index < bytes.len() && !matches!(bytes[index], b'\r' | b'\n') {
-                output[index] = b' ';
-                index += 1;
-            }
-            continue;
-        }
-        index += 1;
-    }
-    String::from_utf8(output)
-        .map_err(|_| "Source-search comment masking produced invalid UTF-8.".to_owned())
-}
-
-fn yaml_block_scalar_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
-    let mut ranges = Vec::new();
-    let mut block_indent = None;
-    let mut offset = 0_usize;
-    for line in source.split_inclusive('\n') {
-        let content = line.trim_end_matches(['\r', '\n']);
-        let indentation = content.bytes().take_while(u8::is_ascii_whitespace).count();
-        let blank = content.trim().is_empty();
-        if let Some(parent_indent) = block_indent {
-            if blank || indentation > parent_indent {
-                ranges.push(offset..offset + line.len());
-                offset += line.len();
-                continue;
-            }
-            block_indent = None;
-        }
-        let without_comment = content
-            .split_once(" #")
-            .map_or(content, |(value, _)| value)
-            .trim_end();
-        let scalar = without_comment
-            .rsplit_once(':')
-            .map(|(_, value)| value.trim())
-            .is_some_and(|value| {
-                let mut chars = value.chars();
-                matches!(chars.next(), Some('|' | '>'))
-                    && chars.all(|character| matches!(character, '+' | '-' | '1'..='9'))
-            });
-        if scalar {
-            block_indent = Some(indentation);
-        }
-        offset += line.len();
-    }
-    ranges
 }
 
 fn mask_verilog_comments(source: &str) -> Result<String, String> {
@@ -804,20 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn comment_masking_preserves_offsets_strings_and_yaml_block_scalars() {
-        let python = "value = 'not # comment'  # gain µ\ntext = \"\"\"# body\"\"\"\n";
-        let masked = mask_hash_comments(python, HashSyntax::Python).expect("Python mask");
-        assert_eq!(masked.len(), python.len());
-        assert!(masked.contains("'not # comment'"));
-        assert!(masked.contains("\"\"\"# body\"\"\""));
-        assert!(!masked.contains("gain"));
-
-        let yaml = "script: |\n  # literal content\n  gain\nvalue: gain # comment gain\n";
-        let masked = mask_hash_comments(yaml, HashSyntax::Yaml).expect("YAML mask");
-        assert!(masked.contains("# literal content"));
-        assert!(masked.contains("value: gain"));
-        assert!(!masked.contains("# comment gain"));
-
+    fn comment_masking_preserves_offsets_and_strings() {
         let veriloga = "analog V(out) <+ \"//gain\"; // gain µ\n/* gain */\n";
         let masked = mask_verilog_comments(veriloga).expect("Verilog-A mask");
         assert_eq!(masked.len(), veriloga.len());

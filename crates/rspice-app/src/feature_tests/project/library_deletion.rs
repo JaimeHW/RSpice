@@ -18,7 +18,7 @@ use super::with_cx;
 
 fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.code.automation_runtime_project_id = state.model.workspace.content.project.id();
+    app.code.project_id = state.model.workspace.content.project.id();
     app.state = state;
     app
 }

@@ -277,7 +277,7 @@ fn palette_names_are_canonical_labels_without_ellipsis() {
 #[cfg(not(target_arch = "wasm32"))]
 fn test_app() -> RSpiceApp {
     let state = crate::workbench::app_state::AppState::default();
-    let automation_runtime_project_id = state.model.workspace.content.project.id();
+    let project_id = state.model.workspace.content.project.id();
     RSpiceApp {
         state,
         first_frame: false,
@@ -286,11 +286,7 @@ fn test_app() -> RSpiceApp {
         last_window_title: String::new(),
         symbol_library: None,
         simulation_controller: rspice_app_runs::simulation::controller::SimulationController::new(),
-        code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
-            automation_runtime:
-                rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
-            automation_runtime_project_id,
-        },
+        code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
         cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
             account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),

@@ -1,15 +1,13 @@
-//! The Verilog-A and Automation source navigators.
+//! The Verilog-A source navigator.
 //!
-//! Both show one file at a time out of a project-owned bundle, so the rail's
+//! It shows one file at a time out of a project-owned bundle, so the rail's
 //! first job is choosing which. Before this existed the selection had no UI
-//! writer at all: a bundle's build profile, run plan, environment lock, and
-//! permission manifest were authored by the workspace and then unreachable,
-//! because only the bundle root was ever opened.
+//! writer at all: a bundle's included files and build profile were authored
+//! and then unreachable, because only the bundle root was ever opened.
 //!
 //! Rows state the role the bundle records, never a guess from the filename,
 //! and only a role other than ordinary source: a label every row wears tells
-//! the reader nothing. A starter name is not identity — `characterize.py` is
-//! the Python entry because the bundle says so, not because of its extension.
+//! the reader nothing.
 //!
 //! Below the files, the Verilog-A rail states what the file in front of the
 //! reader includes and where each include resolved, what it declares, and
@@ -37,7 +35,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// What a source bundle rail reads, and writes in place: the model, the
-/// Code & Automation page's state, the platform's and the message catalogue.
+/// Verilog-A editor's state, the platform's and the message catalogue.
 pub(crate) struct SourceRail<'a> {
     pub(crate) model: &'a Model,
     pub(crate) code_workspace: &'a mut CodeWorkspaceRuntimeState,

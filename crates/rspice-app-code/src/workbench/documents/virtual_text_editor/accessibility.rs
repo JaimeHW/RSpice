@@ -307,22 +307,7 @@ pub(super) fn update_accesskit_text_state(
             &tab_mode_sentence(style, ui.ctx().os(), true),
         );
     }
-    if style.breakpoints_enabled {
-        append_accessible_sentence(
-            &mut description,
-            &style
-                .messages
-                .text(crate::workbench::MessageId::EditorAccessibleBreakpointToggleHint),
-        );
-    }
-    let one_based_line = window.line + 1;
     for message in [
-        style
-            .breakpoints
-            .contains(&one_based_line)
-            .then_some(crate::workbench::MessageId::EditorAccessibleBreakpoint),
-        (style.current_line == Some(one_based_line))
-            .then_some(crate::workbench::MessageId::EditorAccessibleCurrentStatement),
         (style.cross_probe_line == Some(window.line))
             .then_some(crate::workbench::MessageId::EditorAccessibleCrossProbe),
         style

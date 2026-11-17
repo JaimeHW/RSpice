@@ -1,4 +1,4 @@
-//! Mockup-owned Code & Automation netlist document surface.
+//! Mockup-owned Netlist document surface.
 //!
 //! The center well is deliberately flat: one 33-point document toolbar over
 //! an exact-entry editor. Generated and owned source are independent retained

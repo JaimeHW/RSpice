@@ -15,7 +15,6 @@ use std::sync::Arc;
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::FindingKey;
-use crate::product::ProjectId;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::model::Model;
@@ -42,13 +41,6 @@ pub struct SourceCollections<'a> {
     pub veriloga_failure: &'a Arc<CodeDiagnosticCollection>,
     /// The token that failed compile was authorized under.
     pub veriloga_failure_token: Option<&'a VerilogASourceOperationToken>,
-    /// The Automation validation's diagnostics.
-    pub automation: &'a Arc<CodeDiagnosticCollection>,
-    /// Whether an Automation validation is on record as having run.
-    pub automation_validated: bool,
-    /// The project and source revision the Automation diagnostics were
-    /// produced under: the receipt's token, or the diagnostics' own.
-    pub automation_token: Option<(ProjectId, u64)>,
 }
 
 /// One source editor's collection of findings.
@@ -57,16 +49,10 @@ pub(super) enum SourceSegment {
     Netlist,
     VerilogA,
     VerilogAFailure,
-    Automation,
 }
 
 impl SourceSegment {
-    const ALL: [Self; 4] = [
-        Self::Netlist,
-        Self::VerilogA,
-        Self::VerilogAFailure,
-        Self::Automation,
-    ];
+    const ALL: [Self; 3] = [Self::Netlist, Self::VerilogA, Self::VerilogAFailure];
 }
 
 /// Where the current finding was last seen among the source editors'
@@ -87,7 +73,7 @@ pub(super) struct SourceAnchor {
 /// every edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SourceFingerprint {
-    collections: [usize; 4],
+    collections: [usize; 3],
     netlist_revision: u64,
 }
 
@@ -169,7 +155,6 @@ fn records<'a>(sources: &SourceCollections<'a>, segment: SourceSegment) -> Optio
             .veriloga
             .map(|diagnostics| Records::Code(diagnostics.as_ref())),
         SourceSegment::VerilogAFailure => Some(Records::Code(sources.veriloga_failure.as_ref())),
-        SourceSegment::Automation => Some(Records::Code(sources.automation.as_ref())),
     }
 }
 
@@ -182,7 +167,6 @@ fn fingerprint(sources: &SourceCollections<'_>) -> SourceFingerprint {
             Arc::as_ptr(sources.netlist) as usize,
             address(sources.veriloga),
             address(Some(sources.veriloga_failure)),
-            address(Some(sources.automation)),
         ],
         netlist_revision: sources.netlist_revision,
     }

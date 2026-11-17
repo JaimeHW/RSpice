@@ -355,27 +355,11 @@ pub fn void_veriloga_evidence(cx: &mut Cx<'_, CodeFeature>) {
     cx.state.code_workspace.veriloga.void_evidence();
 }
 
-/// Carry out what a source document dialog handed over: create the
-/// Automation workspace its draft describes or the top deck its creation
-/// form drafted, or a lifecycle choice on the document it manages, then the
-/// close the same frame asked for.
+/// Carry out what a source document dialog handed over: the top deck its
+/// creation form drafted, or a lifecycle choice on the document it manages,
+/// then the close the same frame asked for.
 fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentRequest) {
     match request {
-        SourceDocumentRequest::CreateWorkspace => {
-            match code_workspace::commit_source_workspace_dialog(&mut CodeFeature::workspace_parts(
-                cx,
-            )) {
-                Ok(message) => {
-                    cx.model
-                        .record(LogSeverity::Info, LogSource::Studio, message);
-                }
-                Err(error) => {
-                    if let Some(state) = cx.state.code_workspace.source_workspace_dialog.as_mut() {
-                        state.error = Some(error);
-                    }
-                }
-            }
-        }
         SourceDocumentRequest::Document {
             action,
             language,

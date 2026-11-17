@@ -275,9 +275,7 @@ fn apply_find_action(
                         logical_path: logical_path.clone(),
                     });
                 }
-                ProjectSourceLanguage::RSpiceAutomation => {
-                    code.automation.selected_file = Some(logical_path.clone());
-                }
+                ProjectSourceLanguage::RSpiceAutomation => {}
             }
             crate::workbench::documents::text_editor_commands::queue_reveal_line(
                 ctx,

@@ -587,7 +587,7 @@ mod tests {
         state: crate::workbench::app_state::AppState,
         file_io: TestFileWorkflowIo,
     ) -> RSpiceApp {
-        let automation_runtime_project_id = state.model.workspace.content.project.id();
+        let project_id = state.model.workspace.content.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -597,11 +597,7 @@ mod tests {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
-                automation_runtime:
-                    rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
-                automation_runtime_project_id,
-            },
+            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account:
                     rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),

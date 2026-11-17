@@ -1,5 +1,5 @@
 //! The code feature's dialogs, creating a Verilog-A device and editing the
-//! open Verilog-A view's build settings, and its netlist and Code & Automation
+//! open Verilog-A view's build settings, and its netlist and Verilog-A
 //! editors' session, with the netlist documents opened and the outline groups
 //! collapsed; and what code shows other features.
 
@@ -20,7 +20,7 @@ pub struct CodeState {
     pub veriloga_build_settings: Option<crate::workbench::app::VerilogABuildSettingsDraft>,
     /// Netlist editor state (diagnostics, diff pips).
     pub netlist: crate::workbench::documents::netlist_document::NetlistDocumentState,
-    /// Visible Code & Automation page and revision-bound operation receipts.
+    /// The Verilog-A editor's revision-bound operation receipts.
     pub code_workspace: crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState,
     /// Netlist secondary documents explicitly opened by the user. Resolved
     /// include closures can contain thousands of files, so availability alone
@@ -49,15 +49,6 @@ impl CodeState {
             veriloga_token: veriloga.map(|receipt| receipt.compilation.token()),
             veriloga_failure: &code.veriloga.last_failure,
             veriloga_failure_token: code.veriloga.last_failure_token.as_ref(),
-            automation: &code.automation.diagnostics,
-            automation_validated: code.automation.receipt.is_some(),
-            automation_token: code
-                .automation
-                .receipt
-                .as_ref()
-                .map(|receipt| &receipt.token)
-                .or(code.automation.diagnostic_token.as_ref())
-                .map(|token| (token.project_id, token.revision)),
         }
     }
 
@@ -107,8 +98,8 @@ pub fn netlist_shown_in(netlist: &NetlistDocumentState) -> NetlistShown {
     }
 }
 
-/// The receipt of the project's current Verilog-A compilation, as the Code &
-/// Automation page's state holds it.
+/// The receipt of the project's current Verilog-A compilation, as the
+/// Verilog-A editor's state holds it.
 pub fn veriloga_compilation_in(
     code_workspace: &CodeWorkspaceRuntimeState,
 ) -> Option<&ProjectCompileReceipt> {

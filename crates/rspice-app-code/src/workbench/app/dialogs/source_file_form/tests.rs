@@ -18,7 +18,7 @@ fn reference() -> crate::state::CellViewRef {
 
 /// The Verilog-A view `behavioral/gain/veriloga` open, its bundle the main
 /// file `gain.va` and `stage.va`, which the main file includes.
-fn two_files() -> CodeHarness {
+pub(crate) fn two_files() -> CodeHarness {
     let mut harness = harness();
     let reference = reference();
     let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);

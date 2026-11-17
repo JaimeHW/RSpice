@@ -1,11 +1,10 @@
-//! Canonical state and behavior for the Code & Automation workspace.
+//! Canonical state and behavior for the Netlist workspace's source documents
+//! and the Verilog-A sources Design edits.
 //!
 //! The visual surface composes these contracts; it does not own source text,
 //! provenance, validation identity, or document transitions. Keeping those
 //! concerns here makes native and browser behavior identical and prevents an
 //! asynchronous file or validation response from being applied to newer text.
-
-mod automation;
 
 mod editor;
 mod language_services;
@@ -27,19 +26,9 @@ use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::CodeSourceFileAction;
 
-pub use automation::{AutomationRunPort, CodeHandles, CodeWorkspaceParts};
-pub use automation::{
-    cancel_automation_workflow, continue_automation_debugger, dry_run_automation_workflow,
-    export_automation_artifact, pause_automation_debugger, poll_automation_workflow,
-    poll_managed_automation_runtime, refresh_automation_debugger, remove_automation_breakpoint,
-    restart_automation_debugger, select_automation_debug_frame, settle_pending_python_execute,
-    start_automation_debugger, start_automation_workflow, step_into_automation_debugger,
-    step_out_automation_debugger, step_over_automation_debugger, stop_automation_debugger,
-    sync_automation_debugger, toggle_automation_breakpoint, validate_automation_workspace,
-};
 pub use editor::{
     CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, EditorFindings,
-    show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
+    show_code_document_interaction_versioned,
 };
 pub use editor::{
     ProblemStep, problem_at_caret_announcement, problem_step_announcement, problem_step_index,
@@ -50,28 +39,19 @@ pub use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
     format_language_document, open_language_tools_in_bundle,
 };
-// A managed run the frame tests seed, to press its Stop.
-#[cfg(any(test, feature = "test-support"))]
-pub use page::PendingAutomationRuntimeExecution;
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
-    AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
-    AutomationDispatchSnapshot, AutomationExceptionPolicy, AutomationExecutionState,
-    AutomationRuntimeLaunchMode, AutomationValidationReceipt, AutomationWatch,
-    CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
-    CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
-    CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
+    CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceSearchScope,
+    CodeSourceSearchState, CodeWorkspaceRuntimeState, PendingVerilogACompile,
     VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
     VerilogAReplaceTarget, VerilogAWorkbenchState,
 };
 pub use source_files::{
-    assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
-    commit_source_workspace_dialog, import_dropped_automation_files, open_source_file_dialog,
-    open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
-    poll_automation_source_import, request_automation_source_import,
-    source_bundle_contains_document, source_bundle_document_is_editable_in,
-    source_document_is_editable, source_file_mutation_block_reason,
-    source_file_mutation_block_reason_in, veriloga_include_hosts, veriloga_includers_of,
+    commit_source_file_dialog, commit_source_history_restore, open_source_file_dialog,
+    open_source_file_dialog_in_bundle, open_source_history, source_bundle_contains_document,
+    source_bundle_document_is_editable_in, source_document_is_editable,
+    source_file_mutation_block_reason, source_file_mutation_block_reason_in,
+    veriloga_include_hosts, veriloga_includers_of,
 };
 pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
@@ -112,74 +92,27 @@ pub use veriloga_library::{
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
-/// Compile the project's Automation workspace as a new session opens it,
-/// and keep its manifest and worker snapshot.
-pub fn bootstrap_automation(
-    workspace: &crate::state::ProjectWorkspace,
-    code_workspace: &mut CodeWorkspaceRuntimeState,
-) {
-    let mut automation = None;
-    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
-        &crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-        ),
-    ) {
-        let mut documents = vec![crate::automation_workflow::AutomationSourceDocument {
-            path: bundle.root().logical_path(),
-            source: bundle.root().content(),
-        }];
-        documents.extend(bundle.files().iter().map(|file| {
-            crate::automation_workflow::AutomationSourceDocument {
-                path: file.logical_path(),
-                source: file.content(),
-            }
-        }));
-        let roles = bundle
-            .roles()
-            .iter()
-            .filter_map(|binding| {
-                let role = match binding.role() {
-                    crate::state::ProjectSourceRole::VerilogABuildProfile
-                    | crate::state::ProjectSourceRole::AutomationEntry => return None,
-                    crate::state::ProjectSourceRole::AutomationRunPlan => {
-                        crate::automation_workflow::AutomationSourceRole::RunPlan
-                    }
-                    crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
-                        crate::automation_workflow::AutomationSourceRole::EnvironmentLock
-                    }
-                    crate::state::ProjectSourceRole::AutomationPermissionManifest => {
-                        crate::automation_workflow::AutomationSourceRole::PermissionManifest
-                    }
-                };
-                Some(crate::automation_workflow::AutomationRoleBinding {
-                    path: binding.logical_path(),
-                    role,
-                })
-            })
-            .collect::<Vec<_>>();
-        let (_plan, manifest) = crate::automation_workflow::compile_automation_documents(
-            bundle.root().logical_path(),
-            &documents,
-            &roles,
-        )
-        .expect("the canonical bootstrapped Automation workspace must compile");
-        let runtime_snapshot = crate::automation_workflow::build_automation_runtime_snapshot(
-            workspace.content.project.id(),
-            bundle,
-            &manifest,
-            Vec::new(),
-        )
-        .expect("the canonical bootstrapped Automation worker snapshot must be valid");
-        automation = Some((manifest, runtime_snapshot));
-        // Static compilation prepares editor metadata and the immutable worker
-        // snapshot, but it cannot authorize Python execution. The managed
-        // runtime creates the validation receipt after authoritative CPython
-        // compilation.
-    }
-    if let Some((manifest, runtime_snapshot)) = automation {
-        code_workspace.automation.manifest = Some(manifest);
-        code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
-    }
+/// What the code feature holds beside its state: the project its state
+/// was built for, so a project replaced under it is noticed.
+#[derive(Debug, Default)]
+pub struct CodeHandles {
+    pub project_id: crate::product::ProjectId,
+}
+
+/// What the code workspace's operations read and change, lent for the one
+/// call: the source documents' state, the deck's, the model, the session,
+/// the platform's state, and the run tier with its controller and the
+/// export IO.
+pub struct CodeWorkspaceParts<'a> {
+    pub code: &'a mut CodeWorkspaceRuntimeState,
+    pub netlist: &'a mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    pub model: &'a mut rspice_app_state::workbench::app_state::model::Model,
+    pub wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
+    pub platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
+    pub runs: &'a mut rspice_app_runs::workbench::slots::runs::RunsState,
+    pub run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
+    pub export_io:
+        &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
 /// The cell view whose Verilog-A source a deck's `.veriloga` locator names.
@@ -249,9 +182,7 @@ pub(crate) fn active_bundle_path(
                 })
             })
             .map(|selection| selection.logical_path.clone()),
-        crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-            code.automation.selected_file.clone()
-        }
+        crate::state::ProjectSourceLanguage::RSpiceAutomation => None,
     };
     explicit.or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
 }
@@ -302,9 +233,7 @@ pub fn select_source_document(
                 logical_path: logical_path.to_owned(),
             });
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            code.automation.selected_file = Some(logical_path.to_owned());
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     Some(bundle_id)
 }

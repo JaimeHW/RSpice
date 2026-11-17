@@ -564,7 +564,6 @@ fn indexed_veriloga_outline(
             SourceSymbolKind::Module => SourceOutlineGroup::Module,
             SourceSymbolKind::Port => SourceOutlineGroup::Ports,
             SourceSymbolKind::Parameter => SourceOutlineGroup::Parameters,
-            SourceSymbolKind::Variable => SourceOutlineGroup::Variables,
             SourceSymbolKind::Net
                 if symbols.iter().any(|other| {
                     other.kind == SourceSymbolKind::Port && other.name == symbol.name

@@ -1,8 +1,8 @@
 //! Deterministic structural editing shared by every source-language page.
 //!
 //! EGUI owns ordinary IME, clipboard, selection, and undo input. Commands
-//! which operate on complete source lines live here so Netlist, Verilog-A,
-//! Python, YAML, and TOML cannot drift into subtly different behavior.
+//! which operate on complete source lines live here so Netlist, Verilog-A
+//! and TOML cannot drift into subtly different behavior.
 
 use std::ops::Range;
 
@@ -33,24 +33,19 @@ pub(crate) enum EditorSyntax {
     /// A source the engine reads as Spectre from its first line.
     Spectre,
     VerilogA,
-    Python,
-    Yaml,
     Toml,
 }
 
 impl EditorSyntax {
     pub(crate) const fn indentation(self) -> &'static str {
-        match self {
-            Self::Yaml => "  ",
-            Self::Spice | Self::Spectre | Self::VerilogA | Self::Python | Self::Toml => "    ",
-        }
+        "    "
     }
 
     const fn comment(self) -> &'static str {
         match self {
             Self::Spice => "* ",
             Self::Spectre | Self::VerilogA => "// ",
-            Self::Python | Self::Yaml | Self::Toml => "# ",
+            Self::Toml => "# ",
         }
     }
 }
@@ -798,28 +793,28 @@ mod tests {
         let indented = apply_structural_command(
             &mut source,
             selection,
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::Indent,
         );
         assert_eq!(source, "    α = 1\n    β = 2\n");
         let commented = apply_structural_command(
             &mut source,
             indented.selection,
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::ToggleComment,
         );
         assert_eq!(source, "    # α = 1\n    # β = 2\n");
         let uncommented = apply_structural_command(
             &mut source,
             commented.selection,
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::ToggleComment,
         );
         assert_eq!(source, "    α = 1\n    β = 2\n");
         apply_structural_command(
             &mut source,
             uncommented.selection,
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::Outdent,
         );
         assert_eq!(source, "α = 1\nβ = 2\n");
@@ -969,14 +964,14 @@ mod tests {
         let open = apply_structural_command(
             &mut source.to_owned(),
             caret(1),
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::MatchBracket,
         );
         assert_eq!(open.selection.cursor, source.len() - 1);
         let close = apply_structural_command(
             &mut source.to_owned(),
             caret(source.len()),
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::MatchBracket,
         );
         assert_eq!(close.selection.cursor, 1);
@@ -984,7 +979,7 @@ mod tests {
         let immediately_after_open = apply_structural_command(
             &mut source.to_owned(),
             caret(2),
-            EditorSyntax::Python,
+            EditorSyntax::Toml,
             StructuralCommand::MatchBracket,
         );
         assert_eq!(immediately_after_open.selection.cursor, source.len() - 1);

@@ -122,8 +122,8 @@ pub struct RSpiceApp {
     pub(crate) symbol_library: Option<rspice_app_design::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: rspice_app_runs::simulation::controller::SimulationController,
-    /// What the code feature runs: the automation runtime and the project it
-    /// is authorized to serve.
+    /// What the code feature keeps between frames: the project its workspace
+    /// answers for.
     pub(crate) code: rspice_app_code::workbench::documents::code_workspace::CodeHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
@@ -176,13 +176,13 @@ impl RSpiceApp {
 
     /// The parts of the application the code workspace's operations read
     /// and change, lent for the one call.
+    #[cfg(test)]
     pub(crate) fn code_workspace_parts(
         &mut self,
     ) -> rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
         rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts {
             code: &mut self.state.code.code_workspace,
             netlist: &mut self.state.code.netlist,
-            handles: &mut self.code,
             model: &mut self.state.model,
             wb: &mut self.state.workbench,
             platform: &self.state.platform,
@@ -211,8 +211,8 @@ impl RSpiceApp {
     /// The frame boundary, once every window has drawn: an edit the frame
     /// made drops preflight authority, the schematic selection cross-probes
     /// into the results and the generated netlist, the authoring recovery
-    /// point is captured, and a project the frame replaced takes the old
-    /// project's automation authority with it.
+    /// point is captured, and a project the frame replaced starts the code
+    /// workspace over.
     pub(crate) fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
         self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame);
         let state = &mut self.state;
@@ -234,8 +234,9 @@ impl RSpiceApp {
         }
         self.state.models.capture_authoring_recovery();
         // A project replacement can commit from a dialog after prepare_frame.
-        // Terminate at the same frame boundary so old authority cannot survive.
-        self.terminate_code_runtime_after_project_change();
+        // Reset at the same frame boundary so the old project's state cannot
+        // survive.
+        self.reset_code_after_project_change();
     }
 
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
@@ -250,7 +251,7 @@ impl RSpiceApp {
     #[cfg(test)]
     pub(crate) fn test_instance() -> Self {
         let state = AppState::default();
-        let automation_runtime_project_id = state.model.workspace.content.project.id();
+        let project_id = state.model.workspace.content.project.id();
         Self {
             state,
             first_frame: false,
@@ -261,15 +262,7 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
-                #[cfg(not(target_arch = "wasm32"))]
-                automation_runtime:
-                    rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
-                #[cfg(target_arch = "wasm32")]
-                automation_runtime:
-                    rspice_app_services::automation_runtime::BrowserAutomationRuntime::discover(),
-                automation_runtime_project_id,
-            },
+            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account:
                     rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
@@ -429,7 +422,7 @@ impl RSpiceApp {
             controller.set_engine_wakeup(std::sync::Arc::new(move || ctx.request_repaint()));
             controller
         };
-        let automation_runtime_project_id = state.model.workspace.content.project.id();
+        let project_id = state.model.workspace.content.project.id();
         Self {
             state,
             first_frame: true,
@@ -439,13 +432,7 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
-                #[cfg(not(target_arch = "wasm32"))]
-                automation_runtime: rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
-                #[cfg(target_arch = "wasm32")]
-                automation_runtime: rspice_app_services::automation_runtime::BrowserAutomationRuntime::discover(),
-                automation_runtime_project_id,
-            },
+            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
@@ -520,18 +507,6 @@ impl RSpiceApp {
         }
 
         self.poll_code(ctx);
-        self.poll_automation_workflow();
-        rspice_app_code::workbench::documents::code_workspace::settle_pending_python_execute(
-            &mut self.code_workspace_parts(),
-        );
-        self.poll_managed_automation_runtime();
-        let automation = &self.state.code.code_workspace.automation;
-        if automation.pending_runtime_validation.is_some()
-            || automation.runtime_execution.is_some()
-            || automation.execution.is_active()
-        {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
-        }
 
         #[cfg(target_arch = "wasm32")]
         synchronize_browser_surface_navigation(&mut self.state);
@@ -985,7 +960,6 @@ impl eframe::App for RSpiceApp {
 
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
-        self.terminate_code_runtime();
         // Unsaved work a closed window leaves becomes an autosave the next
         // start offers; work File > Exit saved or gave up leaves none.
         #[cfg(not(target_arch = "wasm32"))]

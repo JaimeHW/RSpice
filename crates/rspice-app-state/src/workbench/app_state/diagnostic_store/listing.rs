@@ -861,7 +861,7 @@ fn code_collections<'a>(
                     .is_some_and(|bundle| bundle.revision().get() == token.revision)
         };
     let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _, bool)> =
-        Vec::with_capacity(3);
+        Vec::with_capacity(2);
     if let (Some(diagnostics), Some(token)) = (code.veriloga, code.veriloga_token.as_ref()) {
         collections.push((
             Some(token.bundle_id),
@@ -875,21 +875,6 @@ fn code_collections<'a>(
             token.map(|token| token.bundle_id),
             code.veriloga_failure.as_ref(),
             token.is_some_and(veriloga_current),
-        ));
-    }
-    if !code.automation.is_empty() || code.automation_validated {
-        let bundle = model
-            .workspace
-            .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation);
-        let current = code.automation_token.zip(bundle).is_some_and(
-            |((token_project, token_revision), bundle)| {
-                token_project == project && token_revision == bundle.revision().get()
-            },
-        );
-        collections.push((
-            bundle.map(crate::state::ProjectSourceBundle::id),
-            code.automation.as_ref(),
-            current,
         ));
     }
     collections

@@ -300,34 +300,16 @@ impl RSpiceApp {
         CloudFeature::poll_account(&mut features::cx(self), ctx);
     }
 
-    /// Have the code feature settle what its runtime, its imports and its
-    /// compiles finished since the last frame, in its context.
+    /// Have the code feature settle what its compiles finished since the
+    /// last frame, in its context.
     pub(in crate::workbench) fn poll_code(&mut self, ctx: &Context) {
         CodeFeature::poll(&mut features::cx(self), ctx);
     }
 
-    /// Have the code feature stop the automation runtime a replaced project
-    /// still holds, in its context.
-    pub(in crate::workbench) fn terminate_code_runtime_after_project_change(&mut self) {
-        CodeFeature::terminate_after_project_change(&mut features::cx(self));
-    }
-
-    /// Have the code feature follow the Automation run in flight, in its
-    /// context.
-    pub(in crate::workbench) fn poll_automation_workflow(&mut self) {
-        CodeFeature::poll_automation_workflow(&mut features::cx(self));
-    }
-
-    /// Have the code feature take what the managed Python worker reported
-    /// since the last frame, in its context.
-    pub(in crate::workbench) fn poll_managed_automation_runtime(&mut self) {
-        CodeFeature::poll_managed_automation_runtime(&mut features::cx(self));
-    }
-
-    /// Have the code feature stop its automation runtime as the application
-    /// shuts down, in its context.
-    pub(in crate::workbench) fn terminate_code_runtime(&mut self) {
-        CodeFeature::terminate_runtime(&mut features::cx(self));
+    /// Have the code feature start its workspace over for a project that
+    /// replaced the one it answered for, in its context.
+    pub(in crate::workbench) fn reset_code_after_project_change(&mut self) {
+        CodeFeature::reset_after_project_change(&mut features::cx(self));
     }
 
     /// Have the cloud feature take the publish executor's receipt, in its

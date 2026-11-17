@@ -1,6 +1,6 @@
 //! The code editors' canonical findings, as the diagnostic store reads them.
 //!
-//! The Verilog-A and Automation editors publish their compiler and
+//! The Verilog-A editor publishes its compiler and
 //! validation findings as one bounded collection behind an `Arc`; the
 //! Problems listing reads that collection in place. The collection is the
 //! shared model's, so the store below the editors can read it without naming

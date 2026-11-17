@@ -3,10 +3,8 @@
 //!
 //! Every operation here is a revision-bound transaction the Code Workspace
 //! already implements. This module is the surface that reaches them. Before it
-//! existed the whole lifecycle — new, rename, move, duplicate, delete, import,
-//! role reassignment, and revision restore — was written, tested, and
-//! unreachable, and the "Create source workspace" buttons on the empty
-//! Verilog-A and Automation pages opened a transaction that nothing ever drew.
+//! existed the whole lifecycle — new, rename, move, duplicate, delete and
+//! revision restore — was written, tested, and unreachable.
 //!
 //! A draft is never applied by closing the dialog. Committing is an explicit
 //! act, because the operations here rewrite a source graph.
@@ -30,9 +28,9 @@ use crate::workbench::code::commands::{
 };
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    PANEL_INSET, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
-    property_row_height, property_row_input, property_row_problem, property_row_wrapped,
-    section_block_gap, subsection_header,
+    PANEL_INSET, panel_bleed, panel_body, panel_inset, property_row, property_row_height,
+    property_row_input, property_row_problem, property_row_wrapped, section_block_gap,
+    subsection_header,
 };
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
@@ -146,8 +144,6 @@ pub struct DocumentFacts {
     pub logical_path: String,
     leaf: String,
     role: String,
-    is_entry: bool,
-    is_environment_lock: bool,
     editable: bool,
     pub is_root: bool,
     line_endings: MessageId,
@@ -317,10 +313,6 @@ fn document_facts(
         language,
         leaf: leaf_name(&logical_path),
         role: role_label(messages, bundle.role_for_path(&logical_path)),
-        is_entry: bundle.role_for_path(&logical_path)
-            == Some(crate::state::ProjectSourceRole::AutomationEntry),
-        is_environment_lock: bundle.role_for_path(&logical_path)
-            == Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock),
         editable: code_workspace::source_bundle_document_is_editable_in(
             model,
             code,
@@ -377,18 +369,6 @@ enum Report {
     Console,
 }
 
-/// The roles an Automation document can be given here.
-///
-/// The entry role is the bundle's own identity, bound by the closure rather
-/// than reassigned per file, so it is not offered. Everything else is a
-/// project decision the workspace is allowed to change.
-const ASSIGNABLE_AUTOMATION_ROLES: [Option<crate::state::ProjectSourceRole>; 4] = [
-    None,
-    Some(crate::state::ProjectSourceRole::AutomationRunPlan),
-    Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock),
-    Some(crate::state::ProjectSourceRole::AutomationPermissionManifest),
-];
-
 /// One spelling of a document's role, so the property row and the picker can
 /// never disagree about which entry is currently selected.
 ///
@@ -436,8 +416,7 @@ pub fn close_netlist_lifecycle(
 
 /// Draw the source document dialogs over the Code workspace's runtime state,
 /// the netlist editor's state, the model, the workbench session and the
-/// platform's state: the Automation workspace's draft while one is open, else
-/// the lifecycle of the document on the page in front. What a choice still
+/// platform's state: the lifecycle of the document on the page in front. What a choice still
 /// needs of the whole application is returned for the shell to carry out.
 pub(in crate::workbench) fn render_source_document_dialog(
     code: &mut CodeWorkspaceRuntimeState,
@@ -447,9 +426,6 @@ pub(in crate::workbench) fn render_source_document_dialog(
     platform: &PlatformState,
     ctx: &Context,
 ) -> Option<SourceDocumentRequest> {
-    if code.source_workspace_dialog.is_some() {
-        return render_source_workspace_dialog(code, wb.messages(), ctx);
-    }
     if code.source_file_dialog.is_some() {
         return super::source_file_form::render(code, model, platform, wb.messages(), ctx);
     }
@@ -528,7 +504,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
     None
 }
 
-/// Carry out a lifecycle choice on the Verilog-A or Automation document at
+/// Carry out a lifecycle choice on the Verilog-A document at
 /// `logical_path` that the dialog handed the shell.
 pub fn apply_lifecycle_action(
     parts: &mut CodeWorkspaceParts<'_>,
@@ -574,10 +550,6 @@ pub fn apply_lifecycle_action(
             code_workspace::commit_source_history_restore(parts).map(|_| ()),
             Report::History,
         ),
-        LifecycleAction::Import => (
-            code_workspace::request_automation_source_import(parts, logical_path),
-            Report::Console,
-        ),
         LifecycleAction::ReplaceFromFile => {
             let outcome = code_workspace::request_veriloga_source_replacement(parts, logical_path);
             if outcome.is_ok() {
@@ -587,10 +559,6 @@ pub fn apply_lifecycle_action(
             }
             (outcome, Report::Console)
         }
-        LifecycleAction::AssignRole(role) => (
-            code_workspace::assign_automation_source_role(parts, logical_path, role).map(|_| ()),
-            Report::Console,
-        ),
     };
     let Err(error) = outcome else {
         return;
@@ -705,93 +673,6 @@ fn render_netlist_source_document_dialog(
     None
 }
 
-/// The transaction that creates the Automation workspace a project has
-/// none of. It is opened straight from the empty state, so it renders
-/// whenever the draft exists rather than waiting for the lifecycle dialog
-/// to be asked for.
-fn render_source_workspace_dialog(
-    code: &mut CodeWorkspaceRuntimeState,
-    messages: MessageCatalog,
-    ctx: &Context,
-) -> Option<SourceDocumentRequest> {
-    let draft = code.source_workspace_dialog.clone()?;
-    let language = ProjectSourceLanguage::RSpiceAutomation.label();
-    let mut dialog = Dialog::new(
-        messages.text(MessageId::CodeSourceWorkspaceTitle),
-        messages.text(MessageId::CodeSourceWorkspacePrimary),
-    )
-    .description(messages.format(
-        MessageId::CodeSourceWorkspaceDescription,
-        &[("language", language)],
-    ))
-    .size(DialogSize::Transaction)
-    .ghost(messages.text(MessageId::CommonCancel));
-    if let Some(error) = draft.error.as_deref() {
-        dialog = dialog.transaction_state(
-            DialogTransactionTone::Error,
-            messages.text(MessageId::CodeSourceWorkspaceRefused),
-            error,
-        );
-    }
-
-    let mut edited = draft.clone();
-    let choice = dialog.show(ctx, |ui| {
-        code_inspector_section(
-            ui,
-            &messages.text(MessageId::CodeSourceWorkspaceClosure),
-            None,
-            None,
-            |ui| {
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceWorkspaceRootPath),
-                    &mut edited.root_path,
-                    false,
-                );
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
-                    &mut edited.run_plan_path,
-                    false,
-                );
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
-                    &mut edited.environment_lock_path,
-                    false,
-                );
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
-                    &mut edited.permission_manifest_path,
-                    false,
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
-                    &edited.netlist_source_path,
-                );
-            },
-        );
-    });
-    if let Some(state) = code.source_workspace_dialog.as_mut() {
-        state.root_path = edited.root_path;
-        state.run_plan_path = edited.run_plan_path;
-        state.environment_lock_path = edited.environment_lock_path;
-        state.permission_manifest_path = edited.permission_manifest_path;
-    }
-    match choice {
-        // Creating the workspace writes the project's sources, so the
-        // shell carries it out.
-        DialogChoice::Primary => Some(SourceDocumentRequest::CreateWorkspace),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            code.source_workspace_dialog = None;
-            None
-        }
-        DialogChoice::None | DialogChoice::Secondary => None,
-    }
-}
-
 /// New source document on a project that owns no deck: a form that makes
 /// one. There is no current document to state and nothing to operate on,
 /// so the lifecycle's sections would be a page of disabled controls.
@@ -890,9 +771,7 @@ fn lifecycle_body(
     // The dialog's body scrolls when the sections outgrow it; a scroll area
     // of its own here held the dialog at full height and withheld a gutter.
     sections(ui, |ui| {
-        if let Some(chosen) = current_document(ui, facts, messages) {
-            action = chosen;
-        }
+        current_document(ui, facts, messages);
         operations(ui, facts, &mut action, messages);
         includes(ui, facts, messages);
         if let Some(chosen) = revision_history(ui, code, facts, messages) {
@@ -1449,14 +1328,9 @@ fn netlist_include_operation_review(
     action
 }
 
-fn current_document(
-    ui: &mut Ui,
-    facts: &DocumentFacts,
-    messages: MessageCatalog,
-) -> Option<LifecycleAction> {
+fn current_document(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
     // Every project document is editable; only one that is not is news.
     let ownership = (!facts.editable).then(|| messages.text(MessageId::CodeSourceOwnedReadOnly));
-    let mut action = None;
     dialog_section(
         ui,
         &messages.text(MessageId::CodeSourceCurrentDocument),
@@ -1467,9 +1341,11 @@ fn current_document(
                 &messages.text(MessageId::CodeSourcePath),
                 &facts.logical_path,
             );
-            if let Some(chosen) = role_control(ui, facts, messages) {
-                action = Some(chosen);
-            }
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceRecordedRole),
+                &facts.role,
+            );
             property_row_wrapped(
                 ui,
                 &messages.text(MessageId::CodeSourceLineEndings),
@@ -1487,46 +1363,6 @@ fn current_document(
             }
         },
     );
-    action
-}
-
-/// The recorded role, editable where the project can actually change it.
-///
-/// An Automation environment lock refuses graph mutation and the refusal tells
-/// the user to reassign its role first. Without this control that instruction
-/// could not be followed, so the lock was a document nothing could ever move,
-/// rename, or delete.
-fn role_control(
-    ui: &mut Ui,
-    facts: &DocumentFacts,
-    messages: MessageCatalog,
-) -> Option<LifecycleAction> {
-    let row_label = messages.text(MessageId::CodeSourceRecordedRole);
-    if facts.language != ProjectSourceLanguage::RSpiceAutomation || facts.is_entry {
-        property_row(ui, &row_label, &facts.role);
-        return None;
-    }
-    let options = ASSIGNABLE_AUTOMATION_ROLES
-        .iter()
-        .map(|role| (role_label(messages, *role), role_label(messages, *role)))
-        .collect::<Vec<_>>();
-    let mut selected = facts.role.clone();
-    let changed = crate::workbench::design_system::property_row_combo(
-        ui,
-        &row_label,
-        "source-document-role",
-        &mut selected,
-        &options,
-        facts.block_reason.is_none(),
-    );
-    changed
-        .then(|| {
-            ASSIGNABLE_AUTOMATION_ROLES
-                .iter()
-                .find(|role| role_label(messages, **role) == selected)
-                .map(|role| LifecycleAction::AssignRole(*role))
-        })
-        .flatten()
 }
 
 /// The file operations, in the order they are offered.
@@ -1564,7 +1400,7 @@ fn operations(
                         *action = LifecycleAction::Begin(candidate);
                     }
                     if let Some(reason) = refusal {
-                        response.on_disabled_hover_text(reason.resolve(messages));
+                        response.on_disabled_hover_text(reason.resolve());
                     }
                 }
                 if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
@@ -1572,18 +1408,6 @@ fn operations(
                     .clicked()
                 {
                     *action = LifecycleAction::OpenHistory;
-                }
-                if facts.language == ProjectSourceLanguage::RSpiceAutomation {
-                    let response =
-                        Button::new(&messages.text(MessageId::CodeSourceImportDependency))
-                            .enabled(facts.block_reason.is_none())
-                            .show(ui);
-                    if response.clicked() {
-                        *action = LifecycleAction::Import;
-                    }
-                    if let Some(reason) = facts.block_reason {
-                        response.on_disabled_hover_text(reason);
-                    }
                 }
                 if facts.language == ProjectSourceLanguage::VerilogA {
                     let response =
@@ -1612,18 +1436,6 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
     if let Some(reason) = facts.block_reason {
         return Some(Refusal::Service(reason));
     }
-    let rewrites_graph = matches!(
-        candidate,
-        CodeSourceFileAction::New
-            | CodeSourceFileAction::Rename
-            | CodeSourceFileAction::Move
-            | CodeSourceFileAction::Delete
-    );
-    if rewrites_graph && facts.is_environment_lock {
-        return Some(Refusal::Stated(
-            MessageId::CodeSourceEnvironmentLockMutationBlocked,
-        ));
-    }
     // The main file, a file a role binds and a file that still includes
     // another: the bundle refuses to delete each, and says why first.
     if candidate == CodeSourceFileAction::Delete {
@@ -1632,23 +1444,19 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
     None
 }
 
-/// Why an operation is refused, and who owns the wording.
-///
-/// A rule this surface restates is catalog copy. A rule the source-graph
-/// service already answered with is that service's sentence, passed through
-/// unaltered so the two can never disagree about the reason.
+/// Why an operation is refused, and who owns the wording: the source-graph
+/// service's sentence, passed through unaltered so the two can never
+/// disagree about the reason.
 #[derive(Clone)]
 enum Refusal {
-    Stated(MessageId),
     Service(&'static str),
     /// The delete form's own refusal, already worded.
     Delete(String),
 }
 
 impl Refusal {
-    fn resolve(self, messages: MessageCatalog) -> String {
+    fn resolve(self) -> String {
         match self {
-            Self::Stated(id) => messages.text(id),
             Self::Service(reason) => reason.to_owned(),
             Self::Delete(reason) => reason,
         }

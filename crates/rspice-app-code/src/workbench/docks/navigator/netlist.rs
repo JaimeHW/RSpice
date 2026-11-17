@@ -41,7 +41,7 @@ const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 /// The Netlist page's outline over what it reads and writes in place, and
 /// what it asks of the whole application.
 /// What the Netlist page's outline reads, and writes in place: the model,
-/// the netlist editor's and the Code & Automation page's state, the outline
+/// the netlist editor's and the Verilog-A editor's state, the outline
 /// groups the reader collapsed, the include tabs the reader opened, the runs,
 /// the navigator's filter, whether the pointer is coarse and the message
 /// catalogue.

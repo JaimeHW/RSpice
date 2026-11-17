@@ -28,9 +28,6 @@ pub(super) fn test_style<'a>(
         error: Color32::RED,
         warning: Color32::YELLOW,
         edited_lines: edited,
-        breakpoints: &[],
-        breakpoints_enabled: false,
-        current_line: None,
         cross_probe_line: None,
         marks: &[],
         marks_outdated: false,
@@ -131,7 +128,7 @@ fn release_text_fidelity_matrix_preserves_large_unicode_ime_clipboard_and_paste_
     let keys = KeyContext {
         os: egui::os::OperatingSystem::Windows,
         editable: true,
-        syntax: EditorSyntax::Python,
+        syntax: EditorSyntax::Toml,
         page_rows: 20,
         tab_moves_focus: false,
     };
@@ -209,10 +206,10 @@ fn disjoint_multicursor_structural_edit_is_one_transaction() {
 
 #[test]
 fn smart_newline_preserves_line_endings_and_indents_language_blocks() {
-    let mut model = TextDocumentModel::from_source("    if ready:\r\n");
-    model.set_selections(vec![TextSelection::caret(13)]);
-    assert!(insert_smart_newline(&mut model, EditorSyntax::Python));
-    assert_eq!(model.to_source(), "    if ready:\r\n        \r\n");
+    let mut model = TextDocumentModel::from_source("    .subckt amp a b\r\n");
+    model.set_selections(vec![TextSelection::caret(19)]);
+    assert!(insert_smart_newline(&mut model, EditorSyntax::Spice));
+    assert_eq!(model.to_source(), "    .subckt amp a b\r\n        \r\n");
 }
 
 #[test]
@@ -293,14 +290,7 @@ fn requested_line_unfolds_and_reveals_a_collapsed_target() {
 }
 
 #[test]
-fn indentation_and_toml_fold_discovery_are_deterministic() {
-    let python = TextDocumentModel::from_source(
-        "def outer():\n    if ready:\n        return 1\n    return 0\nnext_value = 2\n",
-    );
-    assert_eq!(
-        discover_fold_regions(&python, EditorSyntax::Python),
-        vec![(0, 4), (1, 3)]
-    );
+fn toml_fold_discovery_is_deterministic() {
     let toml =
         TextDocumentModel::from_source("title = 'x'\n[first]\na = 1\nb = 2\n[second]\nc = 3\n");
     assert_eq!(
@@ -395,7 +385,7 @@ fn verilog_a_indents_after_a_line_that_opens_a_block_and_only_then() {
 fn five_million_line_fold_discovery_streams_without_a_line_vector() {
     let source = "x\n".repeat(5_000_000);
     let model = TextDocumentModel::from_source(&source);
-    assert!(discover_fold_regions(&model, EditorSyntax::Python).is_empty());
+    assert!(discover_fold_regions(&model, EditorSyntax::Toml).is_empty());
     assert!(discover_fold_regions(&model, EditorSyntax::Spice).is_empty());
 }
 
@@ -483,74 +473,6 @@ fn maximum_column_reconciliation_is_revision_bound_and_chunked() {
     );
 }
 
-#[test]
-fn focused_debug_editor_exposes_f9_breakpoint_toggle() {
-    let context = egui::Context::default();
-    let mut source = "print('ready')\n".to_owned();
-    let edited = std::collections::HashSet::new();
-    let mut style = test_style(&edited);
-    style.breakpoints_enabled = true;
-    let editor_id = egui::Id::new("breakpoint-shortcut-editor-test");
-    let raw_input = || egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(900.0, 600.0),
-        )),
-        ..Default::default()
-    };
-    let _ = context.run_ui(raw_input(), |ui| {
-        let output = show_virtual_text_editor(
-            ui,
-            editor_id,
-            &mut source,
-            1,
-            true,
-            EditorSyntax::Python,
-            None,
-            &style,
-            |ui, row, font| {
-                ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                })
-            },
-            |_| None,
-            |_| None,
-        );
-        output.response.request_focus();
-    });
-
-    let mut input = raw_input();
-    input.events.push(egui::Event::Key {
-        key: Key::F9,
-        physical_key: Some(Key::F9),
-        pressed: true,
-        repeat: false,
-        modifiers: Modifiers::NONE,
-    });
-    let mut toggled = None;
-    let _ = context.run_ui(input, |ui| {
-        toggled = show_virtual_text_editor(
-            ui,
-            editor_id,
-            &mut source,
-            1,
-            true,
-            EditorSyntax::Python,
-            None,
-            &style,
-            |ui, row, font| {
-                ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                })
-            },
-            |_| None,
-            |_| None,
-        )
-        .breakpoint_toggled;
-    });
-    assert_eq!(toggled, Some(1));
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
@@ -560,11 +482,8 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
     let mut source = "R1 input output 1k\nV1 input 0 1\n".to_owned();
     let mut edited = std::collections::HashSet::new();
     edited.insert(1);
-    let breakpoints = [2];
     let mut style = test_style(&edited);
     style.accessible_label = "Generated SPICE netlist viewer";
-    style.breakpoints = &breakpoints;
-    style.current_line = Some(2);
     let raw_input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -614,8 +533,6 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
     assert!(description.contains("Line 2 of 3, column 1. Read-only."));
     assert!(description.contains("One warning diagnostic on this line"));
     assert!(description.contains("TEST-001"));
-    assert!(description.contains("Breakpoint on this line"));
-    assert!(description.contains("Current debugger statement"));
     assert!(description.contains("Modified line"));
     assert!(editor.is_read_only());
     assert!(editor.text_selection().is_some());

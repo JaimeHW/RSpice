@@ -1,4 +1,4 @@
-//! Exact, transactional source-file lifecycle for the Code Workspace tree.
+//! Exact, transactional source-file lifecycle for project source bundles.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
@@ -6,32 +6,15 @@
 use super::CodeWorkspaceParts;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
-    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
+    ProjectSourceBundle, ProjectSourceFile, ProjectSourceLanguage, ProjectSourceOwner,
 };
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use super::CodeHandles;
-use super::CodeSourceImportState;
 use super::CodeWorkspaceRuntimeState;
 use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
-use rspice_app_workbench::workbench::state::WorkbenchSession;
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Debug)]
-struct BrowserAutomationImportCompletion {
-    token: crate::workbench::browser::file_import::TextImportToken,
-    result: Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
-}
-
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    static BROWSER_AUTOMATION_IMPORT_COMPLETION: std::cell::RefCell<Option<BrowserAutomationImportCompletion>> =
-        const { std::cell::RefCell::new(None) };
-}
 
 pub fn source_file_mutation_block_reason(
     parts: &CodeWorkspaceParts<'_>,
@@ -58,293 +41,8 @@ pub fn source_file_mutation_block_reason_in(
         ProjectSourceLanguage::VerilogA if code.veriloga.pending.is_some() => {
             Some("Wait for the Verilog-A compile to finish or cancel it first.")
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            let runtime = &code.automation;
-            (runtime.pending_runtime_validation.is_some()
-                || runtime.runtime_execution.is_some()
-                || runtime.execution.is_active())
-            .then_some("Stop the managed Automation validation or execution before changing files.")
-        }
         _ => None,
     }
-}
-
-/// Open the transaction that creates the project's Automation workspace.
-///
-/// Automation is the one project-wide source workspace: a Verilog-A source is
-/// a cell view, created with its cell.
-pub fn open_source_workspace_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
-        return Err(reason.to_owned());
-    }
-    let owner = ProjectSourceOwner::code_workspace(language);
-    if parts
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .is_some()
-    {
-        return Err(format!(
-            "This project already owns a {} source workspace.",
-            language.label()
-        ));
-    }
-    let netlist_source_path = parts
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .map(|descriptor| descriptor.artifact_name.clone())
-        .unwrap_or_else(|| "top.sp".to_owned());
-    parts.code.source_workspace_dialog = Some(super::CodeSourceWorkspaceDialogState {
-        project_id: parts.model.workspace.content.project.id(),
-        root_path: "automation.py".to_owned(),
-        run_plan_path: "runplan.yaml".to_owned(),
-        environment_lock_path: "environment.lock".to_owned(),
-        permission_manifest_path: "permissions.toml".to_owned(),
-        netlist_source_path,
-        error: None,
-    });
-    Ok(())
-}
-
-pub fn commit_source_workspace_dialog(
-    parts: &mut CodeWorkspaceParts<'_>,
-) -> Result<String, String> {
-    let draft = parts
-        .code
-        .source_workspace_dialog
-        .clone()
-        .ok_or_else(|| "No source-workspace transaction is open.".to_owned())?;
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
-        return Err(reason.to_owned());
-    }
-    if draft.project_id != parts.model.workspace.content.project.id() {
-        return Err(
-            "The active project changed while the source-workspace transaction was open."
-                .to_owned(),
-        );
-    }
-    let owner = ProjectSourceOwner::code_workspace(language);
-    if parts
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .is_some()
-    {
-        return Err("The source workspace was created by another operation. Review the current project source tree."
-            .to_owned());
-    }
-
-    let bundle = new_automation_workspace_bundle(&draft)?;
-    let root_path = bundle.root().logical_path().to_owned();
-    parts
-        .model
-        .workspace
-        .content
-        .insert_project_source_bundle(bundle)
-        .map_err(|error| error.to_string())?;
-    parts.code.automation = Default::default();
-    parts.code.automation.selected_file = Some(root_path.clone());
-    parts.code.source_workspace_dialog = None;
-    // The dialog that commits this records the line.
-    Ok(format!(
-        "Created a {} source workspace at {root_path}.",
-        language.label()
-    ))
-}
-
-fn new_automation_workspace_bundle(
-    draft: &super::CodeSourceWorkspaceDialogState,
-) -> Result<ProjectSourceBundle, String> {
-    let paths = [
-        draft.root_path.trim(),
-        draft.run_plan_path.trim(),
-        draft.environment_lock_path.trim(),
-        draft.permission_manifest_path.trim(),
-    ];
-    let mut unique = std::collections::HashSet::new();
-    if paths.iter().any(|path| !unique.insert(path.to_lowercase())) {
-        return Err(
-            "Every Automation role must be bound to a distinct project source path.".to_owned(),
-        );
-    }
-    if !draft.root_path.trim().to_ascii_lowercase().ends_with(".py") {
-        return Err("The Automation entry document must be a Python source file.".to_owned());
-    }
-    let netlist_source = draft.netlist_source_path.trim();
-    if netlist_source.is_empty() {
-        return Err(
-            "Enter the portable project-relative netlist source used by the starter run plan."
-                .to_owned(),
-        );
-    }
-    let plan_literal = serde_json::to_string(draft.run_plan_path.trim())
-        .map_err(|error| format!("Could not encode the run-plan path: {error}"))?;
-    let entry = format!(
-        "from rspice import Project\n\nproject = Project.open(\".\")\nplan = project.run_plans.load({plan_literal})\npreview = plan.validate(target=\"local\", fail_closed=True)\nrun = preview.execute()\n"
-    );
-    let plan = format!(
-        "schema: rspice.run-plan/v1\nname: New automation workflow\nsource: {netlist_source}\nanalyses: [op]\ntarget: local\n"
-    );
-    let lock = crate::state::DEFAULT_ENVIRONMENT_LOCK;
-    let permissions = "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = []\nsecret_logging = \"redact\"\n";
-    let documents = [
-        crate::automation_workflow::AutomationSourceDocument {
-            path: draft.root_path.trim(),
-            source: &entry,
-        },
-        crate::automation_workflow::AutomationSourceDocument {
-            path: draft.run_plan_path.trim(),
-            source: &plan,
-        },
-        crate::automation_workflow::AutomationSourceDocument {
-            path: draft.environment_lock_path.trim(),
-            source: lock,
-        },
-        crate::automation_workflow::AutomationSourceDocument {
-            path: draft.permission_manifest_path.trim(),
-            source: permissions,
-        },
-    ];
-    let compile_roles = [
-        crate::automation_workflow::AutomationRoleBinding {
-            path: draft.run_plan_path.trim(),
-            role: crate::automation_workflow::AutomationSourceRole::RunPlan,
-        },
-        crate::automation_workflow::AutomationRoleBinding {
-            path: draft.environment_lock_path.trim(),
-            role: crate::automation_workflow::AutomationSourceRole::EnvironmentLock,
-        },
-        crate::automation_workflow::AutomationRoleBinding {
-            path: draft.permission_manifest_path.trim(),
-            role: crate::automation_workflow::AutomationSourceRole::PermissionManifest,
-        },
-    ];
-    if let Err(diagnostics) = crate::automation_workflow::compile_automation_documents(
-        draft.root_path.trim(),
-        &documents,
-        &compile_roles,
-    ) {
-        let Some(diagnostic) = diagnostics.first() else {
-            return Err(
-                "Automation source compilation failed without a structured diagnostic.".to_owned(),
-            );
-        };
-        return Err(format!(
-            "{}:{}:{} {}: {}",
-            diagnostic.path,
-            diagnostic.line,
-            diagnostic.column,
-            diagnostic.code,
-            diagnostic.message
-        ));
-    }
-    let files = [
-        ProjectSourceFile::try_new(draft.run_plan_path.trim(), plan)
-            .map_err(|error| error.to_string())?,
-        ProjectSourceFile::try_new(draft.environment_lock_path.trim(), lock)
-            .map_err(|error| error.to_string())?,
-        ProjectSourceFile::try_new(draft.permission_manifest_path.trim(), permissions)
-            .map_err(|error| error.to_string())?,
-    ];
-    let dependencies = [
-        ProjectSourceDependency::try_new(draft.root_path.trim(), draft.run_plan_path.trim())
-            .map_err(|error| error.to_string())?,
-        ProjectSourceDependency::try_new(
-            draft.root_path.trim(),
-            draft.environment_lock_path.trim(),
-        )
-        .map_err(|error| error.to_string())?,
-        ProjectSourceDependency::try_new(
-            draft.root_path.trim(),
-            draft.permission_manifest_path.trim(),
-        )
-        .map_err(|error| error.to_string())?,
-    ];
-    let roles = [
-        ProjectSourceRoleBinding::try_new(
-            draft.root_path.trim(),
-            ProjectSourceRole::AutomationEntry,
-        )
-        .map_err(|error| error.to_string())?,
-        ProjectSourceRoleBinding::try_new(
-            draft.run_plan_path.trim(),
-            ProjectSourceRole::AutomationRunPlan,
-        )
-        .map_err(|error| error.to_string())?,
-        ProjectSourceRoleBinding::try_new(
-            draft.environment_lock_path.trim(),
-            ProjectSourceRole::AutomationEnvironmentLock,
-        )
-        .map_err(|error| error.to_string())?,
-        ProjectSourceRoleBinding::try_new(
-            draft.permission_manifest_path.trim(),
-            ProjectSourceRole::AutomationPermissionManifest,
-        )
-        .map_err(|error| error.to_string())?,
-    ];
-    ProjectSourceBundle::try_new_with_roles(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
-        ProjectSourceLanguage::RSpiceAutomation,
-        draft.root_path.trim(),
-        entry,
-        files,
-        dependencies,
-        roles,
-    )
-    .map_err(|error| error.to_string())
-}
-
-pub fn assign_automation_source_role(
-    parts: &mut CodeWorkspaceParts<'_>,
-    logical_path: &str,
-    role: Option<ProjectSourceRole>,
-) -> Result<String, String> {
-    if let Some(reason) =
-        source_file_mutation_block_reason(parts, ProjectSourceLanguage::RSpiceAutomation)
-    {
-        return Err(reason.to_owned());
-    }
-    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-    let bundle = parts
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    let bundle_id = bundle.id();
-    let changed = parts
-        .model
-        .workspace
-        .content
-        .set_project_source_bundle_non_entry_role(bundle_id, logical_path, role)
-        .map_err(|error| error.to_string())?;
-    if changed {
-        super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-    }
-    let role_label = role.map_or("unassigned", ProjectSourceRole::label);
-    let message = if changed {
-        let message = format!("Set Automation source '{logical_path}' role to {role_label}.");
-        parts
-            .model
-            .record(LogSeverity::Info, LogSource::Studio, message.clone());
-        message
-    } else {
-        let message =
-            format!("Automation source '{logical_path}' already has the {role_label} role.");
-        parts.wb.prompt(message.clone());
-        message
-    };
-    Ok(message)
 }
 
 /// Resolve edit authority from persisted document ownership and semantic
@@ -368,8 +66,7 @@ pub fn source_document_is_editable(
 
 /// Resolve edit authority for an exact source bundle, over the model, the
 /// Code workspace's runtime state and the platform's. A Verilog-A bundle
-/// belongs to its cell view; Automation remains confined to its singleton
-/// project workspace.
+/// belongs to its cell view.
 pub fn source_bundle_document_is_editable_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
@@ -382,14 +79,6 @@ pub fn source_bundle_document_is_editable_in(
         return false;
     }
     source_bundle_contains_document_in(model, platform, language, bundle_id, logical_path)
-        && (language != ProjectSourceLanguage::RSpiceAutomation
-            || model
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(bundle_id)
-                .and_then(|bundle| bundle.role_for_path(logical_path))
-                != Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock))
 }
 
 /// Whether an exact retained document belongs to an authenticated source
@@ -437,15 +126,6 @@ pub(crate) fn source_bundle_contains_document_in(
             };
             bundle.language() == language && owner_matches && bundle.contains_file(logical_path)
         })
-}
-
-fn source_document_blocks_graph_mutation(
-    bundle: &ProjectSourceBundle,
-    language: ProjectSourceLanguage,
-    logical_path: &str,
-) -> bool {
-    language == ProjectSourceLanguage::RSpiceAutomation
-        && bundle.role_for_path(logical_path) == Some(ProjectSourceRole::AutomationEnvironmentLock)
 }
 
 pub fn open_source_file_dialog(
@@ -503,18 +183,6 @@ pub fn open_source_file_dialog_in_bundle(
         return Err(format!(
             "The selected source file '{source_path}' no longer exists."
         ));
-    }
-    if (matches!(
-        action,
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move | CodeSourceFileAction::Delete
-    ) && source_document_blocks_graph_mutation(bundle, language, source_path))
-        || (action == CodeSourceFileAction::New
-            && source_document_blocks_graph_mutation(bundle, language, importer_path))
-    {
-        return Err(
-            "The managed Automation environment lock is read-only. Reassign its semantic role or duplicate it before changing the source graph."
-                .to_owned(),
-        );
     }
     if action == CodeSourceFileAction::Delete
         && crate::state::project_source_paths_equal(source_path, bundle.root().logical_path())
@@ -612,18 +280,6 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
                 .to_owned(),
         );
     }
-    if (matches!(
-        draft.action,
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move | CodeSourceFileAction::Delete
-    ) && source_document_blocks_graph_mutation(bundle, draft.language, &draft.source_path))
-        || (draft.action == CodeSourceFileAction::New
-            && source_document_blocks_graph_mutation(bundle, draft.language, &draft.importer_path))
-    {
-        return Err(
-            "The managed Automation environment lock became read-only before the source-file transaction committed."
-                .to_owned(),
-        );
-    }
 
     let proposed = draft.proposed_path.trim();
     let after_delete = veriloga_includers_of(bundle, &draft.source_path)
@@ -632,9 +288,8 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         .unwrap_or_else(|| bundle.root().logical_path().to_owned());
     let changed = match draft.action {
         CodeSourceFileAction::New => {
-            let file =
-                ProjectSourceFile::try_new(proposed, new_file_template(draft.language, proposed))
-                    .map_err(|error| error.to_string())?;
+            let file = ProjectSourceFile::try_new(proposed, new_file_template(draft.language))
+                .map_err(|error| error.to_string())?;
             parts
                 .model
                 .workspace
@@ -694,10 +349,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
                 draft.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            parts.code.automation.selected_file = Some(selected_path);
-            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_file_dialog = None;
     let message = match draft.action {
@@ -770,389 +422,6 @@ pub(crate) fn open_source_history_in_bundle(
         error: None,
     });
     Ok(())
-}
-
-pub fn request_automation_source_import(
-    parts: &mut CodeWorkspaceParts<'_>,
-    importer_path: &str,
-) -> Result<(), String> {
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
-        return Err(reason.to_owned());
-    }
-    if parts.code.source_import.is_some() {
-        return Err("An Automation source import is already pending.".to_owned());
-    }
-    let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-    let bundle = parts
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    if !bundle.contains_file(importer_path) {
-        return Err(format!("The importer '{importer_path}' no longer exists."));
-    }
-    if source_document_blocks_graph_mutation(bundle, language, importer_path) {
-        return Err(
-            "The managed Automation environment lock cannot own imported project dependencies. Select an editable project source first."
-                .to_owned(),
-        );
-    }
-    parts.code.source_import = Some(CodeSourceImportState {
-        project_id: parts.model.workspace.content.project.id(),
-        bundle_id: bundle.id(),
-        bundle_revision: bundle.revision().get(),
-        closure_digest: bundle.closure_digest(),
-        language,
-        importer_path: importer_path.to_owned(),
-        picker_started: false,
-    });
-    Ok(())
-}
-
-/// Advance a pending Automation dependency import.
-///
-/// The request only records intent; the picker runs from the frame loop so the
-/// browser build can hand the file back asynchronously. A request that is
-/// never polled leaves `source_import` set forever, and every later import is
-/// then refused as already pending — so this must stay wired into the frame.
-pub fn poll_automation_source_import(
-    model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
-    wb: &mut WorkbenchSession,
-    platform: &PlatformState,
-    handles: &mut CodeHandles,
-) {
-    #[cfg(target_arch = "wasm32")]
-    poll_browser_automation_import_completion(model, code, platform, handles);
-
-    let Some(request) = code.source_import.as_mut() else {
-        return;
-    };
-    if request.language != ProjectSourceLanguage::RSpiceAutomation || request.picker_started {
-        return;
-    }
-    request.picker_started = true;
-    if let Some(reason) = source_file_mutation_block_reason_in(
-        model,
-        code,
-        platform,
-        ProjectSourceLanguage::RSpiceAutomation,
-    ) {
-        code.source_import = None;
-        wb.prompt(format!("Automation source import cancelled: {reason}"));
-        return;
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(request) = code.source_import.take() else {
-            return;
-        };
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "Automation source",
-                &["py", "yaml", "yml", "toml", "lock", "json", "csv"],
-            )
-            .set_title("Import Automation dependency")
-            .pick_file()
-        else {
-            return;
-        };
-        let result = read_imported_text(&path).and_then(|(file_name, contents)| {
-            apply_automation_source_import_in(
-                model, code, platform, handles, request, file_name, contents,
-            )
-        });
-        if let Err(error) = result {
-            model.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Automation source import failed: {error}"),
-            );
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let token = match crate::workbench::browser::file_import::try_begin_text_import(
-            crate::workbench::browser::file_import::BrowserTextImportKind::Automation,
-        ) {
-            Ok(token) => token,
-            Err(error) => {
-                code.source_import = None;
-                wb.prompt(format!("Automation source import failed: {error}"));
-                return;
-            }
-        };
-        crate::workbench::browser::file_import::pick_text_file(
-            "Automation source",
-            &["py", "yaml", "yml", "toml", "lock", "json", "csv"],
-            move |result| {
-                if crate::workbench::browser::file_import::text_import_is_current(token) {
-                    BROWSER_AUTOMATION_IMPORT_COMPLETION.with(|slot| {
-                        *slot.borrow_mut() =
-                            Some(BrowserAutomationImportCompletion { token, result });
-                    });
-                }
-            },
-        );
-    }
-}
-
-/// Read a picked file as project source, refusing anything the project source
-/// registry would not be allowed to hold.
-#[cfg(not(target_arch = "wasm32"))]
-fn read_imported_text(path: &std::path::Path) -> Result<(String, String), String> {
-    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES as u64 {
-        return Err(format!(
-            "Selected source exceeds the supported {}-byte limit",
-            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-        ));
-    }
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-    if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-        return Err(format!(
-            "Selected source exceeds the supported {}-byte limit",
-            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-        ));
-    }
-    let contents = String::from_utf8(bytes)
-        .map_err(|error| format!("Selected source is not valid UTF-8: {error}"))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .ok_or_else(|| "Selected source has no valid UTF-8 file name".to_owned())?;
-    Ok((file_name.to_owned(), contents))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn poll_browser_automation_import_completion(
-    model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
-    platform: &PlatformState,
-    handles: &mut CodeHandles,
-) {
-    let Some(completion) =
-        BROWSER_AUTOMATION_IMPORT_COMPLETION.with(|slot| slot.borrow_mut().take())
-    else {
-        return;
-    };
-    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
-        return;
-    }
-    let Some(request) = code.source_import.take() else {
-        return;
-    };
-    let result = match completion.result {
-        Ok(Some(file)) => apply_automation_source_import_in(
-            model,
-            code,
-            platform,
-            handles,
-            request,
-            file.name,
-            file.contents,
-        ),
-        Ok(None) => return,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = result {
-        model.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Automation source import failed: {error}"),
-        );
-    }
-}
-
-fn apply_automation_source_import(
-    parts: &mut CodeWorkspaceParts<'_>,
-    request: CodeSourceImportState,
-    file_name: String,
-    contents: String,
-) -> Result<String, String> {
-    apply_automation_source_import_in(
-        parts.model,
-        parts.code,
-        parts.platform,
-        parts.handles,
-        request,
-        file_name,
-        contents,
-    )
-}
-
-/// [`apply_automation_source_import`], over the model, the Code &
-/// Automation page's state, the platform's and what the code feature runs.
-fn apply_automation_source_import_in(
-    model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
-    platform: &PlatformState,
-    handles: &mut CodeHandles,
-    request: CodeSourceImportState,
-    file_name: String,
-    contents: String,
-) -> Result<String, String> {
-    if let Some(reason) = source_file_mutation_block_reason_in(
-        model,
-        code,
-        platform,
-        ProjectSourceLanguage::RSpiceAutomation,
-    ) {
-        return Err(reason.to_owned());
-    }
-    if model.workspace.content.project.id() != request.project_id {
-        return Err("The active project changed while the source picker was open.".to_owned());
-    }
-    let bundle = model
-        .workspace
-        .content
-        .project_sources
-        .get_bundle(request.bundle_id)
-        .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    if bundle.revision().get() != request.bundle_revision
-        || bundle.closure_digest() != request.closure_digest
-        || !bundle.contains_file(&request.importer_path)
-    {
-        return Err(
-            "The Automation source bundle changed while the source picker was open.".to_owned(),
-        );
-    }
-    if source_document_blocks_graph_mutation(
-        bundle,
-        ProjectSourceLanguage::RSpiceAutomation,
-        &request.importer_path,
-    ) {
-        return Err(
-            "The selected Automation importer is a read-only managed environment lock.".to_owned(),
-        );
-    }
-    let logical_path = unique_suggestion(bundle, &request.importer_path, file_name);
-    let file =
-        ProjectSourceFile::try_new(&logical_path, contents).map_err(|error| error.to_string())?;
-    model
-        .workspace
-        .content
-        .add_project_source_bundle_file(request.bundle_id, &request.importer_path, file)
-        .map_err(|error| error.to_string())?;
-    code.automation.selected_file = Some(logical_path.clone());
-    super::automation::invalidate_automation_evidence_in(code, handles);
-    let message = format!("Imported Automation source '{logical_path}'.");
-    model.record(LogSeverity::Info, LogSource::Studio, message.clone());
-    Ok(message)
-}
-
-/// Import the one file dropped on the Automation page as its source, or say
-/// why not: one file at a time, its bytes within the source limit and in
-/// UTF-8. Nothing is imported while an application modal is open.
-pub fn import_dropped_automation_files(
-    parts: &mut CodeWorkspaceParts<'_>,
-    application_modal_open: bool,
-    dropped: Vec<egui::DroppedFile>,
-) {
-    if application_modal_open {
-        return;
-    }
-    if dropped.len() != 1 {
-        let message = parts
-            .wb
-            .messages()
-            .text(crate::workbench::MessageId::AutomationDropOneSource);
-        parts.wb.prompt(message);
-        return;
-    }
-    let file = &dropped[0];
-    let name = (!file.name.trim().is_empty())
-        .then(|| file.name.clone())
-        .or_else(|| {
-            file.path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .and_then(std::ffi::OsStr::to_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "dropped-source.py".to_owned());
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            file.path
-                .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
-        }
-    };
-    let result = bytes.and_then(|bytes| {
-        if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-            return Err(format!(
-                "Dropped source exceeds the supported {}-byte limit.",
-                crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-            ));
-        }
-        let contents = String::from_utf8(bytes)
-            .map_err(|error| format!("Dropped source is not valid UTF-8: {error}"))?;
-        import_dropped_automation_source(parts, name, contents).map(|_| ())
-    });
-    if let Err(error) = result {
-        parts.model.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Automation drop import failed: {error}"),
-        );
-    }
-}
-
-fn import_dropped_automation_source(
-    parts: &mut CodeWorkspaceParts<'_>,
-    file_name: String,
-    contents: String,
-) -> Result<String, String> {
-    let language = ProjectSourceLanguage::RSpiceAutomation;
-    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
-        return Err(reason.to_owned());
-    }
-    if contents.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-        return Err(format!(
-            "Dropped source exceeds the supported {}-byte limit.",
-            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-        ));
-    }
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let bundle = parts
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
-    let importer_path = parts
-        .code
-        .automation
-        .selected_file
-        .as_deref()
-        .filter(|path| bundle.contains_file(path))
-        .unwrap_or_else(|| bundle.root().logical_path())
-        .to_owned();
-    let request = CodeSourceImportState {
-        project_id: parts.model.workspace.content.project.id(),
-        bundle_id: bundle.id(),
-        bundle_revision: bundle.revision().get(),
-        closure_digest: bundle.closure_digest(),
-        language,
-        importer_path,
-        picker_started: true,
-    };
-    apply_automation_source_import(parts, request, file_name, contents)
 }
 
 pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
@@ -1233,10 +502,7 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
                 draft.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            parts.code.automation.selected_file = Some(selected_path);
-            super::automation::invalidate_automation_evidence_in(parts.code, parts.handles);
-        }
+        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_history = None;
     let message = format!(
@@ -1343,26 +609,12 @@ pub fn veriloga_includers_of(bundle: &ProjectSourceBundle, logical_path: &str) -
 /// everything in the file that includes it, so it brings the standard
 /// headers it needs with it and compiles on its own terms; the reader's
 /// caret goes under them.
-fn new_file_template(language: ProjectSourceLanguage, path: &str) -> String {
+fn new_file_template(language: ProjectSourceLanguage) -> String {
     match language {
         ProjectSourceLanguage::VerilogA => {
             "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n".to_owned()
         }
-        ProjectSourceLanguage::RSpiceAutomation
-            if path.to_ascii_lowercase().ends_with(".yaml")
-                || path.to_ascii_lowercase().ends_with(".yml") =>
-        {
-            "# Project-owned Automation configuration.\n".to_owned()
-        }
-        ProjectSourceLanguage::RSpiceAutomation
-            if path.to_ascii_lowercase().ends_with(".toml")
-                || path.to_ascii_lowercase().ends_with(".lock") =>
-        {
-            "# Project-owned Automation configuration.\n".to_owned()
-        }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            "\"\"\"Project-owned RSpice Automation helper module.\"\"\"\n".to_owned()
-        }
+        ProjectSourceLanguage::RSpiceAutomation => String::new(),
     }
 }
 
@@ -1521,69 +773,8 @@ mod tests {
     }
 
     #[test]
-    fn dropped_automation_source_uses_the_transactional_project_import_path() {
-        let mut harness = harness();
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let before = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .expect("test Automation bundle")
-            .revision()
-            .get();
-
-        let message = import_dropped_automation_source(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            "helpers.py".to_owned(),
-            "def characterize():\n    return 42\n".to_owned(),
-        )
-        .expect("drop import");
-        let logical_path = harness
-            .state
-            .code_workspace
-            .automation
-            .selected_file
-            .clone()
-            .expect("imported selection");
-        assert!(message.contains(&logical_path));
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        assert!(bundle.revision().get() > before);
-        assert_eq!(
-            bundle.file_content(&logical_path),
-            Some("def characterize():\n    return 42\n")
-        );
-        assert!(harness.model.workspace.content.project_sources_dirty);
-    }
-
-    #[test]
-    fn editor_authority_rejects_closed_read_only_and_governed_sources() {
+    fn editor_authority_rejects_closed_read_only_and_missing_sources() {
         let mut harness = veriloga_view_app();
-        let automation_owner =
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let automation = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&automation_owner)
-            .expect("test Automation bundle");
-        let automation_root = automation.root().logical_path().to_owned();
-        let automation_bundle_id = automation.id();
-        let automation_revision = automation.revision().get();
-        let automation_digest = automation.closure_digest();
-        let lock = automation
-            .paths_for_role(ProjectSourceRole::AutomationEnvironmentLock)
-            .next()
-            .expect("managed environment lock")
-            .to_owned();
         let verilog_owner = ProjectSourceOwner::cell_view(veriloga_reference());
         let verilog_root = harness
             .model
@@ -1595,85 +786,21 @@ mod tests {
             .root()
             .logical_path()
             .to_owned();
+        let editable = |harness: &CodeHarness, path: &str| {
+            source_document_is_editable(
+                &harness.model,
+                &harness.state.code_workspace,
+                &harness.platform,
+                ProjectSourceLanguage::VerilogA,
+                path,
+            )
+        };
 
-        assert!(source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::VerilogA,
-            &verilog_root
-        ));
-        assert!(source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &automation_root
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &lock
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::VerilogA,
-            "missing/model.va"
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            "missing/automation.py"
-        ));
-
-        harness
-            .state
-            .code_workspace
-            .automation
-            .pending_runtime_validation =
-            Some(super::super::page::PendingAutomationRuntimeValidation {
-                request_id: 41,
-                bundle_id: automation_bundle_id,
-                token: super::super::SourceOperationToken {
-                    project_id: harness.model.workspace.content.project.id(),
-                    revision: automation_revision,
-                    content_digest: automation_digest,
-                },
-            });
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &automation_root
-        ));
-        harness
-            .state
-            .code_workspace
-            .automation
-            .pending_runtime_validation = None;
+        assert!(editable(&harness, &verilog_root));
+        assert!(!editable(&harness, "missing/model.va"));
 
         harness.close_project_session();
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::VerilogA,
-            &verilog_root
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &automation_root
-        ));
+        assert!(!editable(&harness, &verilog_root));
 
         harness.open_project_session();
         harness.model.safe_mode.activate(
@@ -1683,124 +810,7 @@ mod tests {
             },
             String::new(),
         );
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::VerilogA,
-            &verilog_root
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &automation_root
-        ));
-    }
-
-    #[test]
-    fn managed_environment_lock_blocks_graph_mutation_but_allows_an_editable_copy() {
-        let mut harness = harness();
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .expect("test Automation bundle");
-        let bundle_id = bundle.id();
-        let root = bundle.root().logical_path().to_owned();
-        let lock = bundle
-            .paths_for_role(ProjectSourceRole::AutomationEnvironmentLock)
-            .next()
-            .expect("managed environment lock")
-            .to_owned();
-        let revision = bundle.revision().get();
-
-        for action in [
-            CodeSourceFileAction::Rename,
-            CodeSourceFileAction::Move,
-            CodeSourceFileAction::Delete,
-        ] {
-            let error = open_source_file_dialog(
-                &mut CodeFeature::workspace_parts(&mut harness.cx()),
-                ProjectSourceLanguage::RSpiceAutomation,
-                action,
-                &lock,
-                &root,
-            )
-            .unwrap_err();
-            assert!(error.contains("environment lock is read-only"));
-            assert!(harness.state.code_workspace.source_file_dialog.is_none());
-        }
-
-        let error = open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::RSpiceAutomation,
-            CodeSourceFileAction::New,
-            &lock,
-            &lock,
-        )
-        .unwrap_err();
-        assert!(error.contains("environment lock is read-only"));
-
-        let error = request_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            &lock,
-        )
-        .unwrap_err();
-        assert!(error.contains("cannot own imported project dependencies"));
-
-        harness.state.code_workspace.automation.selected_file = Some(lock.clone());
-        let error = import_dropped_automation_source(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            "should-not-import.py".to_owned(),
-            "value = 1\n".to_owned(),
-        )
-        .unwrap_err();
-        assert!(error.contains("read-only managed environment lock"));
-
-        open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::RSpiceAutomation,
-            CodeSourceFileAction::Duplicate,
-            &lock,
-            &root,
-        )
-        .expect("an exact project-owned copy remains available");
-        let draft = harness
-            .state
-            .code_workspace
-            .source_file_dialog
-            .as_ref()
-            .expect("duplicate transaction");
-        assert_eq!(draft.bundle_id, bundle_id);
-        assert_eq!(draft.action, CodeSourceFileAction::Duplicate);
-        assert_eq!(draft.source_path, lock);
-        harness
-            .state
-            .code_workspace
-            .source_file_dialog
-            .as_mut()
-            .expect("duplicate transaction")
-            .action = CodeSourceFileAction::Rename;
-        let error = commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
-            .unwrap_err();
-        assert!(error.contains("became read-only"));
-        assert_eq!(
-            harness
-                .model
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(bundle_id)
-                .expect("same exact bundle")
-                .revision()
-                .get(),
-            revision
-        );
+        assert!(!editable(&harness, &verilog_root));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2066,359 +1076,5 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("main file can't be deleted"), "{error}");
         assert!(harness.state.code_workspace.source_file_dialog.is_none());
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn automation_import_applies_to_the_exact_owned_bundle() {
-        let mut harness = harness();
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        let bundle_id = bundle.id();
-        let importer = bundle.root().logical_path().to_owned();
-        let logical_path = unique_suggestion(bundle, &importer, "analysis_helpers.py");
-
-        request_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            &importer,
-        )
-        .unwrap();
-        let request = harness.state.code_workspace.source_import.take().unwrap();
-        let message = apply_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            request,
-            "analysis_helpers.py".to_owned(),
-            "def gain(value):\n    return value * 2\n".to_owned(),
-        )
-        .unwrap();
-
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap();
-        assert_eq!(
-            bundle.file_content(&logical_path),
-            Some("def gain(value):\n    return value * 2\n")
-        );
-        assert_eq!(
-            harness.state.code_workspace.automation.selected_file,
-            Some(logical_path.clone())
-        );
-        assert!(message.contains(&logical_path));
-        assert!(harness.model.workspace.content.project_sources_dirty);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn automation_import_rejects_a_stale_picker_result() {
-        let mut harness = harness();
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        let bundle_id = bundle.id();
-        let importer = bundle.root().logical_path().to_owned();
-
-        request_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            &importer,
-        )
-        .unwrap();
-        let request = harness.state.code_workspace.source_import.take().unwrap();
-        harness
-            .model
-            .workspace
-            .content
-            .replace_project_source_bundle_file(
-                bundle_id,
-                &importer,
-                "# changed while picker was open\n".to_owned(),
-            )
-            .unwrap();
-
-        let error = apply_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            request,
-            "stale.py".to_owned(),
-            "raise RuntimeError('must not be imported')\n".to_owned(),
-        )
-        .unwrap_err();
-        assert!(error.contains("changed while the source picker was open"));
-        assert!(
-            !harness
-                .model
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(bundle_id)
-                .unwrap()
-                .contains_file("stale.py")
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn automation_import_rechecks_read_only_authority_after_picker_open() {
-        let mut harness = harness();
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let owner = ProjectSourceOwner::code_workspace(language);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        let bundle_id = bundle.id();
-        let importer = bundle.root().logical_path().to_owned();
-        let before_revision = bundle.revision().get();
-
-        request_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            &importer,
-        )
-        .unwrap();
-        let request = harness.state.code_workspace.source_import.take().unwrap();
-        harness.model.safe_mode.activate(
-            crate::state::write_policy::LocalSafeModeOptions {
-                open_project_read_only: true,
-                ..Default::default()
-            },
-            String::new(),
-        );
-        let error = apply_automation_source_import(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            request,
-            "must-not-import.py".to_owned(),
-            "raise RuntimeError('must not commit')\n".to_owned(),
-        )
-        .unwrap_err();
-        assert!(error.contains("read-only"));
-        let unchanged = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap();
-        assert_eq!(unchanged.revision().get(), before_revision);
-        assert!(!unchanged.contains_file("must-not-import.py"));
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn automation_editability_follows_persisted_role_not_filename() {
-        let mut harness = harness();
-        let owner = crate::state::ProjectSourceOwner::code_workspace(
-            ProjectSourceLanguage::RSpiceAutomation,
-        );
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        let bundle_id = bundle.id();
-        let environment_path = bundle
-            .paths_for_role(crate::state::ProjectSourceRole::AutomationEnvironmentLock)
-            .next()
-            .unwrap()
-            .to_owned();
-        harness
-            .model
-            .workspace
-            .content
-            .rename_project_source_bundle_file(
-                bundle_id,
-                &environment_path,
-                "environment/runtime-policy.toml",
-            )
-            .unwrap();
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            "environment/runtime-policy.toml",
-        ));
-
-        let root = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap()
-            .root()
-            .logical_path()
-            .to_owned();
-        harness
-            .model
-            .workspace
-            .content
-            .add_project_source_bundle_file(
-                bundle_id,
-                &root,
-                ProjectSourceFile::try_new("data/user-owned.lock", "value = 1\n").unwrap(),
-            )
-            .unwrap();
-        assert!(source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            "data/user-owned.lock",
-        ));
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn empty_project_creates_arbitrary_role_bound_automation_workspace() {
-        let mut harness = harness();
-        harness
-            .model
-            .workspace
-            .content
-            .remove_project_source(ProjectSourceLanguage::RSpiceAutomation);
-        harness.model.workspace.content.mark_project_sources_clean();
-
-        open_source_workspace_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
-        let draft = harness
-            .state
-            .code_workspace
-            .source_workspace_dialog
-            .as_mut()
-            .unwrap();
-        draft.root_path = "flows/nightly_entry.py".to_owned();
-        draft.run_plan_path = "plans/qualification.data".to_owned();
-        draft.environment_lock_path = "environment/pinned-runtime.toml".to_owned();
-        draft.permission_manifest_path = "security/least-privilege.data".to_owned();
-        draft.netlist_source_path = "circuits/owned-deck.cir".to_owned();
-
-        commit_source_workspace_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
-            .unwrap();
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        assert_eq!(bundle.root().logical_path(), "flows/nightly_entry.py");
-        assert_eq!(
-            bundle.role_for_path("plans/qualification.data"),
-            Some(ProjectSourceRole::AutomationRunPlan)
-        );
-        assert_eq!(
-            bundle.role_for_path("environment/pinned-runtime.toml"),
-            Some(ProjectSourceRole::AutomationEnvironmentLock)
-        );
-        assert_eq!(
-            bundle.role_for_path("security/least-privilege.data"),
-            Some(ProjectSourceRole::AutomationPermissionManifest)
-        );
-        assert!(bundle.root().content().contains("plans/qualification.data"));
-        assert!(
-            bundle
-                .file_content("plans/qualification.data")
-                .unwrap()
-                .contains("source: circuits/owned-deck.cir")
-        );
-        assert!(harness.model.workspace.content.project_sources_dirty);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn automation_singleton_role_moves_in_one_monotonic_revision() {
-        let mut harness = harness();
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .unwrap();
-        let bundle_id = bundle.id();
-        let root = bundle.root().logical_path().to_owned();
-        let old_lock = bundle
-            .paths_for_role(ProjectSourceRole::AutomationEnvironmentLock)
-            .next()
-            .unwrap()
-            .to_owned();
-        harness
-            .model
-            .workspace
-            .content
-            .add_project_source_bundle_file(
-                bundle_id,
-                &root,
-                ProjectSourceFile::try_new(
-                    "environment/next-runtime.data",
-                    crate::state::DEFAULT_ENVIRONMENT_LOCK,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let before = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap()
-            .revision()
-            .get();
-
-        assign_automation_source_role(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            "environment/next-runtime.data",
-            Some(ProjectSourceRole::AutomationEnvironmentLock),
-        )
-        .unwrap();
-        let bundle = harness
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(bundle_id)
-            .unwrap();
-        assert_eq!(bundle.revision().get(), before + 1);
-        assert_eq!(bundle.role_for_path(&old_lock), None);
-        assert_eq!(
-            bundle.role_for_path("environment/next-runtime.data"),
-            Some(ProjectSourceRole::AutomationEnvironmentLock)
-        );
-        assert!(source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            &old_lock,
-        ));
-        assert!(!source_document_is_editable(
-            &harness.model,
-            &harness.state.code_workspace,
-            &harness.platform,
-            ProjectSourceLanguage::RSpiceAutomation,
-            "environment/next-runtime.data",
-        ));
     }
 }

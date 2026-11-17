@@ -1,5 +1,5 @@
-//! New, Rename, Move, Duplicate and Delete for one file of a Verilog-A or
-//! Automation bundle, each its own compact command form.
+//! New, Rename, Move, Duplicate and Delete for one file of a Verilog-A
+//! bundle, each its own compact command form.
 //!
 //! The Files rail and Manage source document both open these. A form states
 //! the file it acts on, the name it is given, and what else the change
@@ -448,4 +448,4 @@ fn select_stem(ctx: &Context, id: Id, value: &str) {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

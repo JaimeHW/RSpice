@@ -226,9 +226,6 @@ pub fn show(
             error: c.err,
             warning: c.warn,
             edited_lines: &edited_lines,
-            breakpoints: &[],
-            breakpoints_enabled: false,
-            current_line: None,
             cross_probe_line,
             // The deck's findings are underlined in its own layout.
             marks: &[],

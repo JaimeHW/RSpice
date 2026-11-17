@@ -324,7 +324,7 @@ fn source_collections_count_what_their_rows_say() {
             DiagnosticSeverity::Warning,
             code,
             "",
-            Some("flow.py".to_owned()),
+            Some("gain.va".to_owned()),
             None,
             None,
             Some(1),
@@ -337,7 +337,7 @@ fn source_collections_count_what_their_rows_say() {
         .mark_currentness(DiagnosticCurrentness::StaleSource);
     let mut waived_code = code("T-WAIVED-CODE");
     waived_code.canonical.suppression = Some(waiver());
-    state.code.code_workspace.automation.diagnostics = Arc::new(
+    state.code.code_workspace.veriloga.last_failure = Arc::new(
         CodeDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
             .expect("the fixture collection is well formed"),
     );
@@ -377,7 +377,7 @@ fn a_stale_code_finding_offers_no_route() {
             DiagnosticSeverity::Error,
             code,
             "",
-            Some("flow.py".to_owned()),
+            Some("gain.va".to_owned()),
             None,
             None,
             Some(3),
@@ -458,37 +458,57 @@ fn an_unreadable_batch_counts_as_unavailable_rather_than_stale() {
     assert_eq!(counts.errors, 0);
 }
 
-/// A validation that ran clean is evidence that the source was looked at,
-/// so the page says there is nothing wrong rather than that nobody looked.
+/// A compile that ran clean is evidence that the source was looked at, so
+/// the page says there is nothing wrong rather than that nobody looked.
 #[test]
-fn a_clean_validation_reads_as_no_findings() {
+fn a_clean_compile_reads_as_no_findings() {
+    use rspice_app_state::state::{
+        CellViewRef, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
+    };
+
     let mut state = open_state();
     assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
-    use rspice_app_code::workbench::documents::code_workspace::{
-        AutomationValidationReceipt, SourceOperationToken,
-    };
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::cell_view(CellViewRef::new("behavioral", "gain", "veriloga")),
+        ProjectSourceLanguage::VerilogA,
+        "gain.va",
+        "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+        [],
+        [],
+    )
+    .expect("a valid cell-view bundle");
+    let bundle_id = bundle.id();
+    state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(bundle)
+        .expect("one bundle per cell view");
     let bundle = state
         .model
         .workspace
-        .active_source_bundle(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation)
-        .expect("a project holds its automation bundle");
-    let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .expect("the inserted bundle");
+    let root = bundle.root().logical_path().to_owned();
     let root_content = bundle.root().content().to_owned();
-    state.code.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
-        token: SourceOperationToken {
-            project_id: state.model.workspace.content.project.id(),
-            revision: bundle.revision().get(),
-            content_digest: bundle.closure_digest(),
-        },
-    });
+    let receipt = rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
+        state.model.workspace.content.project.id(),
+        bundle,
+        Some("gain"),
+    )
+    .expect("the module compiles");
+    state.code.code_workspace.veriloga.receipt = Some(receipt);
 
     let listed = listing(&state);
     assert_eq!(listed.len(), 0);
     assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
 
-    // An edit the page did not see: the clean validation is of older
-    // source than the bundle holds now.
+    // An edit the page did not see: the clean compile is of older source
+    // than the bundle holds now.
     state
         .model
         .workspace

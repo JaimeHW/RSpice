@@ -11,13 +11,6 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 #[test]
 fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
     let mut state = AppState::default();
-    state.code.code_workspace.automation.debug.watches.push(
-        rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
-            expression: "project.old_value".to_owned(),
-            value: "17".to_owned(),
-            error: None,
-        },
-    );
     state.code.netlist.diagnostics = std::sync::Arc::new(
         rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![
@@ -35,15 +28,6 @@ fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console
         .warning(LogSource::Run, "old project warning");
     state.clear_design_execution_context();
 
-    assert!(
-        state
-            .code
-            .code_workspace
-            .automation
-            .debug
-            .watches
-            .is_empty()
-    );
     assert_eq!(state.code.netlist.diagnostics.summary().total(), 0);
     assert!(
         state

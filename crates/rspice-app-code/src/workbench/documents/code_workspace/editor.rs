@@ -1,4 +1,5 @@
-//! Language-neutral owned-source editor used by the Verilog-A and Automation pages.
+//! Language-neutral owned-source editor used by Verilog-A sources and their
+//! build settings.
 //!
 //! It follows the mockup's fixed gutter and non-wrapping code geometry while
 //! retaining ordinary `TextEdit` selection, clipboard, IME, and accessibility
@@ -33,9 +34,6 @@ const CODE_LEFT_PADDING: f32 = 12.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeEditorLanguage {
     VerilogA,
-    Automation,
-    Python,
-    Yaml,
     Toml,
 }
 
@@ -48,7 +46,6 @@ pub struct CodeDocumentInteraction {
     pub changed: bool,
     pub cursor_char_index: usize,
     pub selected_char_range: Option<(usize, usize)>,
-    pub breakpoint_toggled: Option<usize>,
     /// The source well, for its right-click menu.
     pub response: egui::Response,
     /// What a step to the next or previous finding found, for the page to
@@ -91,9 +88,6 @@ pub fn show_code_document_interaction_versioned(
         editable,
         messages,
         &[],
-        None,
-        false,
-        &[],
     )
 }
 
@@ -121,42 +115,7 @@ pub fn show_veriloga_document_versioned(
         diagnostic_path,
         editable,
         messages,
-        &[],
-        None,
-        false,
         include_files,
-    )
-}
-
-/// Debug-aware source editor with accessible, keyboard-neutral breakpoint
-/// markers in the gutter and an exact current-statement projection.
-pub fn show_code_document_with_debug_versioned(
-    ui: &mut Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    source: &mut String,
-    source_revision: u64,
-    language: CodeEditorLanguage,
-    findings: EditorFindings<'_>,
-    diagnostic_path: Option<&str>,
-    editable: bool,
-    messages: crate::workbench::MessageCatalog,
-    breakpoints: &[usize],
-    current_line: Option<usize>,
-) -> CodeDocumentInteraction {
-    show_code_document_impl(
-        ui,
-        egui::Id::new(id),
-        source,
-        source_revision,
-        language,
-        findings,
-        diagnostic_path,
-        editable,
-        messages,
-        breakpoints,
-        current_line,
-        true,
-        &[],
     )
 }
 
@@ -418,9 +377,6 @@ fn show_code_document_impl(
     diagnostic_path: Option<&str>,
     editable: bool,
     messages: crate::workbench::MessageCatalog,
-    breakpoints: &[usize],
-    current_line: Option<usize>,
-    breakpoints_enabled: bool,
     include_files: &[String],
 ) -> CodeDocumentInteraction {
     // The findings shown are the last check's, kept through the edits made
@@ -450,20 +406,12 @@ fn show_code_document_impl(
     let font = theme::mono(text_size, FontWeight::Regular);
     let syntax = match language {
         CodeEditorLanguage::VerilogA => EditorSyntax::VerilogA,
-        CodeEditorLanguage::Automation | CodeEditorLanguage::Python => EditorSyntax::Python,
-        CodeEditorLanguage::Yaml => EditorSyntax::Yaml,
         CodeEditorLanguage::Toml => EditorSyntax::Toml,
     };
     let edited_lines = std::collections::HashSet::new();
     let accessible_label = messages.text(match (language, editable) {
         (CodeEditorLanguage::VerilogA, true) => MessageId::EditorVerilogASourceEditor,
         (CodeEditorLanguage::VerilogA, false) => MessageId::EditorVerilogASourceViewer,
-        (CodeEditorLanguage::Automation, true) => MessageId::EditorAutomationSourceEditor,
-        (CodeEditorLanguage::Automation, false) => MessageId::EditorAutomationSourceViewer,
-        (CodeEditorLanguage::Python, true) => MessageId::EditorPythonSourceEditor,
-        (CodeEditorLanguage::Python, false) => MessageId::EditorPythonSourceViewer,
-        (CodeEditorLanguage::Yaml, true) => MessageId::EditorRunPlanEditor,
-        (CodeEditorLanguage::Yaml, false) => MessageId::EditorRunPlanViewer,
         (CodeEditorLanguage::Toml, true) => MessageId::EditorTomlManifestEditor,
         (CodeEditorLanguage::Toml, false) => MessageId::EditorTomlManifestViewer,
     });
@@ -487,9 +435,6 @@ fn show_code_document_impl(
         error: colors.err,
         warning: colors.warn,
         edited_lines: &edited_lines,
-        breakpoints,
-        breakpoints_enabled,
-        current_line,
         cross_probe_line: None,
         marks: held.marks(),
         marks_outdated: held.is_outdated(),
@@ -581,7 +526,6 @@ fn show_code_document_impl(
         changed: output.changed,
         cursor_char_index: output.cursor_char_index,
         selected_char_range: output.selected_char_range,
-        breakpoint_toggled: output.breakpoint_toggled,
         response: output.response,
         announcement,
         unanswered_history: output.unanswered_history,
@@ -807,37 +751,8 @@ fn next_token(
             .take_while(|(_, ch)| ch.is_alphanumeric() || matches!(ch, '_' | '$' | '`' | '-'))
             .last()
             .map_or(first.len_utf8(), |(index, ch)| index + ch.len_utf8());
-        let word = &text[..length];
         let color = match language {
-            CodeEditorLanguage::Automation if word == "plan" => colors.traces[1],
-            CodeEditorLanguage::Automation if matches!(word, "True" | "False") => colors.net_label,
-            CodeEditorLanguage::Python
-                if matches!(
-                    word,
-                    "from"
-                        | "import"
-                        | "as"
-                        | "def"
-                        | "class"
-                        | "return"
-                        | "if"
-                        | "else"
-                        | "elif"
-                        | "for"
-                        | "while"
-                        | "try"
-                        | "except"
-                        | "finally"
-                        | "with"
-                        | "raise"
-                ) =>
-            {
-                colors.traces[1]
-            }
-            CodeEditorLanguage::Python if matches!(word, "True" | "False" | "None") => {
-                colors.net_label
-            }
-            CodeEditorLanguage::Yaml | CodeEditorLanguage::Toml
+            CodeEditorLanguage::Toml
                 if text[length..].trim_start().starts_with(':')
                     || text[length..].trim_start().starts_with('=') =>
             {
@@ -1002,23 +917,15 @@ mod tests {
     fn canonical_source_tokens_use_mockup_palette_roles() {
         let colors = crate::ui::palette::INSTRUMENT_DARK;
         assert_eq!(
-            next_token("\"all\"", CodeEditorLanguage::Automation, &colors).1,
+            next_token("\"all\"", CodeEditorLanguage::Toml, &colors).1,
             colors.warn
         );
         assert_eq!(
-            next_token("plan", CodeEditorLanguage::Automation, &colors).1,
-            colors.traces[1]
+            next_token("# settings", CodeEditorLanguage::Toml, &colors).1,
+            colors.text_faint
         );
         assert_eq!(
-            next_token("True", CodeEditorLanguage::Automation, &colors).1,
-            colors.net_label
-        );
-        assert_eq!(
-            next_token("from", CodeEditorLanguage::Python, &colors).1,
-            colors.traces[1]
-        );
-        assert_eq!(
-            next_token("schema: value", CodeEditorLanguage::Yaml, &colors).1,
+            next_token("schema = value", CodeEditorLanguage::Toml, &colors).1,
             colors.net_label
         );
     }
@@ -1062,13 +969,13 @@ mod tests {
     #[test]
     fn serialized_editor_diagnostic_contains_the_complete_canonical_contract() {
         let diagnostic = CodeEditorDiagnostic::current(
-            "rspice.automation.runtime",
-            "PY-100",
+            "rspice.veriloga.compiler",
+            "VA-100",
             CodeEditorSeverity::Hint,
             "consider a bounded sweep",
             "The current range is large.",
-            Some("workflow.py".to_owned()),
-            Some("plan.run()\n".to_owned()),
+            Some("gain.va".to_owned()),
+            Some("analog V(p) <+ 1;\n".to_owned()),
             Some(0..4),
             Some(1),
             Some(1),

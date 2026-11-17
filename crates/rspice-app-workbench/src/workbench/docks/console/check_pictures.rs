@@ -54,9 +54,6 @@ impl ListingSource for PictureHost {
                 veriloga_token: None,
                 veriloga_failure: &self.code,
                 veriloga_failure_token: None,
-                automation: &self.code,
-                automation_validated: false,
-                automation_token: None,
             },
             facts: facts(),
         }

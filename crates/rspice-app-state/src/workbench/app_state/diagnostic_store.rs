@@ -189,11 +189,10 @@ pub enum DiagnosticRoute {
     /// logical path inside that bundle, and the one-based line and column.
     ///
     /// The bundle rather than the language, because the bundle is what names
-    /// the editor. A Verilog-A bundle belongs to a cell view and is edited in
-    /// the Design workspace showing that view; the automation bundle belongs
-    /// to the project and is edited on the Netlist workspace's Automation
-    /// page. Carrying the language alone would leave a Verilog-A finding
-    /// resolvable only while its own view already happened to be open.
+    /// the editor: a Verilog-A bundle belongs to a cell view and is edited in
+    /// the Design workspace showing that view. Carrying the language alone
+    /// would leave a Verilog-A finding resolvable only while its own view
+    /// already happened to be open.
     CodeDocument {
         bundle: crate::state::ProjectSourceId,
         logical_path: Arc<str>,

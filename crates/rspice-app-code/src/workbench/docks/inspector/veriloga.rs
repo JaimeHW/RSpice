@@ -14,7 +14,7 @@ use crate::workbench::documents::code_workspace::{
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// Draw the inspector of the Verilog-A view the model has open, over the
-/// Code & Automation page's state, and return what the reader asked of it.
+/// Verilog-A editor's state, and return what the reader asked of it.
 pub(in crate::workbench) fn show(
     ui: &mut Ui,
     model: &Model,

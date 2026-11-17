@@ -1,6 +1,5 @@
 //! The RSpice application's code feature: the netlist and Verilog-A source
-//! editors, their documents and workflows, the source dialogs and the
-//! automation workspace.
+//! editors, their documents and workflows, and the source dialogs.
 //!
 //! The feature's files keep the paths they had inside `rspice-app`. This root
 //! declares them there and re-exports, at the same paths, the lower crates'
@@ -30,13 +29,12 @@
     )
 )]
 
-use rspice_app_services::{automation_runtime, io};
+use rspice_app_services::io;
 #[cfg(test)]
 use rspice_app_state::fixture_root;
 use rspice_app_state::{diagnostics, product, quantity, state, time_compat};
 use rspice_app_workbench::ui;
 
-pub mod automation_workflow;
 #[cfg(test)]
 mod source_guard;
 

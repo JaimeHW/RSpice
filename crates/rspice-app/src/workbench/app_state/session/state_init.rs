@@ -118,10 +118,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     *state.models.pdk_settings_dialog = PdkSettingsDialogState::new();
     *state.results.analysis = analysis;
     state.design.schematic_snap.grid_size = snap_grid_size;
-    rspice_app_code::workbench::documents::code_workspace::bootstrap_automation(
-        &state.model.workspace,
-        &mut state.code.code_workspace,
-    );
     // A first start opens on this untitled project: until it is edited,
     // New project, Close project and Exit have nothing of it to save.
     rspice_app_services::workbench::lifecycle::project_lifecycle::mark_pristine(&mut state);
@@ -130,44 +126,9 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use rspice_app_state::state::ProjectSourceLanguage;
-
     #[test]
-    fn bootstrapped_code_sources_prepare_an_exact_snapshot_without_execution_authority() {
+    fn a_new_session_compiles_no_veriloga_source() {
         let state = super::default_app_state();
-        let automation = state
-            .model
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(
-                &rspice_app_state::state::ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::RSpiceAutomation,
-                ),
-            )
-            .expect("bootstrapped Automation workspace");
-        let snapshot = state
-            .code
-            .code_workspace
-            .automation
-            .runtime_snapshot
-            .as_ref()
-            .expect("bootstrapped Automation runtime snapshot");
-
-        assert_eq!(
-            snapshot.project_id,
-            state.model.workspace.content.project.id().as_uuid()
-        );
-        assert_eq!(snapshot.workspace_revision, automation.revision().get());
-        assert_eq!(
-            snapshot.closure_digest.0,
-            *automation.closure_digest().as_bytes()
-        );
-        assert!(
-            state.code.code_workspace.automation.receipt.is_none(),
-            "static startup parsing must not impersonate managed-CPython validation"
-        );
-        assert!(state.code.code_workspace.automation.manifest.is_some());
         assert!(
             state.code.code_workspace.veriloga.receipt.is_none(),
             "a new project has no Verilog-A source, so startup compiles none"

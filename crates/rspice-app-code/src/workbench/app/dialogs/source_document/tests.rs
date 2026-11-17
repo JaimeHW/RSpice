@@ -110,28 +110,3 @@ fn line_endings_are_measured_rather_than_assumed() {
     assert_eq!(summary("a\r\nb\n"), "mixed LF and CRLF");
     assert_eq!(summary("single"), "none \u{00b7} single line");
 }
-
-/// The role picker resolves a selection by matching the label it drew, so
-/// every assignable role has to round-trip through its own text in every
-/// locale — including the one whose expansion rewrites every vowel.
-#[test]
-fn every_assignable_role_round_trips_through_its_label_in_every_locale() {
-    for locale in crate::workbench::UiTextLocale::ALL {
-        let messages = MessageCatalog::new(locale);
-        let mut drawn = std::collections::BTreeSet::new();
-        for role in ASSIGNABLE_AUTOMATION_ROLES {
-            let label = role_label(messages, role);
-            assert!(
-                drawn.insert(label.clone()),
-                "two roles share the label {label:?} in {locale:?}"
-            );
-            assert_eq!(
-                ASSIGNABLE_AUTOMATION_ROLES
-                    .iter()
-                    .find(|candidate| role_label(messages, **candidate) == label)
-                    .copied(),
-                Some(role)
-            );
-        }
-    }
-}

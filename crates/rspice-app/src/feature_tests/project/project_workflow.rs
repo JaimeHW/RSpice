@@ -1279,13 +1279,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         .node_to_waveform
         .insert("stale".to_string(), 99);
     state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
-    state.code.code_workspace.automation.debug.watches.push(
-        rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
-            expression: "old_project.signal".to_owned(),
-            value: "1.25".to_owned(),
-            error: None,
-        },
-    );
     state.code.netlist.diagnostics = std::sync::Arc::new(
         rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![
@@ -1321,15 +1314,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     );
     assert_eq!(state.model.simulation.view.ground_node, None);
     assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
-    assert!(
-        state
-            .code
-            .code_workspace
-            .automation
-            .debug
-            .watches
-            .is_empty()
-    );
     assert_eq!(state.code.netlist.diagnostics.summary().total(), 0);
     // The Console is the session's record: the old project's history stays,
     // and the replacement states itself once after it.

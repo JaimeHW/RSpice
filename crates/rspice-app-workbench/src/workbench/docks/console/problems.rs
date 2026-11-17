@@ -1079,10 +1079,6 @@ pub(crate) fn producer_name(producer: &str) -> Cow<'_, str> {
         "rspice.engine.boundary" => "Simulator",
         "rspice.engine.hdl" => "HDL",
         "rspice.engine.assert" => "Assertions",
-        "rspice.automation.workspace"
-        | "rspice.automation.runtime"
-        | "rspice.automation.permissions"
-        | "rspice.automation.language-service" => "Automation",
         "rspice.pdk.env" => "PDK",
         _ => {
             let words = producer.strip_prefix("rspice.").unwrap_or(producer);

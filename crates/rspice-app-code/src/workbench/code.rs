@@ -32,24 +32,19 @@ use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
 use crate::workbench::documents::code_workspace::{
-    self, AutomationRunPort, CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile,
-    consume_veriloga_compile_request, design_hosts_veriloga, poll_automation_source_import,
-    poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
+    CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
+    design_hosts_veriloga, poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::framework::command_registry::{
-    CommandAvailability, CommandSpec, Registry, ids,
-};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    FeatureSurface, Peers, Reads, RoutedCommand,
+    FeatureSurface, Reads, RoutedCommand,
 };
-use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
-use crate::workbench::slots::{CodeState, netlist_shown_in, veriloga_compilation_in};
+use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::{CodeCommand, CodeRequest};
-use rspice_app_runs::simulation::{RunHost, SimulationController};
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 
 /// The code feature.
@@ -139,7 +134,6 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
         key: DialogKey("code.source_document"),
         is_open: |code| {
             code.code_workspace.source_document_dialog
-                || code.code_workspace.source_workspace_dialog.is_some()
                 || code.code_workspace.source_file_dialog.is_some()
         },
         render: CodeFeature::render_source_document_dialog,
@@ -463,20 +457,16 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
         )
 }
 
-/// What the feature settles each frame before any surface draws, and how
-/// its automation runtime stops.
+/// What the feature settles each frame before any surface draws.
 impl CodeFeature {
-    /// Settle, in this order: a project the last frame replaced takes its
-    /// automation authority with it, the runtime is discovered, the
-    /// Verilog-A import and compile that finished are taken, the compile a
-    /// request asked for starts, where the open module's symbol stands is
-    /// measured, and the Automation import that finished is taken.
+    /// Settle, in this order: a project the last frame replaced starts the
+    /// code workspace over, the Verilog-A import and compile that finished
+    /// are taken, the compile a request asked for starts, and where the open
+    /// module's symbol stands is measured.
     pub fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
-        Self::terminate_after_project_change(cx);
-        #[cfg(not(target_arch = "wasm32"))]
-        cx.own.automation_runtime.poll_discovery();
-        // Both source imports record intent and complete from the frame loop.
-        // Neither was driven from anywhere, so a requested import stayed
+        Self::reset_after_project_change(cx);
+        // A source import records intent and completes from the frame loop.
+        // It was driven from nowhere once, so a requested import stayed
         // pending forever and blocked every later one.
         poll_veriloga_import(cx.model, &mut cx.state.code_workspace, cx.wb);
         // A Verilog-A compile is published here for the same reason: its
@@ -493,32 +483,18 @@ impl CodeFeature {
             &cx.model.workspace.content.active_view,
             cx.model.workspace.content.active_view_type(),
         );
-        poll_automation_source_import(
-            cx.model,
-            &mut cx.state.code_workspace,
-            cx.wb,
-            cx.platform,
-            cx.own,
-        );
     }
 
-    /// A project replaced since the last check takes its automation
-    /// authority with it: the runtime serving it stops, the Code &
-    /// Automation page starts over, and the run prepared for it is dropped.
-    pub fn terminate_after_project_change(cx: &mut Cx<'_, Self>) {
+    /// A project replaced since the last check starts the code workspace
+    /// over, and the run prepared for the old project is dropped.
+    pub fn reset_after_project_change(cx: &mut Cx<'_, Self>) {
         let project_id = cx.model.workspace.content.project.id();
-        if project_id == cx.own.automation_runtime_project_id {
+        if project_id == cx.own.project_id {
             return;
         }
-        let _ = cx.own.automation_runtime.terminate();
-        cx.own.automation_runtime_project_id = project_id;
+        cx.own.project_id = project_id;
         cx.state.code_workspace = Default::default();
         cx.handles.run_controller.clear_prepared_run();
-    }
-
-    /// Stop the automation runtime, as the application shuts down.
-    pub fn terminate_runtime(cx: &mut Cx<'_, Self>) {
-        let _ = cx.own.automation_runtime.terminate();
     }
 }
 
@@ -529,93 +505,16 @@ impl CodeFeature {
     pub(in crate::workbench) fn workspace_parts<'c>(
         cx: &'c mut Cx<'_, Self>,
     ) -> CodeWorkspaceParts<'c> {
-        Self::automation_parts(cx).0
-    }
-
-    /// The code workspace's parts and the run tier's host lent over them,
-    /// both from `cx` for one call: what the automation workflow runs over.
-    fn automation_parts<'c, 'a>(
-        cx: &'c mut Cx<'a, Self>,
-    ) -> (CodeWorkspaceParts<'c>, AutomationRunLend<'c, 'a>) {
-        let parts = CodeWorkspaceParts {
+        CodeWorkspaceParts {
             code: &mut cx.state.code_workspace,
             netlist: &mut cx.state.netlist,
-            handles: &mut *cx.own,
             model: &mut *cx.model,
             wb: &mut *cx.wb,
             platform: &*cx.platform,
             runs: &mut *cx.runs,
             run_controller: &mut *cx.handles.run_controller,
             export_io: cx.handles.export_io,
-        };
-        let lend = AutomationRunLend {
-            peers: &mut cx.peers,
-            commands: cx.commands,
-        };
-        (parts, lend)
-    }
-}
-
-/// The run tier's host the code feature lends the automation workflow: the
-/// peers of the context the workflow runs in and the command registry, over
-/// the code workspace's parts the workflow hands it for each step.
-struct AutomationRunLend<'c, 'a> {
-    peers: &'c mut Peers<'a>,
-    commands: &'static Registry,
-}
-
-/// The host is the framework's, built as simulate's commands build it. What
-/// code shows is read from the parts, which lend it only shared while the
-/// host lives, so it is what code shows throughout.
-impl AutomationRunPort for AutomationRunLend<'_, '_> {
-    fn run_host<'v>(
-        &'v mut self,
-        parts: &'v mut CodeWorkspaceParts<'_>,
-    ) -> (impl RunHost + 'v, &'v mut SimulationController) {
-        let code = RunCodeFacts {
-            veriloga_compilation: veriloga_compilation_in(parts.code),
-            netlist_shown: netlist_shown_in(parts.netlist),
-        };
-        let host = RunView::new(
-            &mut *parts.model,
-            &mut *parts.runs,
-            &mut *parts.wb,
-            parts.platform,
-            &mut *self.peers,
-            code,
-            self.commands,
-        );
-        (host, &mut *parts.run_controller)
-    }
-}
-
-/// The automation workflow's steps the shell runs, each over the code
-/// workspace's parts and the run tier's host the feature lends them.
-impl CodeFeature {
-    /// Check the Automation workflow and queue the run it binds.
-    pub fn start_automation_workflow(cx: &mut Cx<'_, Self>) {
-        let (mut parts, mut run_port) = Self::automation_parts(cx);
-        code_workspace::start_automation_workflow(&mut parts, &mut run_port);
-    }
-
-    /// Check the Automation workflow through its run preflight without
-    /// queueing a run.
-    pub fn dry_run_automation_workflow(cx: &mut Cx<'_, Self>) {
-        let (mut parts, mut run_port) = Self::automation_parts(cx);
-        code_workspace::dry_run_automation_workflow(&mut parts, &mut run_port);
-    }
-
-    /// Follow the Automation run in flight: take the run its dispatch
-    /// produced, and publish or refuse its results.
-    pub fn poll_automation_workflow(cx: &mut Cx<'_, Self>) {
-        let (mut parts, mut run_port) = Self::automation_parts(cx);
-        code_workspace::poll_automation_workflow(&mut parts, &mut run_port);
-    }
-
-    /// Take what the managed Python worker reported since the last frame.
-    pub fn poll_managed_automation_runtime(cx: &mut Cx<'_, Self>) {
-        let (mut parts, mut run_port) = Self::automation_parts(cx);
-        code_workspace::poll_managed_automation_runtime(&mut parts, &mut run_port);
+        }
     }
 }
 
@@ -676,9 +575,8 @@ impl CodeFeature {
         }
     }
 
-    /// The source document dialogs: the Automation workspace's draft, else
-    /// the open file transaction's form, else the lifecycle of the document
-    /// on the page in front.
+    /// The source document dialogs: the open file transaction's form, else
+    /// the lifecycle of the document on the page in front.
     fn render_source_document_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let code = &mut *cx.state;
         if let Some(request) = source_document::render_source_document_dialog(
