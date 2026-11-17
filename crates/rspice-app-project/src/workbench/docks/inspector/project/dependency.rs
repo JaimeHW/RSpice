@@ -87,9 +87,9 @@ fn model_facts(ui: &mut Ui, model: &crate::workbench::app_state::Model, name: &s
     };
     let access = match library.source_authority {
         ModelSourceAuthority::BuiltIn => "Ships with RSpice",
-        ModelSourceAuthority::External => "Read from its file on every run",
-        ModelSourceAuthority::RetainedImport { .. } => "Kept in the project as imported",
-        ModelSourceAuthority::ProjectOwned { .. } => "Owned by the project",
+        ModelSourceAuthority::External => "Linked to its file",
+        ModelSourceAuthority::RetainedImport { .. } => "Kept as imported",
+        ModelSourceAuthority::ProjectOwned { .. } => "Project-owned",
     };
     property_row(ui, "Access", access);
     if digest != UNSET {
@@ -105,11 +105,13 @@ fn model_facts(ui: &mut Ui, model: &crate::workbench::app_state::Model, name: &s
     }
 }
 
-/// A status as one row, its mark in front of its word, and what more it has
-/// to say wrapped under it.
+/// A status as one row, its mark in front of its word, and what more a
+/// problem has to say wrapped under it. A sound status's detail is a count
+/// of files or where the library comes from, which the rows under it state.
 fn status_rows(ui: &mut Ui, label: &str, status: &LibraryStatus) {
-    property_row_problem(ui, label, status.label, status.mark.problem());
-    if let Some(detail) = status.detail.as_deref() {
+    let problem = status.mark.problem();
+    property_row_problem(ui, label, status.label, problem);
+    if let (Some(_), Some(detail)) = (problem, status.detail.as_deref()) {
         detail_text(ui, detail);
     }
 }

@@ -642,9 +642,9 @@ fn a_model_library_states_its_access_digest_models_and_files_in_the_inspector() 
         .clone();
     let access = match library.source_authority {
         ModelSourceAuthority::BuiltIn => "Ships with RSpice",
-        ModelSourceAuthority::External => "Read from its file on every run",
-        ModelSourceAuthority::RetainedImport { .. } => "Kept in the project as imported",
-        ModelSourceAuthority::ProjectOwned { .. } => "Owned by the project",
+        ModelSourceAuthority::External => "Linked to its file",
+        ModelSourceAuthority::RetainedImport { .. } => "Kept as imported",
+        ModelSourceAuthority::ProjectOwned { .. } => "Project-owned",
     };
     assert_eq!(value("Access"), access);
     let pin = library
