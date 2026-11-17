@@ -13,16 +13,16 @@ mx	ac	native	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB,
 mx	ac	worker	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
 mx	ac@trim	interp	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°
 mx	ac@trim	native	pass	psrr (O5) [2] Δ=1.255e-8 dB, 3.609e-8° allowed 8.7e-4 dB, 5.7e-3°
-mx	ac@trim	worker	pass	psrr (O5) [2] Δ=3.776e-8 dB, -1.549e-8° allowed 8.7e-4 dB, 5.7e-3°
+mx	ac@trim	worker	pass	psrr (O5) [2] Δ=1.256e-8 dB, 3.638e-8° allowed 8.7e-4 dB, 5.7e-3°
 mx	stb	interp	pass	margins.gm (O5-O1) [0] |a−e|=6.487e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	stb	native	pass	margins.gm (O5-O1) [0] |a−e|=6.487e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
-mx	stb	worker	pass	margins.gm (O5-O1) [0] |a−e|=6.474e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
+mx	stb	worker	pass	margins.gm (O5-O1) [0] |a−e|=6.480e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	noise	interp	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
 mx	noise	native	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
 mx	noise	worker	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
 mx	tf	interp	pass	tf (O5-O1) [0] |a−e|=2.604e-11 allowed 4.248e-6 (a=4.247540e-3, e=4.247540e-3)
 mx	tf	native	pass	tf (O5-O1) [0] |a−e|=2.604e-11 allowed 4.248e-6 (a=4.247540e-3, e=4.247540e-3)
-mx	tf	worker	pass	tf (O5) [1] |a−e|=2.474e-5 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
+mx	tf	worker	pass	tf (O5) [1] |a−e|=6.765e-6 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
 mx	sens	interp	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
 mx	sens	native	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
 mx	sens	worker	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
