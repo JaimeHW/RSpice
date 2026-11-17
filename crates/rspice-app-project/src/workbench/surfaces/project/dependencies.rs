@@ -128,8 +128,16 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
 /// One side of the split, drawn to the full height of the workspace so the two
 /// panels end on the same line and the divider between them runs all the way
 /// down rather than stopping under whichever panel ran out of content first.
+/// A zero `height` is the stacked pane: as tall as what it holds, in the
+/// page's own scroll, so its table shows every row rather than the sliver a
+/// zero-high track left it.
 fn dependency_pane(ui: &mut Ui, width: f32, height: f32, content: impl FnOnce(&mut Ui)) {
-    ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
+    let track = if height > 0.0 {
+        height
+    } else {
+        ui.available_height()
+    };
+    ui.allocate_ui_with_layout(vec2(width, track), Layout::top_down(Align::Min), |ui| {
         // `allocate_ui_with_layout` advances the cursor by the content width
         // rather than the requested track, so the track is asserted inside —
         // and `set_width` is what stops a child from laying itself out against
@@ -200,11 +208,11 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         problem,
     );
     if let Some(binding) = binding.as_ref() {
-        property_row(ui, "Technology", &binding.display_label());
-        property_row(ui, "Model library", binding.model_library());
+        value_row(ui, "Technology", &binding.display_label());
+        value_row(ui, "Model library", binding.model_library());
         let source = binding.root_source().display().to_string();
-        property_row(ui, "Model file", &source).on_hover_text(source.as_str());
-        property_row(
+        value_row(ui, "Model file", &source);
+        value_row(
             ui,
             "Source files",
             &binding.source_closure().len().to_string(),
@@ -221,7 +229,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         .as_ref()
         .and_then(crate::state::ProjectTechnologyBinding::pdk_package)
     {
-        property_row(
+        value_row(
             ui,
             "PDK package",
             &format!(
@@ -232,8 +240,8 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 pin.stack_name()
             ),
         );
-        property_row(ui, "Publisher", pin.publisher_id());
-        property_row(
+        value_row(ui, "Publisher", pin.publisher_id());
+        value_row(
             ui,
             "Package digests",
             &format!(
@@ -247,7 +255,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     }
     let libraries = cx.model.model_library_manager.library_count();
     let models = cx.model.model_library_manager.total_model_count();
-    property_row(
+    value_row(
         ui,
         "Model catalog",
         &format!(
@@ -256,7 +264,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             plural_suffix(models)
         ),
     );
-    property_row(
+    value_row(
         ui,
         "Execution",
         crate::state::ExecutionTarget::current().label(),
@@ -296,6 +304,17 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         ui.cursor().top(),
         Stroke::new(1.0, t.color.border_strong),
     );
+}
+
+/// A technology value: one line, cut to its column, under a fine pointer,
+/// whose hover says the rest; every word of it, wrapped, under a finger,
+/// which has no hover.
+fn value_row(ui: &mut Ui, label: &str, value: &str) {
+    if Tokens::get(ui.ctx()).metrics.is_touch() {
+        crate::workbench::design_system::property_row_wrapped(ui, label, value);
+    } else {
+        property_row(ui, label, value);
+    }
 }
 
 /// What stands in the way of the project's technology, under a rule that
