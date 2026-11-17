@@ -5,14 +5,14 @@
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 use rspice_app_project::workbench::project::ProjectFeature;
-use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_state::state::{
-    CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch, SymbolDocument,
+    CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch,
+    SymbolDocument, ViewType,
 };
 use rspice_app_state::workbench::preferences::ChoicePreference;
 
-use super::{in_front, published, shown, with_cx};
+use super::{in_front, with_cx};
 
 /// Create the cell the dialog names in the feature's context, with
 /// what it raised answered as the dialog step answers it, and whether
@@ -391,79 +391,92 @@ fn creating(veriloga_only: bool) -> RSpiceApp {
     app
 }
 
-/// Carry out what the creation handed over in the order the creation
-/// once did it in place, with the new document it read before it
-/// changed the catalog.
-fn carry_out_in_place(app: &mut RSpiceApp, seeded: rspice_app_state::state::SchematicState) {
-    let Some(ProjectRequest::CellViewsCreated {
-        schematics,
-        mutation,
-        notice,
-        open,
-        veriloga,
-        persist_global_veriloga,
-    }) = app.state.workbench.outbox.take::<ProjectRequest>()
-    else {
-        panic!("the creation hands the shell what it left");
-    };
-    assert!(
-        !persist_global_veriloga,
-        "the cell is not the Verilog-A library's"
-    );
-    let state = &mut app.state;
-    for reference in schematics {
-        state
+/// A created cell ends with its views, a seeded drawing for each schematic
+/// and testbench, one published revision, its line in the Console and a view
+/// in front: the schematic for a cell with one; for a module-only cell, which
+/// also gets the symbol it is placed by, the Verilog-A module, with its
+/// receipt kept.
+#[test]
+fn a_created_cell_holds_its_views_and_opens_one() {
+    for veriloga_only in [false, true] {
+        let mut app = creating(veriloga_only);
+        let receipts = app
+            .state
             .model
             .workspace
-            .insert_schematic_editor(reference.key(), seeded.clone());
-    }
-    state.model.publish_project_library_mutation(
-        mutation
-            .take()
-            .expect("the reserved revision is published once"),
-    );
-    state.record(
-        rspice_app_state::diagnostics::LogSeverity::Info,
-        rspice_app_state::diagnostics::LogSource::Studio,
-        notice,
-    );
-    if let Some(view) = open {
-        state.open_workspace_view(view);
-    }
-    if let Some((view, receipt)) = veriloga.map(|seeded| *seeded)
-        && state.model.workspace.content.active_view == view
-    {
-        state
-            .workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-        state.code.code_workspace.veriloga.receipt = Some(receipt);
-    }
-}
+            .content
+            .project
+            .library_mutation_audit()
+            .len();
+        assert!(create(&mut app));
 
-/// A cell created in the feature's context, with what it left handed to
-/// the shell, ends where the creation carried out in place did: the new
-/// documents, then the revision, then the creation's line in the log,
-/// then the view it opens, and the Verilog-A receipt kept only when the
-/// module is the view open.
-#[test]
-fn a_created_cell_ends_where_the_creation_carried_out_in_place_did() {
-    for veriloga_only in [false, true] {
-        let mut in_place = creating(veriloga_only);
-        let seeded = in_place.state.new_schematic_document();
-        assert!(with_cx(&mut in_place, create_new_cell));
-        carry_out_in_place(&mut in_place, seeded);
-
-        let mut handed = creating(veriloga_only);
-        assert!(create(&mut handed));
-
+        let model = &app.state.model;
+        let cell = model
+            .library_manager
+            .get_library("behavioral")
+            .and_then(|library| library.get_cell("comparator"))
+            .expect("the cell is in its library");
+        let mut kinds = cell
+            .views_sorted()
+            .into_iter()
+            .map(|view| view.view_type)
+            .collect::<Vec<_>>();
+        kinds.sort_by_key(|kind| format!("{kind:?}"));
+        // A module-only cell gets the symbol it is placed by.
+        let mut expected = if veriloga_only {
+            vec![ViewType::Symbol, ViewType::VerilogA]
+        } else {
+            vec![ViewType::Schematic, ViewType::Testbench, ViewType::VerilogA]
+        };
+        expected.sort_by_key(|kind| format!("{kind:?}"));
+        assert_eq!(kinds, expected, "Verilog-A only: {veriloga_only}");
+        for view in cell.views_sorted() {
+            let drawn = matches!(view.view_type, ViewType::Schematic | ViewType::Testbench);
+            assert_eq!(
+                model
+                    .workspace
+                    .content
+                    .schematic_buffers
+                    .contains_key(&CellViewRef::new("behavioral", "comparator", &view.name).key()),
+                drawn,
+                "{}: a drawing is seeded for a schematic or testbench only",
+                view.name
+            );
+        }
         assert_eq!(
-            shown(&handed),
-            shown(&in_place),
-            "Verilog-A only: {veriloga_only}"
+            model
+                .workspace
+                .content
+                .project
+                .library_mutation_audit()
+                .len(),
+            receipts + 1,
+            "one revision is published"
         );
-        assert_eq!(published(&handed), published(&in_place));
-        assert_eq!(in_front(&handed), in_front(&in_place));
-        assert_eq!(in_front(&handed).1, veriloga_only);
+        assert!(
+            model
+                .log_buffer
+                .entries()
+                .any(|entry| entry.message.contains("comparator")),
+            "the Console says what was created"
+        );
+        let content = &model.workspace.content;
+        assert_eq!(
+            (
+                content.active_view.library.as_str(),
+                content.active_view.cell.as_str()
+            ),
+            ("behavioral", "comparator")
+        );
+        assert_eq!(
+            content.active_view_type(),
+            Some(if veriloga_only {
+                ViewType::VerilogA
+            } else {
+                ViewType::Schematic
+            })
+        );
+        assert_eq!(in_front(&app).1, veriloga_only, "the receipt is kept");
     }
 }
 

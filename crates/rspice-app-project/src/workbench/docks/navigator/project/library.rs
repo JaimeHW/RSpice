@@ -38,8 +38,11 @@ pub(super) fn project_library_navigator(
             .iter()
             .any(|model| model.name.to_ascii_lowercase().contains(&query));
     let total = libraries.len() + 1;
-    let visible =
-        libraries.iter().filter(|(_, _, visible)| *visible).count() + usize::from(builtin_matches);
+    let visible = libraries
+        .iter()
+        .filter(|(_, _, _, visible)| *visible)
+        .count()
+        + usize::from(builtin_matches);
     // The ratio is a fact only while the filter is hiding something; with no
     // filter it reads "3 / 3" on every project.
     section_header(
@@ -56,7 +59,7 @@ pub(super) fn project_library_navigator(
         .as_deref()
         .filter(|_| !nav.builtin_library_open);
     let mut intent = None;
-    for (name, read_only, visible) in libraries.iter() {
+    for (name, label, read_only, visible) in libraries.iter() {
         if !visible {
             continue;
         }
@@ -69,7 +72,7 @@ pub(super) fn project_library_navigator(
             } else {
                 WorkbenchIcon::Project
             },
-            name,
+            label,
             selected == Some(name.as_str()),
             read_only.then_some("read-only"),
         ) {
@@ -92,9 +95,10 @@ pub(super) fn project_library_navigator(
     intent
 }
 
-/// Each library by name, whether it is read-only, and whether the filter
-/// matches it by its own name or a cell's or a view's.
-fn library_rail_rows(model: &Model, query: &str) -> Arc<[(String, bool, bool)]> {
+/// Each library by name and the name it is shown by, whether it is
+/// read-only, and whether the filter matches it by either name or a cell's or
+/// a view's.
+fn library_rail_rows(model: &Model, query: &str) -> Arc<[(String, String, bool, bool)]> {
     model
         .library_manager
         .libraries_sorted()
@@ -102,6 +106,7 @@ fn library_rail_rows(model: &Model, query: &str) -> Arc<[(String, bool, bool)]> 
         .map(|library| {
             let matches_query = query.is_empty()
                 || library.name.to_ascii_lowercase().contains(query)
+                || library.display_name().to_ascii_lowercase().contains(query)
                 || library.cells_sorted().into_iter().any(|cell| {
                     cell.name.to_ascii_lowercase().contains(query)
                         || cell
@@ -109,7 +114,12 @@ fn library_rail_rows(model: &Model, query: &str) -> Arc<[(String, bool, bool)]> 
                             .into_iter()
                             .any(|view| view.name.to_ascii_lowercase().contains(query))
                 });
-            (library.name.clone(), library.read_only, matches_query)
+            (
+                library.name.clone(),
+                library.display_name().to_owned(),
+                library.read_only,
+                matches_query,
+            )
         })
         .collect()
 }

@@ -3,11 +3,7 @@
 //! dialog walk takes it.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::session::project_transactions::{
-    apply_workspace_pruned, void_veriloga_evidence,
-};
 use rspice_app_project::workbench::project::ProjectFeature;
-use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::library_dialogs::deletion::library_deletion_impact;
 use rspice_app_project::workbench::project::workspace_state::{
     DeletionInstanceResolution, LibraryDeletionTarget,
@@ -17,7 +13,7 @@ use rspice_app_state::state::{
     SchematicState, View, ViewType,
 };
 
-use super::{in_front, published, shown, with_cx};
+use super::with_cx;
 
 fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -1237,47 +1233,6 @@ fn removing_placements_across_two_drawings_undoes_as_one_step() {
     );
 }
 
-/// Carry out what the deletion handed over in the order the deletion
-/// once did it in place.
-fn carry_out_in_place(app: &mut RSpiceApp) {
-    let Some(ProjectRequest::CellOrViewDeleted {
-        removed_sources,
-        pruned,
-        mutation,
-        remove_placements,
-        notice,
-        persist_global_veriloga,
-    }) = app.state.workbench.outbox.take::<ProjectRequest>()
-    else {
-        panic!("the deletion hands the shell what it left");
-    };
-    assert!(
-        !persist_global_veriloga,
-        "the object is not the Verilog-A library's"
-    );
-    let state = &mut app.state;
-    void_veriloga_evidence(state, &removed_sources);
-    apply_workspace_pruned(state, pruned);
-    state.model.publish_project_library_mutation(
-        mutation
-            .take()
-            .expect("the reserved revision is published once"),
-    );
-    if let Some(target) = remove_placements {
-        state.model.remove_deleted_master_placements(
-            target.library(),
-            target.cell(),
-            target.view(),
-            &target.display_path(),
-        );
-    }
-    state.record(
-        rspice_app_state::diagnostics::LogSeverity::Info,
-        rspice_app_state::diagnostics::LogSource::Studio,
-        notice,
-    );
-}
-
 /// Each drawing the project holds, with how many objects it places.
 fn drawings(app: &RSpiceApp) -> Vec<(String, usize)> {
     let mut drawings = app
@@ -1293,70 +1248,84 @@ fn drawings(app: &RSpiceApp) -> Vec<(String, usize)> {
     drawings
 }
 
-/// Who owns each source the project keeps.
-fn source_owners(app: &RSpiceApp) -> Vec<String> {
-    let mut owners = app
+/// A staged deletion carried out through the shell ends with the object
+/// and what it owned gone: a cell whose placements the reader removed from
+/// two drawings, and a view that owned a Verilog-A source. Each publishes
+/// one revision and says so in the Console.
+#[test]
+fn a_staged_deletion_removes_the_object_and_what_it_owned() {
+    let mut app = app_with_state(default_project_with_two_drawings_instancing_amp());
+    app.state.open_project_session();
+    let receipts = app
         .state
         .model
         .workspace
         .content
-        .project_sources
-        .iter_bundles()
-        .map(|bundle| format!("{:?}", bundle.owner()))
-        .collect::<Vec<_>>();
-    owners.sort();
-    owners
-}
+        .project
+        .library_mutation_audit()
+        .len();
+    stage_cell_deletion(
+        &mut app.state,
+        "amp",
+        DeletionInstanceResolution::RemoveInstances,
+    );
+    process_pending(&mut app);
+    let model = &app.state.model;
+    assert!(
+        model
+            .library_manager
+            .get_library("user")
+            .and_then(|library| library.get_cell("amp"))
+            .is_none(),
+        "the cell is gone"
+    );
+    assert!(
+        model.cell_instances("user", "amp", None).is_empty(),
+        "no drawing places it"
+    );
+    assert_eq!(
+        drawings(&app).len(),
+        2,
+        "both drawings stay, without the placement"
+    );
+    assert_eq!(
+        model
+            .workspace
+            .content
+            .project
+            .library_mutation_audit()
+            .len(),
+        receipts + 1,
+        "one revision is published"
+    );
+    assert_ne!(model.workspace.content.active_view.cell, "amp");
+    assert!(
+        model
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.contains("amp")),
+        "the Console says what was deleted"
+    );
 
-/// A staged deletion carried out in the feature's context, with what it
-/// left handed to the shell, ends where the deletion carried out in place
-/// did: a cell whose placements the reader removed from two drawings, and
-/// a view that owned a Verilog-A source.
-#[test]
-fn a_staged_deletion_ends_where_the_deletion_carried_out_in_place_did() {
-    let staged: [fn() -> RSpiceApp; 2] = [
-        || {
-            let mut app = app_with_state(default_project_with_two_drawings_instancing_amp());
-            app.state.open_project_session();
-            stage_cell_deletion(
-                &mut app.state,
-                "amp",
-                DeletionInstanceResolution::RemoveInstances,
-            );
-            app
-        },
-        || {
-            let mut state = state_with_open_amp_cell();
-            insert_cell_source(&mut state, "amp", "behavior");
-            let mut app = app_with_state(state);
-            app.state.project.pending_delete_view =
-                Some(("work".to_owned(), "amp".to_owned(), "behavior".to_owned()));
-            app
-        },
-    ];
-    for (fixture, staged) in staged.into_iter().enumerate() {
-        let mut in_place = staged();
-        with_cx(
-            &mut in_place,
-            ProjectFeature::process_pending_library_deletions,
-        );
-        carry_out_in_place(&mut in_place);
-
-        let mut handed = staged();
-        process_pending(&mut handed);
-
-        assert_eq!(shown(&handed), shown(&in_place), "fixture {fixture}");
-        assert_eq!(
-            published(&handed),
-            published(&in_place),
-            "fixture {fixture}"
-        );
-        assert_eq!(in_front(&handed), in_front(&in_place), "fixture {fixture}");
-        assert_eq!(drawings(&handed), drawings(&in_place), "fixture {fixture}");
-        assert_eq!(
-            source_owners(&handed),
-            source_owners(&in_place),
-            "fixture {fixture}"
-        );
-    }
+    let mut state = state_with_open_amp_cell();
+    let source = insert_cell_source(&mut state, "amp", "behavior");
+    let mut app = app_with_state(state);
+    app.state.project.pending_delete_view =
+        Some(("work".to_owned(), "amp".to_owned(), "behavior".to_owned()));
+    process_pending(&mut app);
+    let content = &app.state.model.workspace.content;
+    assert!(
+        app.state
+            .model
+            .library_manager
+            .get_library("work")
+            .and_then(|library| library.get_cell("amp"))
+            .is_some_and(|cell| cell.get_view("behavior").is_none()),
+        "the view is gone and its cell stays"
+    );
+    assert!(
+        content.project_sources.get_bundle(source).is_none(),
+        "the view's Verilog-A source goes with it"
+    );
+    assert_eq!(content.project.library_mutation_audit().len(), 1);
 }

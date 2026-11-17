@@ -55,7 +55,7 @@ fn a_long_selection_is_cut_so_access_stays_on_the_page() {
         .shapes
         .iter()
         .find_map(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) if text.galley.text() == "read only" => {
+            egui::Shape::Text(text) if text.galley.text() == "read-only" => {
                 Some(text.galley.rect.translate(text.pos.to_vec2()))
             }
             _ => None,
@@ -64,44 +64,148 @@ fn a_long_selection_is_cut_so_access_stays_on_the_page() {
     assert!(access.right() <= PAGE_WIDTH, "{access:?}");
 }
 
-/// Source views are cell views: opening one lands in Design, which edits a
-/// Verilog-A module and states what a SPICE or Verilog view is bound to.
-/// The Netlist workspace they used to open shows the project's deck,
-/// which is not the view that was asked for.
+/// Every kind of view the Library page lists opens the view that was asked
+/// for: a real view of each kind, in a cell of its own, is the view in front
+/// afterwards. Source and document views are cell views and open in Design,
+/// which edits a Verilog-A module and states what the others are bound to; a
+/// configuration opens on the Project workspace's Configuration page.
 #[test]
-fn source_views_route_to_the_design_workspace() {
+fn every_kind_of_view_opens_the_view_that_was_asked_for() {
     assert_eq!(icon_for_view(ViewType::VerilogA), WorkbenchIcon::Code);
     assert_eq!(icon_for_view(ViewType::Spice), WorkbenchIcon::Code);
     assert_eq!(icon_for_view(ViewType::Config), WorkbenchIcon::Sliders);
 
-    for view_type in [ViewType::Spice, ViewType::Verilog, ViewType::VerilogA] {
+    for (view_type, name) in [
+        (ViewType::Spice, "spice"),
+        (ViewType::Verilog, "verilog"),
+        (ViewType::VerilogA, "veriloga"),
+        (ViewType::VerilogAms, "vams"),
+        (ViewType::Document, "document"),
+        (ViewType::Extracted, "extracted"),
+        (ViewType::Abstract, "abstract"),
+        (ViewType::Custom, "custom"),
+        (ViewType::Config, "config"),
+    ] {
         let mut app = RSpiceApp::test_instance();
+        let mut cell = Cell::new("block");
+        cell.add_view(View::new(name, view_type));
+        let mut library = Library::new("kinds");
+        library.add_cell(cell);
+        app.state.model.library_manager.add_library(library);
         app.state.workbench.activate(Workspace::Models);
-        let reference = app.state.model.workspace.content.active_view.clone();
+        let reference = CellViewRef::new("kinds", "block", name);
+        assert_ne!(app.state.model.workspace.content.active_view, reference);
+
         apply_and_answer(
             &egui::Context::default(),
             &mut app,
-            LibraryIntent::OpenView(reference, view_type),
+            LibraryIntent::OpenView(reference.clone(), view_type),
         );
-        assert_eq!(
-            app.state.workbench.workspace,
-            Workspace::Design,
-            "{view_type:?} opens as a Design document"
+        let content = &app.state.model.workspace.content;
+        assert_eq!(content.active_view, reference, "{view_type:?}");
+        assert_eq!(content.active_view_type(), Some(view_type), "{view_type:?}");
+        if view_type == ViewType::Config {
+            assert_eq!(app.state.workbench.workspace, Workspace::Project);
+            assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
+        } else {
+            assert_eq!(
+                app.state.workbench.workspace,
+                Workspace::Design,
+                "{view_type:?} opens as a Design document"
+            );
+        }
+    }
+}
+
+/// A cell with a symbol view offers Symbol & form in Cell actions; the
+/// entry selects that symbol and opens the manager on the page that edits
+/// it.
+#[test]
+fn cell_actions_open_a_cells_symbol_in_symbol_and_form() {
+    use rspice_app_project::workbench::project::workspace_state::LibraryCellviewPage;
+
+    let mut app = RSpiceApp::test_instance();
+    let mut cell = Cell::new("filter");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    cell.add_view(View::new("symbol", ViewType::Symbol));
+    let mut library = Library::new("forms");
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .model
+        .library_manager
+        .select_view("forms", "filter", "schematic");
+    app.state.project.project_page = ProjectPage::Library;
+    app.state.workbench.activate(Workspace::Project);
+    let mut replay = super::super::replay::Replay::of(app);
+    press_named(&mut replay, "Cell actions");
+    press_named(&mut replay, "Open in Symbol & form");
+
+    let state = &replay.app.state;
+    assert_eq!(
+        state.project.library_cellview_page,
+        LibraryCellviewPage::SymbolForm
+    );
+    assert_eq!(
+        state.model.library_manager.selected_view.as_deref(),
+        Some("symbol"),
+        "the symbol is the one Symbol & form shows"
+    );
+    assert_eq!(
+        state.workbench.current_route().surface_id(),
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::LibraryCellviewManager
+    );
+}
+
+/// Library actions holds Publish project… and Restore project from
+/// publication… beside the library's own actions.
+#[test]
+fn library_actions_hold_publish_and_restore() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project.project_page = ProjectPage::Library;
+    app.state.workbench.activate(Workspace::Project);
+    let mut replay = super::super::replay::Replay::of(app);
+    let menu = press_named(&mut replay, "Library actions");
+    for entry in [
+        "New library\u{2026}",
+        "Publish project\u{2026}",
+        "Restore project from publication\u{2026}",
+    ] {
+        assert!(
+            menu.iter().any(|control| control.label == entry),
+            "{entry} is in Library actions"
         );
     }
 }
 
-#[test]
-fn configuration_views_route_to_the_project_configuration_page() {
-    let mut app = RSpiceApp::test_instance();
-    let reference = app.state.model.workspace.content.active_view.clone();
-    apply_and_answer(
-        &egui::Context::default(),
-        &mut app,
-        LibraryIntent::OpenView(reference, ViewType::Config),
-    );
-    assert_eq!(app.state.workbench.workspace, Workspace::Project);
-    assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
+/// The control named `label`, whatever its role, pressed and released at
+/// its centre; what the frames after it published.
+fn press_named(
+    replay: &mut super::super::replay::Replay,
+    label: &str,
+) -> Vec<super::super::replay::Control> {
+    let controls = replay.frames(Vec::new());
+    let at = controls
+        .iter()
+        .find(|control| control.label == label)
+        .unwrap_or_else(|| {
+            panic!(
+                "no control named {label:?}; the controls are {:?}",
+                controls
+                    .iter()
+                    .map(|control| &control.label)
+                    .collect::<Vec<_>>()
+            )
+        })
+        .center;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(at), press(true)]);
+    replay.frames(vec![press(false)])
 }
 
 #[test]
@@ -769,7 +873,7 @@ fn library_rows_mark_only_a_read_only_library_and_a_modified_view() {
     for retired in ["RW", "RO", "saved", "writable", "working changes"] {
         assert!(!lines.contains(&retired), "{retired:?} in:\n{text}");
     }
-    assert!(lines.contains(&"read only"), "{text}");
+    assert!(lines.contains(&"read-only"), "{text}");
     assert!(lines.contains(&"modified"), "{text}");
 }
 

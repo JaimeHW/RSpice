@@ -931,9 +931,10 @@ fn build_comparison_workspace(
         library
             .metadata
             .insert("role".to_owned(), "immutable saved drawing".to_owned());
-        library
-            .metadata
-            .insert("display_name".to_owned(), "Saved drawing".to_owned());
+        library.metadata.insert(
+            rspice_design::library::LIBRARY_DISPLAY_NAME.to_owned(),
+            "Saved drawing".to_owned(),
+        );
         libraries.add_library(library);
 
         baseline.session.is_dirty = false;

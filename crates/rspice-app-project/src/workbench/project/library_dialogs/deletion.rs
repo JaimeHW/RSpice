@@ -201,8 +201,7 @@ impl ProjectFeature {
             .size(DialogSize::Transaction)
             .ghost("Cancel")
             .destructive()
-            .primary_enabled(deletable)
-            .hint("Permanent project mutation");
+            .primary_enabled(deletable);
         if placements > 0 {
             dialog = dialog
                 .secondary("Delete and remove placements")
@@ -244,7 +243,7 @@ impl ProjectFeature {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(
-                    "This action removes the selected object from the current project. It cannot be undone from the schematic-local history.",
+                    "This cannot be undone.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                 .color(t.color.warn),
@@ -428,15 +427,11 @@ fn can_delete(
         target.view(),
     );
     if !roots.is_empty() {
-        let mut names = roots
+        let names = roots
             .iter()
-            .take(4)
             .map(|configuration| configuration.name())
             .collect::<Vec<_>>()
             .join(", ");
-        if roots.len() > 4 {
-            names.push_str(&format!(" and {} more", roots.len() - 4));
-        }
         return Err(format!(
             "Configuration set roots still reference this {} ({names}). Rebind or remove those configurations first.",
             target.kind_label().to_ascii_lowercase()
@@ -575,29 +570,11 @@ pub fn library_deletion_impact(
             .view()
             .is_none_or(|view| view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW);
 
-    let count_references = |document: &rspice_design::schematic::document::SchematicDocument| {
-        document
-            .components
-            .iter()
-            .filter(|component| {
-                component.library_cell.as_ref().is_some_and(|binding| {
-                    binding.library == target.library()
-                        && binding.cell == target.cell()
-                        && target.view().is_none_or(|view| binding.view == view)
-                })
-            })
-            .count()
-    };
-    let active_key = model.workspace.content.active_view.key();
-    let instance_references = count_references(model.schematic.document())
-        + model
-            .workspace
-            .content
-            .schematic_buffers
-            .iter()
-            .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
-            .map(|(_, schematic)| count_references(schematic.document()))
-            .sum::<usize>();
+    // The count Where used gives, by the one comparison placements are
+    // matched by.
+    let instance_references = model
+        .cell_instances(target.library(), target.cell(), target.view())
+        .len();
 
     LibraryDeletionImpact {
         views,

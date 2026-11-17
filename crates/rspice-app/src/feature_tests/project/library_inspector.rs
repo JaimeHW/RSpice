@@ -83,7 +83,7 @@ fn the_open_built_in_library_is_what_the_inspector_describes() {
         "Version",
         model.version,
         "Access",
-        "read only",
+        "read-only",
     ] {
         assert!(said.iter().any(|text| text == row), "{row:?} in {said:?}");
     }

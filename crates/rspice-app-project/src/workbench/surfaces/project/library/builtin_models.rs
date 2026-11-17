@@ -140,7 +140,7 @@ pub(super) fn library_row(ui: &mut Ui, browser: &BuiltinModelsBrowser) -> Option
             icon: WorkbenchIcon::Folder,
             label: BUILTIN_VERILOGA_LIBRARY,
             meta: &count,
-            status: "read only",
+            status: "read-only",
             selected: browser.open,
             read_only: true,
         },
@@ -280,10 +280,13 @@ pub(super) fn view_column(
 /// The band under the columns: what the selected model is, and the two things
 /// a read-only library offers, Copy cell… while `libraries` holds a writable
 /// one. The strip above already names the selection.
+/// The band: `creation` draws the page's creation actions at its right end,
+/// then the selected model's own actions and summary follow.
 pub fn detail(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
     libraries: &crate::state::LibraryManager,
+    creation: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
 ) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
     let model = selected_model(browser);
@@ -298,6 +301,9 @@ pub fn detail(
             ui.set_min_height(DETAIL_HEIGHT - 10.0);
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if let Some(asked) = creation(ui) {
+                        intent = Some(asked);
+                    }
                     if browser.source.is_none()
                         && let Some(file) = browser.file.as_ref()
                         && Button::new("Open read-only").accent().show(ui).clicked()
@@ -310,7 +316,9 @@ pub fn detail(
                         && Button::new("Copy cell\u{2026}")
                             .enabled(writable_library_available)
                             .show(ui)
-                            .on_disabled_hover_text("No writable destination library is available.")
+                            .on_disabled_hover_text(
+                                "Every library is read-only; none can take a copy.",
+                            )
                             .clicked()
                     {
                         intent = Some(LibraryIntent::BuiltinModels(
@@ -366,7 +374,7 @@ pub(super) fn source_pane(
                 bar.top(),
                 Stroke::new(1.0, t.color.border_strong),
             );
-            let title = format!("{file}  \u{00b7}  read only");
+            let title = format!("{file}  \u{00b7}  read-only");
             ui.painter().text(
                 pos2(bar.left() + 10.0, bar.center().y),
                 Align2::LEFT_CENTER,

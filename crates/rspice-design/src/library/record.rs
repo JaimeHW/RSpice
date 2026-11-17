@@ -26,7 +26,19 @@ pub struct Library {
     pub metadata: HashMap<String, String>,
 }
 
+/// The metadata key of the name a library is shown by, where it carries one
+/// apart from its identifier.
+pub const LIBRARY_DISPLAY_NAME: &str = "display_name";
+
 impl Library {
+    /// The name a reader sees: the library's display name where it carries
+    /// one, its identifier otherwise.
+    pub fn display_name(&self) -> &str {
+        self.metadata
+            .get(LIBRARY_DISPLAY_NAME)
+            .map_or(self.name.as_str(), String::as_str)
+    }
+
     /// Create a new library
     pub fn new(name: impl Into<String>) -> Self {
         Self {

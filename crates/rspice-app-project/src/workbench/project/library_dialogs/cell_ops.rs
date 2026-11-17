@@ -452,12 +452,9 @@ impl ProjectFeature {
             dialogs.rename_cell_library, dialogs.rename_cell_current
         );
         let choice = Dialog::new("Rename cell", "Rename")
-            .description(
-                "Rename the selected cell and remap open buffers, tabs, and instance bindings that reference it.",
-            )
+            .description("Open tabs and every placed instance follow the new name.")
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("Remaps buffers, tabs, and instance bindings")
             .primary_enabled(catalog_current && !dialogs.rename_cell_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

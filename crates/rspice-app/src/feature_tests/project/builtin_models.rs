@@ -24,6 +24,7 @@ fn band_text(state: &AppState, width: f32) -> Vec<String> {
                 ui,
                 &state.project.builtin_models,
                 &state.model.library_manager,
+                |_| None,
             );
         });
     };
@@ -52,7 +53,7 @@ fn the_band_states_the_summary_and_clips_it_before_the_buttons() {
     assert!(wide.iter().any(|text| text == model.summary), "{wide:?}");
     assert!(wide.iter().any(|text| text == "Open read-only"), "{wide:?}");
     let version = format!("version {}", model.version);
-    for gone in [model.class.label(), version.as_str(), "read only"] {
+    for gone in [model.class.label(), version.as_str(), "read-only"] {
         assert!(
             !wide.iter().any(|text| text == gone),
             "{gone:?} in {wide:?}"

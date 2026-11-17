@@ -508,7 +508,6 @@ fn context_value(ui: &mut Ui, label: &str, value: &str, problem: Option<Problem>
 }
 
 fn no_symbol_state(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    let tokens = Tokens::get(ui.ctx());
     section_card(
         ui,
         "No symbol view is available",
@@ -535,11 +534,6 @@ fn no_symbol_state(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 cx.wb.outbox.push(OpenSymbolAuthoring::Import(None));
             }
         },
-    );
-    ui.label(
-        RichText::new("No placeholder symbol or inferred electrical interface is rendered.")
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(tokens.color.text_faint),
     );
 }
 
@@ -672,14 +666,12 @@ fn action_buttons(
         action = Some(SymbolAction::Import);
     }
 
-    let state = if projection.library_read_only {
-        "read-only library"
+    // Only the exception is stated; a saved, writable view says nothing.
+    if projection.library_read_only {
+        ui.label("read-only library");
     } else if modified {
-        "view has unsaved changes"
-    } else {
-        "view synchronized"
-    };
-    ui.label(state);
+        ui.label("modified");
+    }
     action
 }
 

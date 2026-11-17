@@ -258,11 +258,10 @@ impl ProjectFeature {
         let current = dialogs.rename_library_current.clone();
         let choice = Dialog::new("Rename library", "Rename")
             .description(
-                "Rename the selected library and remap open buffers, tabs, instance bindings, owned sources, and the project root.",
+                "Open tabs, every placed instance, the library's source files and the project's top cell follow the new name.",
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("Remaps buffers, tabs, bindings, and sources")
             .primary_enabled(catalog_current && !dialogs.rename_library_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
@@ -344,19 +343,18 @@ impl ProjectFeature {
 
         let choice = Dialog::new("Delete library", "Delete")
             .description(
-                "Permanently remove this library, every cell and view it owns, and every loaded workspace buffer beneath it.",
+                "Remove this library with every cell and view in it, and close their tabs.",
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
             .destructive()
             .primary_enabled(catalog_current && blocker.is_none())
-            .hint("Permanent project mutation")
             .show(ctx, |ui| {
                 kv_row(ui, "Library", &library);
                 kv_row(ui, "Cells removed", &cells);
                 kv_row(ui, "Views removed", &views);
                 kv_row(ui, "Open views", &open_views);
-                kv_row(ui, "External instance references", &references);
+                kv_row(ui, "Placements outside this library", &references);
                 kv_row(ui, "Owned source bundles", &bundles);
                 kv_row(ui, "Configuration roots", &roots);
                 kv_row(ui, "Project root", project_root);
@@ -364,11 +362,9 @@ impl ProjectFeature {
                 ui.add_space(8.0);
                 let t = Tokens::get(ui.ctx());
                 ui.label(
-                    egui::RichText::new(
-                        "This action removes the selected library from the current project. It cannot be undone from the schematic-local history.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.warn),
+                    egui::RichText::new("This cannot be undone.")
+                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                        .color(t.color.warn),
                 );
                 if let Some(error) = displayed_error {
                     error_label(ui, &error);

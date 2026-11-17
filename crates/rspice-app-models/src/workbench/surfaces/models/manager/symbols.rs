@@ -53,7 +53,10 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             if Button::new("Import symbol").show(ui).clicked() {
                 app.wb.outbox.push(OpenSymbolAuthoring::Import(None));
             }
-            if Button::new("Library manager").show(ui).clicked() {
+            if Button::new("Library and cellview manager")
+                .show(ui)
+                .clicked()
+            {
                 navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
             }
         },

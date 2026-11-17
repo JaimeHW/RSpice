@@ -21,7 +21,7 @@ fn builtin_model_selection(ui: &mut Ui, model: Option<&BuiltinVerilogAModel>) {
         property_row(ui, "Module", model.module);
         property_row(ui, "Version", model.version);
     }
-    property_row(ui, "Access", "read only");
+    property_row(ui, "Access", "read-only");
 }
 
 pub fn project_library(
@@ -34,9 +34,10 @@ pub fn project_library(
     }
     let model = inspector.model;
     let library = model.library_manager.current_library();
-    let library_path = library
-        .and_then(|item| item.path.as_ref())
-        .map_or_else(|| "not bound".to_owned(), |path| path.display().to_string());
+    let library_path = library.and_then(|item| item.path.as_ref()).map_or_else(
+        || "in project".to_owned(),
+        |path| path.display().to_string(),
+    );
     let technology = library.map_or("unbound", |item| {
         if item.technology.trim().is_empty() {
             "unbound"

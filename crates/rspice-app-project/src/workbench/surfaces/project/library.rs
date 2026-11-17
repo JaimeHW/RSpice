@@ -27,18 +27,35 @@ pub const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
 pub enum LibraryIntent {
     BuiltinModels(builtin_models::BuiltinModelsIntent),
     SelectLibrary(String),
-    SelectCell { library: String, cell: String },
+    SelectCell {
+        library: String,
+        cell: String,
+    },
     SelectView(CellViewRef),
     OpenView(CellViewRef, ViewType),
+    /// The manager's Symbol & form page, on this symbol view.
+    OpenSymbolForm(CellViewRef),
     ReportUsage(CellViewRef),
     NewLibrary,
     RenameLibrary(String),
     DeleteLibrary(String),
     NewCell,
-    NewView { library: String, cell: String },
-    CopyCell { library: String, cell: String },
-    RenameCell { library: String, cell: String },
-    DeleteCell { library: String, cell: String },
+    NewView {
+        library: String,
+        cell: String,
+    },
+    CopyCell {
+        library: String,
+        cell: String,
+    },
+    RenameCell {
+        library: String,
+        cell: String,
+    },
+    DeleteCell {
+        library: String,
+        cell: String,
+    },
     RenameView(CellViewRef),
     DeleteView(CellViewRef),
     ShowAuditHistory,
@@ -49,7 +66,8 @@ pub enum LibraryIntent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LibraryUsageReport {
     reference: CellViewRef,
-    consumers: Vec<String>,
+    /// Each placement: the schematic it is on and the instance's name.
+    placements: Vec<(String, String)>,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -61,6 +79,8 @@ thread_local! {
 /// One library as its column lists it.
 struct LibraryRow {
     name: String,
+    /// What the row reads: the library's display name, or its name.
+    label: String,
     cells: String,
     read_only: bool,
 }
@@ -132,6 +152,7 @@ fn library_rows(ctx: &Context, manager: &LibraryManager) -> Arc<[LibraryRow]> {
                 .into_iter()
                 .map(|library| LibraryRow {
                     name: library.name.clone(),
+                    label: library.display_name().to_owned(),
                     cells: library.cell_count().to_string(),
                     read_only: library.read_only,
                 })
@@ -312,9 +333,25 @@ fn builtin_source(
     )
 }
 
-/// The built-in library's band under the columns.
+/// The built-in library's band under the columns. It keeps the creation
+/// actions the project's band has: a reader looking at the built-in library
+/// can still make a cell or a library of their own.
 fn builtin_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
-    builtin_models::detail(ui, &cx.state.builtin_models, &cx.model.library_manager)
+    builtin_models::detail(
+        ui,
+        &cx.state.builtin_models,
+        &cx.model.library_manager,
+        |ui| {
+            let mut intent = None;
+            if Button::new("New cell\u{2026}").show(ui).clicked() {
+                intent = Some(LibraryIntent::NewCell);
+            }
+            if let Some(asked) = library_actions_menu(ui, cx, None) {
+                intent = Some(asked);
+            }
+            intent
+        },
+    )
 }
 
 fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_view: &CellViewRef) {
@@ -451,7 +488,7 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 context_value(ui, "Selection", &selection, t.color.text);
                 if read_only {
                     ui.separator();
-                    context_value(ui, "Access", "read only", t.color.text_dim);
+                    context_value(ui, "Access", "read-only", t.color.text_dim);
                 }
             });
         });
@@ -509,9 +546,9 @@ fn library_column(
                 ui,
                 BrowserRowSpec {
                     icon: WorkbenchIcon::Folder,
-                    label: &library.name,
+                    label: &library.label,
                     meta: &library.cells,
-                    status: if library.read_only { "read only" } else { "" },
+                    status: if library.read_only { "read-only" } else { "" },
                     selected: selected == Some(library.name.as_str()),
                     read_only: library.read_only,
                 },
@@ -932,11 +969,18 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                         intent = Some(LibraryIntent::OpenView(reference, view_type));
                     }
                     if let Some((library, cell, read_only)) = selected_cell.clone() {
+                        let symbol = symbol_view(cx.model, &library, &cell);
                         ui.menu_button("Cell actions", |ui| {
+                            if let Some(symbol) = symbol
+                                && ui.button("Open in Symbol & form").clicked()
+                            {
+                                intent = Some(LibraryIntent::OpenSymbolForm(symbol));
+                                ui.close();
+                            }
                             if ui
                                 .add_enabled(!read_only, egui::Button::new("New view\u{2026}"))
                                 .on_disabled_hover_text(
-                                    "The selected library is read-only; create the view in a writable library.",
+                                    "The library is read-only; a view cannot be added to it.",
                                 )
                                 .clicked()
                             {
@@ -952,7 +996,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                                     egui::Button::new("Copy cell\u{2026}"),
                                 )
                                 .on_disabled_hover_text(
-                                    "No writable destination library is available.",
+                                    "Every library is read-only; none can take a copy.",
                                 )
                                 .clicked()
                             {
@@ -965,7 +1009,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                             if ui
                                 .add_enabled(!read_only, egui::Button::new("Rename cell\u{2026}"))
                                 .on_disabled_hover_text(
-                                    "The selected library is read-only and cannot be renamed.",
+                                    "The library is read-only; its cells cannot be renamed.",
                                 )
                                 .clicked()
                             {
@@ -983,7 +1027,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                                         egui::Button::new("Rename view\u{2026}"),
                                     )
                                     .on_disabled_hover_text(
-                                        "The selected library is read-only and cannot be changed.",
+                                        "The library is read-only; its views cannot be renamed.",
                                     )
                                     .clicked()
                             {
@@ -997,7 +1041,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                                         egui::Button::new("Delete view\u{2026}"),
                                     )
                                     .on_disabled_hover_text(
-                                        "The selected library is read-only and cannot be changed.",
+                                        "The library is read-only; its views cannot be deleted.",
                                     )
                                     .clicked()
                             {
@@ -1005,12 +1049,9 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                                 ui.close();
                             }
                             if ui
-                                .add_enabled(
-                                    !read_only,
-                                    egui::Button::new("Delete cell\u{2026}"),
-                                )
+                                .add_enabled(!read_only, egui::Button::new("Delete cell\u{2026}"))
                                 .on_disabled_hover_text(
-                                    "The selected library is read-only and cannot be changed.",
+                                    "The library is read-only; its cells cannot be deleted.",
                                 )
                                 .clicked()
                             {
@@ -1100,6 +1141,18 @@ pub(super) fn library_actions_menu(
     intent
 }
 
+/// The cell's symbol view, the one Symbol & form edits, when it has one.
+fn symbol_view(model: &Model, library: &str, cell: &str) -> Option<CellViewRef> {
+    model
+        .library_manager
+        .get_library(library)?
+        .get_cell(cell)?
+        .views_sorted()
+        .into_iter()
+        .find(|view| view.view_type == ViewType::Symbol)
+        .map(|view| CellViewRef::new(library, cell, &view.name))
+}
+
 /// Whether the selected cell is one the Cell column lists: a filter can
 /// hide it, and then the page does not act on it.
 fn selected_cell_shown(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> bool {
@@ -1159,23 +1212,37 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
                 .outbox
                 .push(ProjectRequest::OpenView(reference, view_type));
         }
+        LibraryIntent::OpenSymbolForm(reference) => {
+            cx.state.builtin_models.open = false;
+            cx.model.library_manager.select_view(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+            );
+            cx.state.library_cellview_page =
+                crate::workbench::project::workspace_state::LibraryCellviewPage::SymbolForm;
+            let manager = crate::workbench::SurfaceId::LibraryCellviewManager;
+            if let Err(error) = cx.wb.navigate(
+                crate::workbench::SurfaceRoute::surface(manager),
+                crate::workbench::RouteTransitionSource::User,
+            ) {
+                cx.wb
+                    .prompt(format!("Cannot open {}: {error}", manager.label()));
+            }
+        }
         LibraryIntent::ReportUsage(reference) => {
-            let consumers = library_view_usage(cx.model, &reference);
-            let count = consumers.len();
+            let placements = library_view_usage(cx.model, &reference);
+            let summary = usage_summary(&reference, &placements);
             ctx.data_mut(|data| {
                 data.insert_temp(
                     egui::Id::new(USAGE_REPORT_ID),
                     LibraryUsageReport {
-                        reference: reference.clone(),
-                        consumers,
+                        reference,
+                        placements,
                     },
                 );
             });
-            cx.wb.prompt(format!(
-                "{} has {count} loaded schematic consumer{}.",
-                reference.display_path(),
-                if count == 1 { "" } else { "s" }
-            ));
+            cx.wb.prompt(summary);
         }
         LibraryIntent::NewLibrary => cx.state.open_new_library_dialog(cx.model),
         LibraryIntent::RenameLibrary(library) => {
@@ -1249,12 +1316,37 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
     }
 }
 
-fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<String> {
+fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<(String, String)> {
     model
         .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
         .into_iter()
-        .map(|usage| format!("{} / {}", usage.schematic.display_path(), usage.instance))
+        .map(|usage| (usage.schematic.display_path(), usage.instance))
         .collect()
+}
+
+/// "amp/symbol is placed 3 times in 2 schematics."
+fn usage_summary(reference: &CellViewRef, placements: &[(String, String)]) -> String {
+    let path = reference.display_path();
+    if placements.is_empty() {
+        return format!("{path} is not placed in any schematic of this project.");
+    }
+    let mut schematics = placements
+        .iter()
+        .map(|(schematic, _)| schematic.as_str())
+        .collect::<Vec<_>>();
+    schematics.dedup();
+    let plural = |count: usize, one: &str, many: &str| {
+        if count == 1 {
+            format!("{count} {one}")
+        } else {
+            format!("{count} {many}")
+        }
+    };
+    format!(
+        "{path} is placed {} in {}.",
+        plural(placements.len(), "time", "times"),
+        plural(schematics.len(), "schematic", "schematics")
+    )
 }
 
 fn show_library_usage_report(ctx: &Context) {
@@ -1263,32 +1355,18 @@ fn show_library_usage_report(ctx: &Context) {
     else {
         return;
     };
-    let description = format!(
-        "Loaded schematic consumers of {}. This report is derived from current live buffers.",
-        report.reference.display_path()
-    );
+    let description = usage_summary(&report.reference, &report.placements);
     let choice = Dialog::new("Where used", "Close")
         .description(&description)
         .size(DialogSize::Transaction)
         .show(ctx, |ui| {
-            property_card(ui, "Selected library view", |ui| {
-                property_row(
-                    ui,
-                    "Library / cell / view",
-                    &report.reference.display_path(),
-                );
-                property_row(ui, "Loaded consumers", &report.consumers.len().to_string());
-            });
-            ui.add_space(8.0);
-            property_card(ui, "Schematic instances", |ui| {
-                if report.consumers.is_empty() {
-                    property_row(ui, "Consumers", "none in loaded schematic documents");
-                } else {
-                    for consumer in &report.consumers {
-                        property_row(ui, "Instance", consumer);
+            if !report.placements.is_empty() {
+                property_card(ui, "Placements", |ui| {
+                    for (schematic, instance) in &report.placements {
+                        property_row(ui, schematic, instance);
                     }
-                }
-            });
+                });
+            }
         });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
         ctx.data_mut(|data| {
@@ -1537,7 +1615,7 @@ mod tests {
                         icon: WorkbenchIcon::Folder,
                         label: "A library with a long name",
                         meta: "43",
-                        status: "read only",
+                        status: "read-only",
                         selected: false,
                         read_only: true,
                     },
@@ -1601,12 +1679,26 @@ mod tests {
             .workspace
             .insert_schematic_editor("work/consumer/schematic".to_owned(), inactive);
 
-        let consumers = library_view_usage(&harness.model, &reference);
-        assert_eq!(consumers.len(), 2);
+        let placements = library_view_usage(&harness.model, &reference);
+        assert_eq!(placements.len(), 2);
         assert!(
-            consumers
+            placements
                 .iter()
-                .any(|consumer| consumer.contains("work/consumer/schematic"))
+                .any(|(schematic, _)| schematic.contains("work/consumer/schematic"))
+        );
+        assert_eq!(
+            usage_summary(&reference, &placements),
+            format!(
+                "{} is placed 2 times in 2 schematics.",
+                reference.display_path()
+            )
+        );
+        assert_eq!(
+            usage_summary(&reference, &[]),
+            format!(
+                "{} is not placed in any schematic of this project.",
+                reference.display_path()
+            )
         );
     }
 
