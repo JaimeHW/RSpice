@@ -9,6 +9,12 @@ use std::fmt;
 
 use crate::format::CANONICAL_NAN_BITS;
 
+/// The file name of the kept segment whose logical digest is `digest`: a project, a recovery or
+/// a session keeps each segment under the name of what it holds.
+pub fn kept_segment_name(digest: &Digest) -> String {
+    format!("{digest}.rsr")
+}
+
 /// A SHA-256 digest.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Digest(pub [u8; 32]);

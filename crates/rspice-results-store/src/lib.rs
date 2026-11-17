@@ -18,6 +18,8 @@ mod events;
 mod format;
 mod io;
 mod manifest;
+#[cfg(any(unix, windows))]
+mod place;
 mod reader;
 mod run_writer;
 mod schema;
@@ -30,7 +32,7 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
-pub use digest::Digest;
+pub use digest::{Digest, kept_segment_name};
 pub use error::StoreError;
 pub use events::{EventChange, EventValue, Logic};
 #[cfg(any(unix, windows))]
@@ -39,6 +41,8 @@ pub use io::{MemoryIo, SegmentIo};
 #[cfg(any(unix, windows))]
 pub use manifest::StoreDir;
 pub use manifest::{Manifest, Member};
+#[cfg(any(unix, windows))]
+pub use place::{PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments};
 pub use reader::{EventSpan, SegmentReader, SegmentState};
 pub use run_writer::{RunIo, RunWriter};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};

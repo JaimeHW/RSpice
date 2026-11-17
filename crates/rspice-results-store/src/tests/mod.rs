@@ -2,6 +2,8 @@
 
 mod events_tests;
 mod manifest_tests;
+#[cfg(any(unix, windows))]
+mod place_tests;
 mod reader_tests;
 mod reopen_tests;
 #[cfg(not(target_arch = "wasm32"))]
