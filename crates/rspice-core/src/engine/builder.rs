@@ -3721,6 +3721,12 @@ fn report_planned_xspice_auto_bridge_supplies(
             if selected.states_supply() && !derivation.is_attribute() {
                 continue;
             }
+            // An authored body converts against its supply ports and the
+            // supply its statement states, and against nothing else: with
+            // neither, no supply is consulted, so none is reported.
+            if selected.signature().is_none() && !selected.states_supply() {
+                continue;
+            }
         }
         supplies.report(
             &node_label,

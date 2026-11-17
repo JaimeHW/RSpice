@@ -385,6 +385,43 @@ fn a_boundary_no_rail_reaches_defaults_to_three_point_three() {
     );
 }
 
+/// An authored connect module converts against its supply ports and the
+/// `vsup` its statement states, and against nothing else (VAMS-2.4 section
+/// 7.7). One with neither consults no supply, so no rail is derived for its
+/// boundary and no default is announced: its own levels, 0.7 V and 1.3 V,
+/// are what the net reads.
+#[test]
+fn an_authored_connect_module_with_no_supply_says_nothing_of_one() {
+    let directory = TempDirectory::new("authored-no-supply");
+    let source = directory.write(
+        "drv.vams",
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module drv(o); output o; reg o; initial begin o = 0; #10 o = 1; end endmodule\n\
+         connectmodule d2a_a(d, a); input d; logic d; output a; electrical a;\n\
+         \x20 real lv; initial lv = 0.7; always @(d) lv = (d === 1'b1) ? 1.3 : 0.7;\n\
+         \x20 analog V(a) <+ transition(lv, 0, 0.1n);\n\
+         endmodule\n\
+         connectrules mine; connect d2a_a input logic, output electrical; endconnectrules\n",
+    );
+    let deck = format!(
+        "* an authored D/A on a boundary no rail reaches\n\
+         .hdl \"{}\" module=drv\n\
+         .options connectrules=mine\n\
+         x1 o drv\n\
+         r1 o 0 1meg\n\
+         .end\n",
+        slashed(&source)
+    );
+    let (result, warnings) = supply_warnings_of(|| run(&deck, 20e-9, 0.1e-9));
+    assert_level("authored_low", value_at(&result, "o", 5e-9), 0.7);
+    assert_level("authored_high", value_at(&result, "o", 15e-9), 1.3);
+    assert!(
+        warnings.is_empty(),
+        "an authored module with no supply is told of none: {warnings:?}"
+    );
+}
+
 /// A rail only reaches a boundary through the passive network. A source card
 /// carrying a waveform is stimulus rather than supply, and ground is not a
 /// path: every rail touches it, so a walk through it would reach everything.
