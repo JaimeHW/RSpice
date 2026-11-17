@@ -43,10 +43,10 @@ use rspice_simulation::netlist_preparation::{
 use rspice_simulation::output_contract::selection::{
     effective_plan_capture, projection_occurrence_nets,
 };
+use rspice_simulation::project_veriloga::preparation::external_veriloga_source_names;
 #[cfg(test)]
-use rspice_simulation::project_veriloga::preparation::prepared_configuration_veriloga_runtimes;
 use rspice_simulation::project_veriloga::preparation::{
-    prepared_model_library_veriloga_runtimes, prepared_pdk_veriloga_runtimes,
+    prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
 };
 
 /// Let the deck find the data files its sources name.
@@ -749,17 +749,16 @@ impl SimulationController {
                 &generated_source,
                 &model_cards,
             );
-        let external_veriloga_runtimes = prepared_pdk_veriloga_runtimes(&sealed_models)?
-            .try_merge(prepared_model_library_veriloga_runtimes(
-                &sealed_models,
-                model.sim_setup.reference_pvt.process,
-            )?)
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        for runtime in external_veriloga_runtimes.sources() {
+        // The deck names the Verilog-A the run installs, as the run's own
+        // deck does, and compiles none of it: every caller builds it in the
+        // frame, and a PDK model's compile takes seconds.
+        for name in
+            external_veriloga_source_names(&sealed_models, model.sim_setup.reference_pvt.process)?
+        {
             rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut source,
-                runtime.source_key(),
-                runtime.netlist_alias(),
+                &name.source_key,
+                &name.netlist_alias,
             );
         }
         let source = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(

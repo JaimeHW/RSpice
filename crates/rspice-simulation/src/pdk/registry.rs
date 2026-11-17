@@ -11,9 +11,8 @@
 //! - installs are append-only, hash-chained transactions; and
 //! - deserialized packages are never executable until they are revalidated.
 
-use super::{
-    SealedPdkModelSources, ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
-};
+use super::package::revalidate_archive;
+use super::{SealedPdkModelSources, ValidatedPdkTechnologyPackage, validate_archive_bytes};
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{PdkTechnologyManifest, validate_version};
 use rspice_model_library::pdk::package::decode_bounded;
@@ -256,7 +255,7 @@ impl PdkTechnologyRegistry {
         let mut packages = Vec::with_capacity(self.archives.len());
         let mut errors = Vec::new();
         for (index, archive) in self.archives.iter().enumerate() {
-            match validate_archive(archive) {
+            match revalidate_archive(archive) {
                 Ok(package) => packages.push(package),
                 Err(error) => errors.push(format!("archive[{index}]: {error}")),
             }

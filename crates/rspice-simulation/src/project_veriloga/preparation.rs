@@ -235,6 +235,44 @@ pub fn prepared_pdk_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
+/// The sources [`prepared_pdk_veriloga_runtimes`] and
+/// [`prepared_model_library_veriloga_runtimes`] install for a run's deck,
+/// merged, named in the order the merged set holds them, and none compiled.
+///
+/// A deck names the Verilog-A it installs; compiling it is the run's work, as
+/// Spectre compiles `ahdl_include` sources when the simulation starts and not
+/// when the design is netlisted. A deck built to be read (a picker's
+/// catalogue, an exported netlist, the cells a design-tab compile binds) is
+/// built from these names, so building it costs no compile; a source that
+/// fails to compile is refused when the run is prepared.
+pub fn external_veriloga_source_names(
+    sealed_models: &crate::model_sources::SealedModelExecutionSources,
+    reference_process: rspice_vocabulary::product::ProcessCorner,
+) -> Result<Vec<crate::veriloga::VerilogASourceName>, PreparationError> {
+    let mut devices = Vec::new();
+    if let Some((package, archive_digest, _, bindings)) = sealed_models.pdk_veriloga_authority() {
+        devices.extend(
+            bindings
+                .iter()
+                .map(|binding| crate::veriloga::pdk_source_name(package, archive_digest, binding)),
+        );
+    }
+    let mut connections = Vec::new();
+    if let Some(authority) = sealed_models
+        .reference_model_library_veriloga_authority(reference_process)
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
+    {
+        let (library_devices, library_connections) =
+            crate::project_veriloga::model_library_source_names(&authority)
+                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        devices.extend(library_devices);
+        connections = library_connections;
+    }
+    devices.sort_by_cached_key(|name| name.source_key.to_ascii_lowercase());
+    devices.extend(connections);
+    Ok(devices)
+}
+
 /// The model-library Verilog-A runtimes the reference model selection's
 /// sections name, which the run's own deck installs.
 pub fn prepared_model_library_veriloga_runtimes(

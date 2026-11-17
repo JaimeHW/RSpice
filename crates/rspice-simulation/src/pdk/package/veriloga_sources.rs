@@ -1,4 +1,5 @@
-//! Authenticate and compile the exact Verilog-A closure of a PDK.
+//! Authenticate the exact Verilog-A closure of a PDK, compiling it when a
+//! package is installed.
 //!
 //! Every declared source must be reachable from a runtime contract, and its
 //! bytes must still match the declared artifact before compilation or sealing.
@@ -8,6 +9,7 @@ use super::*;
 pub(super) fn seal_pdk_veriloga_sources(
     archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
+    check: PdkVerilogACheck,
 ) -> Result<
     (
         Vec<SealedPdkVerilogAArtifact>,
@@ -110,23 +112,41 @@ pub(super) fn seal_pdk_veriloga_sources(
                 contract.source_id
             ))
         })?;
-        let compilation = rspice_veriloga::VerilogACompiler::new(
+        let compiler = rspice_veriloga::VerilogACompiler::new(
             crate::compilation::unified_runtime_compiler_options(),
-        )
-        .compile_virtual_runtime(&bundle, &contract.module_name, limits)
-        .map_err(|error| {
-            PdkTechnologyError::ModelMaterialization(format!(
-                "PDK Verilog-A source '{}' module '{}' could not be compiled: {error}",
-                contract.source_id, contract.module_name
-            ))
-        })?;
-        compilation.validate_integrity().map_err(|error| {
-            PdkTechnologyError::ModelMaterialization(format!(
-                "compiled Verilog-A source '{}' failed its integrity check: {error}",
-                contract.source_id
-            ))
-        })?;
-        for dependency in &compilation.dependency_closure {
+        );
+        let dependency_closure = match check {
+            PdkVerilogACheck::Compile => {
+                crate::veriloga::thread_compiles::record(&contract.module_name);
+                let compilation = compiler
+                    .compile_virtual_runtime(&bundle, &contract.module_name, limits)
+                    .map_err(|error| {
+                        PdkTechnologyError::ModelMaterialization(format!(
+                            "PDK Verilog-A source '{}' module '{}' could not be compiled: {error}",
+                            contract.source_id, contract.module_name
+                        ))
+                    })?;
+                compilation.validate_integrity().map_err(|error| {
+                    PdkTechnologyError::ModelMaterialization(format!(
+                        "compiled Verilog-A source '{}' failed its integrity check: {error}",
+                        contract.source_id
+                    ))
+                })?;
+                compilation.dependency_closure
+            }
+            PdkVerilogACheck::Closure => {
+                compiler
+                    .virtual_source_closure(&bundle, limits)
+                    .map_err(|error| {
+                        PdkTechnologyError::ModelMaterialization(format!(
+                            "PDK Verilog-A source '{}' cannot be read: {error}",
+                            contract.source_id
+                        ))
+                    })?
+                    .dependency_closure
+            }
+        };
+        for dependency in &dependency_closure {
             let key = dependency.logical_path.to_ascii_lowercase();
             if declared.contains_key(&key) {
                 reachable.insert(key);

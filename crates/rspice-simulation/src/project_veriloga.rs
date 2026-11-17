@@ -343,6 +343,20 @@ pub fn compile_model_library_source_runtimes(
     )
 }
 
+/// [`crate::veriloga::model_library_source_names`], under the limits
+/// [`compile_model_library_source_runtimes`] compiles within.
+pub fn model_library_source_names(
+    authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
+) -> Result<
+    (
+        Vec<crate::veriloga::VerilogASourceName>,
+        Vec<crate::veriloga::VerilogASourceName>,
+    ),
+    PreparedRuntimeError,
+> {
+    crate::veriloga::model_library_source_names(authority, model_library_virtual_compile_limits())
+}
+
 fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
     rspice_veriloga::VirtualCompileLimits {
         max_files: rspice_design::project_sources::MAX_PROJECT_SOURCE_FILES,

@@ -230,6 +230,61 @@ fn pdk_veriloga_closure_compiles_and_retains_exact_archive_authority() {
     assert_eq!(restored, runtime);
 }
 
+/// Installing a package compiles its Verilog-A, which proves the package.
+/// Nothing after that compiles it in the caller's thread: a session's
+/// revalidation and every run's seal read the closure by the preprocessor,
+/// and a deck names the source by its sealed identity. Each of those runs in
+/// the frame, and a PDK model's compile takes seconds; the run compiles what
+/// it installs.
+#[test]
+fn only_installing_a_pdk_compiles_its_veriloga() {
+    let (bytes, authority) = fixture_archive_with_veriloga();
+    let mut registry = PdkTechnologyRegistry::default();
+    crate::veriloga::thread_compiles::take();
+    registry
+        .install_archive_bytes(&bytes, &authority, "Install PDK Verilog-A fixture")
+        .expect("PDK Verilog-A package installs");
+    assert_eq!(crate::veriloga::thread_compiles::take(), ["pdk_resistor"]);
+
+    assert_eq!(registry.revalidate_installed(), Ok(1));
+    let package = registry.validated_packages()[0].clone();
+    let sealed = registry
+        .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
+        .expect("exact PDK Verilog-A closure seals");
+    assert_eq!(
+        sealed.as_parts().veriloga_artifacts.len(),
+        2,
+        "the seal still reads the include the root reaches"
+    );
+    let sealed = crate::model_sources::seal_catalog_execution_sources(
+        &rspice_model_library::ModelCatalog::default(),
+        &rspice_model_library::ModelResolutionRecords::default(),
+    )
+    .unwrap()
+    .with_pdk_model_sources(sealed)
+    .unwrap();
+    let names = crate::project_veriloga::preparation::external_veriloga_source_names(
+        &sealed,
+        rspice_vocabulary::product::ProcessCorner::TT,
+    )
+    .expect("the PDK's Verilog-A is named");
+    assert!(crate::veriloga::thread_compiles::take().is_empty());
+
+    let compiled = crate::project_veriloga::preparation::prepared_pdk_veriloga_runtimes(&sealed)
+        .expect("the run compiles what it installs");
+    assert_eq!(
+        names,
+        compiled
+            .sources()
+            .map(|source| crate::veriloga::VerilogASourceName {
+                source_key: source.source_key().to_owned(),
+                netlist_alias: source.netlist_alias().to_owned(),
+            })
+            .collect::<Vec<_>>(),
+        "a deck names what the run installs"
+    );
+}
+
 #[test]
 fn pdk_veriloga_rejects_tampered_or_untyped_dependency_bytes() {
     let (bytes, _) = fixture_archive_with_veriloga();

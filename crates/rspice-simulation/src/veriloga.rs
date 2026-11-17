@@ -290,19 +290,11 @@ impl PreparedVerilogARuntime {
         binding: &crate::pdk::SealedPdkVerilogABinding,
         compilation: &rspice_veriloga::VirtualRuntimeCompilation,
     ) -> Result<Self, PreparedRuntimeError> {
-        let source_key = format!(
-            "__rspice_pdk__/{}/{}/{}/{}.va",
-            package.manifest_digest,
-            archive_digest,
-            binding.source_id,
-            binding.root_artifact_digest
-        );
-        Self::try_from_virtual_compilation(
+        let VerilogASourceName {
             source_key,
-            archive_digest,
-            binding.netlist_alias.clone(),
-            compilation,
-        )
+            netlist_alias,
+        } = pdk_source_name(package, archive_digest, binding);
+        Self::try_from_virtual_compilation(source_key, archive_digest, netlist_alias, compilation)
     }
 
     fn registration(&self) -> Result<rspice_core::ProjectVerilogARuntimeRegistration, String> {
@@ -734,6 +726,25 @@ impl PreparedVerilogARuntimeSet {
     }
 }
 
+/// The name [`compile_pdk_source_runtime`] installs `binding`'s runtime
+/// under, without compiling it.
+pub fn pdk_source_name(
+    package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
+    archive_digest: rspice_vocabulary::product::ContentDigest,
+    binding: &crate::pdk::SealedPdkVerilogABinding,
+) -> VerilogASourceName {
+    VerilogASourceName {
+        source_key: format!(
+            "__rspice_pdk__/{}/{}/{}/{}.va",
+            package.manifest_digest,
+            archive_digest,
+            binding.source_id,
+            binding.root_artifact_digest
+        ),
+        netlist_alias: binding.netlist_alias.clone(),
+    }
+}
+
 pub fn compile_pdk_source_runtime(
     package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
     archive_digest: rspice_vocabulary::product::ContentDigest,
@@ -790,6 +801,7 @@ pub fn compile_pdk_source_runtime(
                 binding.source_id
             ))
         })?;
+    thread_compiles::record(&binding.module_name);
     let compilation = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options())
         .compile_virtual_runtime(&bundle, &binding.module_name, pdk_virtual_compile_limits())
         .map_err(|error| {
@@ -892,80 +904,241 @@ pub fn compile_model_library_source_runtimes(
     authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
     limits: rspice_veriloga::VirtualCompileLimits,
 ) -> Result<PreparedVerilogARuntimeSet, PreparedRuntimeError> {
-    let mut logical_sources = Vec::with_capacity(authority.sources().len());
-    let mut logical_paths = std::collections::HashMap::<String, String>::new();
-    for (path, source) in authority.sources() {
-        let logical = model_library_virtual_path(path)?;
-        let folded = logical.to_ascii_lowercase();
-        if let Some(existing) = logical_paths.insert(folded, logical.clone()) {
-            return Err(PreparedRuntimeError::SourceIdentity(format!(
-                "Model-library Verilog-A paths '{}' and '{}' collide in the portable compiler namespace",
-                existing,
-                path.display()
-            )));
-        }
-        logical_sources.push(rspice_veriloga::VirtualSourceFile::new(logical, source));
-    }
-
     // Every retained model includes its canonical digital plan and is installed
     // through the unified engine. Mixed reports are safe on this host path.
     let compiler = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options());
     let mut runtimes = Vec::new();
     let mut connections = Vec::new();
-    let mut roots_by_path = std::collections::BTreeMap::<_, Vec<_>>::new();
-    for root in authority.roots() {
-        let root_path = model_library_virtual_path(&root.path)?;
-        roots_by_path.entry(root_path).or_default().push(root);
+    for root in ModelLibraryRootPath::of(authority)? {
+        let prepared = root.prepare(&compiler, limits)?;
+        let module_names = prepared.module_names().collect::<Vec<_>>();
+        for source in root.sources(authority, Some(&module_names))? {
+            match source {
+                ModelLibraryRootSource::Connections(name) => {
+                    let artifact = prepared.connection_artifact().ok_or_else(|| {
+                        PreparedRuntimeError::SourceIdentity(format!(
+                            "Model-library Verilog-A source '{}' declares neither device modules nor connection rules",
+                            root.display()
+                        ))
+                    })?;
+                    connections.push(
+                        PreparedVerilogAConnectionLibrary::try_new(
+                            name.source_key,
+                            authority.closure_digest(),
+                            name.netlist_alias,
+                            artifact,
+                        )
+                        .map_err(PreparedRuntimeError::Integrity)?,
+                    );
+                }
+                ModelLibraryRootSource::Device { module_name, name } => {
+                    thread_compiles::record(&module_name);
+                    let compilation = prepared
+                        .compile_runtime(&module_name)
+                        .map_err(|error| {
+                            PreparedRuntimeError::Compile(format!(
+                                "Could not compile module '{}' from sealed model-library Verilog-A root '{}': {error}",
+                                module_name,
+                                root.display()
+                            ))
+                        })?;
+                    runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
+                        name.source_key,
+                        authority.closure_digest(),
+                        name.netlist_alias,
+                        &compilation,
+                    )?);
+                }
+            }
+        }
     }
-    for (root_path, roots) in roots_by_path {
-        let bundle =
-            rspice_veriloga::VirtualSourceBundle::new(&root_path, logical_sources.iter().cloned())
-                .map_err(|error| {
-                    PreparedRuntimeError::SourceBundle(format!(
-                        "Sealed model-library Verilog-A root '{}' is invalid: {error}",
-                        roots[0].path.display()
-                    ))
-                })?;
-        let prepared = compiler
+    PreparedVerilogARuntimeSet::try_with_connections(runtimes, connections)
+        .map_err(PreparedRuntimeError::Integrity)
+}
+
+/// Test-only record of the Verilog-A modules compiled on the calling thread,
+/// so a test can state that a frame compiled none.
+pub mod thread_compiles {
+    #[cfg(any(test, feature = "test-support"))]
+    thread_local! {
+        static COMPILED: std::cell::RefCell<Vec<String>> = const {
+            std::cell::RefCell::new(Vec::new())
+        };
+    }
+
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(unused_variables))]
+    pub(crate) fn record(module_name: &str) {
+        #[cfg(any(test, feature = "test-support"))]
+        COMPILED.with(|compiled| compiled.borrow_mut().push(module_name.to_owned()));
+    }
+
+    /// The modules this thread compiled since the last call, which forgets
+    /// them.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn take() -> Vec<String> {
+        COMPILED.with(|compiled| std::mem::take(&mut *compiled.borrow_mut()))
+    }
+}
+
+/// The deck key and netlist alias one Verilog-A source installs under: what
+/// a `.veriloga` directive names it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogASourceName {
+    pub source_key: String,
+    pub netlist_alias: String,
+}
+
+/// The names [`compile_model_library_source_runtimes`] installs `authority`'s
+/// runtimes under, device sources first and then connection libraries, each
+/// in the order the compiled set holds them, without compiling any module.
+///
+/// A root that selects its module is named from the selection alone. A root
+/// that installs every module it declares is parsed for their names: a
+/// source's names are read by the front end, not by the compile.
+pub fn model_library_source_names(
+    authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
+    limits: rspice_veriloga::VirtualCompileLimits,
+) -> Result<(Vec<VerilogASourceName>, Vec<VerilogASourceName>), PreparedRuntimeError> {
+    let compiler = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options());
+    let mut devices = Vec::new();
+    let mut connections = Vec::new();
+    for root in ModelLibraryRootPath::of(authority)? {
+        let prepared = root
+            .reads_module_names()
+            .then(|| root.prepare(&compiler, limits))
+            .transpose()?;
+        let module_names = prepared
+            .as_ref()
+            .map(|prepared| prepared.module_names().collect::<Vec<_>>());
+        for source in root.sources(authority, module_names.as_deref())? {
+            match source {
+                ModelLibraryRootSource::Connections(name) => connections.push(name),
+                ModelLibraryRootSource::Device { name, .. } => devices.push(name),
+            }
+        }
+    }
+    devices.sort_by_cached_key(|name| name.source_key.to_ascii_lowercase());
+    connections.sort_by_cached_key(|name| name.source_key.to_ascii_lowercase());
+    Ok((devices, connections))
+}
+
+/// One source path of a model library that `.hdl`/`ahdl_include` lines name
+/// as a root, with every root that names it.
+struct ModelLibraryRootPath<'a> {
+    logical_path: String,
+    logical_sources: std::rc::Rc<[rspice_veriloga::VirtualSourceFile]>,
+    roots: Vec<&'a crate::model_sources::SealedModelLibraryVerilogARoot>,
+}
+
+/// What one root installs.
+enum ModelLibraryRootSource {
+    Device {
+        module_name: String,
+        name: VerilogASourceName,
+    },
+    /// A source that declares connect rules and no device module.
+    Connections(VerilogASourceName),
+}
+
+impl<'a> ModelLibraryRootPath<'a> {
+    /// `authority`'s roots, grouped by the path they name, in path order.
+    fn of(
+        authority: &'a crate::model_sources::SealedModelLibraryVerilogAAuthority,
+    ) -> Result<Vec<Self>, PreparedRuntimeError> {
+        let mut logical_sources = Vec::with_capacity(authority.sources().len());
+        let mut logical_paths = std::collections::HashMap::<String, String>::new();
+        for (path, source) in authority.sources() {
+            let logical = model_library_virtual_path(path)?;
+            let folded = logical.to_ascii_lowercase();
+            if let Some(existing) = logical_paths.insert(folded, logical.clone()) {
+                return Err(PreparedRuntimeError::SourceIdentity(format!(
+                    "Model-library Verilog-A paths '{}' and '{}' collide in the portable compiler namespace",
+                    existing,
+                    path.display()
+                )));
+            }
+            logical_sources.push(rspice_veriloga::VirtualSourceFile::new(logical, source));
+        }
+        let logical_sources = std::rc::Rc::<[_]>::from(logical_sources);
+        let mut roots_by_path = std::collections::BTreeMap::<_, Vec<_>>::new();
+        for root in authority.roots() {
+            let root_path = model_library_virtual_path(&root.path)?;
+            roots_by_path.entry(root_path).or_default().push(root);
+        }
+        Ok(roots_by_path
+            .into_iter()
+            .map(|(logical_path, roots)| Self {
+                logical_path,
+                logical_sources: std::rc::Rc::clone(&logical_sources),
+                roots,
+            })
+            .collect())
+    }
+
+    fn display(&self) -> std::path::Display<'_> {
+        self.roots[0].path.display()
+    }
+
+    /// Whether some root here installs every module the source declares,
+    /// so naming its runtimes reads the source.
+    fn reads_module_names(&self) -> bool {
+        self.roots.iter().any(|root| root.selected_module.is_none())
+    }
+
+    fn prepare(
+        &self,
+        compiler: &rspice_veriloga::VerilogACompiler,
+        limits: rspice_veriloga::VirtualCompileLimits,
+    ) -> Result<rspice_veriloga::PreparedVirtualSource, PreparedRuntimeError> {
+        let bundle = rspice_veriloga::VirtualSourceBundle::new(
+            &self.logical_path,
+            self.logical_sources.iter().cloned(),
+        )
+        .map_err(|error| {
+            PreparedRuntimeError::SourceBundle(format!(
+                "Sealed model-library Verilog-A root '{}' is invalid: {error}",
+                self.display()
+            ))
+        })?;
+        compiler
             .prepare_virtual_runtime_source(&bundle, limits)
             .map_err(|error| {
                 PreparedRuntimeError::Compile(format!(
                     "Could not prepare sealed model-library Verilog-A root '{}': {error}",
-                    roots[0].path.display()
+                    self.display()
                 ))
-            })?;
-        let module_names = prepared.module_names().collect::<Vec<_>>();
-        let root_identity = model_library_root_identity(&root_path);
-        for root in roots {
-            if module_names.is_empty() && root.selected_module.is_none() {
-                let artifact = prepared.connection_artifact().ok_or_else(|| {
-                    PreparedRuntimeError::SourceIdentity(format!(
-                        "Model-library Verilog-A source '{}' declares neither device modules nor connection rules",
-                        root.path.display()
-                    ))
-                })?;
-                let source_key = format!(
-                    "__rspice_model_library__/{}/{}/connections.vams",
-                    authority.closure_digest(),
-                    root_identity
-                );
-                let alias = root
-                    .netlist_alias
-                    .clone()
-                    .unwrap_or_else(|| format!("__rspice_connections_{root_identity}"));
-                connections.push(
-                    PreparedVerilogAConnectionLibrary::try_new(
-                        source_key,
+            })
+    }
+
+    /// What each root here installs, under the keys a run's deck names.
+    /// `module_names` are the modules the source declares, in declaration
+    /// order; `None` when it was not read, which only a root that selects
+    /// its module allows, and then the selection is not checked against it.
+    fn sources(
+        &self,
+        authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
+        module_names: Option<&[&str]>,
+    ) -> Result<Vec<ModelLibraryRootSource>, PreparedRuntimeError> {
+        let root_identity = model_library_root_identity(&self.logical_path);
+        let mut sources = Vec::new();
+        for root in &self.roots {
+            let declared = module_names.unwrap_or_default();
+            if module_names.is_some_and(<[_]>::is_empty) && root.selected_module.is_none() {
+                sources.push(ModelLibraryRootSource::Connections(VerilogASourceName {
+                    source_key: format!(
+                        "__rspice_model_library__/{}/{}/connections.vams",
                         authority.closure_digest(),
-                        alias,
-                        artifact,
-                    )
-                    .map_err(PreparedRuntimeError::Integrity)?,
-                );
+                        root_identity
+                    ),
+                    netlist_alias: root
+                        .netlist_alias
+                        .clone()
+                        .unwrap_or_else(|| format!("__rspice_connections_{root_identity}")),
+                }));
                 continue;
             }
             let selected = if let Some(module) = root.selected_module.as_deref() {
-                if !module_names.contains(&module) {
+                if module_names.is_some() && !declared.contains(&module) {
                     return Err(PreparedRuntimeError::SourceIdentity(format!(
                         "Model-library Verilog-A source '{}' does not declare module '{}'",
                         root.path.display(),
@@ -977,17 +1150,17 @@ pub fn compile_model_library_source_runtimes(
                     root.netlist_alias.as_deref().unwrap_or(module).to_owned(),
                 )]
             } else if let Some(alias) = root.netlist_alias.as_deref() {
-                let [module] = module_names.as_slice() else {
+                let [module] = declared else {
                     return Err(PreparedRuntimeError::SourceIdentity(format!(
                         "Model-library .veriloga source '{}' declares {} modules, so alias '{}' is ambiguous",
                         root.path.display(),
-                        module_names.len(),
+                        declared.len(),
                         alias
                     )));
                 };
                 vec![((*module).to_owned(), alias.to_owned())]
             } else {
-                module_names
+                declared
                     .iter()
                     .map(|module| ((*module).to_owned(), (*module).to_owned()))
                     .collect::<Vec<_>>()
@@ -1001,32 +1174,23 @@ pub fn compile_model_library_source_runtimes(
                         module_name, netlist_alias
                     )));
                 }
-                let compilation = prepared
-                    .compile_runtime(&module_name)
-                    .map_err(|error| {
-                        PreparedRuntimeError::Compile(format!(
-                            "Could not compile module '{}' from sealed model-library Verilog-A root '{}': {error}",
-                            module_name,
-                            root.path.display()
-                        ))
-                    })?;
                 let source_key = format!(
                     "__rspice_model_library__/{}/{}/{}.va",
                     authority.closure_digest(),
                     root_identity,
                     module_name
                 );
-                runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
-                    source_key,
-                    authority.closure_digest(),
-                    netlist_alias,
-                    &compilation,
-                )?);
+                sources.push(ModelLibraryRootSource::Device {
+                    module_name,
+                    name: VerilogASourceName {
+                        source_key,
+                        netlist_alias,
+                    },
+                });
             }
         }
+        Ok(sources)
     }
-    PreparedVerilogARuntimeSet::try_with_connections(runtimes, connections)
-        .map_err(PreparedRuntimeError::Integrity)
 }
 
 fn model_library_virtual_path(path: &std::path::Path) -> Result<String, PreparedRuntimeError> {

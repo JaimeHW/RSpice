@@ -67,12 +67,14 @@ impl ValidatedPdkTechnologyPackage {
         self.0.binding()
     }
 
-    /// Recheck and compile this package's exact archived source closure.
+    /// Recheck this package's exact archived source closure. Its Verilog-A
+    /// is not compiled again: package validation compiled it, and the run
+    /// that installs it compiles it.
     pub fn seal_model_sources(
         &self,
         archive: &PdkTechnologyArchive,
     ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
-        seal_pdk_model_sources(archive, self)
+        seal_pdk_model_sources(archive, self, PdkVerilogACheck::Closure)
     }
 }
 
@@ -157,18 +159,45 @@ pub fn validate_archive_bytes(
 pub fn validate_archive(
     archive: &PdkTechnologyArchive,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
+    validate_archive_checking(archive, PdkVerilogACheck::Compile)
+}
+
+/// [`validate_archive`] for an archive a registry installed, which compiled
+/// its Verilog-A then: the closure is checked again, and nothing compiled.
+pub(super) fn revalidate_archive(
+    archive: &PdkTechnologyArchive,
+) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
+    validate_archive_checking(archive, PdkVerilogACheck::Closure)
+}
+
+fn validate_archive_checking(
+    archive: &PdkTechnologyArchive,
+    veriloga: PdkVerilogACheck,
+) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
     let package = ValidatedPdkTechnologyPackage(verify_archive_contents(archive)?);
     // Executable model contracts are part of package validation, not a
     // deferred simulation-time best effort. This proves section existence,
     // package-relative dependency closure, source encoding, and reachability
     // using the exact decoded artifact bytes covered by the PDK manifest.
-    let _ = seal_pdk_model_sources(archive, &package)?;
+    let _ = seal_pdk_model_sources(archive, &package, veriloga)?;
     Ok(package)
+}
+
+/// How a seal checks a PDK's Verilog-A sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PdkVerilogACheck {
+    /// Compile every declared module: what installing a package proves.
+    Compile,
+    /// Read each module's include closure by the preprocessor alone, for a
+    /// package installing it already compiled. A run compiles what it
+    /// installs, and a module that no longer compiles is refused there.
+    Closure,
 }
 
 fn seal_pdk_model_sources(
     archive: &PdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
+    veriloga: PdkVerilogACheck,
 ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
     let binding = package.binding();
     let archive_bytes = serde_json::to_vec(archive)
@@ -187,7 +216,8 @@ fn seal_pdk_model_sources(
         .filter(|artifact| artifact.kind == PdkTechnologyArtifactKind::Model)
         .map(|artifact| (artifact.path.to_ascii_lowercase(), artifact))
         .collect::<BTreeMap<_, _>>();
-    let (veriloga_artifacts, veriloga_bindings) = seal_pdk_veriloga_sources(archive, package)?;
+    let (veriloga_artifacts, veriloga_bindings) =
+        seal_pdk_veriloga_sources(archive, package, veriloga)?;
     if model_artifacts.is_empty() {
         return Ok(SealedPdkModelSources(PdkModelSourceParts {
             binding,

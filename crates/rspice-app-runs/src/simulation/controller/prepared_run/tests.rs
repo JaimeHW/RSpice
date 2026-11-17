@@ -102,9 +102,27 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
         .seal_execution_sources_for_plan(&[binding])
         .expect("model-library sources seal");
 
+    rspice_simulation::veriloga::thread_compiles::take();
+    let names = external_veriloga_source_names(&sealed, crate::product::ProcessCorner::TT)
+        .expect("the library's Verilog-A is named");
+    assert!(
+        rspice_simulation::veriloga::thread_compiles::take().is_empty(),
+        "naming the sources compiles none"
+    );
     let runtimes =
         prepared_model_library_veriloga_runtimes(&sealed, crate::product::ProcessCorner::TT)
             .expect("prepared-run compilation succeeds");
+    assert_eq!(
+        names
+            .iter()
+            .map(|name| (name.source_key.as_str(), name.netlist_alias.as_str()))
+            .collect::<Vec<_>>(),
+        runtimes
+            .sources()
+            .map(|source| (source.source_key(), source.netlist_alias()))
+            .collect::<Vec<_>>(),
+        "a deck names what the run installs"
+    );
     assert_eq!(runtimes.len(), 1);
     let runtime = runtimes.device_runtimes().next().expect("one AHDL runtime");
     let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();
@@ -265,6 +283,44 @@ fn receipt_backed_manual_project_deck_uses_pdk_models_without_host_paths() {
     assert!(!executable.contains("vto=0.60"));
     assert!(!contains_external_include_directive(executable));
     assert!(!executable.contains("/rspice-pdk/"));
+}
+
+/// The design deck the simulate page's pickers, the models page's bins, a
+/// design-tab compile and File \u{25b8} Export \u{25b8} Netlist read is built
+/// in the frame, so it names the PDK's Verilog-A and compiles none of it; the
+/// run's own deck names the same source, and the run compiles it.
+#[test]
+fn a_design_deck_names_the_pdk_veriloga_its_run_installs_without_compiling_it() {
+    let mut state = technology_free_runnable_state();
+    state.provision_test_project_veriloga_technology_contract();
+    rspice_simulation::veriloga::thread_compiles::take();
+    let inspected = SimulationController::prepare_design_netlist_for_inspection(&state.model)
+        .expect("the design deck builds");
+    let exported = SimulationController::prepare_design_netlist_for_export(&state.model)
+        .expect("the design deck exports");
+    assert!(
+        rspice_simulation::veriloga::thread_compiles::take().is_empty(),
+        "building the design deck compiled Verilog-A in the frame"
+    );
+
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the run prepares");
+    assert_eq!(
+        rspice_simulation::veriloga::thread_compiles::take(),
+        ["pdk_resistor"],
+        "the run compiles the source its deck installs"
+    );
+    let directives = |deck: &str| {
+        deck.lines()
+            .filter(|line| line.starts_with(".veriloga \"__rspice_pdk__/"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let run = directives(snapshot.executable_netlist());
+    assert_eq!(run.len(), 1, "the run installs the PDK's one source");
+    assert_eq!(directives(&inspected), run);
+    assert_eq!(directives(&exported.netlist), run);
 }
 
 #[test]
