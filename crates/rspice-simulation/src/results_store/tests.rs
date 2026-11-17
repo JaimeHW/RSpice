@@ -212,6 +212,34 @@ fn a_stored_waveform_tiles_fits_and_reads_cursors_from_its_store_as_from_its_val
     let windowed = out.extent_over(&axis, Some((x0, x1))).unwrap();
     assert_eq!((windowed.min, windowed.max), finite(&inside));
 
+    // A report figure draws it from the store's tiles: two points to a pixel column at most,
+    // over the whole run's span and value range, as it draws the same samples held in memory.
+    use rspice_results::visualization_document::figure_points;
+    let held = (
+        WaveformValues::from(x.clone()),
+        WaveformValues::from(y.clone()),
+    );
+    for (columns, range) in [(256, None), (1_000, Some((x0, x1)))] {
+        let (fx, fy) = figure_points(&axis, &out, range, columns).unwrap();
+        let (hx, hy) = figure_points(&held.0, &held.1, range, columns).unwrap();
+        assert!(
+            fx.len() <= 2 * columns + 2 && fx.len() == fy.len(),
+            "{}",
+            fx.len()
+        );
+        let span = range.unwrap_or((start, time(rows - 1)));
+        let drawn = finite(&fy);
+        match range {
+            None => {
+                assert_eq!((fx[0], fx[fx.len() - 1]), span);
+                assert_eq!(drawn, finite(&y));
+            }
+            Some(_) => assert_eq!(drawn, finite(&inside)),
+        }
+        assert_eq!(drawn, finite(&hy), "{columns} columns");
+        assert_eq!((fx[0], fx[fx.len() - 1]), (hx[0], hx[hx.len() - 1]));
+    }
+
     // The lead is the first pixel's: a tile of the window's start holds it.
     let Some(rspice_results::waveform::ColumnTile::Samples { x: xs, y: ys, .. }) =
         out.tile_over(&axis, 0.0, time(103), 400)

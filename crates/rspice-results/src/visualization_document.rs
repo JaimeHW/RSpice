@@ -2529,7 +2529,7 @@ impl VisualizationDocument {
     /// stating any other version is refused, never migrated. Unknown
     /// extension fields are ignored; a new required meaning takes a new
     /// version.
-    pub const SCHEMA_VERSION: u16 = 14;
+    pub const SCHEMA_VERSION: u16 = 15;
 
     pub fn new(
         title: impl Into<String>,

@@ -46,6 +46,19 @@ impl Segment {
         }
     }
 
+    /// The segment shared with every reader that names it by its digest, so a reference
+    /// written while it is open reads it from where it is.
+    pub fn shared(self) -> Arc<Self> {
+        let digest = self.reader.digest();
+        let segment = Arc::new(self);
+        if let Some(digest) = digest {
+            let mut kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
+            kept.open.retain(|_, open| open.strong_count() > 0);
+            kept.open.insert(digest.0, Arc::downgrade(&segment));
+        }
+        segment
+    }
+
     /// The segment file.
     pub fn path(&self) -> &Path {
         &self.path
@@ -307,6 +320,24 @@ static KEPT: Mutex<KeptSegments> = Mutex::new(KeptSegments {
     folders: Vec::new(),
     open: BTreeMap::new(),
 });
+
+/// The segments a document archived, held open for as long as this process runs: a run's own
+/// segment outlives the run's leaving the history until a save keeps it beside its file.
+#[cfg(any(unix, windows))]
+static PINNED: Mutex<Vec<Arc<Segment>>> = Mutex::new(Vec::new());
+
+/// Hold the segment whose digest is `digest` open for as long as this process runs, and say
+/// where its file is. `None` when no reader has it open and no folder keeps it.
+#[cfg(any(unix, windows))]
+pub fn pin_segment(digest: Digest) -> Option<PathBuf> {
+    let segment = kept_segment(digest)?;
+    let path = segment.path.clone();
+    let mut pinned = PINNED.lock().unwrap_or_else(|p| p.into_inner());
+    if !pinned.iter().any(|known| Arc::ptr_eq(known, &segment)) {
+        pinned.push(segment);
+    }
+    Some(path)
+}
 
 /// Look for kept segments in `folder` too, before every folder named earlier.
 pub fn keep_segments_in(folder: &Path) {

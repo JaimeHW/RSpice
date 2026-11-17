@@ -976,12 +976,12 @@ pub fn save_native(
         } = candidate;
         // The segments the file names are in its folder before the file is written, so a
         // project on disk never names results it cannot read.
-        keep_result_segments(&file.simulation_results, path)?;
+        keep_result_segments(&file, path)?;
         let published = destination.publish(&persistence::NativeStorage, file, |candidate| {
             prepare_post_save_registry(state, candidate, scope, SnapshotContent::Current)
         })?;
         crate::io::result_segments::release_unread_segments(
-            &published.candidate.simulation_results,
+            &file_segments(&published.candidate),
             path,
         );
         let candidate = ProjectSnapshot {
@@ -1006,15 +1006,26 @@ pub fn save_native(
     result
 }
 
-/// Keep every segment `results` reads beside the project file at `path`, on this thread. A
-/// save started from the application has already placed them off the interface's thread, and
-/// this finds them there.
+/// Each segment `file` reads: its runs', and those its result documents archived.
+#[cfg(not(target_arch = "wasm32"))]
+fn file_segments(
+    file: &rspice_project::ProjectFile,
+) -> Vec<rspice_formats::project_results::StoredSegment> {
+    crate::io::result_segments::file_segments(
+        &file.simulation_results,
+        &file.workspace.visualization_documents,
+    )
+}
+
+/// Keep every segment `file` reads beside the project file at `path`, on this thread. A save
+/// started from the application has already placed them off the interface's thread, and this
+/// finds them there.
 #[cfg(not(target_arch = "wasm32"))]
 fn keep_result_segments(
-    results: &crate::io::ProjectSimulationResults,
+    file: &rspice_project::ProjectFile,
     path: &Path,
 ) -> Result<(), ProjectLifecycleError> {
-    crate::io::result_segments::keep_segments_now(results, path).map_err(|error| {
+    crate::io::result_segments::keep_segments_now(file_segments(file), path).map_err(|error| {
         ProjectLifecycleError::Persistence(rspice_project::persistence::PersistenceError::Platform(
             error,
         ))
@@ -1062,7 +1073,11 @@ pub fn begin_results_save(
         .project_lifecycle
         .result_cache
         .capture(&state.model.simulation);
-    let plan = crate::io::result_segments::segments_to_keep(&results, path);
+    let segments = crate::io::result_segments::file_segments(
+        &results,
+        &state.model.workspace.content.visualization_documents,
+    );
+    let plan = crate::io::result_segments::segments_to_keep(segments, path);
     if plan.is_empty() {
         return Ok(None);
     }
@@ -1169,7 +1184,7 @@ pub fn save_project_copy_native(
     state.platform.project_lifecycle.authority.begin_save()?;
     let result = (|| {
         let copy = snapshot(state)?;
-        keep_result_segments(&copy.file.simulation_results, path)?;
+        keep_result_segments(&copy.file, path)?;
         destination.publish(&persistence::NativeStorage, copy.file)
     })();
     state

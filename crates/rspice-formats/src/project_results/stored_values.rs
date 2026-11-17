@@ -148,6 +148,13 @@ fn segments_of<'a>(
     segments
 }
 
+impl super::ProjectSimulationRun {
+    /// Each segment this run reads, once.
+    pub fn stored_segments(&self) -> Vec<StoredSegment> {
+        segments_of(self.analyses.iter())
+    }
+}
+
 impl super::ProjectSimulationResultsData {
     /// Each segment these results read, once, in the order their runs read them.
     pub fn stored_segments(&self) -> Vec<StoredSegment> {

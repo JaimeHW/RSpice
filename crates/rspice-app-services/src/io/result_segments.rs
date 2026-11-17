@@ -10,10 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rspice_formats::project_results::{ProjectSimulationResults, segment_folder};
+use rspice_formats::project_results::{ProjectSimulationResults, StoredSegment, segment_folder};
 use rspice_results::store_reader::{
-    PlaceError, PlaceWays, SegmentDigest, kept_segment_name, place_segment, remove_unkept_segments,
+    PlaceError, PlaceWays, SegmentDigest, kept_segment, kept_segment_name, parse_digest,
+    place_segment, remove_unkept_segments,
 };
+use rspice_results::visualization_document::VisualizationDocument;
 
 /// The segments a save must still put in its folder before it writes its file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -31,16 +33,37 @@ impl SegmentsToKeep {
     }
 }
 
-/// What saving `results` to `file` has to keep that its folder does not hold yet. A segment no
-/// file holds any more (deleted outside RSpice) stays named, and missing.
-pub fn segments_to_keep(results: &ProjectSimulationResults, file: &Path) -> SegmentsToKeep {
-    segments_to_keep_in(results, segment_folder(file))
+/// Each segment a file holding `results` and `documents` reads, once: its runs', and those of
+/// the runs its documents archived, which outlive the runs' leaving the history.
+pub fn file_segments(
+    results: &ProjectSimulationResults,
+    documents: &[VisualizationDocument],
+) -> Vec<StoredSegment> {
+    let mut segments = results.stored_segments();
+    for hex in documents
+        .iter()
+        .flat_map(VisualizationDocument::archived_segments)
+    {
+        let Ok(digest) = parse_digest(hex) else {
+            continue;
+        };
+        if segments.iter().all(|segment| segment.digest != digest) {
+            let source = kept_segment(digest).map(|segment| segment.path().to_path_buf());
+            segments.push(StoredSegment { digest, source });
+        }
+    }
+    segments
 }
 
-/// What keeping `results` in `folder` has to place that it does not hold yet.
-fn segments_to_keep_in(results: &ProjectSimulationResults, folder: PathBuf) -> SegmentsToKeep {
-    let segments: Vec<_> = results
-        .stored_segments()
+/// What saving a file that reads `segments` to `file` has to keep that its folder does not
+/// hold yet. A segment no file holds any more (deleted outside RSpice) stays named, and missing.
+pub fn segments_to_keep(segments: Vec<StoredSegment>, file: &Path) -> SegmentsToKeep {
+    segments_to_keep_in(segments, segment_folder(file))
+}
+
+/// What keeping `segments` in `folder` has to place that it does not hold yet.
+fn segments_to_keep_in(segments: Vec<StoredSegment>, folder: PathBuf) -> SegmentsToKeep {
+    let segments: Vec<_> = segments
         .into_iter()
         .filter(|segment| !folder.join(kept_segment_name(&segment.digest)).is_file())
         .filter_map(|segment| Some((segment.digest, segment.source?)))
@@ -276,32 +299,28 @@ fn mount_point(path: &Path) -> PathBuf {
     )
 }
 
-/// After `results` were saved to `file`: delete the segments its folder keeps that they no
-/// longer read, and any partial copy.
-pub fn release_unread_segments(results: &ProjectSimulationResults, file: &Path) {
-    release_unread_segments_in(results, &segment_folder(file));
+/// After a file that reads `segments` was saved to `file`: delete the segments its folder
+/// keeps that it no longer reads, and any partial copy.
+pub fn release_unread_segments(segments: &[StoredSegment], file: &Path) {
+    release_unread_segments_in(segments, &segment_folder(file));
 }
 
-fn release_unread_segments_in(results: &ProjectSimulationResults, folder: &Path) {
+fn release_unread_segments_in(segments: &[StoredSegment], folder: &Path) {
     if !folder.is_dir() {
         return;
     }
-    let read = results
-        .stored_segments()
-        .into_iter()
-        .map(|segment| segment.digest)
-        .collect();
+    let read = segments.iter().map(|segment| segment.digest).collect();
     remove_unkept_segments(folder, &read);
 }
 
-/// Keep every segment `results` reads beside `file` now, on this thread: what a save that
-/// did not place them first does before it writes.
-pub fn keep_segments_now(results: &ProjectSimulationResults, file: &Path) -> Result<(), String> {
-    keep_segments_now_in(results, segment_folder(file))
+/// Keep every one of `segments` beside `file` now, on this thread: what a save that did not
+/// place them first does before it writes.
+pub fn keep_segments_now(segments: Vec<StoredSegment>, file: &Path) -> Result<(), String> {
+    keep_segments_now_in(segments, segment_folder(file))
 }
 
-fn keep_segments_now_in(results: &ProjectSimulationResults, folder: PathBuf) -> Result<(), String> {
-    let plan = segments_to_keep_in(results, folder);
+fn keep_segments_now_in(segments: Vec<StoredSegment>, folder: PathBuf) -> Result<(), String> {
+    let plan = segments_to_keep_in(segments, folder);
     if plan.is_empty() {
         return Ok(());
     }
@@ -317,16 +336,16 @@ pub fn session_segment_folder() -> Option<PathBuf> {
 
 /// Keep every segment `results` reads in the session's folder before the session is stored, so
 /// a relaunch reads them after this process's own store is gone.
-pub fn keep_session_segments(results: &ProjectSimulationResults) -> Result<(), String> {
+pub fn keep_session_segments(segments: Vec<StoredSegment>) -> Result<(), String> {
     let folder = session_segment_folder()
         .ok_or_else(|| "no local folder is available to keep the results in".to_owned())?;
-    keep_segments_now_in(results, folder)
+    keep_segments_now_in(segments, folder)
 }
 
 /// After the session was stored with `results`, let its folder go of the segments they no
 /// longer read.
-pub fn release_unread_session_segments(results: &ProjectSimulationResults) {
+pub fn release_unread_session_segments(segments: &[StoredSegment]) {
     if let Some(folder) = session_segment_folder() {
-        release_unread_segments_in(results, &folder);
+        release_unread_segments_in(segments, &folder);
     }
 }

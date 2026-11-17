@@ -335,7 +335,10 @@ impl CheckpointCapture {
         // The results the checkpoint names are kept beside it first, as a save keeps a
         // project's: it outlives the run's own store.
         crate::io::result_segments::keep_segments_now(
-            &self.project.file.simulation_results,
+            crate::io::result_segments::file_segments(
+                &self.project.file.simulation_results,
+                &self.project.file.workspace.visualization_documents,
+            ),
             &self.directory.join(&manifest.snapshot_name),
         )?;
         let summary = publish_native(&self.directory, &manifest, serialized.as_bytes())?;
@@ -476,7 +479,13 @@ pub fn publish_recovery_copy(
         return Err("recovery copies never overwrite an existing file".to_owned());
     }
     // The copy reads its results from beside it, as a saved project does.
-    crate::io::result_segments::keep_segments_now(&project.file.simulation_results, destination)?;
+    crate::io::result_segments::keep_segments_now(
+        crate::io::result_segments::file_segments(
+            &project.file.simulation_results,
+            &project.file.workspace.visualization_documents,
+        ),
+        destination,
+    )?;
     crate::io::durable_file::compare_exchange_bytes(destination, expected, &bytes)
         .map_err(|error| format!("recovery copy publication failed: {error}"))
 }

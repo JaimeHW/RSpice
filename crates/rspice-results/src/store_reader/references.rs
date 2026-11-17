@@ -36,6 +36,11 @@ pub(crate) fn references_written() -> bool {
     WRITING_REFERENCES.with(Cell::get)
 }
 
+/// The digest `hex` writes, as a reference names a segment.
+pub fn parse_digest(hex: &str) -> Result<Digest, String> {
+    digest_of(hex)
+}
+
 fn digest_of(hex: &str) -> Result<Digest, String> {
     let bytes = hex.as_bytes();
     if bytes.len() != 64 {

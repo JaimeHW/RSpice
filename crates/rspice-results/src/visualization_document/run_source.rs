@@ -206,19 +206,33 @@ pub struct RunArchive {
     #[serde(deserialize_with = "deserialize_key_string")]
     encoding: String,
     record: String,
+    /// The results stores the record reads its samples from, by digest: a stored run's record
+    /// holds no samples, and the document keeps these with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    segments: Vec<String>,
 }
 
 impl RunArchive {
+    /// The record of a run, in `encoding`, that reads its samples from the results stores
+    /// `segments` names by digest.
     pub fn new(
         encoding: impl Into<String>,
         record: impl Into<String>,
+        segments: Vec<String>,
     ) -> Result<Self, VisualizationError> {
         let archive = Self {
             encoding: encoding.into(),
             record: record.into(),
+            segments,
         };
         archive.validate()?;
         Ok(archive)
+    }
+
+    /// The digests of the results stores the record reads.
+    #[must_use]
+    pub fn segments(&self) -> &[String] {
+        &self.segments
     }
 
     #[must_use]
@@ -239,6 +253,19 @@ impl RunArchive {
                 message: "an archived run holds its record".to_owned(),
             });
         }
+        let digest = |hex: &String| {
+            hex.len() == 64
+                && hex
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        };
+        if !self.segments.iter().all(digest) {
+            return Err(VisualizationError::InvalidValue {
+                field: "run-archive.segments",
+                message: "an archived run names each results store by its 64-digit digest"
+                    .to_owned(),
+            });
+        }
         Ok(())
     }
 }
@@ -249,6 +276,7 @@ impl fmt::Debug for RunArchive {
             .debug_struct("RunArchive")
             .field("encoding", &self.encoding)
             .field("record_bytes", &self.record.len())
+            .field("segments", &self.segments)
             .finish()
     }
 }
@@ -349,16 +377,141 @@ where
     deserialize_bounded_vec::<D, RunSeriesSamples, MAX_RUN_SOURCE_SIGNALS>(deserializer)
 }
 
+/// The pixel columns a report figure's series is drawn at: as many as the widest figure has.
+pub const FIGURE_COLUMNS: usize = crate::visualization_raster::MAX_RASTER_DIMENSION as usize;
+
 /// Reads the samples of the runs a document references.
 pub trait SourceSamples {
-    /// The X samples and values of one series of the run `binding` names:
-    /// `None` when the reader does not hold that exact run or series. A
-    /// `NaN` value is an unavailable sample.
-    fn series_samples(
+    /// One series of the run `binding` names as a figure `columns` pixels wide over x in `range`
+    /// (all of it when `None`) draws it, as X samples and values: every row where a column holds
+    /// at most two, else each column's least and greatest value at its centre. `None` when the
+    /// reader does not hold that exact run or series. A `NaN` value is an unavailable sample.
+    fn series_figure(
         &self,
         binding: DatasetBinding,
         series: SeriesKey,
-    ) -> Option<(&[f64], &[f64])>;
+        range: Option<(f64, f64)>,
+        columns: usize,
+    ) -> Option<(Vec<f64>, Vec<f64>)>;
+}
+
+/// The points a figure draws of a tile over x in `x0 ..= x1`: a sample tile's rows with the
+/// nearest row either side, or each touched column's least and greatest value at its centre,
+/// in the order that leaves the line nearest the previous column, the first and last columns
+/// at the ends of the span so its extent stays the series'. A column with no available value
+/// breaks the line.
+#[cfg(feature = "engine-evidence")]
+pub fn tile_points(tile: crate::waveform::ColumnTile, x0: f64, x1: f64) -> (Vec<f64>, Vec<f64>) {
+    use crate::waveform::ColumnTile;
+    match tile {
+        ColumnTile::Samples {
+            x,
+            y,
+            before,
+            after,
+        } => {
+            let mut points: Vec<(f64, f64)> = Vec::with_capacity(x.len() + 2);
+            points.extend(before);
+            points.extend(x.into_iter().zip(y));
+            points.extend(after);
+            points.into_iter().unzip()
+        }
+        ColumnTile::Envelope { min, max, touched } => {
+            let columns = min.len();
+            let first = touched.iter().position(|&touched| touched);
+            let last = touched.iter().rposition(|&touched| touched);
+            let width = (x1 - x0) / columns as f64;
+            let mut xs = Vec::with_capacity(2 * columns);
+            let mut ys = Vec::with_capacity(2 * columns);
+            let mut previous = f64::NAN;
+            for column in (0..columns).filter(|&column| touched[column]) {
+                let at = if Some(column) == first {
+                    x0
+                } else if Some(column) == last {
+                    x1
+                } else {
+                    x0 + (column as f64 + 0.5) * width
+                };
+                let (low, high) = (min[column], max[column]);
+                if low.is_nan() {
+                    xs.push(at);
+                    ys.push(f64::NAN);
+                    previous = f64::NAN;
+                    continue;
+                }
+                let (start, end) = if (previous - high).abs() < (previous - low).abs() {
+                    (high, low)
+                } else {
+                    (low, high)
+                };
+                xs.push(at);
+                ys.push(start);
+                if end != start {
+                    xs.push(at);
+                    ys.push(end);
+                }
+                previous = end;
+            }
+            (xs, ys)
+        }
+    }
+}
+
+/// `y` over `x` as a figure `columns` wide over x in `range` draws it: from the store's tiles
+/// for a stored window, and from the samples for one in memory.
+#[cfg(feature = "engine-evidence")]
+pub fn figure_points(
+    x: &crate::waveform::WaveformValues,
+    y: &crate::waveform::WaveformValues,
+    range: Option<(f64, f64)>,
+    columns: usize,
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    if x.len() != y.len() || columns == 0 {
+        return None;
+    }
+    let (x0, x1) = match range {
+        Some(range) => range,
+        None => x.ends()?,
+    };
+    if let Some(tile) = y.tile_over(x, x0, x1, columns) {
+        return Some(tile_points(tile, x0, x1));
+    }
+    let first = x.partition_point(|&value| value < x0);
+    let end = x.partition_point(|&value| value <= x1);
+    let before = first.checked_sub(1).map(|row| (x[row], y[row]));
+    let after = (end < x.len()).then(|| (x[end], y[end]));
+    let tile = if end - first <= 2 * columns {
+        crate::waveform::ColumnTile::Samples {
+            x: x[first..end].to_vec(),
+            y: y[first..end].to_vec(),
+            before,
+            after,
+        }
+    } else {
+        let mut min = vec![f64::NAN; columns];
+        let mut max = vec![f64::NAN; columns];
+        let mut touched = vec![false; columns];
+        let scale = columns as f64 / (x1 - x0);
+        for row in first..end {
+            let column = (((x[row] - x0) * scale) as usize).min(columns - 1);
+            touched[column] = true;
+            let value = y[row];
+            if !value.is_nan() {
+                min[column] = if min[column].is_nan() {
+                    value
+                } else {
+                    min[column].min(value)
+                };
+                max[column] = if max[column].is_nan() {
+                    value
+                } else {
+                    max[column].max(value)
+                };
+            }
+        }
+        crate::waveform::ColumnTile::Envelope { min, max, touched }
+    };
+    Some(tile_points(tile, x0, x1))
 }
 
 /// The signals of a retained run a document reads, without its samples.
@@ -665,19 +818,20 @@ impl SourceDataset {
     }
 }
 
-/// A run reference's samples read through a host reader, or its figure
+/// A run reference's series as a figure draws it, read through a host reader, or its figure
 /// samples when the document carries them.
 pub(super) fn run_series_points(
     run: &RunSource,
     binding: DatasetBinding,
     series: SeriesKey,
+    range: Option<(f64, f64)>,
     samples: Option<&dyn SourceSamples>,
 ) -> Option<(Vec<f64>, Vec<f64>)> {
     if let Some(embedded) = run.figure_samples(series) {
         return Some((embedded.x.clone(), embedded.y.clone()));
     }
-    let (x, y) = samples?.series_samples(binding, series)?;
-    (x.len() == y.len()).then(|| (x.to_vec(), y.to_vec()))
+    let (x, y) = samples?.series_figure(binding, series, range, FIGURE_COLUMNS)?;
+    (x.len() == y.len()).then_some((x, y))
 }
 
 impl VisualizationDocument {
@@ -697,24 +851,35 @@ impl VisualizationDocument {
             let Some(run) = dataset.run.as_mut() else {
                 continue;
             };
-            let mut series = Vec::<SeriesKey>::new();
+            // Each series is drawn over the span its traces' horizontal axes fix, or all of it
+            // where one of them fits its data.
+            let mut series = Vec::<(SeriesKey, Option<(f64, f64)>)>::new();
             for trace in self.traces.iter().filter(|trace| trace.binding == binding) {
                 let key = run.select_one(&trace.row_predicates)?;
-                if !series.contains(&key) {
-                    series.push(key);
+                let range = self
+                    .axes
+                    .iter()
+                    .find(|axis| axis.id == trace.x_axis_id)
+                    .and_then(|axis| axis.range)
+                    .map(|range| (range.minimum, range.maximum));
+                match series.iter_mut().find(|(known, _)| *known == key) {
+                    Some((_, known)) => {
+                        *known = known
+                            .zip(range)
+                            .map(|(known, range)| (known.0.min(range.0), known.1.max(range.1)));
+                    }
+                    None => series.push((key, range)),
                 }
             }
             let mut embedded = Vec::with_capacity(series.len());
-            for key in series {
-                let (x, y) =
-                    run_series_points(run, binding, key, Some(samples)).ok_or_else(|| {
-                        VisualizationError::InvalidValue {
-                            field: "run-source.figure-samples",
-                            message: format!(
-                                "the samples of signal {} of run {} are not retained",
-                                key.index, binding.dataset_id
-                            ),
-                        }
+            for (key, range) in series {
+                let (x, y) = run_series_points(run, binding, key, range, Some(samples))
+                    .ok_or_else(|| VisualizationError::InvalidValue {
+                        field: "run-source.figure-samples",
+                        message: format!(
+                            "the samples of signal {} of run {} are not retained",
+                            key.index, binding.dataset_id
+                        ),
                     })?;
                 embedded.push(RunSeriesSamples::new(
                     key.analysis,
@@ -728,6 +893,14 @@ impl VisualizationDocument {
             run.validate()?;
         }
         Ok(copy)
+    }
+
+    /// The digests of the results stores its archived runs read.
+    pub fn archived_segments(&self) -> impl Iterator<Item = &str> {
+        self.datasets
+            .iter()
+            .filter_map(|dataset| dataset.run.as_ref()?.archive.as_ref())
+            .flat_map(|archive| archive.segments.iter().map(String::as_str))
     }
 
     /// Whether the document holds every sample it shows, so it reads with no
@@ -790,11 +963,13 @@ where
     A: AsRef<crate::analysis_result::AnalysisResult<W>>,
     W: AsRef<crate::waveform::RetainedWaveform>,
 {
-    fn series_samples(
+    fn series_figure(
         &self,
         binding: DatasetBinding,
         series: SeriesKey,
-    ) -> Option<(&[f64], &[f64])> {
+        range: Option<(f64, f64)>,
+        columns: usize,
+    ) -> Option<(Vec<f64>, Vec<f64>)> {
         let run = self.run(binding)?;
         let analysis = run.analyses.iter().map(AsRef::as_ref).find(|analysis| {
             crate::result_presentation::AnalysisPresentationKey::new(run.dataset_id, analysis)
@@ -810,6 +985,6 @@ where
             SignalComponent::Real => &waveform.complex.as_ref()?.real,
             SignalComponent::Imag => &waveform.complex.as_ref()?.imag,
         };
-        Some((waveform.x.as_slice(), values.as_slice()))
+        figure_points(&waveform.x, values, range, columns)
     }
 }

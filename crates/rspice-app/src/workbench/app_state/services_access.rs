@@ -322,14 +322,19 @@ impl AppState {
         // them, and this process's store is gone by the next launch. Without them the session
         // is kept without its runs.
         #[cfg(not(target_arch = "wasm32"))]
-        let results = self
-            .platform
-            .project_lifecycle
-            .result_cache
-            .capture(&self.model.simulation);
+        let documents = &self.model.workspace.content.visualization_documents;
+        #[cfg(not(target_arch = "wasm32"))]
+        let segments = rspice_app_services::io::result_segments::file_segments(
+            &self
+                .platform
+                .project_lifecycle
+                .result_cache
+                .capture(&self.model.simulation),
+            documents,
+        );
         #[cfg(not(target_arch = "wasm32"))]
         let results_kept =
-            rspice_app_services::io::result_segments::keep_session_segments(&results)
+            rspice_app_services::io::result_segments::keep_session_segments(segments.clone())
                 .inspect_err(|error| log::warn!("the session keeps no runs: {error}"))
                 .is_ok();
         #[cfg(target_arch = "wasm32")]
@@ -342,7 +347,7 @@ impl AppState {
                     #[cfg(not(target_arch = "wasm32"))]
                     if self.state_safe_mode_session_snapshot().is_none() {
                         rspice_app_services::io::result_segments::release_unread_session_segments(
-                            &results,
+                            &segments,
                         );
                     }
                     return;
@@ -361,11 +366,14 @@ impl AppState {
             Offer::NotEncoded => return,
         };
         settle(&mut self.model, &mut self.platform, kept);
-        // A session kept without its runs reads no segment.
+        // A session kept without its runs reads only what its documents archived.
         #[cfg(not(target_arch = "wasm32"))]
         if self.state_safe_mode_session_snapshot().is_none() {
             rspice_app_services::io::result_segments::release_unread_session_segments(
-                &Default::default(),
+                &rspice_app_services::io::result_segments::file_segments(
+                    &Default::default(),
+                    &self.model.workspace.content.visualization_documents,
+                ),
             );
         }
     }

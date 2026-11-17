@@ -234,7 +234,7 @@ C1 out 0 10n
     let root = std::env::temp_dir().join(format!("rspice-stored-run-saved-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let file = root.join("saved.rspiceproj");
-    rspice_app_services::io::result_segments::keep_segments_now(&results, &file)
+    rspice_app_services::io::result_segments::keep_segments_now(results.stored_segments(), &file)
         .expect("the run's segment is kept beside the project");
     let segments = results.stored_segments();
     assert_eq!(segments.len(), 1, "one transient, one segment");

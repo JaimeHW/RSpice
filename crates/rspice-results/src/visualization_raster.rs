@@ -6,6 +6,9 @@
 //! scene and encodes that scene as an opaque RGB8 PNG. The same Rust code and
 //! fixed PNG settings are therefore used by native and WebAssembly builds.
 //!
+//! A run's series arrive as the figure draws them: a stored run's from its store's tiles, at
+//! most two points to a pixel column, so no count of samples bounds a figure.
+//!
 //! The renderer is intentionally fail-closed. A document feature is rendered
 //! only when this module has an explicit, deterministic interpretation for it;
 //! other viewers, non-linear axes, family styling, non-numeric values, and
@@ -40,8 +43,6 @@ pub const MAX_RASTER_ARTIFACT_BYTES: usize = MAX_FROZEN_ARTIFACT_BYTES;
 pub const MAX_RASTER_TRACES: usize = 256;
 /// Maximum retained A/B or engineering cursors in one pane.
 pub const MAX_RASTER_CURSORS: usize = 256;
-/// Maximum source samples resolved across all visible traces.
-pub const MAX_RASTER_POINTS: usize = 2_000_000;
 /// Maximum Bresenham steps, bounding adversarial zig-zag source data.
 pub const MAX_RASTER_STROKE_STEPS: usize = 64 * 1_048_576;
 /// Maximum exact immutable bindings accepted for one pane figure.
@@ -603,7 +604,6 @@ pub fn resolve_cartesian_line_scene(
         insert_actual_binding(&mut actual_bindings, binding.dataset)?;
     }
     let mut traces = Vec::with_capacity(visible.len());
-    let mut total_points = 0_usize;
     for trace in visible {
         if trace.x_axis_id != x_axis.id || trace.y_axis_id != y_axis.id {
             return Err(VisualizationRasterError::UnsupportedAxisConfiguration(
@@ -693,16 +693,6 @@ pub fn resolve_cartesian_line_scene(
         }
         if points.is_empty() {
             return Err(VisualizationRasterError::EmptyTrace(trace.id.get()));
-        }
-        total_points = total_points.checked_add(points.len()).ok_or(
-            VisualizationRasterError::ArithmeticOverflow("resolved raster point count"),
-        )?;
-        if total_points > MAX_RASTER_POINTS {
-            return Err(VisualizationRasterError::ResourceLimit {
-                resource: "resolved raster points",
-                maximum: MAX_RASTER_POINTS,
-                actual: total_points,
-            });
         }
         traces.push(ResolvedRasterTrace {
             trace_id: trace.id,

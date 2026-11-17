@@ -439,10 +439,22 @@ pub fn archive_document(
         }
         let run = retained_run(reads, binding.dataset_id)
             .ok_or_else(|| "A run this document reads left the run history.".to_owned())?;
-        let record = serde_json::to_string(&ProjectSimulationRun::from(run))
+        let record = ProjectSimulationRun::from(run);
+        // A stored run's record names its segments and holds none of its samples: the
+        // document binds them, and they stay open until a save keeps them beside the project.
+        let segments = record
+            .stored_segments()
+            .into_iter()
+            .map(|segment| {
+                #[cfg(any(unix, windows))]
+                rspice_results::store_reader::pin_segment(segment.digest);
+                segment.digest.to_string()
+            })
+            .collect();
+        let record = serde_json::to_string(&record)
             .map_err(|error| format!("The run could not be written into the document: {error}."))?;
-        let archive =
-            RunArchive::new(RUN_ARCHIVE_ENCODING, record).map_err(|error| error.to_string())?;
+        let archive = RunArchive::new(RUN_ARCHIVE_ENCODING, record, segments)
+            .map_err(|error| error.to_string())?;
         edits.push(DocumentEdit::ArchiveDataset { binding, archive });
     }
     let revision = document.revision();

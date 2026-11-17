@@ -182,7 +182,7 @@ impl EngineBridge {
             }
         };
         let bytes = std::fs::metadata(&path).map_or(0, |meta| meta.len());
-        let run = Arc::new(StoredRun::temporary(StoreReader::new(reader), path.clone()));
+        let run = StoredRun::temporary(StoreReader::new(reader), path.clone()).shared();
         let (shell, targets, parameters) = run
             .with_reader(|reader| {
                 // A run that ended with an error returned no result: the segment names it.

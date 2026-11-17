@@ -210,12 +210,19 @@ fn repointing_moves_every_pane_and_trace_onto_the_same_signals_of_another_run() 
 }
 
 #[test]
-fn an_archive_embeds_the_run_once_and_reads_back() {
+fn an_archive_embeds_the_run_once_names_its_stores_and_reads_back() {
     let (mut document, source, _) = referencing_document();
+    let store = "0123456789abcdef".repeat(4);
     let archive = || DocumentEdit::ArchiveDataset {
         binding: source,
-        archive: RunArchive::new("test-run", "{\"run\":1}").unwrap(),
+        archive: RunArchive::new("test-run", "{\"run\":1}", vec![store.clone()]).unwrap(),
     };
+    assert!(
+        RunArchive::new("test-run", "{}", vec!["0123".to_owned()])
+            .unwrap_err()
+            .to_string()
+            .contains("64-digit digest")
+    );
     document
         .transact(document.revision(), vec![archive()])
         .unwrap();
@@ -235,6 +242,11 @@ fn an_archive_embeds_the_run_once_and_reads_back() {
         .archive()
         .unwrap();
     assert_eq!(archived.record(), "{\"run\":1}");
+    assert_eq!(archived.segments(), [store.clone()]);
+    assert_eq!(
+        reopened.archived_segments().collect::<Vec<_>>(),
+        [store.as_str()]
+    );
 }
 
 struct Samples {
@@ -244,13 +256,15 @@ struct Samples {
 }
 
 impl SourceSamples for Samples {
-    fn series_samples(
+    fn series_figure(
         &self,
         binding: DatasetBinding,
         series: SeriesKey,
-    ) -> Option<(&[f64], &[f64])> {
+        _range: Option<(f64, f64)>,
+        _columns: usize,
+    ) -> Option<(Vec<f64>, Vec<f64>)> {
         (binding == self.binding && series.component == SignalComponent::Display)
-            .then_some((&self.x, &self.y))
+            .then(|| (self.x.clone(), self.y.clone()))
     }
 }
 
