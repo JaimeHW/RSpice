@@ -387,6 +387,9 @@ mod runtime_checkpoint_codec_tests {
                 zi_filters: Vec::new(),
                 timer_event_bound: Some(4.0),
                 accepted_event_step: Some(3.5),
+                analog_system: vec![1, 42, 2, (1 << 32) | 5, 0],
+                // Not a multiple of eight bytes, and not all ASCII.
+                analog_files: Some("[{\"name\":\"r\u{e9}sum\u{e9}.txt\"}]".into()),
             },
             prev_discontinuity: true,
         }
@@ -1003,7 +1006,7 @@ pub struct VerilogADevice {
 
 /// The accepted-state payload's own version, independent of the outer
 /// checkpoint file format. A payload of any other version is refused.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 14;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 15;
 
 /// What one charge slot held immediately before an accepted-state rotation.
 ///
@@ -1185,6 +1188,12 @@ impl VerilogADeviceCheckpoint {
             for &word in &origin.words {
                 encoder.word(word);
             }
+        }
+        encoder.word(self.accepted.analog_system.len() as u64);
+        encoder.words.extend_from_slice(&self.accepted.analog_system);
+        encoder.boolean(self.accepted.analog_files.is_some());
+        if let Some(image) = &self.accepted.analog_files {
+            encoder.text(image);
         }
         encoder.words
     }
@@ -1451,6 +1460,16 @@ impl VerilogADeviceCheckpoint {
             }
             idtmod_origins.push((slot, origin));
         }
+        let count = decoder.length("system-function seeds", 1)?;
+        let mut analog_system = Vec::with_capacity(count);
+        for _ in 0..count {
+            analog_system.push(decoder.word("system-function seed word")?);
+        }
+        let analog_files = if decoder.boolean("open files present")? {
+            Some(decoder.text("open files")?)
+        } else {
+            None
+        };
         decoder.finish()?;
         Ok(Self {
             instance_name,
@@ -1474,6 +1493,8 @@ impl VerilogADeviceCheckpoint {
                 zi_filters,
                 timer_event_bound,
                 accepted_event_step,
+                analog_system,
+                analog_files,
             },
             prev_discontinuity,
         })
@@ -1514,6 +1535,15 @@ impl CheckpointWordEncoder {
         if let Some(value) = value {
             self.float(value);
         }
+    }
+    /// The byte count, then the bytes eight to a word, little-endian.
+    fn text(&mut self, text: &str) {
+        self.word(text.len() as u64);
+        self.words.extend(text.as_bytes().chunks(8).map(|chunk| {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            u64::from_le_bytes(word)
+        }));
     }
 }
 
@@ -1587,6 +1617,32 @@ impl<'a> CheckpointWordDecoder<'a> {
         } else {
             Ok(None)
         }
+    }
+    fn text(&mut self, name: &str) -> Result<String, String> {
+        let length = usize::try_from(self.word(&format!("{name} length"))?)
+            .map_err(|_| format!("{name} length exceeds this platform"))?;
+        let words = self.length_words(name, length.div_ceil(8))?;
+        let mut bytes = Vec::with_capacity(length);
+        for word in words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        if bytes[length..].iter().any(|byte| *byte != 0) {
+            return Err(format!("{name} has bytes past its length"));
+        }
+        bytes.truncate(length);
+        String::from_utf8(bytes).map_err(|_| format!("{name} is not UTF-8"))
+    }
+    /// The next `count` words, when that many remain.
+    fn length_words(&mut self, name: &str, count: usize) -> Result<&'a [u64], String> {
+        if count > self.remaining() {
+            return Err(format!(
+                "{name} needs {count} words but only {} payload words remain",
+                self.remaining()
+            ));
+        }
+        let words = &self.words[self.cursor..self.cursor + count];
+        self.cursor += count;
+        Ok(words)
     }
     fn finish(self) -> Result<(), String> {
         if self.cursor == self.words.len() {
@@ -2756,6 +2812,7 @@ impl VerilogADevice {
             .collect();
         context.variables.resize(model.num_variables, 0.0);
         context.configure_event_state_variables(&model.event_state_variables)?;
+        context.configure_system_calls(&model.analog_system_calls);
         if let Some(artifact) = canonical_artifact {
             let slots = crate::analog_occurrences::counter_slots(&model, artifact)?;
             if !slots.is_empty() {
@@ -5066,6 +5123,54 @@ impl VerilogADevice {
         self.context.analog_files = Some(files);
     }
 
+    /// The model's value-returning system-function calls, by site, for a
+    /// host that answers their plusarg queries.
+    pub fn analog_system_sites(&self) -> &[rspice_veriloga_runtime::AnalogSystemSite] {
+        self.context
+            .analog_system
+            .as_deref()
+            .map_or(&[], |system| system.sites())
+    }
+
+    /// Whether the host gave the instance a file table.
+    pub fn has_analog_files(&self) -> bool {
+        self.context.analog_files.is_some()
+    }
+
+    /// The warnings the instance's file table raised at accepted points
+    /// (a `$fopen` the run refused, a `$fscanf` of a bad descriptor), to
+    /// report once.
+    pub fn take_analog_file_warnings(&mut self) -> Vec<String> {
+        self.context
+            .analog_files
+            .as_mut()
+            .map(|files| files.take_warnings())
+            .unwrap_or_default()
+    }
+
+    /// The run's random seed, which a `$random` or `$arandom` without a seed
+    /// draws from, as the digital kernel's `$random` does.
+    pub fn set_analog_random_seed(&mut self, seed: i32) {
+        if let Some(system) = &mut self.context.analog_system {
+            system.set_stream_seed(seed);
+        }
+    }
+
+    /// The host's plusarg answers, one per [`Self::analog_system_sites`]
+    /// entry: `Some` where a plusarg matched, with `$value$plusargs`'s
+    /// converted value.
+    pub fn set_analog_plusargs(&mut self, resolved: Vec<Option<f64>>) -> Result<(), VmError> {
+        match &mut self.context.analog_system {
+            Some(system) => system
+                .set_plusargs(resolved)
+                .map_err(VmError::InvalidRuntimeConfiguration),
+            None if resolved.is_empty() => Ok(()),
+            None => Err(VmError::InvalidRuntimeConfiguration(
+                "plusarg answers for a model without system-function sites".into(),
+            )),
+        }
+    }
+
     /// Consume the analog task calls published by accepted-state application.
     /// The analysis host owns output delivery and simulation control; a JIT
     /// helper never prints, suspends the engine, or exits the host process.
@@ -5282,6 +5387,18 @@ impl VerilogADevice {
         self.context
             .restore_accepted_checkpoint(&checkpoint.accepted);
         self.prev_discontinuity = checkpoint.prev_discontinuity;
+    }
+
+    /// Reopen the checkpoint's open files in the host's table, after
+    /// [`Self::apply_validated_checkpoint_state`]: a file the instance wrote
+    /// is cut back to what it held at the checkpoint, and one it read must
+    /// still hold what it read. Fails when the files changed underneath.
+    pub fn restore_checkpoint_files(
+        &mut self,
+        checkpoint: &VerilogADeviceCheckpoint,
+    ) -> Result<(), VmError> {
+        self.context
+            .restore_checkpoint_files(&checkpoint.accepted)
     }
 
     /// Continue one analysis in a rebuilt instance whose configuration is

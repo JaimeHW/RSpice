@@ -1149,6 +1149,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         assignment_steps,
         noise_assignment_steps,
         analog_task_origins: _,
+        analog_system_calls: _,
         contribution_sources: _,
         analog_operator_origins: _,
         periodic_derivative_slots: _,

@@ -562,6 +562,13 @@ pub(super) struct SmallSignalEngine<'a, V: DynamicOperators> {
     integral_origins: BTreeMap<usize, IdtModOrigin>,
     /// Operator state a non-frequency algebra keeps for this evaluation.
     pub(super) realization: V::Realization,
+    /// A private copy of the instance's system-function state and files,
+    /// started from the accepted point when a call first needs it, so the
+    /// replay draws what the evaluation drew and changes nothing.
+    system: Option<(
+        Box<rspice_veriloga_runtime::AnalogSystemState>,
+        Option<Box<dyn rspice_veriloga_runtime::AnalogFileTable>>,
+    )>,
 }
 
 impl<V: DynamicOperators> Drop for SmallSignalEngine<'_, V> {
@@ -657,7 +664,29 @@ impl<'a, V: DynamicOperators> SmallSignalEngine<'a, V> {
             range_lost: false,
             integral_origins: BTreeMap::new(),
             realization,
+            system: None,
         }
+    }
+
+    fn system_call(&mut self, site: u32, operands: &[f64]) -> Result<f64, VmError> {
+        if self.system.is_none() {
+            let Some(state) = self.context.analog_system.as_deref() else {
+                return Err(VmError::InvalidRuntimeOperation(format!(
+                    "the model has no system-function site {site}"
+                )));
+            };
+            let mut state = Box::new(state.clone());
+            state.begin_evaluation();
+            let mut files = self.context.analog_files.clone();
+            if let Some(files) = &mut files {
+                files.begin_evaluation();
+            }
+            self.system = Some((state, files));
+        }
+        let (state, files) = self.system.as_mut().expect("installed above");
+        state
+            .call(files.as_mut(), site, operands)
+            .map_err(VmError::InvalidRuntimeOperation)
     }
 
     pub(super) fn execute_value(&mut self, program: &BytecodeProgram) -> Result<V, VmError> {
@@ -1481,6 +1510,22 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
             Instruction::NamedLimiterPrevious(_) => {}
             Instruction::NamedLimiterStore(_) => {
                 let _candidate = self.pop("NamedLimiterStore candidate")?;
+            }
+            Instruction::SystemCall { site, operands } => {
+                let mut values = (0..*operands)
+                    .map(|_| self.pop_real("system function operand"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                values.reverse();
+                let value = self.system_call(*site, &values)?;
+                self.stack.push(V::constant(value));
+            }
+            Instruction::SystemOutput { site, index } => {
+                let fallback = self.pop("system function output")?;
+                let assigned = self
+                    .system
+                    .as_ref()
+                    .and_then(|(state, _)| state.assigned_output(*site, *index as usize));
+                self.stack.push(assigned.map_or(fallback, V::constant));
             }
             Instruction::TableLookup(table_id) => {
                 let input = self.pop_real("TableLookup")?;

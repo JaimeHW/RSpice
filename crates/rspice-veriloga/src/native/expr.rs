@@ -133,6 +133,18 @@ pub(crate) enum NativeOp {
     },
     /// Record a counter write: operands are new value and absolute slot.
     RecordAnalogCounter,
+    /// Call the value-returning system function at `site` with `operands`
+    /// stack operands, which its value replaces.
+    SystemCall {
+        site: u32,
+        operands: u16,
+    },
+    /// Replace the target value on the stack with output `index` of the
+    /// latest call at `site`, when that call assigned it.
+    SystemOutput {
+        site: u32,
+        index: u32,
+    },
     Const(f64),
     LoadParam(usize),
     LoadParamGiven(usize),
@@ -1457,6 +1469,38 @@ impl NativeProgram {
                         continue;
                     }
                     ops.push(NativeOp::IntegerBinary(op));
+                }
+                Instruction::SystemCall { site, operands } => {
+                    let count = *operands as usize;
+                    let operands = u16::try_from(count)
+                        .ok()
+                        .filter(|_| count <= depth)
+                        .ok_or_else(|| JitError::Encoding {
+                            model: model.clone(),
+                            detail: "system function operand count exceeds the stack".into(),
+                        })?;
+                    if count == 0 {
+                        push_stack(&mut depth, &mut max_stack_depth);
+                    } else {
+                        depth -= count - 1;
+                    }
+                    ops.push(NativeOp::SystemCall {
+                        site: *site,
+                        operands,
+                    });
+                }
+                Instruction::SystemOutput { site, index } => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::SystemOutput {
+                        site: *site,
+                        index: *index,
+                    });
                 }
                 Instruction::TableLookup(table_id) => {
                     validate_index(
@@ -6792,8 +6836,57 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "white_noise" => self.lower_white_noise_intrinsic(name, args),
             "flicker_noise" => self.lower_flicker_noise_intrinsic(name, args),
             "noise_table" | "noise_table_log" => self.lower_noise_table_intrinsic(name, args),
+            SYSTEM_CALL_INTRINSIC => {
+                let Some((site, operands)) = args.split_first() else {
+                    return Err(self.unsupported("a system-function call without its site"));
+                };
+                let site = self.system_site(*site)?;
+                for &operand in operands {
+                    self.lower(operand)?;
+                }
+                let count = u16::try_from(operands.len())
+                    .map_err(|_| self.unsupported("a system-function call's operands"))?;
+                if count == 0 {
+                    self.push(NativeOp::SystemCall {
+                        site,
+                        operands: count,
+                    })
+                } else {
+                    require_stack(
+                        self.model.clone(),
+                        self.entry_kind,
+                        "system function",
+                        self.depth,
+                        operands.len(),
+                    )?;
+                    self.depth -= operands.len() - 1;
+                    self.ops.push(NativeOp::SystemCall {
+                        site,
+                        operands: count,
+                    });
+                    Ok(())
+                }
+            }
+            SYSTEM_OUTPUT_INTRINSIC => {
+                let [site, index, fallback] = args else {
+                    return Err(self.unsupported("a system-function output read's arguments"));
+                };
+                let site = self.system_site(*site)?;
+                let index = self.system_site(*index)?;
+                self.lower(*fallback)?;
+                self.append_unary(NativeOp::SystemOutput { site, index })
+            }
             _ => Err(self.unsupported(format!("intrinsic function '{name}'"))),
         }
+    }
+
+    /// A materialized system-function call's site or output index, which
+    /// semantic analysis wrote as a literal.
+    fn system_site(&self, expr_id: ExprId) -> JitResult<u32> {
+        self.constant_number(expr_id)
+            .filter(|value| *value >= 0.0 && value.fract() == 0.0 && *value <= f64::from(u32::MAX))
+            .map(|value| value as u32)
+            .ok_or_else(|| self.unsupported("a system-function site that is not a literal"))
     }
 
     fn lower_thermal_voltage_intrinsic(
@@ -7939,9 +8032,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 fn electrically_independent_query(name: &str) -> bool {
     matches!(
         name,
-        "temperature" | "abstime" | "mfactor" | "param_given" | "port_connected" | "analysis"
+        "temperature"
+            | "abstime"
+            | "mfactor"
+            | "param_given"
+            | "port_connected"
+            | "analysis"
+            | SYSTEM_CALL_INTRINSIC
+            | SYSTEM_OUTPUT_INTRINSIC
     )
 }
+
+/// [`crate::analog_tasks::SYSTEM_CALL`] and [`crate::analog_tasks::SYSTEM_OUTPUT`]
+/// as [`normalize_intrinsic_name`] spells them. Neither varies with the
+/// solution.
+const SYSTEM_CALL_INTRINSIC: &str = "rspice@system_call";
+const SYSTEM_OUTPUT_INTRINSIC: &str = "rspice@system_output";
 
 fn normalize_intrinsic_name(name: &str) -> String {
     name.strip_prefix('$').unwrap_or(name).to_ascii_lowercase()
@@ -8097,6 +8203,8 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::AnalogFinish(_) => "AnalogFinish",
         NativeOp::AnalogOutput { .. } => "AnalogOutput",
         NativeOp::RecordAnalogCounter => "RecordAnalogCounter",
+        NativeOp::SystemCall { .. } => "SystemCall",
+        NativeOp::SystemOutput { .. } => "SystemOutput",
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",
         NativeOp::LoadParamGiven(_) => "LoadParamGiven",
@@ -9098,6 +9206,8 @@ fn compute_native_max_stack_depth(
 pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
     match op {
         NativeOp::RecordAnalogCounter => (4, 1),
+        NativeOp::SystemCall { operands, .. } => (usize::from(*operands), 1),
+        NativeOp::SystemOutput { .. } => (1, 1),
         NativeOp::AnalogTasksEnabled => (0, 1),
         NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_) => (1, 1),
         NativeOp::AnalogOutput { arguments, .. } => (*arguments, 1),
@@ -9317,6 +9427,8 @@ fn format_current_endpoint(endpoint: usize) -> String {
 fn instruction_name(instruction: &Instruction) -> &'static str {
     match instruction {
         Instruction::PushConst(_) => "PushConst",
+        Instruction::SystemCall { .. } => "SystemCall",
+        Instruction::SystemOutput { .. } => "SystemOutput",
         Instruction::PushParam(_) => "PushParam",
         Instruction::PushParamGiven(_) => "PushParamGiven",
         Instruction::PushBranchCurrent(_) => "PushBranchCurrent",
@@ -9746,6 +9858,7 @@ mod tests {
             param_aliases: Vec::new(),
             variables: Vec::new(),
             event_state_variables: Vec::new(),
+            analog_system_calls: Vec::new(),
             switch_branch_variables: Vec::new(),
             private_switches: Vec::new(),
             branches: Vec::new(),

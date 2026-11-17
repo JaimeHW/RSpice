@@ -1871,6 +1871,7 @@ endmodule
             context
                 .configure_event_state_variables(&report.model.event_state_variables)
                 .unwrap();
+            context.configure_system_calls(&report.model.analog_system_calls);
             context
                 .configure_evaluation_inputs(
                     &report.model.evaluation_input_variables,
@@ -3397,6 +3398,60 @@ endmodule
                 (AnalogTaskKind::Fatal, vec![real(1.0), real(3.0)]),
             ]
         );
+    }
+
+    #[test]
+    fn wasm_system_functions_draw_what_the_interpreter_draws() {
+        use rspice_veriloga_runtime::random;
+        let source = "module draws(p,n); inout p,n; electrical p,n; integer seed, r, b; real g;
+             analog begin r = $random(seed); g = $rdist_normal(seed, 1.0, 0.5) + $arandom(5);
+             b = $realtobits(-2.75e-3); I(p,n)<+V(p,n); end endmodule";
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, Some("draws"))
+            .unwrap();
+        let slot = |name: &str| {
+            report
+                .model
+                .variable_names
+                .iter()
+                .position(|v| v == name)
+                .unwrap()
+        };
+        let mut harness = FusedKernelHarness::for_source(source, "draws");
+        harness.reset();
+        let context = harness.store.data_mut().context_mut();
+        context.variables[slot("seed")] = 42.0;
+        context.commit_initialization().unwrap();
+        let (mut seed, mut internal) = (42, 5);
+        for _ in 0..2 {
+            let r = random::random(&mut seed);
+            let g = random::rdist_normal(&mut seed, 1.0, 0.5)
+                + f64::from(random::random(&mut internal));
+            // Two Newton evaluations of one point draw the same values.
+            for _ in 0..2 {
+                let context = harness.store.data_mut().context_mut();
+                context.begin_stateful_evaluation();
+                let variables = context.variables.clone();
+                for (index, value) in variables.into_iter().enumerate() {
+                    harness.write_f64(FusedKernelHarness::VARIABLES as usize + index * 8, value);
+                }
+                harness.call_assignments();
+                let read = |name: &str| {
+                    harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot(name) * 8)
+                };
+                assert_eq!(read("r"), f64::from(r));
+                assert_eq!(read("g"), g);
+                assert_eq!(read("seed"), f64::from(seed));
+                // Icarus 12: `j = $realtobits(-2.75e-3)` is 34359738.
+                assert_eq!(read("b"), 34_359_738.0);
+            }
+            let variables = (0..report.model.num_variables)
+                .map(|index| harness.read_f64(FusedKernelHarness::VARIABLES as usize + index * 8))
+                .collect::<Vec<_>>();
+            let context = harness.store.data_mut().context_mut();
+            context.variables.copy_from_slice(&variables);
+            context.advance_state().unwrap();
+        }
     }
 
     #[test]

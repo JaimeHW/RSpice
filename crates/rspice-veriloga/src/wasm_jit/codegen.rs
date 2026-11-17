@@ -2052,6 +2052,17 @@ fn emit_helper_call(
     }
 
     let descriptor = helper_descriptor(op)?;
+    if let NativeOp::SystemCall {
+        operands: count, ..
+    } = op
+    {
+        if usize::from(count) != operands.len() {
+            return Err(WasmJitError::Encoding(
+                "system function operand count mismatch".into(),
+            ));
+        }
+        return emit_slice_helper_call(body, descriptor, operands, result);
+    }
     if let NativeOp::AnalogOutput { arguments, .. } = op {
         if arguments != operands.len() {
             return Err(WasmJitError::Encoding(
@@ -2277,6 +2288,11 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::AnalogOutput { site, kind, .. } => {
             set_index(&mut descriptor, 464, site as usize)?;
             descriptor.aux1 = i32::from(kind.code());
+        }
+        NativeOp::SystemCall { site, .. } => set_index(&mut descriptor, 465, site as usize)?,
+        NativeOp::SystemOutput { site, index } => {
+            set_index(&mut descriptor, 466, site as usize)?;
+            descriptor.aux1 = index_i32(index as usize)?;
         }
         NativeOp::LoadSimParamValue(parameter) => {
             set_index(&mut descriptor, 470, parameter as usize)?

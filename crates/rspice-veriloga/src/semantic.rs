@@ -428,6 +428,7 @@ pub(crate) mod source_references;
 mod string_parameters;
 mod switch_branches;
 mod symbols;
+mod system_calls;
 mod unreached_nodes;
 
 pub use analyzed::*;
@@ -1222,6 +1223,7 @@ impl SemanticAnalyzer {
             param_aliases: Vec::new(),
             variables: Vec::new(),
             event_state_variables: Vec::new(),
+            analog_system_calls: Vec::new(),
             switch_branch_variables: Vec::new(),
             private_switches: Vec::new(),
             branches: Vec::new(),
@@ -6935,6 +6937,9 @@ impl SemanticAnalyzer {
                 if let Some(resolved) = self.lower_module_query_function(function)? {
                     return Ok(resolved);
                 }
+                if let Some(value) = self.materialize_system_value_call(function, module, sink)? {
+                    return Ok(value);
+                }
                 let function = SystemFunction {
                     name: function.name.clone(),
                     args: function
@@ -7281,10 +7286,13 @@ impl SemanticAnalyzer {
                         .iter()
                         .any(|arg| self.expression_contains_output_function_call(arg))
             }
-            Expression::SystemFunction(function) => function
-                .args
-                .iter()
-                .any(|arg| self.expression_contains_output_function_call(arg)),
+            Expression::SystemFunction(function) => {
+                self.is_system_value_call(function)
+                    || function
+                        .args
+                        .iter()
+                        .any(|arg| self.expression_contains_output_function_call(arg))
+            }
             Expression::Binary(binary) => {
                 self.expression_contains_output_function_call(&binary.left)
                     || self.expression_contains_output_function_call(&binary.right)
@@ -8050,6 +8058,7 @@ impl SemanticAnalyzer {
                     if f.name.starts_with('$')
                         && !crate::expr_converter::LOWERED_SYSTEM_FUNCTION_NAMES
                             .contains(&f.name.as_str())
+                        && !system_calls::is_internal_system_name(&f.name)
                     {
                         self.record_unresolved_name(
                             Self::system_name_error_kind(&f.name, "function"),

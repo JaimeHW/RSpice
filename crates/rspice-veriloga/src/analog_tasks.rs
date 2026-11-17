@@ -169,6 +169,32 @@ pub(crate) fn is_standard_system_name(name: &str) -> bool {
     STANDARD_SYSTEM_NAMES.contains(&name)
 }
 
+/// The internal name a materialized call to a value-returning system
+/// function takes: its site, then its numeric operands. `@` cannot begin a
+/// source identifier, so no authored call takes it.
+pub(crate) const SYSTEM_CALL: &str = "$rspice@system_call";
+
+/// The internal name a read of a materialized call's output takes: the
+/// call's site, the output's index, and the target's own value, which the
+/// read returns when the call did not assign the output.
+pub(crate) const SYSTEM_OUTPUT: &str = "$rspice@system_output";
+
+/// One value-returning system-function call and where it was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalogSystemCall<S> {
+    pub site: rspice_veriloga_runtime::AnalogSystemSite,
+    pub span: S,
+}
+
+impl<S> AnalogSystemCall<S> {
+    pub(crate) fn map_span<T>(self, map: impl FnOnce(S) -> T) -> AnalogSystemCall<T> {
+        AnalogSystemCall {
+            site: self.site,
+            span: map(self.span),
+        }
+    }
+}
+
 /// An argument's language type must survive numerical backend lowering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalogTaskOperand<E> {

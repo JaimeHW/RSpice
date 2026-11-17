@@ -171,6 +171,14 @@ pub fn builtins() -> impl Iterator<Item = (&'static str, BuiltinKind)> {
                 .map(|name| (*name, BuiltinKind::SystemFunction)),
         )
         .chain(
+            rspice_veriloga_runtime::AnalogSystemFunction::ALL
+                .iter()
+                .map(|function| function.name())
+                // `$bitstoreal` reads back what `$realtobits` wrote.
+                .chain(["$bitstoreal"])
+                .map(|name| (name, BuiltinKind::SystemFunction)),
+        )
+        .chain(
             ANALOG_SYSTEM_TASKS
                 .iter()
                 .map(|name| (*name, BuiltinKind::SystemTask)),
@@ -321,6 +329,10 @@ mod tests {
             Some(BuiltinKind::SystemFunction)
         );
         assert_eq!(builtin_kind("$strobe"), Some(BuiltinKind::SystemTask));
+        assert_eq!(
+            builtin_kind("$rdist_normal"),
+            Some(BuiltinKind::SystemFunction)
+        );
         assert_eq!(builtin_kind("M_PI"), Some(BuiltinKind::Constant));
         assert_eq!(builtin_kind("gain"), None);
     }

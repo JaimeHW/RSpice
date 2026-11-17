@@ -290,6 +290,7 @@ mod tests {
             initialization_prologue_variables: Vec::new(),
             noise_assignment_steps: Vec::new(),
             analog_task_origins: Vec::new(),
+            analog_system_calls: Vec::new(),
             contribution_sources: Vec::new(),
             analog_operator_origins: Vec::new(),
             periodic_derivative_slots: Some(Vec::new()),

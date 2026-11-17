@@ -1092,6 +1092,24 @@ impl<'a> Vm<'a> {
             // TableLookup: linear interpolation in lookup table
             // Stack: [input_value] -> [interpolated_value]
             // Uses context.lookup_tables for table storage
+            Instruction::SystemCall { site, operands } => {
+                let start = self
+                    .stack
+                    .len()
+                    .checked_sub(*operands as usize)
+                    .ok_or(VmError::StackUnderflow("system function"))?;
+                let value = self
+                    .context
+                    .call_system_function(*site, &self.stack[start..])
+                    .map_err(VmError::InvalidRuntimeOperation)?;
+                self.stack.truncate(start);
+                self.stack.push(value);
+            }
+            Instruction::SystemOutput { site, index } => {
+                let fallback = self.pop()?;
+                self.stack
+                    .push(self.context.system_function_output(*site, *index, fallback));
+            }
             Instruction::TableLookup(table_id) => {
                 let input = self.pop()?;
                 let table = self

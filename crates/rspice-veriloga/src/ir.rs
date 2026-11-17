@@ -260,6 +260,10 @@ pub struct DeviceIR {
     /// Sorted, duplicate-free procedural slots requiring accepted state,
     /// including event writes, initialization and retained entry inputs.
     pub event_state_variables: Vec<usize>,
+    /// Each value-returning system-function call, by the site its
+    /// [`Node::SystemCall`]s name.
+    pub analog_system_calls:
+        Vec<crate::analog_tasks::AnalogSystemCall<crate::canonical_ir::SourceSpanRef>>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,
@@ -699,6 +703,12 @@ impl DeviceIR {
             parameters: Vec::new(),
             variables: Vec::new(),
             event_state_variables: module.event_state_variables.clone(),
+            analog_system_calls: module
+                .analog_system_calls
+                .iter()
+                .cloned()
+                .map(|call| call.map_span(crate::canonical_ir::SourceSpanRef::from))
+                .collect(),
             switch_branch_variables: module.switch_branch_variables.clone(),
             initialization_prologue_variables: module
                 .prologue_statements
@@ -1600,6 +1610,11 @@ impl DeviceIR {
                 | Node::Limexp(inner)
                 | Node::IdtCompanion(inner)
                 | Node::LimiterPrevious(inner) => contains_ddt(arena, inner),
+                Node::SystemCall { args, .. } => arena
+                    .call_args(args)
+                    .iter()
+                    .any(|arg| contains_ddt(arena, *arg)),
+                Node::SystemOutput { .. } => false,
                 Node::NamedLimit {
                     proposed,
                     candidate,
@@ -2462,7 +2477,10 @@ pub mod autodiff {
             | Node::SimParamPresent(_)
             | Node::Mfactor
             | Node::PortConnected(_)
-            | Node::Analysis(_) => 0,
+            | Node::Analysis(_)
+            // A system function's value does not vary with the solution.
+            | Node::SystemCall { .. }
+            | Node::SystemOutput { .. } => 0,
             Node::Binary(op, left, right) => match op {
                 BinaryOp::CheckedValue | BinaryOp::DiscreteValue => recurse(right),
                 BinaryOp::Add
@@ -3523,7 +3541,7 @@ pub mod autodiff {
             };
         }
         match *arena.node(expr) {
-            Node::FreezeDerivative(_) => {}
+            Node::FreezeDerivative(_) | Node::SystemCall { .. } | Node::SystemOutput { .. } => {}
             Node::Var(name) => {
                 if let Some(processes) = deps.get(arena.name(name).as_str()) {
                     axes.extend(processes.iter().copied());

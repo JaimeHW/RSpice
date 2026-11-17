@@ -1298,7 +1298,9 @@ impl FunctionCompiler {
                         | NativeOp::AnalogTaskGuard
                         | NativeOp::AnalogFinish(_)
                         | NativeOp::AnalogOutput { .. }
-                        | NativeOp::RecordAnalogCounter => {
+                        | NativeOp::RecordAnalogCounter
+                        | NativeOp::SystemCall { .. }
+                        | NativeOp::SystemOutput { .. } => {
                             unreachable!(
                                 "operand-array helpers are emitted before register preparation"
                             )
@@ -13914,6 +13916,8 @@ mod tests {
             evaluation_state_inputs_len: 0,
             analog_occurrences: std::ptr::null_mut(),
             event_deferral: std::ptr::null_mut(),
+            analog_system: std::ptr::null_mut(),
+            analog_files: std::ptr::null_mut(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

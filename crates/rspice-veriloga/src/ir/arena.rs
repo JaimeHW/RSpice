@@ -323,6 +323,17 @@ pub enum Node {
         /// Index into the arena's spilled-argument table.
         args: u32,
     },
+    /// A value-returning system-function call (`$random`, `$fscanf`, ...):
+    /// the site in the model's table and its numeric operands,
+    /// `ExprArena::call_args(args)`. It has effects and zero derivative.
+    SystemCall { site: u32, args: u32 },
+    /// Output `index` of the latest call at `site`, or `fallback`, the
+    /// assigned target's own value, when that call did not assign it.
+    SystemOutput {
+        site: u32,
+        index: u32,
+        fallback: NodeId,
+    },
     /// Time derivative (`ddt`).
     Ddt(NodeId),
     /// Time integral (`idt`) and its optional initial condition.
@@ -876,6 +887,14 @@ impl ExprArena {
         self.push(node)
     }
 
+    /// Append a system-function call of `site` with `args`.
+    pub fn push_system_call(&mut self, site: u32, args: &[NodeId]) -> NodeId {
+        let index =
+            u32::try_from(self.call_args.len()).expect("spilled call count is below u32::MAX");
+        self.call_args.push(args.to_vec());
+        self.push(Node::SystemCall { site, args: index })
+    }
+
     /// Append a heavy payload and the node that addresses it.
     pub fn push_heavy(&mut self, heavy: Heavy) -> NodeId {
         let kind = heavy.kind();
@@ -1085,6 +1104,12 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
             optional(*a, f);
             optional(*b, f);
         }
+        Node::SystemCall { args, .. } => {
+            for arg in arena.call_args(*args) {
+                f(*arg);
+            }
+        }
+        Node::SystemOutput { fallback, .. } => f(*fallback),
         Node::CallSpilled { args, .. } => {
             for arg in arena.call_args(*args) {
                 f(*arg);
@@ -1507,6 +1532,32 @@ pub fn rebuild_children(
                 return id;
             }
             arena.push_call(func, &new)
+        }
+        Node::SystemCall { site, args } => {
+            let old = arena.call_args(args).to_vec();
+            let new = old
+                .iter()
+                .map(|arg| descend(arena, *arg))
+                .collect::<Vec<_>>();
+            if new == old {
+                return id;
+            }
+            arena.push_system_call(site, &new)
+        }
+        Node::SystemOutput {
+            site,
+            index,
+            fallback,
+        } => {
+            let new = descend(arena, fallback);
+            if new == fallback {
+                return id;
+            }
+            arena.push(Node::SystemOutput {
+                site,
+                index,
+                fallback: new,
+            })
         }
         Node::Conditional(..) => {
             // A chain's else-branches are rebuilt here, in a loop, so a walk

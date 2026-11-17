@@ -218,6 +218,8 @@ impl Effects {
             NativeOp::AnalogFinish(_)
                 | NativeOp::AnalogOutput { .. }
                 | NativeOp::RecordAnalogCounter
+                | NativeOp::SystemCall { .. }
+                | NativeOp::SystemOutput { .. }
         ) {
             bits |= Self::WRITE_JOURNAL;
         }
@@ -3994,6 +3996,8 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::RecordAnalogCounter
             | NativeOp::AnalogFinish(_)
             | NativeOp::AnalogOutput { .. }
+            | NativeOp::SystemCall { .. }
+            | NativeOp::SystemOutput { .. }
             | NativeOp::BinaryMath(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
@@ -4207,6 +4211,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::RecordAnalogCounter
             | NativeOp::AnalogFinish(_)
             | NativeOp::AnalogOutput { .. }
+            | NativeOp::SystemCall { .. }
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)

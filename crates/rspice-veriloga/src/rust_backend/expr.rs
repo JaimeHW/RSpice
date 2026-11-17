@@ -671,6 +671,13 @@ impl ExprEmitter<'_> {
                 let index = self.port_connected_index(args)?;
                 format!("if self.port_connected[{index}] {{ 1.0 }} else {{ 0.0 }}")
             }
+            crate::analog_tasks::SYSTEM_CALL | crate::analog_tasks::SYSTEM_OUTPUT => {
+                return Err(self.unsupported(
+                    "a value-returning system function ($random, $arandom, $dist_*, \
+                     $rdist_*, $realtobits, $test$plusargs, $value$plusargs, $fopen or \
+                     $fscanf): those run on the interpreter, native and browser routes",
+                ));
+            }
             _ => return Err(self.unsupported(format!("system function '{name}'"))),
         };
         Ok(self.emit_value(base, value))

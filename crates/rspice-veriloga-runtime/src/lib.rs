@@ -22,6 +22,7 @@ pub mod absdelta;
 mod analog_effects;
 mod analog_files;
 mod analog_lifecycle;
+mod analog_system;
 pub mod arithmetic;
 pub mod array_index;
 mod descriptor;
@@ -58,6 +59,7 @@ pub use analog_lifecycle::{
     ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names,
     analysis_query_id, analysis_query_mask, analysis_query_name,
 };
+pub use analog_system::{AnalogSeed, AnalogSystemFunction, AnalogSystemSite, AnalogSystemState};
 
 pub use descriptor::*;
 pub use integration::{

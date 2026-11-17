@@ -526,6 +526,7 @@ impl CodeGenerator {
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),
             analog_task_origins: Vec::new(),
+            analog_system_calls: ir.analog_system_calls.clone(),
             contribution_sources: Vec::new(),
             analog_operator_origins: Vec::new(),
             periodic_derivative_slots: Some(Vec::new()),
@@ -1467,6 +1468,26 @@ impl CodeGenerator {
                 }
                 // Variable-arity internal arithmetic retains every operand.
                 // Source-call arities are checked before reaching this IR.
+                Node::SystemCall { site, args } => {
+                    let operands = arena.call_args(args);
+                    for arg in operands {
+                        self.emit_expr(arena, *arg, emit_ctx, program)?;
+                    }
+                    program.instructions.push(Instruction::SystemCall {
+                        site,
+                        operands: operands.len() as u32,
+                    });
+                }
+                Node::SystemOutput {
+                    site,
+                    index,
+                    fallback,
+                } => {
+                    self.emit_expr(arena, fallback, emit_ctx, program)?;
+                    program
+                        .instructions
+                        .push(Instruction::SystemOutput { site, index });
+                }
                 Node::CallSpilled { func, args } => {
                     for arg in arena.call_args(args) {
                         self.emit_expr(arena, *arg, emit_ctx, program)?;

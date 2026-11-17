@@ -129,6 +129,12 @@ pub struct CompiledModel {
     /// had no source text to locate a call in.
     #[serde(default)]
     pub analog_task_origins: Vec<crate::analog_tasks::AnalogTaskOrigin>,
+    /// Each value-returning system-function call, by the site its
+    /// [`Instruction::SystemCall`]s name. Its file and line are filled in
+    /// where the task calls are located.
+    #[serde(default)]
+    pub analog_system_calls:
+        Vec<crate::analog_tasks::AnalogSystemCall<crate::canonical_ir::SourceSpanRef>>,
     /// Where each contribution was written, by stamp-program index, as
     /// `file:line: text`, for a run-time diagnostic that has to name one.
     /// Empty when the compile had no source text to locate them in.
@@ -1094,6 +1100,20 @@ pub enum Instruction {
         lower: i64,
         len: u32,
     },
+    /// Call the value-returning system function at `site` of
+    /// [`CompiledModel::analog_system_calls`].
+    /// Stack: `[operand 0, .., operand n-1] -> [value]`.
+    SystemCall {
+        site: u32,
+        operands: u32,
+    },
+    /// Output `index` of the latest call at `site`, or the target's own
+    /// value when that call did not assign it.
+    /// Stack: `[target] -> [value]`.
+    SystemOutput {
+        site: u32,
+        index: u32,
+    },
 }
 
 impl CompiledModel {
@@ -1213,6 +1233,12 @@ impl CompiledModel {
         origins.sort_by_key(|origin| origin.site);
         origins.dedup_by_key(|origin| origin.site);
         self.analog_task_origins = origins;
+        for call in &mut self.analog_system_calls {
+            if let Some((file, line)) = locate(call.span) {
+                call.site.file = file.to_string();
+                call.site.line = line;
+            }
+        }
     }
 
     /// Place each task call where `original`, compiled from the same text,
@@ -1260,6 +1286,15 @@ impl CompiledModel {
         origins.sort_by_key(|origin| origin.site);
         origins.dedup_by_key(|origin| origin.site);
         self.analog_task_origins = origins;
+        for call in &mut self.analog_system_calls {
+            if let Some(placed) = original.analog_system_calls.iter().find(|placed| {
+                (placed.span.source_file_id, placed.span.start)
+                    == (call.span.source_file_id, call.span.start)
+            }) {
+                call.site.file.clone_from(&placed.site.file);
+                call.site.line = placed.site.line;
+            }
+        }
     }
 
     /// Every task call's site and span.

@@ -353,6 +353,10 @@ pub struct VmContext {
     /// The instance's open files, which the host installs; transacted with
     /// the event variables (see [`rspice_veriloga_runtime::AnalogFileTable`]).
     pub(crate) analog_files: Option<Box<dyn rspice_veriloga_runtime::AnalogFileTable>>,
+    /// What the instance's value-returning system-function calls keep, when
+    /// the model makes any; transacted with the event variables (see
+    /// [`rspice_veriloga_runtime::AnalogSystemState`]).
+    pub(crate) analog_system: Option<Box<rspice_veriloga_runtime::AnalogSystemState>>,
     /// Numerical replay/probe passes preserve the candidate journal and may
     /// not append calls to it. This is separate from the limiter policy.
     pub(crate) record_task_effects: bool,
@@ -518,6 +522,13 @@ pub struct VmAcceptedCheckpoint {
     /// The accepted point whose analog events stepped the event-state lane,
     /// while the interval leaving it is solved ([`VmContext::accepted_event_step`]).
     pub accepted_event_step: Option<f64>,
+    /// The value-returning system functions' accepted seeds
+    /// ([`rspice_veriloga_runtime::AnalogSystemState::checkpoint_words`]);
+    /// empty for a model that calls none.
+    pub analog_system: Vec<u64>,
+    /// The instance's accepted open files, as its host's table saves them;
+    /// `None` when the host gave it no table.
+    pub analog_files: Option<String>,
 }
 
 impl Default for VmContext {
@@ -542,6 +553,7 @@ impl Default for VmContext {
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             analog_files: None,
+            analog_system: None,
             analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
@@ -624,6 +636,38 @@ impl VmContext {
         }
     }
 
+    /// Give the instance the state its value-returning system-function
+    /// calls keep, when the model makes any.
+    pub(crate) fn configure_system_calls<S>(
+        &mut self,
+        calls: &[crate::analog_tasks::AnalogSystemCall<S>],
+    ) {
+        self.analog_system = (!calls.is_empty()).then(|| {
+            Box::new(rspice_veriloga_runtime::AnalogSystemState::new(
+                calls.iter().map(|call| call.site.clone()).collect(),
+            ))
+        });
+    }
+
+    /// Call the value-returning system function at `site`.
+    pub(crate) fn call_system_function(
+        &mut self,
+        site: u32,
+        operands: &[f64],
+    ) -> Result<f64, String> {
+        match self.analog_system.as_deref_mut() {
+            Some(system) => system.call(self.analog_files.as_mut(), site, operands),
+            None => Err(format!("the model has no system-function site {site}")),
+        }
+    }
+
+    /// Output `index` of the latest system-function call at `site`.
+    pub(crate) fn system_function_output(&self, site: u32, index: u32, fallback: f64) -> f64 {
+        self.analog_system.as_deref().map_or(fallback, |system| {
+            system.output(site, index as usize, fallback)
+        })
+    }
+
     /// The instance's open files, when the host installed them.
     pub(crate) fn analog_files_mut(
         &mut self,
@@ -668,6 +712,9 @@ impl VmContext {
         }
         if let Some(files) = &mut self.analog_files {
             files.begin_evaluation();
+        }
+        if let Some(system) = &mut self.analog_system {
+            system.discard();
         }
         for origin in self.idtmod_origins.values_mut() {
             origin.candidate = None;
@@ -802,6 +849,7 @@ impl VmContext {
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             analog_files: None,
+            analog_system: None,
             analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
@@ -974,6 +1022,9 @@ impl VmContext {
         }
         if let Some(files) = &mut self.analog_files {
             files.accept();
+        }
+        if let Some(system) = &mut self.analog_system {
+            system.accept();
         }
         for (&index, accepted) in self
             .event_state_indices
@@ -1224,6 +1275,9 @@ impl VmContext {
         if let Some(files) = &mut self.analog_files {
             files.accept();
         }
+        if let Some(system) = &mut self.analog_system {
+            system.accept();
+        }
         let time = self.time;
         // A point whose deferred events ran commits the lane they left; the
         // left-limit evaluation's own lane is what the step leaves behind.
@@ -1465,6 +1519,19 @@ impl VmContext {
                 .timer_event_step_bound()
                 .map(|_| self.timer_event_bound),
             accepted_event_step: self.accepted_event_step,
+            analog_system: self
+                .analog_system
+                .as_ref()
+                .map(|system| system.checkpoint_words())
+                .unwrap_or_default(),
+            analog_files: self
+                .analog_files
+                .as_ref()
+                .map(|files| files.checkpoint())
+                .transpose()
+                .map_err(|error| {
+                    VmError::InvalidRuntimeOperation(format!("analog open files: {error}"))
+                })?,
         };
         self.validate_accepted_checkpoint(&checkpoint)?;
         Ok(checkpoint)
@@ -1627,7 +1694,38 @@ impl VmContext {
                 )));
             }
         }
+        match &self.analog_system {
+            Some(system) => system
+                .clone()
+                .restore_checkpoint_words(&checkpoint.analog_system)
+                .map_err(invalid)?,
+            None if checkpoint.analog_system.is_empty() => {}
+            None => {
+                return Err(invalid(
+                    "checkpoint carries system-function seeds the model does not keep".into(),
+                ));
+            }
+        }
+        if self.analog_files.is_some() != checkpoint.analog_files.is_some() {
+            return Err(invalid(
+                "checkpoint and instance disagree on whether it keeps open files".into(),
+            ));
+        }
         Ok(())
+    }
+
+    /// Reopen the checkpoint's open files in the instance's table: a file it
+    /// wrote is cut back to what it held then, one it read must be unchanged.
+    pub(crate) fn restore_checkpoint_files(
+        &mut self,
+        checkpoint: &VmAcceptedCheckpoint,
+    ) -> Result<(), VmError> {
+        match (&mut self.analog_files, &checkpoint.analog_files) {
+            (Some(files), Some(image)) => files.restore(image).map_err(|error| {
+                VmError::InvalidRuntimeOperation(format!("analog open files: {error}"))
+            }),
+            _ => Ok(()),
+        }
     }
 
     pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
@@ -1639,6 +1737,11 @@ impl VmContext {
         }
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
+        }
+        if let Some(system) = &mut self.analog_system {
+            // Validated with the rest of the checkpoint.
+            let restored = system.restore_checkpoint_words(&checkpoint.analog_system);
+            debug_assert!(restored.is_ok(), "{restored:?}");
         }
         self.time = checkpoint.time;
         self.variables.clone_from(&checkpoint.variables);
@@ -1744,6 +1847,9 @@ impl VmContext {
         if let Some(files) = &mut self.analog_files {
             files.reset_analysis();
         }
+        if let Some(system) = &mut self.analog_system {
+            system.reset_analysis();
+        }
         self.variables.fill(0.0);
         self.accepted_event_variables.fill(0.0);
         self.evaluation_state_inputs.fill(0.0);
@@ -1821,6 +1927,9 @@ impl VmContext {
     pub(crate) fn begin_stateful_observation(&mut self) {
         self.record_task_effects = false;
         self.numerical_evaluation_valid = false;
+        if let Some(system) = &mut self.analog_system {
+            system.begin_observation();
+        }
     }
 
     /// Seed an assignment replay from the original numerical input. Observing
@@ -1908,6 +2017,15 @@ impl VmContext {
         }
         if record_tasks && let Some(files) = &mut self.analog_files {
             files.begin_evaluation();
+        }
+        // A pass that records nothing is an observation of the point: its
+        // calls see the accepted state on a copy and leave the candidate.
+        if let Some(system) = &mut self.analog_system {
+            if record_tasks {
+                system.begin_evaluation();
+            } else {
+                system.begin_observation();
+            }
         }
         for (&index, &accepted) in self
             .event_state_indices
@@ -2196,6 +2314,9 @@ impl VmContext {
         // position) is the point's candidate table, as their tasks are.
         if pass.analog_files.is_some() {
             self.analog_files = pass.analog_files.take();
+        }
+        if pass.analog_system.is_some() {
+            self.analog_system = pass.analog_system.take();
         }
         self.timer_event_bound = self.timer_event_bound.min(pass.timer_event_bound);
         Ok(())

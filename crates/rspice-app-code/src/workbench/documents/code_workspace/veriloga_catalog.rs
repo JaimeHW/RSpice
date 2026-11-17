@@ -649,6 +649,116 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
         "Tabulated noise source interpolated log-log, as noise_table_log.",
     ),
     (
+        "$random",
+        Some("[seed]"),
+        "A 32-bit signed random integer, the IEEE 1364 sequence; draws once per accepted point.",
+    ),
+    (
+        "$arandom",
+        Some("[seed], [type_string]"),
+        "A 32-bit signed random integer, as $random; the seed may be a constant.",
+    ),
+    (
+        "$dist_uniform",
+        Some("seed, start, end"),
+        "A uniformly distributed integer from start to end.",
+    ),
+    (
+        "$dist_normal",
+        Some("seed, mean, standard_deviation"),
+        "A normally distributed integer.",
+    ),
+    (
+        "$dist_exponential",
+        Some("seed, mean"),
+        "An exponentially distributed integer.",
+    ),
+    (
+        "$dist_poisson",
+        Some("seed, mean"),
+        "A Poisson-distributed integer.",
+    ),
+    (
+        "$dist_chi_square",
+        Some("seed, degree_of_freedom"),
+        "A chi-square-distributed integer.",
+    ),
+    (
+        "$dist_t",
+        Some("seed, degree_of_freedom"),
+        "A Student's t-distributed integer.",
+    ),
+    (
+        "$dist_erlang",
+        Some("seed, k_stage, mean"),
+        "An Erlang-distributed integer.",
+    ),
+    (
+        "$rdist_uniform",
+        Some("seed, start, end, [type_string]"),
+        "A uniformly distributed real from start to end.",
+    ),
+    (
+        "$rdist_normal",
+        Some("seed, mean, standard_deviation, [type_string]"),
+        "A normally distributed real.",
+    ),
+    (
+        "$rdist_exponential",
+        Some("seed, mean, [type_string]"),
+        "An exponentially distributed real.",
+    ),
+    (
+        "$rdist_poisson",
+        Some("seed, mean, [type_string]"),
+        "A Poisson-distributed real.",
+    ),
+    (
+        "$rdist_chi_square",
+        Some("seed, degree_of_freedom, [type_string]"),
+        "A chi-square-distributed real.",
+    ),
+    (
+        "$rdist_t",
+        Some("seed, degree_of_freedom, [type_string]"),
+        "A Student's t-distributed real.",
+    ),
+    (
+        "$rdist_erlang",
+        Some("seed, k_stage, mean, [type_string]"),
+        "An Erlang-distributed real.",
+    ),
+    (
+        "$realtobits",
+        Some("value"),
+        "The IEEE 754 bits of a real; an integer holds the low 32.",
+    ),
+    (
+        "$bitstoreal",
+        Some("bits"),
+        "The real whose IEEE 754 bits these are.",
+    ),
+    (
+        "$test$plusargs",
+        Some("string"),
+        "1 when a plusarg on the command line begins with the string, else 0.",
+    ),
+    (
+        "$value$plusargs",
+        Some("format, variable"),
+        "Reads the value of a matching plusarg into the variable; 1 when one matched.",
+    ),
+    (
+        "$fopen",
+        Some("name, [mode]"),
+        "Opens a file; a descriptor, or 0 when it cannot be opened.",
+    ),
+    (
+        "$fscanf",
+        Some("fd, format, variable…"),
+        "Reads formatted fields from a file; how many it assigned, or -1 at the end.",
+    ),
+    (
         "$strobe",
         Some("format, [arg…]"),
         "Prints formatted text once the time step is accepted.",

@@ -1817,7 +1817,9 @@ impl FunctionCompiler {
             | NativeOp::AnalogTaskGuard
             | NativeOp::AnalogFinish(_)
             | NativeOp::AnalogOutput { .. }
-            | NativeOp::RecordAnalogCounter => {
+            | NativeOp::RecordAnalogCounter
+            | NativeOp::SystemCall { .. }
+            | NativeOp::SystemOutput { .. } => {
                 unreachable!("operand-array helpers are emitted before register preparation")
             }
             NativeOp::TimerState(timer_id) => self.emit_operand_context_helper(

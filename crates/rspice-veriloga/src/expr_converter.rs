@@ -465,6 +465,24 @@ pub(crate) const LOWERED_SYSTEM_FUNCTION_NAMES: &[&str] = &[
     "$noise_table_log",
 ];
 
+/// The site a materialized system-function call names, and its other
+/// arguments.
+fn system_site(func: &SystemFunction) -> CompileResult<(u32, &[Expression])> {
+    match func.args.split_first() {
+        Some((Expression::Number(site), operands))
+            if site.value >= 0.0
+                && site.value.fract() == 0.0
+                && site.value <= f64::from(u32::MAX) =>
+        {
+            Ok((site.value as u32, operands))
+        }
+        _ => Err(CodeGenError::new(CodeGenErrorKind::Internal(
+            "a materialized system-function call names no site".into(),
+        ))
+        .into()),
+    }
+}
+
 /// The refusal for a call [`ExprConverter`] has no lowering for. Semantic
 /// analysis reports unknown functions first, so reaching it is a bug.
 const UNLOWERED_CALL: &str = "no lowering for function";
@@ -971,6 +989,29 @@ impl<'a> ExprConverter<'a> {
         func: &SystemFunction,
     ) -> CompileResult<NodeId> {
         match func.name.as_str() {
+            crate::analog_tasks::SYSTEM_CALL => {
+                let (site, operands) = system_site(func)?;
+                let operands = operands
+                    .iter()
+                    .map(|operand| self.convert(arena, operand))
+                    .collect::<CompileResult<Vec<_>>>()?;
+                Ok(arena.push_system_call(site, &operands))
+            }
+            crate::analog_tasks::SYSTEM_OUTPUT => {
+                let (site, operands) = system_site(func)?;
+                let [Expression::Number(index), fallback] = operands else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::Internal(
+                        "a system-function output read takes its index and its target".into(),
+                    ))
+                    .into());
+                };
+                let fallback = self.convert(arena, fallback)?;
+                Ok(arena.push(Node::SystemOutput {
+                    site,
+                    index: index.value as u32,
+                    fallback,
+                }))
+            }
             "$vt" | "$thermal_vt" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(1))?;
                 if func.args.is_empty() {

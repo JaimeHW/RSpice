@@ -113,6 +113,9 @@ pub struct AnalyzedModule {
     /// storage for initialization, event writes or retained evaluation inputs.
     /// Locals defined before every read do not require this storage.
     pub event_state_variables: Vec<usize>,
+    /// Each value-returning system-function call the statements make, by the
+    /// site their materialized calls name.
+    pub analog_system_calls: Vec<crate::analog_tasks::AnalogSystemCall<Span>>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,
