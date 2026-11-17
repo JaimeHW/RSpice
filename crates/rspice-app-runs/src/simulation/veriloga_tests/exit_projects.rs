@@ -151,17 +151,14 @@ impl Drawing {
             [],
         )
         .expect("a cell-view source");
+        let project = model.workspace.content.project.id();
         let sources = &mut model.workspace.content.project_sources;
         sources.insert_bundle(bundle).expect("one source per view");
         let bundle = sources
             .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
             .expect("the view's source");
-        let receipt = compile_project_bundle_receipt(
-            model.workspace.content.project.id(),
-            bundle,
-            Some(cell),
-        )
-        .unwrap_or_else(|diagnostics| panic!("{cell} compiles: {diagnostics:#?}"));
+        let receipt = compile_project_bundle_receipt(project, bundle, Some(cell))
+            .unwrap_or_else(|diagnostics| panic!("{cell} compiles: {diagnostics:#?}"));
         let applied = apply_compiled_interface(
             &mut model.library_manager,
             &model.workspace.content.schematic_buffers,

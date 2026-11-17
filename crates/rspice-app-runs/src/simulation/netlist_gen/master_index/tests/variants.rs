@@ -32,12 +32,13 @@ fn fixture(configured: bool) -> (ProjectWorkspace, LibraryManager, SchematicStat
     let top = top_with_instance(&["a", "b"]);
     workspace.insert_schematic_editor(workspace.content.active_view.key(), top.clone());
     if configured {
+        let root = workspace.content.active_view.clone();
         workspace
             .content
             .configuration_sets
             .create(ConfigurationSetDefinition {
                 name: "Variant testbench".to_owned(),
-                root: workspace.content.active_view.clone(),
+                root,
                 dut_path: "/".to_owned(),
                 executable_view_policy: vec!["schematic".to_owned()],
                 stop_views: Vec::new(),

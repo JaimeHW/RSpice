@@ -577,10 +577,8 @@ fn population_contract_never_accepts_invalid_or_duplicate_legacy_requirements() 
     for duplicate in [false, true] {
         let mut workspace = workspace_with_limit(Some(-1.0), None);
         if duplicate {
-            workspace
-                .content
-                .specs
-                .push(workspace.content.specs[0].clone());
+            let first = workspace.content.specs[0].clone();
+            workspace.content.specs.push(first);
         } else {
             workspace.content.specs[0].min = Some(f64::NAN);
         }
@@ -597,7 +595,10 @@ fn population_contract_never_accepts_invalid_or_duplicate_legacy_requirements() 
                 .as_deref()
                 .is_some_and(|note| note.starts_with("Requirements unavailable:"))
         );
-        workspace.content.specs = workspace_with_limit(Some(-1.0), None).content.specs;
+        workspace.content.specs = workspace_with_limit(Some(-1.0), None)
+            .content
+            .into_inner()
+            .specs;
         let repaired = cached_population(&simulation, &workspace, &mut results).unwrap();
         assert_eq!(repaired.status, vec![TrialStatus::Passing; 3]);
     }
