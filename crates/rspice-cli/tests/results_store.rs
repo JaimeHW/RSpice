@@ -291,6 +291,64 @@ fn continuous_measurements_read_from_the_store_equal_the_run_read_back_whole() {
     assert_eq!(streamed, read_back);
 }
 
+/// A FRAC_MAX delay, whose levels follow each clause's running maximum, is measured in a pass
+/// over the store's rows, as the run read back whole measures it.
+#[test]
+fn frac_max_delays_are_measured_from_the_store() {
+    let dir = test_dir("results-store-frac-max");
+    let body = RC.trim_end_matches(".end\n");
+    let statements = ".meas tran rise trig v(out) frac_max=0.1 targ v(out) frac_max=0.9
+.meas tran fall trig v(out) frac_max=0.9 fall=1 targ v(out) frac_max=0.1 fall=1
+.meas tran late trig v(out) frac_max=0.2 rise=2 targ v(out) frac_max=0.8 rise=2 td=300n
+.meas tran attarg trig at=100n targ v(out) frac_max=0.5
+.meas tran never trig v(out) frac_max=0.1 rise=9 targ v(out) frac_max=0.9 rise=9
+";
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    let measured = |twin: &str, extra: &str| {
+        let deck = dir.join(format!("{twin}.cir"));
+        std::fs::write(&deck, format!("{body}{statements}{extra}.end\n")).unwrap();
+        let path = dir.join(format!("{twin}.json"));
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "--meas-file",
+            path.to_str().unwrap(),
+            "--log-level",
+            "debug",
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // NEVER fails, which fails the run's verification.
+        assert_eq!(output.status.code(), Some(3), "{twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{twin}: {stderr}"
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        json["measurements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !["VAVG", "VMAX"].contains(&row["name"].as_str().unwrap_or("")))
+            .map(|row| {
+                // Each row names its deck.
+                let mut row = row.clone();
+                if let Some(row) = row.as_object_mut() {
+                    row.remove("netlist");
+                    row.remove("run");
+                }
+                row
+            })
+            .collect::<Vec<_>>()
+    };
+    let streamed = measured("streamed", "");
+    let read_back = measured("read-back", read_back);
+    assert_eq!(streamed.len(), 5, "{streamed:?}");
+    assert!(streamed[0]["value"].is_number(), "{streamed:?}");
+    assert_eq!(streamed, read_back);
+}
+
 #[test]
 fn fourier_spectra_read_around_their_windows_equal_the_run_read_back_whole() {
     let dir = test_dir("results-store-fourier");

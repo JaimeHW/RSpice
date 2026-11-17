@@ -166,6 +166,14 @@ enum Clause {
     },
 }
 
+/// One clause of a FRAC_MAX delay: the signal it reads (none for an AT clause, which reads
+/// zero) and the level it is compared with.
+#[derive(Clone, Copy)]
+struct FracClause {
+    signal: Option<Operand>,
+    target: Operand,
+}
+
 #[derive(Clone)]
 enum Kind {
     Window {
@@ -203,6 +211,15 @@ enum Kind {
         trig: Clause,
         targ: Clause,
         minval: Value,
+    },
+    /// Xyce's legacy `RiseFallDelay` with a FRAC_MAX level, which follows each clause's running
+    /// maximum: one tracker fed every row the window accepts, as the evaluation in memory feeds
+    /// it, which keeps the history Xyce replays when a maximum grows.
+    LegacyFrac {
+        trig: FracClause,
+        targ: FracClause,
+        tracker: Box<LegacyFracDelayTracker>,
+        window: MeasureWindow,
     },
     /// Xyce's legacy `RiseFallDelay`: one window gates both clauses, and the target counts
     /// only after the trigger, so the target takes a second pass.
@@ -288,6 +305,14 @@ impl Kind {
             Kind::Delay { trig, targ, .. } | Kind::LegacyDelay { trig, targ, .. } => {
                 let mut operands = clause(trig);
                 operands.extend(clause(targ));
+                operands
+            }
+            Kind::LegacyFrac { trig, targ, .. } => {
+                let mut operands = Vec::new();
+                for clause in [trig, targ] {
+                    operands.extend(clause.signal.as_mut());
+                    operands.push(&mut clause.target);
+                }
                 operands
             }
             Kind::Span | Kind::Fixed(_) => Vec::new(),
@@ -516,10 +541,37 @@ pub(super) fn plan(
             to,
             minval,
         } => {
-            // FRAC_MAX moves its level with the running maximum, and Xyce replays the history it
-            // keeps whenever the maximum grows; it is read in memory.
+            // FRAC_MAX selects the legacy form, whose target may not be an AT point.
             if trig.frac_max.is_some() || targ.frac_max.is_some() {
-                return None;
+                let kind = if matches!(targ.event, TriggerEvent::At(_)) {
+                    Kind::Fixed(MeasureResult::failed(
+                        &statement.name,
+                        "AT keyword not allowed in legacy TARG block",
+                    ))
+                } else {
+                    let clause = |spec: &TrigSpec| match &spec.event {
+                        TriggerEvent::At(_) => Some(FracClause {
+                            signal: None,
+                            target: Operand::Constant(0.0),
+                        }),
+                        TriggerEvent::When(condition) => Some(FracClause {
+                            signal: Some(column(&condition.left)?),
+                            target: operand(&condition.right)?,
+                        }),
+                    };
+                    Kind::LegacyFrac {
+                        trig: clause(trig)?,
+                        targ: clause(targ)?,
+                        tracker: Box::new(LegacyFracDelayTracker::new(trig, targ, *minval)),
+                        window: window(*from, *to, targ.td.or(trig.td), *minval),
+                    }
+                };
+                return Some(Spec {
+                    name: statement.name.clone(),
+                    kind,
+                    earlier,
+                    names: names.into_inner(),
+                });
             }
             let clause = |spec: &TrigSpec, td: Option<Value>| match &spec.event {
                 TriggerEvent::At(target) => Some(Clause::At(*target)),
@@ -806,7 +858,6 @@ impl TranMeasureStream {
     /// - an expression that reads other rows (`sdt`) or another statement's running result,
     ///   which a chunk alone does not give;
     /// - an event operand beside a sampled one, whose sampled values are read at the events;
-    /// - FRAC_MAX, whose level moves with the running maximum while Xyce replays its history;
     /// - an equation or an error function (forms with no pass of their own);
     /// - a run with impulses, whose integrals add them.
     pub fn plan(
@@ -1205,6 +1256,7 @@ enum Measure {
     When(WhenState),
     Delay(Box<DelayState>),
     LegacyDelay(Box<LegacyDelayState>),
+    LegacyFrac(Box<LegacyFracState>),
     OnOff(OnOffState),
     Fourier(FourierState),
     ErrorFunction {
@@ -1303,6 +1355,15 @@ enum ClauseState {
 struct DelayState {
     trig: ClauseState,
     targ: ClauseState,
+}
+
+/// A FRAC_MAX delay's tracker and its latest result.
+struct LegacyFracState {
+    trig: FracClause,
+    targ: FracClause,
+    tracker: LegacyFracDelayTracker,
+    window: MeasureWindow,
+    result: Option<(Value, Value)>,
 }
 
 /// [`delay_clause_event`] of a legacy clause: the trigger's pass, then the target's, which
@@ -1568,6 +1629,18 @@ impl Measure {
                     targ: clause(targ),
                 }))
             }
+            Kind::LegacyFrac {
+                trig,
+                targ,
+                ref tracker,
+                window,
+            } => Self::LegacyFrac(Box::new(LegacyFracState {
+                trig,
+                targ,
+                tracker: (**tracker).clone(),
+                window,
+                result: None,
+            })),
             Kind::LegacyDelay { trig, targ, window } => {
                 Self::LegacyDelay(Box::new(LegacyDelayState {
                     window,
@@ -1678,6 +1751,7 @@ impl Measure {
                 state.targ.update(x, row);
             }
             Self::LegacyDelay(state) => state.update(x, row),
+            Self::LegacyFrac(state) => state.update(x, row),
             Self::OnOff(state) => {
                 let MeasureWindow {
                     from,
@@ -1731,6 +1805,10 @@ impl Measure {
                 };
             }
             Self::Done(result) => result,
+            Self::LegacyFrac(state) => match state.result {
+                Some((trigger, target)) => MeasureResult::success(name, target - trigger),
+                None => MeasureResult::failed(name, "Trigger or target condition not found"),
+            },
             Self::Window(state) => state.finish(name),
             Self::Extrema(state) => state.finish(name),
             Self::At(state) => {
@@ -2038,6 +2116,31 @@ impl WhenState {
                 MeasureResult::failed(name, "WHEN condition not found in the measurement window")
             }
         }
+    }
+}
+
+impl LegacyFracState {
+    /// `eval_legacy_frac_delay` at one row.
+    #[inline]
+    fn update(&mut self, x: Value, row: &[Value]) {
+        if !legacy_delay_accepts_sample(
+            x,
+            self.window.td,
+            MeasureWindow {
+                td: None,
+                ..self.window
+            },
+        ) {
+            return;
+        }
+        let read = |operand: Option<Operand>| operand.map_or(0.0, |operand| operand.value(x, row));
+        self.result = self.tracker.update(
+            x,
+            read(self.trig.signal),
+            self.trig.target.value(x, row),
+            read(self.targ.signal),
+            self.targ.target.value(x, row),
+        );
     }
 }
 
