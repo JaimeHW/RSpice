@@ -427,8 +427,6 @@ mod c04 {
 /// converter supplied from the `vdrv` net on the Connect rules page, as the
 /// `gate_drive` block the deck selects states it.
 mod c06 {
-    use egui::accesskit::Role;
-
     use super::*;
 
     /// vss (O6): the regulated output, the controller's target code over its
@@ -675,12 +673,6 @@ mod c06 {
         e.label(pin(&controller, "hs"), "ghs");
         e.label(pin(&controller, "ls"), "gls");
 
-        // Every accepted point kept: the automatic set keeps each node on the
-        // transient's step grid, 50 ns apart, which no 10 ns gate edge
-        // survives.
-        e.setup_page("Save, streaming & retention policy");
-        e.press("Plan output selection mode", Role::ComboBox);
-        e.press("Save all", Role::ListBoxOption);
         e.transient("50n", STOP);
         let designed = e.run();
         let deck = deck.join().expect("the deck route");

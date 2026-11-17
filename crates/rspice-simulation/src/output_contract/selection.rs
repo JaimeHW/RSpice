@@ -303,6 +303,10 @@ fn effective_plan_saved_outputs(
 /// Shallower occurrences win the bound, because a design's own interface is
 /// what a reader looks at first and a deep instance's internals are what they
 /// ask for by name.
+///
+/// Each keeps every point the engine accepted, as Spectre and LTspice keep a
+/// saved signal: a transient resampled to its print step reads an edge up to
+/// a step late.
 fn automatic_outputs(
     occurrences: &[OccurrenceNets],
     plan_id: SimulationPlanId,
@@ -375,7 +379,7 @@ fn automatic_outputs(
             candidate.spelling.display().to_owned(),
             candidate.spelling.engine().to_owned(),
             SavedOutputCompatibility::AllCompatibleAnalyses,
-            SavedOutputPolicy::SelectedAndFinalPoints,
+            SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )

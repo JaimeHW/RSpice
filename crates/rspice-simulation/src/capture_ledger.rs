@@ -190,8 +190,8 @@ pub fn priced_output_bytes(
 /// The plan's retained-evidence forecast, partitioned the way it is printed.
 pub struct CaptureLedger {
     rows: Vec<CaptureLedgerRow>,
-    /// Retained engine state shared by deferred outputs, counted once for the
-    /// plan.
+    /// Retained engine state shared by deferred outputs and by Automatic's
+    /// whole engine columns, counted once for the plan.
     shared_source_bytes: u64,
     /// Engine results retained by Save All or Automatic without output contracts.
     engine_ceiling_bytes: Option<u64>,

@@ -198,7 +198,7 @@ pub(super) fn capture_groups(
                 plan_level_row(
                     ui,
                     "Retained engine source",
-                    "shared by deferred outputs",
+                    "shared by deferred and automatic outputs",
                     ledger.shared_source_bytes(),
                 );
             }

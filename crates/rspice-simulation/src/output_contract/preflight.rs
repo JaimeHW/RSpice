@@ -134,7 +134,11 @@ pub fn preflight_saved_output<'a>(
     if let SavedOutputSemanticStatus::Invalid { reason } = &semantic_status {
         return SavedOutputPreflightReport::invalid(reason.clone());
     }
-    let (storage_estimate, bytes_by_analysis) = storage_estimate(&contracts, &analyses);
+    let engine_columns = output.origin
+        == rspice_simulation_contract::saved_output::SavedOutputOrigin::Automatic
+        && output.save_policy == SavedOutputPolicy::EveryAcceptedPoint;
+    let (storage_estimate, bytes_by_analysis, kept_engine_columns) =
+        storage_estimate(&contracts, &analyses, engine_columns);
     let retained_engine_source_analysis_ids =
         if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
             contracts
@@ -142,7 +146,7 @@ pub fn preflight_saved_output<'a>(
                 .map(PreparedSavedOutput::analysis_id)
                 .collect()
         } else {
-            Vec::new()
+            kept_engine_columns
         };
     SavedOutputPreflightReport {
         semantic_status,
@@ -214,11 +218,23 @@ fn semantic_status(
 /// The scalar is the sum of the parts, so a reader can keep using it — but a
 /// caller that prices the output over a run set needs the parts, because the
 /// analyses producing it do not all run at the same number of points.
+///
+/// With `engine_columns`, the output is Automatic's node voltage kept at every
+/// point its analysis accepted. Where only the solve decides how many points
+/// that is, the output is the engine's own column for that analysis: it adds
+/// nothing of its own, and the analysis is returned to be counted once as
+/// retained engine source, under the engine's result-value ceiling.
 fn storage_estimate(
     contracts: &[PreparedSavedOutput],
     analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-) -> (SavedOutputStorageEstimate, Vec<(AnalysisInstanceId, u64)>) {
+    engine_columns: bool,
+) -> (
+    SavedOutputStorageEstimate,
+    Vec<(AnalysisInstanceId, u64)>,
+    Vec<AnalysisInstanceId>,
+) {
     let mut by_analysis: Vec<(AnalysisInstanceId, u64)> = Vec::new();
+    let mut kept_engine_columns = Vec::new();
     let mut total = 0_u64;
     for contract in contracts {
         if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
@@ -231,6 +247,7 @@ fn storage_estimate(
                     contract.name
                 )),
                 Vec::new(),
+                Vec::new(),
             );
         }
         if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly {
@@ -239,6 +256,7 @@ fn storage_estimate(
                     "'{}' is retained only on failure, so its storage depends on the partial dataset available at the failure boundary",
                     contract.name
                 )),
+                Vec::new(),
                 Vec::new(),
             );
         }
@@ -252,11 +270,16 @@ fn storage_estimate(
                     contract.analysis_id
                 )),
                 Vec::new(),
+                Vec::new(),
             );
         };
         let sample_count = match deterministic_sample_count(contract, spec) {
             Ok(sample_count) => sample_count,
-            Err(reason) => return (indeterminate(reason), Vec::new()),
+            Err(_) if engine_columns => {
+                kept_engine_columns.push(contract.analysis_id);
+                continue;
+            }
+            Err(reason) => return (indeterminate(reason), Vec::new(), Vec::new()),
         };
         let source_values = if stores_complex_components(contract.kind, spec.run_type()) {
             4_u64
@@ -272,6 +295,7 @@ fn storage_estimate(
                     "saved-output storage estimate exceeds the supported 64-bit byte range",
                 ),
                 Vec::new(),
+                Vec::new(),
             );
         };
         let Some(next_total) = total.checked_add(output_bytes) else {
@@ -279,6 +303,7 @@ fn storage_estimate(
                 indeterminate(
                     "aggregate saved-output storage estimate exceeds the supported 64-bit byte range",
                 ),
+                Vec::new(),
                 Vec::new(),
             );
         };
@@ -294,7 +319,11 @@ fn storage_estimate(
             None => by_analysis.push((contract.analysis_id, output_bytes)),
         }
     }
-    (SavedOutputStorageEstimate::ExactBytes(total), by_analysis)
+    (
+        SavedOutputStorageEstimate::ExactBytes(total),
+        by_analysis,
+        kept_engine_columns,
+    )
 }
 
 fn indeterminate(reason: impl Into<String>) -> SavedOutputStorageEstimate {
@@ -549,6 +578,39 @@ mod tests {
                 SavedOutputSemanticStatus::RuntimeBound { .. }
             ));
         }
+    }
+
+    /// Automatic's node voltage keeps every point a transient accepted, and
+    /// is then the engine's own column: nothing of its own, its analysis
+    /// counted once as retained engine source. On a grid the analysis fixes
+    /// it is still priced at that grid.
+    #[test]
+    fn an_automatic_node_voltage_on_a_transient_is_its_engine_column() {
+        let automatic = output(
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+        )
+        .with_origin(rspice_simulation_contract::saved_output::SavedOutputOrigin::Automatic);
+        let (transient, ac) = (AnalysisInstanceId::new(), AnalysisInstanceId::new());
+        let report = preflight_saved_output(&automatic, [(transient, &transient_spec())]);
+        assert_eq!(
+            report.storage_estimate(),
+            &SavedOutputStorageEstimate::ExactBytes(0)
+        );
+        assert_eq!(report.retained_engine_source_analysis_ids(), [transient]);
+
+        let spec = AnalysisSpec::Ac {
+            start_freq: 1.0,
+            stop_freq: 1000.0,
+            points_per_unit: 10,
+            sweep: FrequencySweep::Decade,
+        };
+        let report = preflight_saved_output(&automatic, [(ac, &spec)]);
+        assert_eq!(
+            report.storage_estimate(),
+            &SavedOutputStorageEstimate::ExactBytes(31 * 4 * 8)
+        );
+        assert!(report.retained_engine_source_analysis_ids().is_empty());
     }
 
     #[test]

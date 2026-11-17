@@ -81,7 +81,8 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
     assert!(
         first
             .iter()
-            .all(|output| { output.save_policy == SavedOutputPolicy::SelectedAndFinalPoints })
+            .all(|output| { output.save_policy == SavedOutputPolicy::EveryAcceptedPoint }),
+        "each keeps every point its analysis accepts"
     );
     assert_eq!(
         first
