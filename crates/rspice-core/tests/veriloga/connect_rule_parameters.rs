@@ -812,11 +812,20 @@ fn c9_live_records_the_statement_binding_vdd_live() {
 /// `.param vcc=3.3` (`net/bus.cir`). Every port converts through the built-in
 /// rule set at the deck's static 3.3 V: the controller's `scl` and `sda` and
 /// both targets' `sda` are `inout`, so `bidir`; the targets' `scl` is an
-/// input, so `a2d`. Three converters on each net.
+/// input, so `a2d`. Three converters on each net. The d_buffer that reads
+/// SDA leaves them as they are and reads SDA through an `adc_bridge` of its
+/// own at `vcc/2`.
 #[test]
 fn c7_cont_records_three_converters_on_each_bus_net() {
     let records = insertions(&corpus_deck("c07-i2c", "cont.tran.cir"));
-    assert_eq!(records.len(), 6, "{records:#?}");
+    assert_eq!(records.len(), 7, "{records:#?}");
+    let receiver = only_on(&records, "sda", "abufrx.in");
+    assert_eq!(
+        (receiver.kind, receiver.direction, receiver.module.as_str()),
+        (ConverterKind::AdcBridge, PortDirection::In, "adc_bridge"),
+        "{receiver:#?}"
+    );
+    assert_eq!(parameter(receiver, "in_low").value, 1.65, "{receiver:#?}");
     let rule_set = ConverterSource::RuleSet("rspice_builtin".into());
     for (node, port, kind) in [
         ("scl", "xctrl.scl", ConverterKind::Bidir),
@@ -860,7 +869,11 @@ fn c7_cont_records_three_converters_on_each_bus_net() {
         .iter()
         .map(|record| record.instance.as_str())
         .collect();
-    assert_eq!(instances.len(), 6, "each port has its own converter");
+    assert_eq!(
+        instances.len(),
+        7,
+        "each port, and the receiver, has its own converter"
+    );
 }
 
 //=============================================================================

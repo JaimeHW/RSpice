@@ -8,10 +8,13 @@ use rspice_core::{Engine, Netlist, SimulationConfig};
 struct Source(std::path::PathBuf);
 impl Source {
     fn new(text: &str) -> Self {
+        Self::with_extension(text, "vams")
+    }
+    fn with_extension(text: &str, extension: &str) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "rspice-segregation-{}-{id}.vams",
+            "rspice-segregation-{}-{id}.{extension}",
             std::process::id()
         ));
         std::fs::write(&path, text).unwrap();
@@ -375,5 +378,212 @@ fn a_segregated_net_resumes_from_a_checkpoint_in_contention_exactly() {
             "{options}: the buffer's output moves after the seam"
         );
         assert_eq!(events(&resumed), expected, "{options}");
+    }
+}
+
+/// The node's voltage at `time`, interpolated between the accepted points
+/// around it, so two runs on different time grids compare at one instant.
+fn voltage_at(result: &TransientResult, name: &str, time: f64) -> f64 {
+    let node = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("node {name} missing from {:?}", result.node_names));
+    let values = result
+        .try_voltage_waveform(node + 1)
+        .expect("node index in range");
+    let after = result.time.iter().position(|value| *value >= time).unwrap();
+    if after == 0 || result.time[after] == time {
+        return values[after];
+    }
+    let (t0, t1) = (result.time[after - 1], result.time[after]);
+    values[after - 1] + (values[after] - values[after - 1]) * (time - t0) / (t1 - t0)
+}
+
+/// The converters a deck's build inserts, as `check --converters` lists
+/// them: boundary, port, direction, kind and module.
+fn converter_rows(netlist: &Netlist) -> Vec<String> {
+    let circuit = Engine::default()
+        .build_circuit(netlist)
+        .unwrap_or_else(|error| panic!("deck builds: {error}"));
+    let mut rows: Vec<String> = circuit
+        .converter_insertions()
+        .iter()
+        .map(|record| {
+            format!(
+                "{} {:?} {:?} {:?} {}",
+                record.boundary, record.port, record.direction, record.kind, record.module
+            )
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// The rows `with` lists beyond `without`, after checking it lists every
+/// row of `without`.
+fn added_rows(without: &[String], with: &[String]) -> Vec<String> {
+    for row in without {
+        assert!(
+            with.contains(row),
+            "{row} is gone with the receiver: {with:#?}"
+        );
+    }
+    with.iter()
+        .filter(|row| !without.contains(row))
+        .cloned()
+        .collect()
+}
+
+/// Two modules drive one bus through ports of their own: 1 from 10 to 30 ns
+/// and 0 from 20 to 40 ns, against a 2.2 kohm pull-up to 1.8 V.
+const BUS: &str = r#"
+`timescale 1ns/1ps
+module drv(p); inout p; wire p; reg d;
+  parameter real t_on = 10;
+  parameter real t_off = 30;
+  parameter integer level = 1;
+  assign p = d;
+  initial begin d = 1'bz; #(t_on) d = level ? 1'b1 : 1'b0; #(t_off - t_on) d = 1'bz; end
+endmodule
+"#;
+
+fn bus_deck(source: &Source, receiver: bool) -> String {
+    format!(
+        "* two drivers on one bus\n\
+         .hdl \"{}\" module=drv\n\
+         .param vcc=1.8\n\
+         xa n drv t_on=10 t_off=30 level=1\n\
+         xb n drv t_on=20 t_off=40 level=0\n\
+         vdd vdd 0 1.8\n\
+         rp n vdd 2.2k\n\
+         cb n 0 0.1p\n\
+         {}.end\n",
+        source.path(),
+        if receiver {
+            "abuf n q buf\n.model buf d_buffer(rise_delay=1p fall_delay=1p)\n"
+        } else {
+            ""
+        }
+    )
+}
+
+/// A code model that only reads a net never changes the net's analog value.
+/// The modules' ports keep the converters they have without it, inout and
+/// output ports alike, and the code model reads the node through an A/D of
+/// its own that drives nothing: the bus holds the same voltage, the drivers'
+/// contention included, and the code model reads it against vcc/2.
+#[test]
+fn a_code_model_reading_the_bus_never_changes_it() {
+    use rspice_core::xspice::DigitalState;
+    for direction in ["inout", "output"] {
+        let source = Source::new(&BUS.replace("inout p;", &format!("{direction} p;")));
+        let [without, with] =
+            [false, true].map(|receiver| Netlist::parse(&bus_deck(&source, receiver)).unwrap());
+        assert_eq!(
+            added_rows(&converter_rows(&without), &converter_rows(&with)),
+            vec!["N Some(\"ABUF.in\") In AdcBridge adc_bridge".to_string()],
+            "{direction}"
+        );
+        let run = |netlist: &Netlist| Engine::default().run_tran(netlist, 50e-9, 0.1e-9).unwrap();
+        let (alone, read) = (run(&without), run(&with));
+        // Each driver converts through its own 20 ohm: the 1 to 1.8 V
+        // against the 0 to ground, with the pull-up. The converters' sensing
+        // inputs load the bus by megohms, a few microvolts.
+        let contention = 1.8 * (1.0 / 20.0 + 1.0 / 2200.0) / (2.0 / 20.0 + 1.0 / 2200.0);
+        let seen = voltage_at(&alone, "n", 25e-9);
+        assert!(
+            (seen - contention).abs() < 1e-5,
+            "{direction} v(n)@25n: {seen} != {contention}"
+        );
+        let trace: Vec<_> = read
+            .digital_trace_named("q")
+            .unwrap_or_else(|| panic!("{direction}: q has no digital trace"))
+            .iter()
+            .map(|point| (point.time, point.value.state))
+            .collect();
+        for (time, expected) in [
+            (5e-9, DigitalState::One),
+            (15e-9, DigitalState::One),
+            (25e-9, DigitalState::One),
+            (35e-9, DigitalState::Zero),
+            (45e-9, DigitalState::One),
+        ] {
+            let (bare, loaded) = (voltage_at(&alone, "n", time), voltage_at(&read, "n", time));
+            assert!(
+                (bare - loaded).abs() < 1e-6,
+                "{direction} v(n)@{time}: {loaded} with the reader, {bare} without"
+            );
+            let state = trace
+                .iter()
+                .rev()
+                .find(|(at, _)| *at <= time)
+                .map(|(_, state)| *state);
+            assert_eq!(state, Some(expected), "{direction} q@{time}: {trace:?}");
+        }
+    }
+}
+
+/// Corpus design C7's contention deck, with or without the d_buffer that
+/// reads SDA, parsed from a copy whose includes name their files absolutely.
+fn i2c_contention_deck(receiver: bool) -> Netlist {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c07-i2c/deck")
+        .canonicalize()
+        .expect("the C7 deck directory exists");
+    let net = dir.join("../net").canonicalize().unwrap();
+    let net = net.to_string_lossy().replace('\\', "/");
+    let text = std::fs::read_to_string(dir.join("cont.tran.cir")).unwrap();
+    let mut deck = String::new();
+    for line in text.lines() {
+        let reads_sda = ["abufrx ", ".model dbufrx", "adacrx ", ".model dacrx"]
+            .iter()
+            .any(|card| line.starts_with(card));
+        if reads_sda && !receiver {
+            continue;
+        }
+        deck.push_str(&line.replace("../net", &net));
+        deck.push('\n');
+    }
+    assert!(deck.contains("abufrx sda sda_rx") == receiver, "{deck}");
+    let copy = Source::with_extension(&deck, "cir");
+    Netlist::parse_file(&copy.0).unwrap_or_else(|error| panic!("the C7 deck parses: {error}"))
+}
+
+/// The I2C bus's contention, the controller sinking SDA through 20 ohm
+/// against i2c_dev51 driving it high, reads the same with a receiver on SDA
+/// as without one, and the receiver reads 0, 1 and 0 across it: the
+/// converters' A/D of V(sda) against vcc/2, as the modules' receivers read
+/// it.
+#[test]
+fn the_i2c_bus_reads_the_same_with_a_receiver_on_sda() {
+    let [without, with] = [false, true].map(i2c_contention_deck);
+    let added = added_rows(&converter_rows(&without), &converter_rows(&with));
+    assert_eq!(
+        added,
+        vec!["SDA Some(\"ABUFRX.in\") In AdcBridge adc_bridge".to_string()]
+    );
+    let run = |netlist: &Netlist| Engine::default().run_tran(netlist, 320e-6, 100e-9).unwrap();
+    let (alone, read) = (run(&without), run(&with));
+    let contention = 3.3 * (1.0 / 20.0 + 1.0 / 2200.0) / (2.0 / 20.0 + 1.0 / 2200.0);
+    let seen = voltage_at(&alone, "sda", 305e-6);
+    assert!(
+        (seen - contention).abs() < 1e-5,
+        "v(sda)@305u: {seen} != {contention}"
+    );
+    for (time, receives) in [(297e-6, 0.0), (305e-6, 1.0), (313e-6, 0.0), (319e-6, 1.0)] {
+        let (bare, loaded) = (
+            voltage_at(&alone, "sda", time),
+            voltage_at(&read, "sda", time),
+        );
+        assert!(
+            (bare - loaded).abs() < 1e-6,
+            "v(sda)@{time}: {loaded} with the receiver, {bare} without"
+        );
+        let rx = voltage_at(&read, "rx", time);
+        assert!(
+            (rx - receives).abs() < 1e-6,
+            "v(rx)@{time}: {rx} != {receives}"
+        );
     }
 }

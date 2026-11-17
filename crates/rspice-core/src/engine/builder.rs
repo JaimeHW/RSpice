@@ -3045,22 +3045,6 @@ fn mixed_module_drives_analog_load(circuit: &CircuitData, loaded: &BTreeSet<usiz
     })
 }
 
-/// The nodes a mixed module's event ports sit on.
-#[cfg(feature = "veriloga")]
-fn mixed_module_port_nodes(circuit: &CircuitData) -> BTreeSet<usize> {
-    circuit
-        .mixed_signal_hosts
-        .iter()
-        .flat_map(|host| host.direct_event_ports().map(|(port, _)| port.node))
-        .filter(|node| *node > 0)
-        .collect()
-}
-
-#[cfg(not(feature = "veriloga"))]
-fn mixed_module_port_nodes(_circuit: &CircuitData) -> BTreeSet<usize> {
-    BTreeSet::new()
-}
-
 fn collect_flat_analog_nodes(
     nodes: &mut BTreeSet<usize>,
     circuit: &CircuitData,
@@ -3470,6 +3454,7 @@ fn plan_xspice_auto_bridges(
     flat_elements: &[Element],
     bridge_metadata: &BTreeMap<usize, XspiceAutoBridgeNodeMetadata>,
     supplies: &boundary_supply::BoundarySupplies,
+    module_nodes: &BTreeSet<usize>,
 ) -> Vec<PlannedXspiceAutoBridge> {
     if circuit.xspice_instances.is_empty() {
         return Vec::new();
@@ -3482,10 +3467,11 @@ fn plan_xspice_auto_bridges(
     let mut explicit_real_bridge_nodes = BTreeSet::new();
 
     collect_flat_analog_nodes(&mut analog_nodes, circuit, flat_elements);
-    // A net a mixed module's port shares is the module route's to split
-    // (`mixed_boundaries::plan_conversions`): the code models' event ports
-    // there join the module's digital segment, so no bridge is planned here.
-    let module_nodes = mixed_module_port_nodes(circuit);
+    // A net whose code models join a mixed module's digital segment
+    // (`module_nodes`, `mixed_boundaries::shared_segment_nodes`) is the
+    // module route's to split (`mixed_boundaries::plan_conversions`), so no
+    // bridge is planned here. A code model that only reads a net several
+    // module ports convert on is bridged here like any other.
 
     for instance in &circuit.xspice_instances {
         let explicit_digital_bridge = is_xspice_digital_bridge_model(instance.model_name());
@@ -11486,12 +11472,19 @@ impl Engine {
 
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
+        // The nets a module's ports share with code models on one digital
+        // segment, taken before any converter's ports join them.
+        #[cfg(feature = "veriloga")]
+        let shared_segments = mixed_boundaries::shared_segment_nodes(&circuit);
+        #[cfg(not(feature = "veriloga"))]
+        let shared_segments = BTreeSet::new();
         #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
         let mut auto_bridges = plan_xspice_auto_bridges(
             &circuit,
             &flat_elements,
             &scoped_auto_bridge_metadata,
             &boundary_supplies,
+            &shared_segments,
         );
         // Clause 7 runs over the boundaries the one planner found, never
         // instead of it. A design with no `connectrules` block leaves every
@@ -11539,6 +11532,7 @@ impl Engine {
         {
             let bridges = mixed_boundaries::plan_conversions(
                 &mut circuit,
+                &shared_segments,
                 &flat_elements,
                 &scoped_auto_bridge_metadata,
                 &boundary_supplies,

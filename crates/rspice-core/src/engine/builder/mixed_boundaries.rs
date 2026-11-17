@@ -5,13 +5,17 @@
 //! A net that also carries XSPICE event values splits as Verilog-AMS splits it
 //! (LRM 2.4 section 7.8): the module's ports and the code models' event ports
 //! form one digital segment on a shared endpoint, and one converter between
-//! that segment and the electrical node serves the analog side.
+//! that segment and the electrical node serves the analog side. A code model
+//! that only reads a net never changes its analog value, so it joins the
+//! segment only where that converter is the one module port's own
+//! (`shared_segment_nodes`).
 
 use super::*;
 use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection;
 
 pub(super) fn plan_conversions(
     circuit: &mut CircuitData,
+    shared: &BTreeSet<usize>,
     flat_elements: &[Element],
     metadata: &BTreeMap<usize, XspiceAutoBridgeNodeMetadata>,
     supplies: &boundary_supply::BoundarySupplies,
@@ -36,7 +40,7 @@ pub(super) fn plan_conversions(
     }
 
     let names = circuit.node_names_sorted();
-    let segments = split_segments(circuit, &physical, &names)?;
+    let segments = split_segments(circuit, shared, &physical, &names)?;
     let merged = merged_real_drivers(circuit, &physical)?;
     let mut pending: Vec<PendingConverter> = Vec::new();
     // Section 7.8.4 insertion rules 3 and 4: the ports on one net that select
@@ -337,6 +341,7 @@ type PendingConverter = (Vec<(usize, usize)>, String, bool, PlannedXspiceAutoBri
 /// 6.5.3), and its converter would read one side's alone.
 fn split_segments(
     circuit: &CircuitData,
+    shared: &BTreeSet<usize>,
     physical: &BTreeSet<usize>,
     names: &[String],
 ) -> Result<BTreeMap<usize, SplitSegment>, SimulationError> {
@@ -344,7 +349,11 @@ fn split_segments(
     for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
         for (port_index, (port, signal)) in host.direct_event_ports().enumerate() {
             let net_kind = circuit.net_kinds.kind(port.node);
-            if port.node == 0 || !physical.contains(&port.node) || !net_kind.is_discrete() {
+            if port.node == 0
+                || !physical.contains(&port.node)
+                || !net_kind.is_discrete()
+                || !shared.contains(&port.node)
+            {
                 continue;
             }
             let logic = port.bit.is_some();
@@ -428,6 +437,50 @@ fn split_segments(
         .into());
     }
     Ok(segments)
+}
+
+/// The module ports' nodes where the code models' event ports join the
+/// module's digital segment, taken before any converter is inserted: a node
+/// a code model's output or inout port drives, whose drivers resolve as one
+/// net before their one converter reads them, and a node no other module
+/// port shares, where that converter is the one port's own.
+///
+/// A code model that only reads a net never changes the net's analog value.
+/// Where several module ports convert on a net, joining their segment would
+/// merge their converters into one that converts the resolved drive, so a
+/// contention no longer converts each driver through its own resistance.
+/// There the module ports convert as they do without the code model, and it
+/// reads the node through an A/D of its own (`plan_xspice_auto_bridges`), at
+/// the threshold the ports' own A/Ds read it at. On a node one module port
+/// drives alone, the code model stays on the digital segment and reads the
+/// driver itself, as Verilog-AMS keeps a digital receiver on the digital net.
+pub(super) fn shared_segment_nodes(circuit: &CircuitData) -> BTreeSet<usize> {
+    let mut driven = BTreeSet::new();
+    for instance in &circuit.xspice_instances {
+        for (port_index, port) in instance.ports().iter().enumerate() {
+            if port.direction == crate::xspice::PortDirection::In {
+                continue;
+            }
+            if let Some(connection) = instance.connection_at(port_index) {
+                for_each_event_connection_node(connection, |node| {
+                    driven.insert(node);
+                });
+            }
+        }
+    }
+    let mut ports: BTreeMap<usize, usize> = BTreeMap::new();
+    for host in &circuit.mixed_signal_hosts {
+        for (port, _) in host.direct_event_ports() {
+            if port.node > 0 {
+                *ports.entry(port.node).or_default() += 1;
+            }
+        }
+    }
+    ports
+        .into_iter()
+        .filter(|(node, count)| *count == 1 || driven.contains(node))
+        .map(|(node, _)| node)
+        .collect()
 }
 
 /// Every event node one XSPICE connection reaches.
