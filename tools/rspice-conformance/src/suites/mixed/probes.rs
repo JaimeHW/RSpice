@@ -71,7 +71,9 @@ fn one_step(quantity: &Quantity, observation: &Observation) -> Result<Verdict, S
     let tolerance = quantity.abs.unwrap_or(0.0);
     let mut worst = (0usize, 0.0f64);
     for k in 1..output.len() {
-        let diff = (output[k] - input[k - 1]).abs();
+        // The output is the operand a perturbed run moves; the input it
+        // must equal is the reference.
+        let diff = (crate::suites::perturb::actual(output[k]) - input[k - 1]).abs();
         if diff > worst.1 {
             worst = (k, diff);
         }
@@ -125,6 +127,8 @@ mod tests {
             abs_deg: None,
             edge_abs: None,
             why: "w".into(),
+            insensitive: None,
+            insensitive_time: None,
         }
     }
 
@@ -146,5 +150,14 @@ mod tests {
             .insert("v(o)".into(), vec![0.0, 0.1, 0.2, 0.3]);
         let verdict = assert(&quantity(1e-9), &observation).unwrap();
         assert!(!verdict.pass, "{verdict:?}");
+        // A perturbed run moves the output, so the delayed copy then fails.
+        observation
+            .real
+            .insert("v(o)".into(), vec![0.0, 0.0, 0.1, 0.2]);
+        let perturbation = crate::suites::perturb::Perturbation::new(0.01).unwrap();
+        crate::suites::perturb::scoped(Some(perturbation), || {
+            let verdict = assert(&quantity(1e-9), &observation).unwrap();
+            assert!(!verdict.pass, "{verdict:?}");
+        });
     }
 }

@@ -307,6 +307,16 @@ pub struct Quantity {
     #[serde(default)]
     pub edge_abs: Option<f64>,
     pub why: String,
+    /// Why a 1 % scaling of RSpice's values cannot move this quantity past
+    /// its tolerance (a statistic whose allowance comes from sample
+    /// variance), stated so a perturbed run reports the reason, not a blind
+    /// quantity.
+    #[serde(default)]
+    pub insensitive: Option<String>,
+    /// The same for a 1 % stretch of RSpice's time coordinates (a code held
+    /// for a whole window, read in its middle).
+    #[serde(default)]
+    pub insensitive_time: Option<String>,
 }
 
 /// Keys a measure (a `[[q]]` or its `of`) may carry.
@@ -336,9 +346,27 @@ const MEASURE_KEYS: [&str; 22] = [
 ];
 
 /// Keys only a `[[q]]` carries.
-const QUANTITY_KEYS: [&str; 18] = [
-    "id", "analysis", "variants", "oracle", "of", "stat", "over", "interval", "ratio", "trials",
-    "expect", "ref", "abs", "rel", "abs_db", "abs_deg", "edge_abs", "why",
+const QUANTITY_KEYS: [&str; 20] = [
+    "id",
+    "analysis",
+    "variants",
+    "oracle",
+    "of",
+    "stat",
+    "over",
+    "interval",
+    "ratio",
+    "trials",
+    "expect",
+    "ref",
+    "abs",
+    "rel",
+    "abs_db",
+    "abs_deg",
+    "edge_abs",
+    "why",
+    "insensitive",
+    "insensitive_time",
 ];
 
 /// Reject unknown keys. serde cannot deny unknown fields across the flattened
@@ -532,6 +560,50 @@ pub const ANALYSIS_CARDS: [&str; 18] = [
 /// line text. Continuation lines are folded; comments and `.control` blocks
 /// are skipped.
 pub fn deck_cards(source: &str) -> Vec<(String, String)> {
+    cards_of(source, |word| ANALYSIS_CARDS.contains(&word))
+}
+
+/// The names (lower case) of a deck's transient `.MEASURE` results that are
+/// times: a `TRIG`/`TARG` interval, a `WHEN` without a `FIND`, and a `PARAM`
+/// whose every identifier names one of those (`tdiv/49`). A value found at a
+/// time (`FIND … WHEN`, `FIND … AT`) or over an interval (`AVG`, `INTEG`) is
+/// not one.
+pub fn time_measures(source: &str) -> BTreeSet<String> {
+    let mut times = BTreeSet::new();
+    for (_, card) in cards_of(source, |word| matches!(word, ".meas" | ".measure")) {
+        let lower = card.to_ascii_lowercase();
+        let mut words = lower.split_whitespace().skip(1);
+        let (Some("tran"), Some(name)) = (words.next(), words.next()) else {
+            continue;
+        };
+        let rest: Vec<&str> = words.collect();
+        let has = |keyword: &str| {
+            rest.iter()
+                .any(|word| word.split('=').next() == Some(keyword))
+        };
+        let time = if has("trig") && has("targ") {
+            true
+        } else if has("when") {
+            !has("find")
+        } else if let Some(expression) = rest.join(" ").strip_prefix("param") {
+            let identifiers: Vec<&str> = expression
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|word| word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'))
+                .collect();
+            !identifiers.is_empty() && identifiers.iter().all(|word| times.contains(*word))
+        } else {
+            false
+        };
+        if time {
+            times.insert(name.to_owned());
+        }
+    }
+    times
+}
+
+/// The cards of a deck whose first token (lower-cased) is `wanted`, with
+/// their logical line text, as [`deck_cards`] folds them.
+fn cards_of(source: &str, wanted: impl Fn(&str) -> bool) -> Vec<(String, String)> {
     let mut cards: Vec<(String, String)> = Vec::new();
     let mut in_control = false;
     let mut last_was_card = false;
@@ -564,7 +636,7 @@ pub fn deck_cards(source: &str) -> Vec<(String, String)> {
             .next()
             .unwrap_or_default()
             .to_owned();
-        last_was_card = ANALYSIS_CARDS.contains(&word.as_str());
+        last_was_card = wanted(&word);
         if last_was_card {
             cards.push((word, trimmed.to_owned()));
         }
@@ -765,6 +837,17 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
         findings.push(format!(
             "{slug}: quantity {id}: {kind} needs an `of` measure"
         ));
+    }
+    for (key, reason) in [
+        ("insensitive", &quantity.insensitive),
+        ("insensitive_time", &quantity.insensitive_time),
+    ] {
+        if reason
+            .as_ref()
+            .is_some_and(|reason| reason.trim().is_empty())
+        {
+            findings.push(format!("{slug}: quantity {id}: {key} states no reason"));
+        }
     }
     if kind == "meas" && quantity.measure.signal.is_none() {
         findings.push(format!(

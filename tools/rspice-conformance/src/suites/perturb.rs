@@ -21,6 +21,16 @@
 //! once per process; the per-case child processes inherit it. Every
 //! comparison happens on the native side, so the mixed corpus's
 //! browser-worker route is perturbed like the others.
+//!
+//! A value scaling never moves a time coordinate, so it cannot show that a
+//! time tolerance (a lock time, an edge date, a delay) sees a timing error.
+//! [`PERTURB_TIME_ENV`] is the sibling question for the mixed corpus: set to
+//! `e`, every time coordinate of RSpice's result (a transient's axis, event
+//! times, HDL record and assertion times, and the deck's `.MEASURE` times)
+//! is stretched by `1 + e` before any quantity is measured, so a measured
+//! time, an edge date and a value read at a fixed time all move as they
+//! would in a simulator whose clock ran `e` fast. The two variables are
+//! exclusive: one run asks one question.
 
 use std::sync::OnceLock;
 
@@ -28,6 +38,10 @@ use num_complex::Complex64;
 
 /// The opt-in environment variable: the relative error `e` to apply.
 pub const PERTURB_ENV: &str = "RSPICE_CONFORMANCE_PERTURB";
+
+/// The sibling variable: the relative stretch `e` of RSpice's time
+/// coordinates (mixed corpus).
+pub const PERTURB_TIME_ENV: &str = "RSPICE_CONFORMANCE_PERTURB_TIME";
 
 /// A relative error applied to RSpice's side of every comparison.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,7 +55,7 @@ impl Perturbation {
     pub fn new(epsilon: f64) -> Result<Self, String> {
         if !epsilon.is_finite() || epsilon == 0.0 || epsilon.abs() >= 1.0 {
             return Err(format!(
-                "{PERTURB_ENV} must be a finite relative error with 0 < |e| < 1, got {epsilon}"
+                "a perturbation must be a finite relative error with 0 < |e| < 1, got {epsilon}"
             ));
         }
         Ok(Self { epsilon })
@@ -49,11 +63,16 @@ impl Perturbation {
 
     /// Parse the variable's text, for example `0.01` or `1e-3`.
     pub fn parse(text: &str) -> Result<Self, String> {
+        Self::parse_named(PERTURB_ENV, text)
+    }
+
+    /// Parse the text of the variable `name`.
+    fn parse_named(name: &str, text: &str) -> Result<Self, String> {
         let trimmed = text.trim();
         let epsilon = trimmed
             .parse::<f64>()
-            .map_err(|error| format!("{PERTURB_ENV}={trimmed:?} is not a number: {error}"))?;
-        Self::new(epsilon)
+            .map_err(|error| format!("{name}={trimmed:?} is not a number: {error}"))?;
+        Self::new(epsilon).map_err(|error| format!("{name}: {error}"))
     }
 
     /// The relative error `e`.
@@ -86,10 +105,24 @@ pub fn active() -> Option<Perturbation> {
         return scoped;
     }
     static ACTIVE: OnceLock<Option<Perturbation>> = OnceLock::new();
-    *ACTIVE.get_or_init(|| {
-        from_env_value(std::env::var_os(PERTURB_ENV).as_deref()).unwrap_or_else(|error| {
-            panic!("{error}");
-        })
+    *ACTIVE.get_or_init(|| from_env(PERTURB_ENV))
+}
+
+/// The time stretch this process runs under, if [`PERTURB_TIME_ENV`] asks
+/// for one. An unset or empty variable means none.
+///
+/// # Panics
+///
+/// On a value [`Perturbation::parse`] rejects, as [`active`] does.
+pub fn active_time() -> Option<Perturbation> {
+    static ACTIVE: OnceLock<Option<Perturbation>> = OnceLock::new();
+    *ACTIVE.get_or_init(|| from_env(PERTURB_TIME_ENV))
+}
+
+/// The perturbation the variable `name` asks for; panics on a bad value.
+fn from_env(name: &str) -> Option<Perturbation> {
+    from_env_value(name, std::env::var_os(name).as_deref()).unwrap_or_else(|error| {
+        panic!("{error}");
     })
 }
 
@@ -115,18 +148,21 @@ pub(crate) fn scoped<R>(perturbation: Option<Perturbation>, body: impl FnOnce() 
     body()
 }
 
-/// The perturbation a raw environment value asks for.
-fn from_env_value(raw: Option<&std::ffi::OsStr>) -> Result<Option<Perturbation>, String> {
+/// The perturbation a raw value of the variable `name` asks for.
+fn from_env_value(
+    name: &str,
+    raw: Option<&std::ffi::OsStr>,
+) -> Result<Option<Perturbation>, String> {
     let Some(raw) = raw else {
         return Ok(None);
     };
     let text = raw
         .to_str()
-        .ok_or_else(|| format!("{PERTURB_ENV} is not valid Unicode"))?;
+        .ok_or_else(|| format!("{name} is not valid Unicode"))?;
     if text.trim().is_empty() {
         return Ok(None);
     }
-    Perturbation::parse(text).map(Some)
+    Perturbation::parse_named(name, text).map(Some)
 }
 
 /// RSpice's real value as a comparison should see it.
@@ -164,6 +200,18 @@ pub fn blind_verdict(
     checked: usize,
     blind: &[BlindCase],
 ) -> Result<String, String> {
+    blind_verdict_for(suite, "values moved", perturbation, checked, blind)
+}
+
+/// [`blind_verdict`] for a perturbation that does `what` to RSpice's result
+/// (`"values moved"`, `"times stretched"`).
+pub fn blind_verdict_for(
+    suite: &str,
+    what: &str,
+    perturbation: Perturbation,
+    checked: usize,
+    blind: &[BlindCase],
+) -> Result<String, String> {
     let e = perturbation.epsilon();
     if checked == 0 {
         return Err(format!(
@@ -172,7 +220,7 @@ pub fn blind_verdict(
     }
     if blind.is_empty() {
         return Ok(format!(
-            "{suite}: all {checked} checked case(s) caught a {e:e} relative error"
+            "{suite}: all {checked} checked case(s) caught a {e:e} relative error ({what})"
         ));
     }
     let mut lines: Vec<String> = blind
@@ -181,7 +229,7 @@ pub fn blind_verdict(
         .collect();
     lines.sort();
     Err(format!(
-        "{suite}: {} of {checked} checked case(s) still pass with RSpice's values moved by {e:e}; their tolerance cannot see an error that size:\n{}",
+        "{suite}: {} of {checked} checked case(s) still pass with RSpice's {what} by {e:e}; their tolerance cannot see an error that size:\n{}",
         blind.len(),
         lines.join("\n")
     ))
@@ -227,14 +275,17 @@ mod tests {
 
     #[test]
     fn an_unset_or_empty_variable_means_no_perturbation() {
-        assert_eq!(from_env_value(None), Ok(None));
-        assert_eq!(from_env_value(Some("".as_ref())), Ok(None));
-        assert_eq!(from_env_value(Some("  ".as_ref())), Ok(None));
-        assert_eq!(
-            from_env_value(Some("0.001".as_ref())),
-            Ok(Some(perturbation(0.001)))
-        );
-        assert!(from_env_value(Some("0.0".as_ref())).is_err());
+        for name in [PERTURB_ENV, PERTURB_TIME_ENV] {
+            assert_eq!(from_env_value(name, None), Ok(None));
+            assert_eq!(from_env_value(name, Some("".as_ref())), Ok(None));
+            assert_eq!(from_env_value(name, Some("  ".as_ref())), Ok(None));
+            assert_eq!(
+                from_env_value(name, Some("0.001".as_ref())),
+                Ok(Some(perturbation(0.001)))
+            );
+            let error = from_env_value(name, Some("0.0".as_ref())).unwrap_err();
+            assert!(error.starts_with(name), "{error}");
+        }
     }
 
     #[test]

@@ -29,13 +29,23 @@
 //! cell with RSpice's values moved by that relative error and reports each
 //! cell that still passes as blind, in place of the ratchet; it refuses
 //! `--record`, which would write the perturbed outcomes as the baseline.
+//! `RSPICE_CONFORMANCE_PERTURB_TIME` asks the same of RSpice's time
+//! coordinates, stretched by that relative error, over the cells whose
+//! result has a time axis. A cell whose every passing quantity states why
+//! the perturbation cannot move it (`insensitive`, `insensitive_time`) is
+//! listed with its reasons instead of as blind, and a passing quantity in a
+//! cell that another quantity failed is listed as masked.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rspice_conformance::suites::mixed::{Outcome, Route, design::Design, dispatch, peer, runner};
+use rspice_conformance::suites::mixed::{
+    Outcome, Route,
+    design::{Design, analysis_kind},
+    dispatch, peer, runner,
+};
 use rspice_conformance::suites::perturb::{self, BlindCase};
 
 #[derive(Parser)]
@@ -295,11 +305,24 @@ fn options(route: Route) -> Result<runner::RunOptions, String> {
 
 /// Run `options`, then remove the case files unless the caller `keep`s them.
 fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, String> {
-    let perturbation = perturb::active();
-    if perturbation.is_some() && options.record {
+    let stretch = perturb::active_time();
+    let perturbation = match (perturb::active(), stretch) {
+        (Some(_), Some(_)) => {
+            return Err(format!(
+                "{} and {} are both set: one run asks one question",
+                perturb::PERTURB_ENV,
+                perturb::PERTURB_TIME_ENV
+            ));
+        }
+        (Some(scale), None) => Some((scale, perturb::PERTURB_ENV, "values moved")),
+        (None, Some(stretch)) => Some((stretch, perturb::PERTURB_TIME_ENV, "times stretched")),
+        (None, None) => None,
+    };
+    if let Some((_, variable, _)) = perturbation
+        && options.record
+    {
         return Err(format!(
-            "{} is set: refusing --record, which would write perturbed outcomes as the baseline",
-            perturb::PERTURB_ENV
+            "{variable} is set: refusing --record, which would write perturbed outcomes as the baseline"
         ));
     }
     let started = std::time::Instant::now();
@@ -345,28 +368,83 @@ fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, Strin
             }
         }
     }
-    if let Some(perturbation) = perturbation {
+    if let Some((perturbation, _, what)) = perturbation {
         let mut checked = 0usize;
         let mut blind = Vec::new();
+        let mut stated = Vec::new();
+        let mut masked = Vec::new();
         for report in &reports {
             for cell in &report.cells {
+                // A stretch moves nothing in an operating point or a
+                // frequency-domain result.
+                if stretch.is_some() && !has_time_axis(&cell.row.analysis) {
+                    continue;
+                }
+                let name = format!(
+                    "{} {} {} {}",
+                    report.design, cell.row.variant, cell.row.analysis, cell.row.route
+                );
+                let passing: Vec<&runner::QuantityReport> = cell
+                    .quantities
+                    .iter()
+                    .filter(|quantity| quantity.passed == Some(true))
+                    .collect();
                 match cell.row.outcome {
                     Outcome::Pass => {
                         checked += 1;
-                        blind.push(BlindCase::new(
-                            format!(
-                                "{} {} {} {}",
-                                report.design, cell.row.variant, cell.row.analysis, cell.row.route
-                            ),
-                            &cell.row.detail,
-                        ));
+                        if !passing.is_empty()
+                            && passing
+                                .iter()
+                                .all(|quantity| quantity.insensitive.is_some())
+                        {
+                            let reasons: Vec<String> = passing
+                                .iter()
+                                .map(|quantity| {
+                                    format!(
+                                        "{}: {}",
+                                        quantity.name,
+                                        quantity.insensitive.as_deref().unwrap_or_default()
+                                    )
+                                })
+                                .collect();
+                            stated.push(format!("  STATED {name}  [{}]", reasons.join("; ")));
+                        } else {
+                            blind.push(BlindCase::new(name, &cell.row.detail));
+                        }
                     }
-                    Outcome::Fail | Outcome::Wrong => checked += 1,
+                    Outcome::Fail | Outcome::Wrong => {
+                        checked += 1;
+                        for quantity in passing
+                            .iter()
+                            .filter(|quantity| quantity.insensitive.is_none())
+                        {
+                            masked.push(format!(
+                                "  MASKED {name}: {}  [{}]",
+                                quantity.name, quantity.detail
+                            ));
+                        }
+                    }
                     Outcome::Unverified | Outcome::Refused => {}
                 }
             }
         }
-        match perturb::blind_verdict("mixed corpus", perturbation, checked, &blind) {
+        stated.sort();
+        masked.sort();
+        if !stated.is_empty() {
+            println!(
+                "{} passing cell(s) state why the perturbation cannot move them:",
+                stated.len()
+            );
+            println!("{}", stated.join("\n"));
+        }
+        if !masked.is_empty() {
+            println!(
+                "{} quantity(ies) still pass inside a cell another quantity failed:",
+                masked.len()
+            );
+            println!("{}", masked.join("\n"));
+        }
+        match perturb::blind_verdict_for("mixed corpus", what, perturbation, checked, &blind) {
             Ok(summary) => println!("{summary}"),
             Err(report) => {
                 println!("{report}");
@@ -379,4 +457,12 @@ fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, Strin
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// Whether an analysis's result has a time axis a stretch moves.
+fn has_time_axis(analysis: &str) -> bool {
+    matches!(
+        analysis_kind(analysis).unwrap_or(analysis),
+        "tran" | "trnoise" | "mc-tran" | "step-tran" | "ckpt" | "pss"
+    )
 }

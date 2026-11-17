@@ -63,7 +63,9 @@ fn every_mixed_corpus_cell_matches_its_recorded_outcome() {
     assert!(
         output.status.success(),
         "{} ({}); the cells are printed above",
-        if rspice_conformance::suites::perturb::active().is_some() {
+        if rspice_conformance::suites::perturb::active().is_some()
+            || rspice_conformance::suites::perturb::active_time().is_some()
+        {
             "perturbed mixed corpus has blind cells, listed with their allowances"
         } else {
             "mixed corpus drifted from outcomes.tsv, with the drift"

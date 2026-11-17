@@ -21,6 +21,7 @@ use super::design::{Design, Quantity, analysis_kind, discover, integrity};
 use super::measure::{MeasureError, Measured, evaluate, onto_axis, statistic};
 use super::outcomes::{self, Drift, Row};
 use super::{Outcome, Route, analytic, events, oracle, probes};
+use crate::suites::perturb::{self, Perturbation};
 
 /// What `run` was asked to do.
 #[derive(Debug, Clone, Default)]
@@ -91,6 +92,23 @@ pub struct CellReport {
     pub row: Row,
     pub dispatch: String,
     pub elapsed_s: f64,
+    /// Every quantity's own verdict, which a perturbed run reports: a cell
+    /// fails on its worst quantity, and a looser one beside it would
+    /// otherwise pass unseen.
+    pub quantities: Vec<QuantityReport>,
+}
+
+/// One quantity's verdict within a cell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuantityReport {
+    /// `id (oracle)`.
+    pub name: String,
+    /// Whether it passed, when it compared numbers.
+    pub passed: Option<bool>,
+    pub detail: String,
+    /// Its stated reason that the run's perturbation cannot move it
+    /// (`insensitive`, or `insensitive_time` under a time stretch).
+    pub insensitive: Option<String>,
 }
 
 /// One design's run.
@@ -346,7 +364,7 @@ fn run_cell(options: &RunOptions, design: &Design, task: &Task) -> CellReport {
         )),
         None => run_child(options, design, variant, analysis, false, budget),
     };
-    let (classification, dispatch, route) =
+    let (classification, dispatch, route, quantities) =
         evaluate_cell(options, design, variant, analysis, &end, budget);
     let detail = outcomes::normalize_paths(
         &classification.detail,
@@ -370,6 +388,7 @@ fn run_cell(options: &RunOptions, design: &Design, task: &Task) -> CellReport {
         },
         dispatch,
         elapsed_s,
+        quantities,
     }
 }
 
@@ -645,7 +664,7 @@ fn evaluate_cell(
     analysis: &str,
     end: &CaseEnd,
     budget: Duration,
-) -> (Classification, String, Route) {
+) -> (Classification, String, Route, Vec<QuantityReport>) {
     let kind = analysis_kind(analysis).unwrap_or(analysis);
     let instances = deck_instances(&design.deck_path(variant, analysis));
     let (dispatch, route) = match end {
@@ -658,13 +677,22 @@ fn evaluate_cell(
     if let CaseEnd::Completed(result) = end
         && let Some(failure) = super::classify::route_failure(route, result)
     {
-        return (failure, dispatch, route);
+        return (failure, dispatch, route, Vec::new());
     }
+    let stretch = perturb::active_time();
     let mut verdicts = Vec::new();
+    let mut reports = Vec::new();
     if let CaseEnd::Completed(result) = end
         && result.outcome == "completed"
         && let Some(observation) = primary_observation(result, analysis)
     {
+        // Under a time stretch the quantities measure the stretched result;
+        // the oracle side, a closed form and O3's replay read the raw one.
+        let stretched = stretch.map(|stretch| {
+            let deck = design.deck_path(variant, analysis);
+            stretched_in_time(observation, stretch, &deck_time_measures(&deck))
+        });
+        let measured = stretched.as_ref().unwrap_or(observation);
         let mut o5_cache: Option<Result<Observation, String>> = None;
         for quantity in design.quantities_for(variant, analysis) {
             let outcome = evaluate_quantity(
@@ -673,10 +701,27 @@ fn evaluate_cell(
                 quantity,
                 variant,
                 analysis,
-                observation,
+                (observation, measured),
                 budget,
                 &mut o5_cache,
             );
+            let (passed, detail) = match &outcome {
+                QuantityOutcome::Compared(verdict) => (Some(verdict.pass), verdict.detail.clone()),
+                QuantityOutcome::OracleAbsent(why)
+                | QuantityOutcome::Missing(why)
+                | QuantityOutcome::Unmeasurable(why)
+                | QuantityOutcome::OracleError(why) => (None, why.clone()),
+            };
+            reports.push(QuantityReport {
+                name: format!("{} ({})", quantity.id, quantity.oracle),
+                passed,
+                detail,
+                insensitive: if stretch.is_some() {
+                    quantity.insensitive_time.clone()
+                } else {
+                    quantity.insensitive.clone()
+                },
+            });
             verdicts.push(QuantityVerdict {
                 quantity: quantity.id.clone(),
                 oracle: quantity.oracle.clone(),
@@ -684,7 +729,71 @@ fn evaluate_cell(
             });
         }
     }
-    (classify(end, kind, &instances, &verdicts), dispatch, route)
+    (
+        classify(end, kind, &instances, &verdicts),
+        dispatch,
+        route,
+        reports,
+    )
+}
+
+/// The `.MEASURE` results of `deck` (and what it includes) that are times.
+fn deck_time_measures(deck: &Path) -> BTreeSet<String> {
+    let Ok(source) = fs::read_to_string(deck) else {
+        return BTreeSet::new();
+    };
+    let directory = deck.parent().unwrap_or(Path::new("."));
+    let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
+        .expand_content(&source, deck)
+        .unwrap_or(source);
+    super::design::time_measures(&expanded)
+}
+
+/// `observation` with every time coordinate stretched by `stretch`: a
+/// transient's (or checkpointed run's) axis, event times, HDL record times,
+/// assertion starts and the `.MEASURE` results `time_measures` names, in
+/// every trial too.
+pub fn stretched_in_time(
+    observation: &Observation,
+    stretch: Perturbation,
+    time_measures: &BTreeSet<String>,
+) -> Observation {
+    let mut moved = observation.clone();
+    stretch_in_place(&mut moved, stretch, time_measures);
+    moved
+}
+
+fn stretch_in_place(
+    observation: &mut Observation,
+    stretch: Perturbation,
+    time_measures: &BTreeSet<String>,
+) {
+    if matches!(observation.kind.as_str(), "tran" | "ckpt") {
+        for time in &mut observation.axis {
+            *time = stretch.real(*time);
+        }
+    }
+    for trace in observation.events.values_mut() {
+        for (time, _) in trace.iter_mut() {
+            *time = stretch.real(*time);
+        }
+    }
+    for record in &mut observation.hdl_checks {
+        record.at = stretch.real(record.at);
+    }
+    for report in observation.assertions.values_mut() {
+        for start in &mut report.starts {
+            *start = stretch.real(*start);
+        }
+    }
+    for (name, record) in &mut observation.measures {
+        if time_measures.contains(name) {
+            record.value = record.value.map(|value| stretch.real(value));
+        }
+    }
+    for trial in &mut observation.trials {
+        stretch_in_place(trial, stretch, time_measures);
+    }
 }
 
 /// Element names (lower case) of a deck and everything it includes.
@@ -719,7 +828,7 @@ fn evaluate_quantity(
     quantity: &Quantity,
     variant: &str,
     analysis: &str,
-    rspice: &Observation,
+    (rspice, measured): (&Observation, &Observation),
     budget: Duration,
     o5_cache: &mut Option<Result<Observation, String>>,
 ) -> QuantityOutcome {
@@ -727,7 +836,7 @@ fn evaluate_quantity(
     let kind = quantity.measure.kind.as_str();
     // Probe assertions read the observation directly.
     if kind == "assert" {
-        return match probes::assert(quantity, rspice) {
+        return match probes::assert(quantity, measured) {
             Ok(verdict) => QuantityOutcome::Compared(verdict),
             Err(error) if error.starts_with("absent") => QuantityOutcome::Missing(error),
             Err(error) => QuantityOutcome::Unmeasurable(error),
@@ -735,7 +844,7 @@ fn evaluate_quantity(
     }
     // A resumed run is compared with the uninterrupted one in the same result.
     if kind == "identical" {
-        return identical_quantity(quantity, variant, rspice, tolerance);
+        return identical_quantity(quantity, variant, (rspice, measured), tolerance);
     }
     // A captured reference names signals as its own deck does: one variant's
     // reference may serve another (C1's `xs` O1 tables serve `vams`), so the
@@ -817,14 +926,14 @@ fn evaluate_quantity(
             quantity,
             variant,
             &oracle_variant,
-            rspice,
+            measured,
             oracle_observation.as_ref(),
         ),
-        "per_trial" => per_trial_quantity(quantity, variant, rspice, tolerance),
+        "per_trial" => per_trial_quantity(quantity, variant, (rspice, measured), tolerance),
         _ => {
             let on_axis = closed_form_on_axis(quantity, rspice);
             let quantity = on_axis.as_ref().unwrap_or(quantity);
-            let actual = match evaluate(&quantity.measure, variant, rspice) {
+            let actual = match evaluate(&quantity.measure, variant, measured) {
                 Ok(actual) => actual,
                 Err(error) => return measure_failure(error),
             };
@@ -1003,23 +1112,27 @@ fn stat_quantity(
 }
 
 /// `identical` (ckpt): every resumed run, held in the case's trials, against
-/// the uninterrupted run that is the case's own observation.
+/// the uninterrupted run that is the case's own observation. Under a time
+/// stretch only the resumed runs (from `measured`) are stretched.
 fn identical_quantity(
     quantity: &Quantity,
     variant: &str,
-    rspice: &Observation,
+    (rspice, measured): (&Observation, &Observation),
     tolerance: Tolerance,
 ) -> QuantityOutcome {
     if let Some(expected) = quantity.trials
-        && rspice.trials.len() != expected
+        && measured.trials.len() != expected
     {
         return QuantityOutcome::Compared(Verdict {
             pass: false,
             severity: f64::INFINITY,
-            detail: format!("{} resumed runs, expected {expected}", rspice.trials.len()),
+            detail: format!(
+                "{} resumed runs, expected {expected}",
+                measured.trials.len()
+            ),
         });
     }
-    if rspice.trials.is_empty() {
+    if measured.trials.is_empty() {
         return QuantityOutcome::Missing("no resumed run".into());
     }
     let measure = &quantity.measure;
@@ -1051,7 +1164,7 @@ fn identical_quantity(
             (start, stop)
         });
     let mut worst: Option<Verdict> = None;
-    for trial in &rspice.trials {
+    for trial in &measured.trials {
         let mut verdict =
             super::compare::identical(rspice, trial, &signals, &nets, window, tolerance);
         verdict.detail = format!("{}: {}", trial.label, verdict.detail);
@@ -1065,35 +1178,36 @@ fn identical_quantity(
     QuantityOutcome::Compared(worst.expect("at least one resumed run"))
 }
 
-/// The inner measure per trial against the O6 expectation for that trial.
+/// The inner measure per trial against the O6 expectation for that trial,
+/// measured on `measured`'s trial and expected from `rspice`'s.
 fn per_trial_quantity(
     quantity: &Quantity,
     variant: &str,
-    rspice: &Observation,
+    (rspice, measured): (&Observation, &Observation),
     tolerance: Tolerance,
 ) -> QuantityOutcome {
     let Some(inner) = &quantity.of else {
         return QuantityOutcome::OracleError("per_trial without of".into());
     };
     if let Some(expected) = quantity.trials
-        && rspice.trials.len() != expected
+        && measured.trials.len() != expected
     {
         return QuantityOutcome::Compared(Verdict {
             pass: false,
             severity: f64::INFINITY,
-            detail: format!("{} trials, expected {expected}", rspice.trials.len()),
+            detail: format!("{} trials, expected {expected}", measured.trials.len()),
         });
     }
-    if rspice.trials.is_empty() {
+    if measured.trials.is_empty() {
         return QuantityOutcome::Missing("no trials".into());
     }
     let mut worst: Option<Verdict> = None;
-    for (index, trial) in rspice.trials.iter().enumerate() {
+    for (index, (trial, raw)) in measured.trials.iter().zip(&rspice.trials).enumerate() {
         let actual = match evaluate(inner, variant, trial) {
             Ok(actual) => actual,
             Err(error) => return measure_failure(error),
         };
-        let expected = match analytic_expectation(quantity, variant, trial, Some(index)) {
+        let expected = match analytic_expectation(quantity, variant, raw, Some(index)) {
             Ok(expected) => expected,
             Err(error) => return QuantityOutcome::OracleError(error),
         };
@@ -1664,6 +1778,7 @@ mod tests {
                     },
                     dispatch: "simulation".into(),
                     elapsed_s: 0.0,
+                    quantities: Vec::new(),
                 }
             },
             |index, cell| {
