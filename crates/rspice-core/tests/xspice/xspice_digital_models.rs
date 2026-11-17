@@ -2375,8 +2375,8 @@ a_oe [din] [oute] oe
     let outc = digital_tokens(&result, "outc");
     assert!(
         outc.iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "0s"),
-        "d_open_c fall_delay should clamp to 1ps like ngspice, got {outc:?}"
+            .any(|(time, token)| *time == 0.0 && token == "0s"),
+        "d_open_c drives its first level at the operating point like ngspice, got {outc:?}"
     );
     assert!(
         outc.iter()
@@ -2387,8 +2387,8 @@ a_oe [din] [oute] oe
     let oute = digital_tokens(&result, "oute");
     assert!(
         oute.iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "0z"),
-        "d_open_e open_delay should clamp to 1ps like ngspice, got {oute:?}"
+            .any(|(time, token)| *time == 0.0 && token == "0z"),
+        "d_open_e drives its first level at the operating point like ngspice, got {oute:?}"
     );
     assert!(
         oute.iter()
@@ -2418,8 +2418,8 @@ a_open [din] [out] oc
     assert!(
         trace
             .iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "0s"),
-        "d_open_c input zero must drive a strong zero after fall_delay: {trace:?}"
+            .any(|(time, token)| *time == 0.0 && token == "0s"),
+        "d_open_c input zero must drive a strong zero from the operating point: {trace:?}"
     );
     assert!(
         trace
@@ -2456,8 +2456,8 @@ a_open [din] [out] oe
     assert!(
         trace
             .iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "0z"),
-        "d_open_e input zero must emit logic-zero high-Z after open_delay: {trace:?}"
+            .any(|(time, token)| *time == 0.0 && token == "0z"),
+        "d_open_e input zero must emit logic-zero high-Z from the operating point: {trace:?}"
     );
     assert!(
         trace

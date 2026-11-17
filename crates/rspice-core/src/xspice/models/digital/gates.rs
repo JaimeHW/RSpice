@@ -1266,6 +1266,11 @@ fn open_emitter_output_from_code(code: i64) -> DigitalValue {
 }
 
 fn open_collector_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> CmResult<Value> {
+    // The first output is posted at the operating point, as d_buffer's is:
+    // ngspice's d_open_c drives its strong level from INIT.
+    if ctx.time == 0.0 || prev_state == INITIAL_GATE_STATE {
+        return Ok(0.0);
+    }
     let name = match new_state {
         0 => "fall_delay",
         1 => "open_delay",
@@ -1276,6 +1281,9 @@ fn open_collector_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> CmR
 }
 
 fn open_emitter_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> CmResult<Value> {
+    if ctx.time == 0.0 || prev_state == INITIAL_GATE_STATE {
+        return Ok(0.0);
+    }
     let name = match new_state {
         0 => "open_delay",
         1 => "rise_delay",
@@ -1637,6 +1645,33 @@ mod tests {
             .init(&mut open_ctx)
             .expect("d_open_c init");
         assert_invalid_param(DigitalOpenCollector.evaluate(&mut open_ctx), "open_delay");
+    }
+
+    #[test]
+    fn open_collector_and_emitter_post_their_first_level_at_the_operating_point() {
+        for (model, input, level) in [
+            (
+                &DigitalOpenCollector as &dyn CodeModel,
+                DigitalValue::zero(),
+                DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
+            ),
+            (
+                &DigitalOpenEmitter,
+                DigitalValue::one(),
+                DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+            ),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_input_digital("in", input);
+            model.init(&mut ctx).expect("init");
+            model
+                .evaluate(&mut ctx)
+                .expect("evaluates at the operating point");
+            let events = ctx.take_pending_events();
+            assert_eq!(events.len(), 1, "{}", model.name());
+            assert_eq!(events[0].values, [level], "{}", model.name());
+            assert_eq!(events[0].delay, 0.0, "{}", model.name());
+        }
     }
 
     #[test]
