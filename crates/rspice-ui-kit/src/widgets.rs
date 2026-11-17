@@ -30,6 +30,7 @@ mod dialog_tabs;
 mod docbar;
 mod filter_clear;
 mod form;
+mod measurement_table;
 pub mod notice;
 mod ordered_chips;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
@@ -40,7 +41,6 @@ mod segmented;
 mod select;
 mod status_mark;
 mod switch;
-mod table;
 mod toast;
 mod tree;
 mod view_switch;
@@ -81,7 +81,7 @@ pub use status_mark::{
     paint_problem_mark, paint_status_mark, problem_line,
 };
 pub use switch::{SWITCH_WIDTH, paint_switch};
-pub use table::measurement_table;
+pub use measurement_table::measurement_table;
 pub use toast::{
     MirroredEntry, NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts,
 };
