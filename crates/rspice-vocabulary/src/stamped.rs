@@ -22,7 +22,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_STAMP: AtomicU64 = AtomicU64::new(1);
 
-fn issue() -> u64 {
+/// A stamp no value has carried before, for a type that keeps its own.
+pub(crate) fn issue() -> u64 {
     NEXT_STAMP.fetch_add(1, Ordering::Relaxed)
 }
 

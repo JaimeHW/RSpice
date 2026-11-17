@@ -5,10 +5,24 @@ use std::collections::HashMap;
 use super::{Library, LibraryEdit};
 
 /// Library membership and content, independent of browser selection and filters.
-#[derive(Debug, Clone, Default)]
+///
+/// The revision is the governed count a project persists and publications
+/// check against; a catalog loaded from disk resumes it, so two catalogs of
+/// one project can carry the same revision and different content. The stamp
+/// is what a memo keys on: unique for the life of the process, as
+/// [`crate::stamped`] issues it, kept by a clone and reissued by every
+/// content change. Runtime dirty markers are presentation and issue none.
+#[derive(Debug, Clone)]
 pub struct LibraryCatalog {
     libraries: HashMap<String, Library>,
     revision: u64,
+    stamp: u64,
+}
+
+impl Default for LibraryCatalog {
+    fn default() -> Self {
+        Self::from_persisted(HashMap::new(), 0)
+    }
 }
 
 impl LibraryCatalog {
@@ -18,7 +32,20 @@ impl LibraryCatalog {
         Self {
             libraries,
             revision,
+            stamp: crate::stamped::issue(),
         }
+    }
+
+    /// The stamp of the content as it stands: equal stamps, equal libraries.
+    pub const fn stamp(&self) -> u64 {
+        self.stamp
+    }
+
+    /// A content change: the governed revision advances and a new stamp is
+    /// issued.
+    fn advance(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.stamp = crate::stamped::issue();
     }
 
     /// Borrow the stored map for persistence without exposing mutable content.
@@ -32,11 +59,11 @@ impl LibraryCatalog {
 
     pub fn add_library(&mut self, library: Library) {
         self.libraries.insert(library.name.clone(), library);
-        self.revision = self.revision.wrapping_add(1);
+        self.advance();
     }
 
     pub fn remove_library(&mut self, name: &str) -> Option<Library> {
-        self.revision = self.revision.wrapping_add(1);
+        self.advance();
         self.libraries.remove(name)
     }
 
@@ -56,7 +83,7 @@ impl LibraryCatalog {
     }
 
     fn library_for_edit(&mut self, name: &str) -> Option<&mut Library> {
-        self.revision = self.revision.wrapping_add(1);
+        self.advance();
         self.libraries.get_mut(name)
     }
 
@@ -85,7 +112,7 @@ impl LibraryCatalog {
 
     pub fn clear(&mut self) {
         self.libraries.clear();
-        self.revision = self.revision.wrapping_add(1);
+        self.advance();
     }
 
     /// Replace a publication candidate with a checked increment of this catalog
@@ -97,6 +124,7 @@ impl LibraryCatalog {
             .ok_or_else(|| "project library content revision is exhausted".to_owned())?;
         self.libraries = snapshot.libraries.clone();
         self.revision = revision;
+        self.stamp = crate::stamped::issue();
         Ok(revision)
     }
 
@@ -142,6 +170,7 @@ impl LibraryCatalog {
 
     /// Sanitize a persistence clone while retaining its observed revision.
     pub fn sanitize_views_for_persistence(&mut self) {
+        self.stamp = crate::stamped::issue();
         self.mark_all_views_clean_runtime();
         for library in self.libraries.values_mut() {
             for cell in library.cells.values_mut() {
@@ -232,6 +261,7 @@ impl LibraryCatalog {
         }
 
         self.revision = source.revision;
+        self.stamp = crate::stamped::issue();
         Ok(())
     }
 }
@@ -278,6 +308,31 @@ mod tests {
         assert!(
             saved.get_view(GENERATED_SYMBOL_VIEW).is_some(),
             "the generated symbol is saved with the module that defines it"
+        );
+    }
+
+    /// A memo over a catalog keys on its stamp, so the stamp must name one
+    /// content: a clone keeps it, a change reissues it, and a catalog loaded
+    /// at a revision an earlier one carried still gets a stamp of its own.
+    #[test]
+    fn the_stamp_names_one_content() {
+        let mut live = LibraryCatalog::default();
+        live.add_library(Library::new("work"));
+        let clone = live.clone();
+        assert_eq!(clone.stamp(), live.stamp());
+
+        let before = live.stamp();
+        live.set_all_views_modified_runtime(true);
+        assert_eq!(live.stamp(), before, "a dirty marker is not content");
+        let _ = live.edit_library("work");
+        assert_ne!(live.stamp(), before);
+
+        let reloaded = LibraryCatalog::from_persisted(clone.libraries().clone(), clone.revision());
+        assert_eq!(reloaded.revision(), clone.revision());
+        assert_ne!(reloaded.stamp(), clone.stamp());
+        assert_ne!(
+            LibraryCatalog::default().stamp(),
+            LibraryCatalog::default().stamp()
         );
     }
 }
