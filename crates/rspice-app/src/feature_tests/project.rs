@@ -10,6 +10,7 @@ mod configuration_dialogs;
 mod configuration_editing;
 mod configuration_inspector;
 mod configuration_page;
+mod configuration_tables;
 mod configuration_transactions;
 mod dependencies;
 mod design_management;

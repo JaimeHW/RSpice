@@ -5,280 +5,73 @@
 
 use super::*;
 
-use crate::ui::widgets::select;
+use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
 use crate::workbench::project::configuration_state::{
-    CellTableRow, ConfigurationRow, ConfigurationTables,
+    CellTableRow, ConfigurationPageState, ConfigurationRow, ConfigurationTables, INHERITED,
 };
 
-use super::instances::TableEdit;
+use super::instances::{TableAction, answer, ident, lead_follows, table_height, view_list};
 
-const TABLE_MIN_WIDTH: f32 = 700.0;
-
-const COLUMNS: [(&str, f32); 6] = [
-    ("Library", 0.15),
-    ("Cell", 0.18),
-    ("Instances", 0.09),
-    ("View found", 0.16),
-    ("View to use", 0.16),
-    ("Inherited view list", 0.26),
-];
+fn columns() -> [Column; 6] {
+    [
+        Column::words("Library", 104.0),
+        Column::name("Cell", 120.0),
+        Column::number("Instances", 84.0),
+        Column::words("View found", 110.0),
+        Column::name("View to use", 120.0),
+        Column::name("Inherited view list", 140.0)
+            .tooltip("The views a cell binding's instances go back to when it is removed"),
+    ]
+}
 
 pub(super) fn cells_table(
     ui: &mut Ui,
+    page: &mut ConfigurationPageState,
     tables: &ConfigurationTables,
-    selected: Option<&ConfigurationRow>,
-    editable: bool,
-) -> Option<TableEdit> {
-    let t = Tokens::get(ui.ctx());
-    let row_height = t.metrics.row_h;
-    let header_height = (row_height - 4.0).max(22.0);
-    let width = visible_workspace_width(ui).max(TABLE_MIN_WIDTH);
+) -> Vec<TableAction> {
     let rows = &tables.cell_rows;
-    let context = RowContext {
-        tables,
-        selected,
-        editable,
-        width,
-        height: row_height,
-    };
-    let mut edit = None;
-    ScrollArea::horizontal()
-        .id_salt("workbench.project.configuration.cells.horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            header(ui, width, header_height);
-            let height = visible_workspace_height(ui).max(row_height * 4.0);
-            ScrollArea::vertical()
-                .id_salt("workbench.project.configuration.cells")
-                .auto_shrink([false, false])
-                .max_height(height)
-                .show_rows(ui, row_height, rows.len(), |ui, range| {
-                    ui.set_min_width(width);
-                    for row in &rows[range] {
-                        if let Some(row_edit) = cell_row(ui, row, &context) {
-                            edit = Some(row_edit);
-                        }
-                    }
-                });
-        });
-    edit
-}
-
-fn header(ui: &mut Ui, width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("Cell columns: {}", COLUMNS.map(|(name, _)| name).join(", ")),
-        )
-    });
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    for (index, (name, cell)) in columns(rect).into_iter().enumerate() {
-        if index > 0 {
-            ui.painter().vline(
-                cell.left(),
-                rect.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-        }
-        text(ui, ui.painter(), cell, name, &font, t.color.text_faint);
-    }
-}
-
-fn columns(row: Rect) -> [(&'static str, Rect); 6] {
-    let mut left = row.left();
-    COLUMNS.map(|(name, share)| {
-        let right = (left + row.width() * share).min(row.right());
-        let cell = Rect::from_min_max(pos2(left, row.top()), pos2(right, row.bottom()));
-        left = right;
-        (name, cell)
-    })
-}
-
-fn text(
-    ui: &Ui,
-    painter: &egui::Painter,
-    cell: Rect,
-    value: &str,
-    font: &egui::FontId,
-    color: Color32,
-) {
-    let inner = cell.shrink2(vec2(7.0, 0.0));
-    let value = elide_text(ui, value, font, inner.width().max(1.0));
-    painter.with_clip_rect(inner).text(
-        inner.left_center(),
-        Align2::LEFT_CENTER,
-        value,
-        font.clone(),
-        color,
-    );
-}
-
-/// What every row of one frame draws from.
-#[derive(Clone, Copy)]
-struct RowContext<'a> {
-    tables: &'a ConfigurationTables,
-    selected: Option<&'a ConfigurationRow>,
-    editable: bool,
-    width: f32,
-    height: f32,
-}
-
-fn cell_row(ui: &mut Ui, row: &CellTableRow, context: &RowContext<'_>) -> Option<TableEdit> {
-    let RowContext {
-        tables,
-        selected,
-        editable,
-        width,
-        height,
-    } = *context;
-    let inherited = tables.inherited.as_str();
-    let t = Tokens::get(ui.ctx());
-    let is_selected = matches!(
-        selected,
-        Some(ConfigurationRow::Cell { library, cell })
-            if library.eq_ignore_ascii_case(&row.library) && cell.eq_ignore_ascii_case(&row.cell)
-    );
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    let to_use = row.to_use.as_str();
-    let found = &row.found;
-    let mut label = format!(
-        "Cell {}/{}: {} instance{}; view found {found}; view to use {to_use}; inherited view list {inherited}",
-        row.library,
-        row.cell,
-        row.instances,
-        plural_suffix(row.instances)
-    );
-    if !row.in_design {
-        label = format!(
-            "{label}; {}",
-            Problem::Warning.announce("not in this design")
-        );
-    }
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            is_selected,
-            &label,
-        )
-    });
-    if is_selected {
-        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let cells = columns(rect);
-    for (_, cell) in cells.iter().skip(1) {
-        painter.vline(
-            cell.left(),
-            rect.y_range(),
-            Stroke::new(1.0, t.color.border),
-        );
-    }
-    text(
-        ui,
-        &painter,
-        cells[0].1,
-        &row.library,
-        &mono,
-        t.color.text_dim,
-    );
-    text(ui, &painter, cells[1].1, &row.cell, &mono, t.color.text);
-    text(
-        ui,
-        &painter,
-        cells[2].1,
-        &row.instances.to_string(),
-        &mono,
-        t.color.text_dim,
-    );
-    let found_cell = cells[3].1;
-    if row.in_design {
-        text(ui, &painter, found_cell, found, &mono, t.color.text_dim);
-    } else {
-        paint_problem_mark(
-            &painter,
-            Rect::from_center_size(
-                pos2(found_cell.left() + 7.0 + MARK_SIDE * 0.5, rect.center().y),
-                vec2(MARK_SIDE, MARK_SIDE),
-            ),
-            Problem::Warning,
-        );
-        text(
-            ui,
-            &painter,
-            Rect::from_min_max(
-                pos2(found_cell.left() + MARK_ADVANCE, found_cell.top()),
-                found_cell.max,
-            ),
-            "not in this design",
-            &theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-    }
-    let mut edit = None;
-    let view_cell = cells[4].1;
-    if editable {
-        let options = &tables.view_options[row.options];
-        let mut picked = None;
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(view_cell.shrink2(vec2(3.0, 2.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                picked = select(
-                    ui,
-                    &format!("configuration-cell-view-{}-{}", row.library, row.cell),
-                    &format!("View to use for {}/{}", row.library, row.cell),
-                    to_use,
-                    options,
-                    ui.available_width(),
-                );
-            },
-        );
-        if let Some(index) = picked
-            && options[index] != to_use
-        {
-            edit = Some(TableEdit::CellView {
-                library: row.library.clone(),
-                cell: row.cell.clone(),
-                view: (index > 0).then(|| options[index].clone()),
-            });
-        }
-    } else {
-        text(ui, &painter, view_cell, to_use, &mono, t.color.text_dim);
-    }
-    text(
-        ui,
-        &painter,
-        cells[5].1,
-        inherited,
-        &mono,
-        t.color.text_faint,
-    );
-    if response.clicked() && edit.is_none() {
-        edit = Some(TableEdit::Select(ConfigurationRow::Cell {
+    let keys = rows
+        .iter()
+        .map(|row| RowKey::Number(row.key))
+        .collect::<Vec<_>>();
+    let wanted = page.row.as_ref().and_then(|row| tables.row_key(row));
+    lead_follows(&mut page.cells_table, &keys, wanted);
+    let columns = columns();
+    let response = DataTable::new("configuration.cells", &columns, rows.len())
+        .state(&mut page.cells_table)
+        .keys(&keys)
+        .multi_select()
+        .freeze(2)
+        .max_height(table_height(ui))
+        .show(ui, |index| cell_cells(&rows[index], &tables.inherited));
+    let identity = |index: usize| {
+        let row = &rows[index];
+        ConfigurationRow::Cell {
             library: row.library.clone(),
             cell: row.cell.clone(),
-        }));
-    }
-    edit
+        }
+    };
+    answer(&page.cells_table, &response, &identity)
+}
+
+/// One library/cell. The list it inherits is stated only where it has a
+/// binding of its own, since that list is what removing the binding goes
+/// back to; a cell that inherits says so, and the grid above states the list.
+fn cell_cells(row: &CellTableRow, inherited: &str) -> Vec<Cell> {
+    let own = row.to_use != INHERITED;
+    let found = if !row.in_design {
+        Cell::problem("not in this design", Problem::Warning)
+    } else if row.found == "\u{2014}" {
+        Cell::absent()
+    } else {
+        ident(&row.found)
+    };
+    vec![
+        ident(&row.library),
+        ident(&row.cell),
+        Cell::number(row.instances.to_string()).sort_by(SortKey::Number(row.instances as f64)),
+        found,
+        view_list(&row.to_use),
+        if own { ident(inherited) } else { Cell::empty() },
+    ]
 }

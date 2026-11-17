@@ -29,7 +29,7 @@ use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// The reference project on Project > Configuration, the configuration it
 /// runs with in front.
-fn page_app() -> RSpiceApp {
+pub(super) fn page_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state = hierarchy_reference::build().state;
     app.state.workbench.activate(Workspace::Project);
@@ -39,15 +39,15 @@ fn page_app() -> RSpiceApp {
 
 /// One announced control: its role, name, value, whether it is offered,
 /// and its centre.
-struct Node {
-    role: Role,
-    label: String,
-    value: String,
-    disabled: bool,
-    at: Option<Pos2>,
+pub(super) struct Node {
+    pub(super) role: Role,
+    pub(super) label: String,
+    pub(super) value: String,
+    pub(super) disabled: bool,
+    pub(super) at: Option<Pos2>,
 }
 
-fn nodes(output: &egui::FullOutput) -> Vec<Node> {
+pub(super) fn nodes(output: &egui::FullOutput) -> Vec<Node> {
     output
         .platform_output
         .accesskit_update
@@ -77,7 +77,11 @@ fn says(output: &egui::FullOutput, text: &str) -> bool {
 }
 
 /// Frames until what was asked for has drawn: a press lands, a popup opens.
-fn settle(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui::FullOutput {
+pub(super) fn settle(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
     app_frame(ctx, app, events);
     app_frame(ctx, app, Vec::new());
     app_frame(ctx, app, Vec::new())
@@ -85,7 +89,7 @@ fn settle(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui:
 
 /// Press and release on the control `output` announced with `role` and a
 /// name for which `named` holds, then let the page answer.
-fn click(
+pub(super) fn click(
     ctx: &Context,
     app: &mut RSpiceApp,
     output: &egui::FullOutput,
@@ -126,7 +130,7 @@ fn click_lowest(
     press_at(ctx, app, at)
 }
 
-fn press_at(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutput {
+pub(super) fn press_at(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutput {
     settle(
         ctx,
         app,
@@ -165,6 +169,17 @@ fn disabled(output: &egui::FullOutput, name: &str) -> bool {
     nodes(output)
         .iter()
         .any(|node| node.role == Role::Button && node.label == name && node.disabled)
+}
+
+/// A right-click at `at`: the press that asks for a row's menu.
+pub(super) fn secondary_press(at: Pos2) -> Vec<egui::Event> {
+    let edge = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: Modifiers::default(),
+    };
+    vec![egui::Event::PointerMoved(at), edge(true), edge(false)]
 }
 
 /// Paint until no check runs, as the reader's screen would while one does.
@@ -208,7 +223,7 @@ fn select_row(app: &mut RSpiceApp, row: ConfigurationRow) {
 }
 
 /// The definition the page shows for the configuration in front.
-fn shown(app: &RSpiceApp) -> rspice_app_state::state::ConfigurationSetDefinition {
+pub(super) fn shown(app: &RSpiceApp) -> rspice_app_state::state::ConfigurationSetDefinition {
     let catalog = &app.state.model.workspace.content.configuration_sets;
     let id = catalog
         .active_configuration_id()
@@ -222,7 +237,7 @@ fn shown(app: &RSpiceApp) -> rspice_app_state::state::ConfigurationSetDefinition
 }
 
 /// Edit the configuration in front directly, as a fixture.
-fn edit(
+pub(super) fn edit(
     app: &mut RSpiceApp,
     change: impl FnOnce(&mut rspice_app_state::state::ConfigurationSetDefinition),
 ) {
@@ -266,7 +281,7 @@ fn an_inspector_edit_keeps_what_the_cell_binding_chose() {
     assert!(
         nodes(&output).iter().any(|node| node
             .label
-            .starts_with("Instance /X1: cell user/amp; view found schematic; view to use Inherited; bound by Cell binding")),
+            .starts_with("Instance: X1, Cell: user/amp, View found: schematic, View to use: Inherited, Bound by: Cell binding")),
         "the cell binding still binds /X1"
     );
 }
@@ -347,7 +362,7 @@ fn an_invalid_entry_is_refused_at_its_field_and_the_tables_stay() {
     );
     assert!(says(
         &output,
-        "Instance columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
+        "Table columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
     ));
 }
 
@@ -363,19 +378,26 @@ fn view_to_use_states_the_whole_list_and_a_pick_moves_a_view_first() {
     });
     app.state.project.configuration.tab = ConfigurationTab::Cells;
     let output = settle(&ctx, &mut app, Vec::new());
-    assert!(
-        nodes(&output).iter().any(|node| node.label.starts_with(
-            "Cell user/amp: 2 instances; view found schematic; view to use extracted, schematic"
-        )),
-        "the row states every view of the binding"
-    );
-    pick(
+    let row = nodes(&output)
+        .into_iter()
+        .find(|node| {
+            node.label.starts_with(
+                "Library: user, Cell: amp, Instances: 2, View found: schematic, \
+                 View to use: extracted, schematic",
+            )
+        })
+        .expect("the row states every view of the binding");
+    let menu = settle(
         &ctx,
         &mut app,
-        &output,
-        "View to use for user/amp",
-        "schematic",
+        secondary_press(row.at.expect("the row is on the screen")),
     );
+    let views = click(&ctx, &mut app, &menu, Role::Button, |name| {
+        name.starts_with("Set view to")
+    });
+    click(&ctx, &mut app, &views, Role::Button, |name| {
+        name == "schematic"
+    });
     let definition = shown(&app);
     let binding = definition
         .cell_bindings

@@ -10,6 +10,7 @@
 mod cells;
 mod grid;
 mod instances;
+mod menu;
 
 use super::*;
 

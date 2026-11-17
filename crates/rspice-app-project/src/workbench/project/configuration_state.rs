@@ -20,6 +20,7 @@ use crate::state::{
     ConfigurationSetOverride, InstancePath, InstancePathPattern, LibraryManager, ProjectWorkspace,
     SchematicState, ViewType, default_view_search_order,
 };
+use crate::ui::widgets::table::TableState;
 use crate::workbench::app::dialogs::project::configuration::ConfigurationCheck;
 
 /// The view-to-use choice that keeps the view list an instance or a cell
@@ -107,6 +108,18 @@ pub enum ConfigurationRow {
     Cell { library: String, cell: String },
 }
 
+/// A binding Copy binding put aside: what Paste binding gives each row it
+/// is pasted on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CopiedBinding {
+    pub(crate) views: Vec<String>,
+    pub(crate) stop: Option<String>,
+    pub(crate) model_section: Option<String>,
+    /// The platforms an instance or pattern binding is limited to; `None`
+    /// for a cell binding, which holds none.
+    pub(crate) platforms: Option<Vec<ConfigurationPlatform>>,
+}
+
 /// The Configuration page's own state.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurationPageState {
@@ -121,7 +134,13 @@ pub struct ConfigurationPageState {
     /// that are not applied; the page asks before it switches.
     pub(crate) pending_selection: Option<ConfigurationSelection>,
     pub tab: ConfigurationTab,
+    /// The row the inspector shows: the lead of the shown table's selection.
     pub row: Option<ConfigurationRow>,
+    /// Each table's selection, filter and sideways scroll.
+    pub instances_table: TableState,
+    pub cells_table: TableState,
+    /// The binding Copy binding put aside, for Paste binding.
+    pub(crate) copied_binding: Option<CopiedBinding>,
     pub field_edit: Option<FieldEdit>,
     /// Instances whose children the tree hides, by fold key.
     collapsed: BTreeSet<String>,
@@ -528,6 +547,10 @@ pub(crate) struct ConfigurationTables {
     pub(crate) inherited: String,
     /// Per tree row: the views its own instance binding names, in order.
     pub(crate) instance_to_use: Vec<Option<String>>,
+    /// Per tree row: the key the Instances table finds it by.
+    pub(crate) instance_keys: Vec<u64>,
+    /// The pattern bindings of the shown definition, in its order.
+    pub(crate) patterns: Vec<PatternRow>,
     /// Per hierarchy binding: its cell's view-to-use choices, an index into
     /// `view_options`.
     pub(crate) binding_options: Vec<usize>,
@@ -546,11 +569,26 @@ pub(crate) struct ConfigurationTables {
     index: HashMap<String, usize>,
 }
 
+/// One pattern binding, as the Instances table states it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PatternRow {
+    /// The pattern as written.
+    pub(crate) pattern: String,
+    /// Its views in the order they are tried, or Inherited.
+    pub(crate) views: String,
+    pub(crate) model_section: Option<String>,
+    /// The one platform it is limited to, if it is.
+    pub(crate) only_on: Option<&'static str>,
+    pub(crate) key: u64,
+}
+
 /// One row of the Cells table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CellTableRow {
     pub(crate) library: String,
     pub(crate) cell: String,
+    /// The key the Cells table finds it by.
+    pub(crate) key: u64,
     pub(crate) instances: usize,
     /// The views its instances resolved to, or a dash.
     pub(crate) found: String,
@@ -755,6 +793,27 @@ impl ConfigurationTables {
         );
 
         let instance_to_use = instance_bindings(instances, definition);
+        let instance_keys = instances
+            .iter()
+            .map(|instance| row_key("instance", &fold(&instance.path)))
+            .collect();
+        let patterns = definition
+            .into_iter()
+            .flat_map(|definition| &definition.overrides)
+            .filter(|binding| is_pattern(binding))
+            .map(|binding| PatternRow {
+                pattern: binding.instance_path.clone(),
+                views: if binding.executable_views.is_empty() {
+                    INHERITED.to_owned()
+                } else {
+                    binding.executable_views.join(", then ")
+                },
+                model_section: binding.model_section.clone(),
+                only_on: Some(only_on_label(&binding.eligible_platforms))
+                    .filter(|only_on| *only_on != ONLY_ON[0]),
+                key: pattern_key(&binding.instance_path),
+            })
+            .collect();
 
         let mut view_options = Vec::new();
         let mut options_of = HashMap::new();
@@ -786,6 +845,7 @@ impl ConfigurationTables {
             cell_rows.push(CellTableRow {
                 library: row.library.clone(),
                 cell: row.cell.clone(),
+                key: cell_key(&row.library, &row.cell),
                 instances: row.instances,
                 found: if row.views_found.is_empty() {
                     "\u{2014}".to_owned()
@@ -814,6 +874,7 @@ impl ConfigurationTables {
             cell_rows.push(CellTableRow {
                 library: binding.library.clone(),
                 cell: binding.cell.clone(),
+                key: cell_key(&binding.library, &binding.cell),
                 instances: 0,
                 found: "\u{2014}".to_owned(),
                 to_use: cell_to_use(definition, &binding.library, &binding.cell),
@@ -845,6 +906,8 @@ impl ConfigurationTables {
             addable_stops,
             inherited,
             instance_to_use,
+            instance_keys,
+            patterns,
             binding_options,
             view_options,
             cell_rows,
@@ -855,6 +918,38 @@ impl ConfigurationTables {
             index,
         }
     }
+}
+
+impl ConfigurationTables {
+    /// The key the tables find `row` by, wherever it is shown.
+    pub(crate) fn row_key(&self, row: &ConfigurationRow) -> Option<u64> {
+        match row {
+            ConfigurationRow::Instance(path) => self
+                .index
+                .get(&fold(path))
+                .map(|index| self.instance_keys[*index]),
+            ConfigurationRow::Pattern(pattern) => Some(pattern_key(pattern)),
+            ConfigurationRow::Cell { library, cell } => Some(cell_key(library, cell)),
+        }
+    }
+}
+
+/// A table row's key: what kind of row it is and the name it goes by, read
+/// without regard to case, as the configuration reads names.
+fn row_key(kind: &str, name: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    kind.hash(&mut hasher);
+    name.to_ascii_lowercase().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn pattern_key(pattern: &str) -> u64 {
+    row_key("pattern", pattern.trim())
+}
+
+fn cell_key(library: &str, cell: &str) -> u64 {
+    row_key("cell", &format!("{library}/{cell}"))
 }
 
 /// The views `library`/`cell`'s own binding uses, or Inherited.

@@ -1,8 +1,13 @@
-//! The tables under the global bindings. Instances lists every instance of
-//! the expanded design as a tree: what the shown configuration resolved it
-//! to, which list chose that, and the view it binds it to; pattern bindings
-//! sit above it, since one names many instances. Cells lists each
-//! library/cell once, with the cell binding every instance of it follows.
+//! The tables under the global bindings, on the kit's row list. Instances
+//! lists the pattern bindings, since one names many instances, then every
+//! instance of the expanded design as a tree: what the shown configuration
+//! resolved it to, which list chose that, and the view it binds it to. Cells
+//! lists each library/cell once, with the cell binding every instance of it
+//! follows.
+//!
+//! Rows select as a file list does, a double-click or Enter opens the view a
+//! row is bound to, and the row menu sets, removes, copies and pastes the
+//! selected rows' bindings in one edit.
 
 use super::*;
 
@@ -11,44 +16,32 @@ use rspice_design::hierarchy::{
 };
 
 use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride};
-use crate::ui::widgets::{SegmentedWidth, segmented, select};
+use crate::ui::widgets::table::{
+    Cell, Column, DataTable, Group, RowKey, TableResponse, TableState,
+};
+use crate::ui::widgets::{FILTER_CLEAR_INSET, SegmentedWidth, filter_field_clear, segmented};
 use crate::workbench::project::configuration_state::{
-    ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED, InstanceRow, ONLY_ON,
-    is_pattern, only_on_label, set_cell_view, set_instance_view,
+    ConfigurationPageState, ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED,
+    InstanceRow, PatternRow,
 };
 
-/// Below this width the table scrolls sideways instead of squeezing.
-const TABLE_MIN_WIDTH: f32 = 760.0;
-const INDENT: f32 = 14.0;
-const CHEVRON: f32 = 14.0;
+/// The widest the header's filter field grows.
+const FILTER_WIDTH: f32 = 200.0;
 
-/// The columns, by share of the table's width.
-const COLUMNS: [(&str, f32); 7] = [
-    ("Instance", 0.16),
-    ("Cell", 0.13),
-    ("View found", 0.10),
-    ("View to use", 0.17),
-    ("Bound by", 0.14),
-    ("Model section", 0.12),
-    ("Status", 0.18),
-];
-
-/// What the reader did to the tables this frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum TableEdit {
+/// What the reader asked of the tables this frame.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum TableAction {
     Tab(ConfigurationTab),
-    Select(ConfigurationRow),
-    Toggle(String),
-    View {
-        path: String,
-        view: Option<String>,
-    },
-    CellView {
-        library: String,
-        cell: String,
-        view: Option<String>,
-    },
     AddPattern,
+    /// The lead of the selection moved: the inspector shows this row.
+    Lead(Option<ConfigurationRow>),
+    Toggle(String),
+    /// Open the view a row is bound to.
+    Open(ConfigurationRow),
+    /// The row menu, for the selected rows, at a place on the screen.
+    Menu(Vec<ConfigurationRow>, egui::Pos2),
+    /// Delete: remove the selected rows' own bindings.
+    Remove(Vec<ConfigurationRow>),
 }
 
 /// Which list chose a row's view, in the page's words.
@@ -69,91 +62,54 @@ pub(super) fn tables(
     selection: ConfigurationSelection,
     resolution: &ConfigurationResolution,
 ) {
-    let visible = cx.state.configuration.visible_instances();
     let catalog = &cx.model.workspace.content.configuration_sets;
     let id = match selection {
         ConfigurationSelection::Configuration(id) => Some(id),
         ConfigurationSelection::Default => None,
     };
-    let definition = id.and_then(|id| cx.state.configuration.definition(catalog, id));
-    let editable = definition.is_some() && !cx.model.safe_mode.project_read_only();
-    let page = &cx.state.configuration;
-    let tab = page.tab;
-    let mut edit = tab_header(ui, resolution, tab, editable);
-    if tab == ConfigurationTab::Instances
-        && let Some(definition) = definition
-        && let Some(pattern_edit) = pattern_bindings(ui, definition, page.row.as_ref())
-    {
-        edit = Some(pattern_edit);
-    }
-    let Ok(hierarchy) = &resolution.hierarchy else {
-        apply_table_edit(cx, id, edit);
-        return;
-    };
-    if tab == ConfigurationTab::Cells {
-        if let Some(cell_edit) =
-            super::cells::cells_table(ui, &resolution.tables, page.row.as_ref(), editable)
-        {
-            edit = Some(cell_edit);
+    let editable = id.is_some_and(|id| cx.state.configuration.definition(catalog, id).is_some())
+        && !cx.model.safe_mode.project_read_only();
+    let visible = cx.state.configuration.visible_instances();
+    let page = &mut cx.state.configuration;
+    let mut actions = tab_header(ui, resolution, page, editable)
+        .into_iter()
+        .collect::<Vec<_>>();
+    actions.extend(match page.tab {
+        ConfigurationTab::Instances => instance_table(ui, page, resolution, &visible),
+        ConfigurationTab::Cells => super::cells::cells_table(ui, page, &resolution.tables),
+    });
+    let mut menu_at = None;
+    for action in actions {
+        match action {
+            TableAction::Menu(rows, at) => menu_at = Some((rows, at)),
+            action => apply(cx, id, resolution, editable, action),
         }
-        apply_table_edit(cx, id, edit);
-        return;
     }
-    if let Some(table_edit) = instance_tree(
-        ui,
-        TreeInput {
-            hierarchy: &hierarchy.bindings,
-            rows: &resolution.instances,
-            visible: &visible,
-            tables: &resolution.tables,
-            selected: page.row.as_ref(),
-            collapsed: &|path| page.is_collapsed(path),
-            editable,
-        },
-    ) {
-        edit = Some(table_edit);
-    }
-    apply_table_edit(cx, id, edit);
+    super::menu::row_menu(ui, cx, id, resolution, editable, menu_at);
 }
 
-fn apply_table_edit(
+fn apply(
     cx: &mut Cx<'_, ProjectFeature>,
     id: Option<crate::state::ConfigurationSetId>,
-    edit: Option<TableEdit>,
+    resolution: &ConfigurationResolution,
+    editable: bool,
+    action: TableAction,
 ) {
-    let Some(edit) = edit else {
-        return;
-    };
-    match edit {
-        TableEdit::Tab(tab) => {
+    match action {
+        TableAction::Tab(tab) => {
             cx.state.configuration.tab = tab;
             cx.state.configuration.row = None;
         }
-        TableEdit::Select(row) => cx.state.configuration.row = Some(row),
-        TableEdit::CellView {
-            library,
-            cell,
-            view,
-        } => {
-            if let Some(id) = id {
-                cx.state.configuration.edit(
-                    &cx.model.workspace.content.configuration_sets,
-                    id,
-                    |definition| set_cell_view(definition, &library, &cell, view.as_deref()),
-                );
+        TableAction::Lead(row) => cx.state.configuration.row = row,
+        TableAction::Toggle(path) => cx.state.configuration.toggle_collapsed(&path),
+        TableAction::Open(row) => super::menu::open_view(cx, resolution, &row),
+        TableAction::Remove(rows) => {
+            if editable && let Some(id) = id {
+                super::menu::remove_bindings(cx, id, &rows);
             }
         }
-        TableEdit::Toggle(path) => cx.state.configuration.toggle_collapsed(&path),
-        TableEdit::View { path, view } => {
-            if let Some(id) = id {
-                cx.state.configuration.edit(
-                    &cx.model.workspace.content.configuration_sets,
-                    id,
-                    |definition| set_instance_view(definition, &path, view.as_deref()),
-                );
-            }
-        }
-        TableEdit::AddPattern => {
+        TableAction::Menu(..) => {}
+        TableAction::AddPattern => {
             if let Some(id) = id {
                 let mut added = None;
                 if cx.state.configuration.edit(
@@ -168,15 +124,16 @@ fn apply_table_edit(
     }
 }
 
-/// The band over the tables: which table, how many rows it holds, and on
-/// Instances the one action that adds to it.
+/// The band over the tables: which table, how many rows it holds, the filter
+/// that finds rows in it, and on Instances the one action that adds to it.
 fn tab_header(
     ui: &mut Ui,
     resolution: &ConfigurationResolution,
-    tab: ConfigurationTab,
+    page: &mut ConfigurationPageState,
     editable: bool,
-) -> Option<TableEdit> {
+) -> Option<TableAction> {
     let t = Tokens::get(ui.ctx());
+    let tab = page.tab;
     let meta = match tab {
         ConfigurationTab::Instances => {
             let count = resolution.instances.len();
@@ -194,8 +151,10 @@ fn tab_header(
             }
         }
     };
+    // A control tall, and the room around it, so the band holds its controls
+    // at every density.
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width().max(1.0), SECTION_HEADER_HEIGHT + 4.0),
+        vec2(ui.available_width().max(1.0), t.metrics.ctl_h + 6.0),
         Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
@@ -204,7 +163,7 @@ fn tab_header(
         rect.bottom(),
         Stroke::new(1.0, t.color.border_strong),
     );
-    let mut edit = None;
+    let mut action = None;
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(vec2(8.0, 3.0)))
@@ -222,7 +181,7 @@ fn tab_header(
                 &mut index,
                 SegmentedWidth::Natural,
             ) {
-                edit = Some(TableEdit::Tab(if index == 0 {
+                action = Some(TableAction::Tab(if index == 0 {
                     ConfigurationTab::Instances
                 } else {
                     ConfigurationTab::Cells
@@ -233,16 +192,50 @@ fn tab_header(
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                     .color(t.color.text_faint),
             );
-            if tab == ConfigurationTab::Instances && editable {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if Button::new("Add pattern binding").show(ui).clicked() {
-                        edit = Some(TableEdit::AddPattern);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (filter, name) = match tab {
+                    ConfigurationTab::Instances => {
+                        (&mut page.instances_table.filter, "Filter instances")
                     }
-                });
-            }
+                    ConfigurationTab::Cells => (&mut page.cells_table.filter, "Filter cells"),
+                };
+                filter_field(ui, filter, name);
+                if tab == ConfigurationTab::Instances
+                    && editable
+                    && Button::new("Add pattern binding").show(ui).clicked()
+                {
+                    action = Some(TableAction::AddPattern);
+                }
+            });
         },
     );
-    edit
+    action
+}
+
+/// The field that keeps only the rows whose words contain what it holds.
+fn filter_field(ui: &mut Ui, filter: &mut String, name: &str) {
+    let t = Tokens::get(ui.ctx());
+    // egui fades the body tone for a hint; the palette's tertiary text keeps
+    // its contrast on the field.
+    let restored = ui.visuals_mut().weak_text_color.replace(t.color.text_faint);
+    let width = FILTER_WIDTH.min(ui.available_width() * 0.4).max(80.0);
+    let field = ui.add_sized(
+        [width, t.metrics.ctl_h],
+        egui::TextEdit::singleline(filter)
+            .id_salt(("configuration-filter", name))
+            .hint_text("Filter\u{2026}")
+            .font(theme::field_sans())
+            .margin(egui::Margin {
+                left: 6,
+                right: FILTER_CLEAR_INSET,
+                top: 2,
+                bottom: 2,
+            }),
+    );
+    ui.visuals_mut().weak_text_color = restored;
+    ui.ctx()
+        .accesskit_node_builder(field.id, |node| node.set_label(name));
+    filter_field_clear(ui, &field, filter);
 }
 
 /// Bind every instance a new pattern names, starting from the first scope
@@ -274,192 +267,214 @@ fn add_pattern_binding(definition: &mut ConfigurationSetDefinition) -> String {
     pattern
 }
 
-/// The pattern bindings, one row each. Their properties are edited in the
-/// inspector.
-fn pattern_bindings(
+/// An identifier in a cell: a path, a cell or a view name, set in mono as
+/// the rest of the page sets them.
+pub(super) fn ident(text: impl Into<String>) -> Cell {
+    Cell::number(text)
+}
+
+/// The Instances table's columns: the tree's, which the pattern rows above
+/// it share. The tree's order is the hierarchy's, so no head sorts it.
+fn instance_columns() -> [Column; 7] {
+    [
+        Column::name("Instance", 140.0).unsortable(),
+        Column::name("Cell", 120.0).unsortable(),
+        Column::words("View found", 96.0).unsortable(),
+        Column::name("View to use", 110.0).unsortable(),
+        Column::words("Bound by", 132.0).unsortable(),
+        Column::words("Model section", 104.0).unsortable(),
+        Column::name("Status", 120.0).unsortable(),
+    ]
+}
+
+/// One row of the Instances table, in the order the table shows them.
+#[derive(Debug, Clone, Copy)]
+enum Line {
+    /// A pattern binding, by its place among the definition's patterns.
+    Pattern(usize),
+    /// An instance, by its place in the tree.
+    Instance(usize),
+}
+
+/// The Instances table's rows: the pattern bindings, then the tree. While a
+/// filter is set every instance is a candidate, folded or not, and each is
+/// named by its whole path.
+struct InstanceLines<'a> {
+    patterns: &'a [PatternRow],
+    instances: std::borrow::Cow<'a, [usize]>,
+}
+
+impl InstanceLines<'_> {
+    fn len(&self) -> usize {
+        self.patterns.len() + self.instances.len()
+    }
+
+    fn line(&self, index: usize) -> Line {
+        match index.checked_sub(self.patterns.len()) {
+            None => Line::Pattern(index),
+            Some(at) => Line::Instance(self.instances[at]),
+        }
+    }
+}
+
+fn instance_table(
     ui: &mut Ui,
-    definition: &ConfigurationSetDefinition,
-    selected: Option<&ConfigurationRow>,
-) -> Option<TableEdit> {
-    let t = Tokens::get(ui.ctx());
-    let row_height = Tokens::get(ui.ctx()).metrics.row_h;
-    let mut edit = None;
-    for binding in definition
-        .overrides
-        .iter()
-        .filter(|binding| is_pattern(binding))
+    page: &mut ConfigurationPageState,
+    resolution: &ConfigurationResolution,
+    visible: &[usize],
+) -> Vec<TableAction> {
+    let tables = &resolution.tables;
+    let hierarchy = resolution.hierarchy.as_ref().ok();
+    let flat = !page.instances_table.filter.trim().is_empty();
+    let instances = match hierarchy {
+        None => std::borrow::Cow::Borrowed(&[][..]),
+        Some(_) if flat => std::borrow::Cow::Owned((0..resolution.instances.len()).collect()),
+        Some(_) => std::borrow::Cow::Borrowed(visible),
+    };
+    let lines = InstanceLines {
+        patterns: &tables.patterns,
+        instances,
+    };
+    let keys = (0..lines.len())
+        .map(|index| {
+            RowKey::Number(match lines.line(index) {
+                Line::Pattern(at) => tables.patterns[at].key,
+                Line::Instance(at) => tables.instance_keys[at],
+            })
+        })
+        .collect::<Vec<_>>();
+    let groups = if lines.patterns.is_empty() {
+        Vec::new()
+    } else {
+        vec![
+            Group::new("Pattern bindings", 0),
+            Group::new("Instances", lines.patterns.len()),
+        ]
+    };
+    let wanted = page.row.as_ref().and_then(|row| tables.row_key(row));
+    lead_follows(&mut page.instances_table, &keys, wanted);
+    let columns = instance_columns();
+    let mut state = std::mem::take(&mut page.instances_table);
+    let collapsed = |path: &str| !flat && page.is_collapsed(path);
+    let response = DataTable::new("configuration.instances", &columns, lines.len())
+        .state(&mut state)
+        .keys(&keys)
+        .groups(&groups)
+        .multi_select()
+        .freeze(1)
+        .max_height(table_height(ui))
+        .show(ui, |index| match lines.line(index) {
+            Line::Pattern(at) => pattern_cells(&tables.patterns[at]),
+            Line::Instance(at) => hierarchy.map_or_else(Vec::new, |hierarchy| {
+                instance_cells(
+                    tables,
+                    &hierarchy.bindings,
+                    at,
+                    &resolution.instances[at],
+                    collapsed(&resolution.instances[at].path),
+                    flat,
+                )
+            }),
+        });
+    page.instances_table = state;
+    let identity = |index: usize| match lines.line(index) {
+        Line::Pattern(at) => ConfigurationRow::Pattern(tables.patterns[at].pattern.clone()),
+        Line::Instance(at) => ConfigurationRow::Instance(resolution.instances[at].path.clone()),
+    };
+    let mut actions = answer(&page.instances_table, &response, &identity);
+    if let Some((index, open)) = response.expand
+        && let Line::Instance(at) = lines.line(index)
     {
-        let is_selected = matches!(
-            selected,
-            Some(ConfigurationRow::Pattern(pattern)) if pattern == &binding.instance_path
-        );
-        let (rect, response) = ui.allocate_exact_size(
-            vec2(ui.available_width().max(1.0), row_height),
-            Sense::click(),
-        );
-        let views = if binding.executable_views.is_empty() {
-            INHERITED.to_owned()
-        } else {
-            binding.executable_views.join(", then ")
-        };
-        let section = binding.model_section.as_deref().unwrap_or("\u{2014}");
-        let mut label = format!(
-            "Pattern binding {}: view list {views}; model section {section}",
-            binding.instance_path
-        );
-        let only_on = only_on_label(&binding.eligible_platforms);
-        if only_on != ONLY_ON[0] {
-            label = format!("{label}; only on {only_on}");
-        }
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::SelectableLabel,
-                ui.is_enabled(),
-                is_selected,
-                &label,
-            )
-        });
-        row_fill(ui, rect, &response, is_selected);
-        theme::paint_focus_ring(ui, &response, rect);
-        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-        let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
-        let cells = [
-            (binding.instance_path.as_str(), 0.0, 0.22, t.color.text),
-            (views.as_str(), 0.22, 0.53, t.color.text_dim),
-            (section, 0.75, 0.25, t.color.text_dim),
-        ];
-        for (text, start, share, color) in cells {
-            let cell = Rect::from_min_size(
-                pos2(rect.left() + rect.width() * start, rect.top()),
-                vec2(rect.width() * share, rect.height()),
-            );
-            cell_text(ui, &painter, cell, text, &mono, color);
-        }
-        if response.clicked() {
-            edit = Some(TableEdit::Select(ConfigurationRow::Pattern(
-                binding.instance_path.clone(),
-            )));
+        let row = &resolution.instances[at];
+        if row.children > 0 && page.is_collapsed(&row.path) == open {
+            actions.push(TableAction::Toggle(row.path.clone()));
         }
     }
-    edit
+    actions
 }
 
-/// What the tree draws from, borrowed for one frame.
-struct TreeInput<'a> {
-    hierarchy: &'a [ResolvedHierarchyBinding],
-    rows: &'a [InstanceRow],
-    visible: &'a [usize],
-    tables: &'a ConfigurationTables,
-    selected: Option<&'a ConfigurationRow>,
-    collapsed: &'a dyn Fn(&str) -> bool,
-    editable: bool,
+/// How tall a table may be: what the page leaves under the band, and never
+/// less than a few rows.
+pub(super) fn table_height(ui: &Ui) -> f32 {
+    let row = Tokens::get(ui.ctx()).metrics.row_h;
+    ui.available_height().max(row * 6.0)
 }
 
-fn instance_tree(ui: &mut Ui, input: TreeInput<'_>) -> Option<TableEdit> {
-    let t = Tokens::get(ui.ctx());
-    let row_height = t.metrics.row_h;
-    let header_height = (row_height - 4.0).max(22.0);
-    let visible_width = visible_workspace_width(ui);
-    let width = visible_width.max(TABLE_MIN_WIDTH);
-    let mut edit = None;
-    ScrollArea::horizontal()
-        .id_salt("workbench.project.configuration.instances.horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            header_row(ui, width, header_height);
-            let height = visible_workspace_height(ui).max(row_height * 4.0);
-            ScrollArea::vertical()
-                .id_salt("workbench.project.configuration.instances")
-                .auto_shrink([false, false])
-                .max_height(height)
-                .show_rows(ui, row_height, input.visible.len(), |ui, range| {
-                    ui.set_min_width(width);
-                    for &index in &input.visible[range] {
-                        if let Some(row_edit) = instance_row(ui, &input, index, width, row_height) {
-                            edit = Some(row_edit);
-                        }
-                    }
-                });
-        });
-    edit
-}
-
-fn header_row(ui: &mut Ui, width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!(
-                "Instance columns: {}",
-                COLUMNS.map(|(name, _)| name).join(", ")
-            ),
-        )
-    });
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    for (index, (name, cell)) in column_rects(rect).into_iter().enumerate() {
-        if index > 0 {
-            ui.painter().vline(
-                cell.left(),
-                rect.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
+/// Put the table's lead on the row the inspector shows when something other
+/// than the table chose that row: the inspector, a new pattern binding, a
+/// test. A row the table does not show leaves the table with no selection.
+pub(super) fn lead_follows(state: &mut TableState, keys: &[RowKey], wanted: Option<u64>) {
+    let wanted = wanted.map(RowKey::Number);
+    if state.selected_key() == wanted.as_ref() {
+        return;
+    }
+    match wanted.and_then(|key| Some((keys.iter().position(|shown| *shown == key)?, key))) {
+        Some((row, key)) => state.select(row, Some(key)),
+        None => {
+            state.selection = None;
+            state.others.clear();
+            state.anchor = None;
         }
-        cell_text(ui, ui.painter(), cell, name, &font, t.color.text_faint);
     }
 }
 
-/// Each column's name and its rect in `row`.
-fn column_rects(row: Rect) -> [(&'static str, Rect); 7] {
-    let mut left = row.left();
-    COLUMNS.map(|(name, share)| {
-        let right = (left + row.width() * share).min(row.right());
-        let cell = Rect::from_min_max(pos2(left, row.top()), pos2(right, row.bottom()));
-        left = right;
-        (name, cell)
-    })
-}
-
-fn row_fill(ui: &Ui, rect: Rect, response: &egui::Response, selected: bool) {
-    let t = Tokens::get(ui.ctx());
-    if selected {
-        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+/// What a table's response asks of the page, with `identity` naming the row
+/// at each index in the table's own order.
+pub(super) fn answer(
+    state: &TableState,
+    response: &TableResponse,
+    identity: &dyn Fn(usize) -> ConfigurationRow,
+) -> Vec<TableAction> {
+    let selected = || {
+        state
+            .selected_rows()
+            .into_iter()
+            .map(identity)
+            .collect::<Vec<_>>()
+    };
+    let mut actions = Vec::new();
+    if response.selection_changed {
+        actions.push(TableAction::Lead(state.selected_row().map(identity)));
     }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
+    if let Some(row) = response.activate {
+        actions.push(TableAction::Open(identity(row)));
+    }
+    if let Some(request) = response.context_menu {
+        actions.push(TableAction::Menu(selected(), request.position));
+    }
+    if response.delete {
+        actions.push(TableAction::Remove(selected()));
+    }
+    actions
 }
 
-/// `text` in `cell`, elided to fit rather than clipped mid-glyph.
-fn cell_text(
-    ui: &Ui,
-    painter: &egui::Painter,
-    cell: Rect,
-    text: &str,
-    font: &egui::FontId,
-    color: Color32,
-) {
-    let inner = cell.shrink2(vec2(7.0, 0.0));
-    let text = elide_text(ui, text, font, inner.width().max(1.0));
-    painter.with_clip_rect(inner).text(
-        inner.left_center(),
-        Align2::LEFT_CENTER,
-        text,
-        font.clone(),
-        color,
-    );
+/// A pattern binding on the tree's columns: the pattern where an instance
+/// names itself, its views where an instance's view to use is.
+fn pattern_cells(row: &PatternRow) -> Vec<Cell> {
+    let bound_by = match row.only_on {
+        Some(only_on) => format!("Pattern binding \u{b7} only on {only_on}"),
+        None => "Pattern binding".to_owned(),
+    };
+    vec![
+        ident(&row.pattern).leaf(),
+        Cell::absent(),
+        Cell::absent(),
+        view_list(&row.views),
+        Cell::text(bound_by),
+        row.model_section
+            .as_deref()
+            .map_or_else(Cell::absent, ident),
+        Cell::empty(),
+    ]
+}
+
+/// A view list as a cell: Inherited in words, views as identifiers.
+pub(super) fn view_list(views: &str) -> Cell {
+    if views == INHERITED {
+        Cell::text(views)
+    } else {
+        ident(views)
+    }
 }
 
 /// The short reason a row is not bound, or `None` when it is.
@@ -473,203 +488,63 @@ fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
     }
 }
 
-fn instance_row(
-    ui: &mut Ui,
-    input: &TreeInput<'_>,
+/// One instance of the tree: indented by its depth behind its twist, or,
+/// while a filter is set, named by its whole path at the left edge.
+fn instance_cells(
+    tables: &ConfigurationTables,
+    hierarchy: &[ResolvedHierarchyBinding],
     index: usize,
-    width: f32,
-    height: f32,
-) -> Option<TableEdit> {
-    let t = Tokens::get(ui.ctx());
-    let row: &InstanceRow = &input.rows[index];
-    let binding = &input.hierarchy[row.binding];
+    row: &InstanceRow,
+    collapsed: bool,
+    flat: bool,
+) -> Vec<Cell> {
+    let binding = &hierarchy[row.binding];
     let reference = &binding.reference;
-    let is_selected = matches!(
-        input.selected,
-        Some(ConfigurationRow::Instance(path)) if path.eq_ignore_ascii_case(&row.path)
-    );
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    let name = if row.depth == 0 {
-        reference.cell.clone()
+    let instance = if flat {
+        ident(&row.path)
     } else {
-        row.path.rsplit('/').next().unwrap_or(&row.path).to_owned()
+        let name = if row.depth == 0 {
+            reference.cell.as_str()
+        } else {
+            row.path.rsplit('/').next().unwrap_or(&row.path)
+        };
+        let named = ident(name).indent(u8::try_from(row.depth).unwrap_or(u8::MAX));
+        if row.children > 0 {
+            named.twist(!collapsed)
+        } else {
+            named.leaf()
+        }
     };
-    let cell = format!("{}/{}", reference.library, reference.cell);
     let found = if binding.status.is_resolved() {
-        reference.view.as_str()
+        ident(&reference.view)
     } else {
-        "\u{2014}"
+        Cell::absent()
     };
-    let to_use = input.tables.instance_to_use[index]
+    let to_use = tables.instance_to_use[index]
         .as_deref()
-        .unwrap_or(INHERITED);
-    let rule = rule_label(binding.rule);
-    let section = if binding.model_section.is_empty() {
-        "\u{2014}"
-    } else {
-        binding.model_section.as_str()
-    };
-    let (problem, status) = match unbound_reason(binding.status) {
-        Some(reason) => (Some(Problem::Failure), reason),
+        .map_or_else(|| Cell::text(INHERITED), ident);
+    let status = match unbound_reason(binding.status) {
+        Some(reason) => Cell::problem(reason, Problem::Failure),
         None => match binding.warnings.first() {
-            Some(warning) => (Some(Problem::Warning), warning.as_str()),
-            None => (None, ""),
+            Some(warning) => Cell::problem(warning.as_str(), Problem::Warning),
+            None => Cell::empty(),
         },
     };
-    let mut label = format!(
-        "Instance {}: cell {cell}; view found {found}; view to use {to_use}; \
-         bound by {rule}; model section {section}",
-        row.path
-    );
-    if let Some(problem) = problem {
-        label = format!("{label}; {}", problem.announce(status));
-    }
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            is_selected,
-            &label,
-        )
-    });
-    row_fill(ui, rect, &response, is_selected);
-    theme::paint_focus_ring(ui, &response, rect);
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let cells = column_rects(rect);
-    for (_, cell) in cells.iter().skip(1) {
-        painter.vline(
-            cell.left(),
-            rect.y_range(),
-            Stroke::new(1.0, t.color.border),
-        );
-    }
-    let mut edit = None;
-
-    // Instance: indented by depth, with the expand control when it has
-    // children.
-    let instance = cells[0].1;
-    let chevron_left = instance.left() + 4.0 + INDENT * row.depth as f32;
-    if row.children > 0 {
-        let chevron = Rect::from_min_size(
-            pos2(chevron_left, rect.center().y - CHEVRON * 0.5),
-            vec2(CHEVRON, CHEVRON),
-        );
-        let collapsed = (input.collapsed)(&row.path);
-        let toggle = ui.interact(chevron, response.id.with("toggle"), Sense::click());
-        toggle.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Button,
-                true,
-                if collapsed {
-                    format!("Expand {}", row.path)
-                } else {
-                    format!("Collapse {}", row.path)
-                },
-            )
-        });
-        let icon = if collapsed {
-            WorkbenchIcon::ChevronRight
-        } else {
-            WorkbenchIcon::ChevronDown
-        };
-        icon.paint(&painter, chevron.shrink(2.5), t.color.text_dim);
-        theme::paint_focus_ring(ui, &toggle, chevron);
-        let keyboard = response.has_focus()
-            && ui.input_mut(|input| {
-                let key = if collapsed {
-                    egui::Key::ArrowRight
-                } else {
-                    egui::Key::ArrowLeft
-                };
-                input.consume_key(egui::Modifiers::NONE, key)
-            });
-        if toggle.clicked() || keyboard {
-            edit = Some(TableEdit::Toggle(row.path.clone()));
-        }
-    }
-    let name_cell = Rect::from_min_max(
-        pos2(chevron_left + CHEVRON - 4.0, instance.top()),
-        instance.max,
-    );
-    cell_text(ui, &painter, name_cell, &name, &mono, t.color.text);
-    cell_text(ui, &painter, cells[1].1, &cell, &mono, t.color.text_dim);
-    cell_text(ui, &painter, cells[2].1, found, &mono, t.color.text_dim);
-
-    // View to use: a choice of the views the cell holds when the shown
-    // configuration can be edited; a fact otherwise.
-    let view_cell = cells[3].1;
-    if input.editable {
-        let options = &input.tables.view_options[input.tables.binding_options[row.binding]];
-        let mut picked = None;
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(view_cell.shrink2(vec2(3.0, 2.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                picked = select(
-                    ui,
-                    &format!("configuration-view-to-use-{}", row.path),
-                    &format!("View to use for {}", row.path),
-                    to_use,
-                    options,
-                    ui.available_width(),
-                );
-            },
-        );
-        if let Some(choice) = picked
-            && options[choice] != to_use
-        {
-            edit = Some(TableEdit::View {
-                path: row.path.clone(),
-                view: (choice > 0).then(|| options[choice].clone()),
-            });
-        }
-    } else {
-        cell_text(ui, &painter, view_cell, to_use, &mono, t.color.text_dim);
-    }
-    cell_text(
-        ui,
-        &painter,
-        cells[4].1,
-        rule,
-        &theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    cell_text(ui, &painter, cells[5].1, section, &mono, t.color.text_dim);
-
-    // Status: blank when bound; the mark and a short reason otherwise.
-    let status_cell = cells[6].1;
-    if let Some(problem) = problem {
-        paint_problem_mark(
-            &painter,
-            Rect::from_center_size(
-                pos2(status_cell.left() + 7.0 + MARK_SIDE * 0.5, rect.center().y),
-                vec2(MARK_SIDE, MARK_SIDE),
-            ),
-            problem,
-        );
-        cell_text(
-            ui,
-            &painter,
-            Rect::from_min_max(
-                pos2(status_cell.left() + MARK_ADVANCE, status_cell.top()),
-                status_cell.max,
-            ),
-            status,
-            &theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-    }
-    let response = match (&binding.diagnostic, problem) {
-        (Some(diagnostic), _) => response.on_hover_text(diagnostic),
-        (None, Some(_)) => response.on_hover_text(status),
-        (None, None) => response,
+    let status = match &binding.diagnostic {
+        Some(diagnostic) => status.hint(diagnostic.as_str()),
+        None => status,
     };
-    if response.clicked() && edit.is_none() {
-        edit = Some(TableEdit::Select(ConfigurationRow::Instance(
-            row.path.clone(),
-        )));
-    }
-    edit
+    vec![
+        instance,
+        ident(format!("{}/{}", reference.library, reference.cell)),
+        found,
+        to_use,
+        Cell::text(rule_label(binding.rule)),
+        if binding.model_section.is_empty() {
+            Cell::absent()
+        } else {
+            ident(&binding.model_section)
+        },
+        status,
+    ]
 }

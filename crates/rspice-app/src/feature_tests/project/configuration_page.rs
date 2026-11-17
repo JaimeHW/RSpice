@@ -294,13 +294,13 @@ fn a_dirty_configuration_offers_apply_and_revert() {
 fn the_instances_tree_states_what_every_instance_resolved_to() {
     let mut app = reference_app();
     let shown = frame(&mut app, 1440.0);
-    for (path, cell, to_use, rule) in [
-        ("/X1", "user/amp", "Inherited", "View list"),
-        ("/X2", "user/amp", "schematic", "Instance binding"),
+    for (name, cell, to_use, rule) in [
+        ("X1", "user/amp", "Inherited", "View list"),
+        ("X2", "user/amp", "schematic", "Instance binding"),
     ] {
         let row = format!(
-            "Instance {path}: cell {cell}; view found schematic; view to use {to_use}; \
-             bound by {rule}; model section"
+            "Instance: {name}, Cell: {cell}, View found: schematic, View to use: {to_use}, \
+             Bound by: {rule}, Model section: "
         );
         assert!(
             shown.announced.iter().any(|label| label.starts_with(&row)),
@@ -309,7 +309,7 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
         );
     }
     assert!(shown.says(
-        "Instance columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
+        "Table columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
     ));
 
     let collapsed = app.state.project.configuration.visible_instances().len();
@@ -319,7 +319,9 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
 }
 
 /// The Cells tab lists each library/cell once, and keeps a cell binding the
-/// design does not use, marked, so it can be removed.
+/// design does not use, marked, so it can be removed. The list a cell
+/// inherits is stated only on a row with a binding of its own: the grid
+/// above states it once for every cell that inherits.
 #[test]
 fn the_cells_tab_lists_each_cell_once_with_its_binding() {
     let mut app = reference_app();
@@ -346,22 +348,22 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
         rspice_app_project::workbench::project::configuration_state::ConfigurationTab::Cells;
     let shown = frame(&mut app, 1440.0);
     assert!(shown.says(
-        "Cell columns: Library, Cell, Instances, View found, View to use, Inherited view list"
+        "Table columns: Library, Cell, Instances, View found, View to use, Inherited view list"
     ));
     for row in [
-        "Cell user/amp: 2 instances; view found schematic; view to use Inherited; \
-         inherited view list schematic",
-        "Cell vendor/filter: 1 instance; view found schematic; view to use schematic; \
-         inherited view list schematic",
-        "Cell user/retired_block: 0 instances; view found \u{2014}; view to use schematic; \
-         inherited view list schematic; Warning: not in this design",
+        "Library: user, Cell: amp, Instances: 2, View found: schematic, View to use: Inherited",
+        "Library: vendor, Cell: filter, Instances: 1, View found: schematic, \
+         View to use: schematic, Inherited view list: schematic",
+        "Library: user, Cell: retired_block, Instances: 0, \
+         View found: Warning: not in this design, View to use: schematic, \
+         Inherited view list: schematic",
     ] {
         assert!(shown.says(row), "no row {row:?} in {:#?}", shown.announced);
     }
     let amp_rows = shown
         .announced
         .iter()
-        .filter(|label| label.starts_with("Cell user/amp:"))
+        .filter(|label| label.starts_with("Library: user, Cell: amp,"))
         .count();
     assert_eq!(amp_rows, 1, "a cell instantiated twice is one row");
     // The count is the design's cells; the binding beside them is counted
