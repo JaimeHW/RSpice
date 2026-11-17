@@ -244,12 +244,19 @@ fn every_comparison_and_restore_is_reached_by_taps_alone() {
         assert_eq!(selected(&app), Some(key(&baseline)), "{size:?}");
         let text = said(&output);
         let since = format!("From revision {} to the current design", named(&baseline));
-        for stated in ["Changes to the current design", &since, "Components", "Added"] {
+        for stated in [
+            "Changes to the current design",
+            &since,
+            "Components",
+            "Added",
+        ] {
             assert!(text.contains(stated), "{size:?}: {stated:?}\n{text}");
         }
 
         // Compared with the resistor's revision instead, chosen by taps.
-        let output = tap(&ctx, &mut app, size, &output, |label| label == "Compare with");
+        let output = tap(&ctx, &mut app, size, &output, |label| {
+            label == "Compare with"
+        });
         let output = tap(&ctx, &mut app, size, &output, |label| {
             label == named(&resistor)
         });
