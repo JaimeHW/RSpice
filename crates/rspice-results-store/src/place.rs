@@ -104,7 +104,10 @@ pub fn place_segment(
         Placed::Copied
     };
     // A clone or a link of a run's own segment shares bytes that were never made durable.
-    let durable = File::open(&partial)
+    // Flushing needs a handle that may write: Windows refuses it on a read-only one.
+    let durable = fs::OpenOptions::new()
+        .write(true)
+        .open(&partial)
         .and_then(|file| file.sync_all())
         .and_then(|()| fs::rename(&partial, &target));
     if let Err(error) = durable {
