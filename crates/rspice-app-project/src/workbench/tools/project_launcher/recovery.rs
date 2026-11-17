@@ -164,8 +164,15 @@ pub(super) fn recovery_page(
         let recoverable = selected
             .as_ref()
             .is_some_and(|candidate| candidate.integrity.is_recoverable());
+        // Kept from the last refresh or selection: working it out reads the
+        // saved project. Opening the comparison works it out again first.
         let replacement_block_reason = recoverable
-            .then(|| recovery_replacement_block_reason(cx.model))
+            .then(|| {
+                cx.platform
+                    .recovery_catalog
+                    .replacement_block_reason(cx.model)
+                    .map(str::to_owned)
+            })
             .flatten();
         let response = Button::new("Open recovery comparison")
             .accent()
@@ -181,6 +188,8 @@ pub(super) fn recovery_page(
         if response.clicked()
             && let Some(candidate) = selected
         {
+            // Whatever the open finds is what the next frame shows.
+            cx.platform.recovery_catalog.forget_replacement_block();
             *action = Some(LauncherAction::Recover(candidate));
         }
     });

@@ -9,7 +9,8 @@ mod recovery;
 
 use recovery::*;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use egui::{
     Align, Align2, Color32, Context, Frame, Id, Margin, Modifiers, Order, Popup, Rect, Response,
@@ -31,7 +32,7 @@ use crate::workbench::design_system::{WorkbenchIcon, painted_label};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
-    discard_checkpoint, recovery_replacement_block_reason, software_rendering_supported,
+    discard_checkpoint, software_rendering_supported,
 };
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::{
@@ -780,7 +781,8 @@ fn launcher_body(
             .max_rect(list_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
-    if project_entries(cx).is_empty() {
+    let entries = project_entries(ui.ctx(), cx);
+    if entries.is_empty() {
         empty_project_list(
             &mut list_ui,
             cx.state.project_launcher_query.is_empty()
@@ -792,7 +794,9 @@ fn launcher_body(
     egui::ScrollArea::vertical()
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
-        .show(&mut list_ui, |ui| project_list(ui, cx, action, layout));
+        .show(&mut list_ui, |ui| {
+            project_list(ui, &entries, action, layout)
+        });
 }
 
 fn project_heading_actions(
@@ -844,13 +848,12 @@ fn project_heading_actions(
 
 fn project_list(
     ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
+    entries: &[ProjectEntry],
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.set_min_width(ui.available_width());
-    let entries = project_entries(cx);
     for group in ProjectGroup::ALL {
         let group_entries = entries
             .iter()
@@ -1178,7 +1181,63 @@ fn launcher_filter_segments(ui: &mut Ui, selected: &mut ProjectLauncherFilter) {
     }
 }
 
-fn project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread built the launcher's project list.
+    pub static PROJECT_LIST_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What the launcher's project list is built from, and the list built from
+/// it.
+struct ProjectEntries {
+    recent_files: Vec<RecentFile>,
+    query: String,
+    filter: ProjectLauncherFilter,
+    sort: ProjectLauncherSort,
+    current_path: Option<PathBuf>,
+    current_name: String,
+    entries: Arc<[ProjectEntry]>,
+}
+
+impl ProjectEntries {
+    fn built_from(&self, cx: &Cx<'_, ProjectFeature>) -> bool {
+        let project = &cx.model.workspace.content.project;
+        self.query == cx.state.project_launcher_query
+            && self.filter == cx.state.project_launcher_filter
+            && self.sort == cx.state.project_launcher_sort
+            && self.current_path.as_deref() == project.path.as_deref()
+            && self.current_name == project.display_name()
+            && self.recent_files == cx.platform.recent_files
+    }
+}
+
+/// The launcher's project list, built once for what it is filtered and
+/// sorted by and kept until one of those changes.
+fn project_entries(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Arc<[ProjectEntry]> {
+    let id = Id::new("workbench.project_launcher.entries");
+    if let Some(kept) = ctx.data(|data| data.get_temp::<Arc<ProjectEntries>>(id))
+        && kept.built_from(cx)
+    {
+        return Arc::clone(&kept.entries);
+    }
+    let project = &cx.model.workspace.content.project;
+    let built = ProjectEntries {
+        recent_files: cx.platform.recent_files.clone(),
+        query: cx.state.project_launcher_query.clone(),
+        filter: cx.state.project_launcher_filter,
+        sort: cx.state.project_launcher_sort,
+        current_path: project.path.clone(),
+        current_name: project.display_name().to_owned(),
+        entries: build_project_entries(cx).into(),
+    };
+    let entries = Arc::clone(&built.entries);
+    ctx.data_mut(|data| data.insert_temp(id, Arc::new(built)));
+    entries
+}
+
+fn build_project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
+    #[cfg(any(test, feature = "test-support"))]
+    PROJECT_LIST_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let query = cx.state.project_launcher_query.trim().to_lowercase();
     let current_path = cx.model.workspace.content.project.path.as_deref();
     let current_name = cx.model.workspace.content.project.display_name();

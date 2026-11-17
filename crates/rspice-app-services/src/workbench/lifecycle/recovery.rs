@@ -70,6 +70,27 @@ pub struct RecoveryCandidate {
 }
 
 impl RecoveryCandidate {
+    /// A verified candidate that exists only in a test, so the launcher's
+    /// Recovery page can be drawn without a checkpoint on disk.
+    #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+    pub fn fixture(original: PathBuf, checkpoint: PathBuf, display_name: &str) -> Self {
+        Self {
+            original,
+            checkpoint,
+            display_name: display_name.to_owned(),
+            modified_unix_ms: 1,
+            age: "6 min ago".to_owned(),
+            integrity: RecoveryIntegrity::Verified {
+                baseline_available: true,
+                components: 3,
+                wires: 2,
+                changed_objects: Some(1),
+                baseline_note: None,
+            },
+            binding: None,
+        }
+    }
+
     pub fn can_discard(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -105,6 +126,65 @@ pub struct RecoveryNotice {
     pub tone: RecoveryNoticeTone,
 }
 
+/// Per-thread counts of the disk work the recovery surfaces and the project
+/// launcher do, for the regression tests that hold an idle frame to none of
+/// it. Work on a background thread is that thread's, not the frame's.
+pub mod disk_observation {
+    /// What one thread has read since it last asked.
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct DiskReads {
+        /// Whole project files read: a saved project or a checkpoint's
+        /// snapshot.
+        pub project_files: usize,
+        /// Checkpoint directories listed.
+        pub checkpoint_directories: usize,
+        /// Files whose metadata was read.
+        pub file_stats: usize,
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    thread_local! {
+        static READS: std::cell::Cell<DiskReads> = const {
+            std::cell::Cell::new(DiskReads {
+                project_files: 0,
+                checkpoint_directories: 0,
+                file_stats: 0,
+            })
+        };
+    }
+
+    /// What this thread has read since the last call, and start again.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn take() -> DiskReads {
+        READS.with(|reads| reads.replace(DiskReads::default()))
+    }
+
+    fn note(count: impl FnOnce(&mut DiskReads)) {
+        #[cfg(any(test, feature = "test-support"))]
+        READS.with(|reads| {
+            let mut observed = reads.get();
+            count(&mut observed);
+            reads.set(observed);
+        });
+        #[cfg(not(any(test, feature = "test-support")))]
+        let _ = count;
+    }
+
+    pub(crate) fn project_file() {
+        note(|reads| reads.project_files += 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn checkpoint_directory() {
+        note(|reads| reads.checkpoint_directories += 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn file_stat() {
+        note(|reads| reads.file_stats += 1);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RecoveryCatalog {
     pub candidates: Vec<RecoveryCandidate>,
@@ -112,6 +192,11 @@ pub struct RecoveryCatalog {
     pub pending_discard: Option<RecoveryCandidate>,
     pub notice: Option<RecoveryNotice>,
     refresh_requested: bool,
+    /// Why opening the selected checkpoint would destroy the open work, as
+    /// last worked out; `None` until it is worked out again. Working it out
+    /// reads the saved project, which no paint pass may do, so it is kept
+    /// from one refresh or selection to the next.
+    replacement_block: Option<Option<String>>,
 }
 
 impl Default for RecoveryCatalog {
@@ -122,6 +207,7 @@ impl Default for RecoveryCatalog {
             pending_discard: None,
             notice: None,
             refresh_requested: true,
+            replacement_block: None,
         }
     }
 }
@@ -139,12 +225,47 @@ impl RecoveryCatalog {
     }
 
     pub fn select(&mut self, checkpoint: PathBuf) {
-        if self
-            .candidates
-            .iter()
-            .any(|candidate| candidate.checkpoint == checkpoint)
+        if self.selected_checkpoint.as_ref() != Some(&checkpoint)
+            && self
+                .candidates
+                .iter()
+                .any(|candidate| candidate.checkpoint == checkpoint)
         {
             self.selected_checkpoint = Some(checkpoint);
+            self.replacement_block = None;
+        }
+    }
+
+    /// Why opening a recovery comparison would destroy the open work: worked
+    /// out once after each refresh or selection and kept, so an idle frame
+    /// reads nothing. Opening the comparison works it out again before it
+    /// acts.
+    pub fn replacement_block_reason(&mut self, model: &Model) -> Option<&str> {
+        self.replacement_block
+            .get_or_insert_with(|| recovery_replacement_block_reason(model))
+            .as_deref()
+    }
+
+    /// Work the block reason out again on the next frame that shows it: an
+    /// open was asked for, and its answer may have changed what is true.
+    pub fn forget_replacement_block(&mut self) {
+        self.replacement_block = None;
+    }
+
+    /// A catalog of the given candidates, already refreshed, with the first
+    /// recoverable one selected, so a launcher can be drawn over it without
+    /// a checkpoint on disk.
+    #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+    pub fn fixture(candidates: Vec<RecoveryCandidate>) -> Self {
+        let selected_checkpoint = candidates
+            .iter()
+            .find(|candidate| candidate.integrity.is_recoverable())
+            .map(|candidate| candidate.checkpoint.clone());
+        Self {
+            candidates,
+            selected_checkpoint,
+            refresh_requested: false,
+            ..Self::default()
         }
     }
 
@@ -212,6 +333,7 @@ pub fn refresh_catalog_if_requested(
                 .map(|candidate| candidate.checkpoint.clone())
         });
     catalog.refresh_requested = false;
+    catalog.replacement_block = None;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -227,6 +349,7 @@ fn discover_candidates(
     let mut candidates = sources
         .into_iter()
         .flat_map(|original| {
+            disk_observation::checkpoint_directory();
             crate::workbench::lifecycle::recovery_checkpoint::checkpoint_paths_for_source(&original)
                 .into_iter()
                 .filter_map(move |checkpoint| discover_candidate(original.clone(), checkpoint, io))
@@ -256,6 +379,7 @@ fn discover_candidate(
     checkpoint: PathBuf,
     _io: &(impl FileWorkflowIo + ?Sized),
 ) -> Option<RecoveryCandidate> {
+    disk_observation::file_stat();
     let checkpoint_meta = std::fs::metadata(&checkpoint).ok()?;
     let checkpoint_modified = checkpoint_meta.modified().ok()?;
 
@@ -556,6 +680,7 @@ fn project_owned_differences(model: &Model) -> Result<ProjectOwnedDifferences, S
     let (saved_execution, saved_results) = if let Some(project_path) =
         model.workspace.content.project.path.as_deref()
     {
+        disk_observation::project_file();
         let project = crate::io::load_project_file(project_path).map_err(|error| {
             format!(
                 "saved project snapshot '{}' could not be loaded: {error}",
