@@ -440,15 +440,15 @@ endmodule"#,
 #[test]
 fn ac_portless_final_step_errors_are_not_skipped_without_system_tasks() {
     let model = write_model(
-        "portless_final_loop",
+        "portless_final_divide",
         r#"
-module portless_final_loop;
+module portless_final_divide;
 integer count;
-analog @(final_step("ac")) while ($temperature > 0) count=count+1;
+analog @(final_step("ac")) count = 1 / count;
 endmodule"#,
     );
     let netlist = Netlist::parse(&format!(
-        "* Portless final step\nX1 portless_final_loop\n.va \"{}\" portless_final_loop\n.end\n",
+        "* Portless final step\nX1 portless_final_divide\n.va \"{}\" portless_final_divide\n.end\n",
         deck_path(&model),
     ))
     .unwrap();
@@ -464,7 +464,10 @@ endmodule"#,
         "{error}"
     );
     assert!(
-        error.to_string().to_ascii_lowercase().contains("loop"),
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("division by zero"),
         "{error}"
     );
     let _ = std::fs::remove_file(model);
