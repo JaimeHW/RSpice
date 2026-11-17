@@ -155,6 +155,62 @@ impl Bjt {
         n: Value,
     ) -> (Value, Value) {
         let n = self.legacy_junction_emission(kind, n);
+        let law = self.legacy_junction_law(kind, isat, v, n);
+        let limit = self.transport_conductance_limit(kind);
+        if law.1 <= limit || !v.is_finite() {
+            return law;
+        }
+        // Past the knee where the law's conductance reaches the limit, the
+        // current runs on the law's tangent there. The knee comes from the
+        // logarithm of the saturation current, so a bias whose exponential
+        // overflows still finds it.
+        let nvt = n * self.vt;
+        let log_saturation = match self.legacy_current_scale(kind) {
+            Some(scale) => {
+                scale.mantissa.ln()
+                    + Value::from(scale.binary_exponent) * std::f64::consts::LN_2
+                    + scale.thermal_exponent
+            }
+            None => isat.ln(),
+        };
+        let knee = nvt * ((limit * nvt).ln() - log_saturation);
+        // A knee at or below zero bias would take the junction's zero-bias
+        // current off zero; LTspice does that (IS=1e20 draws -1e20 A at
+        // 0 V), which needs IS above N*Vt*M/GMIN, 2.6e10 A by default.
+        if !(knee.is_finite() && knee > 0.0 && knee < v) {
+            return law;
+        }
+        let (current, _) = self.legacy_junction_law(kind, isat, knee, n);
+        (current + limit * (v - knee), limit)
+    }
+
+    /// LTspice's limit on a Gummel-Poon transport junction: the forward and
+    /// reverse transport exponentials stop steepening at `M / GMIN` and run
+    /// on their tangent from there. LTspice 17.2.4 shows it on bare-device
+    /// sweeps to 6 V: the collector current's slope is exactly 1e12 S at the
+    /// default GMIN, 1e9 S at GMIN=1e-9 and 1e13 S at M=10, while AREA=10
+    /// leaves it at 1e12 S and only moves the knee. Its leakage currents
+    /// (ISE, ISC) carry no limit, and neither do ngspice's or Xyce's.
+    #[inline]
+    fn transport_conductance_limit(&self, kind: LegacyCurrent) -> Value {
+        if self.ngspice_compatibility
+            || self.xyce_compatibility
+            || self.charge_model != BjtChargeModel::LegacyGummelPoon
+            || !matches!(kind, LegacyCurrent::Forward | LegacyCurrent::Reverse)
+            || self.junction_gmin <= 0.0
+        {
+            return Value::INFINITY;
+        }
+        self.m / self.junction_gmin
+    }
+
+    fn legacy_junction_law(
+        &self,
+        kind: LegacyCurrent,
+        isat: Value,
+        v: Value,
+        n: Value,
+    ) -> (Value, Value) {
         let Some(scale) = self.legacy_current_scale(kind) else {
             return self.diode_iv_with_is(isat, v, n);
         };

@@ -203,10 +203,11 @@ fn gp_zero_phase_or_transit_time_preserves_ac_exactly() {
 }
 
 /// A GP transistor with excess phase and 6 V across its base-emitter junction
-/// carries 2.8e84 A. Its operating point balances its collector row only to
-/// the rounding of that current, and the transient that starts from it holds
-/// it, as ngspice-46 does: V(2) = 1.7928194299e-02 and I(V1) =
-/// -2.836582914e+84 throughout.
+/// carries 2.8e84 A in ngspice. Its operating point balances its collector
+/// row only to the rounding of that current, and the transient that starts
+/// from it holds it, as ngspice-46 does: V(2) = 1.7928194299e-02 and I(V1) =
+/// -2.836582914e+84 throughout. LTspice 17.2.4 limits both transport
+/// junctions to 1e12 S and holds V(2) = 2.22641, I(R1) = 3.77359 mA.
 #[test]
 fn gp_excess_phase_transient_starts_from_a_far_forward_operating_point() {
     let netlist = Netlist::parse(
@@ -214,6 +215,19 @@ fn gp_excess_phase_transient_starts_from_a_far_forward_operating_point() {
          .MODEL QN NPN(BF=100 PTF=14.6 TF=5.3E-10)\n.tran 1n 1u\n.end\n",
     )
     .unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 1e-6, 1e-9)
+        .unwrap();
+    assert!(*result.time.last().unwrap() >= 1e-6);
+    let collector = result.try_voltage_waveform_named("2").unwrap();
+    for (index, &v) in collector.iter().enumerate() {
+        let t = result.time[index];
+        assert!((v / 2.22641 - 1.0).abs() < 2e-6, "t={t}: V(2)={v}");
+        assert!(
+            ((6.0 - v) / 1e3 / 3.77359e-3 - 1.0).abs() < 2e-6,
+            "t={t}: V(2)={v}"
+        );
+    }
     let result = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice))
         .run_tran(&netlist, 1e-6, 1e-9)
         .unwrap();

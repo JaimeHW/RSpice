@@ -151,6 +151,69 @@ fn vbic_runs_eg_as_the_references_do_and_says_to_use_ea() {
     assert_rel_close("EA=0.9", ea, -9.728973696e-06, 1e-6);
 }
 
+/// LTspice 17.2.4 runs a Gummel-Poon transport exponential until its
+/// conductance reaches M/GMIN and on its tangent from there: bare-device
+/// sweeps to 6 V (VCE 5 V, IS=1e-16, BF=100) give these collector currents,
+/// a slope of exactly 1e12 S at the default GMIN, 1e9 S at GMIN=1e-9 and
+/// 1e13 S at M=10, while AREA=10 keeps 1e12 S and only moves the knee
+/// (1.573 V at the default). The ngspice dialect keeps the exponential.
+#[test]
+fn gp_transport_conductance_stops_at_m_over_gmin_as_ltspice_does() {
+    let collector = |dialect, vbe: f64, instance: &str, gmin: f64| {
+        let deck = format!(
+            "* gp transport limit\nv1 b 0 {vbe}\nv2 c 0 5\nq1 c b 0 qn {instance}\n\
+             .model qn npn bf=100\n.options gmin={gmin:e}\n.op\n.end\n"
+        );
+        let config = SimulationConfig::default().with_spice_dialect(dialect);
+        -branch_current_with_config(&deck, "v2", config)
+    };
+    // (instance, GMIN, LTspice IC at 1.57, 5.995 and 6 V, its slope at 6 V)
+    for (instance, gmin, at_1_57, at_5_995, at_6, slope) in [
+        (
+            "",
+            1e-12,
+            2.2994855721e10,
+            4.4478227597e12,
+            4.4528227597e12,
+            1e12,
+        ),
+        (
+            "m=10",
+            1e-12,
+            2.2994855721e11,
+            4.4478227597e13,
+            4.4528227597e13,
+            1e13,
+        ),
+        (
+            "10",
+            1e-12,
+            8.2379014681e10,
+            4.5073790146e12,
+            4.5123790146e12,
+            1e12,
+        ),
+        (
+            "",
+            1e-9,
+            2.0149152472e8,
+            4.6264915145e9,
+            4.6314915124e9,
+            1e9,
+        ),
+    ] {
+        let best = |vbe| collector(SpiceDialect::BestAvailable, vbe, instance, gmin);
+        let label = format!("{instance} gmin={gmin:e}");
+        // Below the default knee only the dialects' thermal voltages differ.
+        assert_rel_close(&label, best(1.57), at_1_57, 1e-4);
+        assert_rel_close(&label, best(5.995), at_5_995, 1e-6);
+        assert_rel_close(&label, best(6.0), at_6, 1e-6);
+        assert_rel_close(&label, (best(6.0) - best(5.995)) / 0.005, slope, 1e-6);
+    }
+    let exponential = collector(SpiceDialect::Ngspice, 6.0, "", 1e-12);
+    assert!(exponential > 1e84, "{exponential:e}");
+}
+
 #[test]
 fn vbic13_pnjmaxi_matches_xyce_and_model_overrides_global_option() {
     // Xyce 7.10 LEVEL=11/12, all five active series resistors = 1 ohm.
