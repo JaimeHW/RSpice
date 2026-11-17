@@ -462,6 +462,15 @@ fn dependency_inventory(
     // always complete and the table never scrolls sideways.
     let width = pane_width.min(visible_workspace_width(ui)).max(1.0);
     let compact = width < DEPENDENCY_COMPACT_WIDTH;
+    // Beside the technology panel the rows scroll within the pane, so the
+    // grid leaves the scroll bar its gutter whether or not the bar shows:
+    // the header, drawn outside the scroll, then lines up with the rows in
+    // it however long the list grows.
+    let width = if pane_height > 0.0 {
+        (width - ui.spacing().scroll.allocated_width()).max(1.0)
+    } else {
+        width
+    };
     if compact {
         workspace_table_row(
             ui,
@@ -495,29 +504,46 @@ fn dependency_inventory(
         workspace_empty_table_row(ui, width, "No dependency matches the current filter.");
     }
     let row_height = workspace_table_row_height(ui);
-    let body_height = if pane_height > 0.0 {
-        // What the pane leaves above its action bar.
-        dependency_panel_free_height(ui, pane_height, top).max(row_height)
-    } else {
-        // Stacked under the technology panel, the ledger scrolls within one
-        // screen of the page rather than lengthening the page by every row.
-        ui.clip_rect().height().max(row_height * 4.0)
-    };
     let mut selected = None;
-    if !view.visible.is_empty() {
+    let mut draw_rows = |ui: &mut Ui, range: std::ops::Range<usize>| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for &index in &view.visible[range] {
+            let row = &view.ledger.rows[index];
+            if ledger_row(ui, cx, row, width, compact) {
+                selected = Some(row.identity.clone());
+            }
+        }
+    };
+    let count = view.visible.len();
+    if count > 0 && pane_height > 0.0 {
+        // Beside the technology panel the ledger scrolls within its pane,
+        // above an action bar that stays in view.
         ScrollArea::vertical()
             .id_salt("workbench.project.dependencies.ledger")
             .auto_shrink([false, true])
-            .max_height(body_height)
-            .show_rows(ui, row_height, view.visible.len(), |ui, range| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for &index in &view.visible[range] {
-                    let row = &view.ledger.rows[index];
-                    if ledger_row(ui, cx, row, width, compact) {
-                        selected = Some(row.identity.clone());
-                    }
-                }
-            });
+            .max_height(dependency_panel_free_height(ui, pane_height, top).max(row_height))
+            .show_rows(ui, row_height, count, draw_rows);
+    } else if count > 0 {
+        // Stacked under it, the ledger is part of the page's own scroll: a
+        // second scroll inside that one would trap a touch drag. It takes the
+        // height of every row and lays out only those in the page's view.
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(width, row_height * count as f32), Sense::hover());
+        let shown = ui.clip_rect().intersect(rect);
+        if shown.is_positive() {
+            let first = (((shown.top() - rect.top()) / row_height).floor() as usize).min(count);
+            let last = (((shown.bottom() - rect.top()) / row_height).ceil() as usize).min(count);
+            let rows = Rect::from_min_size(
+                pos2(rect.left(), rect.top() + first as f32 * row_height),
+                vec2(width, (last - first) as f32 * row_height),
+            );
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(rows)
+                    .layout(Layout::top_down(Align::Min)),
+                |ui| draw_rows(ui, first..last),
+            );
+        }
     }
     if let Some(identity) = selected {
         cx.state.project_dependency_selection = Some(identity);

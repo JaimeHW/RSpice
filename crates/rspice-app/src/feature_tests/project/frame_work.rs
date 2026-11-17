@@ -516,6 +516,49 @@ fn a_library_added_since_the_last_frame_is_a_dependency() {
     );
 }
 
+/// One whole application frame on a screen of `size`.
+fn sized_frame(ctx: &Context, app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ui| {
+            let ctx = ui.ctx().clone();
+            app.prepare_frame(&ctx);
+            app.render_frame_chrome(ui);
+            app.render_frame_dialogs(&ctx);
+        },
+    )
+}
+
+/// The ledger lays out the rows the reader can see, not every row: three
+/// hundred libraries, beside the technology panel or stacked under it on a
+/// narrow window, draw a screenful of ledger rows.
+#[test]
+fn the_dependency_ledger_draws_only_the_rows_in_view() {
+    let mut app = RSpiceApp::test_instance();
+    for index in 0..300 {
+        app.state
+            .model
+            .library_manager
+            .add_library(Library::new(format!("dep-{index:03}")));
+    }
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    for size in [egui::vec2(1600.0, 900.0), egui::vec2(600.0, 1000.0)] {
+        let ctx = offscreen();
+        sized_frame(&ctx, &mut app, size);
+        let text = painted(&sized_frame(&ctx, &mut app, size));
+        // Every design library's ledger row names where it lives.
+        let rows = text.matches("Embedded project data").count();
+        assert!(
+            (1..60).contains(&rows),
+            "{size:?}: {rows} ledger rows drawn\n{text}"
+        );
+    }
+}
+
 /// The attach dialog proves its candidate libraries when the model
 /// catalogue changes, not on each frame it stays open: a library imported
 /// while it is open is offered on the next frame, and the frames after that
