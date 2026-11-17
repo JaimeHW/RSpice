@@ -26,9 +26,9 @@ mx	tf	worker	pass	tf (O5) [1] |a−e|=2.474e-5 allowed 2.301e-1 (a=2.301378e4, e
 mx	sens	interp	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
 mx	sens	native	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
 mx	sens	worker	pass	sens (O5-O1) [1] |a−e|=8.582e-12 allowed 8.582e-8 (a=-8.582325e-6, e=-8.582317e-6)
-mx	pz	interp	pass	pz (O5) H(jω) Δ=0.000e0 dB, 0.000e0° allowed 8.7e-4 dB, 5.7e-3° at ω=1.0000e5 rad/s; 209 points over 1e5..1e9 rad/s; pending 1
-mx	pz	native	pass	pz (O5) H(jω) Δ=0.000e0 dB, 0.000e0° allowed 8.7e-4 dB, 5.7e-3° at ω=1.0000e5 rad/s; 209 points over 1e5..1e9 rad/s; pending 1
-mx	pz	worker	pass	pz (O5) H(jω) Δ=5.153e-5 dB, -2.045e-3° allowed 8.7e-4 dB, 5.7e-3° at ω=5.9723e5 rad/s; 209 points over 1e5..1e9 rad/s; pending 1
+mx	pz	interp	pass	pz (O5) H(jω) Δ=0.000e0 dB, 0.000e0° allowed 8.7e-4 dB, 5.7e-3° at ω=1.0000e5 rad/s; 208 points over 1e5..1e9 rad/s; pending 1
+mx	pz	native	pass	pz (O5) H(jω) Δ=0.000e0 dB, 0.000e0° allowed 8.7e-4 dB, 5.7e-3° at ω=1.0000e5 rad/s; 208 points over 1e5..1e9 rad/s; pending 1
+mx	pz	worker	pass	pz (O5) H(jω) Δ=-1.091e-7 dB, 1.773e-6° allowed 8.7e-4 dB, 5.7e-3° at ω=5.7544e5 rad/s; 208 points over 1e5..1e9 rad/s; pending 1
 mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.094e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
 mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.094e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
 mx	tran	worker	pass	trim (O5-O1) [0] |a−e|=4.094e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)

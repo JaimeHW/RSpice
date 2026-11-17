@@ -49,6 +49,7 @@ impl PoleZeroAnalyzer {
             }
             result => result?,
         };
+        Self::polish_pencil_roots(&g_aug, &c_aug, &mut spectrum.finite);
         self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "zero")?;
         spectrum.finite.sort_by(|left, right| {
             left.re
@@ -260,7 +261,7 @@ impl PoleZeroAnalyzer {
         }
         g_zero.set(n, n, model.d);
 
-        let spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero, abort, false) {
+        let mut spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero, abort, false) {
             Err(PoleZeroAnalysisError::IrregularDescriptor { .. }) => {
                 return Err(PoleZeroAnalysisError::TransferExtraction(
                     "transfer numerator is identically zero",
@@ -268,6 +269,7 @@ impl PoleZeroAnalyzer {
             }
             result => result?,
         };
+        Self::polish_pencil_roots(&g_zero, &c_zero, &mut spectrum.finite);
         self.finalize_zero_roots(spectrum, config)
     }
 

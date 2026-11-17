@@ -689,6 +689,7 @@ fn ensure_pole_zero_not_aborted(abort: &dyn AbortSignal) -> Result<(), PoleZeroA
 mod gain;
 mod matrix_ops;
 mod poles;
+mod polish;
 mod roots;
 mod zeros;
 

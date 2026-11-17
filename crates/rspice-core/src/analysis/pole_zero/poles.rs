@@ -143,6 +143,7 @@ impl PoleZeroAnalyzer {
         // rounding C^-1*G before that decision can erase or invent damping.
         let mut spectrum =
             self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort, true)?;
+        Self::polish_pencil_roots(&self.g_matrix, &self.c_matrix, &mut spectrum.finite);
         spectrum
             .finite
             .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
