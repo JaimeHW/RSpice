@@ -29,7 +29,7 @@ use compress::{
 };
 use integral_trace::TransientIntegralTrace;
 pub use shell_codec::{TRANSIENT_SHELL_ANNOTATION, decode_transient_shell, encode_transient_shell};
-pub use sink_route::SinkTransient;
+pub use sink_route::{SinkTransient, TransientLeadPower};
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -1107,7 +1107,8 @@ pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
 pub use fft::{
-    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain_with_alpha,
+    TransientFftStream, transient_fft_window_coefficient_with_alpha,
+    transient_fft_window_coherent_gain_with_alpha,
 };
 
 mod mosfet;

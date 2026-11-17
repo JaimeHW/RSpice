@@ -2104,11 +2104,27 @@ pub fn evaluate_tran_four_output_requests_with_abort(
 /// rows gives other values there than over the whole run. An operand whose
 /// user functions cannot be expanded counts as reading other rows.
 pub fn tran_four_operands_read_other_rows(netlist: &Netlist, four_index: usize) -> bool {
+    card_operands_read_other_rows(netlist, OutputDirectiveKind::Four, four_index)
+}
+
+/// Whether a row of one `.FFT` card's operand reads rows other than its own, as
+/// [`tran_four_operands_read_other_rows`] says of a `.FOUR` card's: then
+/// [`evaluate_tran_fft_output_with_abort`] over a span of a run's rows gives other values there
+/// than over the whole run.
+pub(crate) fn tran_fft_operand_reads_other_rows(netlist: &Netlist, fft_index: usize) -> bool {
+    card_operands_read_other_rows(netlist, OutputDirectiveKind::Fft, fft_index)
+}
+
+fn card_operands_read_other_rows(
+    netlist: &Netlist,
+    directive: OutputDirectiveKind,
+    index: usize,
+) -> bool {
     let Some(request) = netlist
         .output_requests
         .iter()
-        .filter(|request| request.directive == OutputDirectiveKind::Four)
-        .nth(four_index)
+        .filter(|request| request.directive == directive)
+        .nth(index)
     else {
         return true;
     };

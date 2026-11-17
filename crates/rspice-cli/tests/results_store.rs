@@ -349,6 +349,104 @@ fn frac_max_delays_are_measured_from_the_store() {
     assert_eq!(streamed, read_back);
 }
 
+/// `.FFT` cards over a sine's response: a store column, a voltage between two nodes, an
+/// expression of them and a lead power, with lead power printed and measured.
+const RC_FFT: &str = "rc sine fft
+v1 in 0 sin(0 1 1k)
+r1 in out 1k
+c1 out 0 100n
+.tran 10u 4m
+.fft v(out) np=64 window=hann
+.fft v(in,out) np=32 start=1m stop=3m window=rect
+.fft {2*v(out)-v(in)} np=16 format=unorm
+.fft p(r1) np=64 window=hann
+.print tran v(out) p(r1) w(r1)
+.meas tran pmax max p(r1)
+.meas tran wavg avg w(r1)
+.meas fft thd thd v(out)
+";
+
+/// The `.FFT` spectra are taken in one pass over the store, and lead power is derived from each
+/// chunk's rows: the table, the spectra and the measurements equal the run read back whole.
+#[test]
+fn fft_spectra_and_lead_power_read_from_the_store_equal_the_run_read_back_whole() {
+    let dir = test_dir("results-store-fft-power");
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    let twins = [("streamed", ""), ("read-back", read_back)].map(|(twin, extra)| {
+        let deck = dir.join(format!("{twin}.cir"));
+        std::fs::write(&deck, format!("{RC_FFT}{extra}.end\n")).unwrap();
+        let out = dir.join(twin);
+        let meas = dir.join(format!("{twin}.json"));
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "-f",
+            "csv",
+            "-o",
+            out.join("out.csv").to_str().unwrap(),
+            "--meas-file",
+            meas.to_str().unwrap(),
+            "--log-level",
+            "debug",
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{twin}: {stderr}"
+        );
+        let mut files = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .map(|path| {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read(&path).unwrap())
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&meas).unwrap()).unwrap();
+        let rows = json["measurements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !["VAVG", "VMAX"].contains(&row["name"].as_str().unwrap_or("")))
+            .map(|row| {
+                // Each row names its deck.
+                let mut row = row.clone();
+                if let Some(row) = row.as_object_mut() {
+                    row.remove("netlist");
+                    row.remove("run");
+                }
+                row
+            })
+            .collect::<Vec<_>>();
+        (files, rows)
+    });
+    let (files, rows) = &twins[0];
+    assert!(
+        files.iter().any(|(name, _)| name.contains("fft")),
+        "{:?}",
+        files.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(rows.iter().all(|row| row["value"].is_number()), "{rows:?}");
+    let names = files.iter().map(|(name, _)| name).collect::<Vec<_>>();
+    let (_, table) = files
+        .iter()
+        .find(|(name, _)| name.contains("tran"))
+        .unwrap_or_else(|| panic!("{names:?}"));
+    let header = String::from_utf8_lossy(table)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_owned();
+    assert_eq!(header, "time,v(out),p(r1),w(r1)");
+    assert_eq!(twins[0], twins[1]);
+}
+
 #[test]
 fn fourier_spectra_read_around_their_windows_equal_the_run_read_back_whole() {
     let dir = test_dir("results-store-fourier");

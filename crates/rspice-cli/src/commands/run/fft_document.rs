@@ -26,8 +26,6 @@ use crate::hdf5::{
 };
 use std::path::Path;
 
-use super::basic::TransientOutputDocument;
-
 mod conversion;
 pub(crate) use conversion::FftBundle;
 
@@ -37,7 +35,7 @@ pub(crate) use conversion::FftBundle;
 // against; a struct would move the same list one call earlier.
 pub(super) fn write_transient_fft_output_pair(
     transient_path: &Path,
-    transient: &TransientOutputDocument,
+    write_transient: impl FnOnce(&mut dyn std::io::Write) -> Result<(), CliError>,
     fft_path: &Path,
     format: OutputFormat,
     parent_analysis_id: &str,
@@ -46,38 +44,32 @@ pub(super) fn write_transient_fft_output_pair(
     results: &[rspice_core::engine::TransientFftResult],
     netlist: &rspice_core::Netlist,
     timeout_seconds: Option<f64>,
-    byte_limit: u64,
 ) -> Result<(), CliError> {
     validate_fft_publication(results, analysis_ids, netlist)?;
     let requests = &netlist.fft_analyses;
     // A transient result and the FFT derived from it are one logical result:
     // publishing the transient alone would advertise a run whose declared
     // spectrum is missing. They are staged together and published together.
-    publish::artifact_pair(
-        transient_path,
-        |writer| transient.write_to(writer, transient_path, format, byte_limit, timeout_seconds),
-        fft_path,
-        |writer| {
-            write_fft_to_writer(
-                writer,
-                fft_path,
-                format,
-                parent_analysis_id,
-                analysis_ids,
-                coordinate,
-                results,
-                requests,
-                timeout_seconds,
-            )?;
-            // Both members are complete here and nothing has been published
-            // yet, so a cancellation that arrived during serialization still
-            // leaves both destinations untouched.
-            if crate::abort::reason().is_some() {
-                return Err(super::cancellation_cli_error(timeout_seconds));
-            }
-            Ok(())
-        },
-    )
+    publish::artifact_pair(transient_path, write_transient, fft_path, |writer| {
+        write_fft_to_writer(
+            writer,
+            fft_path,
+            format,
+            parent_analysis_id,
+            analysis_ids,
+            coordinate,
+            results,
+            requests,
+            timeout_seconds,
+        )?;
+        // Both members are complete here and nothing has been published
+        // yet, so a cancellation that arrived during serialization still
+        // leaves both destinations untouched.
+        if crate::abort::reason().is_some() {
+            return Err(super::cancellation_cli_error(timeout_seconds));
+        }
+        Ok(())
+    })
     .map_err(|error| map_atomic_output_error(fft_path, error))
 }
 

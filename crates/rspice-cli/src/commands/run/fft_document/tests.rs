@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::run::basic::TransientOutputDocument;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -353,7 +354,7 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
     };
     write_transient_fft_output_pair(
         &transient_path,
-        &transient,
+        |writer| transient.write_to(writer, &transient_path, OutputFormat::Json, u64::MAX, None),
         &fft_path,
         OutputFormat::Json,
         "tran-001",
@@ -362,7 +363,6 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
         &reordered,
         &netlist,
         None,
-        u64::MAX,
     )
     .expect_err("malformed FFT pair must fail before staging either sibling");
     assert!(!transient_path.exists());

@@ -356,3 +356,26 @@ impl Engine {
             && lead_power::requested_lead_power(netlist).is_ok_and(|requests| requests.is_empty())
     }
 }
+
+/// The lead power, `P(dev)` and `W(dev)`, a deck asks for, derived for whichever of a run's rows
+/// a result holds: a row's power reads only that row, so each span of the rows gets its share of
+/// what [`Engine::finish_transient_from_rows`] records over all of them.
+pub struct TransientLeadPower(Vec<lead_power::LeadPowerRequest>);
+
+impl TransientLeadPower {
+    /// `netlist`'s requests, resolved against its flattened elements.
+    pub fn requested(netlist: &Netlist) -> Result<Self, SimulationError> {
+        lead_power::requested_lead_power(netlist).map(Self)
+    }
+
+    /// Whether the deck asks for no lead power.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Publish each request's power over `result`'s rows as the device trace `P`, after its
+    /// other traces, unless the device has one.
+    pub fn record(&self, result: &mut TransientResult) {
+        lead_power::record_lead_power(&self.0, result);
+    }
+}

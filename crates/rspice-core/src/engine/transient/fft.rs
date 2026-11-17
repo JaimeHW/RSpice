@@ -7,7 +7,7 @@ use super::super::{
 use crate::abort_signal::AbortSignal;
 use crate::netlist::{FftAnalysis, FftFormat, FftWindow, Netlist, XyceFftMode};
 use crate::numerics::rustfft_qualification::qualify_rustfft_forward_length;
-use crate::{ResourceKind, ResourceLimitError, Value};
+use crate::{ResourceKind, ResourceLimitError, ResourceLimits, Value};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::f64::consts::PI;
 
@@ -32,9 +32,16 @@ pub(super) fn uses_accurate_sampling(netlist: &Netlist) -> bool {
 }
 
 pub(super) fn sample_time(analysis: &FftAnalysis, transient_stop: Value, sample: usize) -> Value {
-    let start = analysis.start.unwrap_or(0.0);
-    let stop = analysis.stop.unwrap_or(transient_stop);
-    let interval = (stop - start) / analysis.points as Value;
+    uniform_time(
+        analysis.start.unwrap_or(0.0),
+        analysis.stop.unwrap_or(transient_stop),
+        analysis.points,
+        sample,
+    )
+}
+
+fn uniform_time(start: Value, stop: Value, points: usize, sample: usize) -> Value {
+    let interval = (stop - start) / points as Value;
     start + sample as Value * interval
 }
 
@@ -152,6 +159,170 @@ impl Engine {
     }
 }
 
+/// A transient's `.FFT` spectra taken from its rows a span at a time, in one pass in time order:
+/// each card's operand is evaluated over a span's rows and sampled onto the card's uniform
+/// record, so that only the records are held. The spectra equal the ones the rows read back
+/// whole give ([`Engine::finish_transient_from_rows`]).
+pub struct TransientFftStream {
+    limits: ResourceLimits,
+    transient_stop: Value,
+    mode: XyceFftMode,
+    accurate_sampling: bool,
+    emit_metrics: bool,
+    /// The last row's time, which the next span's rows follow.
+    last_time: Option<Value>,
+    cards: Vec<FftCard>,
+}
+
+/// One card of a [`TransientFftStream`].
+struct FftCard {
+    status: TransientFftStatus,
+    /// The operand's column name and physical type, once a span has given them.
+    output: Option<(String, &'static str)>,
+    record: UniformRecord,
+}
+
+impl Engine {
+    /// A pass that takes `netlist`'s `.FFT` spectra from the rows of a transient run to
+    /// `transient_stop`, whose first and last rows lie at `history`; `shell` is the run's result.
+    /// `None` when the spectra need the rows in memory: the run has impulses, which a spectrum
+    /// adds, or an operand reads rows other than its own (`sdt`).
+    pub fn transient_fft_stream(
+        &self,
+        netlist: &Netlist,
+        shell: &TransientResult,
+        transient_stop: Value,
+        history: (Value, Value),
+    ) -> Result<Option<TransientFftStream>, SimulationError> {
+        if shell.current_impulses.is_some()
+            || shell.voltage_impulses.is_some()
+            || (0..netlist.fft_analyses.len()).any(|index| {
+                crate::analysis::measure_signals::tran_fft_operand_reads_other_rows(netlist, index)
+            })
+        {
+            return Ok(None);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        let mode = netlist.options.fft_mode.unwrap_or_default();
+        let mut cards = Vec::new();
+        cards
+            .try_reserve_exact(netlist.fft_analyses.len())
+            .map_err(|_| allocation_error("result list"))?;
+        for (index, analysis) in netlist.fft_analyses.iter().enumerate() {
+            validate_request(index, analysis, transient_stop)?;
+            let status = record_status(analysis, transient_stop, history);
+            let record = UniformRecord::new(index, analysis, mode, transient_stop, &status)?;
+            cards.push(FftCard {
+                status,
+                output: None,
+                record,
+            });
+        }
+        Ok(Some(TransientFftStream {
+            limits: engine.config.resource_limits,
+            transient_stop,
+            mode,
+            accurate_sampling: uses_accurate_sampling(netlist),
+            emit_metrics: netlist.options.fft_output_metrics.unwrap_or(false),
+            last_time: None,
+            cards,
+        }))
+    }
+}
+
+impl TransientFftStream {
+    /// Sample the rows `span` holds, which follow the ones given before, onto each card's record.
+    pub fn rows(
+        &mut self,
+        netlist: &Netlist,
+        span: &TransientResult,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        for &time in &span.time {
+            if !time.is_finite() || self.last_time.is_some_and(|last| time <= last) {
+                return Err(SimulationError::Circuit(
+                    ".FFT requires finite, strictly increasing transient times".to_string(),
+                ));
+            }
+            self.last_time = Some(time);
+        }
+        for (index, card) in self.cards.iter_mut().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let (name, physical_type, values) =
+                crate::analysis::measure_signals::evaluate_tran_fft_output_with_abort(
+                    netlist,
+                    span,
+                    index,
+                    self.limits,
+                    abort,
+                )?;
+            if values.len() != span.time.len() {
+                return Err(request_error(
+                    index,
+                    format!(
+                        "resolved output has {} values for {} transient samples",
+                        values.len(),
+                        span.time.len()
+                    ),
+                ));
+            }
+            match &card.output {
+                None => card.output = Some((name, physical_type)),
+                Some(output) if *output == (name, physical_type) => {}
+                Some(_) => {
+                    return Err(request_error(
+                        index,
+                        "resolved output names another column over later rows".to_owned(),
+                    ));
+                }
+            }
+            card.record.push(&span.time, &values, abort)?;
+        }
+        Ok(())
+    }
+
+    /// Each card's spectrum, once every row has been given.
+    pub fn finish(
+        self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<TransientFftResult>, SimulationError> {
+        if self.last_time.is_none() {
+            return Err(SimulationError::Circuit(
+                ".FFT requires at least one retained transient sample".to_string(),
+            ));
+        }
+        let mut planner = FftPlanner::<Value>::new();
+        let mut spectra = Vec::new();
+        spectra
+            .try_reserve_exact(self.cards.len())
+            .map_err(|_| allocation_error("result list"))?;
+        for (index, (analysis, card)) in netlist.fft_analyses.iter().zip(self.cards).enumerate() {
+            let output = card
+                .output
+                .ok_or_else(|| request_error(index, "resolved output has no values".to_owned()))?;
+            spectra.push(transform(
+                index,
+                analysis,
+                self.mode,
+                self.accurate_sampling,
+                self.emit_metrics,
+                output,
+                card.status,
+                card.record,
+                &[],
+                self.transient_stop,
+                &mut planner,
+                self.limits.max_result_values,
+                abort,
+            )?);
+        }
+        Ok(spectra)
+    }
+}
+
 fn validate_request(
     index: usize,
     analysis: &FftAnalysis,
@@ -257,21 +428,8 @@ fn evaluate_one(
     }
     let start = analysis.start.unwrap_or(0.0);
     let stop = analysis.stop.unwrap_or(transient_stop);
-    let point_count = analysis.points;
-    let sample_interval = (stop - start) / point_count as Value;
-    let frequency_resolution = 1.0 / (stop - start);
-    let first_target = start;
-    let last_target = sample_time(analysis, transient_stop, point_count - 1);
-    let history_start = time[0];
     let history_stop = *time.last().expect("validated non-empty history");
-    let status = if first_target < history_start || last_target > history_stop {
-        TransientFftStatus::IncompleteHistory {
-            available_start: history_start,
-            available_stop: history_stop,
-        }
-    } else {
-        TransientFftStatus::Complete
-    };
+    let status = record_status(analysis, transient_stop, (time[0], history_stop));
     let impulses = if status.is_complete()
         && let Some((netlist, result)) = current_record
     {
@@ -299,50 +457,207 @@ fn evaluate_one(
         Vec::new()
     };
 
-    let mut input = Vec::new();
-    input
-        .try_reserve_exact(if status.is_complete() { point_count } else { 0 })
-        .map_err(|_| allocation_error("uniform input record"))?;
-    let mut interval = 0usize;
-    let denominator = if mode.uses_periodic_windows() {
-        point_count as Value
+    let mut record = UniformRecord::new(index, analysis, mode, transient_stop, &status)?;
+    record.push(time, values, abort)?;
+    transform(
+        index,
+        analysis,
+        mode,
+        accurate_sampling,
+        emit_metrics,
+        (output_name, physical_type),
+        status,
+        record,
+        &impulses,
+        transient_stop,
+        planner,
+        max_values,
+        abort,
+    )
+}
+
+/// Whether a card's uniform record lies inside the run's rows, which span `history`.
+fn record_status(
+    analysis: &FftAnalysis,
+    transient_stop: Value,
+    history: (Value, Value),
+) -> TransientFftStatus {
+    let (history_start, history_stop) = history;
+    let first_target = analysis.start.unwrap_or(0.0);
+    let last_target = sample_time(analysis, transient_stop, analysis.points - 1);
+    if first_target < history_start || last_target > history_stop {
+        TransientFftStatus::IncompleteHistory {
+            available_start: history_start,
+            available_stop: history_stop,
+        }
     } else {
-        (point_count - 1) as Value
-    };
-    let mut window_sum = 0.0;
-    for sample in 0..point_count {
-        if sample.is_multiple_of(64) && abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let window = transient_fft_window_coefficient_with_alpha(
-            analysis.window,
-            sample,
-            denominator,
-            analysis.alpha,
-        );
-        window_sum += window;
-        if !status.is_complete() {
-            continue;
-        }
-        let target = sample_time(analysis, transient_stop, sample);
-        while interval + 1 < time.len() && time[interval + 1] < target {
-            interval += 1;
-        }
-        let value = interpolate_at(time, values, interval, target).ok_or_else(|| {
-            request_error(
-                index,
-                format!("cannot interpolate the resolved output at time {target}"),
-            )
-        })?;
-        if !value.is_finite() {
-            return Err(request_error(
-                index,
-                format!("resolved output is non-finite at uniform sample {sample} (time {target})"),
-            ));
-        }
-        input.push(Complex::new(value * window, 0.0));
+        TransientFftStatus::Complete
     }
-    let coherent_gain = window_sum / point_count as Value;
+}
+
+/// One card's uniform record, sampled from a run's rows as they are fed in time order: a sample
+/// time takes the row there, or interpolates linearly between the two rows around it. Rows fed
+/// a span at a time give the record the whole run gives.
+struct UniformRecord {
+    index: usize,
+    start: Value,
+    stop: Value,
+    points: usize,
+    window: FftWindow,
+    alpha: Value,
+    denominator: Value,
+    /// The record lies inside the rows; one that does not takes no samples.
+    complete: bool,
+    /// The next sample to take.
+    sample: usize,
+    /// The last row fed, as (time, value).
+    previous: Option<(Value, Value)>,
+    /// Each sample taken, weighted by its window coefficient.
+    input: Vec<Complex<Value>>,
+}
+
+impl UniformRecord {
+    fn new(
+        index: usize,
+        analysis: &FftAnalysis,
+        mode: XyceFftMode,
+        transient_stop: Value,
+        status: &TransientFftStatus,
+    ) -> Result<Self, SimulationError> {
+        let complete = status.is_complete();
+        let points = analysis.points;
+        let mut input = Vec::new();
+        input
+            .try_reserve_exact(if complete { points } else { 0 })
+            .map_err(|_| allocation_error("uniform input record"))?;
+        Ok(Self {
+            index,
+            start: analysis.start.unwrap_or(0.0),
+            stop: analysis.stop.unwrap_or(transient_stop),
+            points,
+            window: analysis.window,
+            alpha: analysis.alpha,
+            denominator: if mode.uses_periodic_windows() {
+                points as Value
+            } else {
+                (points - 1) as Value
+            },
+            complete,
+            sample: 0,
+            previous: None,
+            input,
+        })
+    }
+
+    fn time(&self, sample: usize) -> Value {
+        uniform_time(self.start, self.stop, self.points, sample)
+    }
+
+    fn coefficient(&self, sample: usize) -> Value {
+        transient_fft_window_coefficient_with_alpha(
+            self.window,
+            sample,
+            self.denominator,
+            self.alpha,
+        )
+    }
+
+    /// Take every sample at or before the last of these rows, which follow the ones fed before.
+    fn push(
+        &mut self,
+        time: &[Value],
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if !self.complete {
+            return Ok(());
+        }
+        for (&row_time, &row_value) in time.iter().zip(values) {
+            while self.sample < self.points {
+                let target = self.time(self.sample);
+                if target > row_time {
+                    break;
+                }
+                if self.sample.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                // The rows before this one lie before the target; with none, the target lies
+                // at or before the first row and is taken only there.
+                let value = if target == row_time {
+                    Some(row_value)
+                } else {
+                    self.previous.map(|(left_time, left_value)| {
+                        let fraction = (target - left_time) / (row_time - left_time);
+                        left_value + fraction * (row_value - left_value)
+                    })
+                };
+                let value = value.ok_or_else(|| self.uninterpolated(target))?;
+                if !value.is_finite() {
+                    return Err(request_error(
+                        self.index,
+                        format!(
+                            "resolved output is non-finite at uniform sample {} (time {target})",
+                            self.sample
+                        ),
+                    ));
+                }
+                self.input
+                    .push(Complex::new(value * self.coefficient(self.sample), 0.0));
+                self.sample += 1;
+            }
+            self.previous = Some((row_time, row_value));
+        }
+        Ok(())
+    }
+
+    fn uninterpolated(&self, target: Value) -> SimulationError {
+        request_error(
+            self.index,
+            format!("cannot interpolate the resolved output at time {target}"),
+        )
+    }
+
+    /// The samples taken and the window's coherent gain, once every row is fed.
+    fn finish(
+        self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Complex<Value>>, Value), SimulationError> {
+        if self.complete && self.sample < self.points {
+            return Err(self.uninterpolated(self.time(self.sample)));
+        }
+        let mut window_sum = 0.0;
+        for sample in 0..self.points {
+            if sample.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            window_sum += self.coefficient(sample);
+        }
+        Ok((self.input, window_sum / self.points as Value))
+    }
+}
+
+/// A card's spectrum from its uniform `record`.
+#[allow(clippy::too_many_arguments)]
+fn transform(
+    index: usize,
+    analysis: &FftAnalysis,
+    mode: XyceFftMode,
+    accurate_sampling: bool,
+    emit_metrics: bool,
+    (output_name, physical_type): (String, &'static str),
+    status: TransientFftStatus,
+    record: UniformRecord,
+    impulses: &[crate::analysis::measure_signals::impulse_observation::ImpulseContribution<'_>],
+    transient_stop: Value,
+    planner: &mut FftPlanner<Value>,
+    max_values: usize,
+    abort: &dyn AbortSignal,
+) -> Result<TransientFftResult, SimulationError> {
+    let (start, stop) = (record.start, record.stop);
+    let point_count = record.points;
+    let sample_interval = (stop - start) / point_count as Value;
+    let frequency_resolution = 1.0 / (stop - start);
+    let (mut input, coherent_gain) = record.finish(abort)?;
     if !coherent_gain.is_finite() || coherent_gain <= 0.0 {
         return Err(request_error(
             index,
@@ -385,7 +700,7 @@ fn evaluate_one(
         }
         current_impulses::add_to_bins(
             &mut input,
-            &impulses,
+            impulses,
             analysis,
             mode,
             transient_stop,
@@ -395,7 +710,7 @@ fn evaluate_one(
         .map_err(|error| impulse_observation_error(index, error))?;
         window_derivatives::add_to_bins(
             &mut input,
-            &impulses,
+            impulses,
             analysis,
             mode,
             transient_stop,
@@ -686,28 +1001,6 @@ fn validate_history(result: &TransientResult) -> Result<(), SimulationError> {
     Ok(())
 }
 
-fn interpolate_at(
-    time: &[Value],
-    values: &[Value],
-    interval: usize,
-    target: Value,
-) -> Option<Value> {
-    if target == time[interval] {
-        return values.get(interval).copied();
-    }
-    let next = interval.checked_add(1)?;
-    if target == *time.get(next)? {
-        return values.get(next).copied();
-    }
-    let left_time = *time.get(interval)?;
-    let right_time = *time.get(next)?;
-    if target < left_time || target > right_time {
-        return None;
-    }
-    let fraction = (target - left_time) / (right_time - left_time);
-    Some(values[interval] + fraction * (values[next] - values[interval]))
-}
-
 /// Return the exact coefficient applied by the transient FFT engine.
 /// Result publishers use this to validate calibration, including
 /// ALFA-dependent windows.
@@ -963,11 +1256,49 @@ mod tests {
     }
 
     #[test]
-    fn uniform_interpolation_uses_the_current_segment() {
-        let time = [0.0, 0.1, 0.4, 1.0];
-        let values = [0.0, 0.2, 0.8, 2.0];
-        assert_eq!(interpolate_at(&time, &values, 1, 0.25), Some(0.5));
-        assert_eq!(interpolate_at(&time, &values, 2, 1.0), Some(2.0));
+    fn a_uniform_record_fed_a_span_at_a_time_equals_the_whole_rows() {
+        let netlist = Netlist::parse(
+            "fft uniform record\nV1 out 0 0\nR1 out 0 1k\n.tran 1u 1\n.fft v(out) np=8 window=rect\n.end\n",
+        )
+        .unwrap();
+        let analysis = &netlist.fft_analyses[0];
+        let time = [0.0, 0.1, 0.25, 0.4, 0.5, 0.77, 1.0];
+        let values = [0.0, 0.2, 0.5, 0.8, 1.0, 1.54, 2.0];
+        let record = |spans: &[usize]| {
+            let mut record = UniformRecord::new(
+                0,
+                analysis,
+                XyceFftMode::default(),
+                1.0,
+                &TransientFftStatus::Complete,
+            )
+            .unwrap();
+            let mut first = 0;
+            for &end in spans {
+                record
+                    .push(&time[first..end], &values[first..end], &NoAbort)
+                    .unwrap();
+                first = end;
+            }
+            record.finish(&NoAbort).unwrap()
+        };
+        let (whole, gain) = record(&[time.len()]);
+        assert_eq!(gain, 1.0);
+        // A sample at a row takes it; one between rows interpolates the two around it.
+        let samples = whole.iter().map(|sample| sample.re).collect::<Vec<_>>();
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[2], 0.5);
+        assert_eq!(samples[4], 1.0);
+        assert!((samples[1] - 0.25).abs() < 1e-15, "{samples:?}");
+        assert!((samples[6] - 1.5).abs() < 1e-15, "{samples:?}");
+        for spans in [
+            &[1, 7][..],
+            &[3, 7],
+            &[2, 4, 5, 6, 7],
+            &[1, 2, 3, 4, 5, 6, 7],
+        ] {
+            assert_eq!(record(spans), (whole.clone(), gain), "{spans:?}");
+        }
     }
 
     #[test]

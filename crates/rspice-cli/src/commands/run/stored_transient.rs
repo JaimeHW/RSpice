@@ -21,8 +21,9 @@ use rspice_core::analysis::{
 };
 use rspice_core::engine::{
     AcceptedTransientRows, ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint,
-    TransientEnd, TransientFourierResult, TransientOutputRow, TransientOutputWalk,
-    TransientPostResults, TransientResult, TransientStartupMode, TransientState,
+    TransientEnd, TransientFftResult, TransientFourierResult, TransientLeadPower,
+    TransientOutputRow, TransientOutputWalk, TransientPostResults, TransientResult,
+    TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
 use rspice_core::netlist::{
@@ -66,6 +67,9 @@ pub(super) struct StoredRows {
     stopped: Option<SinkStop>,
     /// The digital and real event histories are in the shell's traces, not only in the store.
     events_held: bool,
+    /// The deck's lead power, derived for the rows each fill moves into the shell, with the
+    /// number of device traces the shell has before the derived ones.
+    lead_power: Option<(TransientLeadPower, usize)>,
 }
 
 /// A store directory, under a private name while its run is open.
@@ -364,6 +368,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
             receipt,
             stopped,
             events_held: false,
+            lead_power: None,
         },
     };
     Ok((stored, end))
@@ -477,6 +482,10 @@ impl StoredTransient {
     /// (`.FFT`, lead power), after which it equals the in-memory run's.
     pub(super) fn read_back(&mut self, ctx: &RunContext<'_>, tstop: f64) -> Result<(), CliError> {
         self.hold_events()?;
+        // The run's own lead power follows the traces it adopts below, as the whole run's does.
+        if let Some((_, base)) = self.rows.lead_power.take() {
+            self.shell.device_op_traces.truncate(base);
+        }
         let rows = self.rows.rows();
         self.rows.fill(&mut self.shell, 0, rows)?;
         let parameters = std::mem::take(&mut self.rows.parameters);
@@ -525,11 +534,13 @@ impl StoredTransient {
     /// statements, if any, read only the store's columns in forms measured in passes over the
     /// rows. The signals are checked by projecting the first chunk exactly as the whole run would be,
     /// and the statements by planning them against the same chunk; they are then measured from
-    /// the store.
+    /// the store. Lead power is derived from each span of rows as it is read, and the `.FFT`
+    /// spectra are taken in a pass over the rows ([`Self::fft_spectra`]).
     pub(super) fn stream_plan(
         &mut self,
         ctx: &RunContext<'_>,
         tstart: f64,
+        tstop: f64,
     ) -> Result<Option<StreamPlan>, CliError> {
         let netlist = ctx.netlist;
         let format_streams = ctx.output.is_none()
@@ -548,8 +559,6 @@ impl StoredTransient {
             Some("its output format is written whole")
         } else if parameters {
             Some("it saves instance parameters")
-        } else if !ctx.engine.transient_rows_are_whole(netlist) {
-            Some("its rows are not the run's whole trajectory")
         } else if !netlist.assertions.is_empty() {
             Some("it has .ASSERT cards")
         } else if !netlist.vector_files.is_empty() {
@@ -563,6 +572,10 @@ impl StoredTransient {
         };
         if let Some(why) = whole {
             log::debug!("the transient is read back whole: {why}");
+            return Ok(None);
+        }
+        if !self.rows.derive_lead_power(netlist, &self.shell) {
+            log::debug!("the transient is read back whole: its lead power does not resolve");
             return Ok(None);
         }
         let probe_rows = self
@@ -635,6 +648,13 @@ impl StoredTransient {
             }
             if let Some(stream) = continuous {
                 plan.continuous = Some(self.measure_continuous(stream)?);
+            }
+            if !netlist.fft_analyses.is_empty() {
+                let Some(spectra) = self.fft_spectra(ctx, tstop)? else {
+                    log::debug!("the transient is read back whole: its .FFT spectra read it whole");
+                    return Ok(None);
+                };
+                self.shell.fft_results = spectra;
             }
             Ok(Some(plan))
         });
@@ -872,6 +892,57 @@ impl StoredTransient {
             measured.len()
         );
         Ok(measured)
+    }
+
+    /// The deck's `.FFT` spectra, taken in one pass over the store: each chunk's rows in the
+    /// shell, every card's operand is evaluated over them and sampled onto the card's uniform
+    /// record. They equal the spectra of the run read back whole. `None` when that one is
+    /// needed, which then reports what the whole run does: the run has impulses a spectrum adds,
+    /// an operand reads other rows (`sdt`), or a card or a chunk's evaluation fails.
+    fn fft_spectra(
+        &mut self,
+        ctx: &RunContext<'_>,
+        tstop: f64,
+    ) -> Result<Option<Vec<TransientFftResult>>, CliError> {
+        let netlist = ctx.netlist;
+        let abort = &crate::abort::ProcessAbort;
+        let dir = self.rows.store.dir.clone();
+        let first = self
+            .rows
+            .reader
+            .read_x(0, 1)
+            .map_err(|error| store_error(&dir, error))?;
+        let (Some(&first), Some(last)) = (first.first(), self.rows.last_time()?) else {
+            return Ok(None);
+        };
+        let cancelled = || super::cancellation_cli_error(ctx.args.timeout);
+        let mut stream =
+            match ctx
+                .engine
+                .transient_fft_stream(netlist, &self.shell, tstop, (first, last))
+            {
+                Ok(Some(stream)) => stream,
+                Err(rspice_core::SimulationError::Aborted) => return Err(cancelled()),
+                Ok(None) | Err(_) => return Ok(None),
+            };
+        let spans = self.rows.reader.chunk_spans().collect::<Vec<_>>();
+        for (first, count) in spans {
+            self.rows.fill(&mut self.shell, first, count as u64)?;
+            match stream.rows(netlist, &self.shell, abort) {
+                Ok(()) => {}
+                Err(rspice_core::SimulationError::Aborted) => return Err(cancelled()),
+                Err(_) => {
+                    self.rows.clear(&mut self.shell);
+                    return Ok(None);
+                }
+            }
+        }
+        self.rows.clear(&mut self.shell);
+        match stream.finish(netlist, abort) {
+            Ok(spectra) => Ok(Some(spectra)),
+            Err(rspice_core::SimulationError::Aborted) => Err(cancelled()),
+            Err(_) => Ok(None),
+        }
     }
 
     /// Leave in the shell only the rows this transient's `.FOUR` cards read, the ones around the
@@ -1742,18 +1813,55 @@ impl StoredRows {
             message: "a transient store holds more rows than this host can address".to_owned(),
         })?;
         fill_rows(&mut self.reader, &self.targets, result, first, count)
-            .map_err(|error| store_error(&self.store.dir, error))
+            .map_err(|error| store_error(&self.store.dir, error))?;
+        self.record_lead_power(result);
+        Ok(())
     }
 
     /// Move the first and last rows into `result`'s time and saved columns: what a statement
     /// that reads only event operands reads of the run, and the row a PARAM reads.
     fn fill_span(&mut self, result: &mut TransientResult) -> Result<(), CliError> {
         fill_span(&mut self.reader, &self.targets, result)
-            .map_err(|error| store_error(&self.store.dir, error))
+            .map_err(|error| store_error(&self.store.dir, error))?;
+        self.record_lead_power(result);
+        Ok(())
     }
 
     fn clear(&self, result: &mut TransientResult) {
         clear_rows(&self.targets, result);
+        if let Some((_, base)) = &self.lead_power {
+            result.device_op_traces.truncate(*base);
+        }
+    }
+
+    /// Derive `netlist`'s lead power, if it asks for any, from the rows each fill moves into
+    /// `shell` from now on; `false` when its requests do not resolve, which the run read back
+    /// then reports.
+    fn derive_lead_power(
+        &mut self,
+        netlist: &rspice_core::Netlist,
+        shell: &TransientResult,
+    ) -> bool {
+        if self.lead_power.is_some() {
+            return true;
+        }
+        match TransientLeadPower::requested(netlist) {
+            Ok(requests) => {
+                if !requests.is_empty() {
+                    self.lead_power = Some((requests, shell.device_op_traces.len()));
+                }
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Replace the lead power `result` holds with the one its rows give.
+    fn record_lead_power(&self, result: &mut TransientResult) {
+        if let Some((requests, base)) = &self.lead_power {
+            result.device_op_traces.truncate(*base);
+            requests.record(result);
+        }
     }
 
     /// Refuse a non-finite saved value as the in-memory check does: the first column in result

@@ -1225,7 +1225,9 @@ fn publish_stored_transient(
     store: TransientStore,
 ) -> (Option<std::path::PathBuf>, Result<(), CliError>) {
     let plan = match store {
-        TransientStore::Streamed | TransientStore::Fourier => stored.stream_plan(ctx, tstart),
+        TransientStore::Streamed | TransientStore::Fourier => {
+            stored.stream_plan(ctx, tstart, tstop)
+        }
         TransientStore::ReadBack => {
             log::debug!("the transient is read back whole: a control script reads it");
             Ok(None)
@@ -1681,95 +1683,98 @@ fn finish_transient_products(
             }
         };
 
-        let fft_output_path = if result.fft_results.is_empty() {
-            publish::artifact(&output_path, |writer| {
-                match (&document, streamed_rows, plan, stored) {
-                    (
-                        TransientOutputDocument::Table { table, events },
-                        Some(view),
-                        Some(plan),
-                        Some(stored),
-                    ) => {
-                        let points = view.points();
-                        let column_events = plan
-                            .reads_events()
-                            .then(|| stored.rows.events(result))
-                            .transpose()?;
-                        let mut cursor = stored.rows.cursor(
-                            plan,
-                            &view,
-                            column_events
-                                .as_ref()
-                                .map(|events| events as &dyn rspice_core::execution::EventSource),
-                        );
-                        table.write_streamed_to(
-                            writer,
-                            &output_path,
-                            ctx.format,
-                            points,
-                            |row, variable| cursor.value(row, variable),
-                        )?;
-                        cursor.finish(&output_path)?;
-                        write_raw_event_plots(writer, &output_path, ctx.format, events)
-                    }
-                    (TransientOutputDocument::Hdf5(data), Some(view), Some(plan), Some(stored)) => {
-                        let points = view.points();
-                        // Each dataset is one column of the store, written as it is read, in
-                        // the order the document refuses a non-finite sample in.
-                        let names = std::iter::once("time")
-                            .chain(signals.iter().map(|signal| signal.display_name.as_str()))
-                            .collect::<Vec<_>>();
-                        let column_events = plan
-                            .reads_events()
-                            .then(|| stored.rows.events(result))
-                            .transpose()?;
-                        let mut cursor = stored.rows.cursor(
-                            plan,
-                            &view,
-                            column_events
-                                .as_ref()
-                                .map(|events| events as &dyn rspice_core::execution::EventSource),
-                        );
-                        crate::hdf5::write_streamed_to_writer(
-                            writer,
-                            data,
-                            "transient",
-                            points,
-                            |variable, out| {
-                                cursor
-                                    .write_column(variable, points, out, &output_path)
-                                    .map_err(|stop| match stop {
-                                        super::stored_transient::ColumnStop::NonFinite(row) => {
-                                            map_hdf5_output_error(
-                                                &output_path,
-                                                crate::hdf5::Hdf5Error::InvalidSchema(format!(
-                                                    "non-finite value in '{}' at sample {row}",
-                                                    names[variable]
-                                                )),
-                                            )
-                                        }
-                                        super::stored_transient::ColumnStop::Failed(error) => error,
-                                    })
-                            },
-                        )
-                        .map_err(|failure| match failure {
-                            crate::hdf5::Hdf5StreamFailure::Hdf5(error) => {
-                                map_hdf5_output_error(&output_path, error)
-                            }
-                            crate::hdf5::Hdf5StreamFailure::Source(error) => error,
-                        })?;
-                        cursor.finish(&output_path)
-                    }
-                    _ => document.write_to(
+        // The table, written from the store when the plan streams it, as a single artifact or
+        // with the `.FFT` spectra taken from it.
+        let write_table = |writer: &mut dyn std::io::Write| -> Result<(), CliError> {
+            match (&document, streamed_rows, plan, stored) {
+                (
+                    TransientOutputDocument::Table { table, events },
+                    Some(view),
+                    Some(plan),
+                    Some(stored),
+                ) => {
+                    let points = view.points();
+                    let column_events = plan
+                        .reads_events()
+                        .then(|| stored.rows.events(result))
+                        .transpose()?;
+                    let mut cursor = stored.rows.cursor(
+                        plan,
+                        &view,
+                        column_events
+                            .as_ref()
+                            .map(|events| events as &dyn rspice_core::execution::EventSource),
+                    );
+                    table.write_streamed_to(
                         writer,
                         &output_path,
                         ctx.format,
-                        super::document::json_byte_limit(ctx),
-                        ctx.args.timeout,
-                    ),
+                        points,
+                        |row, variable| cursor.value(row, variable),
+                    )?;
+                    cursor.finish(&output_path)?;
+                    write_raw_event_plots(writer, &output_path, ctx.format, events)
                 }
-            })
-            .map_err(|error| map_atomic_output_error(&output_path, error))?;
+                (TransientOutputDocument::Hdf5(data), Some(view), Some(plan), Some(stored)) => {
+                    let points = view.points();
+                    // Each dataset is one column of the store, written as it is read, in
+                    // the order the document refuses a non-finite sample in.
+                    let names = std::iter::once("time")
+                        .chain(signals.iter().map(|signal| signal.display_name.as_str()))
+                        .collect::<Vec<_>>();
+                    let column_events = plan
+                        .reads_events()
+                        .then(|| stored.rows.events(result))
+                        .transpose()?;
+                    let mut cursor = stored.rows.cursor(
+                        plan,
+                        &view,
+                        column_events
+                            .as_ref()
+                            .map(|events| events as &dyn rspice_core::execution::EventSource),
+                    );
+                    crate::hdf5::write_streamed_to_writer(
+                        writer,
+                        data,
+                        "transient",
+                        points,
+                        |variable, out| {
+                            cursor
+                                .write_column(variable, points, out, &output_path)
+                                .map_err(|stop| match stop {
+                                    super::stored_transient::ColumnStop::NonFinite(row) => {
+                                        map_hdf5_output_error(
+                                            &output_path,
+                                            crate::hdf5::Hdf5Error::InvalidSchema(format!(
+                                                "non-finite value in '{}' at sample {row}",
+                                                names[variable]
+                                            )),
+                                        )
+                                    }
+                                    super::stored_transient::ColumnStop::Failed(error) => error,
+                                })
+                        },
+                    )
+                    .map_err(|failure| match failure {
+                        crate::hdf5::Hdf5StreamFailure::Hdf5(error) => {
+                            map_hdf5_output_error(&output_path, error)
+                        }
+                        crate::hdf5::Hdf5StreamFailure::Source(error) => error,
+                    })?;
+                    cursor.finish(&output_path)
+                }
+                _ => document.write_to(
+                    writer,
+                    &output_path,
+                    ctx.format,
+                    super::document::json_byte_limit(ctx),
+                    ctx.args.timeout,
+                ),
+            }
+        };
+        let fft_output_path = if result.fft_results.is_empty() {
+            publish::artifact(&output_path, write_table)
+                .map_err(|error| map_atomic_output_error(&output_path, error))?;
             None
         } else {
             let parent_analysis_id = ctx.current_transient_analysis_id()?;
@@ -1781,7 +1786,7 @@ fn finish_transient_products(
                     })?;
             write_transient_fft_output_pair(
                 &output_path,
-                &document,
+                write_table,
                 &fft_output_path,
                 ctx.format,
                 &parent_analysis_id,
@@ -1790,7 +1795,6 @@ fn finish_transient_products(
                 &result.fft_results,
                 ctx.netlist,
                 ctx.args.timeout,
-                super::document::json_byte_limit(ctx),
             )?;
             if !ctx.quiet {
                 crate::console::line(format_args!(
