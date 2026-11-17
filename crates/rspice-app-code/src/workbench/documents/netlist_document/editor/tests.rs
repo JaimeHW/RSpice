@@ -1431,3 +1431,34 @@ fn toggle_comment_writes_the_decks_own_comment_marker() {
         );
     }
 }
+
+/// Choosing a dialect writes its declaration into the deck as one edit, and
+/// one Undo takes the deck back to what it was.
+#[test]
+fn a_dialect_choice_is_one_edit_that_one_undo_takes_back() {
+    use super::super::dialect::{Dialect, declare};
+    use crate::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
+
+    let source = "amp\nR1 a 0 1k\n.op\n.end\n";
+    let declared = "amp\n.options rspice_source=ltspice\nR1 a 0 1k\n.op\n.end\n";
+    for (frames, after) in [(3, declared), (4, source)] {
+        let harness = drawn_deck("amp.cir", source, frames, |frame, context, editor_id| {
+            if frame == 1 {
+                declare(source, Dialect::Ltspice)
+                    .expect("the deck declares nothing yet")
+                    .queue(context, editor_id, source);
+            }
+            if frame == 2 && frames == 4 {
+                crate::workbench::documents::text_editor_commands::queue_source_editor_request(
+                    context,
+                    editor_id,
+                    SourceEditorRequest::Standard(StandardCommand::Undo),
+                );
+            }
+        });
+        assert_eq!(
+            harness.model.simulation.source.netlist_content, after,
+            "after {frames} frames"
+        );
+    }
+}
