@@ -35,6 +35,7 @@ mod inductor_transient;
 #[allow(clippy::excessive_precision)]
 mod jfet2_native;
 mod jfet_family_native;
+mod junction_conductance_limit;
 mod ltra_ac_oracle;
 mod ltra_model_validation;
 mod ltra_rg_line;

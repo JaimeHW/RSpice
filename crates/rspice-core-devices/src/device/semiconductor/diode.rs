@@ -213,6 +213,9 @@ pub struct ResolvedDiodeJunction {
     emission_voltage: Value,
     breakdown: Option<(Value, Value)>,
     idealized: Option<IdealizedDiode>,
+    /// The default dialect's AREA*M/GMIN conductance limit; infinite in the
+    /// other dialects and for the native diode, which limits its whole law.
+    conductance_limit: Value,
 }
 
 impl ResolvedDiodeJunction {
@@ -227,14 +230,27 @@ impl ResolvedDiodeJunction {
             emission_voltage,
             breakdown: breakdown_voltage.map(|voltage| (voltage, breakdown_emission_voltage)),
             idealized: None,
+            conductance_limit: Value::INFINITY,
         }
     }
 
     /// Physical current from anode to cathode and its exact voltage
     /// derivative.  The three regions are Xyce/ngspice's forward
-    /// exponential, cubic reverse continuation, and avalanche breakdown.
+    /// exponential, cubic reverse continuation, and avalanche breakdown; the
+    /// default dialect runs them on their tangent past AREA*M/GMIN.
     #[doc(hidden)]
     pub fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
+        if self.conductance_limit.is_finite() {
+            return tangent_past_conductance_limit(
+                |v| self.unlimited_current_and_conductance(v),
+                voltage,
+                self.conductance_limit,
+            );
+        }
+        self.unlimited_current_and_conductance(voltage)
+    }
+
+    fn unlimited_current_and_conductance(self, voltage: Value) -> (Value, Value) {
         if let Some(idealized) = self.idealized {
             return idealized.current_and_conductance(voltage, 0.0);
         }
@@ -293,6 +309,75 @@ impl ResolvedDiodeJunction {
     pub fn breakdown_voltage(self) -> Option<Value> {
         self.breakdown.map(|(voltage, _)| voltage)
     }
+}
+
+/// Run a junction law on its tangent past the bias where its conductance
+/// reaches `limit`: the current there plus `limit` times the bias beyond it.
+///
+/// The knee lies between zero bias and `vd`, on whichever side `vd` is, and
+/// is found on the logarithm of the conductance (Illinois false position):
+/// that is linear in the bias for one exponential, so a plain junction's
+/// knee comes out in a step, and convex for a sum of them. A law already at
+/// the limit at zero bias keeps its own value, as does a bias whose law is
+/// not finite.
+pub(crate) fn tangent_past_conductance_limit(
+    law: impl Fn(Value) -> (Value, Value),
+    vd: Value,
+    limit: Value,
+) -> (Value, Value) {
+    let at_bias = law(vd);
+    if !(at_bias.1 > limit && vd.is_finite()) {
+        return at_bias;
+    }
+    let log_limit = limit.ln();
+    let excess = |v: Value| law(v).1.ln() - log_limit;
+    // `under` keeps the conductance below the limit and `over` above it.
+    let (mut under, mut over) = (0.0, vd);
+    let (mut h_under, mut h_over) = (excess(under), at_bias.1.ln() - log_limit);
+    if !(h_under < 0.0 && h_over > 0.0) {
+        return at_bias;
+    }
+    let mut knee = under;
+    let mut last_moved_over = None;
+    for _ in 0..200 {
+        let mut v = if h_under.is_finite() && h_over.is_finite() {
+            over - h_over * (over - under) / (h_over - h_under)
+        } else {
+            0.5 * (under + over)
+        };
+        if !(v > under.min(over) && v < under.max(over)) {
+            v = 0.5 * (under + over);
+        }
+        if v == under || v == over {
+            break;
+        }
+        let h = excess(v);
+        if h.is_nan() {
+            return at_bias;
+        }
+        knee = v;
+        if h.abs() <= 1e-13 {
+            break;
+        }
+        // Illinois: halve the end that stays put twice running.
+        if h > 0.0 {
+            over = v;
+            h_over = h;
+            if last_moved_over == Some(true) {
+                h_under *= 0.5;
+            }
+            last_moved_over = Some(true);
+        } else {
+            under = v;
+            h_under = h;
+            if last_moved_over == Some(false) {
+                h_over *= 0.5;
+            }
+            last_moved_over = Some(false);
+        }
+    }
+    let (current, _) = law(knee);
+    (current + limit * (vd - knee), limit)
 }
 
 /// Which junctions an instance evaluates once ngspice's RSW splits the
@@ -449,6 +534,10 @@ pub struct Diode {
     /// Instance multiplicity (M), kept apart from the folded junction
     /// scaling because dionoise.c rides flicker on `m·KF·|Id/m|^AF`.
     pub multiplicity: Value,
+    /// Instance AREA. The junction currents carry it in their saturation
+    /// currents; the default dialect's conductance limit (AREA*M/GMIN)
+    /// needs it on its own.
+    area: Value,
     /// Previous iteration voltage (for convergence check)
     prev_vd: Value,
     /// Previous voltage for convergence
@@ -731,6 +820,7 @@ impl Diode {
             kf: 0.0,
             af: 1.0,
             multiplicity: 1.0,
+            area: 1.0,
 
             prev_vd: 0.0,
             prev_vd_old: 0.0,
@@ -842,7 +932,13 @@ impl Diode {
     /// Engine hook: junction gmin for continuation ladders (mirrors the
     /// MOSFET/JFET/BJT `set_junction_gmin` convention).
     pub fn set_junction_gmin(&mut self, gmin: Value) {
-        self.junction_gmin = if gmin.is_finite() { gmin.max(0.0) } else { 0.0 };
+        let gmin = if gmin.is_finite() { gmin.max(0.0) } else { 0.0 };
+        // The default dialect's conductance limit is AREA*M/GMIN, so the
+        // candidate current depends on GMIN there.
+        if gmin.to_bits() != self.junction_gmin.to_bits() {
+            self.candidate_eval_valid = false;
+        }
+        self.junction_gmin = gmin;
     }
 
     /// Limit the junction voltage against the previous iterate and
@@ -1820,6 +1916,7 @@ impl Diode {
         let scale = area * multiplicity;
         self.candidate_eval_valid = false;
         self.multiplicity *= multiplicity;
+        self.area *= area;
         if let Some(idealized) = self.idealized.as_mut() {
             idealized.scale_parallel(scale);
         }
@@ -2235,6 +2332,40 @@ impl Diode {
     }
 
     fn current_and_conductance_with_gmin(&self, vd: Value, gmin: Value) -> (Value, Value) {
+        let limit = self.junction_conductance_limit();
+        if limit.is_finite() {
+            let (current, conductance) =
+                tangent_past_conductance_limit(|v| self.junction_law_with_gmin(v, 0.0), vd, limit);
+            return if gmin == 0.0 {
+                (current, conductance)
+            } else {
+                (current + gmin * vd, conductance + gmin)
+            };
+        }
+        self.junction_law_with_gmin(vd, gmin)
+    }
+
+    /// LTspice's limit on its diode's conductance, which the default dialect
+    /// follows: LTspice 17.2.4 runs the whole junction law (the IS
+    /// exponential with its IKF knee plus the ISR recombination term, and
+    /// the breakdown exponential in reverse) until its conductance reaches
+    /// AREA*M/GMIN, and on its tangent from there. Bare-diode sweeps show a
+    /// slope of exactly 1e12 S at the default GMIN, 1e9 S at GMIN=1e-9 and
+    /// 1e13 S at AREA=10 or M=10. ngspice and Xyce run the exponential on.
+    fn junction_conductance_limit(&self) -> Value {
+        if self.ngspice_dialect
+            || self.xyce_dialect
+            || self.idealized.is_some()
+            || self.junction_gmin.is_nan()
+            || self.junction_gmin <= 0.0
+        {
+            return Value::INFINITY;
+        }
+        let limit = self.area * self.multiplicity / self.junction_gmin;
+        if limit > 0.0 { limit } else { Value::INFINITY }
+    }
+
+    fn junction_law_with_gmin(&self, vd: Value, gmin: Value) -> (Value, Value) {
         if let Some(idealized) = self.idealized {
             return idealized.current_and_conductance(vd, self.junction_gmin);
         }
@@ -2562,6 +2693,7 @@ impl Diode {
         junction.idealized = self
             .idealized
             .map(|idealized| idealized.resolved(self.junction_gmin));
+        junction.conductance_limit = self.junction_conductance_limit();
         junction
     }
 
@@ -3006,6 +3138,49 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn a_law_past_its_conductance_limit_runs_on_its_tangent_at_the_knee() {
+        let vt = 0.025;
+        let one = |v: Value| (1e-14 * (v / vt).exp_m1(), 1e-14 / vt * (v / vt).exp());
+        let two = |v: Value| {
+            let (a, ga) = one(v);
+            let r = 1e-10 * (v / (2.0 * vt)).exp_m1();
+            (a + r, ga + (r + 1e-10) / (2.0 * vt))
+        };
+        let limit = 1e12;
+        // A single exponential's knee is vt*ln(limit*vt/IS).
+        let knee = vt * (limit * vt / 1e-14).ln();
+        let (current, conductance) = tangent_past_conductance_limit(one, 6.0, limit);
+        assert_eq!(conductance, limit);
+        let expected = one(knee).0 + limit * (6.0 - knee);
+        assert!(
+            (current - expected).abs() <= 1e-14 * expected,
+            "{current:e} vs {expected:e}"
+        );
+        // Under the limit, and in reverse, the law is untouched.
+        assert_eq!(tangent_past_conductance_limit(one, 1.0, limit), one(1.0));
+        assert_eq!(tangent_past_conductance_limit(one, -6.0, limit), one(-6.0));
+        // A sum of exponentials meets its tangent where its own conductance
+        // reaches the limit, so the current is continuous there.
+        let (at_6, g_6) = tangent_past_conductance_limit(two, 6.0, limit);
+        assert_eq!(g_6, limit);
+        let (mut under, mut over) = (0.0, 6.0);
+        for _ in 0..200 {
+            let mid = 0.5 * (under + over);
+            if two(mid).1 < limit {
+                under = mid;
+            } else {
+                over = mid;
+            }
+        }
+        let tangent_at_knee = at_6 - limit * (6.0 - under);
+        let law_at_knee = two(under).0;
+        assert!(
+            (tangent_at_knee - law_at_knee).abs() <= 1e-12 * law_at_knee,
+            "{tangent_at_knee:e} vs {law_at_knee:e}"
+        );
+    }
 
     #[test]
     fn relinking_a_grounded_diode_clears_the_old_terminal_slots() {
