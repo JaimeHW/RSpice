@@ -21,7 +21,7 @@ fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     app.contribute(Point::Surface(Workspace::Project), ui);
 }
 
-fn painted_text(output: &egui::FullOutput) -> String {
+pub(super) fn painted_text(output: &egui::FullOutput) -> String {
     fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
         match shape {
             egui::epaint::Shape::Text(text) => {
@@ -90,7 +90,7 @@ fn a_closed_project_lands_rather_than_dressing_up_the_bootstrap_placeholder() {
 
 /// One pass of the Project workspace as the shell draws it, with the
 /// AccessKit tree it published.
-fn project_frame(
+pub(super) fn project_frame(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     events: Vec<egui::Event>,
@@ -112,10 +112,17 @@ fn project_frame(
 
 /// The Project workspace on `page`, drawn until its layout settles.
 fn settled_on(page: ProjectPage) -> (egui::Context, RSpiceApp, egui::FullOutput) {
+    settled(RSpiceApp::test_instance(), page)
+}
+
+/// `app`'s Project workspace on `page`, drawn until its layout settles.
+pub(super) fn settled(
+    mut app: RSpiceApp,
+    page: ProjectPage,
+) -> (egui::Context, RSpiceApp, egui::FullOutput) {
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut app = RSpiceApp::test_instance();
     app.state.project.project_page = page;
     let mut settled = project_frame(&ctx, &mut app, Vec::new());
     for _ in 0..2 {
@@ -127,7 +134,7 @@ fn settled_on(page: ProjectPage) -> (egui::Context, RSpiceApp, egui::FullOutput)
 /// Press and release the pointer in the middle of the control the
 /// settled frame announced as `label`, and return the frame that took
 /// the click.
-fn click_announced(
+pub(super) fn click_announced(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     settled: egui::FullOutput,
@@ -477,7 +484,7 @@ fn every_project_page_renders_at_desktop_tablet_and_phone_widths() {
     }
 }
 
-fn populated_project_app() -> RSpiceApp {
+pub(super) fn populated_project_app() -> RSpiceApp {
     use rspice_app_state::state::{
         AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance,
     };
@@ -563,6 +570,18 @@ fn populated_project_app() -> RSpiceApp {
                 DrcLocation::Global,
             )
         });
+        result.add_violation(DrcViolation {
+            severity: DrcSeverity::Error,
+            ..DrcViolation::new(
+                8,
+                DrcViolationType::UnconnectedPin,
+                "R3 has an unconnected pin",
+                DrcLocation::Component {
+                    id: 3,
+                    name: "R3".to_owned(),
+                },
+            )
+        });
         result.completed = true;
         app.state
             .publish_active_design_check_result(result)
@@ -597,8 +616,10 @@ fn painted_project_page(size: egui::Vec2, mut pass: impl FnMut(&mut Ui)) -> Stri
     painted_text(&output)
 }
 
-/// The overview names the live project, its cards, and its retained
-/// operations — never placeholder copy — at every supported width.
+/// The overview names the live project, its cards, its retained operations
+/// and the finding that stops a run — never placeholder copy — at every
+/// supported width. A table's row is read whole from what it announces,
+/// since a phone's table cuts its cells to their columns.
 #[test]
 fn the_overview_states_the_project_from_live_state() {
     for size in [
@@ -608,7 +629,19 @@ fn the_overview_states_the_project_from_live_state() {
     ] {
         let mut app = populated_project_app();
         app.state.project.project_page = ProjectPage::Overview;
-        let text = painted_project_page(size, |ui| show(ui, &mut app));
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        let text = painted_text(&output);
         for expected in [
             "lna-frontend-28g",
             "Project status",
@@ -616,15 +649,34 @@ fn the_overview_states_the_project_from_live_state() {
             "Model sources",
             "Dependencies",
             "Unsaved work",
-            "Design",
-            "Recent operations",
-            "Library published · analog-core-1.2.0",
+            "Cells",
+            "All cells",
+            "Activity",
+            "All runs",
             "Open top schematic",
-            "CHK-007",
         ] {
             assert!(
                 text.contains(expected),
                 "{expected:?} missing at {}x{}:\n{text}",
+                size.x,
+                size.y
+            );
+        }
+        let announced = output
+            .platform_output
+            .accesskit_update
+            .expect("the frame publishes its tree")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
+            .collect::<Vec<_>>();
+        for expected in [
+            "Library published · analog-core-1.2.0",
+            "R3 has an unconnected pin",
+        ] {
+            assert!(
+                announced.iter().any(|label| label.contains(expected)),
+                "{expected:?} not announced at {}x{}:\n{announced:#?}",
                 size.x,
                 size.y
             );

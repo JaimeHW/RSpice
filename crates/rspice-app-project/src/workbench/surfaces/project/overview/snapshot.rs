@@ -1,16 +1,17 @@
 //! The Overview's snapshot: what the page shows, read once per frame from the
-//! project, its lifecycle, the checks, the run history and the model catalog
-//! before anything is drawn.
+//! project, its lifecycle, the checks, the run history, the catalogue and the
+//! checkpoints before anything is drawn.
 //!
 //! # Derived on change, not on a frame
 //!
-//! What has to walk the design or the catalogues to be known — the net count,
-//! the view count, the activity register, the model sources, the deck's line
-//! count, the configuration's validity — is derived once and kept in the
-//! frame context beside the identity of what it was derived from: a content
-//! stamp, a catalogue revision, the run history's revision, a digest. A frame
-//! in which none of those moved derives nothing, so the page costs the same on
-//! a project of eight thousand instances as on an empty one.
+//! What has to walk the design or the catalogues to be known — the cells and
+//! their instances, the activity register, the model sources, the deck's line
+//! count, the blocking findings — is derived once and kept in the frame
+//! context beside the identity of what it was derived from: a content stamp,
+//! a catalogue revision, the run history's revision, the diagnostic store's
+//! generation. A frame in which none of those moved derives nothing, so the
+//! page costs the same on a project of eight thousand instances as on an
+//! empty one.
 //!
 //! Each status row's words and mark are its subject's, from
 //! [`crate::workbench::project::health`]; the row adds only the action that
@@ -21,25 +22,31 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 use std::sync::Arc;
 
-use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
+use crate::state::netlist_document::DiagnosticSeverity;
 use crate::state::{CellViewRef, ViewType};
+use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
+use crate::workbench::app_state::design_checks::finding_identities;
 use crate::workbench::app_state::{DesignCheckStatus, Model};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::health::{self, DesignSubject, SubjectStatus};
+use crate::workbench::project::schematic_row_key;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::project::{ProjectFeature, lifecycle_view};
 use crate::workbench::state::Workspace;
 use rspice_design::drc::DrcSeverity;
 
 use super::super::derived::derived;
-use super::activity::{relative_time, run_title, unix_seconds_to_millis};
+use super::activity::{run_title, unix_seconds_to_millis};
 use super::{
     OverviewIntent, Tone, command_gate, lifecycle_label, lifecycle_tone, run_destination,
     singular_or_plural,
 };
+
+/// A day, in milliseconds: inside one an age is told, past one a date.
+const DAY_MS: u64 = 86_400_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSnapshot {
@@ -93,54 +100,90 @@ impl StatusSnapshot {
     }
 }
 
+/// One finding that stops a run, as the strip under the status rows lists
+/// it: what is wrong, then where.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigurationSnapshot {
-    pub configured: bool,
-    pub state: String,
-    pub(crate) detail: String,
-    pub root: String,
-    pub dut: String,
+pub struct ProblemSnapshot {
+    pub message: String,
+    /// Where it is: an object or a net of the design, a line of the deck.
+    pub path: String,
     pub tone: Tone,
+    /// Its identity in the Problems list, which the link stands on; `None`
+    /// for a deck's diagnostic, which its editor keeps.
+    pub finding: Option<uuid::Uuid>,
 }
 
+/// One row of the Cells table: a cell of the project's libraries, or the
+/// deck a netlist-first project is made of.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct OpenDocumentSnapshot {
-    pub(super) reference: CellViewRef,
-    pub(super) view_type: ViewType,
-    pub(super) active: bool,
-    pub(super) dirty: bool,
+pub struct CellRowSnapshot {
+    pub name: String,
+    pub library: String,
+    /// What the cell is to the project: its top, a testbench a configuration
+    /// runs, its deck; empty for any other cell.
+    pub role: &'static str,
+    pub views: String,
+    /// The instances on its schematic, where the project holds one.
+    pub instances: Option<usize>,
+    /// One of its views has unsaved changes.
+    pub unsaved: bool,
+    /// What opening the row does: its schematic, else the view it has.
+    pub intent: OverviewIntent,
 }
 
+/// One row of the Activity table: a run, a validated revision, a library
+/// publication or a checkpoint, and when it happened.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperationSnapshot {
-    pub when: String,
+    /// When it happened; `None` where its record keeps no time.
+    pub timestamp_ms: Option<u64>,
+    /// When it happened, as a date and a time.
+    pub(super) stamp: String,
     pub event: String,
+    /// How long a run took, in seconds.
+    pub elapsed: Option<f64>,
+    /// The rest, least needed last: a run's engine ends it, so a narrow
+    /// table gives that up before anything else.
     pub detail: String,
     pub(crate) tone: Tone,
     pub intent: Option<OverviewIntent>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProblemSnapshot {
-    pub code: String,
-    pub message: String,
-    pub path: String,
-    pub tone: Tone,
+impl OperationSnapshot {
+    /// A record's time, and its date and time as the pointer reads them,
+    /// written once when the register is derived.
+    pub(super) fn dated(timestamp_ms: Option<u64>) -> (Option<u64>, String) {
+        (
+            timestamp_ms,
+            timestamp_ms.map_or_else(String::new, crate::time_compat::utc_stamp),
+        )
+    }
+
+    /// When it happened as the table says it, and in full for the pointer:
+    /// how long ago inside a day, the date and time past one. `None` where
+    /// its record keeps no time.
+    pub fn when(&self, now_ms: u64) -> Option<(String, &str)> {
+        let at = self.timestamp_ms?;
+        let short = match now_ms.checked_sub(at) {
+            Some(ago) if ago < DAY_MS => {
+                crate::time_compat::relative_age(std::time::Duration::from_millis(ago))
+            }
+            _ => self.stamp.clone(),
+        };
+        Some((short, &self.stamp))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceDeckSnapshot {
     pub(super) name: String,
-    pub(super) ownership: &'static str,
-    pub(super) revision: u64,
     pub(super) line_count: usize,
     pub(super) dependency_count: usize,
     pub(super) dependencies_sealed: bool,
-    pub(super) validation_tone: Tone,
-    /// The deck's worst current diagnostic, which the strip under the status
-    /// rows names; nothing while the deck has none. A deck not validated, or
-    /// changed since, is its status row's to say.
-    problem: Option<ProblemSnapshot>,
+    /// The deck's current errors, which the strip under the status rows
+    /// names. A deck not validated, or changed since, is its status row's to
+    /// say.
+    problems: Vec<ProblemSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,37 +193,45 @@ pub struct OverviewSnapshot {
     /// Where the project file is, or `None` before it is first saved.
     pub(crate) location: Option<String>,
     pub descriptor_root: String,
-    pub(super) simulation_root: String,
-    pub(super) technology: String,
-    pub(super) technology_attached: bool,
-    pub(super) library_count: usize,
-    pub(super) model_library_count: usize,
-    pub(super) cell_count: usize,
-    pub(super) view_count: usize,
-    pub(super) root_sheet_count: usize,
-    pub(super) root_instance_count: usize,
-    pub(super) root_net_count: usize,
     pub netlist_first: bool,
-    pub(super) source_deck: Option<SourceDeckSnapshot>,
-    pub configuration: ConfigurationSnapshot,
     pub statuses: Vec<StatusSnapshot>,
-    pub problem: Option<ProblemSnapshot>,
-    pub(super) open_documents: Vec<OpenDocumentSnapshot>,
-    pub operations: Vec<OperationSnapshot>,
-    /// Every operation the project keeps, counted from the records rather
-    /// than from the truncated list above: reporting the shown count as the
-    /// kept count would claim a project with thirty runs has five.
-    pub operation_total: usize,
+    /// The findings that stop a run, worst first: none while the checks
+    /// pass, have not run or are out of date, which their row says.
+    pub problems: Vec<ProblemSnapshot>,
+    /// The deck a netlist-first project is made of, listed before its cells.
+    pub deck: Option<CellRowSnapshot>,
+    /// Every cell of the project's libraries: the top cell, the testbenches,
+    /// those with unsaved changes, then the rest by library and name.
+    pub cells: Arc<[CellRowSnapshot]>,
+    /// Every operation the project keeps, newest first.
+    pub operations: Arc<[OperationSnapshot]>,
+    /// The time the operations' ages are told against.
+    pub now_ms: u64,
+}
+
+impl OverviewSnapshot {
+    /// The Cells table's rows in the order it lists them.
+    pub fn cell_rows(&self) -> impl Iterator<Item = &CellRowSnapshot> {
+        self.deck.iter().chain(self.cells.iter())
+    }
+
+    /// The Cells table's row `index`.
+    pub fn cell_row(&self, index: usize) -> Option<&CellRowSnapshot> {
+        match (&self.deck, index) {
+            (Some(deck), 0) => Some(deck),
+            (Some(_), index) => self.cells.get(index - 1),
+            (None, index) => self.cells.get(index),
+        }
+    }
+
+    pub fn cell_row_count(&self) -> usize {
+        usize::from(self.deck.is_some()) + self.cells.len()
+    }
 }
 
 fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeckSnapshot> {
     let document = model.workspace.content.netlist_document.as_ref()?;
     let name = health::deck_name(model)?;
-    let ownership = match document.ownership() {
-        DocumentOwnership::Generated => "generated",
-        DocumentOwnership::Imported => "imported",
-        DocumentOwnership::Editable => "editable",
-    };
     let line_count = derived(
         ctx,
         "overview.deck lines",
@@ -190,46 +241,61 @@ fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeck
     let current = document
         .validation()
         .filter(|report| report.content_digest() == document.content_digest());
-    // Nothing at all when the deck validates: "No current source
-    // diagnostics" was a strip the page painted to report an absence.
-    let problem = current
-        .and_then(|report| {
+    // Its errors only: a warning does not stop a run, and the Source deck
+    // row says how the deck validated.
+    let problems = current
+        .map(|report| {
             report
                 .diagnostics()
                 .iter()
-                .max_by_key(|diagnostic| diagnostic.severity())
+                .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
+                .map(|diagnostic| {
+                    let position = diagnostic.position();
+                    ProblemSnapshot {
+                        message: diagnostic.message().to_owned(),
+                        path: format!("{}:{}:{}", name, position.line(), position.column()),
+                        tone: Tone::Error,
+                        finding: None,
+                    }
+                })
+                .collect()
         })
-        .map(|diagnostic| {
-            let position = diagnostic.position();
-            ProblemSnapshot {
-                code: diagnostic.code().map_or_else(
-                    || match diagnostic.severity() {
-                        DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
-                        DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
-                        DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
-                    },
-                    str::to_owned,
-                ),
-                message: diagnostic.message().to_owned(),
-                path: format!("{}:{}:{}", name, position.line(), position.column()),
-                tone: match diagnostic.severity() {
-                    DiagnosticSeverity::Info => Tone::Neutral,
-                    DiagnosticSeverity::Warning => Tone::Warn,
-                    DiagnosticSeverity::Error => Tone::Error,
-                },
-            }
-        });
+        .unwrap_or_default();
 
     Some(SourceDeckSnapshot {
         name,
-        ownership,
-        revision: document.revision().get(),
         line_count,
         dependency_count: document.dependencies().len(),
         dependencies_sealed: document.dependency_graph_is_sealed(),
-        validation_tone: health::source_deck(model).tone,
-        problem,
+        problems,
     })
+}
+
+/// The deck as the first row of a netlist-first project's Cells table.
+fn deck_row(deck: &SourceDeckSnapshot) -> CellRowSnapshot {
+    CellRowSnapshot {
+        name: deck.name.clone(),
+        library: String::new(),
+        role: "Deck",
+        // What it is and how long, then what it includes when it includes
+        // anything: how it validated is the Source deck row's to say.
+        views: format!(
+            "SPICE \u{b7} {} {}{}",
+            deck.line_count,
+            singular_or_plural(deck.line_count, "line", "lines"),
+            match (deck.dependency_count, deck.dependencies_sealed) {
+                (0, _) => String::new(),
+                (count, sealed) => format!(
+                    " \u{b7} {count} {}{}",
+                    singular_or_plural(count, "include", "includes"),
+                    if sealed { "" } else { ", not all found" }
+                ),
+            }
+        ),
+        instances: None,
+        unsaved: false,
+        intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
+    }
 }
 
 impl OverviewSnapshot {
@@ -241,132 +307,51 @@ impl OverviewSnapshot {
             dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
         let netlist_first = cx.model.is_netlist_first_without_schematic();
         let source_deck = source_deck_snapshot(ctx, cx.model);
-        let configuration = configuration_snapshot(ctx, cx.model);
-        let library_count = cx.model.library_manager.library_count();
-        let model_library_count = cx.model.model_library_manager.library_count();
-        let (cell_count, view_count) = derived(
-            ctx,
-            "overview.catalog counts",
-            cx.model.library_manager.catalog().stamp(),
-            || {
-                (
-                    cx.model.library_manager.total_cell_count(),
-                    cx.model.library_manager.total_view_count(),
-                )
-            },
-        );
-        // A netlist-first project keeps its bootstrap cell pristine: it is
-        // not part of the design the reader made, so it is not counted.
-        let (library_count, cell_count, view_count) = if netlist_first {
-            bootstrap_excluded(cx.model, library_count, cell_count, view_count)
-        } else {
-            (library_count, cell_count, view_count)
-        };
-        let root_reference = CellViewRef::new(
-            &project.root_library,
-            &project.top_cell,
-            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-        );
-        let root_schematic = if cx.model.workspace.content.active_view == root_reference {
-            Some(cx.model.schematic.editor_ref().design)
-        } else {
-            cx.model
-                .workspace
-                .content
-                .schematic_buffers
-                .get(&root_reference.key())
-        };
-        let root_sheet_count = cx
-            .model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&root_reference.key())
-            .map_or_else(
-                || usize::from(root_schematic.is_some()),
-                |catalog| catalog.sheets().len(),
-            );
-        let root_instance_count =
-            root_schematic.map_or(0, |schematic| schematic.document().components.len());
-        let root_net_count = root_schematic.map_or(0, |schematic| {
-            derived(ctx, "overview.root nets", schematic.content_stamp(), || {
-                rspice_design::connectivity::summary::design_nets(schematic).len()
-            })
-        });
 
         let location = health::location(cx.model, cx.platform);
         let statuses = status_rows(ctx, cx, netlist_first, dirty_documents, location.is_some());
-        let problem = if netlist_first {
-            source_deck.as_ref().map_or_else(
-                || {
-                    Some(ProblemSnapshot {
-                        code: "SOURCE".to_owned(),
-                        message: "The project's source document is unavailable".to_owned(),
-                        path: "Project source".to_owned(),
-                        tone: Tone::Error,
-                    })
-                },
-                |deck| deck.problem.clone(),
-            )
+        let problems = if netlist_first {
+            source_deck
+                .as_ref()
+                .map(|deck| deck.problems.clone())
+                .unwrap_or_default()
         } else {
-            problem_snapshot(cx)
+            blocking_findings(ctx, cx)
         };
-
-        let open_documents = cx
-            .model
-            .workspace
-            .content
-            .open_views
-            .iter()
-            .map(|document| OpenDocumentSnapshot {
-                reference: document.reference.clone(),
-                view_type: document.view_type,
-                active: document.reference == cx.model.workspace.content.active_view,
-                dirty: document.dirty,
-            })
-            .collect();
+        let deck = if netlist_first {
+            source_deck.as_ref().map(deck_row)
+        } else {
+            None
+        };
+        let cells = derived(
+            ctx,
+            "overview.cells",
+            CellsKey::of(cx.model, netlist_first),
+            || cell_rows(cx.model, netlist_first),
+        );
 
         let now_ms =
             u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
-        let retained = derived(
+        let recovery = &cx.state.project_checkpoint_recovery;
+        let operations = derived(
             ctx,
             "overview.operations",
-            OperationsKey::of(cx.model),
-            || Arc::new(retained_operations(cx.model)),
+            OperationsKey::of(cx.model, recovery),
+            || retained_operations(cx.model, recovery),
         );
-        let operations = retained
-            .newest
-            .iter()
-            .map(|operation| operation.at(now_ms))
-            .collect();
-        let operation_total = retained.total;
 
         Self {
             project_name: project.display_name().to_owned(),
             project_revision: project.revision().get(),
             location,
             descriptor_root: format!("{}/{}", project.root_library, project.top_cell),
-            simulation_root: configuration.root.clone(),
-            technology: project.technology_binding().map_or_else(
-                || "Not attached".to_owned(),
-                |binding| binding.display_label(),
-            ),
-            technology_attached: project.technology_binding().is_some(),
-            library_count,
-            model_library_count,
-            cell_count,
-            view_count,
-            root_sheet_count,
-            root_instance_count,
-            root_net_count,
             netlist_first,
-            source_deck,
-            configuration,
             statuses,
-            problem,
-            open_documents,
+            problems,
+            deck,
+            cells,
             operations,
-            operation_total,
+            now_ms,
         }
     }
 }
@@ -423,7 +408,7 @@ fn status_rows(
         Some(run) => {
             let has_dataset = !run.analyses.is_empty();
             let destination = run_destination(has_dataset, netlist_first);
-            // Recent operations, beside the row, lists this run with its
+            // The Activity table, beside the row, lists this run with its
             // analyses, measurements and engine; the row says how it ended.
             let status = SubjectStatus {
                 detail: String::new(),
@@ -491,66 +476,178 @@ fn status_rows(
     ]
 }
 
-/// The catalogue's counts without the bootstrap cell a netlist-first project
-/// leaves pristine, nor its library when it holds nothing else.
-fn bootstrap_excluded(
-    model: &Model,
-    libraries: usize,
-    cells: usize,
-    views: usize,
-) -> (usize, usize, usize) {
-    let project = &model.workspace.content.project;
-    let Some(library) = model.library_manager.get_library(&project.root_library) else {
-        return (libraries, cells, views);
-    };
-    let Some(cell) = library.get_cell(&project.top_cell) else {
-        return (libraries, cells, views);
-    };
-    let only_cell = library.cell_count() == 1;
-    (
-        libraries.saturating_sub(usize::from(only_cell)),
-        cells.saturating_sub(1),
-        views.saturating_sub(cell.view_count()),
-    )
+/// What the Cells table is read from, by identity: the catalogue, every
+/// schematic (whose instances it counts), the configurations (whose roots
+/// are the testbenches), the documents with unsaved changes and the top.
+#[derive(Clone, PartialEq)]
+struct CellsKey {
+    catalog: u64,
+    schematics: (usize, u64, u64),
+    configurations: u64,
+    unsaved: u64,
+    top: u64,
+    netlist_first: bool,
 }
 
-/// One retained operation, with the time it happened rather than a phrase
-/// about it: how long ago it was is said again on every frame.
-#[derive(Debug, Clone)]
-struct RetainedOperation {
-    timestamp_ms: Option<u64>,
-    event: String,
-    detail: String,
-    tone: Tone,
-    intent: Option<OverviewIntent>,
-}
-
-impl RetainedOperation {
-    fn at(&self, now_ms: u64) -> OperationSnapshot {
-        OperationSnapshot {
-            when: self.timestamp_ms.map_or_else(
-                || "time n/a".to_owned(),
-                |value| relative_time(value, now_ms),
-            ),
-            event: self.event.clone(),
-            detail: self.detail.clone(),
-            tone: self.tone,
-            intent: self.intent.clone(),
+impl CellsKey {
+    fn of(model: &Model, netlist_first: bool) -> Self {
+        let content = &model.workspace.content;
+        let mut configurations = DefaultHasher::new();
+        for configuration in content.configuration_sets.configurations() {
+            configuration.id().hash(&mut configurations);
+            configuration.revision().hash(&mut configurations);
+        }
+        let mut unsaved = DefaultHasher::new();
+        for document in content.open_views.iter().filter(|document| document.dirty) {
+            document.reference.library.hash(&mut unsaved);
+            document.reference.cell.hash(&mut unsaved);
+        }
+        let mut top = DefaultHasher::new();
+        content.project.root_library.hash(&mut top);
+        content.project.top_cell.hash(&mut top);
+        Self {
+            catalog: model.library_manager.catalog().stamp(),
+            schematics: schematic_stamps(model),
+            configurations: configurations.finish(),
+            unsaved: unsaved.finish(),
+            top: top.finish(),
+            netlist_first,
         }
     }
 }
 
-/// The activity register: the newest operations, and how many the project
-/// retains.
-#[derive(Debug, Clone, Default)]
-struct RetainedOperations {
-    newest: Vec<RetainedOperation>,
-    total: usize,
+/// Which of a cell's views a row opens: its schematic, else its testbench,
+/// else its code, else its symbol, else whatever it has.
+const fn opening_rank(view_type: ViewType) -> u8 {
+    match view_type {
+        ViewType::Schematic => 0,
+        ViewType::Testbench => 1,
+        ViewType::VerilogA | ViewType::VerilogAms | ViewType::Verilog | ViewType::Spice => 2,
+        ViewType::Symbol => 3,
+        _ => 4,
+    }
+}
+
+/// Every cell of the project's libraries, in the order the Cells table lists
+/// them: the top cell, the cells a configuration runs as its testbench, the
+/// cells with unsaved changes, then the rest by library and name. The cell
+/// a netlist-first project keeps pristine is not part of the design the
+/// reader made, so it is not listed.
+fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
+    let content = &model.workspace.content;
+    let project = &content.project;
+    let testbenches = content
+        .configuration_sets
+        .configurations()
+        .iter()
+        .map(|configuration| {
+            (
+                configuration.root().library.as_str(),
+                configuration.root().cell.as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let unsaved = content
+        .open_views
+        .iter()
+        .filter(|document| document.dirty)
+        .map(|document| {
+            (
+                document.reference.library.as_str(),
+                document.reference.cell.as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let components = |reference: &CellViewRef| {
+        if content.active_view == *reference {
+            Some(
+                model
+                    .schematic
+                    .editor_ref()
+                    .design
+                    .document()
+                    .components
+                    .len(),
+            )
+        } else {
+            content
+                .schematic_buffers
+                .get(&reference.key())
+                .map(|schematic| schematic.document().components.len())
+        }
+    };
+    let mut rows = Vec::new();
+    for library in model.library_manager.libraries_sorted() {
+        for cell in library.cells_sorted() {
+            let top = library.name == project.root_library && cell.name == project.top_cell;
+            if top && netlist_first {
+                continue;
+            }
+            let named = (library.name.as_str(), cell.name.as_str());
+            let testbench = testbenches.contains(&named);
+            let unsaved = unsaved.contains(&named);
+            let views = cell.views_sorted();
+            let reference = |view: &str| CellViewRef::new(&library.name, &cell.name, view);
+            let instances = views
+                .iter()
+                .find(|view| view.view_type == ViewType::Schematic)
+                .and_then(|view| components(&reference(&view.name)));
+            let intent = views
+                .iter()
+                .min_by_key(|view| {
+                    (
+                        opening_rank(view.view_type),
+                        view.name != crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+                    )
+                })
+                .map_or_else(
+                    || OverviewIntent::ShowInLibrary {
+                        library: library.name.clone(),
+                        cell: Some(cell.name.clone()),
+                    },
+                    |view| OverviewIntent::OpenView(reference(&view.name), view.view_type),
+                );
+            let rank = if top {
+                0
+            } else if testbench {
+                1
+            } else if unsaved {
+                2
+            } else {
+                3
+            };
+            rows.push((
+                rank,
+                CellRowSnapshot {
+                    name: cell.name.clone(),
+                    library: library.display_name().to_owned(),
+                    role: if top {
+                        "Top"
+                    } else if testbench {
+                        "Testbench"
+                    } else {
+                        ""
+                    },
+                    views: views
+                        .iter()
+                        .map(|view| view.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    instances,
+                    unsaved,
+                    intent,
+                },
+            ));
+        }
+    }
+    // Stable, so each rank keeps the catalogue's library and name order.
+    rows.sort_by_key(|(rank, _)| *rank);
+    rows.into_iter().map(|(_, row)| row).collect()
 }
 
 /// What the activity register is read from, by identity: the run history,
-/// every schematic (whose validated revisions it lists) and the project's
-/// publications.
+/// every schematic (whose validated revisions it lists), the project's
+/// publications and its checkpoints.
 #[derive(Clone, PartialEq)]
 struct OperationsKey {
     runs: crate::state::RunHistoryRevision,
@@ -558,10 +655,13 @@ struct OperationsKey {
     /// The newest library publication's receipt digest. The receipts are
     /// hash-chained, so it names every publication before it as well.
     publications: Option<crate::product::ContentDigest>,
+    /// How many checkpoints are listed, and the first and last of them.
+    checkpoints: (usize, Option<uuid::Uuid>, Option<uuid::Uuid>),
 }
 
 impl OperationsKey {
-    fn of(model: &Model) -> Self {
+    fn of(model: &Model, recovery: &ProjectCheckpointRecoveryState) -> Self {
+        let checkpoints = &recovery.checkpoints;
         Self {
             runs: model.simulation.retained.runs.revision(),
             schematics: schematic_stamps(model),
@@ -572,6 +672,15 @@ impl OperationsKey {
                 .library_publications()
                 .last()
                 .map(|receipt| receipt.receipt_digest()),
+            checkpoints: (
+                checkpoints.len(),
+                checkpoints
+                    .first()
+                    .map(|checkpoint| checkpoint.checkpoint_id()),
+                checkpoints
+                    .last()
+                    .map(|checkpoint| checkpoint.checkpoint_id()),
+            ),
         }
     }
 }
@@ -604,60 +713,55 @@ fn schematic_stamps(model: &Model) -> (usize, u64, u64) {
     )
 }
 
-/// The runs, validated revisions and library publications the project
-/// retains, newest first.
-fn retained_operations(model: &Model) -> RetainedOperations {
+/// The runs, validated revisions, library publications and checkpoints the
+/// project keeps, newest first: every one of them, since the table scrolls.
+/// A plain save keeps no record of its own, so none is listed for it.
+fn retained_operations(
+    model: &Model,
+    recovery: &ProjectCheckpointRecoveryState,
+) -> Arc<[OperationSnapshot]> {
     let mut operations = model
         .simulation
         .retained
         .runs
         .iter()
         .enumerate()
-        .take(8)
         .map(|(index, run)| {
             let measurement_count = run
                 .analyses
                 .iter()
                 .map(|analysis| analysis.measurements.len())
                 .sum();
-            let timestamp_ms = unix_seconds_to_millis(run.timestamp);
-            (
-                timestamp_ms.unwrap_or_default(),
-                RetainedOperation {
-                    timestamp_ms,
-                    event: format!(
-                        "{} · {}",
-                        run_title(run.id, &run.label),
-                        lifecycle_label(run.lifecycle, run.success)
-                    ),
-                    detail: format!(
-                        "{} {} · {measurement_count} {} · {} · {}",
-                        run.analyses.len(),
-                        singular_or_plural(run.analyses.len(), "analysis", "analyses"),
-                        singular_or_plural(measurement_count, "measurement", "measurements"),
-                        run.execution_target
-                            .map_or("engine not recorded", |target| target.label()),
-                        crate::quantity::format_elapsed(run.elapsed_time),
-                    ),
-                    tone: lifecycle_tone(run.lifecycle, run.success),
-                    intent: Some(OverviewIntent::OpenRun(index)),
-                },
-            )
+            let (timestamp_ms, stamp) =
+                OperationSnapshot::dated(unix_seconds_to_millis(run.timestamp));
+            OperationSnapshot {
+                timestamp_ms,
+                stamp,
+                event: format!(
+                    "{} \u{b7} {}",
+                    run_title(run.id, &run.label),
+                    lifecycle_label(run.lifecycle, run.success)
+                ),
+                elapsed: Some(run.elapsed_time),
+                detail: format!(
+                    "{} {} \u{b7} {measurement_count} {} \u{b7} {}",
+                    run.analyses.len(),
+                    singular_or_plural(run.analyses.len(), "analysis", "analyses"),
+                    singular_or_plural(measurement_count, "measurement", "measurements"),
+                    run.execution_target
+                        .map_or("engine not recorded", |target| target.label()),
+                ),
+                tone: lifecycle_tone(run.lifecycle, run.success),
+                intent: Some(OverviewIntent::OpenRun(index)),
+            }
         })
         .collect::<Vec<_>>();
     let mut retained_revision_ids = BTreeSet::new();
     for schematic in std::iter::once(model.schematic.editor_ref().design)
         .chain(model.workspace.content.schematic_buffers.values())
     {
-        for revision in schematic
-            .document()
-            .validated_revisions
-            .records()
-            .iter()
-            .rev()
-            .take(8)
-        {
-            if !retained_revision_ids.insert(revision.id().as_uuid().to_string()) {
+        for revision in schematic.document().validated_revisions.records() {
+            if !retained_revision_ids.insert(revision.id().as_uuid()) {
                 continue;
             }
             let findings = revision.finding_counts();
@@ -668,154 +772,113 @@ fn retained_operations(model: &Model) -> RetainedOperations {
             } else {
                 Tone::Neutral
             };
-            operations.push((
-                revision.created_unix_ms(),
-                RetainedOperation {
-                    timestamp_ms: Some(revision.created_unix_ms()),
-                    event: format!("{} validated", revision.view_identity()),
-                    detail: format!(
-                        "{} · project revision {} · {}",
-                        revision.revision_note(),
-                        revision.project_revision(),
-                        revision.author()
-                    ),
-                    tone,
-                    intent: Some(OverviewIntent::Command(
-                        ProjectCommand::RevisionHistory.key(),
-                    )),
-                },
-            ));
-        }
-    }
-    // Published library snapshots are the third class of retained project
-    // operation that carries its own creation time. The hash-chained library
-    // *mutation* receipts beside them are deliberately absent: they record a
-    // sequence and no timestamp, so this time-ordered register could only
-    // show them by inventing a `when` for them.
-    for publication in model
-        .workspace
-        .content
-        .project
-        .library_publications()
-        .iter()
-        .rev()
-        .take(8)
-    {
-        // A retained receipt cannot carry a zero creation time; the draft
-        // validation rejects one before the receipt is ever chained.
-        let created_unix_ms = publication.created_unix_ms();
-        operations.push((
-            created_unix_ms,
-            RetainedOperation {
-                timestamp_ms: Some(created_unix_ms),
-                event: format!("Library published · {}", publication.label()),
+            let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(revision.created_unix_ms()));
+            operations.push(OperationSnapshot {
+                timestamp_ms,
+                stamp,
+                event: format!("{} validated", revision.view_identity()),
+                elapsed: None,
                 detail: format!(
-                    "#{:04} · library revision {} · {} · {}",
-                    publication.sequence(),
-                    publication.library_revision(),
-                    publication.reason(),
-                    publication.actor_id()
+                    "{} \u{b7} project revision {} \u{b7} {}",
+                    revision.revision_note(),
+                    revision.project_revision(),
+                    revision.author()
                 ),
-                tone: Tone::Neutral,
-                intent: Some(OverviewIntent::Command(
-                    ProjectCommand::Page(ProjectPage::Library).key(),
-                )),
-            },
-        ));
-    }
-    operations.sort_by(|left, right| right.0.cmp(&left.0));
-    // Counted from the retained records themselves, not from what the loops
-    // above collected: each of those is capped, so reporting their length
-    // would describe the cap rather than the project.
-    let retained_revision_total = std::iter::once(model.schematic.editor_ref().design)
-        .chain(model.workspace.content.schematic_buffers.values())
-        .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
-        .map(|revision| revision.id().as_uuid())
-        .collect::<BTreeSet<_>>()
-        .len();
-    RetainedOperations {
-        newest: operations
-            .into_iter()
-            .take(5)
-            .map(|(_, operation)| operation)
-            .collect(),
-        total: model.simulation.retained.runs.len()
-            + retained_revision_total
-            + model.workspace.content.project.library_publications().len(),
-    }
-}
-
-/// The one finding of the cell view runs start from that the status rows'
-/// strip names, or nothing. Checks not run yet, or out of date, are the
-/// Schematic checks row's to say: the strip names findings.
-pub fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
-    let result = match cx
-        .model
-        .simulation_root_design_check_status(cx.runs.slot_facts(cx.peers.design().review_markers()))
-    {
-        DesignCheckStatus::Current(receipt) => &receipt.result,
-        DesignCheckStatus::NotRun | DesignCheckStatus::Stale(_) => return None,
-        DesignCheckStatus::Unavailable { reason, .. } => {
-            return Some(ProblemSnapshot {
-                code: "UNAVAILABLE".to_owned(),
-                message: reason,
-                path: cx
-                    .model
-                    .workspace
-                    .content
-                    .simulation_root_reference()
-                    .display_path(),
-                tone: Tone::Error,
+                tone,
+                intent: Some(OverviewIntent::OpenRevision(schematic_row_key(
+                    revision.id(),
+                ))),
             });
         }
+    }
+    // Published library snapshots carry their own creation time. The
+    // hash-chained library *mutation* receipts beside them are deliberately
+    // absent: they record a sequence and no timestamp, so this time-ordered
+    // register could only show them by inventing a time for them.
+    for publication in model.workspace.content.project.library_publications() {
+        let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(publication.created_unix_ms()));
+        operations.push(OperationSnapshot {
+            timestamp_ms,
+            stamp,
+            event: format!("Library published \u{b7} {}", publication.label()),
+            elapsed: None,
+            detail: format!(
+                "#{:04} \u{b7} library revision {} \u{b7} {} \u{b7} {}",
+                publication.sequence(),
+                publication.library_revision(),
+                publication.reason(),
+                publication.actor_id()
+            ),
+            tone: Tone::Neutral,
+            intent: Some(OverviewIntent::Command(
+                ProjectCommand::Page(ProjectPage::Library).key(),
+            )),
+        });
+    }
+    for checkpoint in &recovery.checkpoints {
+        let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(checkpoint.created_unix_ms()));
+        operations.push(OperationSnapshot {
+            timestamp_ms,
+            stamp,
+            event: checkpoint.reason().label().to_owned(),
+            elapsed: None,
+            detail: format!("Revision {}", checkpoint.project_revision()),
+            tone: Tone::Neutral,
+            intent: Some(OverviewIntent::OpenCheckpoint(
+                checkpoint.checkpoint_id().to_string(),
+            )),
+        });
+    }
+    // Newest first; a record with no time after every dated one.
+    operations.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+    operations.into()
+}
+
+/// The findings of the cell view runs start from that stop a run, worst
+/// first, each with its identity in the Problems list. Checks not run yet,
+/// out of date or unavailable are the Schematic checks row's to say: the
+/// strip names findings.
+pub fn blocking_findings(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Vec<ProblemSnapshot> {
+    let model = &*cx.model;
+    let DesignCheckStatus::Current(receipt) = model.simulation_root_design_check_status(
+        cx.runs.slot_facts(cx.peers.design().review_markers()),
+    ) else {
+        return Vec::new();
     };
-    let highest_priority = result
-        .violations()
-        .iter()
-        .max_by_key(|violation| drc_severity_priority(violation.severity));
-    // Nothing when the root checks clean: "No current schematic findings" is
-    // the absence of a finding dressed as one.
-    highest_priority.map(|violation| ProblemSnapshot {
-        code: format!("CHK-{:03}", violation.id),
-        message: violation.message.clone(),
-        path: violation.location.display(),
-        tone: match violation.severity {
-            DrcSeverity::Critical | DrcSeverity::Error => Tone::Error,
-            DrcSeverity::Warning => Tone::Warn,
-            DrcSeverity::Info => Tone::Neutral,
+    let root = model.workspace.content.simulation_root_reference();
+    // A published check moves the store's generation, so the findings are
+    // listed again only when a check is.
+    derived(
+        ctx,
+        "overview.blocking findings",
+        (model.diagnostics.generation(), root.key()),
+        || {
+            let result = &receipt.result;
+            let mut findings = result
+                .violations()
+                .iter()
+                .zip(finding_identities(&root, result))
+                .filter(|(violation, _)| {
+                    matches!(
+                        violation.severity,
+                        DrcSeverity::Critical | DrcSeverity::Error
+                    )
+                })
+                .map(|(violation, finding)| {
+                    (
+                        violation.severity == DrcSeverity::Critical,
+                        ProblemSnapshot {
+                            message: violation.message.clone(),
+                            path: violation.location.display(),
+                            tone: Tone::Error,
+                            finding: Some(finding),
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            // Critical first, each severity in the order the checks found them.
+            findings.sort_by_key(|(critical, _)| !*critical);
+            findings.into_iter().map(|(_, finding)| finding).collect()
         },
-    })
-}
-
-const fn drc_severity_priority(severity: DrcSeverity) -> u8 {
-    match severity {
-        DrcSeverity::Critical => 4,
-        DrcSeverity::Error => 3,
-        DrcSeverity::Warning => 2,
-        DrcSeverity::Info => 1,
-    }
-}
-
-/// The configuration runs use, as the Configuration row states it, with the
-/// root and the design under test the design register names.
-fn configuration_snapshot(ctx: &egui::Context, model: &Model) -> ConfigurationSnapshot {
-    let status = health::configuration(ctx, model);
-    let active = model.workspace.content.configuration_sets.active();
-    ConfigurationSnapshot {
-        configured: active.is_some(),
-        state: status.state,
-        detail: status.detail,
-        // With no configuration used for runs the project runs Default: its
-        // own top cell through the built-in view list, with no DUT instance.
-        root: model
-            .workspace
-            .content
-            .simulation_root_reference()
-            .display_path(),
-        dut: active.map_or_else(
-            || "\u{2014}".to_owned(),
-            |configuration| configuration.dut_path().to_owned(),
-        ),
-        tone: status.tone,
-    }
+    )
 }

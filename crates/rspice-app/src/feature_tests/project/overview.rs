@@ -2,7 +2,6 @@
 //! problem line, and the actions it raises, run as the dispatcher runs them.
 
 use rspice_design::drc::DrcSeverity;
-use std::collections::BTreeSet;
 
 use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
@@ -11,8 +10,7 @@ use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::{
-    OverviewIntent, OverviewSnapshot, ProblemSnapshot, Tone, design_objects, problem_snapshot,
-    run_plan_intent,
+    OverviewIntent, OverviewSnapshot, ProblemSnapshot, Tone, blocking_findings, run_plan_intent,
 };
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -29,15 +27,16 @@ fn snapshot_on(ctx: &egui::Context, app: &mut RSpiceApp) -> OverviewSnapshot {
     OverviewSnapshot::capture(ctx, &features::cx_with_foreign_answers(app, |_| true))
 }
 
-/// The project root's finding, as the page reads it in its context.
-fn problem_of(app: &mut RSpiceApp) -> Option<ProblemSnapshot> {
-    problem_snapshot(&features::cx(app))
+/// The findings of the cell view runs start from that stop a run, as the
+/// page reads them in its context.
+fn findings_of(app: &mut RSpiceApp) -> Vec<ProblemSnapshot> {
+    blocking_findings(&egui::Context::default(), &features::cx(app))
 }
 
 /// What the reader asked of the Overview, raised in the project feature's
 /// context and carried out as the shell does once the page returns.
 fn raise(app: &mut RSpiceApp, intent: OverviewIntent) {
-    intent.raise(&mut features::cx(app));
+    intent.raise(&egui::Context::default(), &mut features::cx(app));
     app.after_contribution();
 }
 
@@ -75,16 +74,12 @@ fn published_library_snapshots_are_retained_project_operations() {
     assert_eq!(published.event, "Library published · analog-core-1.0.0");
     assert!(published.detail.contains("Qualified library handoff"));
     assert!(published.detail.contains("release-engineer@example.test"));
-    assert_ne!(published.when, "time n/a");
+    assert!(published.when(snapshot.now_ms).is_some());
     assert_eq!(
         published.intent,
         Some(OverviewIntent::Command(
             ProjectCommand::Page(ProjectPage::Library).key()
         ))
-    );
-    assert!(
-        snapshot.operation_total >= snapshot.operations.len(),
-        "the retained total can never be smaller than the rows shown"
     );
 }
 
@@ -186,7 +181,6 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     app.state.workbench.workspace = Workspace::Project;
 
     let snapshot = snapshot_of(&mut app);
-    let objects = design_objects(&snapshot);
 
     assert!(snapshot.netlist_first);
     assert_eq!(snapshot.statuses[0].area, "Source deck");
@@ -200,17 +194,23 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     // names findings only.
     assert_eq!(snapshot.statuses[0].state(), "Not validated");
     assert_eq!(snapshot.statuses[0].tone(), Tone::Neutral);
-    assert_eq!(snapshot.problem, None);
-    assert!(objects.first().is_some_and(|object| {
-        object.top && object.name == "front_end.sp" && object.kind.starts_with("SPICE deck")
-    }));
-    // The pristine bootstrap views must not leak in under any spelling —
-    // neither the root identity itself nor its schematic/symbol view paths.
+    assert!(snapshot.problems.is_empty());
+    let deck = snapshot.deck.as_ref().expect("the deck is the first row");
+    assert_eq!(deck.name, "front_end.sp");
+    assert_eq!(deck.role, "Deck");
+    assert!(deck.views.starts_with("SPICE \u{b7} 3 lines"), "{deck:?}");
+    assert_eq!(
+        deck.intent,
+        OverviewIntent::Command(ShellCommand::OpenWorkspace(Workspace::Netlist).key())
+    );
+    // The pristine bootstrap cell is not part of the design the reader made.
+    let project = &app.state.model.workspace.content.project;
     assert!(
-        objects
-            .iter()
-            .all(|object| !object.name.starts_with(&snapshot.descriptor_root)),
-        "{objects:?}"
+        snapshot.cells.iter().all(|cell| {
+            !(cell.library == project.root_library && cell.name == project.top_cell)
+        }),
+        "{:?}",
+        snapshot.cells
     );
 }
 
@@ -235,7 +235,7 @@ fn checks_without_a_retained_result_read_not_run_unmarked() {
         &app.state.model.workspace.content.project.top_cell,
         rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
-    assert_eq!(problem_of(&mut app), None);
+    assert_eq!(findings_of(&mut app), Vec::new());
     let snapshot = snapshot_of(&mut app);
     let checks = &snapshot.statuses[0];
     assert_eq!(checks.area, "Schematic checks");
@@ -261,11 +261,15 @@ fn a_clean_project_root_states_no_problem() {
         .publish_active_design_check_result(result)
         .expect("publish project-root design-check receipt");
 
-    assert!(problem_of(&mut app).is_none());
+    assert!(findings_of(&mut app).is_empty());
 }
 
+/// The strip under the status rows lists every finding that stops a run,
+/// the worst first and each in the order the checks found it, by its words
+/// and with its identity in the Problems list; a finding that does not stop
+/// a run is the Problems list's alone.
 #[test]
-fn project_problem_selects_the_highest_severity_finding() {
+fn the_strip_lists_every_finding_that_stops_a_run_worst_first() {
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
@@ -285,9 +289,27 @@ fn project_problem_selects_the_highest_severity_finding() {
         )
     });
     result.add_violation(DrcViolation {
-        severity: DrcSeverity::Critical,
+        severity: DrcSeverity::Error,
         ..DrcViolation::new(
             2,
+            DrcViolationType::UnconnectedPin,
+            "error finding",
+            DrcLocation::Global,
+        )
+    });
+    result.add_violation(DrcViolation {
+        severity: DrcSeverity::Warning,
+        ..DrcViolation::new(
+            3,
+            DrcViolationType::DanglingWire,
+            "warning finding",
+            DrcLocation::Global,
+        )
+    });
+    result.add_violation(DrcViolation {
+        severity: DrcSeverity::Critical,
+        ..DrcViolation::new(
+            4,
             DrcViolationType::MissingGround,
             "critical finding",
             DrcLocation::Global,
@@ -298,47 +320,27 @@ fn project_problem_selects_the_highest_severity_finding() {
         .publish_active_design_check_result(result)
         .expect("publish project-root design-check receipt");
 
-    let problem = problem_of(&mut app).expect("a critical violation is a finding");
-    assert_eq!(problem.code, "CHK-002");
-    assert_eq!(problem.message, "critical finding");
-    assert_eq!(problem.tone, Tone::Error);
-}
-
-#[test]
-fn design_register_rows_have_unique_truthful_identities() {
-    let mut app = RSpiceApp::test_instance();
-    let snapshot = snapshot_of(&mut app);
-    let rows = design_objects(&snapshot);
-    let unique = rows
-        .iter()
-        .map(|row| row.key.to_ascii_lowercase())
-        .collect::<BTreeSet<_>>();
-
-    assert_eq!(unique.len(), rows.len());
-    assert!(rows.len() <= 5);
-    assert!(rows.first().is_some_and(|row| row.top));
-}
-
-/// With no configuration used for runs the project runs Default: the
-/// overview names it, roots it at the project's own top cell, and invents no
-/// DUT.
-#[test]
-fn overview_states_default_without_a_configuration() {
-    let mut app = RSpiceApp::test_instance();
-    let snapshot = snapshot_of(&mut app);
-    let project = &app.state.model.workspace.content.project;
-
-    assert!(!snapshot.configuration.configured);
-    assert_eq!(snapshot.configuration.state, "Default");
+    let findings = findings_of(&mut app);
     assert_eq!(
-        snapshot.configuration.root,
-        format!("{}/{}/schematic", project.root_library, project.top_cell)
-    );
-    assert_eq!(snapshot.configuration.dut, "\u{2014}");
-    assert!(snapshot.configuration.tone.problem().is_none());
-    assert!(
-        design_objects(&snapshot)
+        findings
             .iter()
-            .all(|row| row.name != "\u{2014}")
+            .map(|finding| finding.message.as_str())
+            .collect::<Vec<_>>(),
+        ["critical finding", "error finding"]
     );
+    assert!(findings.iter().all(|finding| finding.tone == Tone::Error));
+    let critical = findings[0]
+        .finding
+        .expect("a check's finding has an identity");
+    assert!(
+        app.state
+            .model
+            .diagnostics
+            .batches()
+            .flat_map(|batch| &batch.records)
+            .any(|record| record.canonical.diagnostic_id == critical
+                && record.message == "critical finding"),
+        "the identity is the one the Problems list holds"
+    );
+    assert_eq!(snapshot_of(&mut app).problems, findings);
 }

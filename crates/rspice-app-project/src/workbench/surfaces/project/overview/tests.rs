@@ -1,20 +1,13 @@
 //! The overview reports what is current, never a retained copy of what was.
 //!
 //! These pin the ways a stale value could be read as project status: a
-//! completed failure rendered in the shape of a success, and a display limit
-//! reported as though it were the length of the history.
+//! completed failure rendered in the shape of a success, and a time the
+//! reader cannot place.
 
-use super::activity::{operations_meta, relative_time, run_title, unix_seconds_to_millis};
+use super::activity::{run_title, unix_seconds_to_millis};
 use super::header::{header_facts, import_deck_intent};
 use super::*;
 use crate::state::SimulationRunLifecycle;
-
-#[test]
-fn operations_meta_never_reports_the_display_limit_as_the_history() {
-    assert_eq!(operations_meta(5, 23), "5 of 23");
-    assert_eq!(operations_meta(3, 3), "");
-    assert_eq!(operations_meta(0, 0), "");
-}
 
 #[test]
 fn completed_failure_is_not_rendered_as_success() {
@@ -37,16 +30,50 @@ fn run_title_does_not_duplicate_retained_sequence_prefix() {
     assert_eq!(run_title(12, "corner sweep"), "Run 12 · corner sweep");
 }
 
+fn operation_at(timestamp_ms: Option<u64>) -> OperationSnapshot {
+    let (timestamp_ms, stamp) = OperationSnapshot::dated(timestamp_ms);
+    OperationSnapshot {
+        timestamp_ms,
+        stamp,
+        event: String::new(),
+        elapsed: None,
+        detail: String::new(),
+        tone: Tone::Neutral,
+        intent: None,
+    }
+}
+
+/// Inside a day the Activity table says how long ago; past one, or for a
+/// time ahead of the clock, the date and time, which the pointer reads in
+/// full on every row.
 #[test]
-fn recent_operation_timestamps_fail_closed_and_format_relative_age() {
+fn an_operation_says_how_long_ago_inside_a_day_and_its_date_past_one() {
     assert_eq!(unix_seconds_to_millis(f64::NAN), None);
     assert_eq!(unix_seconds_to_millis(-1.0), None);
     assert_eq!(unix_seconds_to_millis(1.25), Some(1_250));
-    assert_eq!(relative_time(1_000, 999), "time n/a");
-    assert_eq!(relative_time(1_000, 1_030), "now");
-    assert_eq!(relative_time(1_000, 61_000), "1 min");
-    assert_eq!(relative_time(1_000, 3_601_000), "1 h");
-    assert_eq!(relative_time(1_000, 86_401_000), "1 d");
+
+    let at = 1_700_000_000_000;
+    let full = "2023-11-14 22:13 UTC";
+    let operation = operation_at(Some(at));
+    let when = |now: u64| {
+        operation
+            .when(now)
+            .map(|(short, full)| (short, full.to_owned()))
+    };
+    assert_eq!(
+        when(at + 30_000),
+        Some(("just now".to_owned(), full.to_owned()))
+    );
+    assert_eq!(
+        when(at + 2 * 3_600_000),
+        Some(("2 h ago".to_owned(), full.to_owned()))
+    );
+    assert_eq!(
+        when(at + 25 * 3_600_000),
+        Some((full.to_owned(), full.to_owned()))
+    );
+    assert_eq!(when(at - 60_000), Some((full.to_owned(), full.to_owned())));
+    assert_eq!(operation_at(None).when(at), None);
 }
 
 #[test]

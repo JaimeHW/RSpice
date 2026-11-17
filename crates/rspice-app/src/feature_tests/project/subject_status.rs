@@ -235,7 +235,10 @@ fn run_checks_opens_and_checks_the_root_its_row_describes() {
     let checks = &snapshot.statuses[0];
     assert_eq!(checks.area, "Schematic checks");
     assert_eq!(checks.action, "Run checks");
-    checks.intent.clone().raise(&mut features::cx(&mut app));
+    checks
+        .intent
+        .clone()
+        .raise(&egui::Context::default(), &mut features::cx(&mut app));
     app.after_contribution();
 
     assert_eq!(app.state.model.workspace.content.active_view, root);

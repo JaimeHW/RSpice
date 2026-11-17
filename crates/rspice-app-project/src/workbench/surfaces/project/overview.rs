@@ -6,7 +6,7 @@
 //! unrelated runtime flags.
 
 mod activity;
-mod design;
+mod cells;
 mod header;
 mod snapshot;
 mod status;
@@ -15,25 +15,27 @@ use egui::{Ui, pos2, vec2};
 
 use crate::state::command_catalog::CommandKey;
 use crate::state::{CellViewRef, ViewType};
+use crate::ui::widgets::table::TableState;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::health::{lifecycle_label, lifecycle_tone};
+use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::project::{ProjectFeature, open_project_revision_history, schematic_row_key};
 use crate::workbench::state::Workspace;
 
+use super::library::{LibraryIntent, apply_library_intent};
 use super::page::{self, BODY_TOP, CARD_GAP, STACK_BREAKPOINT};
 
-use activity::operations_card;
-use design::design_card;
-pub use design::{DesignObjectSnapshot, design_objects};
+use activity::activity_card;
+use cells::cells_card;
 use header::overview_header;
 pub use header::run_plan_intent;
 pub use snapshot::{
-    ConfigurationSnapshot, OperationSnapshot, OverviewSnapshot, ProblemSnapshot, StatusSnapshot,
-    problem_snapshot,
+    CellRowSnapshot, OperationSnapshot, OverviewSnapshot, ProblemSnapshot, StatusSnapshot,
+    blocking_findings,
 };
 use status::status_card;
 
@@ -95,12 +97,31 @@ pub enum OverviewIntent {
     OpenProjectRoot,
     OpenProjectModels,
     OpenRun(usize),
+    /// Open a view of a cell: the one the Cells table's row names.
+    OpenView(CellViewRef, ViewType),
+    /// The Library page, on a library and one of its cells: a cell with no
+    /// view to open.
+    ShowInLibrary {
+        library: String,
+        cell: Option<String>,
+    },
+    /// The Problems page, listing one finding and standing on it: the strip
+    /// under the status rows links each finding there. `None` for a deck's
+    /// diagnostic, which the list finds by its words alone.
+    ShowFinding {
+        message: String,
+        finding: Option<uuid::Uuid>,
+    },
+    /// Revision history, on a validated revision by its row's key.
+    OpenRevision(String),
+    /// The Recovery page, on a checkpoint by its identity.
+    OpenCheckpoint(String),
 }
 
 impl OverviewIntent {
     /// Ask for what the reader asked of the page: a command runs, and what
     /// only the shell carries out is raised for it, as the page returns.
-    pub fn raise(self, cx: &mut Cx<'_, ProjectFeature>) {
+    pub fn raise(self, ctx: &egui::Context, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::Command(key) => cx.execute(key),
             Self::CheckSimulationRoot => {
@@ -134,8 +155,64 @@ impl OverviewIntent {
                     cx.execute(ids::open_workspace(destination));
                 }
             }
+            Self::OpenView(reference, view_type) => {
+                cx.wb
+                    .outbox
+                    .push(ProjectRequest::OpenView(reference, view_type));
+            }
+            Self::ShowInLibrary { library, cell } => {
+                cx.execute(ProjectCommand::Page(ProjectPage::Library).key());
+                let select = match cell {
+                    Some(cell) => LibraryIntent::SelectCell { library, cell },
+                    None => LibraryIntent::SelectLibrary(library),
+                };
+                apply_library_intent(ctx, cx, select);
+            }
+            Self::ShowFinding { message, finding } => {
+                // Every filter cleared but the finding's own words, so the
+                // list holds it whatever was being read there before.
+                cx.wb.show_problem_findings();
+                cx.wb.problems_view.text = message;
+                if finding.is_some() {
+                    cx.model.diagnostics.set_current_finding(finding);
+                }
+            }
+            Self::OpenRevision(key) => {
+                open_project_revision_history(
+                    &mut cx.state.project_revision_history,
+                    cx.model,
+                    cx.platform,
+                );
+                // The history lists the open schematic's revisions; one of
+                // another cell's opens the history on its newest.
+                let listed = cx
+                    .model
+                    .schematic
+                    .document()
+                    .validated_revisions
+                    .records()
+                    .iter()
+                    .any(|record| schematic_row_key(record.id()) == key);
+                if listed && cx.state.project_revision_history.open {
+                    cx.state.project_revision_history.selected = vec![key];
+                }
+            }
+            Self::OpenCheckpoint(checkpoint) => {
+                cx.execute(ProjectCommand::Page(ProjectPage::Recovery).key());
+                cx.state.project_checkpoint_selection = Some(checkpoint);
+            }
         }
     }
+}
+
+/// What the Overview's tables keep between frames: the order the reader put
+/// them in, the columns they sized, the row they stand on and how far each
+/// is scrolled. Presentation only, and the open project's.
+#[derive(Debug, Clone, Default)]
+pub struct OverviewTables {
+    pub cells: TableState,
+    pub activity: TableState,
+    pub findings: TableState,
 }
 
 /// Where the "Latest run" affordances lead.
@@ -165,9 +242,9 @@ fn command_gate(cx: &Cx<'_, ProjectFeature>, key: CommandKey) -> (bool, Option<&
 /// parts the frame context keeps until what they were derived from changes.
 ///
 /// The page shares the landing surfaces' geometry — a header band and a
-/// centred content column on the application ground — and projects the
-/// dashboard as bordered cards that size to their content, so a sparse
-/// project shows page ground below the cards rather than stretched panels.
+/// centred content column on the application ground — with the status card
+/// at its content's height and the Cells and Activity tables taking the
+/// height the window has, so the two columns end together.
 /// The Overview page, over the dispatcher's answers the context holds for
 /// the commands its rows offer. What the reader asked of it is raised as the
 /// page returns, and the shell carries it out straight after.
@@ -181,20 +258,34 @@ pub fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     crate::workbench::project::dependency_status::refresh_source_drift(ui.ctx(), cx.model);
     let snapshot = OverviewSnapshot::capture(ui.ctx(), cx);
     let mut intent = None;
+    // The tables' memory is the feature's, lent to the page while the rest
+    // of the context is read.
+    let mut tables = std::mem::take(&mut cx.state.overview_tables);
     let shown = &*cx;
-    page::show(
+    page::show_measured(
         ui,
         "workbench.project.overview.page",
-        |ui, inset, content_width| {
+        |ui, inset, content_width, viewport_height| {
+            let top = ui.cursor().top();
             retain_first_intent(
                 &mut intent,
                 overview_header(ui, shown, &snapshot, inset, content_width),
             );
-            overview_body(ui, shown, &snapshot, &mut intent, inset, content_width);
+            let body = Body {
+                cx: shown,
+                snapshot: &snapshot,
+                inset,
+                width: content_width,
+                // What the window has under the header, down to the page's
+                // bottom margin.
+                height: viewport_height - (ui.cursor().top() - top) - BODY_TOP - page::BODY_BOTTOM,
+            };
+            overview_body(ui, &body, &mut tables, &mut intent);
         },
     );
+    cx.state.overview_tables = tables;
     if let Some(intent) = intent {
-        intent.raise(cx);
+        intent.raise(ui.ctx(), cx);
     }
 }
 
@@ -204,45 +295,89 @@ fn retain_first_intent(slot: &mut Option<OverviewIntent>, candidate: Option<Over
     }
 }
 
+/// The least a list card is made, so a short window still shows a few of
+/// its rows, and the page scrolls to the rest of it.
+const LIST_CARD_MIN_HEIGHT: f32 = 180.0;
+
+/// What the Overview's body is drawn from, and the room it has: the content
+/// column's inset and width, and the height under the header.
+struct Body<'a, 'c> {
+    cx: &'a Cx<'c, ProjectFeature>,
+    snapshot: &'a OverviewSnapshot,
+    inset: f32,
+    width: f32,
+    height: f32,
+}
+
 fn overview_body(
     ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
-    snapshot: &OverviewSnapshot,
+    body: &Body<'_, '_>,
+    tables: &mut OverviewTables,
     intent: &mut Option<OverviewIntent>,
-    inset: f32,
-    content_width: f32,
 ) {
+    let Body {
+        cx,
+        snapshot,
+        inset,
+        width,
+        height,
+    } = *body;
+    let OverviewTables {
+        cells,
+        activity,
+        findings,
+    } = tables;
     ui.add_space(BODY_TOP);
-    if content_width >= STACK_BREAKPOINT {
+    if width >= STACK_BREAKPOINT {
         let (mut left_intent, mut right_intent) = (None, None);
+        // Where the columns end: the window's bottom, or under the status
+        // card and the least Cells card when that is lower. The Activity
+        // card is drawn after the left column and ends where it does.
+        let left_bottom = std::cell::Cell::new(0.0_f32);
+        let top = ui.cursor().top();
         page::columns(
             ui,
             inset,
-            content_width,
+            width,
             |left| {
                 retain_first_intent(
                     &mut left_intent,
-                    status_card(left, &snapshot.statuses, snapshot.problem.as_ref()),
+                    status_card(left, &snapshot.statuses, &snapshot.problems, findings),
                 );
                 left.add_space(CARD_GAP);
-                retain_first_intent(&mut left_intent, design_card(left, cx, snapshot));
+                let room = (top + height - left.cursor().top()).max(LIST_CARD_MIN_HEIGHT);
+                retain_first_intent(
+                    &mut left_intent,
+                    cells_card(left, cx, snapshot, cells, (room, true)),
+                );
+                left_bottom.set(left.min_rect().bottom());
             },
             |right| {
-                retain_first_intent(&mut right_intent, operations_card(right, snapshot));
+                let room = (left_bottom.get() - right.cursor().top()).max(LIST_CARD_MIN_HEIGHT);
+                retain_first_intent(
+                    &mut right_intent,
+                    activity_card(right, cx, snapshot, activity, (room, true)),
+                );
             },
         );
         retain_first_intent(intent, left_intent);
         retain_first_intent(intent, right_intent);
     } else {
-        page::inset_column(ui, inset, content_width, |ui| {
+        // One column: each card ends with its list, and a list longer than
+        // the window scrolls inside its card.
+        let room = height.max(LIST_CARD_MIN_HEIGHT);
+        page::inset_column(ui, inset, width, |ui| {
             retain_first_intent(
                 intent,
-                status_card(ui, &snapshot.statuses, snapshot.problem.as_ref()),
+                status_card(ui, &snapshot.statuses, &snapshot.problems, findings),
             );
             ui.add_space(CARD_GAP);
-            retain_first_intent(intent, design_card(ui, cx, snapshot));
+            retain_first_intent(intent, cells_card(ui, cx, snapshot, cells, (room, false)));
             ui.add_space(CARD_GAP);
-            retain_first_intent(intent, operations_card(ui, snapshot));
+            retain_first_intent(
+                intent,
+                activity_card(ui, cx, snapshot, activity, (room, false)),
+            );
         });
     }
 }

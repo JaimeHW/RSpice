@@ -11,11 +11,12 @@ use std::path::{Path, PathBuf};
 
 use egui::Context;
 
-use crate::workbench::RSpiceApp;
+use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::configuration_state::CONFIGURATION_SCANS;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::library_cellview_manager::CELLVIEW_PROJECTION_BUILDS;
 use rspice_app_project::workbench::surfaces::project::library::LIBRARY_ROW_BUILDS;
+use rspice_app_project::workbench::surfaces::project::overview::OverviewSnapshot;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, create,
 };
@@ -329,11 +330,6 @@ fn the_recovery_page_lists_its_checkpoints_off_the_frame_and_idles() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// `count` and the noun for it, as the Overview states a count.
-fn counted(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
-}
-
 /// A project on the Overview with its root schematic in the editor.
 fn overview_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -352,19 +348,21 @@ fn show_overview(app: &mut RSpiceApp) {
     app.state.project.project_page = ProjectPage::Overview;
 }
 
-/// The Overview keeps what it counted between frames, so what it keeps has
+/// The Overview's snapshot as the page's frames on `ctx` keep it.
+fn kept_snapshot(ctx: &Context, app: &mut RSpiceApp) -> OverviewSnapshot {
+    OverviewSnapshot::capture(ctx, &features::cx_with_foreign_answers(app, |_| true))
+}
+
+/// The Overview keeps what it derived between frames, so what it keeps has
 /// to follow the project: a cell, a component and a model library added
-/// since the last frame are all counted on the next one.
+/// since the last frame are all shown on the next one.
 #[test]
-fn the_overview_counts_what_changed_since_its_last_frame() {
+fn the_overview_follows_what_changed_since_its_last_frame() {
     let mut app = overview_app();
     let ctx = offscreen();
     let cells = app.state.model.library_manager.total_cell_count();
-    let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(
-        first.contains(&format!("\u{b7} {}", counted(cells, "cell", "cells"))),
-        "{first}"
-    );
+    let _ = app_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(kept_snapshot(&ctx, &mut app).cells.len(), cells);
 
     let mut late = Library::new("late");
     let mut cell = Cell::new("added");
@@ -385,20 +383,28 @@ fn the_overview_counts_what_changed_since_its_last_frame() {
         .expect("the model library imports");
 
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
+    let kept = kept_snapshot(&ctx, &mut app);
+    assert_eq!(kept.cells.len(), cells + 1, "the added cell is listed");
     assert!(
-        next.contains(&format!("\u{b7} {}", counted(cells + 1, "cell", "cells"))),
-        "the added cell is counted: {next}"
+        kept.cells
+            .iter()
+            .any(|cell| cell.library == "late" && cell.name == "added"),
+        "{:?}",
+        kept.cells
     );
-    let design = app.state.model.schematic.editor_ref().design;
-    let instances = design.document().components.len();
-    let nets = rspice_design::connectivity::summary::design_nets(design).len();
-    assert!(
-        next.contains(&format!(
-            "{} \u{b7} {}",
-            counted(instances, "instance", "instances"),
-            counted(nets, "net", "nets")
-        )),
-        "the placed component and its nets are counted: {next}"
+    let instances = app
+        .state
+        .model
+        .schematic
+        .editor_ref()
+        .design
+        .document()
+        .components
+        .len();
+    assert_eq!(
+        kept.cells[0].instances,
+        Some(instances),
+        "the placed component is counted on the top cell's row"
     );
     let models = app.state.model.model_library_manager.total_model_count();
     assert!(
@@ -422,7 +428,7 @@ fn the_overview_counts_the_lines_of_the_deck_in_front() {
     show_overview(&mut app);
     let ctx = offscreen();
     let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(first.contains("\u{b7} 3 lines \u{b7}"), "{first}");
+    assert!(first.contains("SPICE \u{b7} 3 lines"), "{first}");
 
     assert!(app.state.apply_imported_netlist(
         "* front end\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
@@ -431,7 +437,7 @@ fn the_overview_counts_the_lines_of_the_deck_in_front() {
     ));
     show_overview(&mut app);
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(next.contains("\u{b7} 5 lines \u{b7}"), "{next}");
+    assert!(next.contains("SPICE \u{b7} 5 lines"), "{next}");
 }
 
 /// The model library at `path`, imported from disk as the Models workspace

@@ -71,8 +71,9 @@ pub const TABLE_ROW_H: f32 = 24.0;
 /// Where the first column's words start and the last column's end: the panel
 /// inset, so a table's text lines up with the toolbar title over it.
 pub const TABLE_EDGE_INSET: f32 = crate::panels::PANEL_INSET;
-/// Space between a cell's words and the rule on either side of it.
-const CELL_PAD: f32 = 8.0;
+/// Space between a cell's words and the rule on either side of it, which a
+/// page sizing a column to its words adds to them.
+pub const CELL_PAD: f32 = 8.0;
 /// The narrowest the reader can drag a column: room for a letter and an
 /// ellipsis between its pads.
 const MIN_COLUMN_W: f32 = 2.0 * CELL_PAD + 16.0;

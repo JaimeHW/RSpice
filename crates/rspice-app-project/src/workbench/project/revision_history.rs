@@ -1102,7 +1102,9 @@ fn comparison_heading(ui: &mut Ui, label: &str) {
     );
 }
 
-fn schematic_row_key(id: ValidatedSchematicRevisionId) -> String {
+/// The history table's key for a validated schematic revision, which its
+/// selection holds.
+pub(crate) fn schematic_row_key(id: ValidatedSchematicRevisionId) -> String {
     format!("schematic:{}", id.as_uuid())
 }
 

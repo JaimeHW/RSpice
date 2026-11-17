@@ -1,9 +1,9 @@
 //! Geometry shared by the project workspace's carded pages.
 //!
 //! Overview and Recovery share the landing surfaces' layout: a header band and a
-//! centred content column on the application ground, with bordered cards that
-//! size to their content. A sparse page then shows ground below its cards
-//! instead of panels stretched to the bottom of the viewport.
+//! centred content column on the application ground, with bordered cards. A
+//! card of facts sizes to its content; a card that is a list takes the height
+//! the window has, since a list has more rows to show in it.
 
 use egui::{
     Align, Align2, Color32, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2,
@@ -33,6 +33,13 @@ const CARD_HEADER_HEIGHT: f32 = 26.0;
 /// Lay a page out on the application ground: its own vertical scroll, and a
 /// content column `body` receives as `(inset, width)` from the left edge.
 pub(super) fn show(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui, f32, f32)) {
+    show_measured(ui, id_salt, |ui, inset, width, _| body(ui, inset, width));
+}
+
+/// [`show`], telling `body` the viewport's height as well, `(inset, width,
+/// height)`: a page whose lists take the height the window has sizes them
+/// to it, and scrolls only once they reach their least.
+pub(super) fn show_measured(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui, f32, f32, f32)) {
     let tokens = Tokens::get(ui.ctx());
     let workspace_width = visible_workspace_width(ui);
     let viewport_height = ui.available_height().max(1.0);
@@ -51,7 +58,7 @@ pub(super) fn show(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui, f32, f
                     DESKTOP_GUTTER,
                     CONTENT_MAX_WIDTH,
                 );
-                body(ui, content.left(), content.width());
+                body(ui, content.left(), content.width(), viewport_height);
                 ui.add_space(BODY_BOTTOM);
             });
     });
@@ -175,6 +182,143 @@ pub(super) fn card<R>(
         node.set_label(title);
     });
     output.expect("the card body runs exactly once")
+}
+
+/// The link at the end of a card's head, to the page that lists everything
+/// the card shows: its words, and why it is greyed when it is.
+pub(super) struct CardLink<'a> {
+    pub(super) label: &'a str,
+    pub(super) enabled: bool,
+    pub(super) disabled_reason: Option<&'a str>,
+}
+
+/// A bordered card whose body is a list: a title bar ending in `link`, and a
+/// body `body` is handed the height it may take. A card that `fill`s is
+/// `height` tall whatever its list holds, so cards beside each other end
+/// together; one that does not ends with its list, at most `height` tall.
+/// Answers what the body did and whether the link was followed.
+pub(super) fn list_card<R>(
+    ui: &mut Ui,
+    title: &str,
+    link: &CardLink<'_>,
+    height: f32,
+    fill: bool,
+    body: impl FnOnce(&mut Ui, f32) -> R,
+) -> (R, bool) {
+    let tokens = Tokens::get(ui.ctx());
+    let border = 1.0;
+    let width = (ui.available_width() - 2.0 * border).max(1.0);
+    let head = CARD_HEADER_HEIGHT.max(if tokens.metrics.is_touch() {
+        tokens.metrics.touch_target()
+    } else {
+        0.0
+    });
+    let room = (height - 2.0 * border - head - LIST_CARD_BOTTOM).max(1.0);
+    let mut output = None;
+    let mut followed = false;
+    let shown = egui::Frame::new()
+        .fill(tokens.color.bg_panel)
+        .stroke(Stroke::new(border, tokens.color.border))
+        .corner_radius(tokens.radius)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(width);
+            if fill {
+                ui.set_min_height((height - 2.0 * border).max(1.0));
+            }
+            followed = card_link_row(ui, title, link, head);
+            output = Some(body(ui, room));
+            ui.add_space(LIST_CARD_BOTTOM);
+        });
+    ui.ctx().accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Group);
+        node.set_label(title);
+    });
+    (output.expect("the card body runs exactly once"), followed)
+}
+
+/// Room under a list card's list, so its last row does not sit on the
+/// border.
+const LIST_CARD_BOTTOM: f32 = 4.0;
+
+/// A list card's title bar: its title, and the link at its right edge in the
+/// words' own register, underlined under the pointer.
+fn card_link_row(ui: &mut Ui, title: &str, link: &CardLink<'_>, height: f32) -> bool {
+    let tokens = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, title_response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let radius = tokens.radius as u8;
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius {
+            nw: radius,
+            ne: radius,
+            sw: 0,
+            se: 0,
+        },
+        tokens.color.bg_panel_2,
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, tokens.color.border),
+    );
+    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(link.label.to_owned(), font.clone(), Color32::WHITE);
+    let words = Rect::from_min_size(
+        pos2(
+            rect.right() - 10.0 - galley.size().x,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley.size(),
+    );
+    // The whole height of the bar answers, and a little either side of the
+    // words, so the link is as easy to hit as the rows under it.
+    let target = Rect::from_x_y_ranges(words.left() - 6.0..=rect.right(), rect.y_range());
+    let response = ui.interact(
+        target,
+        ui.id().with(("card link", title)),
+        if link.enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Link, link.enabled, link.label)
+    });
+    let color = match (link.enabled, response.hovered() || response.has_focus()) {
+        (false, _) => tokens.color.text_faint,
+        (true, true) => tokens.color.text,
+        (true, false) => tokens.color.text_dim,
+    };
+    ui.painter().galley(words.min, galley, color);
+    if link.enabled && response.hovered() {
+        ui.painter().hline(
+            words.x_range(),
+            words.bottom() - 0.5,
+            Stroke::new(1.0, color),
+        );
+    }
+    theme::paint_focus_ring(ui, &response, target);
+    let response = if link.enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response.on_hover_text(link.disabled_reason.unwrap_or("Unavailable"))
+    };
+    paint_elided(
+        ui,
+        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        tokens.color.text_dim,
+        (target.left() - rect.left() - 18.0).max(1.0),
+    );
+    title_response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    link.enabled && response.clicked()
 }
 
 fn card_title_row(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {

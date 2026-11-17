@@ -189,6 +189,9 @@ pub struct ProjectState {
     /// workspace navigator's filter.
     pub project_dependency_selection: Option<crate::workbench::project::DependencyLibrary>,
     pub project_checkpoint_selection: Option<String>,
+    /// The Overview's tables: their order, sized columns, selection and
+    /// scroll. Presentation only; they belong to the open project.
+    pub overview_tables: crate::workbench::surfaces::project::overview::OverviewTables,
     /// Device-local projection retained by the Library/Cellview specialist
     /// route. Authoritative library, cellview, symbol, and form records remain
     /// in the project domains.
@@ -208,8 +211,9 @@ impl ProjectState {
     }
 
     /// The open project is being replaced or closed: a Check and save review,
-    /// the Library page's filter and built-in library, and the Configuration
-    /// and Dependencies pages' selections belong to the project going away.
+    /// the Library page's filter and built-in library, the Configuration and
+    /// Dependencies pages' selections and the Overview's tables belong to the
+    /// project going away.
     pub fn on_project_changed(&mut self) {
         self.check_and_save.close();
         self.project_library_filter.clear();
@@ -218,5 +222,6 @@ impl ProjectState {
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;
+        self.overview_tables = Default::default();
     }
 }

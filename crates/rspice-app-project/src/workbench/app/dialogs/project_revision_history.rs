@@ -155,6 +155,11 @@ impl Default for ProjectRevisionHistoryDialogState {
 }
 
 impl ProjectRevisionHistoryDialogState {
+    /// The keys of the rows the history stands on.
+    pub fn selected(&self) -> &[String] {
+        &self.selected
+    }
+
     pub(crate) fn close(&mut self) {
         *self = Self::default();
     }

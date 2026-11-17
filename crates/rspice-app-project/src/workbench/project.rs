@@ -50,7 +50,7 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::{ProjectCommand, ProjectRequest};
 use library_dialogs::new_view::existing_symbol_view;
 use library_dialogs::new_view_target;
-use revision_history::open_project_revision_history;
+pub(crate) use revision_history::{open_project_revision_history, schematic_row_key};
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
 
 /// The project feature.
