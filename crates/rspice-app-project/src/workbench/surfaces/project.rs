@@ -130,12 +130,19 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
-/// Take what the browser finished writing or reading for this workspace
-/// before it draws.
-#[cfg(target_arch = "wasm32")]
-pub fn poll_browser_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
-    poll_browser_technology_checkpoint(ctx, cx);
-    poll_browser_recovery_completions(ctx, cx);
+/// Take what background work finished writing or reading for this
+/// workspace before it draws, on whichever page is in front.
+pub fn poll_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        poll_browser_technology_checkpoint(ctx, cx);
+        poll_browser_recovery_completions(ctx, cx);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = ctx;
+        recovery::take_checkpoint_job_answer(cx);
+    }
 }
 
 /// What the reader asked of the chrome, raised once it has drawn: a command,

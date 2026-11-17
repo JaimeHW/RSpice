@@ -140,8 +140,7 @@ impl Host for RSpiceApp {
                     // in the same frame.
                     Workspace::Project => {
                         let ctx = ui.ctx().clone();
-                        #[cfg(target_arch = "wasm32")]
-                        project::poll_browser_completions(&ctx, &mut features::cx(app));
+                        project::poll_completions(&ctx, &mut features::cx(app));
                         if app.state.platform.project_lifecycle.is_open() {
                             let fill = rspice_app_workbench::ui::tokens::Tokens::get(&ctx)
                                 .color

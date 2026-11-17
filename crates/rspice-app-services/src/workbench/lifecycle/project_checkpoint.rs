@@ -189,31 +189,67 @@ pub fn matches_current_state(
     summary: &ProjectCheckpointSummary,
     state: &dyn LifecycleSource,
 ) -> Result<bool, String> {
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
-        .map_err(|error| format!("project checkpoint comparison failed: {error}"))?;
-    project
-        .file
-        .validate()
-        .map_err(|error| format!("current project is invalid: {error}"))?;
-    let serialized = crate::io::project_io::serialize_project_file(&project)
-        .map_err(|error| format!("current project comparison serialization failed: {error}"))?;
-    Ok(digest(serialized.as_bytes()) == summary.snapshot_digest
-        && serialized.len() as u64 == summary.snapshot_byte_len)
+    capture_current_state(state)?.matches(summary)
 }
 
+/// The open project as a checkpoint of it would hold it, read off the model.
+/// Comparing it with a checkpoint is work for a background thread.
+#[derive(Debug)]
+pub struct CurrentProjectState {
+    project: ProjectSnapshot,
+}
+
+pub fn capture_current_state(state: &dyn LifecycleSource) -> Result<CurrentProjectState, String> {
+    crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+        .map(|project| CurrentProjectState { project })
+        .map_err(|error| format!("project checkpoint comparison failed: {error}"))
+}
+
+impl CurrentProjectState {
+    /// Whether `summary` holds exactly this project, by its manifest: the
+    /// checkpoint's snapshot is not read.
+    pub fn matches(&self, summary: &ProjectCheckpointSummary) -> Result<bool, String> {
+        self.project
+            .file
+            .validate()
+            .map_err(|error| format!("current project is invalid: {error}"))?;
+        let serialized = crate::io::project_io::serialize_project_file(&self.project)
+            .map_err(|error| format!("current project comparison serialization failed: {error}"))?;
+        Ok(digest(serialized.as_bytes()) == summary.snapshot_digest
+            && serialized.len() as u64 == summary.snapshot_byte_len)
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
 fn prepare_checkpoint(
     state: &dyn LifecycleSource,
     reason: ProjectCheckpointReason,
 ) -> Result<(ProjectCheckpointManifest, String), String> {
+    let (project, created_unix_ms) = snapshot_now(state)?;
+    seal_checkpoint(&project, reason, created_unix_ms)
+}
+
+/// The open project read off the model, and when: a clock that cannot date
+/// the checkpoint stops it before anything is read or written.
+fn snapshot_now(state: &dyn LifecycleSource) -> Result<(ProjectSnapshot, u64), String> {
     let created_unix_ms = crate::time_compat::checked_unix_time_ms()
         .map_err(|error| format!("Project checkpoint could not be timestamped: {error}"))?;
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project checkpoint snapshot failed: {error}"))?;
+    Ok((project, created_unix_ms))
+}
+
+/// The manifest and exact bytes a checkpoint of `project` is written as.
+fn seal_checkpoint(
+    project: &ProjectSnapshot,
+    reason: ProjectCheckpointReason,
+    created_unix_ms: u64,
+) -> Result<(ProjectCheckpointManifest, String), String> {
     project
         .file
         .validate()
         .map_err(|error| format!("project checkpoint is invalid: {error}"))?;
-    let serialized = crate::io::project_io::serialize_project_file(&project)
+    let serialized = crate::io::project_io::serialize_project_file(project)
         .map_err(|error| format!("project checkpoint serialization failed: {error}"))?;
     let bytes = serialized.as_bytes();
     let project_id = project.file.workspace.project.id().to_string();
@@ -242,18 +278,102 @@ pub fn create(
     reason: ProjectCheckpointReason,
 ) -> Result<ProjectCheckpointSummary, String> {
     let state = &mut state.lifecycle_parts();
-    let (manifest, serialized) = prepare_checkpoint(state, reason)?;
-    let summary = publish_native(state.model, &manifest, serialized.as_bytes())?;
-    // Retention runs only after the new manifest is committed and verified.
-    // A cleanup failure never invalidates the newly created recovery point.
-    if let Err(error) = prune_retention(state.model, &manifest.project_id) {
+    let created = capture(state, reason)?.publish()?;
+    if let Some(warning) = created.retention_warning {
         state.model.record(
             crate::diagnostics::LogSeverity::Warning,
             crate::diagnostics::LogSource::Studio,
-            format!("The project checkpoint was created, but older checkpoints were not all removed: {error}"),
+            warning,
         );
     }
-    Ok(summary)
+    Ok(created.summary)
+}
+
+/// A checkpoint of the open project read off the model. Writing it is work
+/// for a background thread: nothing here holds the model.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub struct CheckpointCapture {
+    project: ProjectSnapshot,
+    reason: ProjectCheckpointReason,
+    created_unix_ms: u64,
+    directory: PathBuf,
+}
+
+/// What writing a checkpoint left: the checkpoint, the project's checkpoints
+/// as read back after it, and a retention failure that did not undo it.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub struct CheckpointCreated {
+    pub summary: ProjectCheckpointSummary,
+    pub catalog: Result<ProjectCheckpointCatalog, String>,
+    pub retention_warning: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn capture(
+    state: &dyn LifecycleSource,
+    reason: ProjectCheckpointReason,
+) -> Result<CheckpointCapture, String> {
+    let (project, created_unix_ms) = snapshot_now(state)?;
+    let directory = checkpoint_directory(state.lifecycle_view().model)?;
+    Ok(CheckpointCapture {
+        project,
+        reason,
+        created_unix_ms,
+        directory,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CheckpointCapture {
+    /// Write the checkpoint and read it back, then drop what retention no
+    /// longer keeps and list what is left.
+    pub fn publish(self) -> Result<CheckpointCreated, String> {
+        let (manifest, serialized) =
+            seal_checkpoint(&self.project, self.reason, self.created_unix_ms)?;
+        let summary = publish_native(&self.directory, &manifest, serialized.as_bytes())?;
+        // Retention runs only after the new manifest is committed and
+        // verified. A cleanup failure never invalidates the new checkpoint.
+        let retention_warning = prune_retention(&self.directory, &manifest.project_id)
+            .err()
+            .map(|error| {
+                format!(
+                    "The project checkpoint was created, but older checkpoints were not all removed: {error}"
+                )
+            });
+        let catalog = list_directory(&self.directory, &manifest.project_id);
+        Ok(CheckpointCreated {
+            summary,
+            catalog,
+            retention_warning,
+        })
+    }
+}
+
+/// Where the open project's checkpoints are listed from, read off the
+/// model. Listing them is work for a background thread.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+pub struct CheckpointListing {
+    directory: PathBuf,
+    project_id: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn listing(model: &Model) -> Result<CheckpointListing, String> {
+    Ok(CheckpointListing {
+        directory: checkpoint_directory(model)?,
+        project_id: model.workspace.content.project.id().to_string(),
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CheckpointListing {
+    /// The project's checkpoints, each from its manifest.
+    pub fn list(&self) -> Result<ProjectCheckpointCatalog, String> {
+        list_directory(&self.directory, &self.project_id)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -294,8 +414,7 @@ pub fn start_create(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
-    let project_id = model.workspace.content.project.id().to_string();
-    list_native(model, &project_id)
+    listing(model)?.list()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -430,12 +549,11 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
 /// Where this project's checkpoints are kept, as the reader would look for them.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn storage_location(model: &Model) -> Result<PathBuf, String> {
-    checkpoint_directory(model, &model.workspace.content.project.id().to_string())
+    checkpoint_directory(model)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn checkpoint_directory(model: &Model, project_id: &str) -> Result<PathBuf, String> {
-    let _ = project_id;
+fn checkpoint_directory(model: &Model) -> Result<PathBuf, String> {
     let base = model
         .workspace
         .content
@@ -464,12 +582,11 @@ fn checkpoint_directory(model: &Model, project_id: &str) -> Result<PathBuf, Stri
 
 #[cfg(not(target_arch = "wasm32"))]
 fn publish_native(
-    model: &Model,
+    directory: &Path,
     manifest: &ProjectCheckpointManifest,
     bytes: &[u8],
 ) -> Result<ProjectCheckpointSummary, String> {
-    let directory = checkpoint_directory(model, &manifest.project_id)?;
-    std::fs::create_dir_all(&directory).map_err(|error| {
+    std::fs::create_dir_all(directory).map_err(|error| {
         format!(
             "project checkpoint directory '{}' could not be created: {error}",
             directory.display()
@@ -478,7 +595,7 @@ fn publish_native(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).map_err(
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).map_err(
             |error| {
                 format!(
                     "project checkpoint directory '{}' could not be made private: {error}",
@@ -542,10 +659,13 @@ fn publish_private_file(
     }
 }
 
+/// The checkpoints in `directory` that belong to the project, each from its
+/// manifest. A snapshot is only looked at, for being there at the length its
+/// manifest records; its bytes are verified when it is used.
 #[cfg(not(target_arch = "wasm32"))]
-fn list_native(model: &Model, project_id: &str) -> Result<ProjectCheckpointCatalog, String> {
-    let directory = checkpoint_directory(model, project_id)?;
-    let entries = match std::fs::read_dir(&directory) {
+fn list_directory(directory: &Path, project_id: &str) -> Result<ProjectCheckpointCatalog, String> {
+    super::recovery::disk_observation::checkpoint_directory();
+    let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ProjectCheckpointCatalog::default());
@@ -606,8 +726,8 @@ fn list_native(model: &Model, project_id: &str) -> Result<ProjectCheckpointCatal
                 snapshot,
             },
         ) {
-            Ok(summary) => match load(&summary) {
-                Ok(_) => checkpoints.push(summary),
+            Ok(summary) => match snapshot_present(&summary) {
+                Ok(()) => checkpoints.push(summary),
                 Err(error) => {
                     let ProjectCheckpointLocator::Native { manifest, snapshot } = &summary.locator;
                     quarantined.push(ProjectCheckpointQuarantine {
@@ -635,9 +755,28 @@ fn list_native(model: &Model, project_id: &str) -> Result<ProjectCheckpointCatal
     })
 }
 
+/// Whether a listed checkpoint's snapshot is there at the length its
+/// manifest records: what a listing can know without reading it.
+#[cfg(not(target_arch = "wasm32"))]
+fn snapshot_present(summary: &ProjectCheckpointSummary) -> Result<(), String> {
+    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    super::recovery::disk_observation::file_stat();
+    let metadata = std::fs::metadata(snapshot).map_err(|error| {
+        format!(
+            "project checkpoint snapshot '{}' could not be found: {error}",
+            snapshot.display()
+        )
+    })?;
+    if metadata.len() != summary.snapshot_byte_len {
+        return Err("project checkpoint bytes do not match their integrity manifest".to_owned());
+    }
+    Ok(())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn read_snapshot_bytes(summary: &ProjectCheckpointSummary) -> Result<Vec<u8>, String> {
     let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    super::recovery::disk_observation::project_file();
     std::fs::read(snapshot).map_err(|error| {
         format!(
             "project checkpoint snapshot '{}' could not be read: {error}",
@@ -647,8 +786,8 @@ fn read_snapshot_bytes(summary: &ProjectCheckpointSummary) -> Result<Vec<u8>, St
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn prune_retention(model: &Model, project_id: &str) -> Result<(), String> {
-    let catalog = list_native(model, project_id)?;
+fn prune_retention(directory: &Path, project_id: &str) -> Result<(), String> {
+    let catalog = list_directory(directory, project_id)?;
     let mut failures = Vec::new();
     for checkpoint in catalog
         .checkpoints
@@ -1212,6 +1351,35 @@ mod tests {
                 .reason()
                 .contains("integrity manifest")
         );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_checkpoint_listed_from_its_manifest_is_verified_when_restored() {
+        let directory =
+            std::env::temp_dir().join(format!("rspice-project-verify-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        let mut state = ServicesHost::default();
+        state
+            .model
+            .workspace
+            .content
+            .project
+            .set_path(directory.join("source.rspiceproj"));
+        let checkpoint =
+            create(&mut state, ProjectCheckpointReason::Manual).expect("checkpoint publishes");
+        let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
+        let mut bytes = std::fs::read(snapshot).expect("snapshot reads");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x01;
+        std::fs::write(snapshot, &bytes).expect("corrupt owned snapshot in place");
+
+        let catalog = list(&state.model).expect("catalog reads");
+        assert_eq!(catalog.checkpoints.len(), 1);
+        assert!(catalog.quarantined.is_empty());
+        let refused = load(&catalog.checkpoints[0]).expect_err("restore verifies the bytes");
+        assert!(refused.contains("integrity manifest"), "{refused}");
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

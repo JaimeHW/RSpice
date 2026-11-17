@@ -51,6 +51,10 @@ struct RecoverySnapshot {
     error: Option<String>,
     loading: bool,
     creating: bool,
+    /// The checkpoint a running comparison is comparing with.
+    comparing: Option<uuid::Uuid>,
+    /// Checkpoint work is running; another waits for it.
+    busy: bool,
     selected: Option<String>,
     location: String,
     stored_bytes: u64,
@@ -61,9 +65,30 @@ impl RecoverySnapshot {
     fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
         let recovery = &cx.state.project_checkpoint_recovery;
         #[cfg(target_arch = "wasm32")]
-        let loading = recovery.loading && !recovery.initialized;
+        let (loading, creating, comparing) = (
+            recovery.loading && !recovery.initialized,
+            manual_checkpoint_pending(),
+            None,
+        );
         #[cfg(not(target_arch = "wasm32"))]
-        let loading = false;
+        let (loading, creating, comparing) = {
+            use crate::workbench::app::dialogs::project::CheckpointJobKind;
+            let kind = recovery.job.as_ref().map(|job| &job.kind);
+            (
+                !recovery.initialized && recovery.error.is_none(),
+                kind == Some(&CheckpointJobKind::Create),
+                match kind {
+                    Some(CheckpointJobKind::Compare(checkpoint)) => {
+                        Some(checkpoint.checkpoint_id())
+                    }
+                    _ => None,
+                },
+            )
+        };
+        #[cfg(target_arch = "wasm32")]
+        let busy = creating;
+        #[cfg(not(target_arch = "wasm32"))]
+        let busy = recovery.job.is_some();
         Self {
             checkpoints: recovery.checkpoints.clone(),
             set_aside: recovery
@@ -73,9 +98,11 @@ impl RecoverySnapshot {
                 .collect(),
             error: recovery.error.clone(),
             loading,
-            creating: manual_checkpoint_pending(),
+            creating,
+            comparing,
+            busy,
             selected: cx.state.project_checkpoint_selection.clone(),
-            location: storage_location(cx),
+            location: recovery.location.clone().unwrap_or_default(),
             stored_bytes: recovery
                 .checkpoints
                 .iter()
@@ -93,7 +120,7 @@ impl RecoverySnapshot {
         if self.error.is_some() {
             ("unreadable".to_owned(), Some(Problem::Failure))
         } else if self.loading {
-            ("loading".to_owned(), None)
+            ("listing".to_owned(), None)
         } else if !self.set_aside.is_empty() {
             (
                 format!("{} set aside", self.set_aside.len()),
@@ -108,13 +135,13 @@ impl RecoverySnapshot {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn storage_location(cx: &Cx<'_, ProjectFeature>) -> String {
-    crate::workbench::lifecycle::project_checkpoint::storage_location(cx.model)
+fn storage_location(model: &crate::workbench::app_state::Model) -> String {
+    crate::workbench::lifecycle::project_checkpoint::storage_location(model)
         .map_or_else(|error| error, |path| path.display().to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn storage_location(_cx: &Cx<'_, ProjectFeature>) -> String {
+fn storage_location(_model: &crate::workbench::app_state::Model) -> String {
     "This browser's site storage".to_owned()
 }
 
@@ -137,7 +164,7 @@ impl RecoveryIntent {
             Self::Compare(checkpoint) => {
                 cx.state.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
-                compare_project_checkpoint(cx, &checkpoint);
+                compare_project_checkpoint(ctx, cx, checkpoint);
             }
             Self::Restore(checkpoint) => {
                 cx.state.project_checkpoint_selection =
@@ -259,7 +286,7 @@ fn recovery_header(
             })
             .icon(crate::ui::icons::Icon::Add)
             .accent()
-            .enabled(!snapshot.creating)
+            .enabled(!snapshot.busy)
             .show(ui);
             if create.clicked() {
                 intent = Some(RecoveryIntent::Create);
@@ -288,7 +315,7 @@ fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<Recovery
             return catalog_error(ui, error);
         }
         if snapshot.loading {
-            card_message(ui, "Loading checkpoints\u{2026}", None);
+            card_message(ui, "Listing checkpoints\u{2026}", None);
             return None;
         }
         if snapshot.checkpoints.is_empty() {
@@ -312,7 +339,11 @@ fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<Recovery
                 checkpoint_row(
                     ui,
                     checkpoint,
-                    selected,
+                    RowState {
+                        selected,
+                        comparing: snapshot.comparing == Some(checkpoint.checkpoint_id()),
+                        busy: snapshot.busy,
+                    },
                     snapshot.now_unix_ms,
                     index + 1 < count,
                 ),
@@ -412,13 +443,28 @@ fn catalog_error(ui: &mut Ui, error: &str) -> Option<RecoveryIntent> {
     reload.then_some(RecoveryIntent::Reload)
 }
 
+/// What a checkpoint row shows besides the checkpoint.
+#[derive(Clone, Copy)]
+struct RowState {
+    selected: bool,
+    /// This row's checkpoint is being compared with the project.
+    comparing: bool,
+    /// Checkpoint work is running, so the row's comparison waits.
+    busy: bool,
+}
+
 fn checkpoint_row(
     ui: &mut Ui,
     checkpoint: &ProjectCheckpointSummary,
-    selected: bool,
+    state: RowState,
     now_unix_ms: Option<u64>,
     separated: bool,
 ) -> Option<RecoveryIntent> {
+    let RowState {
+        selected,
+        comparing,
+        busy,
+    } = state;
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let stacked = width < CHECKPOINT_ROW_STACK_WIDTH;
@@ -452,7 +498,12 @@ fn checkpoint_row(
         );
     }
 
-    let compare = Button::new("Compare");
+    let compare = Button::new(if comparing {
+        "Comparing\u{2026}"
+    } else {
+        "Compare"
+    })
+    .enabled(!busy);
     let restore = Button::new("Restore\u{2026}");
     let actions_width = compare.measured_width(ui) + 6.0 + restore.measured_width(ui);
     let actions = if stacked {
@@ -576,7 +627,13 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
             "Keeps",
             &format!("The newest {MAX_RETAINED_CHECKPOINTS} checkpoints"),
         );
-        property_row(ui, "Space used", &format_bytes(snapshot.stored_bytes));
+        // Unknown until the listing is in; "0 B" would say there is none.
+        let space_used = if snapshot.loading {
+            "Listing\u{2026}".to_owned()
+        } else {
+            format_bytes(snapshot.stored_bytes)
+        };
+        property_row(ui, "Space used", &space_used);
         // `ProjectCheckpointReason::TechnologyAttachment` is the one
         // checkpoint RSpice takes on its own.
         property_row(ui, "Taken automatically", "Before technology changes");
@@ -658,30 +715,53 @@ fn utc_stamp(created_unix_ms: u64) -> String {
     crate::time_compat::utc_stamp(created_unix_ms)
 }
 
+/// The open project's catalog, kept for the project it was read for: listed
+/// once on a background thread, and again only when it was invalidated.
 pub(super) fn ensure_project_recovery_catalog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = ctx;
     let project_id = cx.model.workspace.content.project.id().to_string();
     if cx.state.project_checkpoint_recovery.project_id.as_deref() != Some(project_id.as_str()) {
-        cx.state.project_checkpoint_recovery = Default::default();
-        cx.state.project_checkpoint_recovery.project_id = Some(project_id.clone());
+        let recovery = &mut cx.state.project_checkpoint_recovery;
+        #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+        let job_hold = recovery.job_hold.take();
+        *recovery = Default::default();
+        recovery.project_id = Some(project_id.clone());
+        #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+        {
+            recovery.job_hold = job_hold;
+        }
     }
+    if cx.state.project_checkpoint_recovery.location.is_none() {
+        cx.state.project_checkpoint_recovery.location = Some(storage_location(cx.model));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    take_checkpoint_job_answer(cx);
     if cx.state.project_checkpoint_recovery.initialized {
         return;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let result = crate::workbench::lifecycle::project_checkpoint::list(cx.model);
-        let recovery = &mut cx.state.project_checkpoint_recovery;
-        recovery.initialized = true;
-        match result {
-            Ok(catalog) => {
-                recovery.checkpoints = catalog.checkpoints;
-                recovery.quarantined = catalog.quarantined;
-                recovery.error = None;
+        use crate::workbench::app::dialogs::project::{
+            CheckpointJob, CheckpointJobAnswer, CheckpointJobKind,
+        };
+        if cx.state.project_checkpoint_recovery.job.is_some() {
+            return;
+        }
+        match crate::workbench::lifecycle::project_checkpoint::listing(cx.model) {
+            Ok(listing) => {
+                let recovery = &mut cx.state.project_checkpoint_recovery;
+                recovery.job = Some(CheckpointJob::start(
+                    ctx,
+                    CheckpointJobKind::List,
+                    recovery,
+                    move || CheckpointJobAnswer::Listed(listing.list()),
+                ));
             }
-            Err(error) => recovery.error = Some(error),
+            Err(error) => {
+                let recovery = &mut cx.state.project_checkpoint_recovery;
+                recovery.initialized = true;
+                recovery.error = Some(error);
+            }
         }
     }
 
@@ -721,14 +801,11 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
 
 /// Answer a compare on the status bar: the reader asked and is looking. Only
 /// a compare that could not be made is toasted.
-fn compare_project_checkpoint(
+fn report_comparison(
     cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    compared: Result<bool, String>,
 ) {
-    let compared = crate::workbench::lifecycle::project_checkpoint::matches_current_state(
-        checkpoint,
-        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
-    );
     match compared {
         Ok(true) => cx
             .wb
@@ -742,9 +819,51 @@ fn compare_project_checkpoint(
     }
 }
 
+/// Compare the project as it is now with a checkpoint. The project is read
+/// off the model here; writing it out and digesting it runs on a background
+/// thread.
 #[cfg(not(target_arch = "wasm32"))]
-fn manual_checkpoint_pending() -> bool {
-    false
+fn compare_project_checkpoint(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    checkpoint: ProjectCheckpointSummary,
+) {
+    use crate::workbench::app::dialogs::project::{
+        CheckpointJob, CheckpointJobAnswer, CheckpointJobKind,
+    };
+    if cx.state.project_checkpoint_recovery.job.is_some() {
+        return;
+    }
+    let current = match crate::workbench::lifecycle::project_checkpoint::capture_current_state(
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    ) {
+        Ok(current) => current,
+        Err(error) => {
+            report_comparison(cx, &checkpoint, Err(error));
+            return;
+        }
+    };
+    let recovery = &mut cx.state.project_checkpoint_recovery;
+    let compared = checkpoint.clone();
+    recovery.job = Some(CheckpointJob::start(
+        ctx,
+        CheckpointJobKind::Compare(checkpoint),
+        recovery,
+        move || CheckpointJobAnswer::Compared(current.matches(&compared)),
+    ));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn compare_project_checkpoint(
+    _: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    checkpoint: ProjectCheckpointSummary,
+) {
+    let compared = crate::workbench::lifecycle::project_checkpoint::matches_current_state(
+        &checkpoint,
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    );
+    report_comparison(cx, &checkpoint, compared);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -752,23 +871,105 @@ fn manual_checkpoint_pending() -> bool {
     BROWSER_MANUAL_CHECKPOINT_PENDING.with(std::cell::Cell::get)
 }
 
-/// Create a checkpoint the reader asked for. The Console line is its record;
-/// a failure also reaches the notice centre through the activity mirror.
+/// Create a checkpoint the reader asked for. The project is read off the
+/// model here; writing, verifying and listing run on a background thread.
+/// The Console line is its record; a failure also reaches the notice centre
+/// through the activity mirror.
 #[cfg(not(target_arch = "wasm32"))]
-fn create_manual_checkpoint(_: &Context, cx: &mut Cx<'_, ProjectFeature>) {
-    let created = crate::workbench::lifecycle::project_checkpoint::create(
-        &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
+fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    use crate::workbench::app::dialogs::project::{
+        CheckpointJob, CheckpointJobAnswer, CheckpointJobKind,
+    };
+    if cx.state.project_checkpoint_recovery.job.is_some() {
+        return;
+    }
+    let capture = crate::workbench::lifecycle::project_checkpoint::capture(
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
     );
-    match created {
-        Ok(checkpoint) => {
-            cx.state.project_checkpoint_recovery.initialized = false;
-            record_manual_checkpoint(cx, &checkpoint);
+    match capture {
+        Ok(capture) => {
+            let recovery = &mut cx.state.project_checkpoint_recovery;
+            recovery.job = Some(CheckpointJob::start(
+                ctx,
+                CheckpointJobKind::Create,
+                recovery,
+                move || CheckpointJobAnswer::Created(capture.publish()),
+            ));
         }
         Err(error) => {
             cx.model
                 .record(LogSeverity::Error, LogSource::Studio, error);
         }
+    }
+}
+
+/// Take a checkpoint job's answer, if it is in, for the project it was
+/// started for: the catalog it read, the checkpoint it wrote, or the
+/// comparison it made.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
+    use crate::workbench::app::dialogs::project::{CheckpointJobAnswer, CheckpointJobKind};
+    let recovery = &mut cx.state.project_checkpoint_recovery;
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    if recovery.project_id.as_deref() != Some(project_id.as_str()) {
+        // A job for a project that is no longer open is dropped with its
+        // catalog when the page next draws.
+        return;
+    }
+    let Some(job) = recovery.job.as_ref() else {
+        return;
+    };
+    let Some(answer) = job.take_answer() else {
+        return;
+    };
+    let Some(job) = recovery.job.take() else {
+        return;
+    };
+    match answer {
+        CheckpointJobAnswer::Listed(listed) => install_catalog(recovery, listed),
+        CheckpointJobAnswer::Created(Ok(created)) => {
+            // Asked to list again while writing: the listing the creation
+            // made may predate what changed, so another follows.
+            let relist = !recovery.initialized;
+            install_catalog(recovery, created.catalog);
+            if relist {
+                recovery.initialized = false;
+            }
+            record_manual_checkpoint(cx, &created.summary);
+            if let Some(warning) = created.retention_warning {
+                cx.model
+                    .record(LogSeverity::Warning, LogSource::Studio, warning);
+            }
+        }
+        CheckpointJobAnswer::Created(Err(error)) => {
+            cx.model
+                .record(LogSeverity::Error, LogSource::Studio, error);
+        }
+        CheckpointJobAnswer::Compared(compared) => {
+            if let CheckpointJobKind::Compare(checkpoint) = job.kind {
+                report_comparison(cx, &checkpoint, compared);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_catalog(
+    recovery: &mut crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
+    listed: Result<
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointCatalog,
+        String,
+    >,
+) {
+    recovery.initialized = true;
+    match listed {
+        Ok(catalog) => {
+            recovery.checkpoints = catalog.checkpoints;
+            recovery.quarantined = catalog.quarantined;
+            recovery.error = None;
+        }
+        Err(error) => recovery.error = Some(error),
     }
 }
 
