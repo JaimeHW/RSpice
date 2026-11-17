@@ -5,7 +5,9 @@
 //! table each frame. The selection names a row by its index in the page's own
 //! row order and, when the page keys its rows, by that key too: a sort moves
 //! where a row is shown, never its index, and refreshed data may reorder the
-//! rows, so the key is what finds the selected row again.
+//! rows, so the key is what finds the selected row again. A table that
+//! selects several rows keeps a lead, the row the keyboard moves from and
+//! acts on, beside the others, and an anchor Shift extends from.
 //!
 //! The shown order is worked out here, with no painting: the rows the filter
 //! keeps, sorted inside their group when a column is sorted, each group led by
@@ -68,7 +70,14 @@ pub struct Sort {
 /// What one table remembers between frames.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TableState {
+    /// The lead: the selected row the keyboard moves from and acts on, and
+    /// its cell when the table selects cells.
     pub selection: Option<Selection>,
+    /// The rows selected beside the lead, in the order they joined.
+    pub others: Vec<Selection>,
+    /// The row Shift extends the selection from: the last one a plain or a
+    /// toggling press chose.
+    pub anchor: Option<Selection>,
     /// `None` shows the rows in the page's own order.
     pub sort: Option<Sort>,
     /// How far the columns right of the frozen ones are scrolled, in points.
@@ -95,13 +104,123 @@ impl TableState {
         self.selection.as_ref()?.column
     }
 
-    /// Select `row`, known by `key` when the page keys its rows.
+    /// Every selected row's index in the page's own order, the lead first.
+    pub fn selected_rows(&self) -> Vec<usize> {
+        self.selected().map(|selection| selection.row).collect()
+    }
+
+    /// Every selected row's key, the lead first, when the page keys its rows.
+    pub fn selected_keys(&self) -> Vec<&RowKey> {
+        self.selected()
+            .filter_map(|selection| selection.key.as_ref())
+            .collect()
+    }
+
+    /// Whether row `row`, in the page's own order, is selected.
+    pub fn is_selected(&self, row: usize) -> bool {
+        self.selected().any(|selection| selection.row == row)
+    }
+
+    fn selected(&self) -> impl Iterator<Item = &Selection> {
+        self.selection.iter().chain(&self.others)
+    }
+
+    /// Select `row` alone, known by `key` when the page keys its rows.
     pub fn select(&mut self, row: usize, key: Option<RowKey>) {
-        self.selection = Some(Selection {
+        let _ = self.select_only(Selection {
             row,
             key,
             column: None,
         });
+    }
+
+    /// Make `selection` the only selected row and the anchor. Returns
+    /// whether the selection changed.
+    pub(super) fn select_only(&mut self, selection: Selection) -> bool {
+        let changed = self.selection.as_ref() != Some(&selection) || !self.others.is_empty();
+        self.anchor = Some(Selection {
+            column: None,
+            ..selection.clone()
+        });
+        self.selection = Some(selection);
+        self.others.clear();
+        changed
+    }
+
+    /// Make `selection` the lead and keep every other selected row, as a
+    /// context press on a row of a selection does. Returns whether the
+    /// selection changed.
+    pub(super) fn lead_to(&mut self, selection: Selection) -> bool {
+        if !self.is_selected(selection.row) {
+            return self.select_only(selection);
+        }
+        let before = self.selection.clone();
+        if let Some(lead) = self.selection.take() {
+            self.others.push(lead);
+        }
+        self.others.retain(|other| other.row != selection.row);
+        self.selection = Some(selection);
+        before != self.selection
+    }
+
+    /// A toggling press, Ctrl or the leading mark: a selected row leaves the
+    /// selection, any other joins it as the lead; either way it becomes the
+    /// anchor. Returns whether the selection changed, which it always does.
+    pub(super) fn toggle(&mut self, selection: Selection) -> bool {
+        self.anchor = Some(Selection {
+            column: None,
+            ..selection.clone()
+        });
+        if self
+            .selection
+            .as_ref()
+            .is_some_and(|lead| lead.row == selection.row)
+        {
+            self.selection = self.others.pop();
+        } else if let Some(at) = self
+            .others
+            .iter()
+            .position(|other| other.row == selection.row)
+        {
+            self.others.remove(at);
+        } else {
+            if let Some(lead) = self.selection.take() {
+                self.others.push(lead);
+            }
+            self.selection = Some(selection);
+        }
+        true
+    }
+
+    /// An extending press, Shift: `range` (the rows from the anchor to the
+    /// pressed one, in the order they show) becomes the selection, added to
+    /// it when `add`, with `lead` as the lead. The anchor stays. Returns
+    /// whether the selection changed.
+    pub(super) fn extend(&mut self, lead: Selection, range: Vec<Selection>, add: bool) -> bool {
+        let before = (self.selection.clone(), self.others.clone());
+        let mut others = if add {
+            self.selected().cloned().collect()
+        } else {
+            Vec::new()
+        };
+        for selection in range {
+            if !others
+                .iter()
+                .any(|other: &Selection| other.row == selection.row)
+            {
+                others.push(selection);
+            }
+        }
+        others.retain(|other| other.row != lead.row);
+        if self.anchor.is_none() {
+            self.anchor = Some(Selection {
+                column: None,
+                ..lead.clone()
+            });
+        }
+        self.selection = Some(lead);
+        self.others = others;
+        before != (self.selection.clone(), self.others.clone())
     }
 
     /// Whether the group labelled `label` is folded.
@@ -109,22 +228,37 @@ impl TableState {
         self.folded.contains(label)
     }
 
-    /// Find the selected row again by its key after the rows changed: its
-    /// index follows the key, and a key no row carries any more drops the
-    /// selection. A selection without a key keeps its index.
+    /// Find the selected rows again by their keys after the rows changed:
+    /// each index follows its key, and a key no row carries any more drops
+    /// that row from the selection; a lead that goes hands the lead to the
+    /// row that joined last. A selection without a key keeps its index.
     pub(super) fn follow_keys(&mut self, keys: &[RowKey]) {
-        let Some(selection) = &mut self.selection else {
-            return;
-        };
-        let Some(key) = &selection.key else {
-            return;
-        };
-        if keys.get(selection.row) == Some(key) {
-            return;
+        /// Whether `selection` still names a row, moved to where it is now.
+        fn follow(selection: &mut Selection, keys: &[RowKey]) -> bool {
+            let Some(key) = &selection.key else {
+                return true;
+            };
+            if keys.get(selection.row) == Some(key) {
+                return true;
+            }
+            match keys.iter().position(|candidate| candidate == key) {
+                Some(row) => {
+                    selection.row = row;
+                    true
+                }
+                None => false,
+            }
         }
-        match keys.iter().position(|candidate| candidate == key) {
-            Some(row) => selection.row = row,
-            None => self.selection = None,
+        self.others.retain_mut(|other| follow(other, keys));
+        if let Some(anchor) = &mut self.anchor
+            && !follow(anchor, keys)
+        {
+            self.anchor = None;
+        }
+        if let Some(lead) = &mut self.selection
+            && !follow(lead, keys)
+        {
+            self.selection = self.others.pop();
         }
     }
 
@@ -300,6 +434,33 @@ pub(super) fn arrange(
         segment(start..end, Some(index));
     }
     lines
+}
+
+/// How long a pause between typed letters starts a new type-ahead search.
+pub(super) const TYPE_AHEAD_PAUSE: f64 = 1.0;
+
+/// The row type-ahead moves to, among the rows `shown` in their shown order:
+/// the next whose words, `words(row)` in lower case, start with what was
+/// `typed` (lower case too). One letter, or one letter typed again and
+/// again, moves on past the current row and cycles among the rows it
+/// starts; more letters refine from the current row, so it stays while it
+/// still matches.
+pub(super) fn type_ahead(
+    shown: &[usize],
+    current: Option<usize>,
+    typed: &str,
+    mut words: impl FnMut(usize) -> String,
+) -> Option<usize> {
+    let first = typed.chars().next()?;
+    let at = current.and_then(|row| shown.iter().position(|shown| *shown == row));
+    let (needle, start) = if typed.chars().all(|letter| letter == first) {
+        (first.to_string(), at.map_or(0, |at| at + 1))
+    } else {
+        (typed.to_owned(), at.unwrap_or(0))
+    };
+    (0..shown.len())
+        .map(|step| shown[(start + step) % shown.len()])
+        .find(|row| words(*row).starts_with(&needle))
 }
 
 /// A key that moves the selection.

@@ -17,12 +17,17 @@
 //!
 //! A page that hands the table a [`TableState`] gets the rest of a results
 //! grid: a selection the keyboard moves, a sort a head click sets, foldable
-//! group heads, a row filter, and Ctrl+C. A page that hands it none gets the
-//! rows it asked for, in its own order, and reports clicks.
+//! group heads, a row filter, type-ahead and Ctrl+C; one that asks for
+//! [`DataTable::multi_select`] lets the reader select several rows the way a
+//! file list does. Enter, F2, Delete and the menu key are reported for the
+//! page to act on. A page that hands it no state gets the rows it asked for,
+//! in its own order, and reports clicks.
 
 mod body;
 mod geometry;
 mod head;
+#[cfg(test)]
+mod list_tests;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -42,7 +47,7 @@ pub use geometry::Span;
 pub use state::{Group, RowKey, Selection, Sort, SortDirection, SortKey, TableState};
 
 use geometry::Columns;
-use state::{Line, Step, arrange, step};
+use state::{Line, Step, TYPE_AHEAD_PAUSE, arrange, step, type_ahead};
 
 /// Height of a table's head and of each band row over it at the compact
 /// density under a fine pointer, for a page that lines its own bands up with
@@ -383,9 +388,18 @@ pub struct TableResponse {
     pub context_menu: Option<ContextRequest>,
     /// The selection in the table's state changed this frame.
     pub selection_changed: bool,
-    /// The table has the keyboard: a key the page gives a meaning to, such
-    /// as Delete on the selected row, is the page's to read.
+    /// The table has the keyboard: a key the page gives a meaning to beyond
+    /// the ones reported here is the page's to read.
     pub focused: bool,
+    /// The row whose primary action the reader asked for: Enter on a row
+    /// with no editable cell, or a double-click.
+    pub activate: Option<usize>,
+    /// F2 on a row with no editable cell: the page renames what the lead
+    /// row names.
+    pub rename: Option<usize>,
+    /// Delete while the table has the keyboard and a row is selected: the
+    /// page deletes what the selected rows name.
+    pub delete: bool,
 }
 
 /// One table: its columns, its rows, and where it may grow.
@@ -410,6 +424,7 @@ pub struct DataTable<'a> {
     bands: &'a [Vec<Span>],
     groups: &'a [Group],
     cell_selection: bool,
+    multi: bool,
 }
 
 /// Where the body is seen from this frame, in screen points: the viewport's
@@ -449,13 +464,18 @@ impl View {
 
 /// What the table remembers about its own view between frames, which the page
 /// has no reason to keep: where the body was scrolled to and how tall it was,
-/// for Page Up and Down and for bringing the selection into view.
-#[derive(Debug, Clone, Copy, Default)]
+/// for Page Up and Down and for bringing the selection into view, and the
+/// letters typed so far for type-ahead.
+#[derive(Debug, Clone, Default)]
 struct ViewMemory {
     offset_y: f32,
     height: f32,
     /// The sort changed: bring the selection into view on the next frame.
     reveal: bool,
+    /// The letters typed since the last pause, in lower case.
+    typed: String,
+    /// When the last of them was typed, in the input's seconds.
+    typed_at: f64,
 }
 
 impl ViewMemory {
@@ -470,33 +490,50 @@ impl ViewMemory {
 }
 
 /// What the keyboard asked of a focused table this frame.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct Keys {
     step: Option<Step>,
+    /// Shift was held with the step: extend the selection to where it lands.
+    extend: bool,
     /// Left or right by one cell.
     across: Option<isize>,
-    open: bool,
+    enter: bool,
+    f2: bool,
+    delete: bool,
+    /// Ctrl+A in a table that selects several rows.
+    all: bool,
     copy: bool,
     menu: bool,
+    /// The letters typed this frame, for type-ahead.
+    typed: String,
 }
 
 impl Keys {
-    fn read(ui: &Ui) -> Self {
+    /// Read and take the keys a focused table answers; Shift with a step and
+    /// Ctrl+A only when it selects several rows.
+    fn read(ui: &Ui, multi: bool) -> Self {
         ui.input_mut(|input| {
-            let mut take = |key| input.consume_key(Modifiers::NONE, key);
-            let step = [
+            let mut step = None;
+            let mut extend = false;
+            for (key, to) in [
                 (Key::ArrowUp, Step::Up),
                 (Key::ArrowDown, Step::Down),
                 (Key::PageUp, Step::PageUp),
                 (Key::PageDown, Step::PageDown),
                 (Key::Home, Step::Home),
                 (Key::End, Step::End),
-            ]
-            .into_iter()
-            .fold(None, |found, (key, step)| {
-                let pressed = take(key);
-                found.or(pressed.then_some(step))
-            });
+            ] {
+                // Shift first: a key taken without modifiers is taken with
+                // Shift held too.
+                if multi && input.consume_key(Modifiers::SHIFT, key) {
+                    step = step.or(Some(to));
+                    extend = true;
+                }
+                if input.consume_key(Modifiers::NONE, key) {
+                    step = step.or(Some(to));
+                }
+            }
+            let mut take = |key| input.consume_key(Modifiers::NONE, key);
             let left = take(Key::ArrowLeft);
             let right = take(Key::ArrowRight);
             let across = match (left, right) {
@@ -506,7 +543,20 @@ impl Keys {
             };
             let enter = take(Key::Enter);
             let f2 = take(Key::F2);
+            let delete = take(Key::Delete);
+            let all = multi && input.consume_key(Modifiers::COMMAND, Key::A);
             let menu = input.consume_key(Modifiers::SHIFT, Key::F10);
+            let typed = input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Text(text) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<String>();
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Text(_)));
             let copy_event = input
                 .events
                 .iter()
@@ -517,10 +567,15 @@ impl Keys {
             let copy_key = input.consume_key(Modifiers::COMMAND, Key::C);
             Self {
                 step,
+                extend,
                 across,
-                open: enter || f2,
+                enter,
+                f2,
+                delete,
+                all,
                 copy: copy_event || copy_key,
                 menu,
+                typed,
             }
         })
     }
@@ -574,6 +629,7 @@ impl<'a> DataTable<'a> {
             bands: &[],
             groups: &[],
             cell_selection: false,
+            multi: false,
         }
     }
 
@@ -635,6 +691,15 @@ impl<'a> DataTable<'a> {
     /// A click, and Left and Right, select a cell within the selected row.
     pub fn cell_selection(mut self) -> Self {
         self.cell_selection = true;
+        self
+    }
+
+    /// The reader may select several rows, as in a file list: Ctrl+click
+    /// toggles a row, Shift+click and Shift with the arrow keys extend from
+    /// the anchor, Ctrl+A selects every row shown. A context press on a
+    /// selected row keeps the selection, so its menu acts on all of them.
+    pub fn multi_select(mut self) -> Self {
+        self.multi = true;
         self
     }
 
@@ -795,7 +860,7 @@ impl<'a> DataTable<'a> {
                     },
                 );
             });
-            let keys = Keys::read(ui);
+            let keys = Keys::read(ui, self.multi);
             if keys.step.is_some() || keys.across.is_some() {
                 // The arrows moved the selection, not the keyboard focus:
                 // the frame the table took focus it had no filter yet.
@@ -804,8 +869,51 @@ impl<'a> DataTable<'a> {
             if let Some(step_by) = keys.step {
                 let page = ((memory.height.max(row_h) / row_h).floor() as usize).max(1);
                 if let Some(row) = step(&shown, state.selected_row(), step_by, page) {
-                    let column = state.selected_column();
-                    response.selection_changed |= self.select(state, row, column);
+                    let lead = self.selection_at(row, state.selected_column());
+                    response.selection_changed |= if keys.extend {
+                        let range = self.range(state, &shown, row);
+                        state.extend(lead, range, false)
+                    } else {
+                        state.select_only(lead)
+                    };
+                    reveal = Some(row);
+                }
+            }
+            if keys.all
+                && let Some(first) = shown.first()
+            {
+                let lead = state
+                    .selected_row()
+                    .filter(|row| shown.contains(row))
+                    .unwrap_or(*first);
+                let lead = self.selection_at(lead, state.selected_column());
+                let every = shown
+                    .iter()
+                    .map(|row| self.selection_at(*row, None))
+                    .collect();
+                response.selection_changed |= state.extend(lead, every, false);
+            }
+            if !keys.typed.is_empty() {
+                let now = ui.input(|input| input.time);
+                if now - memory.typed_at > TYPE_AHEAD_PAUSE {
+                    memory.typed.clear();
+                }
+                memory.typed_at = now;
+                memory.typed.push_str(&keys.typed.to_lowercase());
+                let column = self.text_column();
+                let found = type_ahead(
+                    &shown,
+                    state.selected_row(),
+                    memory.typed.trim_start(),
+                    |row| {
+                        rows.get(row)
+                            .get(column)
+                            .map_or_else(String::new, |cell| cell.text.to_lowercase())
+                    },
+                );
+                if let Some(row) = found {
+                    let lead = self.selection_at(row, state.selected_column());
+                    response.selection_changed |= state.select_only(lead);
                     reveal = Some(row);
                 }
             }
@@ -821,7 +929,7 @@ impl<'a> DataTable<'a> {
                 selection.column = Some(column);
                 scroll_x = Some(geometry.reveal(column, state.scroll_x, viewport_w));
             }
-            if keys.open
+            if (keys.enter || keys.f2)
                 && let Some(selection) = &state.selection
                 && shown.contains(&selection.row)
             {
@@ -836,13 +944,26 @@ impl<'a> DataTable<'a> {
                     response.edit = Some((selection.row, column));
                     scroll_x = Some(geometry.reveal(column, state.scroll_x, viewport_w));
                     reveal = Some(selection.row);
+                } else if keys.enter {
+                    response.activate = Some(selection.row);
+                } else {
+                    response.rename = Some(selection.row);
                 }
             }
-            if keys.copy
-                && let Some(row) = state.selected_row()
-            {
-                let text = self.copied_text(rows.get(row));
-                ui.ctx().copy_text(text);
+            response.delete = keys.delete && state.selection.is_some();
+            if keys.copy && state.selection.is_some() {
+                let (named, heads) = self.copied_heads();
+                let lines = shown
+                    .iter()
+                    .filter(|row| state.is_selected(**row))
+                    .map(|row| self.copied_line(&named, rows.get(*row)))
+                    .collect::<Vec<_>>();
+                ui.ctx().copy_text(
+                    std::iter::once(heads)
+                        .chain(lines)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                );
             }
             keyed_menu = keys.menu && state.selection.is_some();
         }
@@ -894,6 +1015,12 @@ impl<'a> DataTable<'a> {
                 column: None,
             }),
         };
+        // Every selected row, the lead among them, as the frame began.
+        let chosen = state
+            .as_deref()
+            .map(|state| state.selected_rows().into_iter().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
+        let modifiers = ui.input(|input| input.modifiers);
         let mut folds = Vec::new();
         let mut take_focus = false;
         let output = scroll.show_viewport(ui, |ui, viewport| {
@@ -948,15 +1075,23 @@ impl<'a> DataTable<'a> {
                                     view,
                                     geometry: &geometry,
                                     height: row_h,
-                                    selected: marked.is_some(),
+                                    selected: marked.is_some() || chosen.contains(&index),
                                     selected_column: marked.and_then(|selection| selection.column),
                                     stateful: state.is_some(),
                                 },
                                 cells,
                                 open,
                             );
-                            take_focus |=
-                                self.answer(&mut response, state.as_deref_mut(), index, row);
+                            take_focus |= self.answer(
+                                &mut response,
+                                state.as_deref_mut(),
+                                Pressed {
+                                    index,
+                                    modifiers,
+                                    shown: &shown,
+                                },
+                                row,
+                            );
                             if keyed_menu && selected.as_ref().is_some_and(|s| s.row == index) {
                                 response.context_menu = Some(ContextRequest {
                                     cell: CellRef {
@@ -1046,6 +1181,9 @@ impl<'a> DataTable<'a> {
                 table_id,
                 head_block.union(output.inner_rect),
                 selected.as_ref(),
+                state
+                    .as_deref()
+                    .map_or(0, |state| state.selected_rows().len()),
             );
             // Taken after the focus target has been seen, so a press that
             // lands on a row is not read as a press elsewhere.
@@ -1057,17 +1195,41 @@ impl<'a> DataTable<'a> {
         response
     }
 
-    /// Select `row`, keeping `column` when cells are selected. Returns
-    /// whether the selection changed.
-    fn select(&self, state: &mut TableState, row: usize, column: Option<usize>) -> bool {
-        let selection = Selection {
+    /// Row `row` as a selection, keeping `column` when cells are selected.
+    fn selection_at(&self, row: usize, column: Option<usize>) -> Selection {
+        Selection {
             row,
             key: self.keys.and_then(|keys| keys.get(row).cloned()),
             column: if self.cell_selection { column } else { None },
-        };
-        let changed = state.selection.as_ref() != Some(&selection);
-        state.selection = Some(selection);
-        changed
+        }
+    }
+
+    /// The rows from the anchor to `to`, in the order they show; `to` alone
+    /// when the anchor is not shown.
+    fn range(&self, state: &TableState, shown: &[usize], to: usize) -> Vec<Selection> {
+        let anchor = state
+            .anchor
+            .as_ref()
+            .map(|anchor| anchor.row)
+            .or_else(|| state.selected_row())
+            .unwrap_or(to);
+        let at = |row: usize| shown.iter().position(|shown| *shown == row);
+        match (at(anchor), at(to)) {
+            (Some(from), Some(to)) => shown[from.min(to)..=from.max(to)]
+                .iter()
+                .map(|row| self.selection_at(*row, None))
+                .collect(),
+            _ => vec![self.selection_at(to, None)],
+        }
+    }
+
+    /// The column type-ahead reads: the first whose words sit on the left,
+    /// a name rather than a number.
+    fn text_column(&self) -> usize {
+        self.columns
+            .iter()
+            .position(|column| column.align == Align::Left)
+            .unwrap_or(0)
     }
 
     /// Fold one row's report into the table's, and move the selection to
@@ -1077,9 +1239,14 @@ impl<'a> DataTable<'a> {
         &self,
         response: &mut TableResponse,
         state: Option<&mut TableState>,
-        index: usize,
+        pressed: Pressed<'_>,
         row: body::RowResponse,
     ) -> bool {
+        let Pressed {
+            index,
+            modifiers,
+            shown,
+        } = pressed;
         if row.clicked || row.edit.is_some() {
             response.clicked = Some(index);
         }
@@ -1092,6 +1259,7 @@ impl<'a> DataTable<'a> {
                 row: index,
                 column: row.column,
             });
+            response.activate = Some(index);
         }
         if let Some(position) = row.context {
             response.context_menu = Some(ContextRequest {
@@ -1107,8 +1275,19 @@ impl<'a> DataTable<'a> {
         };
         let pressed = row.clicked || row.edit.is_some() || row.context.is_some();
         if pressed {
-            let column = row.edit.or(row.column);
-            response.selection_changed |= self.select(state, index, column);
+            let selection = self.selection_at(index, row.edit.or(row.column));
+            response.selection_changed |= if !self.multi || row.edit.is_some() {
+                state.select_only(selection)
+            } else if row.context.is_some() {
+                state.lead_to(selection)
+            } else if modifiers.shift {
+                let range = self.range(state, shown, index);
+                state.extend(selection, range, modifiers.command)
+            } else if modifiers.command {
+                state.toggle(selection)
+            } else {
+                state.select_only(selection)
+            };
         }
         // A closed cell hands the keyboard back to the table.
         pressed || (row.edited.is_some() && row.edit.is_none())
@@ -1117,7 +1296,14 @@ impl<'a> DataTable<'a> {
     /// The keyboard's place in a table with state: one stop for the whole
     /// table, where Tab lands and the arrow keys act, framed by the selected
     /// row while focus is shown.
-    fn focus_target(&self, ui: &Ui, table_id: egui::Id, rect: Rect, selected: Option<&Selection>) {
+    fn focus_target(
+        &self,
+        ui: &Ui,
+        table_id: egui::Id,
+        rect: Rect,
+        selected: Option<&Selection>,
+        chosen: usize,
+    ) {
         let focus = ui.interact(rect, table_id, Sense::focusable_noninteractive());
         focus.widget_info(|| {
             egui::WidgetInfo::labeled(
@@ -1126,24 +1312,28 @@ impl<'a> DataTable<'a> {
                 format!(
                     "Table, {} rows{}",
                     self.rows,
-                    selected.map_or_else(String::new, |selection| format!(
-                        ", row {} selected",
-                        selection.row + 1
-                    ))
+                    match (selected, chosen) {
+                        (_, 2..) => format!(", {chosen} rows selected"),
+                        (Some(selection), _) => format!(", row {} selected", selection.row + 1),
+                        (None, _) => String::new(),
+                    }
                 ),
             )
         });
         ui.ctx().accesskit_node_builder(focus.id, |node| {
             node.set_role(egui::accesskit::Role::Grid);
+            if self.multi {
+                node.set_multiselectable();
+            }
         });
         if theme::focus_is_visible(ui.ctx(), &focus) {
             theme::paint_focus_ring(ui, &focus, rect);
         }
     }
 
-    /// The selected row as tab-separated text under the heads of the columns
-    /// that have one.
-    fn copied_text(&self, cells: &[Cell]) -> String {
+    /// The columns that have a head, and their heads as one tab-separated
+    /// line: Ctrl+C copies the selected rows under it.
+    fn copied_heads(&self) -> (Vec<usize>, String) {
         let named = self
             .columns
             .iter()
@@ -1156,7 +1346,13 @@ impl<'a> DataTable<'a> {
             .map(|index| self.columns[*index].head.as_str())
             .collect::<Vec<_>>()
             .join("\t");
-        let values = named
+        (named, heads)
+    }
+
+    /// One row's words under the `named` columns, tab-separated; a value the
+    /// row does not hold is empty.
+    fn copied_line(&self, named: &[usize], cells: &[Cell]) -> String {
+        named
             .iter()
             .map(|index| {
                 cells
@@ -1165,8 +1361,7 @@ impl<'a> DataTable<'a> {
                     .map_or("", |cell| cell.text.as_str())
             })
             .collect::<Vec<_>>()
-            .join("\t");
-        format!("{heads}\n{values}")
+            .join("\t")
     }
 
     /// The page's column under shown column `column`.
@@ -1195,6 +1390,14 @@ impl<'a> DataTable<'a> {
             (cell.right() - right).max(cell.left() + left),
         )
     }
+}
+
+/// Where a row was pressed: its index, the modifiers held, and the rows in
+/// the order they show, which a Shift press extends across.
+struct Pressed<'s> {
+    index: usize,
+    modifiers: Modifiers,
+    shown: &'s [usize],
 }
 
 /// The page's columns in the order a narrow table shows them, the pinned one

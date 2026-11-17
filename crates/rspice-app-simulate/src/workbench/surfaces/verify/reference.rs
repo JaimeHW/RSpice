@@ -528,9 +528,8 @@ pub(super) fn reference_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         deleted = Some(row);
     }
     let selected = session.reference_table.selected_row();
-    if response.focused
+    if response.delete
         && let Some(row) = selected.filter(|row| rows.get(*row).is_some_and(ReferenceRow::orphan))
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
     {
         deleted = Some(row);
     }
