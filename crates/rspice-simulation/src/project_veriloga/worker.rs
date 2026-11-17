@@ -271,11 +271,6 @@ mod tests {
 
     #[test]
     fn source_admission_precedes_compilation_and_bytecode_needs_no_jit() {
-        let foreign = bundle(ProjectSourceLanguage::RSpiceAutomation, "workflow: test");
-        assert!(matches!(
-            WorkerCompileRequest::try_new(&foreign, Some("worker")),
-            Err(WorkerCompileRequestError::Language)
-        ));
         let source = bundle(ProjectSourceLanguage::VerilogA, SOURCE);
         for module in [
             "",

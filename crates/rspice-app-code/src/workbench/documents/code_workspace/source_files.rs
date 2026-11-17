@@ -349,7 +349,6 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
                 draft.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_file_dialog = None;
     let message = match draft.action {
@@ -502,7 +501,6 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
                 draft.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_history = None;
     let message = format!(
@@ -519,7 +517,6 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
 fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
     match language {
         ProjectSourceLanguage::VerilogA => "untitled.va",
-        ProjectSourceLanguage::RSpiceAutomation => "helper.py",
     }
 }
 
@@ -614,7 +611,6 @@ fn new_file_template(language: ProjectSourceLanguage) -> String {
         ProjectSourceLanguage::VerilogA => {
             "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n".to_owned()
         }
-        ProjectSourceLanguage::RSpiceAutomation => String::new(),
     }
 }
 

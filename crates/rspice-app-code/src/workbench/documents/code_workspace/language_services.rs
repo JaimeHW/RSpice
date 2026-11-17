@@ -175,7 +175,6 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
                 state.index.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     let message = format!(
         "Renamed {} to {}: {}.",
@@ -330,7 +329,6 @@ fn write_language_document(
         ProjectSourceLanguage::VerilogA => {
             super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     Ok(())
 }
@@ -1221,7 +1219,6 @@ fn language_keyword(language: ProjectSourceLanguage, value: &str) -> bool {
                 | "begin"
                 | "end"
         ),
-        ProjectSourceLanguage::RSpiceAutomation => false,
     }
 }
 

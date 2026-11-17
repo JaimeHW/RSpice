@@ -200,9 +200,6 @@ impl ProjectWorkspace {
                 .then(|| {
                     crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone())
                 }),
-            ProjectSourceLanguage::RSpiceAutomation => {
-                Some(crate::state::ProjectSourceOwner::code_workspace(language))
-            }
         }
     }
 

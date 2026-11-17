@@ -35,85 +35,12 @@ impl ProjectWorkspace {
     /// A Verilog-A module is a cell view, so a new project carries no
     /// Verilog-A source of its own until its author creates or imports one.
     pub fn new_bootstrapped(libraries: &mut LibraryManager) -> Self {
-        let automation = crate::state::ProjectSourceBundle::try_new_with_roles(
-            crate::state::ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::RSpiceAutomation,
-            ),
-            ProjectSourceLanguage::RSpiceAutomation,
-            crate::state::AutomationStarterFile::PythonEntry.path(),
-            crate::state::DEFAULT_AUTOMATION_PYTHON,
-            [
-                crate::state::ProjectSourceFile::try_new(
-                    crate::state::AutomationStarterFile::RunPlan.path(),
-                    crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
-                )
-                .expect("the built-in run plan is valid"),
-                crate::state::ProjectSourceFile::try_new(
-                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
-                    crate::state::DEFAULT_ENVIRONMENT_LOCK,
-                )
-                .expect("the built-in environment lock is valid"),
-                crate::state::ProjectSourceFile::try_new(
-                    crate::state::AutomationStarterFile::Permissions.path(),
-                    crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
-                )
-                .expect("the built-in permission manifest is valid"),
-            ],
-            [
-                crate::state::ProjectSourceDependency::try_new(
-                    crate::state::AutomationStarterFile::PythonEntry.path(),
-                    crate::state::AutomationStarterFile::RunPlan.path(),
-                )
-                .expect("the run-plan dependency is valid"),
-                crate::state::ProjectSourceDependency::try_new(
-                    crate::state::AutomationStarterFile::PythonEntry.path(),
-                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
-                )
-                .expect("the environment-lock dependency is valid"),
-                crate::state::ProjectSourceDependency::try_new(
-                    crate::state::AutomationStarterFile::PythonEntry.path(),
-                    crate::state::AutomationStarterFile::Permissions.path(),
-                )
-                .expect("the permission-manifest dependency is valid"),
-            ],
-            [
-                crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::state::AutomationStarterFile::PythonEntry.path(),
-                    crate::state::ProjectSourceRole::AutomationEntry,
-                )
-                .expect("the Automation entry role is valid"),
-                crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::state::AutomationStarterFile::RunPlan.path(),
-                    crate::state::ProjectSourceRole::AutomationRunPlan,
-                )
-                .expect("the Automation run-plan role is valid"),
-                crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::state::AutomationStarterFile::EnvironmentLock.path(),
-                    crate::state::ProjectSourceRole::AutomationEnvironmentLock,
-                )
-                .expect("the Automation environment-lock role is valid"),
-                crate::state::ProjectSourceRoleBinding::try_new(
-                    crate::state::AutomationStarterFile::Permissions.path(),
-                    crate::state::ProjectSourceRole::AutomationPermissionManifest,
-                )
-                .expect("the Automation permission role is valid"),
-            ],
-        )
-        .expect("the built-in Automation workspace is valid");
-        // Python Automation is intentionally left unvalidated: only the exact
-        // packaged CPython worker may create that receipt.
-        let project_sources = ProjectSourceRegistry::try_from_bundles([automation])
-            .expect("the bootstrapped Code source registry is valid");
         let mut workspace = Self::default();
-        workspace.content.project_sources = project_sources;
         workspace.ensure_library_model(libraries);
         workspace
     }
 
-    /// Create a genuinely empty project under the requested identity. The
-    /// canonical startup fixture keeps the mockup's example sources, while
-    /// File > New must not force an unrelated circuit to compile or execute
-    /// demonstration code.
+    /// Create a genuinely empty project under the requested identity.
     ///
     /// The identity is adopted before the library model is ensured, so the
     /// seeded design library, top cell, active view, open tab, hierarchy root

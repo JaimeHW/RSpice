@@ -551,7 +551,6 @@ pub enum ChoicePreference {
     CertificateTrust,
     NetworkProxy,
     LocalProjectEncryption,
-    AutomationSandbox,
     DataResidency,
     ExtensionPolicy,
     ExtensionUpdates,
@@ -583,7 +582,7 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 56] = [
         Self::InterfaceScale,
         Self::EditorFontSize,
         Self::MinimumTouchTarget,
@@ -626,7 +625,6 @@ impl ChoicePreference {
         Self::CertificateTrust,
         Self::NetworkProxy,
         Self::LocalProjectEncryption,
-        Self::AutomationSandbox,
         Self::DataResidency,
         Self::ExtensionPolicy,
         Self::ExtensionUpdates,
@@ -687,7 +685,6 @@ impl ChoicePreference {
             Self::CertificateTrust => "certificate-trust",
             Self::NetworkProxy => "network-proxy",
             Self::LocalProjectEncryption => "local-project-encryption",
-            Self::AutomationSandbox => "automation-sandbox",
             Self::DataResidency => "data-residency",
             Self::ExtensionPolicy => "extension-policy",
             Self::ExtensionUpdates => "extension-updates",
@@ -728,7 +725,6 @@ impl ChoicePreference {
             | Self::QueuePriority
             | Self::UnavailableTarget
             | Self::NetworkProxy
-            | Self::AutomationSandbox
             | Self::ExtensionPolicy
             | Self::ExtensionUpdates => 2,
             Self::MinimumTouchTarget
@@ -800,7 +796,6 @@ pub enum TogglePreference {
     RestorePlotDocuments,
     SynchronizeResultFamilyCrossProbes,
     AutomaticDiagnostics,
-    PythonAutomationApi,
     RunDesignChecksOnSave,
     InvertWheelZoom,
     CanvasEdgePan,
@@ -809,7 +804,7 @@ pub enum TogglePreference {
 }
 
 impl TogglePreference {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -818,7 +813,6 @@ impl TogglePreference {
         Self::RestorePlotDocuments,
         Self::SynchronizeResultFamilyCrossProbes,
         Self::AutomaticDiagnostics,
-        Self::PythonAutomationApi,
         Self::RunDesignChecksOnSave,
         Self::InvertWheelZoom,
         Self::CanvasEdgePan,
@@ -836,7 +830,6 @@ impl TogglePreference {
             Self::RestorePlotDocuments => "restore-plot-documents",
             Self::SynchronizeResultFamilyCrossProbes => "synchronize-result-family-cross-probes",
             Self::AutomaticDiagnostics => "automatic-diagnostics",
-            Self::PythonAutomationApi => "python-automation-api",
             Self::RunDesignChecksOnSave => "run-design-checks-on-save",
             Self::InvertWheelZoom => "invert-wheel-zoom",
             Self::CanvasEdgePan => "canvas-edge-pan",

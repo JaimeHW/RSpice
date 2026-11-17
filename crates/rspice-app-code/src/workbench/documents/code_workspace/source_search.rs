@@ -159,9 +159,6 @@ pub fn open_active_source_search(parts: &mut CodeWorkspaceParts<'_>) -> Result<(
                 &active_path,
             )
         }
-        Some(ProjectSourceLanguage::RSpiceAutomation) => {
-            Err("The Netlist workspace searches its deck.".to_owned())
-        }
     }
 }
 
@@ -347,7 +344,6 @@ pub fn commit_source_search_replace(parts: &mut CodeWorkspaceParts<'_>) -> Resul
                 search.bundle_id,
             );
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     parts.code.source_search = None;
     let message = format!(
@@ -513,7 +509,6 @@ fn mask_source_comments(
     }
     match language {
         ProjectSourceLanguage::VerilogA => mask_verilog_comments(source),
-        ProjectSourceLanguage::RSpiceAutomation => Ok(source.to_owned()),
     }
 }
 

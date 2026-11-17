@@ -187,17 +187,14 @@ pub enum ProjectSourceIdParseError {
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectSourceLanguage {
     VerilogA,
-    #[serde(rename = "rspice-automation")]
-    RSpiceAutomation,
 }
 
 impl ProjectSourceLanguage {
-    pub const ALL: [Self; 2] = [Self::VerilogA, Self::RSpiceAutomation];
+    pub const ALL: [Self; 1] = [Self::VerilogA];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::VerilogA => "Verilog-A",
-            Self::RSpiceAutomation => "RSpice Automation",
         }
     }
 
@@ -205,7 +202,6 @@ impl ProjectSourceLanguage {
     pub const fn required_extension(self) -> &'static str {
         match self {
             Self::VerilogA => ".va",
-            Self::RSpiceAutomation => ".py",
         }
     }
 
@@ -216,7 +212,6 @@ impl ProjectSourceLanguage {
     const fn accepted_extensions(self) -> &'static [&'static str] {
         match self {
             Self::VerilogA => &[".va", ".vams", ".v"],
-            Self::RSpiceAutomation => &[".py"],
         }
     }
 
@@ -224,14 +219,12 @@ impl ProjectSourceLanguage {
     const fn accepted_extension_text(self) -> &'static str {
         match self {
             Self::VerilogA => "'.va', '.vams' or '.v'",
-            Self::RSpiceAutomation => "'.py'",
         }
     }
 
     const fn stable_name(self) -> &'static str {
         match self {
             Self::VerilogA => "verilog-a",
-            Self::RSpiceAutomation => "rspice-automation",
         }
     }
 }
@@ -626,51 +619,15 @@ pub struct ProjectSourceDependency {
     imported: String,
 }
 
-/// One document a bootstrapped Automation bundle starts with.
-///
-/// These names and bodies are starter-template content, never policy: the
-/// compiler that later reads the bundle resolves every document through the
-/// persisted logical paths and [`ProjectSourceRoleBinding`]s below, so a
-/// project that renames or rewrites its starter files keeps working.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum AutomationStarterFile {
-    #[default]
-    PythonEntry,
-    RunPlan,
-    EnvironmentLock,
-    Permissions,
-}
-
-impl AutomationStarterFile {
-    #[must_use]
-    pub const fn path(self) -> &'static str {
-        match self {
-            Self::PythonEntry => "characterize.py",
-            Self::RunPlan => "runplan.rspice.yaml",
-            Self::EnvironmentLock => "requirements.lock",
-            Self::Permissions => "permissions.toml",
-        }
-    }
-}
-
-pub const DEFAULT_AUTOMATION_PYTHON: &str = "from rspice import Project, ArtifactFormat\nproject = Project.open(\".\")\nplan = project.run_plans.load(\"runplan.rspice.yaml\")\npreview = plan.validate(target=\"local\", fail_closed=True)\nrun = preview.execute()\nrun.requirements.evaluate(profile=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([ArtifactFormat.JUNIT, ArtifactFormat.JSON, ArtifactFormat.PDF])\n";
-pub const DEFAULT_AUTOMATION_RUN_PLAN: &str = "schema: rspice.run-plan/v1\nname: Default plan\nsource: top.sp\nanalyses: [op, tran, ac, noise]\ncorners: all-qualified\nrequirements: release\nartifacts: [junit, summary-json, verification-pdf]\n";
-pub const DEFAULT_ENVIRONMENT_LOCK: &str = "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\nrspice-api = \">=1.0.0,<2.0.0\"\nbrowser-runtime = \"=314.0.2\"\nenvironment_digest = \"sha256:d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518\"\n";
-pub const DEFAULT_AUTOMATION_PERMISSIONS: &str = "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = [\"RSPICE_LICENSE_TOKEN\"]\nsecret_logging = \"redact\"\n";
-
 /// Semantic role of one document in a project source closure.
 ///
 /// A role is persisted project configuration. It is never inferred from a
-/// mockup filename at execution time. More than one Automation run plan may be
-/// retained; singleton roles are bound to exactly one portable logical path.
+/// filename at compile time, and each role is bound to exactly one portable
+/// logical path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectSourceRole {
     VerilogABuildProfile,
-    AutomationEntry,
-    AutomationRunPlan,
-    AutomationEnvironmentLock,
-    AutomationPermissionManifest,
 }
 
 impl ProjectSourceRole {
@@ -678,29 +635,7 @@ impl ProjectSourceRole {
     pub const fn label(self) -> &'static str {
         match self {
             Self::VerilogABuildProfile => "Verilog-A build profile",
-            Self::AutomationEntry => "Automation entry",
-            Self::AutomationRunPlan => "Automation run plan",
-            Self::AutomationEnvironmentLock => "Automation environment lock",
-            Self::AutomationPermissionManifest => "Automation permission manifest",
         }
-    }
-
-    const fn allows_multiple(self) -> bool {
-        matches!(self, Self::AutomationRunPlan)
-    }
-
-    const fn is_allowed_for(self, language: ProjectSourceLanguage) -> bool {
-        matches!(
-            (self, language),
-            (Self::VerilogABuildProfile, ProjectSourceLanguage::VerilogA)
-                | (
-                    Self::AutomationEntry
-                        | Self::AutomationRunPlan
-                        | Self::AutomationEnvironmentLock
-                        | Self::AutomationPermissionManifest,
-                    ProjectSourceLanguage::RSpiceAutomation
-                )
-        )
     }
 }
 
@@ -1548,19 +1483,6 @@ impl ProjectSourceRegistry {
             .replace_file_content(logical_path, content)
     }
 
-    pub fn set_bundle_non_entry_role(
-        &mut self,
-        id: ProjectSourceId,
-        logical_path: &str,
-        role: Option<ProjectSourceRole>,
-    ) -> Result<bool, ProjectSourceError> {
-        self.bundles
-            .iter_mut()
-            .find(|bundle| bundle.id == id)
-            .ok_or(ProjectSourceError::MissingIdentity { id })?
-            .set_non_entry_role(logical_path, role)
-    }
-
     /// Replace multiple documents as one source-graph transaction. Every
     /// candidate is validated on a private registry clone; any missing path,
     /// duplicate path, size violation, or revision failure leaves `self`
@@ -1975,11 +1897,6 @@ pub enum ProjectSourceError {
         logical_path: String,
         dependency: String,
     },
-    #[error("{role:?} role is not valid for {language} source bundles")]
-    RoleNotAllowedForLanguage {
-        role: ProjectSourceRole,
-        language: ProjectSourceLanguage,
-    },
     #[error("{role:?} role references missing source file '{logical_path}'")]
     MissingRoleEndpoint {
         logical_path: String,
@@ -1989,13 +1906,6 @@ pub enum ProjectSourceError {
     FileHasMultipleRoles { logical_path: String },
     #[error("source role bindings must be strictly sorted and unique")]
     UnsortedRoles,
-    #[error("Automation bundle must contain exactly one entry role bound to its root")]
-    MissingAutomationEntryRole,
-    #[error("Automation entry '{logical_path}' must be the bundle root '{root_path}'")]
-    AutomationEntryMustBeRoot {
-        logical_path: String,
-        root_path: String,
-    },
     #[error("{role:?} is already bound to '{first}' and cannot also bind '{second}'")]
     DuplicateSingletonRole {
         role: ProjectSourceRole,
@@ -2007,8 +1917,6 @@ pub enum ProjectSourceError {
         logical_path: String,
         role: ProjectSourceRole,
     },
-    #[error("Automation entry role for '{logical_path}' cannot be unbound")]
-    CannotUnbindAutomationEntry { logical_path: String },
     #[error("source file '{file_name}' has stale validation evidence")]
     StaleValidationIdentity { file_name: String },
     #[error("source bundle {id} has stale validation evidence")]
@@ -2093,27 +2001,9 @@ fn validate_source_content(file_name: &str, content: &str) -> Result<(), Project
     Ok(())
 }
 
-fn default_source_roles(
-    language: ProjectSourceLanguage,
-    root_path: &str,
-) -> Result<Vec<ProjectSourceRoleBinding>, ProjectSourceError> {
-    if language == ProjectSourceLanguage::RSpiceAutomation {
-        Ok(vec![ProjectSourceRoleBinding::try_new(
-            root_path,
-            ProjectSourceRole::AutomationEntry,
-        )?])
-    } else {
-        Ok(Vec::new())
-    }
-}
-
 const fn source_role_stable_name(role: ProjectSourceRole) -> &'static str {
     match role {
         ProjectSourceRole::VerilogABuildProfile => "veriloga-build-profile",
-        ProjectSourceRole::AutomationEntry => "automation-entry",
-        ProjectSourceRole::AutomationRunPlan => "automation-run-plan",
-        ProjectSourceRole::AutomationEnvironmentLock => "automation-environment-lock",
-        ProjectSourceRole::AutomationPermissionManifest => "automation-permission-manifest",
     }
 }
 
@@ -2142,18 +2032,11 @@ fn validate_project_source_file_name(
     })?;
     let leaf = file_name.rsplit('/').next().unwrap_or_default();
     let lowercase = leaf.to_ascii_lowercase();
-    // Version-one projects used a single `.rspice` workflow document. Keep
-    // those exact sources loadable so the workspace can offer an explicit,
-    // source-preserving migration to the Python/YAML/TOML bundle. New source
-    // roots use the qualified `.py` contract exclusively.
-    let legacy_automation = language == ProjectSourceLanguage::RSpiceAutomation
-        && lowercase.ends_with(".rspice")
-        && leaf.len() > ".rspice".len();
     let accepted = language
         .accepted_extensions()
         .iter()
         .any(|extension| lowercase.ends_with(extension) && leaf.len() > extension.len());
-    if !accepted && !legacy_automation {
+    if !accepted {
         return Err(ProjectSourceError::InvalidFileNameExtension {
             language,
             accepted: language.accepted_extension_text(),

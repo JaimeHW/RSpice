@@ -182,7 +182,6 @@ pub(crate) fn active_bundle_path(
                 })
             })
             .map(|selection| selection.logical_path.clone()),
-        crate::state::ProjectSourceLanguage::RSpiceAutomation => None,
     };
     explicit.or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
 }
@@ -201,9 +200,6 @@ pub fn source_editor_id(
     match language {
         crate::state::ProjectSourceLanguage::VerilogA => {
             egui::Id::new(("workbench.veriloga.source", bundle_id, logical_path))
-        }
-        crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-            egui::Id::new(("workbench.automation.source", logical_path))
         }
     }
 }
@@ -233,7 +229,6 @@ pub fn select_source_document(
                 logical_path: logical_path.to_owned(),
             });
         }
-        ProjectSourceLanguage::RSpiceAutomation => {}
     }
     Some(bundle_id)
 }

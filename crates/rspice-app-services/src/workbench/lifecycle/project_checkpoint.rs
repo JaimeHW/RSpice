@@ -1929,7 +1929,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_closes_over_arbitrary_netlist_veriloga_and_automation_sources() {
+    fn checkpoint_closes_over_arbitrary_netlist_and_veriloga_sources() {
         use crate::state::{
             ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
             ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceRole, ProjectSourceRoleBinding,
@@ -1953,72 +1953,28 @@ mod tests {
         let veriloga_root =
             "`include \"physics/thermal_constants.vams\"\nmodule sensor_core; endmodule\n";
         let veriloga_dependency = "`define ROOM_TEMPERATURE 300.15\n";
-        let automation_entry =
-            "from automation_helpers.naming import run_label\nprint(run_label('tt'))\n";
-        let automation_helper = "def run_label(corner):\n    return f'production-{corner}'\n";
-        let run_plan = "schema: rspice.run-plan/v1\nanalyses: [op]\n";
-        let environment_lock =
-            "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\n";
-        let permission_manifest = "schema = \"rspice.permissions/v1\"\nnetwork = \"deny\"\n";
+        let build_profile = "[compiler]\nwarnings = \"error\"\n";
 
-        let veriloga = ProjectSourceBundle::try_new(
+        let veriloga = ProjectSourceBundle::try_new_with_roles(
             ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
             ProjectSourceLanguage::VerilogA,
             "devices/sensor_core.va",
             veriloga_root,
-            [file("physics/thermal_constants.vams", veriloga_dependency)],
-            [dependency(
-                "devices/sensor_core.va",
-                "physics/thermal_constants.vams",
+            [
+                file("physics/thermal_constants.vams", veriloga_dependency),
+                file("build/release.profile", build_profile),
+            ],
+            [
+                dependency("devices/sensor_core.va", "physics/thermal_constants.vams"),
+                dependency("devices/sensor_core.va", "build/release.profile"),
+            ],
+            [role(
+                "build/release.profile",
+                ProjectSourceRole::VerilogABuildProfile,
             )],
         )
         .expect("Verilog-A source closure is valid");
         let veriloga_id = veriloga.id();
-
-        let automation = ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
-            ProjectSourceLanguage::RSpiceAutomation,
-            "flows/production_sweep.py",
-            automation_entry,
-            [
-                file("automation_helpers/naming.py", automation_helper),
-                file("plans/qualified-release.plan", run_plan),
-                file("environment/native-runtime.lock", environment_lock),
-                file("security/least-authority.policy", permission_manifest),
-            ],
-            [
-                dependency("flows/production_sweep.py", "automation_helpers/naming.py"),
-                dependency("flows/production_sweep.py", "plans/qualified-release.plan"),
-                dependency(
-                    "flows/production_sweep.py",
-                    "environment/native-runtime.lock",
-                ),
-                dependency(
-                    "flows/production_sweep.py",
-                    "security/least-authority.policy",
-                ),
-            ],
-            [
-                role(
-                    "flows/production_sweep.py",
-                    ProjectSourceRole::AutomationEntry,
-                ),
-                role(
-                    "plans/qualified-release.plan",
-                    ProjectSourceRole::AutomationRunPlan,
-                ),
-                role(
-                    "environment/native-runtime.lock",
-                    ProjectSourceRole::AutomationEnvironmentLock,
-                ),
-                role(
-                    "security/least-authority.policy",
-                    ProjectSourceRole::AutomationPermissionManifest,
-                ),
-            ],
-        )
-        .expect("Automation source closure is valid");
-        let automation_id = automation.id();
 
         let mut state = ServicesHost::default();
         assert!(
@@ -2029,8 +1985,7 @@ mod tests {
                 .make_netlist_editable_copy(netlist)
         );
         state.model.workspace.content.project_sources =
-            ProjectSourceRegistry::try_from_bundles([veriloga, automation])
-                .expect("source registry is valid");
+            ProjectSourceRegistry::try_from_bundles([veriloga]).expect("source registry is valid");
         state.model.workspace.content.project_sources_dirty = true;
 
         let (manifest, serialized) = prepare_checkpoint(&state, ProjectCheckpointReason::Manual)
@@ -2061,32 +2016,13 @@ mod tests {
             Some(veriloga_dependency)
         );
 
-        let restored_automation = restored
-            .file
-            .workspace
-            .project_sources
-            .get_bundle(automation_id)
-            .expect("Automation closure restores by stable identity");
         assert_eq!(
-            restored_automation.root().logical_path(),
-            "flows/production_sweep.py"
-        );
-        assert_eq!(restored_automation.root().content(), automation_entry);
-        assert_eq!(
-            restored_automation.file_content("automation_helpers/naming.py"),
-            Some(automation_helper)
+            restored_veriloga.file_content("build/release.profile"),
+            Some(build_profile)
         );
         assert_eq!(
-            restored_automation.role_for_path("plans/qualified-release.plan"),
-            Some(ProjectSourceRole::AutomationRunPlan)
-        );
-        assert_eq!(
-            restored_automation.role_for_path("environment/native-runtime.lock"),
-            Some(ProjectSourceRole::AutomationEnvironmentLock)
-        );
-        assert_eq!(
-            restored_automation.role_for_path("security/least-authority.policy"),
-            Some(ProjectSourceRole::AutomationPermissionManifest)
+            restored_veriloga.role_for_path("build/release.profile"),
+            Some(ProjectSourceRole::VerilogABuildProfile)
         );
 
         assert!(

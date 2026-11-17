@@ -479,23 +479,6 @@ impl ProjectWorkspace {
         Ok(changed)
     }
 
-    /// Assign or clear one persisted non-entry Automation role in a single
-    /// dirty source-graph transaction.
-    pub fn set_project_source_bundle_non_entry_role(
-        &mut self,
-        bundle_id: rspice_design::project_sources::ProjectSourceId,
-        logical_path: &str,
-        role: Option<rspice_design::project_sources::ProjectSourceRole>,
-    ) -> Result<bool, ProjectSourceError> {
-        let changed =
-            self.project_sources
-                .set_bundle_non_entry_role(bundle_id, logical_path, role)?;
-        if changed {
-            self.project_sources_dirty = true;
-        }
-        Ok(changed)
-    }
-
     /// Insert a new project-owned source bundle and participate in the
     /// ordinary project dirty/save/recovery lifecycle.
     pub fn insert_project_source_bundle(

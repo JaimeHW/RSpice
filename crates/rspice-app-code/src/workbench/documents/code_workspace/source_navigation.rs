@@ -43,8 +43,8 @@ pub(crate) enum SourceOutlineGroup {
 /// One row of a source file's outline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceOutlineRow {
-    /// The group a Verilog-A row belongs to. An Automation row has none.
-    pub group: Option<SourceOutlineGroup>,
+    /// The group the row belongs to.
+    pub group: SourceOutlineGroup,
     pub name: String,
     /// What the declaration says about `name`, in the source's own words:
     /// `inout electrical`, `real = 1m from (0:inf)`.
@@ -154,23 +154,6 @@ fn derive_navigation(
                 includes: veriloga_includes(bundle, logical_path),
             }
         }
-        ProjectSourceLanguage::RSpiceAutomation => SourceNavigation {
-            outline: index
-                .map(|index| {
-                    index
-                        .document_symbols(logical_path)
-                        .into_iter()
-                        .map(|symbol| SourceOutlineRow {
-                            group: None,
-                            name: symbol.name.clone(),
-                            detail: symbol.signature.clone(),
-                            line: symbol.line,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            includes: Vec::new(),
-        },
     }
 }
 
@@ -233,10 +216,10 @@ fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceO
         if text.authored(span)
             && !rows[first..]
                 .iter()
-                .any(|row| row.group == Some(group) && row.name == name)
+                .any(|row| row.group == group && row.name == name)
         {
             rows.push(SourceOutlineRow {
-                group: Some(group),
+                group,
                 name: name.to_owned(),
                 detail,
                 line: text.line(span),
@@ -577,10 +560,10 @@ fn indexed_veriloga_outline(
         };
         if !rows
             .iter()
-            .any(|row| row.group == Some(group) && row.name == symbol.name)
+            .any(|row| row.group == group && row.name == symbol.name)
         {
             rows.push(SourceOutlineRow {
-                group: Some(group),
+                group,
                 name: symbol.name.clone(),
                 detail: String::new(),
                 line: symbol.line,

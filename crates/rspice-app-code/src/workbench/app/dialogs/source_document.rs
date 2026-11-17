@@ -383,16 +383,6 @@ pub(super) fn role_label(
             crate::state::ProjectSourceRole::VerilogABuildProfile => {
                 MessageId::CodeSourceRoleBuildProfile
             }
-            crate::state::ProjectSourceRole::AutomationEntry => {
-                MessageId::CodeSourceRoleAutomationEntry
-            }
-            crate::state::ProjectSourceRole::AutomationRunPlan => MessageId::CodeSourceRoleRunPlan,
-            crate::state::ProjectSourceRole::AutomationEnvironmentLock => {
-                MessageId::CodeSourceRoleEnvironmentLock
-            }
-            crate::state::ProjectSourceRole::AutomationPermissionManifest => {
-                MessageId::CodeSourceRolePermissionManifest
-            }
         }),
     )
 }

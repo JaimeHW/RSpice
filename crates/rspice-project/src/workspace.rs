@@ -170,8 +170,8 @@ pub struct ProjectWorkspace {
     /// projected into `netlist_source`/`netlist_document` and may execute.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retained_netlist_decks: Vec<RetainedOwnedNetlistDeck>,
-    /// Project-owned source documents shown by the Verilog-A and Automation
-    /// pages of the Code workspace. Older projects intentionally restore an
+    /// Project-owned source documents, edited where their Verilog-A cell
+    /// views are open. Older projects intentionally restore an
     /// empty registry rather than receiving demonstration content.
     #[serde(default, skip_serializing_if = "ProjectSourceRegistry::is_empty")]
     pub project_sources: ProjectSourceRegistry,

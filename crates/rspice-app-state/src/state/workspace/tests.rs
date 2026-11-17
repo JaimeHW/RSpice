@@ -6,10 +6,7 @@
 
 use super::*;
 use crate::product::RunId;
-use crate::state::{
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceOwner,
-    ProjectSourceRole,
-};
+use crate::state::{AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceOwner};
 
 fn reference(cell: &str) -> CellViewRef {
     CellViewRef::new("work", cell, "schematic")
@@ -1972,83 +1969,15 @@ fn legacy_workspaces_restore_with_no_project_source_examples() {
     assert!(!restored.content.project_sources_dirty);
 }
 
+/// A Verilog-A module is a cell view, so a new project ships no
+/// demonstration module and no project source of any kind.
 #[test]
-fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
+fn a_new_project_carries_no_project_source() {
     let mut libraries = LibraryManager::default();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let automation = workspace
-        .content
-        .project_sources
-        .get(ProjectSourceLanguage::RSpiceAutomation)
-        .unwrap();
 
-    // A Verilog-A module is a cell view. A new project ships no demonstration
-    // module and no project-wide Verilog-A source of any kind.
-    assert!(
-        workspace
-            .content
-            .project_sources
-            .iter_bundles()
-            .all(|bundle| bundle.language() != ProjectSourceLanguage::VerilogA),
-        "a new project carries no Verilog-A bundle"
-    );
-    assert_eq!(automation.file_name(), "characterize.py");
-    assert_eq!(
-        automation.content(),
-        crate::state::DEFAULT_AUTOMATION_PYTHON,
-    );
-    let automation_bundle = workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-            ProjectSourceLanguage::RSpiceAutomation,
-        ))
-        .expect("bootstrapped Automation bundle");
-    assert_eq!(
-        automation_bundle
-            .files()
-            .iter()
-            .map(|file| (file.logical_path(), file.content()))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                "permissions.toml",
-                crate::state::DEFAULT_AUTOMATION_PERMISSIONS,
-            ),
-            ("requirements.lock", crate::state::DEFAULT_ENVIRONMENT_LOCK,),
-            (
-                "runplan.rspice.yaml",
-                crate::state::DEFAULT_AUTOMATION_RUN_PLAN,
-            ),
-        ]
-    );
-    assert_eq!(automation_bundle.dependencies().len(), 3);
-    assert_eq!(
-        automation_bundle
-            .roles()
-            .iter()
-            .map(|binding| (binding.logical_path(), binding.role()))
-            .collect::<Vec<_>>(),
-        vec![
-            ("characterize.py", ProjectSourceRole::AutomationEntry),
-            ("runplan.rspice.yaml", ProjectSourceRole::AutomationRunPlan,),
-            (
-                "requirements.lock",
-                ProjectSourceRole::AutomationEnvironmentLock,
-            ),
-            (
-                "permissions.toml",
-                ProjectSourceRole::AutomationPermissionManifest,
-            ),
-        ]
-    );
+    assert!(workspace.content.project_sources.is_empty());
     assert!(!workspace.any_dirty());
-    assert!(
-        ProjectWorkspace::default()
-            .content
-            .project_sources
-            .is_empty()
-    );
 }
 
 #[test]
@@ -2201,12 +2130,24 @@ fn imported_source_replacement_is_monotonic_validated_and_atomic() {
 fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
     let mut libraries = LibraryManager::default();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    workspace
+        .content
+        .project_sources
+        .insert(
+            ProjectSourceDocument::try_new(
+                "shared.va",
+                ProjectSourceLanguage::VerilogA,
+                "module shared; endmodule\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
 
     workspace
         .content
         .replace_project_source(
-            ProjectSourceLanguage::RSpiceAutomation,
-            "plan = project.plan(\"Unicode Δ\")".to_owned(),
+            ProjectSourceLanguage::VerilogA,
+            "module shared; // Unicode Δ\nendmodule\n".to_owned(),
         )
         .unwrap();
     assert!(workspace.content.project_sources_dirty);
@@ -2216,14 +2157,14 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
 
     let identity = workspace
         .content
-        .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
+        .mark_project_source_validated(ProjectSourceLanguage::VerilogA)
         .unwrap();
     assert!(workspace.content.project_sources_dirty);
     assert_eq!(
         workspace
             .content
             .project_sources
-            .get(ProjectSourceLanguage::RSpiceAutomation)
+            .get(ProjectSourceLanguage::VerilogA)
             .unwrap()
             .validated_identity(),
         Some(identity)
@@ -2233,7 +2174,7 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
 
     let repeated = workspace
         .content
-        .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
+        .mark_project_source_validated(ProjectSourceLanguage::VerilogA)
         .unwrap();
     assert_eq!(repeated, identity);
     assert!(!workspace.any_dirty());

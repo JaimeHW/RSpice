@@ -112,7 +112,6 @@ pub fn navigate_source_bundle(
                     logical_path: definition.logical_path.clone(),
                 });
             }
-            crate::state::ProjectSourceLanguage::RSpiceAutomation => {}
         }
     }
     // The page hands this to the editor it draws next, which is the

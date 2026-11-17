@@ -16,8 +16,6 @@ impl ProjectSourceBundle {
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
     ) -> Result<Self, ProjectSourceError> {
-        let root_path = root_path.into();
-        let roles = default_source_roles(language, &root_path)?;
         Self::try_new_with_id_and_roles(
             ProjectSourceId::new(),
             owner,
@@ -25,14 +23,12 @@ impl ProjectSourceBundle {
             (root_path, root_content),
             files,
             dependencies,
-            roles,
+            [],
         )
     }
 
-    /// Construct a source bundle with explicit persisted semantic roles.
-    /// Callers creating Automation bundles should use this constructor so
-    /// run-plan, environment, and permission documents never depend on path
-    /// or content heuristics.
+    /// Construct a source bundle with explicit persisted semantic roles, so a
+    /// build profile never depends on path or content heuristics.
     pub fn try_new_with_roles(
         owner: ProjectSourceOwner,
         language: ProjectSourceLanguage,
@@ -62,8 +58,6 @@ impl ProjectSourceBundle {
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
     ) -> Result<Self, ProjectSourceError> {
-        let root_path = root_path.into();
-        let roles = default_source_roles(language, &root_path)?;
         Self::try_new_with_id_and_roles(
             id,
             owner,
@@ -71,7 +65,7 @@ impl ProjectSourceBundle {
             (root_path, root_content),
             files,
             dependencies,
-            roles,
+            [],
         )
     }
 
@@ -120,7 +114,7 @@ impl ProjectSourceBundle {
             owner: ProjectSourceOwner::code_workspace(document.language),
             shared_with: Vec::new(),
             language: document.language,
-            roles: default_source_roles(document.language, document.logical_path())?,
+            roles: Vec::new(),
             root: document,
             files: Vec::new(),
             dependencies: Vec::new(),
@@ -318,67 +312,6 @@ impl ProjectSourceBundle {
             .iter()
             .find(|binding| path_key(binding.logical_path()) == key)
             .map(ProjectSourceRoleBinding::role)
-    }
-
-    /// Replace the optional non-entry Automation role for one retained source
-    /// as a single source-graph revision. Singleton roles move atomically from
-    /// their prior document, so the project is never left in a transient state
-    /// with two permission manifests or no environment lock merely because a
-    /// UI operation was interrupted between unbind and bind calls.
-    pub fn set_non_entry_role(
-        &mut self,
-        logical_path: &str,
-        role: Option<ProjectSourceRole>,
-    ) -> Result<bool, ProjectSourceError> {
-        validate_logical_path(logical_path)?;
-        if self.language != ProjectSourceLanguage::RSpiceAutomation {
-            return Err(ProjectSourceError::RoleNotAllowedForLanguage {
-                role: role.unwrap_or(ProjectSourceRole::AutomationEntry),
-                language: self.language,
-            });
-        }
-        if role == Some(ProjectSourceRole::AutomationEntry) {
-            return Err(ProjectSourceError::CannotUnbindAutomationEntry {
-                logical_path: logical_path.to_owned(),
-            });
-        }
-        let canonical_path = self
-            .logical_path_with_original_case(logical_path)
-            .ok_or_else(|| ProjectSourceError::MissingFile {
-                logical_path: logical_path.to_owned(),
-            })?
-            .to_owned();
-        if canonical_path.eq_ignore_ascii_case(self.root.logical_path()) {
-            return Err(ProjectSourceError::CannotUnbindAutomationEntry {
-                logical_path: canonical_path,
-            });
-        }
-        let current = self.role_for_path(&canonical_path);
-        if current == role {
-            return Ok(false);
-        }
-
-        let mut candidate = self.clone();
-        candidate.record_revision_snapshot(self);
-        let requested_key = path_key(&canonical_path);
-        candidate.roles.retain(|binding| {
-            let same_document = path_key(binding.logical_path()) == requested_key;
-            let displaced_singleton = role
-                .is_some_and(|requested| !requested.allows_multiple() && binding.role == requested);
-            binding.role == ProjectSourceRole::AutomationEntry
-                || (!same_document && !displaced_singleton)
-        });
-        if let Some(role) = role {
-            candidate
-                .roles
-                .push(ProjectSourceRoleBinding::try_new(&canonical_path, role)?);
-        }
-        candidate.advance_revision()?;
-        candidate.invalidate_validation();
-        candidate.canonicalize();
-        candidate.validate()?;
-        *self = candidate;
-        Ok(true)
     }
 
     /// Return the exact retained UTF-8 source for one portable logical path.
@@ -717,12 +650,6 @@ impl ProjectSourceBundle {
     ) -> Result<bool, ProjectSourceError> {
         validate_logical_path(importer)?;
         file.validate()?;
-        if !role.is_allowed_for(self.language) {
-            return Err(ProjectSourceError::RoleNotAllowedForLanguage {
-                role,
-                language: self.language,
-            });
-        }
         if self.contains_file(file.logical_path()) {
             return Err(ProjectSourceError::DuplicateLogicalPath {
                 logical_path: file.logical_path().to_owned(),
@@ -733,9 +660,7 @@ impl ProjectSourceBundle {
                 logical_path: importer.to_owned(),
             });
         }
-        if !role.allows_multiple()
-            && let Some(binding) = self.roles.iter().find(|binding| binding.role == role)
-        {
+        if let Some(binding) = self.roles.iter().find(|binding| binding.role == role) {
             return Err(ProjectSourceError::DuplicateSingletonRole {
                 role,
                 first: binding.logical_path.clone(),
@@ -1032,8 +957,7 @@ impl ProjectSourceBundle {
         } else {
             candidate.files.clear();
             candidate.dependencies.clear();
-            candidate.roles =
-                default_source_roles(candidate.language, candidate.root.logical_path())?;
+            candidate.roles.clear();
         }
         candidate.advance_revision()?;
         candidate.invalidate_validation();
@@ -1159,12 +1083,6 @@ impl ProjectSourceBundle {
         let mut role_paths = BTreeSet::new();
         let mut singleton_roles = BTreeMap::new();
         for binding in &self.roles {
-            if !binding.role.is_allowed_for(self.language) {
-                return Err(ProjectSourceError::RoleNotAllowedForLanguage {
-                    role: binding.role,
-                    language: self.language,
-                });
-            }
             validate_logical_path(binding.logical_path())?;
             let path = path_key(binding.logical_path());
             if !paths.contains_key(&path) {
@@ -1178,9 +1096,7 @@ impl ProjectSourceBundle {
                     logical_path: binding.logical_path.clone(),
                 });
             }
-            if !binding.role.allows_multiple()
-                && let Some(first) = singleton_roles.insert(binding.role, binding.logical_path())
-            {
+            if let Some(first) = singleton_roles.insert(binding.role, binding.logical_path()) {
                 return Err(ProjectSourceError::DuplicateSingletonRole {
                     role: binding.role,
                     first: first.to_owned(),
@@ -1196,23 +1112,6 @@ impl ProjectSourceBundle {
             }
             previous_role_key = Some(key);
         }
-        if self.language == ProjectSourceLanguage::RSpiceAutomation {
-            let entries = self
-                .roles
-                .iter()
-                .filter(|binding| binding.role == ProjectSourceRole::AutomationEntry)
-                .collect::<Vec<_>>();
-            if entries.len() != 1 {
-                return Err(ProjectSourceError::MissingAutomationEntryRole);
-            }
-            if path_key(entries[0].logical_path()) != root_key {
-                return Err(ProjectSourceError::AutomationEntryMustBeRoot {
-                    logical_path: entries[0].logical_path.clone(),
-                    root_path: self.root.logical_path().to_owned(),
-                });
-            }
-        }
-
         validate_dependency_graph(&root_key, &graph)?;
         let mut previous_qualification_sequence = 0_u64;
         for record in &self.qualifications {

@@ -328,16 +328,20 @@ mod tests {
     #[test]
     fn code_sources_participate_in_the_code_document_digest() {
         let mut state = ServicesHost::default();
-        assert!(
-            state
-                .model
-                .workspace
-                .content
-                .project_sources
-                .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
-                .is_some(),
-            "a new project carries its Automation workspace"
-        );
+        state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .insert(
+                crate::state::ProjectSourceDocument::try_new(
+                    "shared.va",
+                    crate::state::ProjectSourceLanguage::VerilogA,
+                    "module shared; endmodule\n",
+                )
+                .unwrap(),
+            )
+            .unwrap();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
         state
@@ -345,8 +349,8 @@ mod tests {
             .workspace
             .content
             .replace_project_source(
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-                "print('edited')\n".to_owned(),
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "module shared_edited; endmodule\n".to_owned(),
             )
             .unwrap();
         let current = super::super::snapshot(&state).expect("edited snapshot");

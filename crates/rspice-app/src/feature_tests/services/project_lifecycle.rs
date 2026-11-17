@@ -108,18 +108,30 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
 }
 
-/// Rewrite the root of the project's Automation workspace, the code-workspace
-/// source every new project carries.
-fn edit_automation_source(state: &mut AppState, content: &str) {
-    state
-        .model
-        .workspace
-        .content
-        .replace_project_source(
-            rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation,
-            content.to_owned(),
-        )
-        .unwrap();
+/// Write `content` as the project-wide Verilog-A source, the code-workspace
+/// source a project-wide edit reaches, creating it the first time.
+fn edit_code_workspace_source(state: &mut AppState, content: &str) {
+    let language = rspice_app_state::state::ProjectSourceLanguage::VerilogA;
+    let project = &mut state.model.workspace.content;
+    if project.project_sources.get(language).is_some() {
+        project
+            .replace_project_source(language, content.to_owned())
+            .unwrap();
+    } else {
+        project
+            .insert_project_source_bundle(
+                rspice_app_state::state::ProjectSourceBundle::try_new(
+                    rspice_app_state::state::ProjectSourceOwner::code_workspace(language),
+                    language,
+                    "shared.va",
+                    content,
+                    [],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
 }
 
 fn insert_cell_veriloga_source(
@@ -508,7 +520,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
 #[test]
 fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() {
     let mut state = AppState::default();
-    edit_automation_source(&mut state, "print('workspace')\n");
+    edit_code_workspace_source(&mut state, "module workspace; endmodule\n");
     let code_workspace = state.model.workspace.content.project_sources.clone();
     let baseline = snapshot(&state).expect("baseline");
     let (reference, source_id) = insert_cell_veriloga_source(
@@ -540,8 +552,8 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
             .workspace
             .content
             .project_sources
-            .get(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation),
-        code_workspace.get(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation)
+            .get(rspice_app_state::state::ProjectSourceLanguage::VerilogA),
+        code_workspace.get(rspice_app_state::state::ProjectSourceLanguage::VerilogA)
     );
     assert!(
         state
@@ -564,7 +576,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
         .project_lifecycle
         .accept_project(baseline.clone(), None);
     state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-    edit_automation_source(&mut state, "print('edited')\n");
+    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
     assert!(state.model.workspace.content.project_sources_dirty);
 
     revert_document(&mut state, ProjectDocumentId::NetlistSource).unwrap();

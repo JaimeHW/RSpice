@@ -302,14 +302,6 @@ const fn role_message(role: Option<ProjectSourceRole>) -> Option<MessageId> {
         Some(ProjectSourceRole::VerilogABuildProfile) => {
             Some(MessageId::CodeNavigatorRoleBuildProfile)
         }
-        Some(ProjectSourceRole::AutomationEntry) => Some(MessageId::CodeNavigatorRoleEntry),
-        Some(ProjectSourceRole::AutomationRunPlan) => Some(MessageId::CodeNavigatorRoleRunPlan),
-        Some(ProjectSourceRole::AutomationEnvironmentLock) => {
-            Some(MessageId::CodeNavigatorRoleEnvironmentLock)
-        }
-        Some(ProjectSourceRole::AutomationPermissionManifest) => {
-            Some(MessageId::CodeNavigatorRolePermissions)
-        }
         None => None,
     }
 }
@@ -649,59 +641,42 @@ fn outline_section(
     );
     let mut group = None;
     for row in &navigation.outline {
-        if row.group != group {
-            if let Some(next) = row.group {
-                group_caption(ui, &messages.text(outline_group_title(next)));
-            }
-            group = row.group;
+        if group != Some(row.group) {
+            group_caption(ui, &messages.text(outline_group_title(row.group)));
+            group = Some(row.group);
         }
-        let clicked = match row.group {
-            Some(kind) => {
-                // The name is the row's identity and reads whole; the detail
-                // takes what is left beside it and elides. A quarter of the
-                // row is the icon column and the gaps around the detail.
-                let name_width = ui
-                    .painter()
-                    .layout_no_wrap(
-                        row.name.clone(),
-                        theme::sans(tokens::FS_0, FontWeight::Regular),
-                        egui::Color32::PLACEHOLDER,
-                    )
-                    .size()
-                    .x;
-                let detail = elide_text(
-                    ui,
-                    &row.detail,
-                    &theme::mono(tokens::FS_0, FontWeight::Regular),
-                    ui.available_width() * 0.75 - name_width,
-                );
-                let response = nav_row_response(
-                    ui,
-                    outline_group_icon(kind),
-                    &row.name,
-                    false,
-                    (!detail.is_empty()).then_some(detail.as_str()),
-                );
-                let response = if detail == row.detail {
-                    response
-                } else {
-                    response.on_hover_text(&row.detail)
-                };
-                response.clicked()
-            }
-            // An Automation outline is a list of the lines that declare.
-            None => nav_row_response(
+        let clicked = {
+            // The name is the row's identity and reads whole; the detail
+            // takes what is left beside it and elides. A quarter of the
+            // row is the icon column and the gaps around the detail.
+            let name_width = ui
+                .painter()
+                .layout_no_wrap(
+                    row.name.clone(),
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    egui::Color32::PLACEHOLDER,
+                )
+                .size()
+                .x;
+            let detail = elide_text(
                 ui,
-                WorkbenchIcon::Code,
-                &if row.detail.is_empty() {
-                    row.name.clone()
-                } else {
-                    format!("{} {}", row.name, row.detail)
-                },
+                &row.detail,
+                &theme::mono(tokens::FS_0, FontWeight::Regular),
+                ui.available_width() * 0.75 - name_width,
+            );
+            let response = nav_row_response(
+                ui,
+                outline_group_icon(row.group),
+                &row.name,
                 false,
-                None,
-            )
-            .clicked(),
+                (!detail.is_empty()).then_some(detail.as_str()),
+            );
+            let response = if detail == row.detail {
+                response
+            } else {
+                response.on_hover_text(&row.detail)
+            };
+            response.clicked()
         };
         if clicked {
             *request = Some(RailRequest::Reveal {
@@ -794,15 +769,9 @@ fn used_in_section(
 
 fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {
     match role {
-        // Governed policy rather than authored logic: build settings, the
-        // pinned environment, and the permission manifest.
-        Some(
-            ProjectSourceRole::VerilogABuildProfile
-            | ProjectSourceRole::AutomationEnvironmentLock
-            | ProjectSourceRole::AutomationPermissionManifest,
-        ) => WorkbenchIcon::Sliders,
-        Some(ProjectSourceRole::AutomationRunPlan) => WorkbenchIcon::File,
-        Some(ProjectSourceRole::AutomationEntry) | None => WorkbenchIcon::Code,
+        // Build settings rather than authored logic.
+        Some(ProjectSourceRole::VerilogABuildProfile) => WorkbenchIcon::Sliders,
+        None => WorkbenchIcon::Code,
     }
 }
 

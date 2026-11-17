@@ -67,7 +67,7 @@ fn a_port_is_one_row_stating_its_direction_and_discipline() {
 
     let ports = outline
         .iter()
-        .filter(|row| row.group == Some(SourceOutlineGroup::Ports))
+        .filter(|row| row.group == SourceOutlineGroup::Ports)
         .map(|row| (row.name.as_str(), row.detail.as_str(), row.line))
         .collect::<Vec<_>>();
     assert_eq!(
@@ -81,10 +81,7 @@ fn a_port_is_one_row_stating_its_direction_and_discipline() {
     assert_eq!(row(&outline, "mid").detail, "electrical");
     assert_eq!(row(&outline, "drop").detail, "(p, mid)");
     assert_eq!(row(&outline, "twice").detail, "real (x)");
-    assert_eq!(
-        row(&outline, "gain").group,
-        Some(SourceOutlineGroup::Module)
-    );
+    assert_eq!(row(&outline, "gain").group, SourceOutlineGroup::Module);
 
     let groups = outline.iter().map(|row| row.group).collect::<Vec<_>>();
     let mut ordered = groups.clone();
@@ -180,12 +177,12 @@ fn an_unparsed_file_keeps_its_names() {
             .map(|row| (row.group, row.name.as_str(), row.detail.as_str(), row.line))
             .collect::<Vec<_>>(),
         [
-            (Some(SourceOutlineGroup::Module), "gain", "", 1),
-            (Some(SourceOutlineGroup::Ports), "p", "", 2),
-            (Some(SourceOutlineGroup::Ports), "n", "", 2),
-            (Some(SourceOutlineGroup::Parameters), "g", "", 4),
-            (Some(SourceOutlineGroup::Nets), "m", "", 3),
-            (Some(SourceOutlineGroup::Nets), "k", "", 3),
+            (SourceOutlineGroup::Module, "gain", "", 1),
+            (SourceOutlineGroup::Ports, "p", "", 2),
+            (SourceOutlineGroup::Ports, "n", "", 2),
+            (SourceOutlineGroup::Parameters, "g", "", 4),
+            (SourceOutlineGroup::Nets, "m", "", 3),
+            (SourceOutlineGroup::Nets, "k", "", 3),
         ]
     );
 }

@@ -39,25 +39,37 @@ fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSe
         .any(|instance| instance.kind() == AnalysisKind::Ac)
 }
 
-/// Rewrite the root of the project's Automation workspace, the code-workspace
-/// source every new project carries.
-fn edit_automation_source(state: &mut ServicesHost, content: &str) {
-    state
-        .model
-        .workspace
-        .content
-        .replace_project_source(
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
-            content.to_owned(),
-        )
-        .unwrap();
+/// Write `content` as the project-wide Verilog-A source, the code-workspace
+/// source a project-wide edit reaches, creating it the first time.
+fn edit_code_workspace_source(state: &mut ServicesHost, content: &str) {
+    let language = crate::state::ProjectSourceLanguage::VerilogA;
+    let project = &mut state.model.workspace.content;
+    if project.project_sources.get(language).is_some() {
+        project
+            .replace_project_source(language, content.to_owned())
+            .unwrap();
+    } else {
+        project
+            .insert_project_source_bundle(
+                crate::state::ProjectSourceBundle::try_new(
+                    crate::state::ProjectSourceOwner::code_workspace(language),
+                    language,
+                    "shared.va",
+                    content,
+                    [],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
 }
 
 #[test]
 fn code_document_overlay_copies_project_sources_atomically() {
     let mut state = ServicesHost::default();
     let mut target = snapshot(&state).unwrap();
-    edit_automation_source(&mut state, "print('edited')\n");
+    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
     let working = snapshot(&state).unwrap();
 
     target
@@ -80,7 +92,7 @@ fn code_sources_change_generated_netlist_and_execution_identity() {
     let mut state = ServicesHost::default();
     let before = generated_netlist_input_digest(&state).unwrap();
 
-    edit_automation_source(&mut state, "print('edited')\n");
+    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
 
     assert_ne!(generated_netlist_input_digest(&state).unwrap(), before);
 }
