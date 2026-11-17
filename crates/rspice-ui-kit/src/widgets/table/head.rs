@@ -157,7 +157,8 @@ impl DataTable<'_> {
                     color: t.color.text_dim,
                     problem: None,
                 },
-            );
+            )
+            .map(|painted| painted.landed);
             if let Some(direction) = direction {
                 let centre_x = match (column.align, landed) {
                     (Align::Left, Some(words)) => {

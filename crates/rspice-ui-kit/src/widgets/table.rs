@@ -20,8 +20,11 @@
 //! group heads, a row filter, type-ahead and Ctrl+C; one that asks for
 //! [`DataTable::multi_select`] lets the reader select several rows the way a
 //! file list does. Enter, F2, Delete and the menu key are reported for the
-//! page to act on. A page that hands it no state gets the rows it asked for,
-//! in its own order, and reports clicks.
+//! page to act on. Under a coarse pointer such a table puts a mark before
+//! each row that a tap toggles, since a finger has no Ctrl to hold, and a
+//! press held still on a row asks for its menu. Words a cell cuts short show
+//! in full on hover and under that held press. A page that hands it no state
+//! gets the rows it asked for, in its own order, and reports clicks.
 
 mod body;
 mod geometry;
@@ -425,6 +428,9 @@ pub struct DataTable<'a> {
     groups: &'a [Group],
     cell_selection: bool,
     multi: bool,
+    /// The room before the first column's words that the selection marks
+    /// take under a coarse pointer; none elsewhere.
+    lead_gutter: f32,
 }
 
 /// Where the body is seen from this frame, in screen points: the viewport's
@@ -476,6 +482,9 @@ struct ViewMemory {
     typed: String,
     /// When the last of them was typed, in the input's seconds.
     typed_at: f64,
+    /// When the held press that last asked for a menu began, so one press
+    /// asks once.
+    held_press: Option<f64>,
 }
 
 impl ViewMemory {
@@ -630,6 +639,7 @@ impl<'a> DataTable<'a> {
             groups: &[],
             cell_selection: false,
             multi: false,
+            lead_gutter: 0.0,
         }
     }
 
@@ -746,6 +756,12 @@ impl<'a> DataTable<'a> {
             if let Some(editor) = editor.as_mut() {
                 editor.column = shown(editor.column).unwrap_or(editor.column);
             }
+        }
+        // A finger selects several rows by a mark before each: the first
+        // column grows by the mark's room, so its words keep theirs.
+        if self.multi && state.is_some() && t.metrics.is_touch() && !self.columns.is_empty() {
+            self.lead_gutter = t.metrics.touch_target();
+            self.columns.to_mut()[0].width += self.lead_gutter - TABLE_EDGE_INSET;
         }
         let order = self.order.clone();
         let mut shown_row = move |row: usize| {
@@ -1068,7 +1084,7 @@ impl<'a> DataTable<'a> {
                             let open = editor.as_mut().filter(|editor| editor.row == index);
                             let marked =
                                 selected.as_ref().filter(|selection| selection.row == index);
-                            let row = self.row(
+                            let mut row = self.row(
                                 ui,
                                 body::RowPlace {
                                     index,
@@ -1082,6 +1098,12 @@ impl<'a> DataTable<'a> {
                                 cells,
                                 open,
                             );
+                            if let Some((start, origin)) = row.held
+                                && memory.held_press != Some(start)
+                            {
+                                memory.held_press = Some(start);
+                                row.context = row.context.or(Some(origin));
+                            }
                             take_focus |= self.answer(
                                 &mut response,
                                 state.as_deref_mut(),
@@ -1273,10 +1295,12 @@ impl<'a> DataTable<'a> {
         let Some(state) = state else {
             return false;
         };
-        let pressed = row.clicked || row.edit.is_some() || row.context.is_some();
+        let pressed = row.clicked || row.edit.is_some() || row.context.is_some() || row.marked;
         if pressed {
             let selection = self.selection_at(index, row.edit.or(row.column));
-            response.selection_changed |= if !self.multi || row.edit.is_some() {
+            response.selection_changed |= if row.marked {
+                state.toggle(selection)
+            } else if !self.multi || row.edit.is_some() {
                 state.select_only(selection)
             } else if row.context.is_some() {
                 state.lead_to(selection)
@@ -1373,10 +1397,11 @@ impl<'a> DataTable<'a> {
     }
 
     /// The horizontal span a column's words may occupy: the cell less its
-    /// padding, with the table's outer columns held to the panel inset.
+    /// padding, with the table's outer columns held to the panel inset, and
+    /// the first column's words after the selection marks when it has them.
     fn text_span(&self, column: usize, cell: Rect) -> egui::Rangef {
         let left = if column == 0 {
-            TABLE_EDGE_INSET
+            TABLE_EDGE_INSET.max(self.lead_gutter)
         } else {
             CELL_PAD
         };
@@ -1435,15 +1460,22 @@ struct Words<'a> {
     problem: Option<Problem>,
 }
 
+/// Where a cell's words landed, and whether they were cut short to fit.
+#[derive(Debug, Clone, Copy)]
+struct Painted {
+    landed: Rect,
+    elided: bool,
+}
+
 /// Paint one cell's words on its line, elided to `span` and clipped to
-/// `clip`, and return where the words landed.
+/// `clip`, and return where they landed.
 fn paint_words(
     ui: &Ui,
     cell: Rect,
     clip: Rect,
     span: egui::Rangef,
     words: Words<'_>,
-) -> Option<Rect> {
+) -> Option<Painted> {
     let Words {
         text,
         font,
@@ -1456,6 +1488,7 @@ fn paint_words(
     }
     let mark_room = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
     let shown = elide_text(ui, text, &font, (span.span() - mark_room).max(0.0));
+    let elided = shown != text;
     let galley = ui.painter().layout_no_wrap(shown, font, color);
     let text_width = galley.size().x;
     let left = match align {
@@ -1478,5 +1511,5 @@ fn paint_words(
     }
     let landed = Rect::from_min_size(pos2(left, top), galley.size());
     painter.galley(landed.min, galley, color);
-    Some(landed)
+    Some(Painted { landed, elided })
 }

@@ -5,7 +5,7 @@
 //! the scrolled cells in view right of the freeze edge. The open cell is a
 //! field in its cell's place.
 
-use egui::{Key, Modifiers, Rect, Sense, Ui, pos2, vec2};
+use egui::{Key, Modifiers, Pos2, Rect, Sense, Ui, pos2, vec2};
 
 use crate::icons::Icon;
 use crate::panels::elide_text;
@@ -20,6 +20,8 @@ use super::{
 
 /// Side of the fold mark in front of a group's label.
 const FOLD_MARK_SIDE: f32 = 12.0;
+/// Radius of the selection mark a coarse pointer finds before each row.
+const LEAD_MARK_RADIUS: f32 = 8.0;
 
 /// Where one row goes and how it is marked.
 pub(super) struct RowPlace<'g> {
@@ -47,6 +49,11 @@ pub(super) struct RowResponse {
     pub(super) context: Option<egui::Pos2>,
     /// The column under the pointer when the row was pressed.
     pub(super) column: Option<usize>,
+    /// The reader tapped the row's selection mark.
+    pub(super) marked: bool,
+    /// A press held still on the row past the longest click, under a coarse
+    /// pointer: when it began and where.
+    pub(super) held: Option<(f64, Pos2)>,
 }
 
 impl DataTable<'_> {
@@ -124,9 +131,17 @@ impl DataTable<'_> {
                 None
             },
             column: pressed_column,
+            marked: false,
+            held: None,
         };
         if !ui.is_rect_visible(rect) {
             return answered;
+        }
+        // A coarse pointer: the touch composition, or a finger the platform
+        // reports under any other.
+        let coarse = t.metrics.is_touch() || ui.input(|input| input.any_touches());
+        if self.clickable && editor.is_none() && coarse {
+            answered.held = held_press(ui, rect);
         }
         if selected {
             ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
@@ -178,10 +193,11 @@ impl DataTable<'_> {
                 }
                 continue;
             }
-            if cell.editable || cell.hint.is_some() {
+            let cell_id = ui.id().with((self.id, "cell", index, column_index));
+            let cell_response = if cell.editable || cell.hint.is_some() {
                 let cell_response = ui.interact(
                     cell_rect.intersect(clip),
-                    ui.id().with((self.id, "cell", index, column_index)),
+                    cell_id,
                     if cell.editable {
                         Sense::click()
                     } else {
@@ -211,10 +227,10 @@ impl DataTable<'_> {
                         answered.edit = Some(column_index);
                     }
                 }
-                if let Some(hint) = &cell.hint {
-                    let _ = cell_response.on_hover_text(hint);
-                }
-            }
+                Some(cell_response)
+            } else {
+                None
+            };
             let font = if cell.mono {
                 theme::mono(tokens::FS_0, FontWeight::Regular)
             } else {
@@ -227,7 +243,7 @@ impl DataTable<'_> {
                 Ink::Toned(Tone::Error) => (t.color.err, None),
                 Ink::Problem(problem) => (t.color.text_dim, Some(problem)),
             };
-            let _painted = paint_words(
+            let painted = paint_words(
                 ui,
                 cell_rect,
                 clip,
@@ -241,14 +257,36 @@ impl DataTable<'_> {
                 },
             );
             #[cfg(any(test, feature = "test-support"))]
-            if let Some(text) = _painted
+            if let Some(text) = painted
                 && column.align == Align::Right
             {
                 crate::probe::probe(
                     ui,
                     &format!("table.right.{}.{}", self.id, self.page_column(column_index)),
-                    text,
+                    text.landed,
                 );
+            }
+            // Words cut short show in full where the reader points, and under
+            // a finger held on them, beside any hint the cell gives.
+            let elided = painted.is_some_and(|painted| painted.elided);
+            let tip = match (elided, &cell.hint) {
+                (true, Some(hint)) => Some(format!("{}\n{hint}", cell.text)),
+                (true, None) => Some(cell.text.clone()),
+                (false, hint) => hint.clone(),
+            };
+            if let Some(tip) = tip {
+                let shown = cell_rect.intersect(clip);
+                let cell_response =
+                    cell_response.unwrap_or_else(|| ui.interact(shown, cell_id, Sense::hover()));
+                if elided
+                    && answered
+                        .held
+                        .is_some_and(|(_, origin)| shown.contains(origin))
+                {
+                    cell_response.show_tooltip_text(tip);
+                } else {
+                    let _ = cell_response.on_hover_text(tip);
+                }
             }
             // The row's wash is the selection. A cell is boxed only where it
             // edits, so the box says what Enter opens; a cell that only reads
@@ -264,6 +302,19 @@ impl DataTable<'_> {
                 );
             }
         }
+        if self.lead_gutter > 0.0 {
+            let (first, region) = view.cell(geometry, 0, y);
+            let mark = Rect::from_x_y_ranges(first.left()..=first.left() + self.lead_gutter, y);
+            let name = cells.first().map_or("", |cell| cell.text.as_str());
+            answered.marked = self.lead_mark(
+                ui,
+                index,
+                mark,
+                region.intersect(ui.clip_rect()),
+                selected,
+                name,
+            );
+        }
         ui.painter().hline(
             rect.x_range(),
             rect.bottom() - 0.5,
@@ -273,6 +324,54 @@ impl DataTable<'_> {
             theme::paint_focus_ring(ui, &response, rect);
         }
         answered
+    }
+
+    /// Paint a row's selection mark, the way a coarse pointer selects
+    /// several rows: a ring, filled and checked while the row is selected,
+    /// over a target a finger can tap. Returns whether the reader tapped it.
+    fn lead_mark(
+        &self,
+        ui: &Ui,
+        index: usize,
+        rect: Rect,
+        clip: Rect,
+        selected: bool,
+        name: &str,
+    ) -> bool {
+        let target = rect.intersect(clip);
+        if !target.is_positive() {
+            return false;
+        }
+        let t = Tokens::get(ui.ctx());
+        let mark = ui.interact(target, ui.id().with((self.id, "mark", index)), Sense::CLICK);
+        mark.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Checkbox,
+                ui.is_enabled(),
+                selected,
+                format!("Select {name}"),
+            )
+        });
+        #[cfg(any(test, feature = "test-support"))]
+        crate::probe::probe(ui, &format!("table.mark.{index}"), rect);
+        let painter = ui.painter().with_clip_rect(clip);
+        let centre = rect.center();
+        if selected {
+            painter.circle_filled(centre, LEAD_MARK_RADIUS, t.color.accent);
+            Icon::Check.paint(
+                &painter,
+                Rect::from_center_size(centre, egui::Vec2::splat(LEAD_MARK_RADIUS * 1.5)),
+                t.color.accent_ink,
+            );
+        } else {
+            let ink = if mark.hovered() {
+                t.color.text
+            } else {
+                t.color.text_dim
+            };
+            painter.circle_stroke(centre, LEAD_MARK_RADIUS, egui::Stroke::new(1.5, ink));
+        }
+        mark.clicked()
     }
 
     /// Paint the open cell as a field in its place and report how it closed,
@@ -457,6 +556,45 @@ pub(super) struct GroupHead<'a> {
 }
 
 /// The next editable cell of `cells` from `column`, one way or the other.
+/// A press held still on `rect`, where it shows, past the longest a click
+/// lasts: when it began and where. Until then a held press asks for the
+/// frame that sees it pass, since no other input may come to paint one.
+fn held_press(ui: &Ui, rect: Rect) -> Option<(f64, Pos2)> {
+    let (longest, still) = ui.ctx().options(|options| {
+        (
+            options.input_options.max_click_duration,
+            options.input_options.max_click_dist,
+        )
+    });
+    let (start, origin, at, now) = ui.input(|input| {
+        let pointer = &input.pointer;
+        if !pointer.primary_down() {
+            return None;
+        }
+        Some((
+            pointer.press_start_time()?,
+            pointer.press_origin()?,
+            pointer.latest_pos()?,
+            input.time,
+        ))
+    })?;
+    let on_top = ui
+        .ctx()
+        .layer_id_at(origin)
+        .is_none_or(|layer| layer == ui.layer_id());
+    if !on_top || !rect.intersect(ui.clip_rect()).contains(origin) || origin.distance(at) > still {
+        return None;
+    }
+    let held = now - start;
+    if held > longest {
+        Some((start, origin))
+    } else {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(longest - held));
+        None
+    }
+}
+
 fn next_editable(cells: &[Cell], column: usize, onward: isize) -> Option<usize> {
     if onward > 0 {
         (column + 1..cells.len()).find(|index| cells[*index].editable)

@@ -1,6 +1,7 @@
 //! What a list asks of the shared table, driven through replayed input at
 //! the compact, relaxed and touch metrics: selecting several rows, type-ahead,
-//! and the keys and presses the table reports for the page to act on.
+//! the keys and presses the table reports for the page to act on, and what a
+//! finger does in place of Ctrl, a right button and a hover.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, vec2};
 
@@ -58,6 +59,57 @@ fn press(pos: Pos2, button: PointerButton, modifiers: Modifiers) -> Vec<Event> {
     vec![Event::PointerMoved(pos), edge(true), edge(false)]
 }
 
+/// A name too long for any column to hold, so the table cuts it short.
+const LONG: &str = "Bias network for the folded-cascode tail current, trimmed against the \
+                    bandgap reference over temperature, supply and every process corner the \
+                    foundry characterises, then checked again at the slow-slow and fast-fast \
+                    extremes the sign-off flow names";
+
+/// Every run of words a pass painted, its tooltips included.
+fn painted(output: &egui::FullOutput) -> Vec<String> {
+    fn walk(shape: &egui::Shape, words: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => words.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, words);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut words = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut words);
+    }
+    words
+}
+
+/// A finger, or the pointer a platform makes of it, going down at `at` or
+/// lifting there.
+fn finger(at: Pos2, down: bool) -> Vec<Event> {
+    vec![
+        Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(0),
+            phase: if down {
+                egui::TouchPhase::Start
+            } else {
+                egui::TouchPhase::End
+            },
+            pos: at,
+            force: None,
+        },
+        Event::PointerMoved(at),
+        Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: down,
+            modifiers: Modifiers::NONE,
+        },
+    ]
+}
+
 /// The copy command a pass sent the platform, if it sent one.
 fn copied(output: &egui::FullOutput) -> Option<String> {
     output
@@ -73,6 +125,7 @@ fn copied(output: &egui::FullOutput) -> Option<String> {
 /// A two-column cell list with state, keyed by name, drawn at one metric.
 struct Picker {
     ctx: egui::Context,
+    names: [&'static str; 7],
     columns: Vec<Column>,
     keys: Vec<RowKey>,
     state: TableState,
@@ -85,11 +138,12 @@ impl Picker {
     fn new(ctx: &egui::Context, multi: bool) -> Self {
         Self {
             ctx: ctx.clone(),
+            names: NAMES,
             columns: vec![Column::name("Cell", 160.0), Column::words("View", 90.0)],
             keys: NAMES.iter().map(|name| RowKey::from(*name)).collect(),
             state: TableState::default(),
             multi,
-            time: 0.0,
+            time: ctx.input(|input| input.time),
         }
     }
 
@@ -111,6 +165,7 @@ impl Picker {
         };
         let Self {
             ctx,
+            names,
             columns,
             keys,
             state,
@@ -126,7 +181,7 @@ impl Picker {
                 table = table.multi_select();
             }
             response = table.show(ui, |row| {
-                vec![Cell::text(NAMES[row]), Cell::text("schematic")]
+                vec![Cell::text(names[row]), Cell::text("schematic")]
             });
         });
         (response, geometry, output)
@@ -151,6 +206,58 @@ impl Picker {
         let response = self.frame(press(at, PointerButton::Primary, modifiers), modifiers);
         let _ = self.frame(Vec::new(), Modifiers::NONE);
         response
+    }
+
+    /// A tap on row `row`'s selection mark, and the frame after it.
+    fn tap_mark(&mut self, row: usize) -> TableResponse {
+        let (_, geometry, _) = self.pass(Vec::new(), Modifiers::NONE, 0.1);
+        let at = geometry
+            .one(&format!("table.mark.{row}"))
+            .unwrap_or_else(|| panic!("row {row} has a mark"))
+            .center();
+        let response = self.frame(
+            press(at, PointerButton::Primary, Modifiers::NONE),
+            Modifiers::NONE,
+        );
+        let _ = self.frame(Vec::new(), Modifiers::NONE);
+        response
+    }
+
+    /// A press at `at` held still for `seconds`, a frame each quarter
+    /// second, then let go: the menus it asked for, whether each held frame
+    /// painted `words`, and the row the release clicked.
+    fn hold(
+        &mut self,
+        at: Pos2,
+        seconds: f64,
+        touch: bool,
+        words: &str,
+    ) -> (Vec<ContextRequest>, Vec<bool>, Option<usize>) {
+        let edges = |down: bool| {
+            if touch {
+                finger(at, down)
+            } else {
+                let mut events = vec![Event::PointerMoved(at)];
+                events.push(Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: down,
+                    modifiers: Modifiers::NONE,
+                });
+                events
+            }
+        };
+        let mut asked = Vec::new();
+        let mut shown = Vec::new();
+        asked.extend(self.frame(edges(true), Modifiers::NONE).context_menu);
+        for _ in 0..(seconds / 0.25).round() as usize {
+            let (response, _, output) = self.pass(Vec::new(), Modifiers::NONE, 0.25);
+            asked.extend(response.context_menu);
+            shown.push(painted(&output).iter().any(|painted| painted == words));
+        }
+        let response = self.frame(edges(false), Modifiers::NONE);
+        asked.extend(response.context_menu);
+        (asked, shown, response.clicked)
     }
 
     fn key(&mut self, pressed: Key, modifiers: Modifiers) -> TableResponse {
@@ -410,4 +517,172 @@ fn the_selection_follows_its_keys_when_the_rows_change() {
     state.follow_keys(&keys(&["a"]));
     assert_eq!(state.selected_rows(), Vec::<usize>::new());
     assert_eq!(state.selection, None);
+}
+
+/// A finger has no Ctrl to hold: under a coarse pointer each row of a table
+/// that selects several carries a mark a tap toggles, on a target a finger
+/// can find, while a tap on the row itself still selects it alone. A fine
+/// pointer gets no marks.
+#[test]
+fn a_tap_on_a_rows_mark_toggles_it_into_the_selection_under_a_coarse_pointer() {
+    for (metric, ctx) in metrics() {
+        let mut list = Picker::new(&ctx, true);
+        let (_, geometry, _) = list.pass(Vec::new(), Modifiers::NONE, 0.1);
+        let touch = metric == "touch";
+        assert_eq!(
+            geometry.one("table.mark.0").is_some(),
+            touch,
+            "{metric}: marks only under a finger"
+        );
+        let single = Picker::new(&ctx, false)
+            .pass(Vec::new(), Modifiers::NONE, 0.1)
+            .1;
+        assert!(
+            single.one("table.mark.0").is_none(),
+            "{metric}: a table that selects one row has no marks"
+        );
+        if !touch {
+            continue;
+        }
+        let target = crate::tokens::Tokens::get(&ctx).metrics.touch_target();
+        let (mark, line) = (
+            geometry.one("table.mark.3").expect("a mark"),
+            geometry.one("table.line.3").expect("row 3"),
+        );
+        assert_eq!(mark.width(), target, "a target a finger finds");
+        assert_eq!(mark.y_range(), line.y_range(), "as tall as its row");
+        assert_eq!(mark.left(), line.left(), "before the first column's words");
+
+        let _ = list.click(1, Modifiers::NONE);
+        let response = list.tap_mark(3);
+        assert!(response.selection_changed);
+        assert_eq!(response.clicked, None, "a mark selects; it opens nothing");
+        assert_eq!(list.state.selected_rows(), vec![3, 1]);
+        let _ = list.tap_mark(5);
+        assert_eq!(list.state.selected_rows(), vec![5, 1, 3]);
+        let _ = list.tap_mark(3);
+        assert_eq!(
+            list.state.selected_rows(),
+            vec![5, 1],
+            "a second tap lets go"
+        );
+        let _ = list.click(4, Modifiers::NONE);
+        assert_eq!(
+            list.state.selected_rows(),
+            vec![4],
+            "a tap on the row selects it alone"
+        );
+    }
+}
+
+/// A press held still on a row asks for its menu, once, under a coarse
+/// pointer or wherever the platform reports a finger; on a selected row the
+/// selection stays, so the menu acts on all of it, and letting go clicks
+/// nothing. A mouse has its right button, so holding it asks nothing.
+#[test]
+fn a_press_held_still_asks_for_the_rows_menu_under_a_coarse_pointer() {
+    for (metric, ctx) in metrics() {
+        let touch = metric == "touch";
+        for finger in [false, true] {
+            let mut list = Picker::new(&ctx, true);
+            let _ = list.click(1, Modifiers::NONE);
+            let _ = list.click(4, Modifiers::COMMAND);
+            let at = list.line(4).center();
+            let (asked, _, clicked) = list.hold(at, 1.5, finger, "");
+            assert_eq!(clicked, None, "{metric}: a held press is not a click");
+            if touch || finger {
+                assert_eq!(
+                    asked.len(),
+                    1,
+                    "{metric}, finger {finger}: one menu a press"
+                );
+                assert_eq!(asked[0].cell.row, 4, "{metric}");
+                assert_eq!(
+                    list.state.selected_rows(),
+                    vec![4, 1],
+                    "{metric}: the menu acts on the selection"
+                );
+            } else {
+                assert!(asked.is_empty(), "{metric}, finger {finger}: {asked:?}");
+            }
+
+            let at = list.line(2).center();
+            let (asked, _, clicked) = list.hold(at, 0.5, finger, "");
+            assert!(asked.is_empty(), "{metric}: a short press asks nothing");
+            assert_eq!(clicked, Some(2), "{metric}: it is a click");
+        }
+    }
+}
+
+/// Words a cell cuts short show in full while the pointer rests on them, at
+/// every metric; words that fit show once, in their cell.
+#[test]
+fn an_elided_cell_shows_its_full_words_on_hover() {
+    for (metric, ctx) in metrics() {
+        let mut list = Picker::new(&ctx, false);
+        list.names[2] = LONG;
+        let rest = |list: &mut Picker, at: Pos2, words: &str| {
+            let _ = list.frame(vec![Event::PointerMoved(at)], Modifiers::NONE);
+            (0..8).any(|_| {
+                let (_, _, output) = list.pass(Vec::new(), Modifiers::NONE, 0.25);
+                painted(&output)
+                    .iter()
+                    .filter(|painted| *painted == words)
+                    .count()
+                    == 1
+            })
+        };
+        let (_, _, output) = list.pass(Vec::new(), Modifiers::NONE, 0.1);
+        assert!(
+            !painted(&output).iter().any(|painted| painted == LONG),
+            "{metric}: the cell cuts the name short"
+        );
+        let cut = list.line(2).left_center() + vec2(60.0, 0.0);
+        assert!(rest(&mut list, cut, LONG), "{metric}: the full name shows");
+        let fits = list.line(3).left_center() + vec2(60.0, 0.0);
+        let _ = list.frame(vec![Event::PointerMoved(fits)], Modifiers::NONE);
+        for _ in 0..8 {
+            let (_, _, output) = list.pass(Vec::new(), Modifiers::NONE, 0.25);
+            let words = painted(&output);
+            assert_eq!(
+                words
+                    .iter()
+                    .filter(|painted| *painted == "Comparator")
+                    .count(),
+                1,
+                "{metric}: words that fit need no tip"
+            );
+            assert!(!words.iter().any(|painted| painted == LONG), "{metric}");
+        }
+    }
+}
+
+/// A finger cannot hover, so a press held on cut-short words shows them in
+/// full for as long as it is held, under a coarse pointer or wherever the
+/// platform reports a finger. A tap first keeps the hover tip away, so only
+/// the held press can show them.
+#[test]
+fn an_elided_cell_shows_its_full_words_under_a_held_press() {
+    for (metric, ctx) in metrics() {
+        let touch = metric == "touch";
+        for finger in [false, true] {
+            let mut list = Picker::new(&ctx, false);
+            list.names[2] = LONG;
+            let at = list.line(2).left_center() + vec2(60.0, 0.0);
+            let _ = list.frame(
+                press(at, PointerButton::Primary, Modifiers::NONE),
+                Modifiers::NONE,
+            );
+            let (_, shown, _) = list.hold(at, 1.5, finger, LONG);
+            assert_eq!(
+                shown.iter().any(|shown| *shown),
+                touch || finger,
+                "{metric}, finger {finger}: {shown:?}"
+            );
+            if touch || finger {
+                assert!(shown.last() == Some(&true), "{metric}: shown while held");
+                assert!(!shown[0], "{metric}: not before the press is held");
+            }
+        }
+    }
 }
