@@ -1368,9 +1368,38 @@ endmodule
         "* local event operand bindings\nV1 a 0 pwl(0 0 1n 1)\nX1 a p q local_wrapper\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" local_wrapper module=local_wrapper\n.end\n", source.path()
     )).unwrap();
     let result = Engine::default().run_tran(&deck, 0.95e-9, 70e-12).unwrap();
+    // `None` is a step solved at the first instant after its event rather
+    // than at the event's completion. p's first crossing has its root on the
+    // timer's 125 ps grid point, and a crossing fires strictly past its root
+    // (VAMS-LRM 2.4 5.10.3.1), one solver floor later: the two events are no
+    // longer one instant, so the tick is solved at that landing and the hit
+    // at its completion. At 625 ps the threshold p's first loop left behind
+    // (0.375 + 0.25) has its root on the timer's next grid point, and its
+    // landing one floor later is the first instant after that tick, for both
+    // instances.
     for (name, expected_times) in [
-        ("p", vec![0.0, 125e-12, 375e-12, 625e-12, 750e-12]),
-        ("q", vec![0.0, 125e-12, 200e-12, 450e-12, 625e-12, 825e-12]),
+        (
+            "p",
+            vec![
+                Some(0.0),
+                None,
+                Some(125e-12),
+                Some(375e-12),
+                None,
+                Some(750e-12),
+            ],
+        ),
+        (
+            "q",
+            vec![
+                Some(0.0),
+                None,
+                Some(200e-12),
+                Some(450e-12),
+                None,
+                Some(825e-12),
+            ],
+        ),
     ] {
         let node = result
             .node_names
@@ -1393,11 +1422,14 @@ endmodule
         // block reads at the left limit; the new count acts from the first
         // instant after it and is first solved at the step's completion, one
         // picosecond on, as a D/A edge's is.
+        // A step solved at the first instant after a tick is one solver
+        // floor (1e-20 s) past it, inside the tolerance below.
+        let mut first_instants = [125e-12, 625e-12].into_iter();
         for (index, (&actual, expected)) in times.iter().zip(expected_times).enumerate() {
-            let expected = if index == 0 {
-                expected
-            } else {
-                expected + 1e-12
+            let expected = match expected {
+                None => first_instants.next().unwrap(),
+                Some(expected) if index == 0 => expected,
+                Some(expected) => expected + 1e-12,
             };
             assert!(
                 (actual - expected).abs() < 2e-15,
@@ -1566,9 +1598,13 @@ endmodule
     begin(&mut host, 0.0, 0.0);
     settle_standalone_observer(&mut host, &[0.0]);
     host.accept_trial().unwrap();
+    // Each sample lands just past its threshold, inside the crossing's
+    // default tolerance: one on the threshold has not crossed it (VAMS-LRM
+    // 2.4 5.10.3.1).
+    let past = |threshold: f64| threshold * (1.0 + 8.0 * f64::EPSILON);
     for reject in [true, false] {
         begin(&mut host, 1e-9, 1e-9);
-        settle_standalone_observer(&mut host, &[0.25]);
+        settle_standalone_observer(&mut host, &[past(0.25)]);
         assert_eq!(count(&host), 1);
         if reject {
             host.reject_trial().unwrap();
@@ -1583,7 +1619,7 @@ endmodule
             host.restore(&checkpoint).unwrap();
         }
         begin(&mut host, 2e-9, 1e-9);
-        settle_standalone_observer(&mut host, &[0.5]);
+        settle_standalone_observer(&mut host, &[past(0.5)]);
         host.accept_trial().unwrap();
         assert_eq!(count(&host), 2);
     }
@@ -1617,9 +1653,16 @@ endmodule
         .unwrap();
     settle_standalone_observer(&mut host, &[0.0]);
     host.accept_trial().unwrap();
-    // Each timepoint lands exactly on the next threshold: every one is a
-    // crossing only if the previous one's write is already in the guard.
-    for (index, (level, count)) in [(0.25, 1), (0.5, 2), (0.75, 3)].into_iter().enumerate() {
+    // Each timepoint lands just past the next threshold, inside the
+    // crossing's default tolerance (64 ulps of the expression's scale), so it
+    // fires there without a refinement: a sample on the threshold has not
+    // crossed it (VAMS-LRM 2.4 5.10.3.1). Every one is a crossing only if the
+    // previous one's write is already in the guard.
+    let past = |threshold: f64| threshold * (1.0 + 8.0 * f64::EPSILON);
+    for (index, (level, count)) in [(past(0.25), 1), (past(0.5), 2), (past(0.75), 3)]
+        .into_iter()
+        .enumerate()
+    {
         let time = (index + 1) as f64 * 1e-9;
         host.begin_trial(
             time,

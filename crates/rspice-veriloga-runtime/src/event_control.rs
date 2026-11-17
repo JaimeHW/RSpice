@@ -262,12 +262,28 @@ fn generated_next_time_after(time: Value) -> Value {
     }
 }
 
+/// [`generated_refinement_time`], landing `margin` past the estimate where
+/// the interval leaves room for it.
+fn generated_refinement_time_past(
+    start: Value,
+    estimate: Value,
+    end: Value,
+    margin: Value,
+) -> Option<Value> {
+    if estimate.is_finite() && end > start {
+        let target = estimate.max(start) + margin;
+        if target > start && target < end && target > estimate {
+            return Some(target);
+        }
+    }
+    generated_refinement_time(start, estimate, end)
+}
+
 /// Where an unconverged crossing in `(start, end)` is resolved next, or `None`
-/// when it is resolved as finely as time can be written. The portable VM's
-/// rule (`CrossDetector::refinement_time`): the first float after the root
-/// estimate; for an estimate in the last float interval, the float just
-/// before `end`, which brackets it; for an interval with no float inside,
-/// nothing, because the crossing is located at `end`.
+/// when it is resolved as finely as time can be written: the first float
+/// after the root estimate; for an estimate in the last float interval, the
+/// float just before `end`, which brackets it; for an interval with no float
+/// inside, nothing, because the crossing is located at `end`.
 fn generated_refinement_time(start: Value, estimate: Value, end: Value) -> Option<Value> {
     if !estimate.is_finite() || end <= start {
         return None;
@@ -281,7 +297,17 @@ fn generated_refinement_time(start: Value, estimate: Value, end: Value) -> Optio
 }
 
 fn generated_crossing_time(accepted: GeneratedCrossState, value: Value, time: Value) -> Value {
-    let accepted_magnitude = accepted.value.abs();
+    generated_crossing_time_between(accepted.value, accepted.time, value, time)
+}
+
+/// The linear root estimate between the accepted sample and the candidate.
+pub fn generated_crossing_time_between(
+    accepted_value: Value,
+    accepted_time: Value,
+    value: Value,
+    time: Value,
+) -> Value {
+    let accepted_magnitude = accepted_value.abs();
     let candidate_magnitude = value.abs();
     let scale = accepted_magnitude.max(candidate_magnitude);
     if scale == 0.0 || !scale.is_finite() {
@@ -290,7 +316,145 @@ fn generated_crossing_time(accepted: GeneratedCrossState, value: Value, time: Va
     let accepted_scaled = accepted_magnitude / scale;
     let candidate_scaled = candidate_magnitude / scale;
     let fraction = (accepted_scaled / (accepted_scaled + candidate_scaled)).clamp(0.0, 1.0);
-    accepted.time + fraction * (time - accepted.time)
+    accepted_time + fraction * (time - accepted_time)
+}
+
+/// The accepted detector state a candidate is judged against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossingAccepted {
+    pub side: i8,
+    pub value: Value,
+    pub time: Value,
+}
+
+/// What a `cross` or `above` site asks of a crossing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossingRule {
+    /// +1 rising only, -1 falling only, 0 both.
+    pub direction: i32,
+    pub time_tol: Value,
+    pub expr_tol: Value,
+    pub enabled: bool,
+    /// A DC or IC sweep point at the accepted time itself, where consecutive
+    /// accepted values are compared with no root to refine.
+    pub same_time_static: bool,
+}
+
+/// How a candidate stands against the accepted state: the direction of the
+/// crossing it completes (0 for none), the crossing's estimated instant,
+/// whether the event fires at the candidate, and where to retry when the
+/// candidate does not yet resolve the crossing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossingDecision {
+    pub direction: i32,
+    pub time: Value,
+    pub fired: bool,
+    pub refinement_time: Option<Value>,
+}
+
+/// The crossing rule every route shares.
+///
+/// "The event shall occur after the threshold crossing" (VAMS-LRM 2.4
+/// 5.10.3.1), so a crossing is complete only at a candidate strictly on the
+/// far side of zero: a candidate reading exactly zero is on the threshold,
+/// not past it, and an event body there would read the crossing expression
+/// as zero, so `@(cross(V(in) - th)) q = V(in) > th;` would never change
+/// `q`. Such a candidate is an ordinary point on the near side.
+///
+/// A landed candidate resolves the crossing when it lies within `time_tol` of
+/// the estimated root and within `expr_tol` of zero. Where the accepted point
+/// itself already reads the crossing to within `expr_tol` — the previous
+/// landing came to rest on the threshold, one representable instant short of
+/// the flip — the root is located there, and the expression criterion, whose
+/// default scales with the two values and so collapses with the accepted
+/// one, says nothing more. The candidate resolves the crossing within
+/// `time_tol` of that point, and the retry lands half the default window past
+/// it, where any expression that changes faster than its own rounding over
+/// that interval has flipped. A sweep point at the same time has no root to refine
+/// and keeps the closed comparison.
+pub fn decide_crossing(
+    accepted: CrossingAccepted,
+    value: Value,
+    time: Value,
+    rule: CrossingRule,
+) -> CrossingDecision {
+    let (rising, falling) = if rule.same_time_static {
+        (
+            accepted.side < 0 && value >= 0.0,
+            accepted.side > 0 && value <= 0.0,
+        )
+    } else {
+        (
+            accepted.side < 0 && value > 0.0,
+            accepted.side > 0 && value < 0.0,
+        )
+    };
+    let direction = if rising {
+        1
+    } else if falling {
+        -1
+    } else {
+        0
+    };
+    let crossing_time = if direction != 0 {
+        generated_crossing_time_between(accepted.value, accepted.time, value, time)
+    } else {
+        -1.0
+    };
+    let fired =
+        rule.enabled && direction != 0 && (rule.direction == 0 || rule.direction == direction);
+    let refinement_time = if fired && !rule.same_time_static {
+        let time_scale = accepted.time.abs().max(time.abs());
+        let effective_time_tol = generated_event_effective_tolerance(rule.time_tol, time_scale);
+        let effective_expr_tol = generated_event_effective_tolerance(
+            rule.expr_tol,
+            accepted.value.abs().max(value.abs()),
+        );
+        // Half the window at the root's own scale, inside any tighter
+        // `time_tol`: the landing's tolerance, taken at a scale no smaller,
+        // holds the margin together with the landing's rounding, so the
+        // landing resolves the crossing rather than asking again. One
+        // representable instant past a root can still read the expression on
+        // the threshold, which is why the margin is not one ulp.
+        let margin = |root: Value| {
+            generated_event_effective_tolerance(rule.time_tol, root.abs())
+                .min(generated_event_effective_tolerance(0.0, root.abs()))
+                / 2.0
+        };
+        if accepted.value.abs() <= effective_expr_tol {
+            let expression_resolved = rule.expr_tol == 0.0 || value.abs() <= effective_expr_tol;
+            if time - accepted.time <= effective_time_tol && expression_resolved {
+                None
+            } else {
+                generated_refinement_time_past(
+                    accepted.time,
+                    accepted.time,
+                    time,
+                    margin(accepted.time),
+                )
+            }
+        } else {
+            let time_error = (time - crossing_time).max(0.0);
+            if time_error > effective_time_tol || value.abs() > effective_expr_tol {
+                generated_refinement_time_past(
+                    accepted.time,
+                    crossing_time,
+                    time,
+                    margin(crossing_time),
+                )
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+    CrossingDecision {
+        direction,
+        time: crossing_time,
+        fired,
+        refinement_time,
+    }
 }
 
 /// Interpolate the latest matching zero crossing without requesting refinement.
@@ -440,38 +604,26 @@ fn evaluate_generated_cross_impl(
         });
     }
 
-    let rising = accepted.side < 0 && value >= 0.0;
-    let falling = accepted.side > 0 && value <= 0.0;
-    let crossing_direction = if rising {
-        1
-    } else if falling {
-        -1
-    } else {
-        0
-    };
-    let crossing_time = if crossing_direction != 0 {
-        generated_crossing_time(accepted, value, time)
-    } else {
-        -1.0
-    };
-    let fired = events_enabled
-        && enabled
-        && crossing_direction != 0
-        && (direction == 0 || direction == crossing_direction);
-    let refinement_time = if fired && !same_time_static {
-        let effective_time_tol =
-            generated_event_effective_tolerance(time_tol, accepted.time.abs().max(time.abs()));
-        let effective_expr_tol =
-            generated_event_effective_tolerance(expr_tol, accepted.value.abs().max(value.abs()));
-        let time_error = (time - crossing_time).max(0.0);
-        if time_error > effective_time_tol || value.abs() > effective_expr_tol {
-            generated_refinement_time(accepted.time, crossing_time, time)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let decision = decide_crossing(
+        CrossingAccepted {
+            side: accepted.side,
+            value: accepted.value,
+            time: accepted.time,
+        },
+        value,
+        time,
+        CrossingRule {
+            direction,
+            time_tol,
+            expr_tol,
+            enabled: events_enabled && enabled,
+            same_time_static,
+        },
+    );
+    let crossing_direction = decision.direction;
+    let crossing_time = decision.time;
+    let fired = decision.fired;
+    let refinement_time = decision.refinement_time;
 
     let stable_side = generated_event_side(value);
     let side = if stable_side != 0 {
@@ -669,6 +821,94 @@ mod tests {
         let jump = cross(before.candidate, 1.0, next(1.0));
         assert!(jump.fired);
         assert_eq!(jump.refinement_time, None);
+    }
+
+    /// The crossing rule every route shares (VAMS-LRM 2.4 5.10.3.1: the
+    /// event occurs after the crossing).
+    #[test]
+    fn a_crossing_completes_strictly_past_the_threshold_and_lands_near_the_root() {
+        let rule = |direction, time_tol, expr_tol| CrossingRule {
+            direction,
+            time_tol,
+            expr_tol,
+            enabled: true,
+            same_time_static: false,
+        };
+        let below = CrossingAccepted {
+            side: -1,
+            value: -1.0,
+            time: 0.0,
+        };
+
+        // A candidate on the threshold has not crossed it.
+        let on = decide_crossing(below, 0.0, 1.0, rule(0, 0.0, 0.0));
+        assert_eq!(
+            (on.direction, on.fired, on.refinement_time),
+            (0, false, None)
+        );
+
+        // A whole step past the root lands half the default window past the
+        // estimate, where the expression has left the threshold.
+        let past = decide_crossing(below, 1.0, 1.0, rule(0, 0.0, 0.0));
+        assert_eq!((past.direction, past.fired, past.time), (1, true, 0.5));
+        assert_eq!(past.refinement_time, Some(0.5 + 16.0 * Value::EPSILON));
+
+        // A tighter time_tol narrows that margin to half of itself.
+        let tight = decide_crossing(below, 1.0, 1.0, rule(0, 1.0e-15, 0.0));
+        assert_eq!(tight.refinement_time, Some(0.5 + 1.0e-15 / 2.0));
+
+        // A candidate past the root within time_tol and expr_tol resolves
+        // the crossing.
+        let landed = decide_crossing(below, 1.0e-6, 0.5 + 1.0e-6, rule(0, 1.0e-3, 1.0e-3));
+        assert!(landed.fired);
+        assert_eq!(landed.refinement_time, None);
+
+        // The direction filter selects the crossings that fire; the rest
+        // still report their direction and ask for no landing.
+        let above = CrossingAccepted {
+            side: 1,
+            value: 1.0,
+            time: 0.0,
+        };
+        let falling = decide_crossing(above, -1.0, 1.0, rule(1, 0.0, 0.0));
+        assert_eq!(
+            (falling.direction, falling.fired, falling.refinement_time),
+            (-1, false, None)
+        );
+
+        // A previous landing came to rest on the threshold: the root is
+        // located there, and the next candidate is pulled back to within the
+        // default window past it, where it fires.
+        let resting = CrossingAccepted {
+            side: -1,
+            value: 0.0,
+            time: 1.5,
+        };
+        let pulled = decide_crossing(resting, 0.5, 1.75, rule(0, 0.0, 0.0));
+        assert!(pulled.fired);
+        let landing = pulled
+            .refinement_time
+            .expect("a whole step past a located root");
+        assert_eq!(landing, 1.5 + 64.0 * Value::EPSILON * 1.5 / 2.0);
+        let fired = decide_crossing(resting, 1.0e-15, landing, rule(0, 0.0, 0.0));
+        assert!(fired.fired);
+        assert_eq!(fired.refinement_time, None);
+
+        // A DC sweep point at the accepted time compares closed and has no
+        // root to refine.
+        let swept = decide_crossing(
+            below,
+            0.0,
+            0.0,
+            CrossingRule {
+                same_time_static: true,
+                ..rule(0, 0.0, 0.0)
+            },
+        );
+        assert_eq!(
+            (swept.direction, swept.fired, swept.refinement_time),
+            (1, true, None)
+        );
     }
 
     #[test]

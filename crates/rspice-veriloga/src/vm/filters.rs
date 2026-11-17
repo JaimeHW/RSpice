@@ -708,7 +708,11 @@ mod tests {
         assert_eq!(cross.eval_event(-1.0, 0.0, 0, 1.0, 0.0, true), Ok(0.0));
         cross.commit();
         assert_eq!(cross.eval_event(1.0, 1.0, 0, 1.0, 0.0, true), Ok(1.0));
-        assert_eq!(cross.candidate_refinement_time(), Some(0.5000000000000001));
+        // Half the default window past the root, inside the requested one.
+        assert_eq!(
+            cross.candidate_refinement_time(),
+            Some(0.5 + 16.0 * f64::EPSILON)
+        );
         cross.commit();
 
         assert_eq!(cross.eval_event(-1.0, 1.2, 0, 1.0, 0.0, true), Ok(1.0));
@@ -754,11 +758,31 @@ mod tests {
         cross.commit();
         assert!(!cross.fired_since(0.0));
 
-        // The next interval holds the root and fires inside it.
-        assert_eq!(cross.eval_event(0.0, 1.5, 0, 0.0, 0.0, true), Ok(1.0));
+        // A candidate on the threshold has not crossed it (VAMS-LRM 2.4
+        // 5.10.3.1: the event occurs after the crossing).
+        assert_eq!(cross.eval_event(0.0, 1.5, 0, 0.0, 0.0, true), Ok(0.0));
         assert_eq!(cross.candidate_refinement_time(), None);
         cross.commit();
-        assert!(cross.fired_since(1.0));
+        assert!(!cross.fired_since(1.0));
+
+        // The root is located at that point; the next candidate past it is
+        // pulled back to within the default window of it, where it fires.
+        assert_eq!(cross.eval_event(0.5, 1.75, 0, 0.0, 0.0, true), Ok(1.0));
+        let landing = cross
+            .candidate_refinement_time()
+            .expect("a candidate a whole step past a located root is refined");
+        assert!(
+            landing > 1.5 && landing - 1.5 <= 64.0 * f64::EPSILON * 1.75,
+            "{landing:e}"
+        );
+        cross.begin_evaluation();
+        assert_eq!(
+            cross.eval_event(1.0e-15, landing, 0, 0.0, 0.0, true),
+            Ok(1.0)
+        );
+        assert_eq!(cross.candidate_refinement_time(), None);
+        cross.commit();
+        assert!(cross.fired_since(1.5));
         assert!(!cross.fired_since(1.75));
     }
 
@@ -821,7 +845,7 @@ mod tests {
         assert_eq!(extreme.eval(f64::MAX, 1.0, 1), Ok(1.0));
         assert_eq!(
             extreme.candidate_refinement_time(),
-            Some(0.5000000000000001)
+            Some(0.5 + 16.0 * f64::EPSILON)
         );
     }
 
@@ -1969,36 +1993,29 @@ impl CrossDetector {
         }
 
         // A tolerance is a landing criterion, not permission to manufacture a
-        // crossing between two values on the same side of zero.
-        let rising = self.committed.side < 0 && value >= 0.0;
-        let falling = self.committed.side > 0 && value <= 0.0;
-        let crossing_direction = if rising {
-            1
-        } else if falling {
-            -1
-        } else {
-            0
-        };
-        let crossing_time = if crossing_direction != 0 {
-            self.estimate_crossing_time(value, time)
-        } else {
-            -1.0
-        };
-        let direction_matches = direction == 0 || direction == crossing_direction;
-        let fired = enabled && crossing_direction != 0 && direction_matches;
-
-        if fired && !same_time_static {
-            let effective_time_tol =
-                Self::effective_tolerance(time_tol, self.committed.time.abs().max(time.abs()));
-            let effective_expr_tol =
-                Self::effective_tolerance(expr_tol, self.committed.value.abs().max(value.abs()));
-            let time_error = (time - crossing_time).max(0.0);
-            let converged = time_error <= effective_time_tol && value.abs() <= effective_expr_tol;
-            if !converged {
-                self.candidate_refinement_time =
-                    Self::refinement_time(self.committed.time, crossing_time, time);
-            }
-        }
+        // crossing between two values on the same side of zero; and a
+        // candidate on the threshold has not crossed it
+        // (`rspice_veriloga_runtime::decide_crossing`).
+        let decision = rspice_veriloga_runtime::decide_crossing(
+            rspice_veriloga_runtime::CrossingAccepted {
+                side: self.committed.side,
+                value: self.committed.value,
+                time: self.committed.time,
+            },
+            value,
+            time,
+            rspice_veriloga_runtime::CrossingRule {
+                direction,
+                time_tol,
+                expr_tol,
+                enabled,
+                same_time_static,
+            },
+        );
+        let crossing_direction = decision.direction;
+        let crossing_time = decision.time;
+        let fired = decision.fired;
+        self.candidate_refinement_time = decision.refinement_time;
 
         let stable_side = Self::side(value, 0.0);
         let side = if stable_side != 0 {
@@ -2044,47 +2061,6 @@ impl CrossDetector {
         Ok(())
     }
 
-    fn effective_tolerance(requested: f64, scale: f64) -> f64 {
-        if requested > 0.0 {
-            requested
-        } else {
-            (64.0 * f64::EPSILON * scale).max(f64::MIN_POSITIVE)
-        }
-    }
-
-    /// Where an unconverged crossing in `(start, end)` is resolved next, or
-    /// `None` when it already is resolved as finely as time can be written.
-    ///
-    /// Normally the first float after the root estimate. An estimate in the
-    /// last float interval before `end` has no such point inside, and it is
-    /// the common case of a crossing solved to the expression's rounding
-    /// floor: `ph - 0.5` with `ph` near 0.5 cannot come nearer zero than one
-    /// ulp of 0.5, far above a tolerance scaled by the expression's own small
-    /// value. The float just before `end` brackets it instead: the crossing is
-    /// either before that point, and resolution continues, or in the last
-    /// float interval. An interval with no float inside it has located the
-    /// crossing to the resolution of time itself, so the crossing is `end`.
-    fn refinement_time(start: f64, estimate: f64, end: f64) -> Option<f64> {
-        if !estimate.is_finite() || end <= start {
-            return None;
-        }
-        let target = Self::next_time_after(estimate.max(start));
-        if target > start && target < end {
-            return Some(target);
-        }
-        let last = f64::from_bits(end.to_bits() - 1);
-        (last > start).then_some(last)
-    }
-
-    fn next_time_after(time: f64) -> f64 {
-        debug_assert!(time.is_finite() && time >= 0.0);
-        if time == 0.0 {
-            f64::from_bits(1)
-        } else {
-            f64::from_bits(time.to_bits() + 1)
-        }
-    }
-
     fn side(value: f64, tolerance: f64) -> i8 {
         if value > tolerance {
             1
@@ -2093,19 +2069,6 @@ impl CrossDetector {
         } else {
             0
         }
-    }
-
-    fn estimate_crossing_time(&self, value: f64, time: f64) -> f64 {
-        let accepted_magnitude = self.committed.value.abs();
-        let candidate_magnitude = value.abs();
-        let scale = accepted_magnitude.max(candidate_magnitude);
-        if scale == 0.0 || !scale.is_finite() {
-            return time;
-        }
-        let accepted_scaled = accepted_magnitude / scale;
-        let candidate_scaled = candidate_magnitude / scale;
-        let fraction = (accepted_scaled / (accepted_scaled + candidate_scaled)).clamp(0.0, 1.0);
-        self.committed.time + fraction * (time - self.committed.time)
     }
 
     pub fn commit(&mut self) {

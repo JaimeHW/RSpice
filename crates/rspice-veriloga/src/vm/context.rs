@@ -3546,7 +3546,7 @@ mod tests {
         context.cross_detectors[1].eval(1.0, 1.0, 1).unwrap();
         assert_eq!(
             context.cross_event_refinement_time().unwrap(),
-            Some(0.5000000000000001)
+            Some(0.5 + 16.0 * f64::EPSILON)
         );
 
         context.begin_stateful_evaluation();

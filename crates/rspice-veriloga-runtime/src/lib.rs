@@ -70,10 +70,11 @@ pub use lanes::*;
 pub use limexp::*;
 
 pub use event_control::{
-    GeneratedCheckpointLaneDescriptor, GeneratedCheckpointLaneType, GeneratedCrossEvaluation,
-    GeneratedCrossState, GeneratedEventControlError, evaluate_generated_above,
+    CrossingAccepted, CrossingDecision, CrossingRule, GeneratedCheckpointLaneDescriptor,
+    GeneratedCheckpointLaneType, GeneratedCrossEvaluation, GeneratedCrossState,
+    GeneratedEventControlError, decide_crossing, evaluate_generated_above,
     evaluate_generated_cross, evaluate_generated_last_crossing, evaluate_generated_timer,
-    validate_generated_cross_state,
+    generated_crossing_time_between, validate_generated_cross_state,
 };
 
 pub type Value = f64;
@@ -3388,10 +3389,9 @@ mod fixed_lane_tests {
         assert_eq!(crossing.candidate.time, 1.0);
         assert_eq!(crossing.candidate.side, 1);
         assert_eq!(crossing.candidate.last_crossing_time, 0.5);
-        assert_eq!(
-            crossing.refinement_time,
-            Some(f64::from_bits(0.5f64.to_bits() + 1))
-        );
+        // Half the default window past the root estimate
+        // (`decide_crossing`).
+        assert_eq!(crossing.refinement_time, Some(0.5 + 16.0 * f64::EPSILON));
 
         let repeated = evaluate_generated_cross(accepted, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, true)
             .expect("repeat the same Newton candidate");
