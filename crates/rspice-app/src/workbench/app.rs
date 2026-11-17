@@ -1071,6 +1071,20 @@ impl RSpiceApp {
         }
     }
 
+    /// The dialog that offers the newest intact checkpoint of a project
+    /// that would not open, and the copy of it the reader asks for.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn render_unopened_project_dialog(&mut self, ctx: &egui::Context) {
+        if let Some(Some(checkpoint)) =
+            rspice_app_services::workbench::app_state::session::autosave::unopened_project_dialog(
+                &mut self.state.platform,
+                ctx,
+            )
+        {
+            self.save_checkpoint_as_new_project(&checkpoint);
+        }
+    }
+
     /// Save a project checkpoint as a project of its own, where the reader
     /// picks, and open it: the file it was taken from is left as it is. The
     /// open asks about unsaved work first, as any open does.

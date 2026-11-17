@@ -518,16 +518,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("services.unopened_project"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.platform.project_autosave.rescue.is_some()),
-        render: |app, ctx| {
-            if let Some(Some(checkpoint)) =
-                rspice_app_services::workbench::app_state::session::autosave::unopened_project_dialog(
-                    &mut app.state.platform,
-                    ctx,
-                )
-            {
-                app.save_checkpoint_as_new_project(&checkpoint);
-            }
-        },
+        render: |app, ctx| app.render_unopened_project_dialog(ctx),
     },
     #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {

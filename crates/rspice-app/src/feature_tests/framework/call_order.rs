@@ -382,6 +382,11 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "project"),
     ("SimulateFeature::render_plan_removal_review", "simulate"),
     ("SimulateFeature::render_plan_removal_refusal", "simulate"),
+    ("render_unopened_project_dialog", "services"),
+    (
+        "app_state::services_access::process_recovered_work_dialog",
+        "services",
+    ),
     (
         "app_state::services_access::process_autosave_restore_dialog",
         "services",
@@ -1528,8 +1533,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        77,
-        "the frame's 75 dialog steps, the route overlays' 3 owners in place of their host"
+        79,
+        "the frame's 77 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);
@@ -1585,8 +1590,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
     }
     assert_eq!(
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
-        70,
-        "the frame draws 70 dialog steps beside its synthetic ones"
+        72,
+        "the frame draws 72 dialog steps beside its synthetic ones"
     );
 }
 
