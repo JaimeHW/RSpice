@@ -128,15 +128,19 @@ fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
     (&wave.x, &wave.y)
 }
 
+/// The trace's value at `time`, its samples joined by straight lines.
+fn value_at(run: &SimulationRun, node: &str, time: f64) -> f64 {
+    let (x, y) = trace(run, node);
+    let index = x.partition_point(|t| *t < time).clamp(1, x.len() - 1);
+    let (t0, t1) = (x[index - 1], x[index]);
+    y[index - 1] + (y[index] - y[index - 1]) * (time - t0) / (t1 - t0)
+}
+
 /// The trace's mean over `window`, its samples joined by straight lines,
 /// as the corpus measures a window mean.
 fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
     let (x, y) = trace(run, node);
-    let at = |time: f64| {
-        let index = x.partition_point(|t| *t < time).clamp(1, x.len() - 1);
-        let (t0, t1) = (x[index - 1], x[index]);
-        y[index - 1] + (y[index] - y[index - 1]) * (time - t0) / (t1 - t0)
-    };
+    let at = |time: f64| value_at(run, node, time);
     let mut points = vec![(window.0, at(window.0))];
     points.extend(
         x.iter()
@@ -1115,5 +1119,316 @@ mod c12 {
             oracle(15)
         );
         assert_eq!(kept(&e.reopened(), VK15), measured, "vk.15 reopens as kept");
+    }
+}
+
+/// C2, the charge-pump PLL (`tests/mixed-corpus/c02-pll`, variant `mx`): the
+/// pump and third-order loop filter drawn as a schematic cell of its own
+/// over the BSIM3 cards of `pll-models.cir`, added from their model file on
+/// Models & sections; the VCO as a Verilog-A view and the divide-by-20 and
+/// phase-frequency detector as a Verilog view; and the reference, the
+/// bridges, the XSPICE divide-by-2 and the plotting D/As on the top sheet.
+mod c02 {
+    use egui::accesskit::Role;
+
+    use super::*;
+
+    /// The run stops at 2 us: the loop's lock and the divider's measured
+    /// period come after 20 us, which a debug build takes many minutes to
+    /// reach.
+    const STOP: &str = "2u";
+
+    /// V(cont)'s mean over the run's last half microsecond, as the
+    /// calculator writes it.
+    const PULLING_IN: &str = "avg(V(cont), 1.5u, 2u)";
+
+    /// The pump and loop filter of `net/loopf_mx.cir`, behind the pins u1n,
+    /// d1 and vout. The deck's `.ic` starts the filter at 2.5 V; drawn,
+    /// each of its three capacitors states that initial voltage itself.
+    fn loop_filter(e: &mut Engineer) {
+        e.schematic_cell("loopf_mx");
+        let part = |e: &mut Engineer, query, row, at, fields: &[(&str, &str)], nets: &[&str]| {
+            let pins = e.place(query, row, at, fields);
+            e.connect(&pins, nets);
+        };
+        let two = |e: &mut Engineer, query, row, at, name: &str, value: &str, nets: &[&str]| {
+            part(
+                e,
+                query,
+                row,
+                at,
+                &[("Instance", name), ("Value", value)],
+                nets,
+            );
+        };
+        let capacitor = |e: &mut Engineer, at, name: &str, value: &str, nets: &[&str]| {
+            let fields = [
+                ("Instance", name),
+                ("Value", value),
+                ("Initial voltage, V", "2.5"),
+            ];
+            part(e, "capacitor", "Capacitor", at, &fields, nets);
+        };
+        let mos = |e: &mut Engineer, row, at, name: &str, size: [&str; 4], nets: &[&str]| {
+            let model = if row == "NMOS" { "N1" } else { "P1" };
+            let fields = [
+                ("Instance", name),
+                ("Value", model),
+                ("Width, m", size[0]),
+                ("Length, m", "0.35u"),
+                ("Source area, m\u{b2}", size[1]),
+                ("Drain area, m\u{b2}", size[1]),
+                ("Source perimeter, m", size[2]),
+                ("Drain perimeter, m", size[3]),
+            ];
+            part(e, row, row, at, &fields, nets);
+        };
+        let source = ("voltage source", "Voltage Source");
+        // The pump's rails and its two devices onto dra.
+        two(
+            e,
+            source.0,
+            source.1,
+            (100, 150),
+            "vdd",
+            "{vcc}",
+            &["dd", "0"],
+        );
+        two(e, source.0, source.1, (250, 150), "vss", "0", &["ss", "0"]);
+        mos(
+            e,
+            "NMOS",
+            (400, 150),
+            "mnd",
+            ["12u", "24p", "28u", "28u"],
+            &["dra", "d1", "ss", "ss"],
+        );
+        mos(
+            e,
+            "PMOS",
+            (550, 150),
+            "mpd",
+            ["24u", "48p", "52u", "52u"],
+            &["dra", "u1n", "dd", "dd"],
+        );
+        // The third-order filter.
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (100, 400),
+            "r1",
+            "{r1v}",
+            &["dra", "int1"],
+        );
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (250, 400),
+            "r2",
+            "200",
+            &["int1", "c1"],
+        );
+        capacitor(e, (400, 400), "c1", "{c1v}", &["c1", "0"]);
+        capacitor(e, (550, 400), "c2", "5n", &["int1", "0"]);
+        two(
+            e,
+            "resistor",
+            "Resistor",
+            (700, 400),
+            "r3",
+            "50",
+            &["int1", "vout"],
+        );
+        capacitor(e, (850, 400), "c3", "0.5n", &["vout", "0"]);
+        e.pins("u1n d1", "Input", &[(100, 650), (250, 650)]);
+        e.pins("vout", "Output", &[(400, 650)]);
+        e.symbol_from_schematic("loopf_mx");
+    }
+
+    /// The PLL drawn from New project as it pulls in: its control voltage
+    /// and every divider edge are the deck's, and the control voltage's
+    /// mean over the last half microsecond, measured over the result, is
+    /// kept through a save and a reopen.
+    #[test]
+    fn c2_drawn_through_the_application_pulls_in_as_its_deck() {
+        // The deck route needs nothing drawn: it runs while the engineer
+        // draws.
+        let deck = std::thread::spawn(|| {
+            deck_route("c02-pll/deck/mx.tran.cir", "0.1n", &format!("{STOP} uic"))
+        });
+        let mut engineer = Engineer::new_project("pll");
+        let e = &mut engineer;
+        assert_eq!(
+            e.add_model_file(&corpus("c02-pll/net/pll-models.cir")),
+            Ok("pll-models".to_owned()),
+            "the BSIM3 cards bind"
+        );
+        loop_filter(e);
+        e.module(
+            "vco_pwl",
+            "Verilog-A",
+            &corpus_text("c02-pll/net/vco_pwl.va"),
+        );
+        e.module(
+            "div20_pfd",
+            "Verilog",
+            &corpus_text("c02-pll/net/div20_pfd.v"),
+        );
+        e.variable("vcc", "3.3");
+        e.variable("r1v", "300");
+        e.variable("c1v", "10n");
+        e.top_sheet();
+
+        // The 10 MHz reference and the bridges onto the event side at
+        // 0.5 V; the divide-by-2 from the shelf; and the D/As the deck plots
+        // the divider and the reference through.
+        let part = |e: &mut Engineer, query, row, at, fields: &[(&str, &str)], nets: &[&str]| {
+            let pins = e.place(query, row, at, fields);
+            e.connect(&pins, nets);
+        };
+        part(
+            e,
+            "pulse",
+            "Pulse Voltage Source",
+            (100, 150),
+            &[
+                ("Instance", "vref"),
+                ("Value", "0"),
+                ("Pulsed value (V2), V", "{vcc}"),
+                ("Delay time (TD), s", "10n"),
+                ("Rise time (TR), s", "1n"),
+                ("Fall time (TF), s", "1n"),
+                ("Pulse width (PW), s", "50n"),
+                ("Period (PER), s", "100n"),
+            ],
+            &["ref", "0"],
+        );
+        let bridge = |e: &mut Engineer, at, name: &str, nets: &[&str]| {
+            let fields = [
+                ("Instance", name),
+                ("Input low threshold", "0.5"),
+                ("Input high threshold", "0.5"),
+            ];
+            part(e, "adc bridge", "ADC Bridge", at, &fields, nets);
+        };
+        bridge(e, (250, 150), "abridgeref", &["ref", "d_ref"]);
+        bridge(e, (400, 150), "abridgevco", &["vco_out", "d_vco"]);
+        part(
+            e,
+            "frequency divider",
+            "Frequency Divider",
+            (550, 150),
+            &[
+                ("Instance", "adiv2"),
+                ("div_factor", "2"),
+                ("high_cycles", "1"),
+                ("i_count", "0"),
+                ("rise_delay", "1e-10"),
+                ("fall_delay", "1e-10"),
+            ],
+            &["d_vco", "d_div2"],
+        );
+        for (at, name, nets) in [
+            ((700, 150), "abridgew1", ["d_divout", "s1"]),
+            ((850, 150), "abridgew2", ["d_ref", "s2"]),
+        ] {
+            let fields = [
+                ("Instance", name),
+                ("Output Low", "0"),
+                ("Output High", "1"),
+                ("Output undefined", "0.5"),
+                ("Input load, F", "5e-12"),
+                ("Rise Time, s", "1e-10"),
+                ("Fall Time, s", "1e-10"),
+            ];
+            part(e, "dac bridge", "DAC Bridge", at, &fields, &nets);
+        }
+        // The detector, the loop filter and the VCO, each port on its net.
+        for (cell, instance, at, nets) in [
+            (
+                "div20_pfd",
+                "xpfd",
+                (300, 500),
+                &[
+                    ("clkin", "d_div2"),
+                    ("ref", "d_ref"),
+                    ("up_n", "up_n"),
+                    ("dn", "dn"),
+                    ("divo", "d_divout"),
+                ][..],
+            ),
+            (
+                "loopf_mx",
+                "xlf",
+                (800, 500),
+                &[("u1n", "up_n"), ("d1", "dn"), ("vout", "cont")][..],
+            ),
+            (
+                "vco_pwl",
+                "xvco",
+                (1200, 500),
+                &[("cont", "cont"), ("out", "vco_out")][..],
+            ),
+        ] {
+            let pins = e.place(cell, cell, at, &[("Instance", instance)]);
+            assert_eq!(pins.len(), nets.len(), "{cell}'s ports: {pins:?}");
+            for (port, net) in nets {
+                e.label(pin(&pins, port), net);
+            }
+        }
+
+        e.setup_page("Save, streaming & retention policy");
+        e.press("Plan output selection mode", Role::ComboBox);
+        e.press("Save all", Role::ListBoxOption);
+        e.transient("0.1n", STOP);
+        e.initial_conditions();
+        let designed = e.run();
+        let deck = deck.join().expect("the deck route");
+
+        // In for vlock (O2, 10 mV), the locked control voltage's mean over
+        // 20-25 us, past this run: the control voltage as the loop pulls in,
+        // every half microsecond, held to the deck route over the same span
+        // within vlock's 10 mV.
+        for step in 1..=4 {
+            let time = f64::from(step) * 0.5e-6;
+            let (app, reference) = (
+                value_at(&designed, "cont", time),
+                value_at(&deck, "cont", time),
+            );
+            assert!(
+                (app - reference).abs() <= 1e-2,
+                "V(cont) at {time:e}: {app}, the deck's {reference}"
+            );
+        }
+        // In for fdiv (O6, 51 ps), the divider's locked period over 49
+        // periods after 20 us, past this run: every edge of D(d_divout),
+        // held to the deck route's within fdiv's 51 ps.
+        let (app, reference) = (events(&designed, "d_divout"), events(&deck, "d_divout"));
+        assert!(
+            app.len() == reference.len()
+                && app
+                    .iter()
+                    .zip(&reference)
+                    .all(|((time, code), (deck_time, deck_code))| {
+                        code == deck_code && (time - deck_time).abs() <= 5.1e-11
+                    }),
+            "D(d_divout) {app:?}, the deck's {reference:?}"
+        );
+
+        // The control voltage's mean over the last half microsecond, as the
+        // calculator measures it, kept through a save and a reopen.
+        let measured = e.measure(PULLING_IN);
+        let reference = mean(&deck, "cont", (1.5e-6, 2e-6));
+        assert!(
+            (measured - reference).abs() <= 1e-2,
+            "{PULLING_IN} {measured}, the deck's {reference}"
+        );
+        assert_eq!(
+            kept(&e.reopened(), PULLING_IN),
+            measured,
+            "the mean reopens as kept"
+        );
     }
 }

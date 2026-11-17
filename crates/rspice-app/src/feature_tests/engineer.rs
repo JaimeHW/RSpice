@@ -641,6 +641,25 @@ impl Engineer {
         );
     }
 
+    /// The transient started from the circuit's initial conditions rather
+    /// than its operating point: Use initial conditions on Analyses.
+    pub(super) fn initial_conditions(&mut self) {
+        self.setup_page("Analyses");
+        self.press("Use initial conditions", Role::CheckBox);
+        let plan = self
+            .replay
+            .app
+            .state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the plan resolves");
+        let uic = plan.instances().iter().any(
+            |instance| matches!(instance.draft(), AnalysisDraft::Transient(setup) if setup.uic),
+        );
+        assert!(uic, "the transient starts from its initial conditions");
+    }
+
     /// Run, and the new run once it has ended.
     pub(super) fn run(&mut self) -> SimulationRun {
         let earlier = self
