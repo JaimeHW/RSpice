@@ -20,6 +20,7 @@
 
 pub mod absdelta;
 mod analog_effects;
+mod analog_files;
 mod analog_lifecycle;
 pub mod arithmetic;
 pub mod array_index;
@@ -48,6 +49,9 @@ pub use simparam::{GeneratedSimulationParameters, SimulationParameter};
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
     AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind, AnalogTaskSource,
+};
+pub use analog_files::{
+    AnalogFileOpen, AnalogFileTable, AnalogFileWrite, AnalogScan, AnalogScanValue,
 };
 pub use analog_lifecycle::{
     ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names,

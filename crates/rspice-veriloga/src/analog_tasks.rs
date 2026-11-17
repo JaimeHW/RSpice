@@ -197,15 +197,16 @@ impl<E, S> AnalogTaskCall<E, S> {
         }
     }
 
-    /// Every backend executes a `$finish` with its level and the output tasks.
+    /// Every backend executes a `$finish` with its level and every other task
+    /// by its journaled operands.
     pub(crate) fn is_executable(&self) -> bool {
-        self.finish_operand().is_some() || self.kind.is_output()
+        self.finish_operand().is_some() || self.kind.records_operands()
     }
 
-    /// An output task's numeric operands in source order; the string literals
-    /// stay in the task table for the host's formatter.
+    /// A journaled task's numeric operands in source order; the string
+    /// literals stay in the task table for the host's formatter.
     pub(crate) fn output_operands(&self) -> Option<Vec<&E>> {
-        self.kind.is_output().then(|| {
+        self.kind.records_operands().then(|| {
             self.arguments
                 .iter()
                 .filter_map(|argument| match argument {
@@ -224,12 +225,12 @@ impl<E, S> AnalogTaskCall<E, S> {
     /// `NativeProgram::analog_output`).
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     pub(crate) fn plan_operand(&self) -> Option<&E> {
-        self.finish_operand().or_else(
-            || match (self.kind.is_output(), self.arguments.as_slice()) {
+        self.finish_operand().or_else(|| {
+            match (self.kind.records_operands(), self.arguments.as_slice()) {
                 (true, [AnalogTaskOperand::Real(value)]) => Some(value),
                 _ => None,
-            },
-        )
+            }
+        })
     }
 
     pub fn map<T, U>(&self, span: U, mut lower: impl FnMut(&E) -> T) -> AnalogTaskCall<T, U> {

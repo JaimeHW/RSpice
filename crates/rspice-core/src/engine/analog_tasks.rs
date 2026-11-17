@@ -34,13 +34,7 @@ pub(super) struct FrequencyModelState<'a> {
 fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
     let level = match (event.call.kind, event.call.arguments.as_ref()) {
         (AnalogTaskKind::Finish | AnalogTaskKind::Stop, [AnalogTaskArgument::Integer(level)])
-        | (
-            AnalogTaskKind::Fatal,
-            [
-                AnalogTaskArgument::Integer(level),
-                AnalogTaskArgument::String(_),
-            ],
-        ) => *level,
+        | (AnalogTaskKind::Fatal, [AnalogTaskArgument::Integer(level), ..]) => *level,
         (AnalogTaskKind::Finish | AnalogTaskKind::Stop | AnalogTaskKind::Fatal, _) => {
             return Err("analog finish call has an invalid argument snapshot");
         }
@@ -53,8 +47,9 @@ fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
 }
 
 /// The run-ending request one accepted `$finish`, `$stop` or `$fatal` event
-/// makes. Only a design's digital half executes `$stop` and `$fatal`: its
-/// event carries the `$fatal` message after the level.
+/// makes. A digital `$fatal` carries its formatted message after the level;
+/// an analog one carries the message's arguments, formatted here as
+/// `$display` formats them.
 fn model_finish(
     event: &AnalogTaskEvent<'_>,
     point: ModelFinishPoint,
@@ -67,6 +62,10 @@ fn model_finish(
     };
     let message = match event.call.arguments.as_ref() {
         [_, AnalogTaskArgument::String(message)] => Some(message.clone()),
+        [_, arguments @ ..] if event.call.kind == AnalogTaskKind::Fatal => Some(
+            format_analog_arguments(arguments, event.instance, event.model),
+        ),
+        [_] if event.call.kind == AnalogTaskKind::Fatal => Some(String::new()),
         _ => None,
     };
     Ok(ModelFinish {
@@ -95,20 +94,10 @@ fn analog_output_record(
     point: ModelFinishPoint,
     monitors: &mut std::collections::HashMap<(String, u32), Box<[AnalogTaskArgument]>>,
 ) -> Option<crate::config::HdlOutputRecord> {
-    use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
-    let point = match point {
-        ModelFinishPoint::Initialization => HdlPoint::Initialization,
-        ModelFinishPoint::OperatingPoint => HdlPoint::OperatingPoint,
-        ModelFinishPoint::Transient { time } => HdlPoint::Transient { time },
-        ModelFinishPoint::DcSweep { value } => HdlPoint::DcSweep { value },
-        ModelFinishPoint::Frequency { .. } => return None,
-    };
-    if event.call.kind == AnalogTaskKind::Monitor {
-        let key = (event.instance.to_owned(), event.call.site);
-        if monitors.get(&key) == Some(&event.call.arguments) {
-            return None;
-        }
-        monitors.insert(key, event.call.arguments.clone());
+    use crate::config::{HdlOrigin, HdlOutputRecord, HdlSeverity, HdlStream};
+    let point = output_point(point)?;
+    if event.call.kind == AnalogTaskKind::Monitor && !monitor_has_news(event, monitors) {
+        return None;
     }
     let mut text = format_analog_output(event);
     let stream = match event.call.kind {
@@ -142,6 +131,138 @@ fn analog_output_record(
             line: event.source.map_or(0, |source| source.line),
         },
     })
+}
+
+/// Where a record of an accepted call at `point` is reported, or `None` at a
+/// small-signal frequency point, which writes nothing.
+fn output_point(point: ModelFinishPoint) -> Option<crate::config::HdlPoint> {
+    use crate::config::HdlPoint;
+    Some(match point {
+        ModelFinishPoint::Initialization => HdlPoint::Initialization,
+        ModelFinishPoint::OperatingPoint => HdlPoint::OperatingPoint,
+        ModelFinishPoint::Transient { time } => HdlPoint::Transient { time },
+        ModelFinishPoint::DcSweep { value } => HdlPoint::DcSweep { value },
+        ModelFinishPoint::Frequency { .. } => return None,
+    })
+}
+
+/// Whether a `$monitor` or `$fmonitor` call's arguments changed since it
+/// last printed (LRM 2.4 section 9.4.1), remembering them when they did.
+fn monitor_has_news(
+    event: &AnalogTaskEvent<'_>,
+    monitors: &mut std::collections::HashMap<(String, u32), Box<[AnalogTaskArgument]>>,
+) -> bool {
+    let key = (event.instance.to_owned(), event.call.site);
+    if monitors.get(&key) == Some(&event.call.arguments) {
+        return false;
+    }
+    monitors.insert(key, event.call.arguments.clone());
+    true
+}
+
+/// The descriptor a file task's first operand names: an integer holds the
+/// descriptor's 32 bits.
+fn task_descriptor(event: &AnalogTaskEvent<'_>) -> Option<u32> {
+    match event.call.arguments.first()? {
+        AnalogTaskArgument::Integer(value) => Some(*value as u32),
+        _ => None,
+    }
+}
+
+/// One accepted analog file task as the records it writes: the text a
+/// `$fdisplay`, `$fwrite`, `$fstrobe` or `$fmonitor` sends to each of its
+/// descriptor's targets, or the warning a bad descriptor raises (IEEE
+/// 1364-2005 section 17.2). `files` is the calling instance's open files;
+/// without them only the standard streams can be written.
+fn analog_file_records(
+    event: &AnalogTaskEvent<'_>,
+    point: ModelFinishPoint,
+    monitors: &mut std::collections::HashMap<(String, u32), Box<[AnalogTaskArgument]>>,
+    files: Option<&mut dyn rspice_veriloga_runtime::AnalogFileTable>,
+) -> Vec<crate::config::HdlOutputRecord> {
+    use crate::config::{HdlOrigin, HdlOutputRecord, HdlSeverity, HdlStream};
+    let Some(point) = output_point(point) else {
+        return Vec::new();
+    };
+    let origin = HdlOrigin {
+        scope: event.instance.into(),
+        file: event
+            .source
+            .map_or_else(|| event.model.into(), |source| source.file.into()),
+        line: event.source.map_or(0, |source| source.line),
+    };
+    let record = |stream: HdlStream, text: String| HdlOutputRecord {
+        point,
+        tick: 0,
+        seconds: event.call.time,
+        stream,
+        text,
+        origin: origin.clone(),
+    };
+    let warning = |text: String| {
+        record(
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Warning,
+            },
+            format!("{}: {text}", analog_file_task_name(event.call.kind)),
+        )
+    };
+    let Some(descriptor) = task_descriptor(event) else {
+        return vec![warning("the descriptor is not an integer".into())];
+    };
+    if event.call.kind == AnalogTaskKind::FileMonitor && !monitor_has_news(event, monitors) {
+        return Vec::new();
+    }
+    let text = (event.call.kind != AnalogTaskKind::FileClose).then(|| {
+        let mut text =
+            format_analog_arguments(&event.call.arguments[1..], event.instance, event.model);
+        if event.call.kind != AnalogTaskKind::FileWrite {
+            text.push('\n');
+        }
+        text
+    });
+    match files {
+        Some(files) => files
+            .deliver(descriptor, text.as_deref())
+            .into_iter()
+            .map(|written| match written {
+                rspice_veriloga_runtime::AnalogFileWrite::Stdout(text) => {
+                    record(HdlStream::Stdout, text)
+                }
+                rspice_veriloga_runtime::AnalogFileWrite::Stderr(text) => {
+                    record(HdlStream::Stderr, text)
+                }
+                rspice_veriloga_runtime::AnalogFileWrite::File { handle, name, text } => {
+                    record(HdlStream::File { handle, path: name }, text)
+                }
+                rspice_veriloga_runtime::AnalogFileWrite::Warning(text) => warning(text),
+            })
+            .collect(),
+        None => {
+            let Some(text) = text else {
+                return vec![warning(format!(
+                    "invalid file descriptor (0x{descriptor:08x})"
+                ))];
+            };
+            match descriptor {
+                0x8000_0001 | 1 => vec![record(HdlStream::Stdout, text)],
+                0x8000_0002 => vec![record(HdlStream::Stderr, text)],
+                _ => vec![warning(format!(
+                    "invalid file descriptor (0x{descriptor:08x})"
+                ))],
+            }
+        }
+    }
+}
+
+fn analog_file_task_name(kind: AnalogTaskKind) -> &'static str {
+    match kind {
+        AnalogTaskKind::FileDisplay => "$fdisplay",
+        AnalogTaskKind::FileWrite => "$fwrite",
+        AnalogTaskKind::FileStrobe => "$fstrobe",
+        AnalogTaskKind::FileMonitor => "$fmonitor",
+        _ => "$fclose",
+    }
 }
 
 /// The accepted `$finish` as the record a digital `$finish` writes (IEEE
@@ -180,18 +301,24 @@ fn analog_finish_record(
     }
 }
 
+fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
+    format_analog_arguments(&event.call.arguments, event.instance, event.model)
+}
+
 /// The `$display` formatter of the digital host (IEEE 1364-2005 section
 /// 17.1.1), with `%m` naming the instance.
 #[cfg(feature = "veriloga")]
-fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
+fn format_analog_arguments(
+    arguments: &[AnalogTaskArgument],
+    instance: &str,
+    model: &str,
+) -> String {
     use crate::xspice::verilog::effects::format::{
         FormatArgument, FormatContext, TimeFormat, format,
     };
     use rspice_veriloga::canonical_ir::digital::DigitalRadix;
     use rspice_veriloga::canonical_ir::digital_eval::DigitalScalar;
-    let scalars = event
-        .call
-        .arguments
+    let scalars = arguments
         .iter()
         .map(|argument| match argument {
             AnalogTaskArgument::Real(value) => DigitalScalar::Real(*value),
@@ -201,9 +328,7 @@ fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
             AnalogTaskArgument::String(_) => DigitalScalar::Effect,
         })
         .collect::<Vec<_>>();
-    let arguments = event
-        .call
-        .arguments
+    let arguments = arguments
         .iter()
         .zip(&scalars)
         .map(|(argument, scalar)| match argument {
@@ -216,8 +341,8 @@ fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
         &arguments,
         &FormatContext {
             radix: DigitalRadix::Decimal,
-            scope: event.instance,
-            module: event.model,
+            scope: instance,
+            module: model,
             time_unit: 0,
             time_format: &time_format,
         },
@@ -226,10 +351,12 @@ fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
 
 /// Without the digital host, the arguments in order, as written.
 #[cfg(not(feature = "veriloga"))]
-fn format_analog_output(event: &AnalogTaskEvent<'_>) -> String {
-    event
-        .call
-        .arguments
+fn format_analog_arguments(
+    arguments: &[AnalogTaskArgument],
+    _instance: &str,
+    _model: &str,
+) -> String {
+    arguments
         .iter()
         .map(|argument| match argument {
             AnalogTaskArgument::Real(value) => format!("{value}"),
@@ -403,12 +530,22 @@ impl Engine {
         let mut invalid = None;
         let output = circuit.analog_task_output.clone();
         let mut monitors = std::mem::take(&mut circuit.analog_monitor_values);
-        let visited = circuit.visit_accepted_analog_tasks(&mut |event| {
+        let visited = circuit.visit_accepted_analog_tasks(&mut |mut event| {
             if event.call.kind.is_output() {
                 if let Some(sink) = &output
                     && let Some(record) = analog_output_record(&event, point, &mut monitors)
                 {
                     sink.emit(&record);
+                }
+                return;
+            }
+            if event.call.kind.writes_file() {
+                let files = event.files.take();
+                let records = analog_file_records(&event, point, &mut monitors, files);
+                if let Some(sink) = &output {
+                    for record in &records {
+                        sink.emit(record);
+                    }
                 }
                 return;
             }

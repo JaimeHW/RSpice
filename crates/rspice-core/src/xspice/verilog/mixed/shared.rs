@@ -335,6 +335,7 @@ impl<'a> CoordinatorFinish<'a> {
                 arguments,
             },
             source: self.source,
+            files: None,
         }
     }
 }

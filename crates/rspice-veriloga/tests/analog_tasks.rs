@@ -483,3 +483,96 @@ endmodule",
     );
     assert!(published(&mut device).is_empty());
 }
+
+/// The accepted calls as the host receives them: typed, literals restored.
+fn accepted(device: &mut rspice_veriloga::device::VerilogADevice) -> Vec<AnalogTaskInvocation> {
+    let mut calls = Vec::new();
+    device.visit_accepted_analog_tasks(&mut |event| calls.push(event.call));
+    calls
+}
+
+fn kinds_and_arguments(
+    calls: &[AnalogTaskInvocation],
+) -> Vec<(AnalogTaskKind, Vec<AnalogTaskArgument>)> {
+    calls
+        .iter()
+        .map(|call| (call.kind, call.arguments.to_vec()))
+        .collect()
+}
+
+/// `$debug`, `$fdisplay` and `$fwrite` write on every evaluation of an
+/// accepted point, ahead of the accepted evaluation's own calls; a point
+/// abandoned for another time writes nothing.
+#[test]
+fn every_evaluation_tasks_keep_each_evaluation_of_the_accepted_point() {
+    let fixture = fixture(
+        "$debug(\"v=%g\", V(p,n)); $fdisplay(32'h8000_0001, \"f=%g\", V(p,n)); \
+         $strobe(\"s=%g\", V(p,n));",
+    );
+    let mut device = fixture.device("EVERY_EVALUATION", &[1, 0]);
+    device.try_set_time(1e-9).unwrap();
+    for voltage in [0.25, 0.5] {
+        device.update_voltages(&[voltage]);
+        device.try_evaluate().unwrap();
+    }
+    // A rejected point: the next evaluation is at another time.
+    device.try_set_time(0.5e-9).unwrap();
+    for voltage in [0.125, 0.375] {
+        device.update_voltages(&[voltage]);
+        device.try_evaluate().unwrap();
+    }
+    device.try_advance_state().unwrap();
+    let calls = accepted(&mut device);
+    let real = |value: f64| AnalogTaskArgument::Real(value);
+    let text = |value: &str| AnalogTaskArgument::String(value.into());
+    let descriptor = AnalogTaskArgument::Integer(0x8000_0001);
+    assert_eq!(
+        kinds_and_arguments(&calls),
+        vec![
+            (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.125)]),
+            (
+                AnalogTaskKind::FileDisplay,
+                vec![descriptor.clone(), text("f=%g"), real(0.125)]
+            ),
+            (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.375)]),
+            (
+                AnalogTaskKind::FileDisplay,
+                vec![descriptor, text("f=%g"), real(0.375)]
+            ),
+            (AnalogTaskKind::Strobe, vec![text("s=%g"), real(0.375)]),
+        ]
+    );
+}
+
+/// `$stop` journals its level as `$finish` does, and `$fatal` its level and
+/// then its message's arguments, for the host to report and end the run.
+#[test]
+fn stop_and_fatal_journal_their_level_and_message() {
+    let fixture = fixture(
+        "if (V(p,n) > 0.5) $stop(2); if (V(p,n) > 0.75) $fatal(0, \"too high: %g\", V(p,n)); \
+         $fclose(5);",
+    );
+    let mut device = fixture.device("CONTROL", &[1, 0]);
+    device.update_voltages(&[1.0]);
+    device.try_evaluate().unwrap();
+    device.try_advance_state().unwrap();
+    let calls = accepted(&mut device);
+    assert_eq!(
+        kinds_and_arguments(&calls),
+        vec![
+            (AnalogTaskKind::Stop, vec![AnalogTaskArgument::Integer(2)]),
+            (
+                AnalogTaskKind::Fatal,
+                vec![
+                    AnalogTaskArgument::Integer(0),
+                    AnalogTaskArgument::String("too high: %g".into()),
+                    AnalogTaskArgument::Real(1.0),
+                ]
+            ),
+            (
+                AnalogTaskKind::FileClose,
+                vec![AnalogTaskArgument::Integer(5)]
+            ),
+        ]
+    );
+}

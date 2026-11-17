@@ -350,6 +350,9 @@ pub struct VmContext {
     /// for the optional pointer and allocate no effect storage.
     analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
     pub(crate) analog_occurrences: Option<Box<crate::analog_occurrences::AnalogOccurrenceJournal>>,
+    /// The instance's open files, which the host installs; transacted with
+    /// the event variables (see [`rspice_veriloga_runtime::AnalogFileTable`]).
+    pub(crate) analog_files: Option<Box<dyn rspice_veriloga_runtime::AnalogFileTable>>,
     /// Numerical replay/probe passes preserve the candidate journal and may
     /// not append calls to it. This is separate from the limiter policy.
     pub(crate) record_task_effects: bool,
@@ -538,6 +541,7 @@ impl Default for VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_files: None,
             analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
@@ -620,6 +624,16 @@ impl VmContext {
         }
     }
 
+    /// The instance's open files, when the host installed them.
+    pub(crate) fn analog_files_mut(
+        &mut self,
+    ) -> Option<&mut dyn rspice_veriloga_runtime::AnalogFileTable> {
+        match &mut self.analog_files {
+            Some(files) => Some(files.as_mut()),
+            None => None,
+        }
+    }
+
     pub(crate) fn analog_effect_journal(
         &mut self,
     ) -> &mut rspice_veriloga_runtime::AnalogEffectJournal {
@@ -650,7 +664,10 @@ impl VmContext {
             journal.clear();
         }
         if let Some(journal) = &mut self.analog_effects {
-            journal.discard_candidate();
+            journal.discard_trial();
+        }
+        if let Some(files) = &mut self.analog_files {
+            files.begin_evaluation();
         }
         for origin in self.idtmod_origins.values_mut() {
             origin.candidate = None;
@@ -784,6 +801,7 @@ impl VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_files: None,
             analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
@@ -936,7 +954,11 @@ impl VmContext {
         self.begin_stateful_evaluation_with_tasks(true);
         self.time = 0.0;
         if let Some(journal) = &mut self.analog_effects {
+            journal.begin_point(0.0);
             journal.begin_evaluation();
+        }
+        if let Some(files) = &mut self.analog_files {
+            files.begin_evaluation();
         }
     }
 
@@ -949,6 +971,9 @@ impl VmContext {
                 .validate_candidate()
                 .map_err(|error| VmError::AnalogTask(error.to_string()))?;
             journal.apply_validated_acceptance();
+        }
+        if let Some(files) = &mut self.analog_files {
+            files.accept();
         }
         for (&index, accepted) in self
             .event_state_indices
@@ -1195,6 +1220,9 @@ impl VmContext {
     pub(crate) fn apply_validated_advance_state(&mut self) {
         if let Some(journal) = &mut self.analog_effects {
             journal.apply_validated_acceptance();
+        }
+        if let Some(files) = &mut self.analog_files {
+            files.accept();
         }
         let time = self.time;
         // A point whose deferred events ran commits the lane they left; the
@@ -1713,6 +1741,9 @@ impl VmContext {
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
         }
+        if let Some(files) = &mut self.analog_files {
+            files.reset_analysis();
+        }
         self.variables.fill(0.0);
         self.accepted_event_variables.fill(0.0);
         self.evaluation_state_inputs.fill(0.0);
@@ -1873,6 +1904,10 @@ impl VmContext {
         self.record_task_effects = record_tasks;
         if record_tasks && let Some(journal) = &mut self.analog_effects {
             journal.discard_candidate();
+            journal.begin_point(self.time);
+        }
+        if record_tasks && let Some(files) = &mut self.analog_files {
+            files.begin_evaluation();
         }
         for (&index, &accepted) in self
             .event_state_indices

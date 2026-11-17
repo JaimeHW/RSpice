@@ -5060,6 +5060,12 @@ impl VerilogADevice {
         &self.model.source_digest
     }
 
+    /// Give the instance its open-file table: the host's, over the run's
+    /// files, which `$fopen`, `$fscanf` and the file output tasks use.
+    pub fn set_analog_files(&mut self, files: Box<dyn rspice_veriloga_runtime::AnalogFileTable>) {
+        self.context.analog_files = Some(files);
+    }
+
     /// Consume the analog task calls published by accepted-state application.
     /// The analysis host owns output delivery and simulation control; a JIT
     /// helper never prints, suspends the engine, or exits the host process.
@@ -5085,6 +5091,7 @@ impl VerilogADevice {
                 model: &self.model.name,
                 source: Self::task_source(&self.model, call.site),
                 call: Self::typed_task_call(&self.model, call.clone()),
+                files: None,
             }))
     }
 
@@ -5118,13 +5125,25 @@ impl VerilogADevice {
         &mut self,
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
     ) {
-        for call in self.context.drain_accepted_analog_tasks() {
+        if !self.context.has_accepted_analog_tasks() {
+            return;
+        }
+        // A file task's delivery writes through the instance's own table, so
+        // the calls leave the journal before the table is lent out.
+        let calls: Vec<_> = self.context.drain_accepted_analog_tasks().collect();
+        for call in calls {
             let call = Self::typed_task_call(&self.model, call);
+            let files = if call.kind.writes_file() {
+                self.context.analog_files_mut()
+            } else {
+                None
+            };
             consume(rspice_veriloga_runtime::AnalogTaskEvent {
                 instance: &self.name,
                 model: &self.model.name,
                 source: Self::task_source(&self.model, call.site),
                 call,
+                files,
             });
         }
     }
@@ -5150,7 +5169,7 @@ impl VerilogADevice {
     ) -> rspice_veriloga_runtime::AnalogTaskInvocation {
         use crate::analog_tasks::AnalogTaskOperand;
         use rspice_veriloga_runtime::AnalogTaskArgument;
-        if !call.kind.is_output() {
+        if !call.kind.records_operands() {
             return call;
         }
         let Some(task) = model.analog_task(call.site) else {

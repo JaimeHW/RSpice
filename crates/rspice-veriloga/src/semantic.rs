@@ -4027,7 +4027,7 @@ impl SemanticAnalyzer {
             // ($strobe, $display, ...) journal their arguments, and the host
             // prints the calls of accepted evaluations only
             AnalogStatement::Call(call) => match call.name.as_str() {
-                "$finish" => self.analyze_control_task(call, module, sink)?,
+                "$finish" | "$stop" => self.analyze_control_task(call, module, sink)?,
                 // Elaboration, not evaluation: the net becomes a hidden
                 // terminal, and the statement form discards the value.
                 name if node_aliases::is_alias_call(name) => {
@@ -4041,7 +4041,10 @@ impl SemanticAnalyzer {
                     self.validate_system_task_arity(call, 0, Some(1))?;
                     self.analyze_discontinuity(call, module, sink)?;
                 }
-                name if Self::is_no_effect_system_task(name) => {
+                name if Self::is_no_effect_system_task(name)
+                    || Self::is_descriptor_task(name)
+                    || matches!(name, "$debug" | "$fatal") =>
+                {
                     self.analyze_output_task(call, module, sink)?;
                 }
                 _ => return Err(Self::unknown_system_task_error(call)),
@@ -4061,6 +4064,22 @@ impl SemanticAnalyzer {
     ) -> CompileResult<()> {
         use crate::analog_tasks::{AnalogTaskCall, AnalogTaskKind, AnalogTaskOperand};
         self.validate_system_task_arity(call, 0, Some(1))?;
+        let task_kind = if call.name == "$stop" {
+            // LRM 2.4 section 9.7.2: `$stop` has no meaning before the
+            // simulation it suspends exists.
+            if self.in_analog_initial {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(
+                        "$stop cannot be called in an analog initial block (LRM 2.4 section 9.7.2)"
+                            .into(),
+                    ),
+                    call.span,
+                )));
+            }
+            AnalogTaskKind::Stop
+        } else {
+            AnalogTaskKind::Finish
+        };
         let diagnostic = match call.args.first() {
             Some(argument) => self.lower_expression_with_side_effects(argument, module, sink)?,
             None => Self::number_expr(1.0, call.span),
@@ -4077,7 +4096,7 @@ impl SemanticAnalyzer {
             )));
         }
         let mut task = AnalogTaskCall {
-            kind: AnalogTaskKind::Finish,
+            kind: task_kind,
             site: self.next_analog_site().0,
             guard: None,
             arguments: vec![AnalogTaskOperand::Integer(diagnostic)],
@@ -4089,11 +4108,22 @@ impl SemanticAnalyzer {
         sink.push(AnalyzedStatement::Task(task));
         Ok(())
     }
-    /// `$strobe`, `$display`, `$write`, `$monitor`, `$info`, `$warning` and
-    /// `$error`: a string literal stays text for the host's formatter, and
-    /// every other argument is a numeric operand captured when the call runs.
-    /// An argument of another type (a string parameter) keeps the call a
-    /// warned no-op rather than printing something other than what it names.
+    /// The file output tasks, whose first argument is the descriptor.
+    fn is_descriptor_task(name: &str) -> bool {
+        matches!(
+            name,
+            "$fdisplay" | "$fwrite" | "$fstrobe" | "$fmonitor" | "$fclose"
+        )
+    }
+
+    /// `$strobe`, `$display`, `$write`, `$monitor`, `$debug`, `$info`,
+    /// `$warning`, `$error` and `$fatal`, and the file tasks `$fdisplay`,
+    /// `$fwrite`, `$fstrobe`, `$fmonitor` and `$fclose`: a string literal
+    /// stays text for the host's formatter, and every other argument is a
+    /// numeric operand captured when the call runs. A file task's descriptor
+    /// and `$fatal`'s level lead as integers. An argument of another type (a
+    /// string parameter) keeps the call a warned no-op rather than printing
+    /// something other than what it names.
     fn analyze_output_task(
         &mut self,
         call: &CallStmt,
@@ -4101,7 +4131,8 @@ impl SemanticAnalyzer {
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
         use crate::analog_tasks::{AnalogTaskCall, AnalogTaskKind, AnalogTaskOperand};
-        if self.discard_output_tasks {
+        let control = call.name == "$fatal";
+        if self.discard_output_tasks && !control && !Self::is_descriptor_task(&call.name) {
             self.warn_no_effect_system_task(call);
             return Ok(());
         }
@@ -4110,15 +4141,52 @@ impl SemanticAnalyzer {
             "$write" => AnalogTaskKind::Write,
             "$strobe" => AnalogTaskKind::Strobe,
             "$monitor" => AnalogTaskKind::Monitor,
+            "$debug" => AnalogTaskKind::Debug,
             "$info" => AnalogTaskKind::Info,
             "$warning" => AnalogTaskKind::Warning,
             "$error" => AnalogTaskKind::Error,
+            "$fatal" => AnalogTaskKind::Fatal,
+            "$fdisplay" => AnalogTaskKind::FileDisplay,
+            "$fwrite" => AnalogTaskKind::FileWrite,
+            "$fstrobe" => AnalogTaskKind::FileStrobe,
+            "$fmonitor" => AnalogTaskKind::FileMonitor,
+            "$fclose" => AnalogTaskKind::FileClose,
             _ => return Err(Self::unknown_system_task_error(call)),
         };
-        let mut arguments = Vec::with_capacity(call.args.len());
+        if kind.writes_file() {
+            let most = (kind == AnalogTaskKind::FileClose).then_some(1);
+            self.validate_system_task_arity(call, 1, most)?;
+        }
+        let mut arguments = Vec::with_capacity(call.args.len() + 1);
         let mut lowered = Vec::new();
-        for argument in &call.args {
-            if let Expression::StringLit(text) = argument {
+        // `$fatal`'s level: 1 when absent, as `$finish`'s (LRM 2.4 section
+        // 9.7.3); the message follows it.
+        let mut leading = call.args.as_slice();
+        if control {
+            let level = match leading.split_first() {
+                Some((level, rest)) => {
+                    leading = rest;
+                    self.lower_expression_with_side_effects(level, module, &mut lowered)?
+                }
+                None => Self::number_expr(1.0, call.span),
+            };
+            if let Some(level) = self.eval_const_invariant(&level)
+                && !(0.0..=2.0).contains(&level.round())
+            {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "$fatal's finish number must be 0, 1 or 2, got {level}"
+                    )),
+                    call.span,
+                )));
+            }
+            arguments.push(AnalogTaskOperand::Integer(level));
+        }
+        for (position, argument) in leading.iter().enumerate() {
+            let descriptor = position == 0 && kind.writes_file();
+            if let Expression::StringLit(text) = argument
+                && !descriptor
+            {
                 arguments.push(AnalogTaskOperand::String(text.value.clone()));
                 continue;
             }
@@ -4129,8 +4197,27 @@ impl SemanticAnalyzer {
                 Ok((ValueType::Integer | ValueType::Boolean, value)) => {
                     arguments.push(AnalogTaskOperand::Integer(value));
                 }
-                Ok((found, value)) if found.is_numeric() => {
+                Ok((found, value)) if found.is_numeric() && !descriptor => {
                     arguments.push(AnalogTaskOperand::Real(value));
+                }
+                Ok(_) if descriptor => {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::TypeMismatch {
+                            expected: "integer file or multichannel descriptor".into(),
+                            found: "a non-integer value".into(),
+                            context: call.name.to_string(),
+                        },
+                        call.span,
+                    )));
+                }
+                _ if control || kind.writes_file() => {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "system task '{}' takes string literals and numbers only",
+                            call.name
+                        )),
+                        call.span,
+                    )));
                 }
                 _ => {
                     self.warn(

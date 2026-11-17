@@ -330,7 +330,10 @@ fn validate_effects(
             return Ok(());
         }
         for (name, span) in pending {
-            if matches!(name.as_str(), "$fatal" | "$stop") || (initialization && name == "$error") {
+            // `$fatal` ends the run wherever it runs; `$stop` suspends a
+            // simulation that initialization has not started (LRM 2.4 section
+            // 9.7.2), and `$error` there must stop the run past it (9.7.3).
+            if initialization && matches!(name.as_str(), "$error" | "$stop") {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::UnsupportedFeature(format!(
                         "analog system task '{name}' requires simulation control that is not implemented{}",

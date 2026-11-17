@@ -3359,6 +3359,47 @@ endmodule
     }
 
     #[test]
+    fn wasm_control_debug_and_file_tasks_journal_their_operands() {
+        use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskKind};
+        let mut harness = FusedKernelHarness::for_source(
+            "module controls(p,n); inout p,n; electrical p,n; integer k;
+             analog begin k=3; $debug(\"k=%d\", k); $fdisplay(32'h8000_0002, \"e%d\", k);
+             $fstrobe(1, k); $fclose(k); if (k > 2) $stop(2); $fatal(1, \"m%d\", k);
+             I(p,n)<+V(p,n); end endmodule",
+            "controls",
+        );
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.call_assignments();
+        harness.call_prelude();
+        let context = harness.store.data_mut().context_mut();
+        context.advance_state().unwrap();
+        let accepted = context
+            .drain_accepted_analog_tasks()
+            .map(|call| (call.kind, call.arguments.to_vec()))
+            .collect::<Vec<_>>();
+        let real = AnalogTaskArgument::Real;
+        assert_eq!(
+            accepted,
+            vec![
+                (AnalogTaskKind::Debug, vec![real(3.0)]),
+                (
+                    AnalogTaskKind::FileDisplay,
+                    vec![real(2147483650.0), real(3.0)]
+                ),
+                (AnalogTaskKind::FileStrobe, vec![real(1.0), real(3.0)]),
+                (AnalogTaskKind::FileClose, vec![real(3.0)]),
+                (AnalogTaskKind::Stop, vec![real(2.0)]),
+                (AnalogTaskKind::Fatal, vec![real(1.0), real(3.0)]),
+            ]
+        );
+    }
+
+    #[test]
     fn wasm_postfix_output_tasks_under_a_guard_journal_and_leave_the_stack_balanced() {
         use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskKind};
         let mut harness = FusedKernelHarness::for_source_with_plan(

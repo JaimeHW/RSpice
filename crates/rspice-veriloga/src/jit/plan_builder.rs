@@ -4595,7 +4595,7 @@ fn plan_task(
     task: crate::analog_tasks::AnalogTaskCall<NativeProgram, crate::canonical_ir::SourceSpanRef>,
 ) -> crate::analog_tasks::AnalogTaskCall<NativeProgram, crate::canonical_ir::SourceSpanRef> {
     use crate::analog_tasks::{AnalogTaskCall, AnalogTaskOperand};
-    if !task.kind.is_output() {
+    if !task.kind.records_operands() {
         return task;
     }
     let programs = task

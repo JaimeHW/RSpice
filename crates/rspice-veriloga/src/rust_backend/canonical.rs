@@ -6173,6 +6173,29 @@ impl Wants {
     }
 }
 
+/// The spelling of a task the generated-Rust backend refuses.
+fn analog_task_spelling(kind: crate::analog_tasks::AnalogTaskKind) -> &'static str {
+    use crate::analog_tasks::AnalogTaskKind;
+    match kind {
+        AnalogTaskKind::Stop => "$stop",
+        AnalogTaskKind::Fatal => "$fatal",
+        AnalogTaskKind::Debug => "$debug",
+        AnalogTaskKind::FileDisplay => "$fdisplay",
+        AnalogTaskKind::FileWrite => "$fwrite",
+        AnalogTaskKind::FileStrobe => "$fstrobe",
+        AnalogTaskKind::FileMonitor => "$fmonitor",
+        AnalogTaskKind::FileClose => "$fclose",
+        AnalogTaskKind::Finish => "$finish",
+        AnalogTaskKind::Error => "$error",
+        AnalogTaskKind::Warning => "$warning",
+        AnalogTaskKind::Info => "$info",
+        AnalogTaskKind::Display => "$display",
+        AnalogTaskKind::Write => "$write",
+        AnalogTaskKind::Strobe => "$strobe",
+        AnalogTaskKind::Monitor => "$monitor",
+    }
+}
+
 fn reject_unsupported_kinds(
     artifact: &CanonicalIrArtifact,
     function: &CfgFunction,
@@ -6199,6 +6222,25 @@ fn reject_unsupported_kinds(
                 return Err(unsupported(
                     artifact,
                     format!("an unresolved flow probe on {branch}"),
+                ));
+            }
+            // A generated model has no file table, no run control past
+            // `$finish`, and journals one accepted evaluation's output only.
+            CfgValueKind::AnalogTask(task)
+                if task.kind.writes_file()
+                    || task.kind.writes_every_evaluation()
+                    || matches!(
+                        task.kind,
+                        crate::analog_tasks::AnalogTaskKind::Stop
+                            | crate::analog_tasks::AnalogTaskKind::Fatal
+                    ) =>
+            {
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "the {} system task in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime, which run it",
+                        analog_task_spelling(task.kind)
+                    ),
                 ));
             }
             // The canonical level represents these; this backend does not run

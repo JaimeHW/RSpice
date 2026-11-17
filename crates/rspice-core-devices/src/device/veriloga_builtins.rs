@@ -637,6 +637,7 @@ impl BuiltinVerilogADevices {
                     model: device.model_name,
                     call,
                     source: None,
+                    files: None,
                 });
             });
         }
@@ -659,6 +660,7 @@ impl BuiltinVerilogADevices {
                     model: device.model_name,
                     call: call.clone(),
                     source: None,
+                    files: None,
                 }));
             }
         }

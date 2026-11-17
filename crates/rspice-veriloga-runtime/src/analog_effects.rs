@@ -21,10 +21,20 @@ pub enum AnalogTaskKind {
     Write,
     Strobe,
     Monitor,
+    /// `$debug`: written for every evaluation of an accepted point.
+    Debug,
+    /// `$fdisplay`, `$fwrite`, `$fstrobe` and `$fmonitor`: the first operand
+    /// is the file or multichannel descriptor.
+    FileDisplay,
+    FileWrite,
+    FileStrobe,
+    FileMonitor,
+    /// `$fclose(descriptor)`.
+    FileClose,
 }
 
 impl AnalogTaskKind {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 16] = [
         Self::Finish,
         Self::Stop,
         Self::Fatal,
@@ -35,6 +45,12 @@ impl AnalogTaskKind {
         Self::Write,
         Self::Strobe,
         Self::Monitor,
+        Self::Debug,
+        Self::FileDisplay,
+        Self::FileWrite,
+        Self::FileStrobe,
+        Self::FileMonitor,
+        Self::FileClose,
     ];
 
     /// A stable small code, for machine-code descriptors that carry the kind.
@@ -52,8 +68,8 @@ impl AnalogTaskKind {
             .copied()
     }
 
-    /// Whether the task writes formatted text: `$display` and its kin and the
-    /// severity tasks that do not stop the run.
+    /// Whether the task writes formatted text to the run's output: `$display`
+    /// and its kin, `$debug`, and the severity tasks that do not stop the run.
     pub fn is_output(self) -> bool {
         matches!(
             self,
@@ -61,10 +77,37 @@ impl AnalogTaskKind {
                 | Self::Write
                 | Self::Strobe
                 | Self::Monitor
+                | Self::Debug
                 | Self::Info
                 | Self::Warning
                 | Self::Error
         )
+    }
+
+    /// Whether the task writes to a descriptor its first operand names.
+    pub fn writes_file(self) -> bool {
+        matches!(
+            self,
+            Self::FileDisplay
+                | Self::FileWrite
+                | Self::FileStrobe
+                | Self::FileMonitor
+                | Self::FileClose
+        )
+    }
+
+    /// Whether a backend journals the call's numeric operands in source order
+    /// through [`AnalogEffectJournal::record_values`]: every task but
+    /// `$finish`, which journals its level alone.
+    pub fn records_operands(self) -> bool {
+        self != Self::Finish
+    }
+
+    /// Whether every evaluation of an accepted point writes, rather than only
+    /// the evaluation the point is accepted with: `$debug`, `$fdisplay` and
+    /// `$fwrite`, as Spectre runs them. A rejected point still writes nothing.
+    pub fn writes_every_evaluation(self) -> bool {
+        matches!(self, Self::Debug | Self::FileDisplay | Self::FileWrite)
     }
 }
 
@@ -102,6 +145,8 @@ pub struct AnalogTaskEvent<'a> {
     pub call: AnalogTaskInvocation,
     /// Where the call was written, when the model knows.
     pub source: Option<AnalogTaskSource<'a>>,
+    /// The instance's open files, for a file task's delivery.
+    pub files: Option<&'a mut dyn crate::AnalogFileTable>,
 }
 
 /// The file and one-based line of an authored task call.
@@ -170,13 +215,25 @@ impl std::error::Error for AnalogEffectError {}
 
 /// Per-instance task journal. Cloning preserves an exact solver rollback image;
 /// resetting an analysis retires both candidate and undelivered accepted calls.
+///
+/// A task that writes on every evaluation
+/// ([`AnalogTaskKind::writes_every_evaluation`]) is kept across the Newton
+/// evaluations of one point rather than replaced by the next one, and is
+/// published, ahead of the accepted evaluation's own calls, only when that
+/// point is accepted. An evaluation at another time, or a withdrawn trial,
+/// discards what a rejected point wrote.
 #[derive(Debug, Default, PartialEq)]
 pub struct AnalogEffectJournal {
     limits: AnalogEffectLimits,
     candidate: Vec<AnalogTaskInvocation>,
     accepted: Vec<AnalogTaskInvocation>,
+    /// Every-evaluation calls of the point being solved.
+    executions: Vec<AnalogTaskInvocation>,
+    /// The time the point being solved is at.
+    point_time: Option<f64>,
     candidate_bytes: usize,
     accepted_bytes: usize,
+    executions_bytes: usize,
     failure: Option<AnalogEffectError>,
     evaluation_in_progress: bool,
 }
@@ -185,14 +242,18 @@ impl Clone for AnalogEffectJournal {
     fn clone(&self) -> Self {
         // Vec::clone retains elements but need not retain spare capacity.
         // A rollback clone must keep acceptance allocation-free as well.
-        let mut accepted = Vec::with_capacity(self.accepted.len() + self.candidate.len());
+        let mut accepted =
+            Vec::with_capacity(self.accepted.len() + self.candidate.len() + self.executions.len());
         accepted.extend(self.accepted.iter().cloned());
         Self {
             limits: self.limits,
             candidate: self.candidate.clone(),
             accepted,
+            executions: self.executions.clone(),
+            point_time: self.point_time,
             candidate_bytes: self.candidate_bytes,
             accepted_bytes: self.accepted_bytes,
+            executions_bytes: self.executions_bytes,
             failure: self.failure,
             evaluation_in_progress: self.evaluation_in_progress,
         }
@@ -205,6 +266,26 @@ impl AnalogEffectJournal {
     pub fn begin_evaluation(&mut self) {
         self.discard_candidate();
         self.evaluation_in_progress = true;
+    }
+
+    /// Note the time of the evaluation about to run. Every-evaluation calls
+    /// of a point at another time belong to a point that was never accepted.
+    pub fn begin_point(&mut self, time: f64) {
+        if self.point_time != Some(time) {
+            self.discard_executions();
+            self.point_time = Some(time);
+        }
+    }
+
+    /// Withdraw a rejected trial: its every-evaluation calls go with it.
+    pub fn discard_trial(&mut self) {
+        self.discard_candidate();
+        self.discard_executions();
+    }
+
+    fn discard_executions(&mut self) {
+        self.executions.clear();
+        self.executions_bytes = 0;
     }
 
     pub fn complete_evaluation(&mut self) {
@@ -238,8 +319,8 @@ impl AnalogEffectJournal {
         })
     }
 
-    /// Capture an output task's numeric arguments in source order. The model's
-    /// task table supplies the string literals and the integer typing when the
+    /// Capture a task's numeric arguments in source order. The model's task
+    /// table supplies the string literals and the integer typing when the
     /// host formats the accepted call.
     pub fn record_values(
         &mut self,
@@ -248,7 +329,7 @@ impl AnalogEffectJournal {
         time: f64,
         values: &[f64],
     ) -> Result<(), AnalogEffectError> {
-        if !kind.is_output() {
+        if !kind.records_operands() {
             self.invalidate_candidate(AnalogEffectError::InvalidArgument);
             return self.validate_candidate();
         }
@@ -283,7 +364,8 @@ impl AnalogEffectJournal {
     }
 
     pub fn reset_analysis(&mut self) {
-        self.discard_candidate();
+        self.discard_trial();
+        self.point_time = None;
         self.accepted.clear();
         self.accepted_bytes = 0;
     }
@@ -312,17 +394,19 @@ impl AnalogEffectJournal {
             .candidate
             .len()
             .checked_add(self.accepted.len())
+            .and_then(|count| count.checked_add(self.executions.len()))
             .and_then(|count| count.checked_add(1))
             .ok_or(AnalogEffectError::CallLimit)?;
         if calls > self.limits.calls {
             return Err(AnalogEffectError::CallLimit);
         }
-        let candidate_bytes = invocation
+        let payload = invocation
             .payload_bytes()
-            .and_then(|bytes| bytes.checked_add(self.candidate_bytes))
             .ok_or(AnalogEffectError::ArgumentLimit)?;
-        let total_bytes = candidate_bytes
-            .checked_add(self.accepted_bytes)
+        let total_bytes = payload
+            .checked_add(self.candidate_bytes)
+            .and_then(|bytes| bytes.checked_add(self.executions_bytes))
+            .and_then(|bytes| bytes.checked_add(self.accepted_bytes))
             .ok_or(AnalogEffectError::ArgumentLimit)?;
         if total_bytes > self.limits.argument_bytes {
             return Err(AnalogEffectError::ArgumentLimit);
@@ -330,13 +414,18 @@ impl AnalogEffectJournal {
         // Reserve delivery capacity now, while errors still belong to candidate
         // evaluation. Circuit-wide accepted-state application is infallible.
         self.accepted
-            .try_reserve(self.candidate.len() + 1)
+            .try_reserve(self.candidate.len() + self.executions.len() + 1)
             .map_err(|_| AnalogEffectError::AllocationFailed)?;
-        self.candidate
+        let (buffer, bytes) = if invocation.kind.writes_every_evaluation() {
+            (&mut self.executions, &mut self.executions_bytes)
+        } else {
+            (&mut self.candidate, &mut self.candidate_bytes)
+        };
+        buffer
             .try_reserve(1)
             .map_err(|_| AnalogEffectError::AllocationFailed)?;
-        self.candidate.push(invocation);
-        self.candidate_bytes = candidate_bytes;
+        buffer.push(invocation);
+        *bytes += payload;
         Ok(())
     }
 
@@ -363,9 +452,11 @@ impl AnalogEffectJournal {
             self.validate_candidate().is_ok(),
             "task acceptance requires a valid candidate"
         );
+        self.accepted.append(&mut self.executions);
         self.accepted.append(&mut self.candidate);
-        self.accepted_bytes += self.candidate_bytes;
+        self.accepted_bytes += self.candidate_bytes + self.executions_bytes;
         self.candidate_bytes = 0;
+        self.executions_bytes = 0;
     }
 
     pub fn accepted(&self) -> &[AnalogTaskInvocation] {
@@ -381,7 +472,10 @@ impl AnalogEffectJournal {
     }
 
     pub fn has_candidate(&self) -> bool {
-        !self.candidate.is_empty() || self.failure.is_some() || self.evaluation_in_progress
+        !self.candidate.is_empty()
+            || !self.executions.is_empty()
+            || self.failure.is_some()
+            || self.evaluation_in_progress
     }
 
     /// Transfer accepted calls to the analysis host, retaining journal capacity
@@ -506,6 +600,46 @@ mod tests {
         assert_eq!(journal.drain_accepted().collect::<Vec<_>>(), [call(1, 2)]);
         journal.accept_candidate().unwrap();
         assert!(journal.accepted().is_empty());
+    }
+
+    fn debug(value: i64, time: f64) -> AnalogTaskInvocation {
+        AnalogTaskInvocation {
+            kind: AnalogTaskKind::Debug,
+            site: 9,
+            time,
+            arguments: Box::new([AnalogTaskArgument::Integer(value)]),
+        }
+    }
+
+    #[test]
+    fn every_evaluation_calls_of_a_rejected_point_are_never_published() {
+        let mut journal = AnalogEffectJournal::default();
+        // Two evaluations at one point keep both every-evaluation calls.
+        for value in [1, 2] {
+            journal.begin_point(1.0);
+            journal.begin_evaluation();
+            journal.record(debug(value, 1.0)).unwrap();
+            journal.record(call(0, value)).unwrap();
+            journal.complete_evaluation();
+        }
+        // The solver gave up on that point and tried an earlier one.
+        journal.begin_point(0.5);
+        journal.begin_evaluation();
+        journal.record(debug(3, 0.5)).unwrap();
+        journal.record(call(0, 3)).unwrap();
+        journal.complete_evaluation();
+        let saved = journal.clone();
+        journal.accept_candidate().unwrap();
+        assert_eq!(
+            journal.drain_accepted().collect::<Vec<_>>(),
+            [debug(3, 0.5), call(0, 3)]
+        );
+        // A withdrawn trial takes its every-evaluation calls with it.
+        let mut withdrawn = saved;
+        withdrawn.discard_trial();
+        withdrawn.accept_candidate().unwrap();
+        assert!(withdrawn.accepted().is_empty());
+        assert!(!withdrawn.has_candidate());
     }
 
     #[test]
