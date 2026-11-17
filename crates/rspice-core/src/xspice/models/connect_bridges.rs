@@ -961,8 +961,10 @@ fn classify(value: DigitalValue) -> (DriveState, ConverterStrength) {
 /// An HDL port's drive as a state and a strength: the state of the XSPICE
 /// value it maps to, at the drive's own strength level, so a supply or weak
 /// drive keeps its resistance. Large converts as pull, and medium and small
-/// as weak, the nearest levels with a resistance of their own. A value with
-/// no level of its own (`z`, `L`, `H`) converts as XSPICE reads it.
+/// as weak, the nearest levels with a resistance of their own. An `L` or an
+/// `H` — what a `bufif` whose control is `x` drives — is the logic value `x`
+/// (IEEE 1364-2005 section 7.10.2), at the strength of the end it drives; `z`
+/// converts as XSPICE reads it.
 fn classify_drive(drive: BitDrive) -> (DriveState, ConverterStrength) {
     use ConverterStrength as S;
     use DigitalStrengthLevel as L;
@@ -977,8 +979,8 @@ fn classify_drive(drive: BitDrive) -> (DriveState, ConverterStrength) {
     match (drive.value, drive.zero, drive.one) {
         (FourStateBit::Zero, zero, _) => (state, level(zero)),
         (FourStateBit::One, _, one) => (state, level(one)),
-        (FourStateBit::Unknown, zero, one) if zero != L::HighZ && one != L::HighZ => {
-            (state, level(zero.max(one)))
+        (FourStateBit::Unknown, zero, one) if zero != L::HighZ || one != L::HighZ => {
+            (DriveState::Unknown, level(zero.max(one)))
         }
         _ => (state, strength),
     }

@@ -479,6 +479,48 @@ fn an_hdl_drive_strength_picks_the_converter_resistance() {
     }
 }
 
+/// A `bufif1` whose control is `x` drives `StH` or `StL`, whose logic value
+/// is `x` (IEEE 1364-2005 section 7.10.2; Icarus Verilog 13 prints `x` for
+/// both). The converter drives its `x` level, not a 1 or a 0: `vx`, half of
+/// `vsup` 3.3 V, through `rx` (20 Ω) into a 1 kΩ load settles at
+/// `1.65·1k/(1k + 20)`.
+#[test]
+fn an_hdl_drive_of_l_or_h_converts_as_x() {
+    let directory = TempDirectory::new("hdl-strength-lh");
+    let expected = 1.65 * 1e3 / (1e3 + 20.0);
+    for (index, data) in ["1'b1", "1'b0"].into_iter().enumerate() {
+        let mut hdl_source = format!(
+            "`include \"disciplines.vams\"\n\
+             `timescale 1ns/1ps\n\
+             module drv(o);\n  output o;\n  wire o;\n  reg c;\n  initial c = 1'bx;\n  \
+             bufif1 b(o, {data}, c);\nendmodule\n"
+        );
+        for (_, module) in BUILTIN_CONNECT_MODULES {
+            hdl_source.push_str(module);
+        }
+        hdl_source
+            .push_str("connectrules deck;\n    connect a2d;\n    connect d2a;\nendconnectrules\n");
+        let hdl_path = directory.write(&format!("drv{index}.vams"), &hdl_source);
+        let result = run(
+            &format!(
+                "* bufif1 with an x control at a converter\n\
+                 .hdl \"{hdl_path}\" module=drv\n\
+                 .options connectrules=deck\n\
+                 x1 out drv\n\
+                 r1 out 0 1k\n\
+                 .end\n"
+            ),
+            20e-9,
+            0.1e-9,
+        );
+        let settled = value_at(&result, "out", 10e-9);
+        assert!(
+            (settled - expected).abs() <= 1e-6 * 3.3,
+            "bufif1 driving {data} under an x control: {settled} V, expected {expected} V"
+        );
+    }
+}
+
 /// Supply and weak drives keep their own resistances through an HDL port's
 /// converter, which XSPICE's strong and resistive classes would not: a 1
 /// into a 1 kΩ load at the `d2a` defaults (`vsup` 3.3 V, `rsup` 2 Ω, `rpull`
