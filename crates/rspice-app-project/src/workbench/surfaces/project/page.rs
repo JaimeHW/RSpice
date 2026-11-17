@@ -84,6 +84,33 @@ pub(super) fn inset_column<R>(
     .inner
 }
 
+/// Run `body` in a top-down column `width` wide, `inset` from the left edge,
+/// as tall as what it holds: the page, not the column, owns the vertical
+/// space, so a list inside takes the height it is given rather than what
+/// is left of the window.
+pub(super) fn stacked_column<R>(
+    ui: &mut Ui,
+    inset: f32,
+    width: f32,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let origin = ui.cursor().min;
+    let mut column = ui.new_child(
+        UiBuilder::new()
+            .max_rect(Rect::from_min_size(
+                pos2(origin.x + inset, origin.y),
+                vec2(width, 40_000.0),
+            ))
+            .layout(Layout::top_down(Align::Min)),
+    );
+    column.set_width(width);
+    column.spacing_mut().item_spacing.y = 0.0;
+    let output = body(&mut column);
+    let used = column.min_rect();
+    ui.advance_cursor_after_rect(Rect::from_min_max(origin, used.max));
+    output
+}
+
 /// The full-width rule that closes a page's header band.
 pub(super) fn header_rule(ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
@@ -264,9 +291,11 @@ fn card_link_row(ui: &mut Ui, title: &str, link: &CardLink<'_>, height: f32) -> 
         Stroke::new(1.0, tokens.color.border),
     );
     let font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    let galley = ui
-        .painter()
-        .layout_no_wrap(link.label.to_owned(), font.clone(), Color32::WHITE);
+    // Laid out in no colour of its own, so the ink chosen below is the one
+    // painted.
+    let galley =
+        ui.painter()
+            .layout_no_wrap(link.label.to_owned(), font.clone(), Color32::PLACEHOLDER);
     let words = Rect::from_min_size(
         pos2(
             rect.right() - 10.0 - galley.size().x,

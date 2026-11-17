@@ -17,7 +17,7 @@ use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::framework::host::{Host, Point};
 
 /// The Project workspace as the shell draws it on the stage.
-fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     app.contribute(Point::Surface(Workspace::Project), ui);
 }
 

@@ -2,9 +2,13 @@
 //! publication and checkpoint the project keeps, newest first, each row
 //! opening what it names; and the words its rows are made of.
 
-use egui::Ui;
+use egui::{Color32, Ui};
 
-use crate::ui::widgets::table::{Cell, Column, DataTable, SortKey, TableState};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens;
+use crate::ui::widgets::table::{
+    CELL_PAD, Cell, Column, DataTable, SortKey, TABLE_EDGE_INSET, TableState,
+};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -57,15 +61,17 @@ fn activity_table(
         empty_sentence(ui, "No runs, validated revisions or checkpoints yet");
         return None;
     }
+    let operations = &snapshot.operations;
     // The detail column ends with a run's engine, so a narrow table gives the
-    // engine up first; the elapsed time has a column of its own.
+    // engine up first; the elapsed time has a column of its own. A time and a
+    // duration are never cut: their columns are as wide as the widest one.
+    let (when, elapsed) = fitted_widths(ui, operations, snapshot.now_ms);
     let columns = [
-        Column::words("When", 140.0),
+        Column::words("When", when),
         Column::name("Operation", 150.0),
-        Column::number("Elapsed", 72.0),
+        Column::number("Elapsed", elapsed),
         Column::name("Detail", 120.0),
     ];
-    let operations = &snapshot.operations;
     let response = DataTable::new(
         "workbench.project.overview.activity",
         &columns,
@@ -102,6 +108,44 @@ fn row_cells(operation: &OperationSnapshot, now_ms: u64) -> Vec<Cell> {
         Cell::number(crate::quantity::format_elapsed(seconds)).sort_by(SortKey::Number(seconds))
     });
     vec![when, event, elapsed, Cell::text(&operation.detail)]
+}
+
+/// The least a fitted column is made: room for its head and the sort mark
+/// beside it.
+const FITTED_HEAD_WIDTH: f32 = 72.0;
+
+/// How wide the When and Elapsed columns are made: each as wide as the
+/// widest value it shows, with the room the table leaves either side of a
+/// cell's words. Both are written in mono, so the value with the most
+/// characters is the widest.
+fn fitted_widths(ui: &Ui, operations: &[OperationSnapshot], now_ms: u64) -> (f32, f32) {
+    let widest = |values: &mut dyn Iterator<Item = String>| {
+        values
+            .max_by_key(|value| value.chars().count())
+            .unwrap_or_default()
+    };
+    let when = widest(
+        &mut operations
+            .iter()
+            .filter_map(|operation| operation.when(now_ms).map(|(short, _)| short)),
+    );
+    let elapsed = widest(
+        &mut operations
+            .iter()
+            .filter_map(|operation| operation.elapsed.map(crate::quantity::format_elapsed)),
+    );
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let measure = |text: String| {
+        ui.painter()
+            .layout_no_wrap(text, font.clone(), Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    (
+        // The first column starts at the table's edge inset.
+        (measure(when) + TABLE_EDGE_INSET + CELL_PAD + 2.0).max(FITTED_HEAD_WIDTH),
+        (measure(elapsed) + 2.0 * CELL_PAD + 2.0).max(FITTED_HEAD_WIDTH),
+    )
 }
 
 pub(super) fn run_title(sequence: u64, label: &str) -> String {

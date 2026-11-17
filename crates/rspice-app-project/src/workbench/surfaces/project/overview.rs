@@ -366,7 +366,7 @@ fn overview_body(
         // One column: each card ends with its list, and a list longer than
         // the window scrolls inside its card.
         let room = height.max(LIST_CARD_MIN_HEIGHT);
-        page::inset_column(ui, inset, width, |ui| {
+        page::stacked_column(ui, inset, width, |ui| {
             retain_first_intent(
                 intent,
                 status_card(ui, &snapshot.statuses, &snapshot.problems, findings),

@@ -56,9 +56,11 @@ fn cells_table(
         empty_sentence(ui, "The project has no cells yet");
         return None;
     }
+    // The least widths sum to 496, so the left column a 1600-point window
+    // gives the Overview holds every column without scrolling sideways.
     let columns = [
-        Column::name("Cell", 120.0),
-        Column::words("Library", 112.0),
+        Column::name("Cell", 104.0),
+        Column::words("Library", 104.0),
         Column::words("Role", 84.0),
         Column::name("Views", 120.0),
         Column::number("Instances", 84.0),

@@ -28,6 +28,7 @@ mod new_project;
 mod new_project_fields;
 mod new_view;
 mod overview;
+mod overview_layout;
 mod overview_rows;
 mod project_workflow;
 mod publication;
