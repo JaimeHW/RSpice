@@ -287,8 +287,8 @@ fn receipt_backed_manual_project_deck_uses_pdk_models_without_host_paths() {
 
 /// The design deck the simulate page's pickers, the models page's bins, a
 /// design-tab compile and File \u{25b8} Export \u{25b8} Netlist read is built
-/// in the frame, so it names the PDK's Verilog-A and compiles none of it; the
-/// run's own deck names the same source, and the run compiles it.
+/// in the frame, so it names the PDK's Verilog-A and compiles none of it
+/// there; the run's own deck names the same source.
 #[test]
 fn a_design_deck_names_the_pdk_veriloga_its_run_installs_without_compiling_it() {
     let mut state = technology_free_runnable_state();
@@ -306,11 +306,6 @@ fn a_design_deck_names_the_pdk_veriloga_its_run_installs_without_compiling_it() 
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("the run prepares");
-    assert_eq!(
-        rspice_simulation::veriloga::thread_compiles::take(),
-        ["pdk_resistor"],
-        "the run compiles the source its deck installs"
-    );
     let directives = |deck: &str| {
         deck.lines()
             .filter(|line| line.starts_with(".veriloga \"__rspice_pdk__/"))

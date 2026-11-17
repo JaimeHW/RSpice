@@ -751,10 +751,12 @@ impl SimulationController {
             );
         // The deck names the Verilog-A the run installs, as the run's own
         // deck does, and compiles none of it: every caller builds it in the
-        // frame, and a PDK model's compile takes seconds.
-        for name in
-            external_veriloga_source_names(&sealed_models, model.sim_setup.reference_pvt.process)?
-        {
+        // frame, and a PDK model's compile takes seconds. The compile starts
+        // here, off the frame, so the frame that validates a manual deck or
+        // queues a campaign reads the runtimes rather than compiling them.
+        let process = model.sim_setup.reference_pvt.process;
+        rspice_simulation::project_veriloga::external_runtimes::warm(&sealed_models, process);
+        for name in external_veriloga_source_names(&sealed_models, process)? {
             rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut source,
                 &name.source_key,

@@ -545,6 +545,26 @@ impl PreparedVerilogARuntimeSet {
         self.check_structure()
     }
 
+    /// A set of runtimes each of which was validated when it was sealed or
+    /// when a set held it, checked as a set ([`Self::check_structure`]) and
+    /// not payload by payload again. A PDK model's payload takes a third of
+    /// a second to parse in a debug build, and a run's preparation builds
+    /// one set per deck from the same runtimes; the install that hands a
+    /// payload to the engine still checks and parses it.
+    pub(crate) fn try_from_validated(
+        mut runtimes: Vec<PreparedVerilogARuntime>,
+        mut connections: Vec<PreparedVerilogAConnectionLibrary>,
+    ) -> Result<Self, String> {
+        runtimes.sort_by_cached_key(|runtime| runtime.source_key.to_ascii_lowercase());
+        connections.sort_by_cached_key(|library| library.binding().source_key.to_ascii_lowercase());
+        let set = Self {
+            runtimes,
+            connections,
+        };
+        set.check_structure()?;
+        Ok(set)
+    }
+
     /// Everything [`Self::validate`] checks but the runtimes' payloads: each
     /// source's identity, the keys and aliases across the set, and its order.
     ///
@@ -709,11 +729,12 @@ impl PreparedVerilogARuntimeSet {
                 runtimes.len() + connections.len()
             ));
         }
-        Self::try_with_connections(runtimes, connections)
+        Self::try_from_validated(runtimes, connections)
     }
 
+    /// This set and `additional` as one, checked as one set.
     pub fn try_merge(self, additional: Self) -> Result<Self, String> {
-        Self::try_with_connections(
+        Self::try_from_validated(
             self.runtimes
                 .into_iter()
                 .chain(additional.runtimes)
@@ -751,6 +772,16 @@ pub fn compile_pdk_source_runtime(
     artifacts: &[crate::pdk::SealedPdkVerilogAArtifact],
     binding: &crate::pdk::SealedPdkVerilogABinding,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
+    let bundle = verified_pdk_source_bundle(artifacts, binding)?;
+    compile_verified_pdk_source_runtime(package, archive_digest, binding, &bundle)
+}
+
+/// `binding`'s sources as one bundle, each artifact checked against its
+/// sealed digest and the root against the manifest's exact identity.
+pub(crate) fn verified_pdk_source_bundle(
+    artifacts: &[crate::pdk::SealedPdkVerilogAArtifact],
+    binding: &crate::pdk::SealedPdkVerilogABinding,
+) -> Result<rspice_veriloga::VirtualSourceBundle, PreparedRuntimeError> {
     if artifacts.is_empty() {
         return Err(PreparedRuntimeError::SourceIdentity(format!(
             "PDK Verilog-A source '{}' has no authenticated artifacts",
@@ -794,16 +825,24 @@ pub fn compile_pdk_source_runtime(
             binding.root_artifact_path
         )));
     }
-    let bundle = rspice_veriloga::VirtualSourceBundle::new(&binding.root_artifact_path, files)
-        .map_err(|error| {
-            PreparedRuntimeError::SourceBundle(format!(
-                "PDK Verilog-A bundle '{}' is invalid: {error}",
-                binding.source_id
-            ))
-        })?;
+    rspice_veriloga::VirtualSourceBundle::new(&binding.root_artifact_path, files).map_err(|error| {
+        PreparedRuntimeError::SourceBundle(format!(
+            "PDK Verilog-A bundle '{}' is invalid: {error}",
+            binding.source_id
+        ))
+    })
+}
+
+/// Compile a bundle [`verified_pdk_source_bundle`] returned.
+pub(crate) fn compile_verified_pdk_source_runtime(
+    package: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
+    archive_digest: rspice_vocabulary::product::ContentDigest,
+    binding: &crate::pdk::SealedPdkVerilogABinding,
+    bundle: &rspice_veriloga::VirtualSourceBundle,
+) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     thread_compiles::record(&binding.module_name);
     let compilation = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options())
-        .compile_virtual_runtime(&bundle, &binding.module_name, pdk_virtual_compile_limits())
+        .compile_virtual_runtime(bundle, &binding.module_name, pdk_virtual_compile_limits())
         .map_err(|error| {
             PreparedRuntimeError::Compile(format!(
                 "Could not compile PDK Verilog-A source '{}' module '{}': {error}",

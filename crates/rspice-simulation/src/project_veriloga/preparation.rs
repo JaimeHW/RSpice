@@ -227,11 +227,16 @@ pub fn prepared_pdk_veriloga_runtimes(
     let runtimes = bindings
         .iter()
         .map(|binding| {
-            crate::veriloga::compile_pdk_source_runtime(package, archive_digest, artifacts, binding)
-                .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+            crate::project_veriloga::external_runtimes::pdk_runtime(
+                package,
+                archive_digest,
+                artifacts,
+                binding,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    crate::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+    crate::veriloga::PreparedVerilogARuntimeSet::try_from_validated(runtimes, Vec::new())
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
@@ -344,7 +349,7 @@ fn compile_model_library_authority(
     else {
         return Ok(Default::default());
     };
-    crate::project_veriloga::compile_model_library_source_runtimes(&authority)
+    crate::project_veriloga::external_runtimes::model_library_runtimes(&authority)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
