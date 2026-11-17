@@ -42,6 +42,7 @@ pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 pub use plan_outcome::AnalysisLifecycleOutcome;
+pub use project_technology::ProjectTechnologyVerdict;
 #[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
@@ -155,6 +156,9 @@ pub struct Model {
     /// scan. Runtime only: a saved verdict about bytes is a verdict about a
     /// moment that has passed.
     pub source_drift: ModelSourceDrift,
+    /// The technology contract as last proven, for the surfaces that show it
+    /// on every frame. Runtime only.
+    pub technology_verdict: ProjectTechnologyVerdict,
 }
 
 impl Model {

@@ -39,6 +39,12 @@ type RenamedLayoutDocument = Result<
     rspice_design::physical_layout::LayoutDocumentError,
 >;
 
+pub(super) fn layout_catalog_is_empty(
+    documents: &Stamped<BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>>,
+) -> bool {
+    documents.is_empty()
+}
+
 fn validate_physical_layout_document_catalog(
     documents: &BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
 ) -> Result<(), rspice_design::physical_layout::LayoutDocumentError> {
@@ -64,6 +70,12 @@ impl ProjectWorkspace {
         &self,
     ) -> &BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument> {
         &self.physical_layout_documents
+    }
+
+    /// The stamp of the layouts as they stand: equal stamps, equal layouts.
+    /// See [`rspice_design::stamped`].
+    pub const fn physical_layout_stamp(&self) -> u64 {
+        self.physical_layout_documents.stamp()
     }
 
     pub fn physical_layout_document(
@@ -96,7 +108,7 @@ impl ProjectWorkspace {
     {
         document.validate()?;
         let key = document.owner().key();
-        let mut candidate = self.physical_layout_documents.clone();
+        let mut candidate = (*self.physical_layout_documents).clone();
         if candidate.insert(key.clone(), document).is_some() {
             return Err(
                 rspice_design::physical_layout::LayoutDocumentError::DuplicateObject {
@@ -159,7 +171,7 @@ impl ProjectWorkspace {
                 document.copy_for_cell(source_library, source_cell, target_library, target_cell)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut candidate = self.physical_layout_documents.clone();
+        let mut candidate = (*self.physical_layout_documents).clone();
         for document in &copies {
             let key = document.owner().key();
             if candidate.contains_key(&key) {
@@ -247,7 +259,7 @@ impl ProjectWorkspace {
         &mut self,
         prepared: PreparedPhysicalLayoutCatalog,
     ) {
-        self.physical_layout_documents = prepared.documents;
+        self.physical_layout_documents = prepared.documents.into();
     }
 
     pub fn validate_physical_layout_documents(&self) -> Result<(), String> {

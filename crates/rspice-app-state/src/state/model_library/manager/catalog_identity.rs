@@ -40,16 +40,18 @@ impl ModelLibraryManager {
     ///
     /// # Why this is content, and not a counter
     ///
-    /// [`ModelLibraryManager`] carries no revision counter, and adding one
-    /// would not be sound. The manager is replaced *wholesale* when a project
-    /// is opened, when a recovery comparison is accepted, when design history
-    /// restores a candidate, and when a model-hub or import operation publishes
-    /// a rebuilt candidate. A replacement arrives carrying whatever counter it
-    /// was serialized with, which may be a value this session has already
-    /// cached an answer against — and the page would then state this project's
-    /// bin geometry from the previous project's cards. Hashing content has no
-    /// such failure mode: a catalogue cannot present a key it did not earn,
-    /// however it arrived.
+    /// A revision counter kept with the catalogue would not be sound, and the
+    /// catalogue's [`Self::catalog_stamp`] is too coarse for this key: it moves
+    /// with every mutable access, presentation fields included, which is
+    /// exactly what this key must ignore. The manager is replaced *wholesale*
+    /// when a project is opened, when a recovery comparison is accepted, when
+    /// design history restores a candidate, and when a model-hub or import
+    /// operation publishes a rebuilt candidate. A replacement arrives carrying
+    /// whatever counter it was serialized with, which may be a value this
+    /// session has already cached an answer against — and the page would then
+    /// state this project's bin geometry from the previous project's cards.
+    /// Hashing content has no such failure mode: a catalogue cannot present a
+    /// key it did not earn, however it arrived.
     ///
     /// # What participates, and why that is all of it
     ///

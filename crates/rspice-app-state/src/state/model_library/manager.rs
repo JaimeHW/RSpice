@@ -405,6 +405,13 @@ impl ModelLibraryManager {
         &self.catalog
     }
 
+    /// The stamp of the catalogue as it stands: equal stamps, equal
+    /// catalogues. A loaded, defaulted or replaced catalogue carries a stamp
+    /// no earlier one did. See [`rspice_design::stamped`].
+    pub const fn catalog_stamp(&self) -> u64 {
+        self.catalog.stamp()
+    }
+
     pub fn resolution_records(&self) -> &ModelResolutionRecords {
         &self.resolution_records
     }

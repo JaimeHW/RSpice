@@ -102,10 +102,11 @@ pub struct ProjectWorkspace {
     /// Authoritative physical geometry for layout cell views, keyed by the
     /// exact `library/cell/view` owner. Documents use integral PDK database
     /// units and expected-revision transactions; no schematic or display
-    /// geometry is projected into this store.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// geometry is projected into this store. Stamped, so what is proven
+    /// against the layouts holds until one of them changes.
+    #[serde(default, skip_serializing_if = "catalog::layout_catalog_is_empty")]
     physical_layout_documents:
-        BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>,
+        Stamped<BTreeMap<String, rspice_design::physical_layout::PhysicalLayoutDocument>>,
     /// Versioned, per-document Page Setup contracts used by schematic,
     /// symbol, result, and report hardcopy workflows. Publication artifacts
     /// and transient preview state are intentionally not persisted here.
@@ -245,7 +246,7 @@ impl Default for ProjectWorkspace {
             schematic_buffers,
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
-            physical_layout_documents: BTreeMap::new(),
+            physical_layout_documents: Stamped::default(),
             hardcopy_setups: rspice_hardcopy_contract::HardcopySetupStore::default(),
             hardcopy_receipts: rspice_hardcopy_contract::HardcopyReceiptLedger::default(),
             project_print_mappings: rspice_hardcopy_contract::PrintMappingPresetCatalog::new(

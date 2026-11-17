@@ -629,6 +629,10 @@ mod tests {
                 .dirty
         );
 
+        // Proven here, the verdict the pages read is kept until a layout
+        // changes; the import below has to reach it.
+        assert_eq!(state.model.project_technology_verdict(), Ok(()));
+
         let invalid_shape = rspice_app_state::state::LayoutObjectId::new();
         let error = state
             .model
@@ -700,6 +704,11 @@ mod tests {
         assert!(
             imported_error.contains("outside the exact project PDK"),
             "{imported_error}"
+        );
+        assert_eq!(
+            state.model.project_technology_verdict(),
+            Err(imported_error),
+            "the verdict the pages read follows the imported layout"
         );
     }
 }
