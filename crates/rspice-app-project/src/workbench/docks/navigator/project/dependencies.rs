@@ -80,7 +80,7 @@ fn dependency_rail_rows(model: &Model, query: &str) -> Arc<[DependencyRailRow]> 
             query.is_empty()
                 || format!("{name} {kind} {}", status.unwrap_or_default())
                     .to_ascii_lowercase()
-                    .contains(&query)
+                    .contains(query)
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.0.cmp(&right.0));

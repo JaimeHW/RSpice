@@ -601,6 +601,10 @@ fn the_attach_dialog_proves_its_candidates_when_the_catalogue_changes() {
 /// --ignored --nocapture`
 #[test]
 #[ignore = "a release-build timing to read, not a rule"]
+#[allow(
+    clippy::print_stdout,
+    reason = "run by hand with --nocapture, the numbers are what it is for"
+)]
 fn overview_idle_frame_time() {
     for components in [0, COMPONENTS] {
         let (mut app, folder) = large_project("frame-time", components);
