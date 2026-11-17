@@ -933,8 +933,10 @@ pub(crate) fn release_test_writer_lease(checkpoint: &Path) -> Result<(), String>
     release_writer_lease(checkpoint)
 }
 
-#[cfg(test)]
-fn orphan_test_checkpoint(checkpoint: &Path) -> Result<(), String> {
+/// Make `checkpoint` look as a session that ended without cleaning up
+/// leaves it, so recovery offers it.
+#[cfg(any(test, feature = "test-support"))]
+pub fn orphan_test_checkpoint(checkpoint: &Path) -> Result<(), String> {
     release_writer_lease(checkpoint)?;
     let mut manifest = read_manifest(checkpoint)?
         .ok_or_else(|| "test checkpoint manifest is missing".to_owned())?;

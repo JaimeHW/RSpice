@@ -226,7 +226,9 @@ fn revert_cell_view(
 }
 
 /// Open a recovery checkpoint as a comparison workspace in place of the open
-/// work; the saved project and the checkpoint stay as they are.
+/// work; the saved project and the checkpoint stay as they are. The
+/// comparison is a new project that belongs to no file: its first save asks
+/// where to write, so it can never land on the project it replaced.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn open_comparison(
     state: &mut AppState,
@@ -240,6 +242,7 @@ pub(crate) fn open_comparison(
     let baseline_notice = recovery::install_comparison_design(&mut state.model, comparison);
     state.bump_active_schematic_epoch();
     recovery::reset_comparison_execution(&mut state.model);
+    reset_for_new_project(state);
     state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Design);
