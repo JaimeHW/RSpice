@@ -334,7 +334,10 @@ mod tests {
 
     #[test]
     fn a_copy_someone_damaged_is_written_again() {
-        let retained = table("route-damaged.csv", "0 0\n5e-9 3.3\n");
+        // The cache is shared by every test process on the machine: a name
+        // of this process's own keeps another run's removal off this copy.
+        let name = format!("route-damaged-{}.csv", std::process::id());
+        let retained = table(&name, "0 0\n5e-9 3.3\n");
         let path = materialized(&retained).expect("the cache is writable");
         std::fs::remove_file(&path).expect("the copy can be removed");
         let again = materialized(&retained).expect("the cache is writable");
