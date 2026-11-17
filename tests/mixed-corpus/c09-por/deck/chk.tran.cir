@@ -1,0 +1,10 @@
+* C9 power-on reset, variant chk, tran
+* The base controller on straight ramps (net/por_ramp.cir), with a Verilog-A
+* checker dating hi's crossings of vcc/2 = 1.65 V with cross() events.
+.hdl "../net/por_ctrl.v"
+.hdl "../net/hi_check.va"
+.include ../net/por_ramp.cir
+.param vcc=3.3
+xchk hi tr tf hi_check
+.tran 10n 500u
+.end

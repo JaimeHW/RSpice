@@ -1,0 +1,20 @@
+// C9 checker (RSpice-authored; corpus design C9): dates V(a)'s crossings of
+// th with cross() events, each to a 1 ps time tolerance, and holds the date
+// of the latest crossing in each direction on tr (rising) and tf (falling),
+// in microseconds; -1 before the first.
+`include "disciplines.vams"
+module hi_check(a, tr, tf);
+  input a; output tr, tf; electrical a, tr, tf;
+  parameter real th = 1.65;
+  real r, f;
+  analog begin
+    @(initial_step) begin
+      r = -1.0;
+      f = -1.0;
+    end
+    @(cross(V(a) - th, +1, 1e-12)) r = $abstime * 1e6;
+    @(cross(V(a) - th, -1, 1e-12)) f = $abstime * 1e6;
+    V(tr) <+ r;
+    V(tf) <+ f;
+  end
+endmodule

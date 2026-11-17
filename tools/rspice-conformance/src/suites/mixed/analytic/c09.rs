@@ -28,6 +28,8 @@ pub const REGISTRY: Registry = &[
     ("thr_hi", thr_hi),
     ("thr_lo", thr_lo),
     ("ramp_por", ramp_por),
+    ("check_rise", check_rise),
+    ("check_fall", check_fall),
 ];
 
 const STATIC_SUPPLY: f64 = 3.3;
@@ -184,6 +186,39 @@ fn ramp_por(context: &Context<'_>) -> Result<Expected, String> {
                 window[0], window[1]
             )
         })
+}
+
+/// The cross() checker (net/hi_check.va) at `time`: the date, in µs, of
+/// hi's latest crossing of 1.65 V in the direction `rising` at or before
+/// `time` on `chk`'s ramp, or −1 before its first.
+fn hi_check(time: f64, rising: bool) -> f64 {
+    RAMP_HI
+        .windows(2)
+        .rev()
+        .find_map(|pair| ramp_crossing(pair, 0.5 * STATIC_SUPPLY, rising, [0.0, time]))
+        .map_or(-1.0, |at| at * 1e6)
+}
+
+fn check_dates(context: &Context<'_>, rising: bool) -> Result<Expected, String> {
+    let grid = context
+        .quantity
+        .measure
+        .times
+        .ok_or("c09::check_rise/check_fall need the sample time grid")?;
+    Ok(values(
+        grid.times()
+            .into_iter()
+            .map(|time| hi_check(time, rising))
+            .collect(),
+    ))
+}
+
+fn check_rise(context: &Context<'_>) -> Result<Expected, String> {
+    check_dates(context, true)
+}
+
+fn check_fall(context: &Context<'_>) -> Result<Expected, String> {
+    check_dates(context, false)
 }
 
 /// The first clock rise strictly after `time`.
@@ -385,5 +420,11 @@ mod tests {
         assert!((at(&RAMP_LO_N, false, [2e-4, 3.2e-4]) - 306e-6).abs() < 1e-15);
         assert!((at(&RAMP_LO_N, true, [3.2e-4, 5e-4]) - 324e-6).abs() < 1e-15);
         assert!(ramp_crossing(&RAMP_HI, 1.65, false, [0.0, 2e-4]).is_none());
+        // The checker holds the latest date in each direction, in µs.
+        assert_eq!(hi_check(40e-6, true), -1.0);
+        assert!((hi_check(2e-4, true) - 50.0).abs() < 1e-9);
+        assert!((hi_check(4e-4, true) - 325.0).abs() < 1e-9);
+        assert_eq!(hi_check(3e-4, false), -1.0);
+        assert!((hi_check(4e-4, false) - 305.0).abs() < 1e-9);
     }
 }
