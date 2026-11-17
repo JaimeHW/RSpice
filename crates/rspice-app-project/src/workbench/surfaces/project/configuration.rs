@@ -125,11 +125,11 @@ const TOOLBAR_GAP: f32 = 8.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusPlace {
     /// At the right end of the name's row.
-    NameRow,
+    BesideName,
     /// At the right end of the actions' row.
-    ActionRow,
+    WithActions,
     /// On a row of its own under them.
-    OwnRow,
+    Alone,
 }
 
 /// How the band lays its parts out at the width it has: one row while the
@@ -150,7 +150,7 @@ fn toolbar_layout(width: f32, name: f32, state: f32, actions: f32, status: f32) 
         return ToolbarLayout {
             two_rows: false,
             name_width: name.min(one_row),
-            status: StatusPlace::NameRow,
+            status: StatusPlace::BesideName,
         };
     }
     let name_row = width - state - gap;
@@ -159,16 +159,16 @@ fn toolbar_layout(width: f32, name: f32, state: f32, actions: f32, status: f32) 
         return ToolbarLayout {
             two_rows: true,
             name_width: name.min(beside_name),
-            status: StatusPlace::NameRow,
+            status: StatusPlace::BesideName,
         };
     }
     ToolbarLayout {
         two_rows: true,
         name_width: name.min(name_row.max(1.0)),
         status: if actions + gap + status <= width {
-            StatusPlace::ActionRow
+            StatusPlace::WithActions
         } else {
-            StatusPlace::OwnRow
+            StatusPlace::Alone
         },
     }
 }
@@ -246,7 +246,7 @@ fn toolbar(
                 if !layout.two_rows {
                     actions(ui, &bar, &mut intent);
                 }
-                if layout.status == StatusPlace::NameRow {
+                if layout.status == StatusPlace::BesideName {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         status_text(ui, &bar.status);
                     });
@@ -255,14 +255,14 @@ fn toolbar(
             if layout.two_rows {
                 row(ui, &mut |ui| {
                     actions(ui, &bar, &mut intent);
-                    if layout.status == StatusPlace::ActionRow {
+                    if layout.status == StatusPlace::WithActions {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             status_text(ui, &bar.status);
                         });
                     }
                 });
             }
-            if layout.status == StatusPlace::OwnRow {
+            if layout.status == StatusPlace::Alone {
                 row(ui, &mut |ui| status_text(ui, &bar.status));
             }
         });
