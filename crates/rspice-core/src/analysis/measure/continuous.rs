@@ -6,6 +6,8 @@ use crate::SimulationError;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
+pub(crate) mod stream;
+
 pub(crate) fn poll(abort: &dyn AbortSignal, work: usize) -> Result<(), SimulationError> {
     if work.is_multiple_of(1024) && abort.is_aborted() {
         Err(SimulationError::Aborted)
@@ -180,35 +182,43 @@ impl MeasureEngine {
             } else {
                 evaluate_one(statement, data, &mut budget, abort)
             };
-            let result = match evaluated {
-                Ok(result) => result,
-                Err(EvaluationError::Measurement(error)) => {
-                    ContinuousMeasureResult::failed(&statement.name, error)
-                }
-                Err(EvaluationError::Simulation(error)) => return Err(error),
-            };
-            if result.failure.is_some() {
-                // A domain failure drops the statement's provisional records.
-                budget.retained = before;
-                let endpoints = result.failure_metadata.map_or(0, |metadata| {
-                    usize::from(metadata.trigger_axis.is_some())
-                        + usize::from(metadata.target_axis.is_some())
-                });
-                budget.admit((endpoints + usize::from(statement.fail_value.is_some())).max(1))?;
-            }
-            results.try_reserve(1).map_err(|source| {
-                SimulationError::reserve_failed(
-                    &results,
-                    1,
-                    "continuous measurement streams",
-                    source,
-                )
-            })?;
-            results.push(result);
+            retain(statement, evaluated, before, &mut budget, &mut results)?;
         }
         poll(abort, 0)?;
         Ok(results)
     }
+}
+
+/// Keep `statement`'s evaluation among `results`: a failure in place of its records, which
+/// give back the budget they took since `before`.
+fn retain(
+    statement: &MeasureStatement,
+    evaluated: Result<ContinuousMeasureResult, EvaluationError>,
+    before: usize,
+    budget: &mut RecordBudget,
+    results: &mut Vec<ContinuousMeasureResult>,
+) -> Result<(), SimulationError> {
+    let result = match evaluated {
+        Ok(result) => result,
+        Err(EvaluationError::Measurement(error)) => {
+            ContinuousMeasureResult::failed(&statement.name, error)
+        }
+        Err(EvaluationError::Simulation(error)) => return Err(error),
+    };
+    if result.failure.is_some() {
+        // A domain failure drops the statement's provisional records.
+        budget.retained = before;
+        let endpoints = result.failure_metadata.map_or(0, |metadata| {
+            usize::from(metadata.trigger_axis.is_some())
+                + usize::from(metadata.target_axis.is_some())
+        });
+        budget.admit((endpoints + usize::from(statement.fail_value.is_some())).max(1))?;
+    }
+    results.try_reserve(1).map_err(|source| {
+        SimulationError::reserve_failed(results, 1, "continuous measurement streams", source)
+    })?;
+    results.push(result);
+    Ok(())
 }
 
 fn window_bounds(
@@ -225,6 +235,11 @@ fn window_bounds(
             break;
         }
     }
+    Ok(bounds_on(ascending, analysis, window))
+}
+
+/// A window's bounds on an axis that rises (or runs one way only) when `ascending`.
+fn bounds_on(ascending: bool, analysis: &str, window: MeasureWindow) -> (Value, Value) {
     let (mut lower, upper) = match (window.from, window.to) {
         (Some(from), Some(to)) => (from, to),
         (Some(from), None) if ascending => (from, Value::INFINITY),
@@ -238,7 +253,7 @@ fn window_bounds(
     {
         lower = lower.max(td);
     }
-    Ok((lower, upper))
+    (lower, upper)
 }
 
 fn visit_condition_events(

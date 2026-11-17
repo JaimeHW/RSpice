@@ -224,6 +224,73 @@ fn measurements_read_from_the_store_equal_the_run_read_back_whole() {
     }
 }
 
+/// `.MEASURE TRAN_CONT` statements over the store's columns are measured in one pass over its
+/// rows: every record, failure and endpoint the same as the run read back whole.
+#[test]
+fn continuous_measurements_read_from_the_store_equal_the_run_read_back_whole() {
+    let dir = test_dir("results-store-continuous");
+    let body = RC.trim_end_matches(".end\n");
+    let statements = ".meas tran_cont up when v(out)=0.5 rise=2
+.meas tran_cont lastfall when v(out)=0.5 fall=-2
+.meas tran_cont crossed find v(in) when v(out)=0.3 cross=2
+.meas tran_cont slope deriv v(out) when v(out)=0.4
+.meas tran_cont slopeat deriv v(out) at=333n
+.meas tran_cont findat find v(out) at=333n
+.meas tran_cont windowed when v(out)=0.5 cross=1 from=500n to=1.5u td=100n
+.meas tran_cont delay trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1
+.meas tran_cont delayat trig at=100n targ v(out) val=0.5 fall=1
+.meas tran_cont never when v(out)=5
+.meas tran_cont unpaired trig v(in) val=0.5 rise=1 targ v(out) val=5 rise=1
+";
+    let read_back = ".meas tran vavg avg v(out)\n.meas tran vmax max par('2*v(out)+0*vavg')\n";
+    let measured = |twin: &str, extra: &str| {
+        let deck = dir.join(format!("{twin}.cir"));
+        std::fs::write(&deck, format!("{body}{statements}{extra}.end\n")).unwrap();
+        let path = dir.join(format!("{twin}.json"));
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "--meas-file",
+            path.to_str().unwrap(),
+            "--log-level",
+            "debug",
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // NEVER and UNPAIRED fail, which fails the run's verification.
+        assert_eq!(output.status.code(), Some(3), "{twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{twin}: {stderr}"
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        json["measurements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !["VAVG", "VMAX"].contains(&row["name"].as_str().unwrap_or("")))
+            .map(|row| {
+                // Each row names its deck.
+                let mut row = row.clone();
+                if let Some(row) = row.as_object_mut() {
+                    row.remove("netlist");
+                    row.remove("run");
+                }
+                row
+            })
+            .collect::<Vec<_>>()
+    };
+    let streamed = measured("streamed", "");
+    let read_back = measured("read-back", read_back);
+    assert!(streamed.len() > 11, "{streamed:?}");
+    assert!(
+        streamed.iter().any(|row| row["value"].is_number()),
+        "{streamed:?}"
+    );
+    assert_eq!(streamed, read_back);
+}
+
 #[test]
 fn fourier_spectra_read_around_their_windows_equal_the_run_read_back_whole() {
     let dir = test_dir("results-store-fourier");

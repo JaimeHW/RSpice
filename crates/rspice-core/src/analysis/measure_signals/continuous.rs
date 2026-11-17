@@ -261,6 +261,57 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
     Ok(results)
 }
 
+/// The signals the deck's `.MEASURE TRAN_CONT` statements read when the run is evaluated in
+/// memory, built from `probe`, a result holding its first rows, the same way: its saved
+/// waveforms, the interface aliases, and the expressions the statements derive, which replace
+/// a saved waveform of the same name; handed to `visit`. `None` when the aliases or an
+/// expression fail, which the run in memory then reports.
+pub(crate) fn with_tran_continuous_signals<R>(
+    netlist: &Netlist,
+    probe: &TransientResult,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+    visit: impl FnOnce(&HashMap<String, &[Value]>) -> R,
+) -> Result<Option<R>, SimulationError> {
+    let statements = measurements_for_analysis(netlist, "TRAN_CONT");
+    let mut signals = retained_transient_signal_map(probe);
+    let projection = match InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Tran,
+        probe.time.len(),
+        abort,
+    ) {
+        Ok(projection) => projection,
+        Err(InterfaceNodeAliasProjectionError::Aborted) => return Err(SimulationError::Aborted),
+        Err(InterfaceNodeAliasProjectionError::Detail(_)) => return Ok(None),
+    };
+    match projection.augment_with_abort(&mut signals, abort) {
+        Ok(()) => {}
+        Err(InterfaceNodeAliasProjectionError::Aborted) => return Err(SimulationError::Aborted),
+        Err(InterfaceNodeAliasProjectionError::Detail(_)) => return Ok(None),
+    }
+    let derived = match materialize_measure_expression_signals_with_limits_and_abort(
+        &statements,
+        &probe.time,
+        &signals,
+        MeasureParameters {
+            base: &netlist.params,
+            rows: None,
+            phase_unit: PhaseUnit::of(netlist),
+        },
+        limits,
+        abort,
+    ) {
+        Ok(derived) => derived,
+        Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+        Err(_) => return Ok(None),
+    };
+    for (name, waveform) in &derived {
+        signals.insert(name.clone(), waveform.as_slice());
+    }
+    Ok(Some(visit(&signals)))
+}
+
 /// Evaluate `.MEASURE DC_CONT` using the default resource policy.
 pub fn evaluate_dc_continuous_measurements(
     netlist: &Netlist,

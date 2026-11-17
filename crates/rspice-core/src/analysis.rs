@@ -129,8 +129,8 @@ pub use {
         ContinuousMeasureFailureMetadata, ContinuousMeasureRecord, ContinuousMeasureResult,
         ContinuousMeasureVerificationFailure, EdgeType, ErrorFunctionNorm, EventOccurrence,
         ExtremaOutput, FileErrorNorm, MeasureEngine, MeasureOperand, MeasurePrintPolicy,
-        MeasureResult, MeasureStatement, MeasureType, TranMeasureStream, TrigSpec, TriggerEvent,
-        WhenCondition, canonical_measure_signal_name,
+        MeasureResult, MeasureStatement, MeasureType, TranContinuousStream, TranMeasureStream,
+        TrigSpec, TriggerEvent, WhenCondition, canonical_measure_signal_name,
     },
     measure_signals::{
         AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

@@ -1411,19 +1411,24 @@ fn finish_transient_products(
         analysis: Some("FFT measurement projection".to_string()),
     })?;
     ctx.record_measurements("FFT", fft_measurements)?;
-    let continuous_measurements = match post_results {
-        Some(post) => post.continuous_measurements.clone(),
-        None => rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
-            ctx.netlist,
-            result,
-            &ctx.transient_limits(),
-            &crate::abort::ProcessAbort,
-        )
-        .map_err(|source| CliError::CoreSimulationError {
-            source,
-            analysis: Some("TRAN continuous measurement projection".to_string()),
-        })?,
-    };
+    let continuous_measurements =
+        match (post_results, plan.and_then(|plan| plan.continuous.as_ref())) {
+            (Some(post), _) => post.continuous_measurements.clone(),
+            // A streamed run was measured from its store.
+            (None, Some(measured)) => measured.clone(),
+            (None, None) => {
+                rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
+                    ctx.netlist,
+                    result,
+                    &ctx.transient_limits(),
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(|source| CliError::CoreSimulationError {
+                    source,
+                    analysis: Some("TRAN continuous measurement projection".to_string()),
+                })?
+            }
+        };
     super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements)?;
     let assertions = match post_results {
         Some(post) => post.assertions.clone(),

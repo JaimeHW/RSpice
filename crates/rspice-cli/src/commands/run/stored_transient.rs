@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rspice_core::AbortSignal;
 use rspice_core::analysis::{
-    FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierRecord, MeasureResult,
-    TranMeasureStream,
+    ContinuousMeasureResult, FourierAnalysis, FourierConfig, FourierError, FourierMethod,
+    FourierRecord, MeasureResult, TranContinuousStream, TranMeasureStream,
 };
 use rspice_core::engine::{
     AcceptedTransientRows, ScheduledTransientCheckpoint, SinkTransient, TransientCheckpoint,
@@ -521,9 +521,9 @@ impl StoredTransient {
     /// card's Xyce `.prn` table is laid out from the store too, and an output schedule's rows
     /// are projected from the store's as they are read); when
     /// every output signal is one of the store's columns, value for value, or a column sampled
-    /// from an event trace (`D(node)`, `E(node)`); and when its `.MEASURE TRAN` statements, if
-    /// any, read only the store's columns in forms measured in one pass over the rows. The
-    /// signals are checked by projecting the first chunk exactly as the whole run would be,
+    /// from an event trace (`D(node)`, `E(node)`); and when its `.MEASURE TRAN` and `TRAN_CONT`
+    /// statements, if any, read only the store's columns in forms measured in passes over the
+    /// rows. The signals are checked by projecting the first chunk exactly as the whole run would be,
     /// and the statements by planning them against the same chunk; they are then measured from
     /// the store.
     pub(super) fn stream_plan(
@@ -550,12 +550,6 @@ impl StoredTransient {
             Some("it saves instance parameters")
         } else if !ctx.engine.transient_rows_are_whole(netlist) {
             Some("its rows are not the run's whole trajectory")
-        } else if netlist
-            .measurements
-            .iter()
-            .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
-        {
-            Some("it has TRAN_CONT measures")
         } else if !netlist.assertions.is_empty() {
             Some("it has .ASSERT cards")
         } else if !netlist.vector_files.is_empty() {
@@ -612,6 +606,17 @@ impl StoredTransient {
             if event_dump {
                 plan.columns.clear();
             }
+            // Planned against the first rows, before the `.MEASURE TRAN` passes change them, and
+            // measured after those, which may read the run back whole instead.
+            let continuous = if has_continuous(netlist) {
+                let Some(stream) = self.plan_continuous(ctx, &ctx.transient_limits())? else {
+                    log::debug!("the transient's .MEASURE TRAN_CONT statements read it back whole");
+                    return Ok(None);
+                };
+                Some(stream)
+            } else {
+                None
+            };
             let measures = netlist
                 .measurements
                 .iter()
@@ -627,6 +632,9 @@ impl StoredTransient {
                     measurements.len()
                 );
                 plan.measurements = Some(measurements);
+            }
+            if let Some(stream) = continuous {
+                plan.continuous = Some(self.measure_continuous(stream)?);
             }
             Ok(Some(plan))
         });
@@ -800,6 +808,72 @@ impl StoredTransient {
             .map_err(failed)
     }
 
+    /// The deck's `.MEASURE TRAN_CONT` statements planned with the first chunk's rows in the
+    /// shell and budgeted by `limits`; `None` when a statement needs the run in memory.
+    fn plan_continuous(
+        &self,
+        ctx: &RunContext<'_>,
+        limits: &rspice_core::ResourceLimits,
+    ) -> Result<Option<TranContinuousStream>, CliError> {
+        let columns = self
+            .rows
+            .targets
+            .iter()
+            .map(|&target| stream_column(&self.shell, target))
+            .collect::<Vec<_>>();
+        TranContinuousStream::plan(
+            ctx.netlist,
+            &self.shell,
+            &columns,
+            limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(continuous_failed)
+    }
+
+    /// `stream`'s results, measured in one pass over the store's rows after one over their
+    /// axis.
+    fn measure_continuous(
+        &mut self,
+        mut stream: TranContinuousStream,
+    ) -> Result<Vec<ContinuousMeasureResult>, CliError> {
+        let failed = continuous_failed;
+        let abort = &crate::abort::ProcessAbort;
+        let rows = &mut self.rows;
+        let chunks = rows.reader.chunk_spans().count();
+        let dir = rows.store.dir.clone();
+        let read = |error| store_error(&dir, error);
+        let mut x = Vec::new();
+        for chunk in 0..chunks {
+            if abort.is_aborted() {
+                return Err(failed(rspice_core::SimulationError::Aborted));
+            }
+            rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
+            stream.axis(&x);
+        }
+        let slots = stream.columns().to_vec();
+        let mut values = vec![Vec::new(); slots.len()];
+        for chunk in 0..chunks {
+            if abort.is_aborted() {
+                return Err(failed(rspice_core::SimulationError::Aborted));
+            }
+            rows.reader.read_chunk_x(chunk, &mut x).map_err(read)?;
+            for (&slot, values) in slots.iter().zip(&mut values) {
+                rows.reader
+                    .read_chunk_slot(chunk, slot, values)
+                    .map_err(read)?;
+            }
+            let columns = values.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            stream.rows(&x, &columns);
+        }
+        let measured = stream.finish().map_err(failed)?;
+        log::debug!(
+            "the transient's {} .MEASURE TRAN_CONT statements were measured from its store",
+            measured.len()
+        );
+        Ok(measured)
+    }
+
     /// Leave in the shell only the rows this transient's `.FOUR` cards read, the ones around the
     /// union of their windows, and return what their operands read of the rest. One pass over
     /// the store evaluates every operand chunk by chunk into its record; a second fills the
@@ -936,10 +1010,6 @@ impl StoredTransient {
         let in_passes = self.rows.rows() > 0
             && self.rows.parameters.is_empty()
             && ctx.engine.transient_rows_are_whole(netlist)
-            && !netlist
-                .measurements
-                .iter()
-                .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
             && netlist.assertions.is_empty()
             && netlist.vector_files.is_empty();
         if !in_passes {
@@ -998,16 +1068,28 @@ impl StoredTransient {
         } else {
             Vec::new()
         };
-        // With neither continuous measurements nor assertions, these read no rows.
         let limits = ctx.engine.config().resource_limits;
-        let continuous_measurements =
-            rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
-                netlist,
-                &self.shell,
-                &limits,
-                abort,
-            )
-            .map_err(failed)?;
+        let continuous_measurements = if has_continuous(netlist) {
+            let probe_rows = self
+                .rows
+                .reader
+                .chunk_spans()
+                .next()
+                .map_or(0, |span| span.1);
+            self.rows.fill(&mut self.shell, 0, probe_rows as u64)?;
+            let planned = self.plan_continuous(ctx, &limits);
+            self.rows.clear(&mut self.shell);
+            match planned? {
+                Some(stream) => self.measure_continuous(stream)?,
+                None => {
+                    self.read_back(ctx, tstop)?;
+                    return Ok(None);
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        // With no assertions, these read no rows.
         let assertions =
             rspice_core::analysis::evaluate_tran_assertions(netlist, &self.shell, abort)
                 .map_err(failed)?;
@@ -1297,6 +1379,9 @@ pub(super) struct StreamPlan {
     columns: Vec<Column>,
     /// The deck's `.MEASURE TRAN` results, measured from the store; `None` when it has none.
     pub(super) measurements: Option<Vec<MeasureResult>>,
+    /// The deck's `.MEASURE TRAN_CONT` results, measured from the store; `None` when it has
+    /// none.
+    pub(super) continuous: Option<Vec<ContinuousMeasureResult>>,
     /// The derived columns' values, when a column is one.
     derived: Option<DerivedColumns>,
 }
@@ -1384,6 +1469,7 @@ fn probe_plan(
         signals,
         columns,
         measurements: None,
+        continuous: None,
         derived: None,
     }))
 }
@@ -2780,3 +2866,19 @@ fn free_space(dir: &Path) -> FreeSpace {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether the deck has `.MEASURE TRAN_CONT` statements.
+fn has_continuous(netlist: &rspice_core::Netlist) -> bool {
+    netlist
+        .measurements
+        .iter()
+        .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+}
+
+/// A `.MEASURE TRAN_CONT` evaluation's failure, labelled as the run in memory labels it.
+fn continuous_failed(source: rspice_core::SimulationError) -> CliError {
+    CliError::CoreSimulationError {
+        source,
+        analysis: Some("TRAN continuous measurement projection".to_string()),
+    }
+}

@@ -29,6 +29,7 @@ mod fourier;
 mod spectrum;
 pub(crate) mod stream;
 
+pub use continuous::stream::TranContinuousStream;
 pub use stream::TranMeasureStream;
 
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
