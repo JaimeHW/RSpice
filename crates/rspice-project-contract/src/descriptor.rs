@@ -1372,6 +1372,18 @@ impl ProjectDescriptor {
         }
     }
 
+    /// Whether the project's properties are `properties`, asked without
+    /// copying them: the Edit menu asks it of the step on top of Undo on
+    /// every frame.
+    #[must_use]
+    pub fn has_properties(&self, properties: &ProjectProperties) -> bool {
+        self.name == properties.name
+            && self.description == properties.description
+            && self.root_library == properties.root_library
+            && self.top_cell == properties.top_cell
+            && self.include_search_paths == properties.include_search_paths
+    }
+
     /// Replace the project's properties as one fail-closed logical
     /// transaction: every field is checked before any is written, and the
     /// revision advances once. Properties equal to the current ones are

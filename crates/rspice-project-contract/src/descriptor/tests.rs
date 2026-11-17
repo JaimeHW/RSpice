@@ -562,6 +562,7 @@ fn properties_are_replaced_whole_with_one_revision() {
     assert_eq!(published, revision.next().unwrap());
     assert_eq!(project.revision(), published);
     assert_eq!(project.properties(), edited);
+    assert!(project.has_properties(&edited));
     assert_eq!(project.name(), "amp_v2");
     assert_eq!(project.top_cell, "bias");
 
@@ -584,4 +585,10 @@ fn properties_are_replaced_whole_with_one_revision() {
     ));
     assert_eq!(project.properties(), edited, "a refusal writes nothing");
     assert_eq!(project.revision(), published);
+    let mut moved = edited;
+    moved.include_search_paths.clear();
+    assert!(
+        !project.has_properties(&moved),
+        "one field apart is not the same properties"
+    );
 }

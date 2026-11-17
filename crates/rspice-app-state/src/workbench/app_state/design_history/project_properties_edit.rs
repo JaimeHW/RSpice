@@ -67,11 +67,11 @@ impl ProjectPropertiesEditRecord {
     }
 
     pub(super) fn after_design_matches(&self, state: &Model) -> bool {
-        state.workspace.content.project.properties() == self.after
+        state.workspace.content.project.has_properties(&self.after)
     }
 
     pub(super) fn before_design_matches(&self, state: &Model) -> bool {
-        state.workspace.content.project.properties() == self.before
+        state.workspace.content.project.has_properties(&self.before)
     }
 
     pub(super) fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
