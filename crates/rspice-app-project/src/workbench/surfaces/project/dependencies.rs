@@ -5,40 +5,34 @@
 //! what a status reads, under the workspace navigator's filter, which is the
 //! page's one filter. The exported manifest serializes the same rows.
 //!
-//! Only the rows in view are laid out, so a site install with hundreds of
-//! model libraries costs a frame what ten do.
+//! The ledger is the kit's row list: a head click sorts it, a head edge
+//! sizes its column, and only the rows in view are drawn, so a site install
+//! with hundreds of model libraries costs a frame what ten do. Each row
+//! opens in its own workspace and offers, in its menu, what can be done to
+//! it from here.
 
 use std::sync::Arc;
 
 use serde::Serialize;
 
 use super::*;
+use crate::state::model_library::ModelSourceAuthority;
+use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
 use crate::workbench::design_system::property_row_toned;
 use crate::workbench::project::dependency_status::{
-    DependencyRow, UNSET, refresh_source_drift, settle_selection, technology_status,
-    visible_dependency_rows,
+    DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_status_key,
+    refresh_source_drift, settle_selection, technology_status, visible_dependency_rows,
 };
+use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
 const DEPENDENCY_SPLIT_BREAKPOINT: f32 = 640.0;
 const DEPENDENCY_LEFT_SHARE: f32 = 0.40;
-/// Width under which the table drops its digest column.
-const DEPENDENCY_COMPACT_WIDTH: f32 = 560.0;
 /// Shortest the split panes are ever drawn, so a very short viewport still
 /// opens a readable table rather than seating an action bar under a header.
 const DEPENDENCY_MIN_PANE_HEIGHT: f32 = 260.0;
 /// Vertical padding inside a panel's action bar.
 const DEPENDENCY_ACTION_BAR_PAD: i8 = 6;
-
-const LEDGER_COLUMNS: [&str; 6] = ["Library", "Type", "Version", "Source", "Digest", "Status"];
-const LEDGER_FRACTIONS: [f32; 6] = [0.20, 0.10, 0.11, 0.21, 0.13, 0.25];
-/// Version and digest are identities rather than prose, so both take the mono
-/// face and stay comparable down the column.
-const LEDGER_MONO_COLUMNS: [usize; 2] = [2, 4];
-/// A narrow table keeps what tells libraries apart and what to act on: the
-/// version and digest are in the row's hover and the inspector.
-const LEDGER_COMPACT_COLUMNS: [&str; 4] = ["Library", "Type", "Source", "Status"];
-const LEDGER_COMPACT_FRACTIONS: [f32; 4] = [0.29, 0.15, 0.26, 0.30];
 
 #[derive(Debug, Clone, Serialize)]
 struct DependencyManifest {
@@ -74,6 +68,9 @@ struct ManifestLibrary {
 struct LedgerView {
     rows: Arc<[DependencyRow]>,
     visible: Arc<[usize]>,
+    /// Each visible row's key, in the same order: the table keeps its
+    /// selection by it through a sort or a change of the rows.
+    keys: Arc<[RowKey]>,
     filtered: bool,
 }
 
@@ -84,9 +81,21 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let filter = cx.wb.navigator_filter().trim().to_owned();
     let (rows, visible) = visible_dependency_rows(ui.ctx(), cx.model, &filter);
     settle_selection(&rows, &visible, &mut cx.state.project_dependency_selection);
+    let keys = derived(
+        ui.ctx(),
+        "dependencies.keys",
+        (dependency_status_key(cx.model), filter.to_lowercase()),
+        || {
+            visible
+                .iter()
+                .map(|&index| ledger_key(&rows[index].library))
+                .collect::<Arc<[RowKey]>>()
+        },
+    );
     let view = LedgerView {
         rows,
         visible,
+        keys,
         filtered: !filter.is_empty(),
     };
     let width = visible_workspace_width(ui);
@@ -330,219 +339,638 @@ fn dependency_inventory(
         .rows
         .iter()
         .map(|row| row.status.mark)
-        .max_by_key(|mark| match mark {
-            Tone::Neutral => 0,
-            Tone::Warn => 1,
-            Tone::Error => 2,
-        })
+        .max_by_key(|mark| severity(*mark))
         .and_then(Tone::problem);
     workspace_table_panel_header(ui, "Libraries and model files", &count, worst);
-    // The pane owns the column grid, not the unconstrained central panel: a
-    // table bound to the wrong width paints its status column underneath the
-    // Inspector dock. Both layouts elide into the pane, so the columns are
-    // always complete and the table never scrolls sideways.
+    // The pane owns the table's width, not the unconstrained central panel:
+    // a table bound to the wrong width paints its status column underneath
+    // the Inspector dock.
     let width = pane_width.min(visible_workspace_width(ui)).max(1.0);
-    let compact = width < DEPENDENCY_COMPACT_WIDTH;
-    // Beside the technology panel the rows scroll within the pane, so the
-    // grid leaves the scroll bar its gutter whether or not the bar shows:
-    // the header, drawn outside the scroll, then lines up with the rows in
-    // it however long the list grows.
-    let width = if pane_height > 0.0 {
-        (width - ui.spacing().scroll.allocated_width()).max(1.0)
-    } else {
-        width
-    };
-    if compact {
-        workspace_table_row(
-            ui,
-            width,
-            LEDGER_COMPACT_COLUMNS,
-            LEDGER_COMPACT_FRACTIONS,
-            WorkspaceRowKind::Header,
-            &[],
-            &[],
-            None,
-        );
-    } else {
-        workspace_table_row(
-            ui,
-            width,
-            LEDGER_COLUMNS,
-            LEDGER_FRACTIONS,
-            WorkspaceRowKind::Header,
-            &[],
-            &[],
-            None,
-        );
-    }
     if view.rows.is_empty() {
         workspace_empty_table_row(ui, width, "The project has no libraries.");
     } else if view.visible.is_empty() {
         workspace_empty_table_row(ui, width, "No library matches the filter.");
-    }
-    let row_height = workspace_table_row_height(ui);
-    let mut selected = None;
-    let mut draw_rows = |ui: &mut Ui, range: std::ops::Range<usize>| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for &index in &view.visible[range] {
-            let row = &view.rows[index];
-            if ledger_row(ui, cx, row, width, compact) {
-                selected = Some(row.library.clone());
-            }
-        }
-    };
-    let count = view.visible.len();
-    if count > 0 && pane_height > 0.0 {
-        // Beside the technology panel the table scrolls within its pane,
-        // above an action bar that stays in view.
-        ScrollArea::vertical()
-            .id_salt("workbench.project.dependencies.ledger")
-            .auto_shrink([false, true])
-            .max_height(dependency_panel_free_height(ui, pane_height, top).max(row_height))
-            .show_rows(ui, row_height, count, draw_rows);
-    } else if count > 0 {
-        // Stacked under it, the table is part of the page's own scroll: a
-        // second scroll inside that one would trap a touch drag. It takes the
-        // height of every row and lays out only those in the page's view.
-        let (rect, _) =
-            ui.allocate_exact_size(vec2(width, row_height * count as f32), Sense::hover());
-        let shown = ui.clip_rect().intersect(rect);
-        if shown.is_positive() {
-            let first = (((shown.top() - rect.top()) / row_height).floor() as usize).min(count);
-            let last = (((shown.bottom() - rect.top()) / row_height).ceil() as usize).min(count);
-            let rows = Rect::from_min_size(
-                pos2(rect.left(), rect.top() + first as f32 * row_height),
-                vec2(width, (last - first) as f32 * row_height),
-            );
-            ui.scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(rows)
-                    .layout(Layout::top_down(Align::Min)),
-                |ui| draw_rows(ui, first..last),
-            );
-        }
-    }
-    if let Some(library) = selected {
-        cx.state.project_dependency_selection = Some(library);
-    }
-    if compact {
-        ledger_grid_floor(ui, width, pane_height, top, LEDGER_COMPACT_FRACTIONS);
     } else {
-        ledger_grid_floor(ui, width, pane_height, top, LEDGER_FRACTIONS);
+        // Beside the technology panel the rows scroll inside the pane, above
+        // an action bar that stays in view. Stacked under it, the table is
+        // part of the page's own scroll: a second scroll inside that one
+        // would trap a touch drag.
+        let max_height = if pane_height > 0.0 {
+            dependency_panel_free_height(ui, pane_height, top)
+                .max(workspace_table_row_height(ui) * 2.0)
+        } else {
+            f32::INFINITY
+        };
+        let asked = ui
+            .scope(|ui| {
+                ui.set_width(width);
+                ledger_table(ui, cx, view, max_height)
+            })
+            .inner;
+        if let Some((library, action)) = asked {
+            run_ledger_action(ui.ctx(), cx, &library, action);
+        }
     }
+    let free = dependency_panel_free_height(ui, pane_height, top);
+    if free > 0.0 {
+        ui.add_space(free);
+    }
+    let reading = cx.state.dependencies.reading();
     dependency_action_bar(ui, |ui| {
         if Button::new("Export manifest\u{2026}").show(ui).clicked() {
             export_dependency_manifest(cx, &view.rows);
         }
+        if let Some(reading) = reading.as_deref() {
+            muted(ui, reading);
+        }
     });
 }
 
-/// One table row, and whether the reader clicked it.
-fn ledger_row(
-    ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
-    row: &DependencyRow,
-    width: f32,
-    compact: bool,
-) -> bool {
-    let kind = WorkspaceRowKind::body(
-        cx.state.project_dependency_selection.as_ref() == Some(&row.library),
-    );
-    let problem = row.status.mark.problem();
-    // The file, by name: a path elided at its end shows only the folders
-    // every row shares. The hover and the inspector give the whole path.
-    let source = std::path::Path::new(&row.source)
+/// How bad a status is: the header names the worst, and the status column
+/// sorts by it.
+const fn severity(mark: Tone) -> u8 {
+    match mark {
+        Tone::Neutral => 0,
+        Tone::Warn => 1,
+        Tone::Error => 2,
+    }
+}
+
+/// The ledger's columns: what tells libraries apart, where each is read
+/// from, and where it stands. A library's digest, access and files are in
+/// the inspector beside the page.
+fn ledger_columns() -> [Column; 5] {
+    [
+        Column::name("Library", 120.0),
+        Column::words("Type", 64.0),
+        Column::words("Version", 88.0),
+        Column::name("Source", 140.0),
+        Column::words("Status", 132.0),
+    ]
+}
+
+/// The column the status is in, kept in view on a narrow pane.
+const STATUS_COLUMN: usize = 4;
+
+/// One library's cells, in the ledger's column order.
+fn ledger_cells(row: &DependencyRow) -> Vec<Cell> {
+    // The file, by name: a path cut short at its end shows only the folders
+    // every row shares. Its hover, and the inspector, give the whole path.
+    let file = std::path::Path::new(&row.source)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&row.source);
-    let response = if compact {
-        let cells = [
-            row.library.name.as_str(),
-            row.library.kind.kind_word(),
-            source,
-            row.status.label,
-        ];
-        workspace_table_row(
-            ui,
-            width,
-            cells,
-            LEDGER_COMPACT_FRACTIONS,
-            kind,
-            &[],
-            &unset_columns(&cells),
-            problem.map(|problem| (3, problem)),
-        )
-        .0
+    // A design library has no version: what its row once showed there was
+    // the technology it names, which the inspector states as that.
+    let version = if row.library.kind == DependencyKind::Design || row.version == UNSET {
+        Cell::absent().sort_by(SortKey::Missing)
     } else {
-        let cells = [
-            row.library.name.as_str(),
-            row.library.kind.kind_word(),
-            row.version.as_str(),
-            source,
-            row.digest.as_str(),
-            row.status.label,
-        ];
-        workspace_table_row(
-            ui,
-            width,
-            cells,
-            LEDGER_FRACTIONS,
-            kind,
-            &LEDGER_MONO_COLUMNS,
-            &unset_columns(&cells),
-            problem.map(|problem| (5, problem)),
-        )
-        .0
+        Cell::number(row.version.as_str())
     };
-    // What the status has to add has no column of its own; the row carries
-    // it, as the inspector does under the status.
-    let mut hover = format!("{}\n{}", row.library.name, row.source);
-    for (label, value) in [("Version", &row.version), ("Digest", &row.digest)] {
-        if value != UNSET {
-            hover.push_str(&format!("\n{label} {value}"));
+    let source = if row.source == UNSET {
+        Cell::absent().sort_by(SortKey::Missing)
+    } else {
+        Cell::text(file).hint(row.source.as_str())
+    };
+    let status = match row.status.mark.problem() {
+        Some(problem) => Cell::problem(row.status.label, problem),
+        None => Cell::text(row.status.label),
+    }
+    .sort_by(SortKey::Status(severity(row.status.mark)));
+    let status = match row.status.detail.as_deref() {
+        Some(detail) => status.hint(detail),
+        None => status,
+    };
+    vec![
+        Cell::text(row.library.name.as_str()),
+        Cell::text(row.library.kind.kind_word()),
+        version,
+        source,
+        status,
+    ]
+}
+
+/// A row's key: its catalogue and its name, since a design and a model
+/// library may share a name.
+fn ledger_key(library: &DependencyLibrary) -> RowKey {
+    RowKey::Text(format!(
+        "{}\u{1f}{}",
+        library.kind.kind_word(),
+        library.name
+    ))
+}
+
+/// The ledger, its selection kept with the rail's and the inspector's, and
+/// what the reader asked of a row: Enter or a double-click opens it, the
+/// context menu offers what can be done to it, Delete removes it.
+fn ledger_table(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    view: &LedgerView,
+    max_height: f32,
+) -> Option<(DependencyLibrary, LedgerAction)> {
+    let keys = &view.keys;
+    // The page's selection is the rail's: the table follows it.
+    let selected = cx
+        .state
+        .project_dependency_selection
+        .as_ref()
+        .and_then(|selected| {
+            view.visible
+                .iter()
+                .position(|&index| &view.rows[index].library == selected)
+        });
+    let table = &mut cx.state.dependencies.table;
+    if let Some(row) = selected
+        && table.selected_key() != Some(&keys[row])
+    {
+        table.select(row, Some(keys[row].clone()));
+    }
+    let columns = ledger_columns();
+    let response = DataTable::new(
+        "workbench.project.dependencies.ledger",
+        &columns,
+        view.visible.len(),
+    )
+    .state(table)
+    .keys(keys)
+    .freeze(1)
+    .pin_when_narrow(STATUS_COLUMN)
+    .max_height(max_height)
+    .show(ui, |row| ledger_cells(&view.rows[view.visible[row]]));
+    let library_at = |row: usize| {
+        view.visible
+            .get(row)
+            .map(|&index| view.rows[index].library.clone())
+    };
+    if response.selection_changed
+        && let Some(library) = cx
+            .state
+            .dependencies
+            .table
+            .selected_row()
+            .and_then(library_at)
+    {
+        cx.state.project_dependency_selection = Some(library);
+    }
+    if let Some(library) = response.activate.and_then(library_at) {
+        return Some((library, LedgerAction::Open));
+    }
+    if response.delete
+        && let Some(library) = cx
+            .state
+            .dependencies
+            .table
+            .selected_row()
+            .and_then(library_at)
+    {
+        return Some((library, LedgerAction::Remove));
+    }
+    ledger_menu(
+        ui,
+        cx,
+        response.context_menu.and_then(|request| {
+            library_at(request.cell.row).map(|library| (library, request.position))
+        }),
+    )
+}
+
+/// A row's context menu: opened where the reader asked for it, on the row
+/// they asked it of, and kept open until an item is taken or they click
+/// elsewhere. An item that cannot be taken now is shown, disabled.
+fn ledger_menu(
+    ui: &Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    request: Option<(DependencyLibrary, egui::Pos2)>,
+) -> Option<(DependencyLibrary, LedgerAction)> {
+    let id = ui.id().with("workbench.project.dependencies.row menu");
+    let at = id.with("at");
+    let opened = request.is_some();
+    if let Some(request) = request {
+        ui.ctx().data_mut(|data| data.insert_temp(at, request));
+    }
+    let (library, position) = ui
+        .ctx()
+        .data(|data| data.get_temp::<(DependencyLibrary, egui::Pos2)>(at))?;
+    if !opened && !egui::Popup::is_id_open(ui.ctx(), id) {
+        return None;
+    }
+    let actions = ledger_actions(cx, &library);
+    let mut taken = None;
+    egui::Popup::new(
+        id,
+        ui.ctx().clone(),
+        egui::PopupAnchor::Position(position),
+        egui::LayerId::new(egui::Order::Foreground, id),
+    )
+    .kind(egui::PopupKind::Menu)
+    .open_memory(opened.then_some(egui::SetOpenCommand::Bool(true)))
+    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+    .show(|ui| {
+        ui.set_min_width(160.0);
+        for (action, enabled) in actions {
+            if ui
+                .add_enabled(enabled, egui::Button::new(action.label(&library)))
+                .clicked()
+            {
+                taken = Some(action);
+                ui.close();
+            }
+        }
+    });
+    taken.map(|action| (library, action))
+}
+
+/// What the reader can ask of one row of the ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LedgerAction {
+    /// The library in its own workspace: a design library on the Library
+    /// page, a model library in Models.
+    Open,
+    /// The folder its files are in.
+    Reveal,
+    /// Read its files from a place the reader chooses.
+    Relink,
+    /// Read its files again from where they were attached.
+    Reload,
+    /// Take it out of the project.
+    Remove,
+}
+
+impl LedgerAction {
+    const fn label(self, library: &DependencyLibrary) -> &'static str {
+        match (self, library.kind) {
+            (Self::Open, DependencyKind::Design) => "Open in Library",
+            (Self::Open, DependencyKind::Model) => "Open in Models",
+            (Self::Reveal, _) => "Show in folder",
+            (Self::Relink, _) => "Relink\u{2026}",
+            (Self::Reload, _) => "Reload",
+            (Self::Remove, DependencyKind::Design) => "Delete library\u{2026}",
+            (Self::Remove, DependencyKind::Model) => "Remove",
         }
     }
-    if let Some(detail) = row.status.detail.as_deref() {
-        hover.push('\n');
-        hover.push_str(detail);
-    }
-    response.on_hover_text(hover).clicked()
 }
 
-/// Carry the table's column rules down to the action bar.
-///
-/// A table that simply stops leaves its pane looking half-drawn; continuing
-/// the grid says the columns are complete and the rows have run out.
-fn ledger_grid_floor<const N: usize>(
-    ui: &mut Ui,
-    width: f32,
-    pane_height: f32,
-    top: f32,
-    fractions: [f32; N],
+/// What the row's menu offers, in order, and whether each can be taken now.
+/// A library read from a file on this machine can be shown in its folder
+/// and read again; one read from a file, or whose bytes the project kept
+/// from one, can be read from another file. A browser has no folder to show
+/// and no file to read, so it offers only what the project itself holds.
+fn ledger_actions(
+    cx: &Cx<'_, ProjectFeature>,
+    library: &DependencyLibrary,
+) -> Vec<(LedgerAction, bool)> {
+    let mut actions = vec![(LedgerAction::Open, true)];
+    match library.kind {
+        DependencyKind::Design => actions.push((LedgerAction::Remove, true)),
+        DependencyKind::Model => {
+            let Some(found) = cx.model.model_library_manager.get_library(&library.name) else {
+                return actions;
+            };
+            let idle = cx.state.dependencies.reading().is_none();
+            if cfg!(not(target_arch = "wasm32")) {
+                let on_disk = found.has_external_root()
+                    && matches!(found.source_authority, ModelSourceAuthority::External);
+                let relinkable = found.pack_id.is_none()
+                    && matches!(
+                        found.source_authority,
+                        ModelSourceAuthority::External
+                            | ModelSourceAuthority::RetainedImport { .. }
+                    );
+                if on_disk {
+                    actions.push((LedgerAction::Reveal, true));
+                }
+                if relinkable {
+                    actions.push((LedgerAction::Relink, idle));
+                }
+                if on_disk {
+                    actions.push((LedgerAction::Reload, idle));
+                }
+            }
+            if found.source_authority.has_execution_source() {
+                actions.push((LedgerAction::Remove, idle));
+            }
+        }
+    }
+    actions
+}
+
+/// Carry out `action` on `library`, if the row still offers it.
+fn run_ledger_action(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    library: &DependencyLibrary,
+    action: LedgerAction,
 ) {
-    let free = dependency_panel_free_height(ui, pane_height, top);
-    if free <= 0.0 {
+    let offered = ledger_actions(cx, library)
+        .into_iter()
+        .any(|(offered, enabled)| offered == action && enabled);
+    if !offered {
         return;
     }
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(width, free), Sense::hover());
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let mut left = rect.left();
-    for fraction in fractions.iter().take(N.saturating_sub(1)) {
-        left += rect.width() * fraction;
-        painter.vline(left, rect.y_range(), Stroke::new(1.0, t.color.border));
+    match (action, library.kind) {
+        (LedgerAction::Open, DependencyKind::Design) => {
+            super::library::apply_library_intent(
+                ctx,
+                cx,
+                super::library::LibraryIntent::SelectLibrary(library.name.clone()),
+            );
+            cx.state.project_page = ProjectPage::Library;
+        }
+        (LedgerAction::Open, DependencyKind::Model) => open_model_library(cx, &library.name),
+        (LedgerAction::Remove, DependencyKind::Design) => {
+            if let Err(refusal) = cx.state.open_delete_library_review(cx.model, &library.name) {
+                cx.wb.prompt(refusal);
+            }
+        }
+        (LedgerAction::Remove, DependencyKind::Model) => remove_model_library(cx, &library.name),
+        #[cfg(not(target_arch = "wasm32"))]
+        (LedgerAction::Reveal, DependencyKind::Model) => reveal_model_library(cx, &library.name),
+        #[cfg(not(target_arch = "wasm32"))]
+        (LedgerAction::Reload, DependencyKind::Model) => {
+            start_model_library_read(ctx, cx, &library.name, None);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        (LedgerAction::Relink, DependencyKind::Model) => {
+            if let Some(root) = pick_model_file(&library.name) {
+                start_model_library_read(ctx, cx, &library.name, Some(root));
+            }
+        }
+        _ => {}
     }
 }
 
-/// The columns of one table row holding a placeholder rather than a value.
-/// They take the faint tone, so an absent value never competes with a real
-/// one down the column.
-fn unset_columns<const N: usize>(cells: &[&str; N]) -> Vec<usize> {
-    cells
-        .iter()
-        .enumerate()
-        .filter_map(|(index, cell)| (*cell == UNSET).then_some(index))
-        .collect()
+/// Show model library `name` in Models. The catalog lists models, not
+/// libraries, so the library opens on its first model in the catalog's own
+/// order; a library that holds none opens the catalog with it selected.
+fn open_model_library(cx: &mut Cx<'_, ProjectFeature>, name: &str) {
+    let first = cx
+        .model
+        .model_library_manager
+        .get_library(name)
+        .and_then(|library| {
+            library
+                .models
+                .keys()
+                .min_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)))
+                .cloned()
+        });
+    match first {
+        Some(model) => cx
+            .wb
+            .outbox
+            .push(crate::workbench::framework::requests::RevealModel {
+                library: name.to_owned(),
+                model,
+            }),
+        None => match cx.model.model_library_manager.select_library(name) {
+            Ok(()) => cx.execute(ids::MODELS_CATALOG),
+            Err(refusal) => cx.wb.prompt(refusal),
+        },
+    }
+}
+
+/// Take model library `name` out of the project, as one step of Undo. The
+/// library the project's technology simulates from stays until the
+/// technology is detached.
+fn remove_model_library(cx: &mut Cx<'_, ProjectFeature>, name: &str) {
+    if cx
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .is_some_and(|binding| binding.model_library() == name)
+    {
+        cx.wb.prompt(format!(
+            "The project's technology simulates from '{name}'. Detach the technology before removing it."
+        ));
+        return;
+    }
+    let mut candidate = cx.model.model_library_manager.clone();
+    if candidate.remove_library(name).is_none() {
+        cx.wb.prompt(format!(
+            "Model library '{name}' is no longer in the project."
+        ));
+        return;
+    }
+    let result = if cx.platform.project_lifecycle.is_open() {
+        crate::workbench::app_state::design_history::publish_model_library_set_candidate(
+            cx.model,
+            candidate,
+            format!("remove model library {name}"),
+        )
+        .map(|revision| {
+            revision.map_or_else(
+                || format!("Removed model library '{name}'."),
+                |revision| {
+                    format!(
+                        "Removed model library '{name}' at project revision {}.",
+                        revision.get()
+                    )
+                },
+            )
+        })
+    } else {
+        cx.model.model_library_manager = candidate;
+        Ok(format!("Removed model library '{name}'."))
+    };
+    match result {
+        Ok(message) => {
+            cx.model
+                .record(LogSeverity::Info, LogSource::Studio, message);
+        }
+        Err(error) => cx.model.report_failure("Model library not removed", error),
+    }
+}
+
+/// Show the folder model library `name` reads its files from.
+#[cfg(not(target_arch = "wasm32"))]
+fn reveal_model_library(cx: &mut Cx<'_, ProjectFeature>, name: &str) {
+    let Some(folder) = cx
+        .model
+        .model_library_manager
+        .get_library(name)
+        .and_then(|library| library.root_path.as_deref())
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf)
+    else {
+        return;
+    };
+    if let Err(error) = show_folder(&folder) {
+        cx.model.report_failure("Folder not shown", error);
+    }
+}
+
+#[cfg(all(not(any(test, feature = "test-support")), not(target_arch = "wasm32")))]
+fn show_folder(folder: &std::path::Path) -> Result<(), String> {
+    crate::workbench::lifecycle::recovery::reveal_directory(folder)
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+fn show_folder(folder: &std::path::Path) -> Result<(), String> {
+    crate::workbench::app::dialogs::project::SHOWN_FOLDERS
+        .with(|shown| shown.borrow_mut().push(folder.to_path_buf()));
+    Ok(())
+}
+
+/// The model file the reader chooses for library `name`.
+#[cfg(all(not(any(test, feature = "test-support")), not(target_arch = "wasm32")))]
+fn pick_model_file(name: &str) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(format!("Relink model library {name}"))
+        .add_filter(
+            "SPICE model source",
+            crate::state::pdk_config::MODEL_FILE_EXTENSIONS,
+        )
+        .add_filter("All files", &["*"])
+        .pick_file()
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+fn pick_model_file(_: &str) -> Option<std::path::PathBuf> {
+    crate::workbench::app::dialogs::project::RELINK_PICK.with(|pick| pick.borrow_mut().take())
+}
+
+/// Read model library `name` again, from `relink` when the reader chose a
+/// new file and else from where it was attached, on a background thread.
+/// The page states the one read in progress; the library changes as one
+/// step of Undo when it is in.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_model_library_read(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    name: &str,
+    relink: Option<std::path::PathBuf>,
+) {
+    let Some(library) = cx.model.model_library_manager.get_library(name) else {
+        return;
+    };
+    let Some(root) = relink.clone().or_else(|| library.root_path.clone()) else {
+        return;
+    };
+    // A library is named by its file: the file it is relinked to keeps the
+    // name, so every model bound to it still finds it.
+    if relink.is_some() && root.file_stem().and_then(|stem| stem.to_str()) != Some(name) {
+        cx.wb.prompt(format!(
+            "Choose a file named '{name}': model library '{name}' is named by its file."
+        ));
+        return;
+    }
+    let section = library.selected_corner.clone();
+    let pack = library.pack_id.clone().filter(|_| relink.is_none());
+    let mut candidate = cx.model.model_library_manager.clone();
+    let expected = name.to_owned();
+    let file = root.file_name().map_or_else(
+        || root.display().to_string(),
+        |file| file.to_string_lossy().into_owned(),
+    );
+    let relinked = relink.is_some();
+    let reading = crate::workbench::app::dialogs::project::ModelLibraryRead::start(
+        ctx,
+        name.to_owned(),
+        file,
+        relinked,
+        cx.model.workspace.content.project.revision().get(),
+        move || {
+            if relinked {
+                candidate.remove_library(&expected);
+            }
+            let loaded = match pack {
+                Some(pack) => candidate.refresh_spice_pack(&pack),
+                None => candidate.load_library_file(&root, section.as_deref()),
+            }?;
+            if loaded != expected {
+                return Err(format!(
+                    "The file read as model library '{loaded}', not '{expected}'."
+                ));
+            }
+            Ok(candidate)
+        },
+    );
+    cx.state.dependencies.read = Some(reading);
+}
+
+/// Take a model library read once it is in: the library as its files now
+/// say, as one step of Undo, or what stopped it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn take_model_library_read(cx: &mut Cx<'_, ProjectFeature>) {
+    let Some(answer) = cx
+        .state
+        .dependencies
+        .read
+        .as_ref()
+        .and_then(crate::workbench::app::dialogs::project::ModelLibraryRead::take_answer)
+    else {
+        return;
+    };
+    let Some(read) = cx.state.dependencies.read.take() else {
+        return;
+    };
+    let name = read.library;
+    let failure = if read.relink {
+        "Model library not relinked"
+    } else {
+        "Model library not reloaded"
+    };
+    if cx.model.workspace.content.project.revision().get() != read.project_revision {
+        cx.model.report_failure(
+            failure,
+            format!("The project changed while '{name}' was read; nothing was changed."),
+        );
+        return;
+    }
+    let candidate = match answer {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            cx.model.report_failure(failure, error);
+            return;
+        }
+    };
+    let unchanged = cx
+        .model
+        .model_library_manager
+        .get_library(&name)
+        .zip(candidate.get_library(&name))
+        .is_some_and(|(before, after)| {
+            before.root_path == after.root_path
+                && before.source_closure == after.source_closure
+                && before.source_authority == after.source_authority
+        });
+    if unchanged {
+        cx.model.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!("Model library '{name}' already matches its files."),
+        );
+        return;
+    }
+    let verb = if read.relink { "Relinked" } else { "Reloaded" };
+    let result = if cx.platform.project_lifecycle.is_open() {
+        crate::workbench::app_state::design_history::publish_model_library_candidate(
+            cx.model,
+            candidate,
+            &name,
+            format!("{} model library {name}", verb.to_lowercase()),
+        )
+        .map(|revision| {
+            format!(
+                "{verb} model library '{name}' from {} at project revision {}.",
+                read.file,
+                revision.get()
+            )
+        })
+    } else {
+        cx.model.model_library_manager = candidate;
+        Ok(format!("{verb} model library '{name}' from {}.", read.file))
+    };
+    match result {
+        Ok(message) => {
+            cx.model
+                .record(LogSeverity::Info, LogSource::Studio, message);
+        }
+        Err(error) => cx.model.report_failure(failure, error),
+    }
 }
 
 fn dependency_manifest(cx: &Cx<'_, ProjectFeature>, rows: &[DependencyRow]) -> DependencyManifest {

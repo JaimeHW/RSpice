@@ -1,20 +1,23 @@
 //! The Dependencies page through whole application frames: each library has
 //! one status, and the rail, the table and the inspector beside the page say
-//! the same thing about it, in every state a library can be in.
+//! the same thing about it, in every state a library can be in; and each row
+//! of the table can be opened, shown, read again or removed from the page.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
 
 use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::app::dialogs::project::{RELINK_PICK, SHOWN_FOLDERS};
 use rspice_app_project::workbench::project::DependencyLibrary;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::Library;
 use rspice_app_state::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
-use super::recovery_frames::{app_frame, offscreen, painted};
+use super::recovery_frames::{app_frame, click_on, offscreen, painted, saved_project};
 
 /// What one place on the page says about a library: the status's word, and
 /// the severity a screen reader is told in front of it, if any.
@@ -67,20 +70,28 @@ fn rail_row<'a>(
         .collect()
 }
 
-/// The table's row for `name` of `kind`: every column, the status last.
+/// The table's row for `name` of `kind`, which a screen reader is told cell
+/// by cell under its head, the status last.
 fn table_row<'a>(
     nodes: &'a [(String, Option<String>, Option<String>, bool)],
     name: &str,
     kind: &str,
 ) -> Vec<&'a (String, Option<String>, Option<String>, bool)> {
+    let row = row_label(name, kind);
     nodes
         .iter()
-        .filter(|(label, ..)| {
-            let (_, words) = severity(label);
-            let cells: Vec<_> = words.split(", ").collect();
-            cells.len() >= 4 && cells[0] == name && cells[1] == kind
-        })
+        .filter(|(label, ..)| label.starts_with(&row))
         .collect()
+}
+
+/// How a table row for `name` of `kind` starts when it is announced.
+fn row_label(name: &str, kind: &str) -> String {
+    format!("Library: {name}, Type: {kind}, ")
+}
+
+/// The status a table row announces, after its head.
+fn row_status(label: &str) -> &str {
+    label.rsplit("Status: ").next().unwrap_or(label)
 }
 
 /// What the rail, the table and the inspector say about `library`, in the
@@ -110,11 +121,8 @@ fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 3] {
         1,
         "one table row names {library:?}: {nodes:#?}"
     );
-    let (table_severity, words) = severity(&table[0].0);
-    let table = (
-        words.rsplit(", ").next().expect("a status").to_owned(),
-        table_severity,
-    );
+    let (table_severity, words) = severity(row_status(&table[0].0));
+    let table = (words.to_owned(), table_severity);
 
     let statuses: Vec<_> = nodes
         .iter()
@@ -436,4 +444,353 @@ fn the_rail_and_the_table_share_one_filter_and_lose_it_with_the_project() {
     );
     assert_eq!(app.state.project.project_dependency_selection, None);
     let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// The table's rows as announced, top to bottom.
+fn ledger_rows(output: &egui::FullOutput) -> Vec<String> {
+    let mut rows: Vec<_> = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            let label = node.label()?;
+            label.starts_with("Library: ").then(|| {
+                (
+                    node.bounds().map_or(0.0, |bounds| bounds.y0),
+                    label.to_owned(),
+                )
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.into_iter().map(|(_, label)| label).collect()
+}
+
+/// A secondary press and release on the table row for `name` of `kind`, as
+/// a right-click asks for its menu.
+fn menu_on(output: &egui::FullOutput, name: &str, kind: &str) -> Vec<egui::Event> {
+    let row = row_label(name, kind);
+    let bounds = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| node.label()?.starts_with(&row).then(|| node.bounds())?)
+        .unwrap_or_else(|| panic!("the table shows `{row}`"));
+    let at = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    [true, false]
+        .into_iter()
+        .map(|pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        })
+        .collect()
+}
+
+/// Whether each of `labels` is announced, and can be pressed.
+fn offered(output: &egui::FullOutput, labels: &[&str]) -> Vec<Option<bool>> {
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes;
+    labels
+        .iter()
+        .map(|label| {
+            nodes
+                .iter()
+                .find_map(|(_, node)| (node.label()? == *label).then(|| !node.is_disabled()))
+        })
+        .collect()
+}
+
+/// The page's menu for the row for `name` of `kind`, opened on a settled
+/// page.
+fn open_menu(ctx: &egui::Context, app: &mut RSpiceApp, name: &str, kind: &str) -> egui::FullOutput {
+    app_frame(ctx, app, Vec::new());
+    let page = app_frame(ctx, app, Vec::new());
+    app_frame(ctx, app, menu_on(&page, name, kind));
+    app_frame(ctx, app, Vec::new())
+}
+
+/// Frames until the Console holds a line that starts with `start`.
+fn paint_until_recorded(ctx: &egui::Context, app: &mut RSpiceApp, start: &str) {
+    for _ in 0..500 {
+        app_frame(ctx, app, Vec::new());
+        if app
+            .state
+            .model
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with(start))
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let lines: Vec<_> = app
+        .state
+        .model
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.clone())
+        .collect();
+    panic!("the Console never said `{start}`: {lines:#?}");
+}
+
+/// The Status head sorts the ledger with the worst first, so a library the
+/// reader has to act on is on top however long the list.
+#[test]
+fn the_status_head_sorts_the_worst_library_first() {
+    let mut libraries = libraries();
+    let ctx = offscreen();
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    let page = app_frame(&ctx, &mut libraries.app, Vec::new());
+    let unsorted = ledger_rows(&page);
+    assert!(
+        unsorted[0].starts_with("Library: cells, "),
+        "design libraries come first until a head sorts: {unsorted:#?}"
+    );
+    app_frame(&ctx, &mut libraries.app, click_on(&page, "Sort by Status"));
+    let sorted = ledger_rows(&app_frame(&ctx, &mut libraries.app, Vec::new()));
+    assert_eq!(sorted.len(), unsorted.len());
+    assert!(row_status(&sorted[0]).starts_with("Error: "), "{sorted:#?}");
+    assert!(
+        !row_status(sorted.last().expect("a row")).contains(": "),
+        "{sorted:#?}"
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// A model library read from a file offers, in its menu, every way to act
+/// on it from here; Open in Models takes the reader to it there.
+#[test]
+fn a_model_library_opens_in_models_from_its_row() {
+    let mut libraries = libraries();
+    let name = libraries.found.clone();
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    assert_eq!(
+        offered(
+            &menu,
+            &[
+                "Open in Models",
+                "Show in folder",
+                "Relink\u{2026}",
+                "Reload",
+                "Remove"
+            ]
+        ),
+        [Some(true); 5]
+    );
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Open in Models"));
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    assert_eq!(libraries.app.state.workbench.workspace, Workspace::Models);
+    assert_eq!(
+        libraries
+            .app
+            .state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
+        Some(name.as_str())
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// The built-in library ships with RSpice: it opens in Models, and there is
+/// no file to show, read or relink and nothing to remove.
+#[test]
+fn the_built_in_library_offers_only_to_open() {
+    let mut libraries = libraries();
+    let name = libraries.built_in.clone();
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    assert_eq!(
+        offered(
+            &menu,
+            &[
+                "Open in Models",
+                "Show in folder",
+                "Relink\u{2026}",
+                "Reload",
+                "Remove"
+            ]
+        ),
+        [Some(true), None, None, None, None]
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// A design library opens on the Library page, selected, and its menu's
+/// Delete library... opens the review that deletes one.
+#[test]
+fn a_design_library_opens_on_the_library_page_and_reviews_its_deletion() {
+    let mut libraries = libraries();
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design");
+    assert_eq!(
+        offered(&menu, &["Open in Library", "Delete library\u{2026}"]),
+        [Some(true), Some(true)]
+    );
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Open in Library"));
+    assert_eq!(
+        libraries.app.state.project.project_page,
+        ProjectPage::Library
+    );
+    assert_eq!(
+        libraries.app.state.model.library_manager.selected_library.as_deref(),
+        Some("cells")
+    );
+
+    libraries.app.state.project.project_page = ProjectPage::Dependencies;
+    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design");
+    app_frame(
+        &ctx,
+        &mut libraries.app,
+        click_on(&menu, "Delete library\u{2026}"),
+    );
+    assert!(libraries.app.state.project.delete_library_dialog);
+    assert!(
+        libraries
+            .app
+            .state
+            .model
+            .library_manager
+            .get_library("cells")
+            .is_some(),
+        "the review deletes it, not the menu"
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// Show in folder opens the folder the library's file is in.
+#[test]
+fn a_model_library_is_shown_in_its_folder() {
+    let mut libraries = libraries();
+    let name = libraries.found.clone();
+    SHOWN_FOLDERS.with(|shown| shown.borrow_mut().clear());
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Show in folder"));
+    let shown = SHOWN_FOLDERS.with(|shown| shown.borrow().clone());
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(
+        shown[0].join("found.lib").is_file(),
+        "{} holds the file",
+        shown[0].display()
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// A model file edited since it was attached is read again from the page:
+/// the library takes what the file now says and is found again.
+#[test]
+fn a_changed_model_library_is_reloaded_from_its_row() {
+    let mut libraries = libraries();
+    let name = libraries.changed.clone();
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Reload"));
+    paint_until_recorded(
+        &ctx,
+        &mut libraries.app,
+        &format!("Reloaded model library '{name}'"),
+    );
+    assert_said(
+        &mut libraries.app,
+        DependencyLibrary::model(name),
+        "Found",
+        None,
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// A model library whose file is gone is pointed at the file where it now
+/// is: the library keeps its name and is found there.
+#[test]
+fn a_missing_model_library_is_relinked_from_its_row() {
+    let mut libraries = libraries();
+    let name = libraries.missing.clone();
+    let moved = libraries.folder.join("moved");
+    std::fs::create_dir_all(&moved).expect("the new folder is made");
+    let file = moved.join(format!("{name}.lib"));
+    std::fs::write(&file, ".model nmissing nmos level=1 vto=0.5\n").expect("the file writes");
+    RELINK_PICK.with(|pick| *pick.borrow_mut() = Some(file.clone()));
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Relink\u{2026}"));
+    paint_until_recorded(
+        &ctx,
+        &mut libraries.app,
+        &format!("Relinked model library '{name}'"),
+    );
+    let root = libraries
+        .app
+        .state
+        .model
+        .model_library_manager
+        .get_library(&name)
+        .and_then(|library| library.root_path.clone())
+        .expect("the library has a root");
+    assert_eq!(
+        std::fs::canonicalize(root).ok(),
+        std::fs::canonicalize(&file).ok()
+    );
+    assert_said(
+        &mut libraries.app,
+        DependencyLibrary::model(name),
+        "Found",
+        None,
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// Removing a model library from the page is one step of Undo, and the
+/// project's technology library is kept until the technology is detached.
+#[test]
+fn a_model_library_removed_from_its_row_comes_back_with_undo() {
+    let (mut app, root) = saved_project("dependency-remove");
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    let (name, _) = import_file(&mut app, &root, "spare.lib", "nspare");
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut app, &name, "Model");
+    app_frame(&ctx, &mut app, click_on(&menu, "Remove"));
+    assert!(
+        app.state
+            .model
+            .model_library_manager
+            .get_library(&name)
+            .is_none()
+    );
+    assert!(
+        app.state.model.log_buffer.entries().any(|entry| entry
+            .message
+            .starts_with(&format!("Removed model library '{name}'"))),
+        "the Console records it"
+    );
+    assert!(app.command_key_enabled(ids::UNDO));
+    app.execute_command_key(ids::UNDO);
+    assert!(
+        app.state
+            .model
+            .model_library_manager
+            .get_library(&name)
+            .is_some(),
+        "Undo puts it back"
+    );
+    let _ = std::fs::remove_dir_all(root);
 }

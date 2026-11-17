@@ -34,14 +34,21 @@ pub struct TechnologyAttachmentDialogState {
 }
 
 /// What a technology transaction does once its checkpoint is written.
+/// The attachment is boxed: it is large, and a change waits in the dialog's
+/// state on every frame the checkpoint takes.
 #[derive(Debug, Clone)]
 pub(crate) enum TechnologyChange {
-    Attach {
-        binding: crate::state::ProjectTechnologyBinding,
-        migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
-    },
+    Attach(Box<TechnologyAttachment>),
     /// The project's technology removed.
     Detach,
+}
+
+/// A technology attached, with the evidence of the migration the reader
+/// reviewed when it replaces another.
+#[derive(Debug, Clone)]
+pub(crate) struct TechnologyAttachment {
+    pub(crate) binding: crate::state::ProjectTechnologyBinding,
+    pub(crate) migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 }
 
 /// A technology change waiting on the whole-project checkpoint written
@@ -352,4 +359,114 @@ impl TechnologyAttachmentDialogState {
     pub(crate) fn close(&mut self) {
         *self = Self::default();
     }
+}
+
+/// The Dependencies page: its ledger, and the model library it is reading.
+#[derive(Clone, Default)]
+pub struct DependencyPageState {
+    /// The ledger's sort, selection and sideways scroll.
+    pub(crate) table: crate::ui::widgets::table::TableState,
+    /// A model library's files being read again, off the frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) read: Option<ModelLibraryRead>,
+}
+
+impl std::fmt::Debug for DependencyPageState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DependencyPageState")
+            .field("table", &self.table)
+            .field("reading", &self.reading())
+            .finish()
+    }
+}
+
+impl DependencyPageState {
+    /// The one line the page states while a model library is read.
+    pub(crate) fn reading(&self) -> Option<String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.read
+                .as_ref()
+                .map(|read| format!("Reading {}\u{2026}", read.file))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            None
+        }
+    }
+}
+
+/// A model library read again from its files on a background thread: the
+/// catalogue as it will be with the library in it, once that is read.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub(crate) struct ModelLibraryRead {
+    pub(crate) library: String,
+    /// The file it is read from, by name, as the page states it.
+    pub(crate) file: String,
+    /// Read from a file the reader chose, rather than where it was attached.
+    pub(crate) relink: bool,
+    /// The project revision the read started from: a change since leaves the
+    /// read unused.
+    pub(crate) project_revision: u64,
+    answer: ModelLibraryAnswer,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type ModelLibraryAnswer = std::sync::Arc<
+    std::sync::Mutex<Option<Result<crate::state::model_library::ModelLibraryManager, String>>>,
+>;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ModelLibraryRead {
+    /// Run `work` on a background thread and ask `ctx` for a frame when it
+    /// has answered.
+    pub(crate) fn start(
+        ctx: &egui::Context,
+        library: String,
+        file: String,
+        relink: bool,
+        project_revision: u64,
+        work: impl FnOnce() -> Result<crate::state::model_library::ModelLibraryManager, String>
+        + Send
+        + 'static,
+    ) -> Self {
+        let answer = ModelLibraryAnswer::default();
+        let slot = std::sync::Arc::clone(&answer);
+        let repaint = ctx.clone();
+        rspice_app_services::workbench::platform::spawn_or_inline(move || {
+            let found = work();
+            if let Ok(mut slot) = slot.lock() {
+                *slot = Some(found);
+            }
+            repaint.request_repaint();
+        });
+        Self {
+            library,
+            file,
+            relink,
+            project_revision,
+            answer,
+        }
+    }
+
+    /// The answer, once, if it is in.
+    pub(crate) fn take_answer(
+        &self,
+    ) -> Option<Result<crate::state::model_library::ModelLibraryManager, String>> {
+        self.answer.lock().ok()?.take()
+    }
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+thread_local! {
+    /// The folders the Dependencies page was asked to show, in a test build,
+    /// in place of a file manager.
+    pub static SHOWN_FOLDERS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// The file the Dependencies page's Relink picks, in a test build, in
+    /// place of a file dialog.
+    pub static RELINK_PICK: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
 }

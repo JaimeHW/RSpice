@@ -197,6 +197,8 @@ pub struct ProjectState {
     /// nor kept when the project is replaced; the page filters by the
     /// workspace navigator's filter.
     pub project_dependency_selection: Option<crate::workbench::project::DependencyLibrary>,
+    /// The Dependencies page's ledger, and the model library it is reading.
+    pub dependencies: crate::workbench::app::dialogs::project::DependencyPageState,
     pub project_checkpoint_selection: Option<String>,
     /// The Overview's tables: their order, sized columns, selection and
     /// scroll. Presentation only; they belong to the open project.
@@ -233,6 +235,7 @@ impl ProjectState {
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;
+        self.dependencies = Default::default();
         self.overview_tables = Default::default();
     }
 }

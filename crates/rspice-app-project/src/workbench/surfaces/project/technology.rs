@@ -12,7 +12,9 @@ use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
 use crate::ui::widgets::{field_label, name_control, text_field};
-use crate::workbench::app::dialogs::project::{TechnologyChange, TechnologyChangeInFlight};
+use crate::workbench::app::dialogs::project::{
+    TechnologyAttachment, TechnologyChange, TechnologyChangeInFlight,
+};
 use crate::workbench::app_state::Model;
 use crate::workbench::project::commands::ProjectRequest;
 
@@ -759,10 +761,10 @@ pub(super) fn attach_technology_binding(
     start_technology_change(
         ctx,
         cx,
-        TechnologyChange::Attach {
+        TechnologyChange::Attach(Box::new(TechnologyAttachment {
             binding,
             migration_evidence,
-        },
+        })),
         authority,
     )?;
     Ok(None)
@@ -923,12 +925,13 @@ pub(super) fn commit_technology_change(
 ) -> Result<String, String> {
     let context = technology_change_context(cx, authority, checkpoint, captured)?;
     match change {
-        TechnologyChange::Attach {
-            binding,
-            migration_evidence,
-        } => {
-            commit_technology_after_checkpoint(cx, binding, context, migration_evidence, checkpoint)
-        }
+        TechnologyChange::Attach(attachment) => commit_technology_after_checkpoint(
+            cx,
+            attachment.binding,
+            context,
+            attachment.migration_evidence,
+            checkpoint,
+        ),
         TechnologyChange::Detach => commit_detach_after_checkpoint(cx, context, checkpoint),
     }
 }

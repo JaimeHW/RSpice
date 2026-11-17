@@ -62,11 +62,6 @@ fn workspace_table_row_height(ui: &Ui) -> f32 {
     Tokens::get(ui.ctx()).metrics.row_h
 }
 
-/// Height of a ledger's column header, drawn tighter than its rows.
-fn workspace_table_column_header_height(ui: &Ui) -> f32 {
-    (workspace_table_row_height(ui) - 4.0).max(22.0)
-}
-
 /// Width that is both allocated to this UI and actually visible through the
 /// current clip. Split-pane children can otherwise inherit the unconstrained
 /// central-panel width and paint beneath the Inspector dock.
@@ -144,6 +139,7 @@ pub fn poll_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     {
         let _ = ctx;
         recovery::take_checkpoint_job_answer(cx);
+        dependencies::take_model_library_read(cx);
     }
 }
 
@@ -693,156 +689,6 @@ fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, problem: O
             problem,
         );
     }
-}
-
-/// How one ledger row is painted.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WorkspaceRowKind {
-    /// The column header: tighter, filled, and unclickable.
-    Header,
-    /// An ordinary body row.
-    Body,
-    /// The body row the page's selection points at.
-    Selected,
-}
-
-impl WorkspaceRowKind {
-    const fn is_header(self) -> bool {
-        matches!(self, Self::Header)
-    }
-
-    /// The selected row for a boolean the caller already holds.
-    const fn body(selected: bool) -> Self {
-        if selected { Self::Selected } else { Self::Body }
-    }
-}
-
-/// One ledger row.
-///
-/// `faint_columns` are the cells holding a placeholder rather than a value,
-/// which take the faint tone so an absent value never competes with a real
-/// one. `problem` marks one cell — a resource the reader has to look at —
-/// with the kit's mark in front of its words; no cell's text is ever
-/// coloured.
-fn workspace_table_row<const N: usize>(
-    ui: &mut Ui,
-    width: f32,
-    cells: [&str; N],
-    fractions: [f32; N],
-    kind: WorkspaceRowKind,
-    mono_columns: &[usize],
-    faint_columns: &[usize],
-    problem: Option<(usize, Problem)>,
-) -> (egui::Response, Vec<Rect>) {
-    let tokens = Tokens::get(ui.ctx());
-    let header = kind.is_header();
-    let height = if header {
-        workspace_table_column_header_height(ui)
-    } else {
-        workspace_table_row_height(ui)
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(width, height),
-        if header {
-            Sense::hover()
-        } else {
-            Sense::click()
-        },
-    );
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    // A row the reader can select has to answer the pointer. Marking the
-    // selection with a two-pixel rule alone left the table looking painted on.
-    if header {
-        painter.rect_filled(rect, 0.0, tokens.color.bg_panel_2);
-    } else if kind == WorkspaceRowKind::Selected {
-        painter.rect_filled(rect, 0.0, tokens.color.bg_active);
-    } else if response.hovered() {
-        painter.rect_filled(rect, 0.0, tokens.color.bg_hover);
-    }
-    painter.hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, tokens.color.border),
-    );
-    if kind == WorkspaceRowKind::Selected {
-        painter.rect_filled(
-            Rect::from_min_size(rect.left_top(), vec2(2.0, rect.height())),
-            0.0,
-            tokens.color.accent,
-        );
-    }
-    let mut left = rect.left();
-    let mut cell_rects = Vec::with_capacity(N);
-    for (index, (text, fraction)) in cells.iter().zip(fractions.iter()).enumerate() {
-        let right = if index + 1 == N {
-            rect.right()
-        } else {
-            left + rect.width() * fraction
-        };
-        let cell = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
-        if index > 0 {
-            painter.vline(left, rect.y_range(), Stroke::new(1.0, tokens.color.border));
-        }
-        let text_color = if header || faint_columns.contains(&index) {
-            tokens.color.text_faint
-        } else {
-            tokens.color.text_dim
-        };
-        let font = if header {
-            theme::sans(tokens::FS_0, FontWeight::Medium)
-        } else if mono_columns.contains(&index) {
-            theme::mono(tokens::FS_0, FontWeight::Regular)
-        } else {
-            theme::sans(tokens::FS_0, FontWeight::Regular)
-        };
-        let mark = problem.and_then(|(column, problem)| (column == index).then_some(problem));
-        if let Some(problem) = mark {
-            paint_problem_mark(
-                &painter,
-                Rect::from_center_size(
-                    pos2(cell.left() + 8.0 + CHIP_MARK_SIDE * 0.5, cell.center().y),
-                    vec2(CHIP_MARK_SIDE, CHIP_MARK_SIDE),
-                ),
-                problem,
-            );
-        }
-        let text_left = 8.0
-            + if mark.is_some() {
-                CHIP_MARK_ADVANCE
-            } else {
-                0.0
-            };
-        let text_rect = cell.shrink2(vec2(text_left, 0.0));
-        let text = elide_text(ui, text, &font, text_rect.width());
-        painter.with_clip_rect(text_rect).text(
-            cell.left_center() + vec2(text_left, 0.0),
-            Align2::LEFT_CENTER,
-            text,
-            font,
-            text_color,
-        );
-        cell_rects.push(cell);
-        left = right;
-    }
-    let announcement = {
-        let joined = cells.join(", ");
-        problem.map_or(joined.clone(), |(_, problem)| problem.announce(&joined))
-    };
-    response.widget_info(|| {
-        if header {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
-        } else {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::SelectableLabel,
-                ui.is_enabled(),
-                kind == WorkspaceRowKind::Selected,
-                &announcement,
-            )
-        }
-    });
-    // No-ops for a header, which senses hover only and can never hold focus.
-    theme::paint_focus_ring(ui, &response, rect);
-    (response, cell_rects)
 }
 
 fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
