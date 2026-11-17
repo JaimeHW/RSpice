@@ -1206,7 +1206,12 @@ impl UserPreferences {
         for key in choices {
             if is_units_choice(*key) {
                 if let Ok(units) = self.units.current_mut() {
-                    let _ = units.set_compatibility_index(key.stable_id(), 0);
+                    // The shipped value's own index, not 0: a choice's default
+                    // need not be its first row.
+                    let shipped = UnitsPreferences::default()
+                        .compatibility_index(key.stable_id())
+                        .unwrap_or(0);
+                    let _ = units.set_compatibility_index(key.stable_id(), shipped);
                 }
                 continue;
             }
