@@ -33,7 +33,6 @@ use crate::workbench::surfaces::project::library;
 
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const SPLIT_BREAKPOINT: f32 = 960.0;
-const HEADER_MIN_HEIGHT: f32 = 68.0;
 /// Side of a header chip's problem mark: the kit's own, so it matches every
 /// other marked line in the product.
 use crate::ui::widgets::PROBLEM_MARK_SIDE as HEADER_CHIP_MARK_SIDE;
@@ -42,12 +41,11 @@ const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
 
 const SURFACE_TITLE: &str = "Library, cellview, symbol and form authoring";
-const SURFACE_SUMMARY: &str = "Author this project's libraries, cells, views, terminal contracts, component forms, locks, revisions, and publication records in one place.";
 
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
-    /// Times this thread projected the catalog for the manager: its header's
-    /// counts, or the symbol its Symbol & form page shows.
+    /// Times this thread projected the catalog for the symbol the manager's
+    /// Symbol & form page shows.
     pub static CELLVIEW_PROJECTION_BUILDS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
 }
@@ -112,15 +110,6 @@ impl ProjectionKey {
     }
 }
 
-/// The header's counts, for the catalog content and read-only filter they
-/// were counted at.
-#[derive(Clone, Copy)]
-struct CountedCatalog {
-    stamp: u64,
-    show_read_only: bool,
-    snapshot: CatalogSnapshot,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymbolAction {
     OpenEditor,
@@ -157,26 +146,26 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> LibraryCellviewPage
 
 fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
-    let snapshot = catalog_snapshot(ui.ctx(), cx.model);
     let compact = ui.available_width() <= COMPACT_BREAKPOINT;
     let shown = Frame::new()
         .fill(tokens.color.bg_panel)
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
-            ui.set_min_height(HEADER_MIN_HEIGHT - 18.0);
+            let access = project_access(cx);
             if compact {
                 identity_block(ui, &tokens);
-                ui.add_space(6.0);
-                ScrollArea::horizontal()
-                    .id_salt("library-cellview-header-context")
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| header_context(ui, cx, snapshot, &tokens));
+                if let Some((value, problem)) = access {
+                    ui.add_space(6.0);
+                    header_chip(ui, "Access", value, problem, &tokens);
+                }
             } else {
                 ui.horizontal(|ui| {
                     identity_block(ui, &tokens);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        header_context(ui, cx, snapshot, &tokens);
-                    });
+                    if let Some((value, problem)) = access {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            header_chip(ui, "Access", value, problem, &tokens);
+                        });
+                    }
                 });
             }
         });
@@ -192,112 +181,22 @@ fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
 }
 
 fn identity_block(ui: &mut Ui, tokens: &Tokens) {
-    ui.vertical(|ui| {
-        ui.label(
-            RichText::new(SURFACE_TITLE)
-                .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                .color(tokens.color.text),
-        );
-        ui.add(
-            egui::Label::new(
-                RichText::new(SURFACE_SUMMARY)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(tokens.color.text_dim),
-            )
-            .wrap(),
-        );
-    });
+    ui.label(
+        RichText::new(SURFACE_TITLE)
+            .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+            .color(tokens.color.text),
+    );
 }
 
-#[derive(Debug, Clone, Copy)]
-struct CatalogSnapshot {
-    libraries: usize,
-    cells: usize,
-    views: usize,
-}
-
-/// The libraries, cells and views the header counts, counted once for the
-/// catalog content.
-fn catalog_snapshot(ctx: &egui::Context, model: &Model) -> CatalogSnapshot {
-    let manager = &model.library_manager;
-    let stamp = manager.catalog().stamp();
-    let show_read_only = manager.show_read_only;
-    let id = egui::Id::new("library-cellview-catalog-counts");
-    if let Some(counted) = ctx.data(|data| data.get_temp::<CountedCatalog>(id))
-        && counted.stamp == stamp
-        && counted.show_read_only == show_read_only
-    {
-        return counted.snapshot;
-    }
-    count_projection_build();
-    let libraries = manager
-        .libraries_by_key()
-        .map(|(_, library)| library)
-        .filter(|library| show_read_only || !library.read_only)
-        .collect::<Vec<_>>();
-    let snapshot = CatalogSnapshot {
-        libraries: libraries.len(),
-        cells: libraries.iter().map(|library| library.cell_count()).sum(),
-        views: libraries
-            .iter()
-            .map(|library| library.total_view_count())
-            .sum(),
-    };
-    ctx.data_mut(|data| {
-        data.insert_temp(
-            id,
-            CountedCatalog {
-                stamp,
-                show_read_only,
-                snapshot,
-            },
-        );
-    });
-    snapshot
-}
-
-fn header_context(
-    ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
-    snapshot: CatalogSnapshot,
-    tokens: &Tokens,
-) {
-    ui.spacing_mut().item_spacing.x = 8.0;
-    header_chip(
-        ui,
-        "Project",
-        &format!("r{}", cx.model.workspace.content.project.revision().get()),
-        None,
-        tokens,
-    );
-    header_chip(
-        ui,
-        "Catalog",
-        &format!("r{}", cx.model.library_manager.revision()),
-        None,
-        tokens,
-    );
-    header_chip(
-        ui,
-        "Contents",
-        &format!(
-            "{} libraries · {} cells · {} views",
-            snapshot.libraries, snapshot.cells, snapshot.views
-        ),
-        None,
-        tokens,
-    );
-    // An open, writable project is the ordinary case and the chip has nothing
-    // to add to it. The other two say what the reader cannot do here.
-    let access = if !cx.platform.project_lifecycle.is_open() {
+/// What the reader cannot do here, if anything. An open, writable project is
+/// the ordinary case and says nothing.
+fn project_access(cx: &Cx<'_, ProjectFeature>) -> Option<(&'static str, Option<Problem>)> {
+    if !cx.platform.project_lifecycle.is_open() {
         Some(("closed", None))
     } else if cx.model.safe_mode.project_read_only() {
         Some(("safe-mode read only", Some(Problem::Warning)))
     } else {
         None
-    };
-    if let Some((value, problem)) = access {
-        header_chip(ui, "Access", value, problem, tokens);
     }
 }
 
