@@ -347,6 +347,8 @@ fn execute_with_destinations(
     }
 
     let start_time = Instant::now();
+    // The Xyce dialect's tables staged from a run's store go with a run that fails.
+    let _recording = xyce_files::Recording;
     let mut reports = Vec::with_capacity(plan.len());
     let report_budget = ReportValueBudget::new(resource_limits.max_result_values);
     let mut outputs: Vec<PathBuf> = Vec::new();

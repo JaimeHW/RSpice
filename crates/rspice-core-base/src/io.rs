@@ -58,8 +58,8 @@ pub use vcd::{
     parse_vcd_bytes_with_limits, parse_vcd_reader_with_limits, write_vcd, write_vcd_streamed,
 };
 pub use xyce_prn::{
-    XycePrnError, XycePrnFooter, XycePrnLimits, XycePrnScientificStyle, XycePrnTable,
-    format_xyce_prn_scientific, serialize_legacy_compact_prn_for_comparison,
+    XycePrnError, XycePrnFooter, XycePrnLayout, XycePrnLimits, XycePrnScientificStyle,
+    XycePrnTable, format_xyce_prn_scientific, serialize_legacy_compact_prn_for_comparison,
     serialize_xyce_prn_sequence,
 };
 

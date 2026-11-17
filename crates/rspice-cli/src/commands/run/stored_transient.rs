@@ -24,7 +24,7 @@ use rspice_core::engine::{
     TransientStartupMode, TransientState,
 };
 use rspice_core::execution::{EventPoints, EventProjectionError, EventSource, HeldEvents};
-use rspice_core::netlist::{AnalysisCommand, OutputAnalysisKind};
+use rspice_core::netlist::AnalysisCommand;
 use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_core::xspice::DigitalValue;
 use rspice_results::stored_transient::{
@@ -512,14 +512,15 @@ impl StoredTransient {
     /// How the outputs can read this run straight from its store, or `None` when they need it in
     /// memory.
     ///
-    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, writes
-    /// no Xyce `.prn` table, keeps every accepted step, and asks for a rawfile, a delimited
-    /// table, HDF5, an event dump or nothing; when every output signal is one of the store's
-    /// columns, value for value, or a column sampled from an event trace (`D(node)`,
-    /// `E(node)`); and when its `.MEASURE TRAN` statements, if any, read only the store's
-    /// columns in forms measured in one pass over the rows. The signals are checked by
-    /// projecting the first chunk exactly as the whole run would be, and the statements by
-    /// planning them against the same chunk; they are then measured from the store.
+    /// They can when the deck asserts nothing, checks no `.VEC` file's expected outputs, keeps
+    /// every accepted step, and asks for a rawfile, a delimited table, HDF5, an event dump or
+    /// nothing (a `.PRINT TRAN` card's Xyce `.prn` table is laid out from the store too); when
+    /// every output signal is one of the store's columns, value for value, or a column sampled
+    /// from an event trace (`D(node)`, `E(node)`); and when its `.MEASURE TRAN` statements, if
+    /// any, read only the store's columns in forms measured in one pass over the rows. The
+    /// signals are checked by projecting the first chunk exactly as the whole run would be,
+    /// and the statements by planning them against the same chunk; they are then measured from
+    /// the store.
     pub(super) fn stream_plan(
         &mut self,
         ctx: &RunContext<'_>,
@@ -536,8 +537,6 @@ impl StoredTransient {
                     | OutputFormat::Hdf5
                     | OutputFormat::Vcd
             );
-        // Xyce's `.prn` table of a `.PRINT TRAN` card is built whole.
-        let prints = super::xyce_files::prints(ctx, OutputAnalysisKind::Tran);
         let every_step = netlist.options.output_time_points.is_empty()
             && netlist.options.output_interval_schedule.is_none();
         let rows = self.rows.rows();
@@ -548,8 +547,6 @@ impl StoredTransient {
             Some("it saves instance parameters")
         } else if !ctx.engine.transient_rows_are_whole(netlist) {
             Some("its rows are not the run's whole trajectory")
-        } else if prints {
-            Some("it writes a .PRINT TRAN table to a .prn file")
         } else if !every_step {
             Some("it prints on an output schedule")
         } else if netlist
@@ -1872,7 +1869,7 @@ impl<'r> RowCursor<'r> {
         for row in 0..rows {
             let value = self.value(row, variable);
             if !value.is_finite() {
-                return Err(match self.failure(path) {
+                return Err(match self.read_failure(path) {
                     Some(error) => ColumnStop::Failed(error),
                     None => ColumnStop::NonFinite(row),
                 });
@@ -1898,9 +1895,9 @@ impl<'r> RowCursor<'r> {
         chunk
     }
 
-    /// The read that failed, if one did: of the store, or of an event history, which names the
-    /// output it was being written to.
-    fn failure(&mut self, path: &Path) -> Option<CliError> {
+    /// The read that failed, if one did: of the store, or of an event history, which names
+    /// `path`, the output it was being written to.
+    pub(crate) fn read_failure(&mut self, path: &Path) -> Option<CliError> {
         if let Some(error) = self.error.take() {
             return Some(store_error(self.dir, error));
         }
@@ -1913,7 +1910,7 @@ impl<'r> RowCursor<'r> {
 
     /// Fail when a read failed or a value was not finite, as a table that held them would.
     pub(crate) fn finish(mut self, path: &Path) -> Result<(), CliError> {
-        if let Some(error) = self.failure(path) {
+        if let Some(error) = self.read_failure(path) {
             return Err(error);
         }
         if self.non_finite {

@@ -2002,6 +2002,56 @@ fn xyce_writes_one_measure_file_per_step_and_the_step_table() {
     );
 }
 
+/// A transient's `.PRINT TRAN` tables are laid out from its results store as
+/// the rows are read, never held: byte for byte the tables of the same run
+/// read back into memory (which a measure of another's running result
+/// forces), across `.STEP` coordinates, a card's own `FILE=` and
+/// `FORMAT=CSV`, and operands spelled in another case than the store's.
+#[test]
+fn xyce_print_tables_laid_out_from_the_store_equal_the_run_read_back() {
+    let body = "* store\nV1 1 0 sin 0 1 1k\nR1 1 2 {r}\nR2 2 0 1k\n.param r=1k\n\
+                .step r list 1k 2k\n.tran 10u 1m\n.print tran v(2) i(v1)\n\
+                .print tran file=own.csv format=csv V(1)\n.meas tran mx max v(2)\n";
+    let mut twins = Vec::new();
+    for (twin, extra) in [
+        ("streamed", ""),
+        ("read-back", ".meas tran twice max {2*v(2)+0*mx}\n"),
+    ] {
+        let dir = test_dir(&format!("xyce_files_store_{twin}"));
+        let output = run_xyce_files(
+            &dir,
+            "st.cir",
+            &format!("{body}{extra}.end\n"),
+            &["--log-level", "debug"],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{twin}: {stderr}");
+        assert_eq!(
+            twin == "streamed",
+            !stderr.contains("back whole"),
+            "{twin}: {stderr}"
+        );
+        let read = |file: &str| {
+            std::fs::read_to_string(dir.join(file))
+                .unwrap_or_else(|error| panic!("{file}: {error}"))
+        };
+        twins.push((read("st.cir.prn"), read("own.csv")));
+    }
+    let (table, own) = &twins[0];
+    assert!(table.starts_with("Index       TIME              V(2)              I(V1)"));
+    assert_eq!(
+        table.matches("\n0        0.00000000e+00").count(),
+        2,
+        "{table}"
+    );
+    assert!(table.ends_with("End of Xyce(TM) Parameter Sweep\n"));
+    assert!(
+        own.starts_with("TIME,V(1)\n0.00000000e+00,0.00000000e+00\n"),
+        "{own}"
+    );
+    assert_eq!(twins[0], twins[1]);
+}
+
 /// A file that cannot be written is a warning: the run's result and exit
 /// status stand, and the other files are still written.
 #[test]

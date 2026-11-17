@@ -1472,28 +1472,61 @@ fn finish_transient_products(
             )
             .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))
     };
-    super::xyce_files::record_print(
-        ctx,
-        rspice_core::netlist::OutputAnalysisKind::Tran,
-        super::xyce_files::Scale::Time,
-        || {
-            let projection = output_projection()?;
-            let mut printed = signals.clone();
-            for signal in &mut printed {
-                signal.values = projection
-                    .project(&signal.values)
-                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+    match (plan, stored.as_deref_mut()) {
+        // A streamed run's `.prn` rows are laid out from its store as they are read.
+        (Some(plan), Some(stored))
+            if super::xyce_files::prints(ctx, rspice_core::netlist::OutputAnalysisKind::Tran) =>
+        {
+            let (first, points) = stored.rows.output_rows(tstart, tstop)?;
+            let points = usize::try_from(points).map_err(|_| CliError::InternalError {
+                message: "a transient output has more rows than this host can address".to_owned(),
+            })?;
+            let column_events = plan
+                .reads_events()
+                .then(|| stored.rows.events(result))
+                .transpose()?;
+            let mut cursor = stored.rows.cursor(
+                plan,
+                first,
+                column_events
+                    .as_ref()
+                    .map(|events| events as &dyn rspice_core::execution::EventSource),
+            );
+            let names = plan
+                .signals
+                .iter()
+                .map(|signal| signal.display_name.as_str())
+                .collect::<Vec<_>>();
+            super::xyce_files::record_stored_print(ctx, &names, points, &mut |row, variable| {
+                cursor.value(row, variable)
+            })?;
+            if let Some(error) = cursor.read_failure(&ctx.args.input) {
+                return Err(error);
             }
-            Ok(super::export::scalar_table(
-                "transient",
-                "Transient Analysis",
-                "time",
-                "time",
-                projection.times().to_vec(),
-                &printed,
-            ))
-        },
-    )?;
+        }
+        _ => super::xyce_files::record_print(
+            ctx,
+            rspice_core::netlist::OutputAnalysisKind::Tran,
+            super::xyce_files::Scale::Time,
+            || {
+                let projection = output_projection()?;
+                let mut printed = signals.clone();
+                for signal in &mut printed {
+                    signal.values = projection
+                        .project(&signal.values)
+                        .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                }
+                Ok(super::export::scalar_table(
+                    "transient",
+                    "Transient Analysis",
+                    "time",
+                    "time",
+                    projection.times().to_vec(),
+                    &printed,
+                ))
+            },
+        )?,
+    }
 
     if let Some(resolved) = ctx.resolve_output("tran") {
         // The transient publishes here rather than through

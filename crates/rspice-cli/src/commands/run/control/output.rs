@@ -525,12 +525,19 @@ fn lexical(path: &Path) -> PathBuf {
 }
 
 pub(in crate::commands::run) fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
-    publish::artifact(path, |writer| {
+    publish_with(path, |writer| {
         writer
             .write_all(bytes)
             .map_err(|error| CliError::output_error(path, error))
     })
-    .map_err(|error| map_atomic_output_error(path, error))
+}
+
+/// Publish the artifact `write` writes at `path`.
+pub(in crate::commands::run) fn publish_with(
+    path: &Path,
+    write: impl FnOnce(&mut dyn std::io::Write) -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    publish::artifact(path, write).map_err(|error| map_atomic_output_error(path, error))
 }
 
 /// Upper bound on the bytes one sample takes in a presentation file: a JSON

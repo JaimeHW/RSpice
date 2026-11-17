@@ -17,7 +17,9 @@
 //!
 //! One CLI process runs one command, so every context of the run, one per
 //! `.STEP` coordinate, records into one log, and the files are written once
-//! the run has finished, each coordinate's rows after the one before.
+//! the run has finished, each coordinate's rows after the one before. A
+//! coordinate whose rows stayed in its results store lays its table out from
+//! there into a staged file as the rows are read, so no table is held whole.
 
 use super::RunContext;
 use crate::cli::{CliError, Config, RunArgs};
@@ -25,14 +27,17 @@ use crate::commands::export_table::{ColumnData, ExportTable};
 use rspice_core::config::SpiceDialect;
 use rspice_core::execution::RunAxisValue;
 use rspice_core::io::xyce_prn::{
-    XycePrnDelimiter, XycePrnFooter, XycePrnLimits, XycePrnOutputOptions, XycePrnRequest,
-    XycePrnScientificStyle, XycePrnTable, format_xyce_prn_scientific, serialize_xyce_prn_sequence,
+    XycePrnDelimiter, XycePrnError, XycePrnFooter, XycePrnLayout, XycePrnLimits,
+    XycePrnOutputOptions, XycePrnRequest, XycePrnScientificStyle, XycePrnTable,
+    format_xyce_prn_scientific, serialize_xyce_prn_sequence,
 };
 use rspice_core::netlist::{
     AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind, OutputRequest, PrintDelimiter,
     SimulationOptions,
 };
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 /// Bytes one table value may take: Xyce's widest default field is 18.
@@ -101,7 +106,48 @@ struct Table {
     layout: Layout,
     step: usize,
     swept: bool,
-    table: XycePrnTable,
+    rows: Rows,
+}
+
+/// Where one coordinate's rows of a table are.
+enum Rows {
+    /// In memory, as the run held them.
+    Held(XycePrnTable),
+    /// Laid out already, in a staged file, from a run's store.
+    Staged(Staged),
+}
+
+impl Rows {
+    fn columns(&self) -> &[String] {
+        match self {
+            Self::Held(table) => &table.columns,
+            Self::Staged(staged) => &staged.columns,
+        }
+    }
+}
+
+/// A coordinate's rows laid out as its file spells them, staged in the system's temporary
+/// directory until the run's files are written; the file goes when this does.
+struct Staged {
+    columns: Vec<String>,
+    path: PathBuf,
+    /// Why the rows cannot be written, found as they were laid out.
+    refused: Option<Refusal>,
+}
+
+/// Why a staged table cannot be written.
+enum Refusal {
+    /// The layout refused a row, which it names as the first table's: the sequence names its
+    /// table when it is written.
+    Rows(XycePrnError),
+    /// The staged file could not be written.
+    Staging(std::io::Error),
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// One coordinate's measure lines.
@@ -246,9 +292,141 @@ pub(super) fn record_print(
     scale: Scale,
     table: impl FnOnce() -> Result<ExportTable, CliError>,
 ) -> Result<(), CliError> {
-    if !writes_files(ctx) {
+    if !prints(ctx, kind) {
         return Ok(());
     }
+    let table = table()?;
+    let mut log = log();
+    let Some(files) = print_files(ctx, kind, scale, table.columns.len(), &mut log) else {
+        return Ok(());
+    };
+    let swept = ctx.run_coordinate().is_some();
+    for (file, layout, columns) in files {
+        match prn_table(&table, scale, &columns, layout.index) {
+            Ok(table) => log.tables.push(Table {
+                file,
+                layout,
+                step: step(ctx),
+                swept,
+                rows: Rows::Held(table),
+            }),
+            Err(reason) => log.warn(format!("warning: {file} is not written: {reason}")),
+        }
+    }
+    Ok(())
+}
+
+/// Record one coordinate's `.PRINT TRAN` table from the rows of its run's store, as
+/// [`record_print`] records it from the run in memory: `names` are its columns after the time,
+/// one per operand of each card, and `value(row, variable)` reads output row `row`'s time
+/// (variable 0) or column `variable - 1`, for rows `0..rows`. Each file's rows are laid out
+/// into a staged file as they are read, so none of them is held.
+pub(super) fn record_stored_print(
+    ctx: &RunContext<'_>,
+    names: &[&str],
+    rows: usize,
+    value: &mut dyn FnMut(usize, usize) -> f64,
+) -> Result<(), CliError> {
+    let kind = OutputAnalysisKind::Tran;
+    if !prints(ctx, kind) {
+        return Ok(());
+    }
+    let Some(files) = print_files(ctx, kind, Scale::Time, names.len(), &mut log()) else {
+        return Ok(());
+    };
+    let swept = ctx.run_coordinate().is_some();
+    for (file, layout, columns) in files {
+        let staged = stage(&layout, names, &columns, rows, value);
+        log().tables.push(Table {
+            file,
+            layout,
+            step: step(ctx),
+            swept,
+            rows: Rows::Staged(staged),
+        });
+    }
+    Ok(())
+}
+
+/// Lay out rows `0..rows` of `columns` (indices into `names`) into a new staged file: Xyce's
+/// `Index` when the layout has it, the time, then each column.
+fn stage(
+    layout: &Layout,
+    names: &[&str],
+    columns: &[usize],
+    rows: usize,
+    value: &mut dyn FnMut(usize, usize) -> f64,
+) -> Staged {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        ".rspice-prn-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut header = Vec::with_capacity(columns.len() + 2);
+    if layout.index {
+        header.push("Index".to_string());
+    }
+    header.push("TIME".to_string());
+    header.extend(columns.iter().map(|&column| xyce_name(names[column])));
+    let mut staged = Staged {
+        columns: header,
+        path,
+        refused: None,
+    };
+    staged.refused = match XycePrnLayout::new(layout, layout, usize::MAX) {
+        Ok(laid_out) => lay_out(&laid_out, &staged.path, layout.index, columns, rows, value)
+            .unwrap_or_else(|error| Some(Refusal::Staging(error))),
+        Err(error) => Some(Refusal::Rows(error)),
+    };
+    staged
+}
+
+/// Write rows `0..rows` to a new file at `path` as `layout` spells them; the first refusal
+/// stops it.
+fn lay_out(
+    layout: &XycePrnLayout<'_>,
+    path: &Path,
+    index: bool,
+    columns: &[usize],
+    rows: usize,
+    value: &mut dyn FnMut(usize, usize) -> f64,
+) -> std::io::Result<Option<Refusal>> {
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut row_values = Vec::with_capacity(columns.len() + 2);
+    let mut text = String::new();
+    let mut refused = None;
+    for row in 0..rows {
+        row_values.clear();
+        if index {
+            row_values.push(row as f64);
+        }
+        row_values.push(value(row, 0));
+        row_values.extend(columns.iter().map(|&column| value(row, column + 1)));
+        if let Err(error) = layout.push_row(&mut text, index, &row_values, (0, row), usize::MAX) {
+            refused = Some(Refusal::Rows(error));
+            break;
+        }
+        if text.len() >= 1 << 16 {
+            out.write_all(text.as_bytes())?;
+            text.clear();
+        }
+    }
+    out.write_all(text.as_bytes())?;
+    out.flush()?;
+    Ok(refused)
+}
+
+/// The files the deck's `.PRINT` cards of `kind` write, each with its layout and the columns
+/// of a table of `columns` columns it takes: a card's own operands when the table has one
+/// column per operand, else every column. `None` when the analysis's table is not written.
+fn print_files(
+    ctx: &RunContext<'_>,
+    kind: OutputAnalysisKind,
+    scale: Scale,
+    columns: usize,
+    log: &mut Log,
+) -> Option<Vec<(String, Layout, Vec<usize>)>> {
     let requests: Vec<&OutputRequest> = ctx
         .netlist
         .output_requests
@@ -257,21 +435,16 @@ pub(super) fn record_print(
             request.directive == OutputDirectiveKind::Print && request.analysis == Some(kind)
         })
         .collect();
-    if requests.is_empty() {
-        return Ok(());
-    }
-    let table = table()?;
     let deck = deck_name(ctx.args);
     let operands: usize = requests.iter().map(|request| request.operands.len()).sum();
-    let by_card = operands == table.columns.len();
+    let by_card = operands == columns;
     let mut files: Vec<(String, Layout, Vec<usize>)> = Vec::new();
     let mut first = 0;
-    let mut log = log();
     for request in requests {
-        let columns: Vec<usize> = if by_card {
+        let card_columns: Vec<usize> = if by_card {
             (first..first + request.operands.len()).collect()
         } else {
-            (0..table.columns.len()).collect()
+            (0..columns).collect()
         };
         first += request.operands.len();
         let layout = match layout(request, &ctx.netlist.options) {
@@ -285,9 +458,7 @@ pub(super) fn record_print(
                 continue;
             }
         };
-        let Some(extension) = extension(kind, scale, layout.csv) else {
-            return Ok(());
-        };
+        let extension = extension(kind, scale, layout.csv)?;
         let file = file_name(&deck, request.print_file.as_deref(), extension);
         // A `.PRINT HB FILE=` names one file, which Xyce gives the spectrum.
         if matches!(scale, Scale::Time)
@@ -297,25 +468,12 @@ pub(super) fn record_print(
             continue;
         }
         match files.iter_mut().find(|(known, ..)| *known == file) {
-            Some((_, _, known)) if by_card => known.extend(columns),
+            Some((_, _, known)) if by_card => known.extend(card_columns),
             Some(_) => {}
-            None => files.push((file, layout, columns)),
+            None => files.push((file, layout, card_columns)),
         }
     }
-    let swept = ctx.run_coordinate().is_some();
-    for (file, layout, columns) in files {
-        match prn_table(&table, scale, &columns, layout.index) {
-            Ok(table) => log.tables.push(Table {
-                file,
-                layout,
-                step: step(ctx),
-                swept,
-                table,
-            }),
-            Err(reason) => log.warn(format!("warning: {file} is not written: {reason}")),
-        }
-    }
-    Ok(())
+    Some(files)
 }
 
 /// A column's name as Xyce prints it: upper case, except the `Re(..)` or
@@ -491,7 +649,7 @@ pub(super) fn publish(
         crate::observability::diagnostic("xyce-output-not-written", None, warning);
     }
     let deck = deck_name(args);
-    let mut files: Vec<(String, Result<String, String>)> = Vec::new();
+    let mut files: Vec<(String, Result<Contents<'_>, String>)> = Vec::new();
 
     let mut tables = log.tables;
     tables.sort_by_key(|table| table.step);
@@ -510,16 +668,30 @@ pub(super) fn publish(
             (true, false) => XycePrnFooter::Simulation,
             (true, true) => XycePrnFooter::ParameterSweep,
         };
-        let rows: Vec<XycePrnTable> = sequence.iter().map(|table| table.table.clone()).collect();
-        let text = serialize_xyce_prn_sequence(
-            &rows,
-            layout,
-            layout,
-            footer,
-            XycePrnLimits::new(limit, limit.saturating_mul(BYTES_PER_VALUE)),
-        )
-        .map_err(|error| error.to_string());
-        files.push((name.to_string(), text));
+        let staged = sequence
+            .iter()
+            .any(|table| matches!(table.rows, Rows::Staged(_)));
+        let contents = if staged {
+            staged_sequence(&sequence, footer, limit.saturating_mul(BYTES_PER_VALUE))
+        } else {
+            let rows: Vec<XycePrnTable> = sequence
+                .iter()
+                .filter_map(|table| match &table.rows {
+                    Rows::Held(rows) => Some(rows.clone()),
+                    Rows::Staged(_) => None,
+                })
+                .collect();
+            serialize_xyce_prn_sequence(
+                &rows,
+                layout,
+                layout,
+                footer,
+                XycePrnLimits::new(limit, limit.saturating_mul(BYTES_PER_VALUE)),
+            )
+            .map(Contents::Text)
+            .map_err(|error| error.to_string())
+        };
+        files.push((name.to_string(), contents));
     }
 
     let mut measures: Vec<(String, Vec<String>)> = Vec::new();
@@ -533,20 +705,25 @@ pub(super) fn publish(
     for (name, lines) in measures {
         files.push((
             name,
-            Ok(lines.iter().map(|line| format!("{line}\n")).collect()),
+            Ok(Contents::Text(
+                lines.iter().map(|line| format!("{line}\n")).collect(),
+            )),
         ));
     }
 
     if !log.coordinates.is_empty() {
         let mut coordinates = log.coordinates;
         coordinates.sort_by_key(|coordinate| coordinate.step);
-        files.push((format!("{deck}.res"), Ok(step_table(&coordinates))));
+        files.push((
+            format!("{deck}.res"),
+            Ok(Contents::Text(step_table(&coordinates))),
+        ));
     }
 
     let mut written = Vec::with_capacity(files.len());
-    for (name, text) in files {
-        match text {
-            Ok(text) => written.extend(write(args, &name, text.as_bytes(), quiet)?),
+    for (name, contents) in files {
+        match contents {
+            Ok(contents) => written.extend(write(args, &name, &contents, quiet)?),
             Err(reason) => crate::observability::diagnostic(
                 "xyce-output-not-written",
                 None,
@@ -580,11 +757,142 @@ fn step_table(coordinates: &[Coordinate]) -> String {
     text
 }
 
+/// What one file holds: its text, or a table sequence some of whose rows are staged.
+enum Contents<'t> {
+    Text(String),
+    Sequence(Vec<Part<'t>>),
+}
+
+/// One run of a sequence's bytes: laid out in memory, or a staged file's.
+enum Part<'t> {
+    Text(String),
+    Staged(&'t Path),
+}
+
+impl Contents<'_> {
+    fn write_to(&self, writer: &mut dyn std::io::Write, path: &Path) -> Result<(), CliError> {
+        let failed = |error| CliError::output_error(path, error);
+        match self {
+            Self::Text(text) => writer.write_all(text.as_bytes()).map_err(failed),
+            Self::Sequence(parts) => {
+                for part in parts {
+                    match part {
+                        Part::Text(text) => writer.write_all(text.as_bytes()).map_err(failed)?,
+                        Part::Staged(staged) => {
+                            let mut rows = std::fs::File::open(staged)
+                                .map_err(|error| CliError::output_error(staged, error))?;
+                            std::io::copy(&mut rows, writer).map_err(failed)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A file's sequence of tables when some of their rows are staged: laid out as
+/// [`serialize_xyce_prn_sequence`] lays them out, refused for the same reasons, except that
+/// rows a run's store kept do not count against the result envelope, which bounds what a run
+/// holds in memory. Rows held in memory are laid out here; staged rows are copied as they are
+/// written.
+fn staged_sequence<'t>(
+    sequence: &[&'t Table],
+    footer: XycePrnFooter,
+    max_output_bytes: usize,
+) -> Result<Contents<'t>, String> {
+    let request = &sequence[0].layout;
+    let layout = XycePrnLayout::new(request, request, max_output_bytes)
+        .map_err(|error| error.to_string())?;
+    let columns = sequence[0].rows.columns();
+    if columns.is_empty() {
+        return Err(XycePrnError::EmptySchema.to_string());
+    }
+    if let Some(table) = sequence
+        .iter()
+        .position(|table| table.rows.columns() != columns)
+    {
+        return Err(XycePrnError::SchemaMismatch { table }.to_string());
+    }
+    let mut parts = Vec::with_capacity(sequence.len() + 2);
+    let mut text = String::new();
+    layout
+        .push_header(&mut text, columns, usize::MAX)
+        .map_err(|error| error.to_string())?;
+    parts.push(Part::Text(text));
+    for (table_index, table) in sequence.iter().enumerate() {
+        match &table.rows {
+            Rows::Held(held) => {
+                let index = held.columns[0].eq_ignore_ascii_case("Index");
+                let mut text = String::new();
+                for (row_index, row) in held.rows.iter().enumerate() {
+                    if row.len() != held.columns.len() {
+                        return Err(XycePrnError::RowShape {
+                            table: table_index,
+                            row: row_index,
+                            fields: row.len(),
+                            columns: held.columns.len(),
+                        }
+                        .to_string());
+                    }
+                    layout
+                        .push_row(&mut text, index, row, (table_index, row_index), usize::MAX)
+                        .map_err(|error| error.to_string())?;
+                }
+                parts.push(Part::Text(text));
+            }
+            Rows::Staged(staged) => match &staged.refused {
+                Some(Refusal::Rows(error)) => return Err(in_table(error, table_index)),
+                Some(Refusal::Staging(error)) => {
+                    return Err(format!("its rows could not be staged: {error}"));
+                }
+                None => parts.push(Part::Staged(&staged.path)),
+            },
+        }
+    }
+    let mut text = String::new();
+    layout
+        .push_footer(&mut text, footer, usize::MAX)
+        .map_err(|error| error.to_string())?;
+    parts.push(Part::Text(text));
+    Ok(Contents::Sequence(parts))
+}
+
+/// A refusal of a staged table's row, which names its row as the first table's, named in the
+/// table it is in its sequence.
+fn in_table(error: &XycePrnError, table: usize) -> String {
+    match *error {
+        XycePrnError::NonFinite {
+            row, column, value, ..
+        } => XycePrnError::NonFinite {
+            table,
+            row,
+            column,
+            value,
+        }
+        .to_string(),
+        XycePrnError::InvalidIndex { row, value, .. } => {
+            XycePrnError::InvalidIndex { table, row, value }.to_string()
+        }
+        ref other => other.to_string(),
+    }
+}
+
+/// While it lives, the run's staged tables do; dropping it drops whatever the run recorded and
+/// did not write, so a run that fails leaves no staged file behind.
+pub(super) struct Recording;
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        drop(std::mem::take(&mut *log()));
+    }
+}
+
 /// Write one file inside the deck's directory, or say why it was not.
 fn write(
     args: &RunArgs,
     name: &str,
-    bytes: &[u8],
+    contents: &Contents<'_>,
     quiet: bool,
 ) -> Result<Option<PathBuf>, CliError> {
     let not_written = |reason: &dyn std::fmt::Display| {
@@ -605,8 +913,12 @@ fn write(
             return Ok(None);
         }
     };
-    let published = crate::commands::publish::destinations::refuse_declared(&destination)
-        .and_then(|()| super::control::publish_bytes(&destination, bytes));
+    let published =
+        crate::commands::publish::destinations::refuse_declared(&destination).and_then(|()| {
+            super::control::publish_with(&destination, |writer| {
+                contents.write_to(writer, &destination)
+            })
+        });
     if let Err(error) = published {
         not_written(&error);
         return Ok(None);

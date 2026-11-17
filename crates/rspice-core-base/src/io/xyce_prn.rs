@@ -22,13 +22,6 @@ pub enum XycePrnDelimiter<'a> {
 }
 
 impl XycePrnDelimiter<'_> {
-    fn separator(&self) -> &str {
-        match self {
-            Self::Whitespace => " ",
-            Self::Separated(separator) => separator,
-        }
-    }
-
     fn is_padded(self) -> bool {
         matches!(self, Self::Whitespace)
     }
@@ -337,48 +330,19 @@ fn serialize_xyce_prn_sequence_with_style(
     limits: XycePrnLimits,
     scientific_style: XycePrnScientificStyle,
 ) -> Result<String, XycePrnError> {
-    if !format.is_print_request {
-        return Err(XycePrnError::NotPrintRequest);
-    }
-    let delimiter = format.delimiter.ok_or(XycePrnError::MissingDelimiter)?;
-    if matches!(delimiter, XycePrnDelimiter::Separated(value) if value.is_empty()) {
-        return Err(XycePrnError::EmptyCustomDelimiter);
-    }
+    let delimiter = format.checked_delimiter()?;
     let [first, ..] = tables else {
         return Err(XycePrnError::EmptySequence);
     };
     if first.columns.is_empty() {
         return Err(XycePrnError::EmptySchema);
     }
-
-    let precision_raw = format.precision.unwrap_or(DEFAULT_SCIENTIFIC_PRECISION);
-    let precision = usize::try_from(precision_raw)
-        .map_err(|_| XycePrnError::NegativePrecision(precision_raw))?;
-    let width_raw = format.width.unwrap_or(DEFAULT_FIELD_WIDTH);
-    let effective_width = if i64::from(width_raw) - i64::from(precision_raw) < 9 {
-        i64::from(precision_raw)
-            .checked_add(9)
-            .ok_or(XycePrnError::WidthOverflow)?
-    } else {
-        i64::from(width_raw)
-    };
-    let width = usize::try_from(effective_width).map_err(|_| XycePrnError::WidthOverflow)?;
-    // `-1.234e+308` needs precision + 9 bytes. Check before formatting.
-    let maximum_serialized_value = precision
-        .checked_add(9)
-        .ok_or(XycePrnError::PrecisionLengthOverflow)?;
-    if maximum_serialized_value > limits.max_output_bytes {
-        return Err(XycePrnError::PrecisionLimit {
-            precision,
-            maximum: limits.max_output_bytes,
-        });
-    }
-    if delimiter.is_padded() && width > limits.max_output_bytes {
-        return Err(XycePrnError::WidthLimit {
-            width,
-            maximum: limits.max_output_bytes,
-        });
-    }
+    let layout = XycePrnLayout::with_delimiter(
+        delimiter,
+        format,
+        limits.max_output_bytes,
+        scientific_style,
+    )?;
 
     let mut total_rows = 0usize;
     for (table_index, table) in tables.iter().enumerate() {
@@ -396,38 +360,10 @@ fn serialize_xyce_prn_sequence_with_style(
         });
     }
 
-    let separator = delimiter.separator();
-    let padded = delimiter.is_padded();
     let mut output = String::new();
-    if format.print_header.unwrap_or(true) {
-        for (column_index, name) in first.columns.iter().enumerate() {
-            let name = if column_index == 0 && name.eq_ignore_ascii_case("Index") {
-                "Index"
-            } else {
-                name.as_str()
-            };
-            push_field_separator(
-                &mut output,
-                separator,
-                column_index,
-                limits.max_output_bytes,
-            )?;
-            if !padded || width <= name.len() {
-                push_bounded(&mut output, name, limits.max_output_bytes)?;
-            } else if column_index == 0 && name.eq_ignore_ascii_case("Index") {
-                push_bounded(&mut output, &format!("{name:<5}"), limits.max_output_bytes)?;
-            } else {
-                let left = (width - name.len()) / 2;
-                let right = width - name.len() - left;
-                push_bounded(&mut output, &" ".repeat(left), limits.max_output_bytes)?;
-                push_bounded(&mut output, name, limits.max_output_bytes)?;
-                push_bounded(&mut output, &" ".repeat(right), limits.max_output_bytes)?;
-            }
-        }
-        push_bounded(&mut output, "\n", limits.max_output_bytes)?;
-    }
-
+    layout.push_header(&mut output, &first.columns, limits.max_output_bytes)?;
     for (table_index, table) in tables.iter().enumerate() {
+        let index = table.columns[0].eq_ignore_ascii_case("Index");
         for (row_index, row) in table.rows.iter().enumerate() {
             if row.len() != table.columns.len() {
                 return Err(XycePrnError::RowShape {
@@ -437,67 +373,234 @@ fn serialize_xyce_prn_sequence_with_style(
                     columns: table.columns.len(),
                 });
             }
-            for (column_index, value) in row.iter().copied().enumerate() {
-                push_field_separator(
-                    &mut output,
-                    separator,
-                    column_index,
-                    limits.max_output_bytes,
-                )?;
-                if column_index == 0 && table.columns[0].eq_ignore_ascii_case("Index") {
-                    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
-                        return Err(XycePrnError::InvalidIndex {
-                            table: table_index,
-                            row: row_index,
-                            value,
-                        });
-                    }
-                    let field = if padded {
-                        format!("{value:<5.0}")
-                    } else {
-                        format!("{value:.0}")
-                    };
-                    push_bounded(&mut output, &field, limits.max_output_bytes)?;
-                } else {
-                    if !value.is_finite() {
-                        return Err(XycePrnError::NonFinite {
-                            table: table_index,
-                            row: row_index,
-                            column: column_index,
-                            value,
-                        });
-                    }
-                    let serialized = format_xyce_prn_scientific(
-                        value,
-                        precision,
-                        limits.max_output_bytes,
-                        scientific_style,
-                    )?;
-                    if padded && width > serialized.len() {
-                        push_bounded(
-                            &mut output,
-                            &" ".repeat(width - serialized.len()),
-                            limits.max_output_bytes,
-                        )?;
-                    }
-                    push_bounded(&mut output, &serialized, limits.max_output_bytes)?;
-                }
-            }
-            push_bounded(&mut output, "\n", limits.max_output_bytes)?;
+            layout.push_row(
+                &mut output,
+                index,
+                row,
+                (table_index, row_index),
+                limits.max_output_bytes,
+            )?;
         }
+    }
+    layout.push_footer(&mut output, footer, limits.max_output_bytes)?;
+    Ok(output)
+}
+
+impl<'a> XycePrnFormat<'a> {
+    /// The delimiter of a `.PRINT` request, refused as the serializer refuses it.
+    fn checked_delimiter(&self) -> Result<XycePrnDelimiter<'a>, XycePrnError> {
+        if !self.is_print_request {
+            return Err(XycePrnError::NotPrintRequest);
+        }
+        let delimiter = self.delimiter.ok_or(XycePrnError::MissingDelimiter)?;
+        if matches!(delimiter, XycePrnDelimiter::Separated(value) if value.is_empty()) {
+            return Err(XycePrnError::EmptyCustomDelimiter);
+        }
+        Ok(delimiter)
+    }
+}
+
+/// One `.PRINT` request's validated byte layout: how its header, each row and its closing line
+/// are spelled. [`serialize_xyce_prn_sequence`] lays a whole sequence out with it; a writer
+/// that streams a long table lays it out a row at a time with the same bytes.
+#[derive(Debug, Clone, Copy)]
+pub struct XycePrnLayout<'a> {
+    separator: &'a str,
+    padded: bool,
+    precision: usize,
+    width: usize,
+    /// The longest a value's spelling may be, which bounds the formatter.
+    max_value_bytes: usize,
+    print_header: bool,
+    print_footer: bool,
+    scientific_style: XycePrnScientificStyle,
+}
+
+impl<'a> XycePrnLayout<'a> {
+    /// The layout `request` and `options` select, checked as [`serialize_xyce_prn_sequence`]
+    /// checks them with `max_output_bytes` as its byte envelope.
+    pub fn new<R, O>(
+        request: &'a R,
+        options: &O,
+        max_output_bytes: usize,
+    ) -> Result<Self, XycePrnError>
+    where
+        R: XycePrnRequest + ?Sized,
+        O: XycePrnOutputOptions + ?Sized,
+    {
+        let format = XycePrnFormat {
+            is_print_request: request.xyce_prn_is_print_request(),
+            delimiter: request.xyce_prn_delimiter(),
+            precision: request.xyce_prn_precision(),
+            width: request.xyce_prn_width(),
+            print_header: options.xyce_prn_print_header(),
+            print_footer: options.xyce_prn_print_footer(),
+        };
+        let delimiter = format.checked_delimiter()?;
+        Self::with_delimiter(
+            delimiter,
+            format,
+            max_output_bytes,
+            XycePrnScientificStyle::Canonical,
+        )
     }
 
-    if format.print_footer.unwrap_or(true) {
-        let marker = match footer {
-            XycePrnFooter::None => None,
-            XycePrnFooter::Simulation => Some("End of Xyce(TM) Simulation\n"),
-            XycePrnFooter::ParameterSweep => Some("End of Xyce(TM) Parameter Sweep\n"),
+    fn with_delimiter(
+        delimiter: XycePrnDelimiter<'a>,
+        format: XycePrnFormat<'a>,
+        max_output_bytes: usize,
+        scientific_style: XycePrnScientificStyle,
+    ) -> Result<Self, XycePrnError> {
+        let precision_raw = format.precision.unwrap_or(DEFAULT_SCIENTIFIC_PRECISION);
+        let precision = usize::try_from(precision_raw)
+            .map_err(|_| XycePrnError::NegativePrecision(precision_raw))?;
+        let width_raw = format.width.unwrap_or(DEFAULT_FIELD_WIDTH);
+        let effective_width = if i64::from(width_raw) - i64::from(precision_raw) < 9 {
+            i64::from(precision_raw)
+                .checked_add(9)
+                .ok_or(XycePrnError::WidthOverflow)?
+        } else {
+            i64::from(width_raw)
         };
-        if let Some(marker) = marker {
-            push_bounded(&mut output, marker, limits.max_output_bytes)?;
+        let width = usize::try_from(effective_width).map_err(|_| XycePrnError::WidthOverflow)?;
+        // `-1.234e+308` needs precision + 9 bytes. Check before formatting.
+        let maximum_serialized_value = precision
+            .checked_add(9)
+            .ok_or(XycePrnError::PrecisionLengthOverflow)?;
+        if maximum_serialized_value > max_output_bytes {
+            return Err(XycePrnError::PrecisionLimit {
+                precision,
+                maximum: max_output_bytes,
+            });
+        }
+        if delimiter.is_padded() && width > max_output_bytes {
+            return Err(XycePrnError::WidthLimit {
+                width,
+                maximum: max_output_bytes,
+            });
+        }
+        let separator = match delimiter {
+            XycePrnDelimiter::Whitespace => " ",
+            XycePrnDelimiter::Separated(separator) => separator,
+        };
+        Ok(Self {
+            separator,
+            padded: delimiter.is_padded(),
+            precision,
+            width,
+            max_value_bytes: max_output_bytes,
+            print_header: format.print_header.unwrap_or(true),
+            print_footer: format.print_footer.unwrap_or(true),
+            scientific_style,
+        })
+    }
+
+    /// Append the column names' line, when the layout prints one, to `output`, which may grow
+    /// to `maximum` bytes.
+    pub fn push_header(
+        &self,
+        output: &mut String,
+        columns: &[String],
+        maximum: usize,
+    ) -> Result<(), XycePrnError> {
+        if !self.print_header {
+            return Ok(());
+        }
+        for (column_index, name) in columns.iter().enumerate() {
+            let name = if column_index == 0 && name.eq_ignore_ascii_case("Index") {
+                "Index"
+            } else {
+                name.as_str()
+            };
+            push_field_separator(output, self.separator, column_index, maximum)?;
+            if !self.padded || self.width <= name.len() {
+                push_bounded(output, name, maximum)?;
+            } else if column_index == 0 && name.eq_ignore_ascii_case("Index") {
+                push_bounded(output, &format!("{name:<5}"), maximum)?;
+            } else {
+                let left = (self.width - name.len()) / 2;
+                let right = self.width - name.len() - left;
+                push_bounded(output, &" ".repeat(left), maximum)?;
+                push_bounded(output, name, maximum)?;
+                push_bounded(output, &" ".repeat(right), maximum)?;
+            }
+        }
+        push_bounded(output, "\n", maximum)
+    }
+
+    /// Append one row to `output`, which may grow to `maximum` bytes: its first value is
+    /// Xyce's `Index` when `index` is set. `at` is the row's (table, row) in its sequence, which
+    /// an error names.
+    pub fn push_row(
+        &self,
+        output: &mut String,
+        index: bool,
+        row: &[Value],
+        at: (usize, usize),
+        maximum: usize,
+    ) -> Result<(), XycePrnError> {
+        let (table, row_index) = at;
+        for (column_index, value) in row.iter().copied().enumerate() {
+            push_field_separator(output, self.separator, column_index, maximum)?;
+            if column_index == 0 && index {
+                if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+                    return Err(XycePrnError::InvalidIndex {
+                        table,
+                        row: row_index,
+                        value,
+                    });
+                }
+                let field = if self.padded {
+                    format!("{value:<5.0}")
+                } else {
+                    format!("{value:.0}")
+                };
+                push_bounded(output, &field, maximum)?;
+            } else {
+                if !value.is_finite() {
+                    return Err(XycePrnError::NonFinite {
+                        table,
+                        row: row_index,
+                        column: column_index,
+                        value,
+                    });
+                }
+                let serialized = format_xyce_prn_scientific(
+                    value,
+                    self.precision,
+                    self.max_value_bytes,
+                    self.scientific_style,
+                )?;
+                if self.padded && self.width > serialized.len() {
+                    push_bounded(output, &" ".repeat(self.width - serialized.len()), maximum)?;
+                }
+                push_bounded(output, &serialized, maximum)?;
+            }
+        }
+        push_bounded(output, "\n", maximum)
+    }
+
+    /// Append `footer`'s closing line, when the layout prints one, to `output`, which may grow
+    /// to `maximum` bytes.
+    pub fn push_footer(
+        &self,
+        output: &mut String,
+        footer: XycePrnFooter,
+        maximum: usize,
+    ) -> Result<(), XycePrnError> {
+        if !self.print_footer {
+            return Ok(());
+        }
+        match footer {
+            XycePrnFooter::None => Ok(()),
+            XycePrnFooter::Simulation => {
+                push_bounded(output, "End of Xyce(TM) Simulation\n", maximum)
+            }
+            XycePrnFooter::ParameterSweep => {
+                push_bounded(output, "End of Xyce(TM) Parameter Sweep\n", maximum)
+            }
         }
     }
-    Ok(output)
 }
 
 #[cfg(test)]
@@ -584,6 +687,54 @@ mod tests {
                 text,
                 "Index         TIME                  V(A)         \n0        0.000000000000e+00    1.000000000000e+00\n1        1.000000000000e-09    1.000000000000e+00\n0        0.000000000000e+00    1.000000000000e+00\n1        1.000000000000e-09    1.000000000000e+00\nEnd of Xyce(TM) Parameter Sweep\n"
             );
+        }
+    }
+
+    #[test]
+    fn a_sequence_laid_out_a_row_at_a_time_is_the_serialized_sequence() {
+        let (request, options) = request();
+        for delimiter in [
+            XycePrnDelimiter::Whitespace,
+            XycePrnDelimiter::Separated(","),
+        ] {
+            let request = TestRequest {
+                delimiter: Some(delimiter),
+                ..request.clone()
+            };
+            let tables = [table(), table()];
+            let whole = serialize_xyce_prn_sequence(
+                &tables,
+                &request,
+                &options,
+                XycePrnFooter::ParameterSweep,
+                XycePrnLimits::new(4, 10_000),
+            )
+            .unwrap();
+            let layout = XycePrnLayout::new(&request, &options, 10_000).unwrap();
+            let mut rows = String::new();
+            layout
+                .push_header(&mut rows, &tables[0].columns, usize::MAX)
+                .unwrap();
+            for (table_index, table) in tables.iter().enumerate() {
+                for (row_index, row) in table.rows.iter().enumerate() {
+                    layout
+                        .push_row(&mut rows, true, row, (table_index, row_index), usize::MAX)
+                        .unwrap();
+                }
+            }
+            layout
+                .push_footer(&mut rows, XycePrnFooter::ParameterSweep, usize::MAX)
+                .unwrap();
+            assert_eq!(rows, whole);
+            assert!(matches!(
+                layout.push_row(&mut rows, true, &[2.0, f64::NAN, 1.0], (1, 2), usize::MAX),
+                Err(XycePrnError::NonFinite {
+                    table: 1,
+                    row: 2,
+                    column: 1,
+                    ..
+                })
+            ));
         }
     }
 
