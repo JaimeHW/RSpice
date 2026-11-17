@@ -4,9 +4,9 @@
 //!
 //! # Derived on change, not on a frame
 //!
-//! What has to walk the design or the catalogues to be known â€” the net count,
+//! What has to walk the design or the catalogues to be known — the net count,
 //! the view count, the activity register, the model sources, the deck's line
-//! count, the configuration's validity â€” is derived once and kept in the
+//! count, the configuration's validity — is derived once and kept in the
 //! frame context beside the identity of what it was derived from: a content
 //! stamp, a catalogue revision, the run history's revision, a digest. A frame
 //! in which none of those moved derives nothing, so the page costs the same on
