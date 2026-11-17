@@ -15,8 +15,6 @@ members = [
     "crates/rspice-core-devices",
     "crates/rspice-output",
     "crates/rspice-design-model",
-    "crates/rspice-automation-protocol",
-    "crates/rspice-automation-runtime",
     "crates/rspice-cli",
     "crates/rspice-pack",
     "crates/rspice-cloud-domain",

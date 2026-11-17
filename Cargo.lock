@@ -5253,7 +5253,6 @@ dependencies = [
  "rspice-app-services",
  "rspice-app-state",
  "rspice-app-workbench",
- "rspice-automation-protocol",
  "rspice-core",
  "rspice-design",
  "rspice-formats",
@@ -5264,13 +5263,11 @@ dependencies = [
  "rspice-ui-kit",
  "rspice-veriloga",
  "rspice-vocabulary",
- "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "similar",
  "thiserror 2.0.21",
- "toml",
  "uuid",
  "web-time",
  "windows-sys 0.61.2",
@@ -5640,33 +5637,6 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "rspice-automation-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "unicode-normalization",
- "uuid",
-]
-
-[[package]]
-name = "rspice-automation-runtime"
-version = "0.1.0"
-dependencies = [
- "ed25519-dalek",
- "rspice-automation-protocol",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "uuid",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

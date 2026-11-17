@@ -19,7 +19,6 @@ rspice-app-state.workspace = true
 rspice-app-services.workspace = true
 rspice-app-runs.workspace = true
 rspice-app-workbench.workspace = true
-rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
 rspice-vocabulary.workspace = true
 rspice-ui-kit.workspace = true
 rspice-design.workspace = true
@@ -32,8 +31,6 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 egui = { version = "0.35.0", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
-semver.workspace = true
-toml.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
 similar = "2.7"
