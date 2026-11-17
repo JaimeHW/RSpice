@@ -170,9 +170,12 @@ pub fn build_menu_netlist_in(
         )
         .map_err(|error| vec![error.to_string()])?;
     let root_reference = execution_projection.root().clone();
-    let root_schematic = execution_projection
-        .root_schematic()
-        .expect("a successful execution projection has a materialized root");
+    let Some(root_schematic) = execution_projection.root_schematic() else {
+        return Err(vec![format!(
+            "{} has no schematic to write the deck from",
+            root_reference.display_path()
+        )]);
+    };
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         model.library_manager.catalog(),
         &execution_projection,
