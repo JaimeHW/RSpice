@@ -3,9 +3,9 @@
 //! The navigable structure of a deck — subcircuits, models, analyses,
 //! includes — for the outline pane.
 
-use rspice_core_base::config::ExpressionDialect;
 use rspice_core_netlist::netlist::{
     DeckCardKind, DeckIndex, DeckIndexSource, DeckSymbol, DeckSymbolKind, DeckTokenKind,
+    SourceKind, comment_start,
 };
 use serde::{Deserialize, Serialize};
 
@@ -158,8 +158,8 @@ impl OutlineSection {
 /// Parsed, deterministic navigation model for exact source text.
 ///
 /// Read off the engine's [`DeckIndex`] of the text, so a card is what the
-/// engine reads as one: `+` lines continue it, the dialect's comments are not
-/// part of it, and it knows the subcircuit it is written in.
+/// engine reads as one: `+` lines continue it, its comments are not part of
+/// it, and it knows the subcircuit it is written in.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct NetlistOutline {
     entries: Vec<OutlineEntry>,
@@ -169,7 +169,13 @@ pub struct NetlistOutline {
 impl NetlistOutline {
     #[must_use]
     pub fn parse(source: &str) -> Self {
-        Self::from_deck(&deck_index_of(source), source)
+        Self::parse_as(source, SourceKind::DeckRoot)
+    }
+
+    /// The outline of `source` read as the engine reads a source of `kind`.
+    #[must_use]
+    pub fn parse_as(source: &str, kind: SourceKind) -> Self {
+        Self::from_deck(&deck_index_of(source, kind), source)
     }
 
     /// The outline of the deck `deck` indexed as its first file, `source`.
@@ -403,14 +409,12 @@ impl NetlistOutline {
 }
 
 /// The engine's index of `source` read as a deck of its own.
-fn deck_index_of(source: &str) -> DeckIndex {
-    DeckIndex::build(
-        &[DeckIndexSource {
-            identity: "",
-            text: source,
-        }],
-        ExpressionDialect::Ngspice,
-    )
+fn deck_index_of(source: &str, kind: SourceKind) -> DeckIndex {
+    DeckIndex::build(&[DeckIndexSource {
+        identity: "",
+        text: source,
+        kind,
+    }])
 }
 
 /// The words of a card as written, its own first: tokens the engine's lexer
@@ -463,8 +467,15 @@ pub struct NetlistSourceIndex {
 }
 
 impl NetlistSourceIndex {
+    /// The index of `source` read as a root deck.
     #[must_use]
     pub fn parse(source: &str) -> Self {
+        Self::parse_as(source, SourceKind::DeckRoot)
+    }
+
+    /// The index of `source` read as the engine reads a source of `kind`.
+    #[must_use]
+    pub fn parse_as(source: &str, kind: SourceKind) -> Self {
         let mut line_starts = vec![0usize];
         for (offset, byte) in source.bytes().enumerate() {
             if byte == b'\n' {
@@ -478,7 +489,7 @@ impl NetlistSourceIndex {
         } else if source.ends_with('\n') {
             line_starts.pop();
         }
-        let deck = deck_index_of(source);
+        let deck = deck_index_of(source, kind);
         let outline = NetlistOutline::from_deck(&deck, source);
         Self {
             source: source.to_owned(),
@@ -678,22 +689,22 @@ pub fn card_tokens_with_columns(card: &str) -> Vec<(String, usize)> {
         .collect()
 }
 
+/// Whether a card is a comment as a whole, by the engine's comment rule.
 fn is_comment(trimmed: &str) -> bool {
-    trimmed.starts_with('*') || trimmed.starts_with(';') || trimmed.starts_with("//")
+    comment_start(trimmed, SourceKind::Included) == Some(0)
 }
 
 /// Tokenize a SPICE card without normalizing or modifying the source. Both
 /// quote styles are accepted and the returned text excludes the quote marks.
+/// The card ends where the engine's comment rule starts its comment.
 fn tokenize_card(card: &str) -> Vec<CardToken> {
+    let card = &card[..comment_start(card, SourceKind::Included).unwrap_or(card.len())];
     let mut tokens = Vec::new();
     let mut chars = card.char_indices().peekable();
 
     while let Some((offset, ch)) = chars.next() {
         if ch.is_whitespace() {
             continue;
-        }
-        if ch == ';' || ch == '$' {
-            break;
         }
 
         let start_column = card[..offset].chars().count() + 1;
@@ -709,7 +720,7 @@ fn tokenize_card(card: &str) -> Vec<CardToken> {
         } else {
             text.push(ch);
             while let Some((_, current)) = chars.peek().copied() {
-                if current.is_whitespace() || current == ';' || current == '$' {
+                if current.is_whitespace() {
                     break;
                 }
                 chars.next();

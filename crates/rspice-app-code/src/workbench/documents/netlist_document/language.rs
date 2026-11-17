@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use rspice_core::netlist::{
     DeckIndex, DeckIndexSource, DeckLocation, DeckNameAt, DeckSymbol, DeckSymbolKind,
-    NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
+    NetlistSourceMap, NetlistValueKind, NetlistValueSpan, SourceKind, UnreadSourceReason,
+    UnreadSourceRegion,
 };
 
 use super::index_worker::BackgroundIndex;
@@ -134,7 +135,13 @@ impl ProjectSymbolKind {
 }
 
 impl NetlistProjectIndex {
-    fn build(root: ActiveNetlistDocument, document: &crate::state::NetlistDocument) -> Self {
+    /// The index of `document`, the root `root`, read from `root_path`, and
+    /// of the SPICE files it includes.
+    fn build(
+        root: ActiveNetlistDocument,
+        root_path: &std::path::Path,
+        document: &crate::state::NetlistDocument,
+    ) -> Self {
         let root_name = match root {
             ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
             ActiveNetlistDocument::OwnedSource => "project root".to_owned(),
@@ -149,6 +156,7 @@ impl NetlistProjectIndex {
             digest: crate::state::content_digest(document.source()),
         }];
         let mut texts = vec![document.source()];
+        let mut kinds = vec![SourceKind::of(root_path, document.source(), true)];
         for dependency in document.dependencies() {
             if document.is_veriloga_dependency(dependency) {
                 continue;
@@ -162,17 +170,23 @@ impl NetlistProjectIndex {
                 display_name: dependency.locator().display_name().to_owned(),
                 digest: crate::state::content_digest(source),
             });
+            let locator = dependency.locator();
+            let path = locator
+                .native_origin()
+                .unwrap_or_else(|| locator.logical_identity());
+            kinds.push(SourceKind::of(std::path::Path::new(path), source, false));
             texts.push(source);
         }
         let sources = files
             .iter()
-            .zip(&texts)
-            .map(|(file, text)| DeckIndexSource {
+            .zip(texts.iter().zip(kinds))
+            .map(|(file, (text, kind))| DeckIndexSource {
                 identity: file.dependency_identity.as_deref().unwrap_or(""),
                 text,
+                kind,
             })
             .collect::<Vec<_>>();
-        let deck = DeckIndex::build(&sources, rspice_core::config::ExpressionDialect::Ngspice);
+        let deck = DeckIndex::build(&sources);
 
         let symbols = deck
             .symbols()
@@ -477,9 +491,10 @@ pub(crate) fn project_index_in(
         && let Some(document) = canonical_root_document_in(model, netlist, root).cloned()
     {
         let wake = ctx.clone();
+        let root_path = root_path_of(model, root);
         netlist.project_index.start(
             key,
-            move || NetlistProjectIndex::build(root, &document),
+            move || NetlistProjectIndex::build(root, &root_path, &document),
             move || wake.request_repaint(),
         );
     }
@@ -499,8 +514,21 @@ pub(crate) fn project_index_now(
     if let Some(index) = netlist.project_index.wait_for(|built| *built == key) {
         return Some(index);
     }
-    let index = NetlistProjectIndex::build(root, canonical_root_document_in(model, netlist, root)?);
+    let index = NetlistProjectIndex::build(
+        root,
+        &root_path_of(model, root),
+        canonical_root_document_in(model, netlist, root)?,
+    );
     Some(netlist.project_index.store(key, index))
+}
+
+/// The file a root is read from: the project's deck, or none for the
+/// generated netlist.
+fn root_path_of(model: &Model, root: ActiveNetlistDocument) -> std::path::PathBuf {
+    match root {
+        ActiveNetlistDocument::OwnedSource => super::source_index::root_deck_path(model),
+        _ => std::path::PathBuf::new(),
+    }
 }
 
 pub(crate) fn symbol_name_at(source: &str, char_index: usize) -> Option<String> {

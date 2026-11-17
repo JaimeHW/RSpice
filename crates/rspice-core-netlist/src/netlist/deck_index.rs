@@ -3,8 +3,9 @@
 //! The index is built from the text of a deck and of its include files as the
 //! caller resolved them; it never reads a file or resolves a path. It reads
 //! cards the way the engine does: a `+` line continues the card before it,
-//! comments follow the dialect's rules, and a field the engine's lexer reads
-//! as a number (`10n`, `1e-9`) is a number, never a name. Every name a card
+//! comments are where the engine's comment rule puts them, a statement
+//! written in Spectre is read as Spectre, and a field the engine's lexer
+//! reads as a number (`10n`, `1e-9`) is a number, never a name. Every name a card
 //! defines or reads is recorded with the subcircuit scope it is written in,
 //! and every read is resolved to the definition SPICE scoping binds it to.
 
@@ -15,12 +16,11 @@ use super::lexer::{Lexer, TokenKind, parse_spice_value_complete};
 use super::source_map::{
     MappedLine, for_each_logical_line, is_param_boundary, logical_values, token_spans,
 };
-use super::{ParameterRedefinitionPolicy, strip_spice_inline_comment};
-use crate::config::ExpressionDialect;
+use super::{ParameterRedefinitionPolicy, SourceKind, comment_ranges};
 
 /// One file of the deck, as the caller resolved it. The first source given to
-/// [`DeckIndex::build`] is the deck itself, whose first line is its title; the
-/// others are the files it includes.
+/// [`DeckIndex::build`] is the deck itself; the others are the files it
+/// includes.
 #[derive(Debug, Clone, Copy)]
 pub struct DeckIndexSource<'a> {
     /// What the caller calls the file. A location names its file by the
@@ -28,6 +28,9 @@ pub struct DeckIndexSource<'a> {
     /// that back into this.
     pub identity: &'a str,
     pub text: &'a str,
+    /// How the engine reads the file: whether its first line is a title,
+    /// and whether it is SPICE or Spectre.
+    pub kind: SourceKind,
 }
 
 /// Where something is written.
@@ -229,7 +232,8 @@ pub enum DeckNameAt {
 /// The index of one deck and its include files.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeckIndex {
-    dialect: ExpressionDialect,
+    /// Per file, where the comment on each physical line starts.
+    comments: Vec<Vec<Option<usize>>>,
     files: Vec<String>,
     cards: Vec<DeckCard>,
     scopes: Vec<DeckScope>,
@@ -243,10 +247,10 @@ impl DeckIndex {
     /// Index `sources`: the deck first, then the files it includes. Every
     /// file is read at the top level of the deck.
     #[must_use]
-    pub fn build(sources: &[DeckIndexSource<'_>], dialect: ExpressionDialect) -> Self {
-        let mut builder = Builder::new(dialect);
+    pub fn build(sources: &[DeckIndexSource<'_>]) -> Self {
+        let mut builder = Builder::new();
         for (file, source) in sources.iter().enumerate() {
-            builder.read_file(file, source, file == 0);
+            builder.read_file(file, source);
         }
         builder.finish()
     }
@@ -409,12 +413,16 @@ impl DeckIndex {
         for _ in card.lines.clone() {
             end = text[end..].find('\n').map_or(text.len(), |at| end + at + 1);
         }
-        let dialect = self.dialect;
+        let comments = self
+            .comments
+            .get(card.location.file)
+            .map_or(&[][..], Vec::as_slice);
+        let first_line = card.lines.start() - 1;
         let mut tokens = Vec::new();
         for_each_logical_line(
             &text[start..end],
             0,
-            |raw| code_of(raw, dialect),
+            |line, raw| Some(code_before_comment(comments, first_line + line, raw)),
             |line| {
                 if tokens.is_empty() {
                     tokens = lex_card(&line)
@@ -477,24 +485,29 @@ fn binding(
     }
 }
 
-/// The code of one physical line under the dialect's comment rules, or
-/// `None` for a line that is a comment as a whole. The rules are the
-/// parser's own.
-fn code_of(raw: &str, dialect: ExpressionDialect) -> Option<&str> {
-    if dialect == ExpressionDialect::Xyce && xyce_line_is_comment(raw) {
-        return None;
+/// Where the comment on each physical line of `text` starts, by the
+/// engine's comment rule for a source of `kind`: a root deck's title, a
+/// Spectre block comment over several lines and a `simulator lang=` switch
+/// included.
+fn comment_starts(text: &str, line_starts: &[usize], kind: SourceKind) -> Vec<Option<usize>> {
+    let mut starts = vec![None; line_starts.len()];
+    for range in comment_ranges(text, kind) {
+        let line = line_starts.partition_point(|start| *start <= range.start) - 1;
+        let at = range.start - line_starts[line];
+        let start: &mut Option<usize> = &mut starts[line];
+        *start = Some(start.map_or(at, |earlier| earlier.min(at)));
     }
-    Some(strip_spice_inline_comment(raw, dialect))
+    starts
 }
 
-/// The parser's Xyce rule: a physical line that starts with a tab, or with a
-/// space not followed by the `+` of a continuation, is a comment.
-fn xyce_line_is_comment(line: &str) -> bool {
-    if line.starts_with('\t') {
-        return true;
-    }
-    line.strip_prefix(' ')
-        .is_some_and(|after| !after.trim_start_matches(' ').starts_with('+'))
+/// The part of physical line `line` before its comment.
+fn code_before_comment<'a>(comments: &[Option<usize>], line: usize, raw: &'a str) -> &'a str {
+    comments
+        .get(line)
+        .copied()
+        .flatten()
+        .and_then(|at| raw.get(..at))
+        .unwrap_or(raw)
 }
 
 /// The tokens of one logical card, each with its buffer range.
@@ -539,6 +552,9 @@ enum ReadKind {
     ModelOrParameter,
     /// A call that is a read only when it names a `.func`.
     Call,
+    /// A Spectre instance's master: a subcircuit, else a model, else a
+    /// primitive the simulator provides, which is no read.
+    Master,
 }
 
 struct PendingRead {
@@ -571,6 +587,11 @@ struct FileState<'a> {
     /// The `.control` card a block being read belongs to.
     control: Option<usize>,
     ended: bool,
+    /// Whether the lines being read are Spectre: a `.scs` file, or after a
+    /// `simulator lang=spectre` statement.
+    spectre: bool,
+    /// How deep in a Spectre `{ }` block (`statistics`) the lines are.
+    braces: usize,
 }
 
 impl FileState<'_> {
@@ -624,10 +645,9 @@ struct Builder {
 }
 
 impl Builder {
-    fn new(dialect: ExpressionDialect) -> Self {
+    fn new() -> Self {
         Self {
             index: DeckIndex {
-                dialect,
                 scopes: vec![DeckScope {
                     name: None,
                     parent: None,
@@ -642,7 +662,7 @@ impl Builder {
         }
     }
 
-    fn read_file(&mut self, file: usize, source: &DeckIndexSource<'_>, root: bool) {
+    fn read_file(&mut self, file: usize, source: &DeckIndexSource<'_>) {
         self.index.files.push(source.identity.to_owned());
         let text = source.text;
         let mut state = FileState {
@@ -655,8 +675,11 @@ impl Builder {
             section: None,
             control: None,
             ended: false,
+            spectre: source.kind == SourceKind::Spectre,
+            braces: 0,
         };
-        let title_lines = usize::from(root && !text.is_empty());
+        let comments = comment_starts(text, &state.line_starts, source.kind);
+        let title_lines = usize::from(source.kind == SourceKind::DeckRoot && !text.is_empty());
         if title_lines == 1 {
             let first = text.split('\n').next().unwrap_or_default();
             let first = first.strip_suffix('\r').unwrap_or(first);
@@ -669,13 +692,13 @@ impl Builder {
                 section: None,
             });
         }
-        let dialect = self.index.dialect;
         for_each_logical_line(
             text,
             title_lines,
-            |raw| code_of(raw, dialect),
+            |line, raw| Some(code_before_comment(&comments, line, raw)),
             |line| self.read_card(&mut state, &line),
         );
+        self.index.comments.push(comments);
     }
 
     fn read_card(&mut self, state: &mut FileState<'_>, line: &MappedLine) {
@@ -699,7 +722,30 @@ impl Builder {
             return;
         }
 
-        let kind = card_kind(&head_lower, &fields, &line.text);
+        let kind = if head_lower == "simulator" {
+            // `simulator lang=spectre` hands the lines after it to Spectre,
+            // `simulator lang=spice` hands them back.
+            for field in &fields[1..] {
+                match line.text[field.clone()].to_ascii_lowercase().as_str() {
+                    "lang=spectre" => state.spectre = true,
+                    "lang=spice" => state.spectre = false,
+                    _ => {}
+                }
+            }
+            DeckCardKind::Directive
+        } else if state.spectre {
+            let inside_block = state.braces > 0;
+            let opened = line.text.matches('{').count();
+            let closed = line.text.matches('}').count();
+            state.braces = (state.braces + opened).saturating_sub(closed);
+            if inside_block || opened > 0 {
+                DeckCardKind::Directive
+            } else {
+                spectre_card_kind(&head_lower, &fields, &line.text)
+            }
+        } else {
+            card_kind(&head_lower, &fields, &line.text)
+        };
         let card_index = self.index.cards.len();
         let Some(head_span) = line.original_span(head_range) else {
             return;
@@ -783,6 +829,10 @@ impl Builder {
                 }
                 self.read_parameters(state, line, card_index, scope, false);
             }
+            // Spectre's `inline subckt name` names the subcircuit a field later.
+            DeckCardKind::Subcircuit if head_lower == "inline" => {
+                self.read_subcircuit(state, line, &fields[1..], card_index);
+            }
             DeckCardKind::Subcircuit => self.read_subcircuit(state, line, &fields, card_index),
             DeckCardKind::EndSubcircuit => {
                 if let Some(inner) = state.scopes.pop() {
@@ -799,6 +849,9 @@ impl Builder {
                     }
                     self.index.cards[card_index].scope = inner;
                 }
+            }
+            DeckCardKind::Instance if state.spectre => {
+                self.read_spectre_instance(state, line, &fields, card_index, scope);
             }
             DeckCardKind::Instance => self.read_instance(state, line, &fields, card_index, scope),
             _ => self.read_parameters(state, line, card_index, scope, false),
@@ -1015,11 +1068,12 @@ impl Builder {
             return;
         };
         let name = line.text[name_range].to_owned();
+        // Spectre writes the ports in parentheses: `subckt amp (in out)`.
         let ports = fields
             .iter()
             .skip(2)
             .take_while(|field| !is_param_boundary(&line.text[(*field).clone()]))
-            .cloned()
+            .filter_map(|field| without_parentheses(&line.text, field.clone()))
             .collect::<Vec<_>>();
         let location = state.location(span);
         let symbol = self.push_symbol(state.symbol(
@@ -1054,6 +1108,65 @@ impl Builder {
         }
         // A formal and its default belong to the subcircuit the card opens.
         self.read_parameters(state, line, card, scope, true);
+    }
+
+    /// A Spectre instance, `name (nodes) master name=value ...`: its nodes,
+    /// and its master read as a subcircuit or model when the deck defines
+    /// one of that name. The parentheses may be left out, and the master is
+    /// then the last field before the first assignment.
+    fn read_spectre_instance(
+        &mut self,
+        state: &FileState<'_>,
+        line: &MappedLine,
+        fields: &[Range<usize>],
+        card: usize,
+        scope: usize,
+    ) {
+        let text = &line.text;
+        let instance = self.push_symbol(state.symbol(
+            DeckSymbolKind::Instance,
+            &text[fields[0].clone()],
+            scope,
+            self.index.cards[card].location.clone(),
+            card,
+            String::new(),
+        ));
+        let positional = fields[1..]
+            .iter()
+            .take_while(|field| !text[(*field).clone()].contains('='))
+            .cloned()
+            .collect::<Vec<_>>();
+        let master = if text[positional.first().cloned().unwrap_or_default()].starts_with('(') {
+            positional
+                .iter()
+                .position(|field| text[field.clone()].ends_with(')'))
+                .map(|close| close + 1)
+        } else {
+            positional.len().checked_sub(1)
+        };
+        let node_count = master.unwrap_or(positional.len()).min(positional.len());
+        for field in &positional[..node_count] {
+            if let Some(node) = without_parentheses(text, field.clone())
+                && let Some(span) = line.original_span(node.clone())
+            {
+                self.push_node(&text[node], scope, state.location(span), card);
+            }
+        }
+        if let Some(field) = master.and_then(|at| positional.get(at))
+            && let Some(span) = line.original_span(field.clone())
+        {
+            let written = text[field.clone()].to_owned();
+            self.index.symbols[instance].detail.clone_from(&written);
+            self.reads.push(PendingRead {
+                kind: ReadKind::Master,
+                name: written,
+                scope,
+                location: state.location(span),
+                card,
+                instance: Some(instance),
+            });
+        }
+        self.read_parameters(state, line, card, scope, false);
     }
 
     fn read_instance(
@@ -1271,6 +1384,15 @@ impl Builder {
                     Some(function) => (DeckSymbolKind::Function, Some(function)),
                     None => continue,
                 },
+                ReadKind::Master => {
+                    match resolve(DeckSymbolKind::Subcircuit, &read.name, read.scope) {
+                        Some(subcircuit) => (DeckSymbolKind::Subcircuit, Some(subcircuit)),
+                        None => match resolve(DeckSymbolKind::Model, &read.name, read.scope) {
+                            Some(model) => (DeckSymbolKind::Model, Some(model)),
+                            None => continue,
+                        },
+                    }
+                }
             };
             if let (Some(instance), Some(target)) = (read.instance, target)
                 && kind != DeckSymbolKind::Parameter
@@ -1460,6 +1582,83 @@ fn card_kind(head: &str, fields: &[Range<usize>], text: &str) -> DeckCardKind {
         _ if head.starts_with(|letter: char| letter.is_alphabetic()) => DeckCardKind::Instance,
         _ => DeckCardKind::Directive,
     }
+}
+
+/// The analyses a named Spectre statement can run: `tran1 tran stop=1u`.
+const SPECTRE_ANALYSES: &[&str] = &[
+    "ac",
+    "acmatch",
+    "dc",
+    "dcmatch",
+    "envlp",
+    "hb",
+    "hbac",
+    "hbnoise",
+    "hbsp",
+    "hbxf",
+    "montecarlo",
+    "noise",
+    "pac",
+    "pdisto",
+    "pnoise",
+    "psp",
+    "pss",
+    "pstb",
+    "pxf",
+    "pz",
+    "qpac",
+    "qpnoise",
+    "qpss",
+    "qpsp",
+    "qpxf",
+    "sens",
+    "sp",
+    "stb",
+    "sweep",
+    "tdr",
+    "tran",
+    "xf",
+];
+
+/// What a statement written in Spectre is: by the keyword that opens it, or
+/// for a named statement by what follows its name (an analysis, the
+/// options, `info`), and an instance otherwise.
+fn spectre_card_kind(head: &str, fields: &[Range<usize>], text: &str) -> DeckCardKind {
+    let second = fields
+        .get(1)
+        .map(|field| text[field.clone()].to_ascii_lowercase())
+        .unwrap_or_default();
+    match head {
+        "include" | "ahdl_include" => DeckCardKind::Include,
+        "subckt" => DeckCardKind::Subcircuit,
+        "inline" if second == "subckt" => DeckCardKind::Subcircuit,
+        "ends" => DeckCardKind::EndSubcircuit,
+        "model" => DeckCardKind::Model,
+        "parameters" => DeckCardKind::Parameter,
+        "section" => DeckCardKind::LibrarySection,
+        "endsection" => DeckCardKind::EndLibrarySection,
+        "global" => DeckCardKind::Global,
+        "save" => DeckCardKind::Output,
+        _ if !head.starts_with(|letter: char| letter.is_alphabetic() || letter == '_') => {
+            DeckCardKind::Directive
+        }
+        _ => match second.as_str() {
+            "options" | "set" => DeckCardKind::Option,
+            "info" => DeckCardKind::Output,
+            analysis if SPECTRE_ANALYSES.contains(&analysis) => DeckCardKind::Analysis,
+            _ if fields.len() > 2 => DeckCardKind::Instance,
+            _ => DeckCardKind::Directive,
+        },
+    }
+}
+
+/// `field` without the parentheses Spectre writes a node list in, or `None`
+/// when nothing is left.
+fn without_parentheses(text: &str, field: Range<usize>) -> Option<Range<usize>> {
+    let written = &text[field.clone()];
+    let start = field.start + (written.len() - written.trim_start_matches('(').len());
+    let end = field.end - (written.len() - written.trim_end_matches(')').len());
+    (start < end).then_some(start..end)
 }
 
 /// Whether the one argument of a `.lib` card names a file rather than the

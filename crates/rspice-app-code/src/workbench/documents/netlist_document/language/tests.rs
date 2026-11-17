@@ -34,7 +34,11 @@ fn project_index_resolves_cross_file_definitions_and_references_case_insensitive
     )
     .unwrap();
 
-    let index = NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document);
+    let index = NetlistProjectIndex::build(
+        ActiveNetlistDocument::Generated,
+        std::path::Path::new(""),
+        &document,
+    );
 
     let definitions = index.definitions_named("cell");
     assert_eq!(definitions.len(), 1);
@@ -117,7 +121,11 @@ fn verilog_a_sources_stay_out_of_the_spice_project_index() {
     )
     .unwrap();
 
-    let index = NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document);
+    let index = NetlistProjectIndex::build(
+        ActiveNetlistDocument::Generated,
+        std::path::Path::new(""),
+        &document,
+    );
 
     let instances = index
         .hierarchy()
@@ -187,7 +195,11 @@ S1 a b c d smod\n\
     )
     .unwrap();
 
-    let index = NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document);
+    let index = NetlistProjectIndex::build(
+        ActiveNetlistDocument::Generated,
+        std::path::Path::new(""),
+        &document,
+    );
 
     for name in ["dmod", "qmod", "mmod", "rmod", "smod"] {
         assert_eq!(
@@ -269,7 +281,11 @@ B1 y 0 V={shape(V(out))*gain}\n\
     )
     .unwrap();
 
-    let index = NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document);
+    let index = NetlistProjectIndex::build(
+        ActiveNetlistDocument::Generated,
+        std::path::Path::new(""),
+        &document,
+    );
 
     assert_eq!(index.definitions_named("base").len(), 1);
     assert_eq!(index.definitions_named("gain").len(), 1);

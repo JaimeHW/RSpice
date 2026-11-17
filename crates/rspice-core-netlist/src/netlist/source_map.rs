@@ -328,7 +328,7 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     for_each_logical_line(
         buffer,
         1,
-        |raw| Some(&raw[..find_inline_comment(raw).unwrap_or(raw.len())]),
+        |_, raw| Some(&raw[..find_inline_comment(raw).unwrap_or(raw.len())]),
         |line| process_logical_line(&line, &mut scopes, &mut map),
     );
     map
@@ -337,14 +337,14 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
 /// Join `buffer` into logical cards and hand each to `each`, in source order.
 ///
 /// The first `skipped_lines` physical lines are not read (a root deck's title).
-/// `code_of` gives the part of a physical line before its comment, a prefix of
-/// it, or `None` for a line that is a comment as a whole; a line whose code is
+/// `code_of` gives the part of a physical line, numbered from zero, before its
+/// comment, a prefix of it, or `None` for a line that is a comment as a whole; a line whose code is
 /// blank or starts with `*` is a comment too. A line whose code starts with `+`
 /// continues the card before it, joined by one space.
 pub(super) fn for_each_logical_line<'a>(
     buffer: &'a str,
     skipped_lines: usize,
-    code_of: impl Fn(&'a str) -> Option<&'a str>,
+    code_of: impl Fn(usize, &'a str) -> Option<&'a str>,
     mut each: impl FnMut(MappedLine),
 ) {
     let mut logical: Option<MappedLine> = None;
@@ -358,7 +358,7 @@ pub(super) fn for_each_logical_line<'a>(
 
         let raw = physical.strip_suffix('\n').unwrap_or(physical);
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
-        let code = code_of(raw).unwrap_or_default();
+        let code = code_of(line_index, raw).unwrap_or_default();
         let trimmed = code.trim_start();
         let lead = code.len() - trimmed.len();
 

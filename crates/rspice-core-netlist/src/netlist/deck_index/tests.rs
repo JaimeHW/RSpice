@@ -1,13 +1,11 @@
 use super::*;
 
 fn index(deck: &str) -> DeckIndex {
-    DeckIndex::build(
-        &[DeckIndexSource {
-            identity: "deck.cir",
-            text: deck,
-        }],
-        ExpressionDialect::Ngspice,
-    )
+    DeckIndex::build(&[DeckIndexSource {
+        identity: "deck.cir",
+        text: deck,
+        kind: SourceKind::DeckRoot,
+    }])
 }
 
 fn symbol<'a>(index: &'a DeckIndex, kind: DeckSymbolKind, name: &str) -> Vec<&'a DeckSymbol> {
@@ -167,19 +165,18 @@ X1 in out
 fn a_read_in_an_include_file_carries_that_files_identity() {
     let deck = "top\n.include \"models/lib.sp\"\n.param vt=0.7\nD1 a 0 dmod\n.end\n";
     let library = "* library\n.model dmod d is=1e-14 vj={vt}\n";
-    let index = DeckIndex::build(
-        &[
-            DeckIndexSource {
-                identity: "deck.cir",
-                text: deck,
-            },
-            DeckIndexSource {
-                identity: "models/lib.sp",
-                text: library,
-            },
-        ],
-        ExpressionDialect::Ngspice,
-    );
+    let index = DeckIndex::build(&[
+        DeckIndexSource {
+            identity: "deck.cir",
+            text: deck,
+            kind: SourceKind::DeckRoot,
+        },
+        DeckIndexSource {
+            identity: "models/lib.sp",
+            text: library,
+            kind: SourceKind::Included,
+        },
+    ]);
     let vt = reads(&index, "vt");
     assert_eq!(vt.len(), 1);
     assert_eq!(
@@ -256,19 +253,18 @@ fn a_model_defined_in_a_selected_library_section_binds_first() {
     let deck = "corners\n.lib \"models.lib\" SS\nM1 d g s b nch\n.end\n";
     let library =
         ".lib TT\n.model nch nmos vto=0.5\n.endl TT\n.lib SS\n.model nch nmos vto=0.6\n.endl SS\n";
-    let index = DeckIndex::build(
-        &[
-            DeckIndexSource {
-                identity: "deck.cir",
-                text: deck,
-            },
-            DeckIndexSource {
-                identity: "models.lib",
-                text: library,
-            },
-        ],
-        ExpressionDialect::Ngspice,
-    );
+    let index = DeckIndex::build(&[
+        DeckIndexSource {
+            identity: "deck.cir",
+            text: deck,
+            kind: SourceKind::DeckRoot,
+        },
+        DeckIndexSource {
+            identity: "models.lib",
+            text: library,
+            kind: SourceKind::Included,
+        },
+    ]);
     let target = reads(&index, "nch")[0].target.expect("nch is defined");
     assert_eq!(index.symbols()[target].section.as_deref(), Some("SS"));
     assert_eq!(index.symbols()[target].location.line, 5);
@@ -278,13 +274,11 @@ fn a_model_defined_in_a_selected_library_section_binds_first() {
 #[test]
 fn ground_and_global_nodes_belong_to_the_top_level() {
     let deck = "inverter\n.global vdd\n.subckt inv in out\nM1 out in vdd vdd p\nM2 out in 0 0 n\n.ends\n.end\n";
-    let index = DeckIndex::build(
-        &[DeckIndexSource {
-            identity: "lib.sp",
-            text: deck,
-        }],
-        ExpressionDialect::Ngspice,
-    );
+    let index = DeckIndex::build(&[DeckIndexSource {
+        identity: "lib.sp",
+        text: deck,
+        kind: SourceKind::DeckRoot,
+    }]);
     for node in index.nodes() {
         let global = matches!(node.name.as_str(), "vdd" | "0");
         assert_eq!(node.scope == 0, global, "{node:?}");
@@ -340,4 +334,107 @@ C1 b 0 { k * 1p }
         .map(|node| node.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(nodes, ["a", "b", "b", "0"]);
+}
+
+fn instance_names(index: &DeckIndex) -> Vec<&str> {
+    index
+        .symbols()
+        .iter()
+        .filter(|symbol| symbol.kind == DeckSymbolKind::Instance)
+        .map(|symbol| symbol.name.as_str())
+        .collect()
+}
+
+#[test]
+fn comments_are_where_the_engine_reads_them_and_a_pspice_node_is_no_comment() {
+    let deck = "pspice\n# a line the engine skips\nV_V1 in 0 1\nR1 in $N_0001 1k $load\nC1 $N_0001 0 1n\n.end\n";
+    let index = index(deck);
+    assert_eq!(instance_names(&index), ["V_V1", "R1", "C1"]);
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "R1")[0].detail,
+        "1k"
+    );
+    assert!(
+        index.nodes().iter().any(|node| node.name == "$N_0001"),
+        "a PSpice $N_ name is a node"
+    );
+    assert!(
+        reads(&index, "load").is_empty(),
+        "the comment reads nothing"
+    );
+}
+
+#[test]
+fn a_spectre_source_is_read_as_spectre_past_its_block_comments() {
+    let source = "// spectre deck\nsimulator lang=spectre\n/* a block comment\n   swept over two lines */\nparameters vdd=1.8\nsubckt amp (in out)\nparameters gain=2\nR1 (in out) resistor r=1k*gain\nends amp\nV1 (vdd 0) vsource dc=vdd\nX1 (vdd out) amp\ntran1 tran stop=1u\n";
+    let index = DeckIndex::build(&[DeckIndexSource {
+        identity: "amp.scs",
+        text: source,
+        kind: SourceKind::Spectre,
+    }]);
+    assert_eq!(instance_names(&index), ["R1", "V1", "X1"]);
+    let amp = &symbol(&index, DeckSymbolKind::Subcircuit, "amp")[0];
+    assert_eq!(amp.detail, "2 ports");
+    let scope = amp.opens.expect("the subcircuit opens a scope");
+    assert_eq!(index.scopes()[scope].ports, ["in", "out"]);
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "R1")[0].scope,
+        scope
+    );
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Parameter, "gain")[0].scope,
+        scope
+    );
+    let x1 = &symbol(&index, DeckSymbolKind::Instance, "X1")[0];
+    assert_eq!(x1.detail, "amp");
+    assert_eq!(
+        reads(&index, "amp")
+            .iter()
+            .filter(|read| read.target.is_some())
+            .count(),
+        2,
+        "the instance and the ends both read the subcircuit"
+    );
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "V1")[0].detail,
+        "vsource"
+    );
+    assert!(
+        reads(&index, "vsource").is_empty(),
+        "a primitive is no read"
+    );
+    assert_eq!(reads(&index, "vdd").len(), 1, "dc=vdd reads the parameter");
+    let analysis = index
+        .cards()
+        .iter()
+        .find(|card| card.head == "tran1")
+        .expect("the analysis is a card");
+    assert_eq!(analysis.kind, DeckCardKind::Analysis);
+    assert!(
+        index
+            .cards()
+            .iter()
+            .all(|card| card.head != "swept" && card.head != "/*"),
+        "nothing in a block comment is a card"
+    );
+}
+
+#[test]
+fn a_simulator_switch_hands_the_lines_after_it_to_spectre_and_back() {
+    let deck = "* mixed\nR1 a 0 1k\nsimulator lang=spectre\nR2 (a b) resistor r=2k\n// a Spectre comment\nsimulator lang=spice\nR3 b 0 3k\n.end\n";
+    let index = DeckIndex::build(&[DeckIndexSource {
+        identity: "mixed.cir",
+        text: deck,
+        kind: SourceKind::Included,
+    }]);
+    let names = instance_names(&index);
+    assert_eq!(names, ["R1", "R2", "R3"]);
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "R2")[0].detail,
+        "resistor"
+    );
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "R3")[0].detail,
+        "3k"
+    );
 }
