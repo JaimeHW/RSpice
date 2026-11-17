@@ -172,7 +172,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
 
     def test_checkpoint_evidence_requires_fresh_time_exact_bytes_and_one_pair(self):
         raw = b'{"version":1,"workspace":{"project":{"id":"source","name":"Source","revision":1}}}'
-        manifest = {"schema_version": 1, "reason": "manual", "created_unix_ms": 105,
+        manifest = {"schema_version": 2, "reason": "manual", "pinned": False, "created_unix_ms": 105,
                     "project_id": "source", "project_name": "Source", "project_revision": 1,
                     "snapshot_byte_len": len(raw), "snapshot_digest": hashlib.sha256(raw).hexdigest()}
         records = {"checkpoint.manifest": json.dumps(manifest), "checkpoint.snapshot": list(raw)}
@@ -196,7 +196,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
                        "analyses": [{"success": True, "waveforms": [
                            {"name": "V(out)", "x": [0.0, 0.001], "y": [5.0, 5.0]}]}]}]}}
         raw = json.dumps(project).encode("utf-8")
-        manifest = {"schema_version": 1, "reason": "manual", "created_unix_ms": 105,
+        manifest = {"schema_version": 2, "reason": "manual", "pinned": False, "created_unix_ms": 105,
                     "project_id": "source", "project_name": "Source", "project_revision": 1,
                     "snapshot_byte_len": len(raw), "snapshot_digest": hashlib.sha256(raw).hexdigest()}
         before = {"old.manifest": "old manifest", "old.snapshot": [1, 2, 3]}
