@@ -38,7 +38,12 @@ pub(in crate::workbench) fn answer_surface_request(
                 state.models.selected_model.as_deref(),
             );
         }
-        DesignSurfaceRequest::ShowInNetlist => state.show_selected_instance_in_netlist(),
+        // The command's own route, which generates the netlist before it
+        // locates; the code feature answers it straight after this.
+        DesignSurfaceRequest::ShowInNetlist => state
+            .workbench
+            .outbox
+            .push(rspice_app_code::workbench::code::commands::CodeRequest::ShowInNetlist),
         DesignSurfaceRequest::CopyToEditableLibrary { library, cell } => {
             if let Err(error) = state
                 .project

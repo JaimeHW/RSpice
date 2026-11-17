@@ -652,15 +652,11 @@ mod tests {
         );
     }
 
-    const SHOW_IN_NETLIST_DECK: &str =
-        "instance locator fixture\nV1 in 0 1\nR1 in out 1k\n.op\n.end\n";
-
-    /// An open design whose retained generated deck states `R1` and not `C9`.
-    fn app_with_generated_deck() -> (RSpiceApp, u64, u64) {
-        use rspice_app_state::state::{
-            ComponentType, GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry,
-            GenerationInput, NetlistDocument, NetlistDocumentId, Point,
-        };
+    /// An open design holding a resistor `R1` and a ground symbol, which
+    /// writes no card of its own, buffered as an edit on the canvas leaves
+    /// them, and never shown on the Netlist page.
+    fn app_with_two_instances() -> (RSpiceApp, u64, u64) {
+        use rspice_app_state::state::{ComponentType, Point};
 
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
@@ -678,66 +674,24 @@ mod tests {
             .model
             .schematic
             .add_component(ComponentType::Resistor, origin);
-        let unmapped_id = app
+        let ground_id = app
             .state
             .model
             .schematic
-            .add_component(ComponentType::Capacitor, origin + Point::new(20, 0));
-        for (id, name) in [(load_id, "R1"), (unmapped_id, "C9")] {
-            if let Some(component) = app
-                .state
-                .model
-                .schematic
-                .document_mut_for_test()
-                .components
-                .iter_mut()
-                .find(|component| component.id == id)
-            {
-                component.name = name.to_owned();
-            }
-        }
-
-        let view = app.state.model.workspace.content.active_view.key();
-        let cell = format!(
-            "{}/{}",
-            app.state.model.workspace.content.active_view.library,
-            app.state.model.workspace.content.active_view.cell
-        );
-        let digest = rspice_app_state::state::content_digest("instance-locator-input");
-        let artifact = GeneratedArtifact::try_from_utf8(
-            GeneratedProvenance::try_new(
-                "rspice-instance-locator-test",
-                GenerationInput::new(rspice_app_state::product::ObjectRevision::INITIAL, digest),
-            )
-            .expect("provenance"),
-            SHOW_IN_NETLIST_DECK.as_bytes().to_vec(),
-            Vec::new(),
-            vec![
-                GeneratedSourceMapEntry::try_new(
-                    3,
-                    cell,
-                    view.clone(),
-                    Some("R1".to_owned()),
-                    Some(GeneratedSourceMapEntry::component_identity_for(
-                        &view, load_id,
-                    )),
-                )
-                .expect("mapping"),
-            ],
-        )
-        .expect("artifact");
-
-        app.state.model.netlist_artifacts.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
-        app.state.model.netlist_artifacts.generated_document = Some(
-            NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
-        );
-        app.state.model.netlist_artifacts.generated_input_digest = Some(digest);
-        app.state
+            .add_component(ComponentType::Ground, origin + Point::new(0, 40));
+        if let Some(component) = app
+            .state
             .model
-            .netlist_artifacts
-            .current_generation_input_digest = Some(digest);
-        app.state.code.netlist.active_document_initialized = true;
-        (app, load_id, unmapped_id)
+            .schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == load_id)
+        {
+            component.name = "R1".to_owned();
+        }
+        app.state.sync_active_schematic_to_workspace();
+        (app, load_id, ground_id)
     }
 
     /// The jump is reachable from the palette and carries no shortcut it would
@@ -756,12 +710,13 @@ mod tests {
         assert!(spec.bindings.is_empty());
     }
 
-    /// Every disabled state names the thing that is missing, in the locator's
+    /// Every disabled state names the thing that is missing, in the model's
     /// own wording, so the context-menu row, the inspector and the palette
-    /// cannot explain the same block three different ways.
+    /// cannot explain the same block three different ways. A netlist that was
+    /// never generated is not one of them: the jump generates it.
     #[test]
     fn show_in_netlist_reports_the_missing_precondition_rather_than_a_generic_block() {
-        let (mut app, load_id, unmapped_id) = app_with_generated_deck();
+        let (mut app, load_id, _) = app_with_two_instances();
 
         assert_eq!(
             app.command_availability(CodeCommand::ShowInNetlist.key()),
@@ -775,49 +730,21 @@ mod tests {
             .editor
             .selection
             .select_only_component(load_id);
+        assert!(
+            app.state
+                .model
+                .netlist_artifacts
+                .generated_document
+                .is_none(),
+            "the Netlist page never generated a deck"
+        );
         assert_eq!(
             app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Available
         );
 
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(unmapped_id);
-        assert_eq!(
-            app.command_availability(CodeCommand::ShowInNetlist.key()),
-            CommandAvailability::Disabled("no netlist line for this instance")
-        );
-
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(load_id);
-        app.state.model.netlist_artifacts.generated_document = None;
-        app.state.model.netlist_artifacts.generated_source.clear();
-        assert_eq!(
-            app.command_availability(CodeCommand::ShowInNetlist.key()),
-            CommandAvailability::Disabled(
-                "no generated netlist yet — open the Netlist workspace to generate one"
-            )
-        );
-
         // Outside a schematic there is no instance to locate at all, and
         // "select one instance" would send the engineer to the wrong place.
-        let (mut app, load_id, _) = app_with_generated_deck();
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(load_id);
         app.state.workbench.workspace = Workspace::Results;
         assert_eq!(
             app.command_availability(CodeCommand::ShowInNetlist.key()),
@@ -825,12 +752,13 @@ mod tests {
         );
     }
 
-    /// Dispatch moves the workspace, the document and the caret, and leaves
-    /// the schematic selection where it was — the netlist navigator's reveal
-    /// is what brings it back, and it reads that same selection.
+    /// Dispatch generates the deck, then moves the workspace, the document and
+    /// the caret to the instance's card, and leaves the schematic selection
+    /// where it was — the netlist navigator's reveal is what brings it back,
+    /// and it reads that same selection.
     #[test]
     fn show_in_netlist_opens_the_generated_deck_without_moving_the_selection() {
-        let (mut app, load_id, _) = app_with_generated_deck();
+        let (mut app, load_id, _) = app_with_two_instances();
         app.state
             .model
             .schematic
@@ -846,8 +774,27 @@ mod tests {
             app.state.code.netlist.active_document,
             rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         );
-        assert_eq!(app.state.code.netlist.requested_line, Some(3));
-        assert_eq!(app.state.code.netlist.cursor_line, 2);
+        let line = app
+            .state
+            .code
+            .netlist
+            .requested_line
+            .expect("the caret is asked for the instance's card");
+        assert_eq!(app.state.code.netlist.cursor_line, line - 1);
+        let card = app
+            .state
+            .model
+            .netlist_artifacts
+            .generated_source
+            .lines()
+            .nth(line - 1)
+            .unwrap_or_default()
+            .to_owned();
+        assert!(card.starts_with("R1 "), "the caret is on R1's card: {card}");
+        assert_eq!(
+            app.state.model.simulation.source.netlist_content,
+            app.state.model.netlist_artifacts.generated_source
+        );
         assert_eq!(
             app.state
                 .model
@@ -857,6 +804,28 @@ mod tests {
                 .selection
                 .single_component(),
             Some(load_id)
+        );
+    }
+
+    /// An instance the deck writes no card for is refused when the jump is
+    /// taken, with the locator's reason, and nothing moves.
+    #[test]
+    fn show_in_netlist_states_why_an_instance_without_a_card_cannot_be_shown() {
+        let (mut app, _, ground_id) = app_with_two_instances();
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(ground_id);
+
+        app.execute_command_key(CodeCommand::ShowInNetlist.key());
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Design);
+        assert_eq!(
+            app.state.prompt_text(),
+            Some("Cannot show the instance in the netlist: no netlist line for this instance.")
         );
     }
 }

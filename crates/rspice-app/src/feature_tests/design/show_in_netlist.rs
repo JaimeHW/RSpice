@@ -170,7 +170,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state.model.netlist_artifacts.generated_source.clear();
     assert_eq!(
         state.model.selected_instance_generated_line().err(),
-        Some("no generated netlist yet — open the Netlist workspace to generate one")
+        Some("the design's netlist could not be generated")
     );
 }
 
@@ -292,4 +292,95 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
         Some(load_id)
     );
     assert_eq!(state.model.selected_instance_generated_line().err(), None);
+}
+
+/// The jump answers from the netlist of the design as it stands, generated
+/// when the jump is taken. An instance placed after the deck was last
+/// generated is found at its own card, and the announcement does not call
+/// the deck stale.
+#[test]
+fn an_instance_placed_after_the_last_generation_is_shown_at_its_own_card() {
+    use crate::workbench::RSpiceApp;
+    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.open_project_session();
+    let first = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(20, 20));
+    app.state.sync_active_schematic_to_workspace();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(first);
+    app.execute_command_key(CodeCommand::ShowInNetlist.key());
+    assert_eq!(
+        app.state.workbench.workspace,
+        Workspace::Netlist,
+        "the first jump generates the deck it reads"
+    );
+
+    app.state.workbench.activate(Workspace::Design);
+    let placed = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Capacitor, Point::new(120, 20));
+    app.state.sync_active_schematic_to_workspace();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(placed);
+    assert_eq!(
+        app.command_availability(CodeCommand::ShowInNetlist.key()),
+        CommandAvailability::Available,
+        "a deck older than the instance is no reason to refuse the jump"
+    );
+    app.execute_command_key(CodeCommand::ShowInNetlist.key());
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    let name = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == placed)
+        .map(|component| component.name.clone())
+        .expect("the placed capacitor");
+    let line = app
+        .state
+        .code
+        .netlist
+        .requested_line
+        .expect("the caret is asked for the card");
+    let card = app
+        .state
+        .model
+        .netlist_artifacts
+        .generated_source
+        .lines()
+        .nth(line - 1)
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        card.starts_with(&format!("{name} ")),
+        "the caret is on {name}'s own card: {card}"
+    );
+    assert!(
+        !prompt(&app.state).contains("stale"),
+        "the deck was generated for this jump: {}",
+        prompt(&app.state)
+    );
 }

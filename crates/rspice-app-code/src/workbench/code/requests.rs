@@ -51,7 +51,12 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::GenerateNetlist => {
             crate::workbench::surfaces::netlist::generation::show_generated_netlist(cx);
         }
-        CodeRequest::ShowInNetlist => return Some(CodeHandOff::ShowInNetlist),
+        CodeRequest::ShowInNetlist => {
+            // The instance is located in the netlist of the design as it
+            // stands, so it is generated first.
+            crate::workbench::surfaces::netlist::generation::refresh_generated_artifact(cx);
+            return Some(CodeHandOff::ShowInNetlist);
+        }
         CodeRequest::FindCodeDocument => {
             if let Err(error) =
                 code_workspace::open_active_source_search(&mut CodeFeature::workspace_parts(cx))

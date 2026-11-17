@@ -87,20 +87,32 @@ impl AppState {
     ///
     /// The Netlist workspace, the generated primary document and the caret
     /// move as one transaction, and the status bar states where the instance
-    /// was found. The schematic selection is deliberately left alone: the netlist
+    /// was found, or why it cannot be shown, in which case nothing moves. The
+    /// schematic selection is deliberately left alone: the netlist
     /// navigator's reveal reads it to bring the round trip back.
     pub(crate) fn show_selected_instance_in_netlist(&mut self) {
-        let Ok(location) = self.model.selected_instance_generated_line() else {
-            return;
+        let location = match self.model.selected_instance_generated_line() {
+            Ok(location) => location,
+            Err(reason) => {
+                let detail = self
+                    .model
+                    .netlist_artifacts
+                    .generation_error
+                    .as_deref()
+                    .map(|error| format!(" {error}"))
+                    .unwrap_or_default();
+                self.prompt(format!(
+                    "Cannot show the instance in the netlist: {reason}.{detail}"
+                ));
+                return;
+            }
         };
-        rspice_app_code::workbench::documents::netlist_document::open_generated_primary_in(
+        rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
             &mut self.model,
             &mut self.code.netlist,
+            &mut self.code.code_workspace.page,
+            &mut self.workbench,
         );
-        self.code.code_workspace.page =
-            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        self.workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
         self.code.netlist.cursor_line = location.line.saturating_sub(1);
         self.code.netlist.requested_line = Some(location.line);
         let announced = self.workbench.messages().format(

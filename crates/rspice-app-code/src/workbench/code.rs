@@ -258,9 +258,9 @@ impl CommandSet for CodeCommand {
             Self::ShowInNetlist if !schematic_in_front(reads) => {
                 (false, "open a schematic or testbench")
             }
-            Self::ShowInNetlist => match model.selected_instance_generated_line() {
-                Ok(_) => (true, UNAVAILABLE),
-                Err(block) => (false, block),
+            Self::ShowInNetlist => match model.show_in_netlist_block() {
+                None => (true, UNAVAILABLE),
+                Some(block) => (false, block),
             },
             Self::FindCodeDocument => (code_document_on_screen(reads), UNAVAILABLE),
             Self::ValidateCodeDocument => (

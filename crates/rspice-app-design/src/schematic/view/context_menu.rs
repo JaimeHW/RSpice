@@ -1511,7 +1511,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             ),
             "Fit is available on a schematic or testbench canvas",
         ),
-        // The locator is the one owner of why a jump cannot be made, so this
+        // The model is the one owner of why the jump cannot be taken, so this
         // row explains itself with the reason the command would report.
         ContextAction::ShowInNetlist => {
             let blocked = state.selected_instance_netlist_block();
@@ -1713,7 +1713,8 @@ fn show_in_netlist(state: &mut CanvasParts<'_>) {
     if state.facts().selected_instance_netlist_block().is_some() {
         return;
     }
-    state.workbench.activate(Workspace::Netlist);
+    // The jump moves to the Netlist workspace itself once it has located the
+    // instance, and stays here when it cannot.
     state
         .workbench
         .outbox

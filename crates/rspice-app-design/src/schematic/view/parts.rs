@@ -404,7 +404,7 @@ impl<'a> CanvasFacts<'a> {
     /// Why the selected instance cannot be shown in the generated deck, or
     /// `None` when it can.
     pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
-        self.model.selected_instance_generated_line().err()
+        self.model.show_in_netlist_block()
     }
 
     /// The current finding's other objects in `cell_view`, as the runs'

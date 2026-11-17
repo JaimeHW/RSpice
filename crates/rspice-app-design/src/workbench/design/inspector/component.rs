@@ -173,7 +173,8 @@ pub fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: 
             .map(|(_, reference)| reference);
     // The deck the instance emits is part of its identity, so the jump to it
     // belongs beside the symbol, master and model routes rather than in a
-    // section of its own. It appears only once a deck states the instance.
+    // section of its own. It appears wherever the command can be taken: the
+    // jump generates the deck first and says so when it states no card.
     let netlist_card = cx.foreign_available(ids::SHOW_IN_NETLIST);
     if symbol_view.is_some() || hierarchy_master.is_some() || model_source.is_some() || netlist_card
     {
