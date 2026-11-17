@@ -65,30 +65,43 @@ pub(in crate::workbench) fn project(
         .inner
 }
 
-/// The document bar's unsaved dot, set before a row's meta: the
-/// configuration has edits that are not applied.
-fn unsaved_mark(ui: &Ui, response: &egui::Response, meta: Option<&str>) {
+/// The room the unsaved dot takes at the head of a row's meta. The row
+/// shortens its name to stop before the meta, so the dot never lands on
+/// the name however narrow the rail is.
+const DOT_ROOM: &str = "   ";
+
+/// A row's meta with room for the unsaved dot at its head.
+fn unsaved_meta(meta: Option<&str>) -> String {
+    format!("{DOT_ROOM}{}", meta.unwrap_or_default())
+}
+
+/// The document bar's unsaved dot, painted in the room [`unsaved_meta`]
+/// made before the row's meta: the configuration has edits that are not
+/// applied. The row is still named for its label and its meta alone.
+fn unsaved_mark(ui: &Ui, response: &egui::Response, label: &str, meta: Option<&str>) {
     let t = Tokens::get(ui.ctx());
-    let meta_width = meta.map_or(0.0, |meta| {
+    let width = |text: &str| {
         ui.painter()
             .layout_no_wrap(
-                meta.to_owned(),
+                text.to_owned(),
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_faint,
             )
             .size()
             .x
-            + 8.0
-    });
+    };
+    let meta_width = meta.map_or(0.0, width);
     ui.painter().circle_filled(
         egui::pos2(
-            response.rect.right() - 8.0 - meta_width - 3.0,
+            response.rect.right() - 8.0 - meta_width - width(DOT_ROOM) / 2.0,
             response.rect.center().y,
         ),
         3.0,
         t.color.text_dim,
     );
+    let name = meta.map_or_else(|| label.to_owned(), |meta| format!("{label}, {meta}"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(name);
         node.set_description("Unsaved changes.");
     });
 }

@@ -824,3 +824,39 @@ fn sectioned_models() -> Vec<u8> {
     }
     text.into_bytes()
 }
+
+/// A configuration with edits not applied carries the unsaved dot on its
+/// navigator row, in room the row keeps for it before the meta, and the row
+/// is still named for its name and meta alone.
+#[test]
+fn an_unsaved_configuration_row_is_named_without_the_dots_room() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    let name = catalog
+        .find(catalog.active_configuration_id().unwrap())
+        .unwrap()
+        .name()
+        .to_owned();
+    edit(&mut app, |definition| {
+        definition.cell_bindings.push(ConfigurationCellBinding {
+            library: "user".to_owned(),
+            cell: "amp".to_owned(),
+            executable_views: vec!["schematic".to_owned()],
+            stop_view: None,
+        });
+    });
+    let output = settle(&ctx, &mut app, Vec::new());
+    let rows = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.description() == Some("Unsaved changes."))
+        .map(|(_, node)| node.label().unwrap_or_default().to_owned())
+        .filter(|label| label.starts_with(&name))
+        .collect::<Vec<_>>();
+    assert_eq!(rows, [format!("{name}, used for runs")]);
+}

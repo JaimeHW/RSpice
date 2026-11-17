@@ -10,7 +10,7 @@ use crate::workbench::design_system::{WorkbenchIcon, section_header};
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 
 use super::super::{nav_row_response, row_context_menu};
-use super::{ProjectNavigator, unsaved_mark};
+use super::{ProjectNavigator, unsaved_mark, unsaved_meta};
 
 /// The project's configurations, Default first. A row puts its configuration
 /// in front of the reader; which one runs use changes only on the page.
@@ -57,10 +57,17 @@ pub(super) fn project_configuration_navigator(ui: &mut Ui, nav: &mut ProjectNavi
     let mut dialog = None;
     for (target, name, runs) in rows {
         let meta = runs.then_some("used for runs");
-        let response =
-            nav_row_response(ui, WorkbenchIcon::Sliders, &name, selection == target, meta);
-        if edited.is_some_and(|id| target == ConfigurationSelection::Configuration(id)) {
-            unsaved_mark(ui, &response, meta);
+        let unsaved = edited.is_some_and(|id| target == ConfigurationSelection::Configuration(id));
+        let shown_meta = unsaved.then(|| unsaved_meta(meta));
+        let response = nav_row_response(
+            ui,
+            WorkbenchIcon::Sliders,
+            &name,
+            selection == target,
+            shown_meta.as_deref().or(meta),
+        );
+        if unsaved {
+            unsaved_mark(ui, &response, &name, meta);
         }
         if response.clicked() {
             picked = Some(target);
