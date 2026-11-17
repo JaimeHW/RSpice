@@ -520,13 +520,17 @@ fn read_only_banner(ui: &mut Ui) {
 }
 
 /// One banner over the canvas: a problem's mark, then the words in the
-/// ordinary tone on the panel's own inset.
+/// ordinary tone on the panel's own inset, which runs the page's whole
+/// width however short the words are.
 fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::symmetric(12, 6))
         .show(ui, |ui| {
+            // A frame shrinks to its content: without this the fill stops
+            // after the last word and the band reads as broken.
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = CANVAS_BANNER_MARK_GAP;
                 let (mark, _) = ui.allocate_exact_size(

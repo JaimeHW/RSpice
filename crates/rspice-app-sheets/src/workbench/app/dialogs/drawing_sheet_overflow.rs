@@ -144,6 +144,9 @@ fn detection_contract(ui: &mut Ui) {
         .fill(tokens.color.bg_inset)
         .inner_margin(egui::Margin::symmetric(12, 9))
         .show(ui, |ui| {
+            // A frame shrinks to its content, and wrapped words stop short
+            // of the edge: the band runs the dialog's whole width.
+            ui.set_min_width(ui.available_width());
             ui.label(
                 "Detection is geometric and re-runs after a move, a paste, a format change or an orientation change, so no separate invalidation can leave the canvas and the inspector disagreeing. A conductor crossing the border counts once. Durable labels, junctions, design notes and documentation geometry are printable sheet content and are counted. Probe flags and transient interaction markers are view state and are never printed, so they are never counted. A title-block overlap is on the page but will print underneath the identity block, which is why it is reported apart from the rest.",
             );
@@ -168,6 +171,7 @@ fn advisory_banner(ui: &mut Ui, report: &DrawingSheetOverflowSummary, format: &s
         .stroke(Stroke::new(1.0, tokens.color.border_strong))
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (marker, _) = ui.allocate_exact_size(vec2(3.0, 42.0), egui::Sense::hover());
                 ui.painter().rect_filled(marker, 0.0, accent);
@@ -448,6 +452,9 @@ fn resolution_card(
         .stroke(Stroke::new(1.0, tokens.color.border))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
+            // Each card fills its column, so the three stand equal however
+            // their words wrap.
+            ui.set_min_width(ui.available_width());
             ui.set_min_height(112.0);
             ui.label(RichText::new(title).strong());
             ui.label(description);

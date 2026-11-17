@@ -943,6 +943,9 @@ fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&m
         .stroke(egui::Stroke::new(1.0, t.color.border))
         .inner_margin(8)
         .show(ui, |ui| {
+            // A frame shrinks to its content: the band runs the page's whole
+            // width however short its words are.
+            ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 if let Some(problem) = problem {
                     let (mark, _) = ui.allocate_exact_size(
