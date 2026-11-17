@@ -383,6 +383,11 @@ fn a_truncated_project_file_opens_from_its_checkpoint() {
         "the question names the checkpoint and its time:\n{}",
         painted(&asked)
     );
+    assert!(
+        painted(&asked).contains(" UTC ("),
+        "at the time the Recovery page gives it:\n{}",
+        painted(&asked)
+    );
     app_frame(
         &ctx,
         &mut app,

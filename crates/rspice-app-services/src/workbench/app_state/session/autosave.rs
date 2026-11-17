@@ -506,7 +506,7 @@ pub fn unopened_project_dialog(
          is left as it is.",
         found.error.trim_end_matches('.'),
         found.checkpoint.title(),
-        autosave_time(created),
+        checkpoint_time(created),
         autosave_age(created),
     );
     let choice = Dialog::new("Open a checkpoint instead?", "Save as new project\u{2026}")
@@ -552,7 +552,7 @@ pub fn recovered_work_dialog(
     let modified = found.autosave.created_unix_ms();
     let sentence = recovered_work_sentence(
         &found.project_name,
-        &autosave_time(modified),
+        &checkpoint_time(modified),
         &autosave_age(modified),
         found.differences.len(),
     );
@@ -764,6 +764,17 @@ fn autosave_time(modified_unix_ms: u64) -> String {
         )
 }
 
+/// When a project checkpoint was taken, spelled as the Recovery page and the
+/// Console spell it: a checkpoint travels with its project, so its time is
+/// UTC, and a dialog must not name it at a second time.
+fn checkpoint_time(created_unix_ms: u64) -> String {
+    if created_unix_ms == 0 {
+        "an earlier session".to_owned()
+    } else {
+        crate::time_compat::utc_stamp(created_unix_ms)
+    }
+}
+
 /// Coarse human age of an autosave ("3 min ago"), from the modification
 /// time read once when it was found and offered: the dialog asks the clock,
 /// never the file.
@@ -801,5 +812,21 @@ mod tests {
             assert!(!sentence.contains(internal), "{sentence}");
         }
         assert_eq!(autosave_time(0), "an earlier session");
+    }
+
+    /// A project checkpoint is named at the time the Recovery page and the
+    /// Console give it, not at the reader's local time.
+    #[test]
+    fn a_project_checkpoint_is_named_at_its_recovery_page_time() {
+        let taken = 1_760_000_000_000;
+        let time = checkpoint_time(taken);
+        assert_eq!(time, crate::time_compat::utc_stamp(taken));
+        assert!(time.ends_with(" UTC"), "{time}");
+        let sentence = recovered_work_sentence("amp", &time, "3 min ago", 2);
+        assert!(
+            sentence.contains(&format!("autosave from {time} (3 min ago)")),
+            "{sentence}"
+        );
+        assert_eq!(checkpoint_time(0), "an earlier session");
     }
 }
