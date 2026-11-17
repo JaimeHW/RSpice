@@ -541,49 +541,79 @@ Q1 cx bx 0 0 qmod
 
     /// The periodic analyses answer from the declared capability table:
     /// harmonic balance carries the `ddt` MEXTRAM scales by a bias-dependent
-    /// quantity as an unknown of its own and solves the routed transistor at
-    /// its authored nodes, while the shooting PSS, whose period map no settled
-    /// transient has confirmed on such a residual, refuses it by that reason.
+    /// quantity as an unknown of its own, and shooting integrates it as a
+    /// charge; each solves the routed transistor at its authored nodes, and
+    /// they agree on the carrier under the model walk's shooting allowance,
+    /// the DC term and first three harmonics each within 1e-3 of the
+    /// fundamental (1.2e-5 at worst, on the fundamental).
     #[test]
     fn the_periodic_analyses_answer_a_generated_compact_model_by_capability() {
+        use num_complex::Complex64;
         let netlist = netlist();
         let hb = engine()
-            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
+            .run_hb(
+                &netlist,
+                HbConfig::new(1.0e6).with_harmonics(8).with_tolerance(1e-9),
+            )
             .unwrap_or_else(|error| panic!("harmonic balance solves MEXTRAM: {error}"));
-        let output = hb
+        let balanced = &hb
             .result
             .spectral_voltages
             .iter()
             .find(|voltage| voltage.node_name.eq_ignore_ascii_case("CX"))
-            .expect("harmonic balance must retain the authored output node");
+            .expect("harmonic balance must retain the authored output node")
+            .coefficients;
         assert!(
-            output
-                .coefficients
+            balanced
                 .iter()
                 .all(|value| value.re.is_finite() && value.im.is_finite())
-                && output.coefficients[1].norm() > 0.0,
-            "the output carries the drive's fundamental: {:?}",
-            output.coefficients
+                && balanced[1].norm() > 0.0,
+            "the output carries the drive's fundamental: {balanced:?}"
         );
 
+        const POINTS: usize = 512;
         let pss = engine()
-            .run_pss_with_continuation_state_abort(
+            .run_pss(
                 &netlist,
                 PssConfig::new(1.0e6)
-                    .with_harmonics(2)
-                    .with_points_per_period(16)
+                    .with_points_per_period(POINTS)
                     .with_tstab_periods(0)
-                    .with_tolerance(1.0e-6),
-                &rspice_core::NoAbort,
+                    .with_tolerance(1.0e-9),
             )
-            .expect_err("MEXTRAM's residual is not F(x) + dQ(x)/dt")
-            .to_string();
-        assert!(
-            pss.contains(
-                "harmonic balance carries a `ddt` or `idt` of it as an unknown of its own"
-            ),
-            "the shooting PSS must name the site it does not take: {pss}"
-        );
+            .unwrap_or_else(|error| panic!("shooting solves MEXTRAM: {error}"))
+            .result;
+        let index = pss
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("CX"))
+            .expect("shooting must retain the authored output node");
+        let (time, values) = (&pss.time, &pss.waveforms[index].values);
+        let at = |t: f64| {
+            let next = time.partition_point(|&s| s < t).clamp(1, time.len() - 1);
+            let (t0, t1) = (time[next - 1], time[next]);
+            values[next - 1] + (values[next] - values[next - 1]) * (t - t0) / (t1 - t0)
+        };
+        let start = time[time.len() - 1] - pss.period;
+        let shot: Vec<Complex64> = (0..=3)
+            .map(|k| {
+                let sum: Complex64 = (0..POINTS)
+                    .map(|n| {
+                        let phase = n as f64 / POINTS as f64;
+                        at(start + phase * pss.period)
+                            * Complex64::from_polar(1.0, -std::f64::consts::TAU * k as f64 * phase)
+                    })
+                    .sum();
+                sum * if k == 0 { 1.0 } else { 2.0 } / POINTS as f64
+            })
+            .collect();
+        let fundamental = shot[1].norm();
+        for (k, (s, b)) in shot.iter().zip(balanced).enumerate() {
+            assert!(
+                (s - b).norm() <= 1e-3 * fundamental,
+                "harmonic {k}: shooting {s} against harmonic balance {b} \
+                 (fundamental {fundamental})"
+            );
+        }
     }
 }
 
