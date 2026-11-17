@@ -708,7 +708,8 @@ fn note_prompt(
                 "workbench.project.recovery.note",
                 checkpoint.checkpoint_id(),
             ))
-            .hint_text("What this checkpoint is for"),
+            .hint_text("What this checkpoint is for")
+            .vertical_align(egui::Align::Center),
     );
     ui.ctx().accesskit_node_builder(field.id, |node| {
         node.set_label(format!("Note on {}", checkpoint.reason().label()));
