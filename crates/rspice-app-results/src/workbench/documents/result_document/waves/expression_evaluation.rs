@@ -122,9 +122,8 @@ fn evaluate_scope(
             } else {
                 waveform
                     .x
-                    .first()
-                    .zip(waveform.x.last())
-                    .map(|(&first, &last)| vec![first, last])
+                    .ends()
+                    .map(|(first, last)| vec![first, last])
                     .unwrap_or_default()
             }
         } else {
@@ -206,17 +205,19 @@ pub(in crate::workbench::documents::result_document) fn event_word(
     else {
         return Err(missing());
     };
-    let history = |net: &str| {
+    let trace = |net: &str| {
         digital_traces
             .iter()
             .find(|trace| trace.node_name.eq_ignore_ascii_case(net))
-            .map(|trace| {
-                trace
-                    .points
-                    .iter()
-                    .map(|point| (point.time_s, point.value_code))
-                    .collect::<Vec<_>>()
-            })
+    };
+    let history = |net: &str| {
+        trace(net).map(|trace| {
+            trace
+                .points
+                .iter()
+                .map(|point| (point.time_s, point.value_code))
+                .collect::<Vec<_>>()
+        })
     };
     let user = lanes.and_then(|lanes| {
         lanes
@@ -241,7 +242,7 @@ pub(in crate::workbench::documents::result_document) fn event_word(
     };
     let (label, members) = match user.or_else(declared) {
         Some(bus) => bus,
-        None if history(name).is_some() => (signal.to_owned(), vec![format!("D({name})")]),
+        None if trace(name).is_some() => (signal.to_owned(), vec![format!("D({name})")]),
         None => return Err(missing()),
     };
     let nets: Vec<String> = members
@@ -279,7 +280,7 @@ pub(in crate::workbench::documents::result_document) fn event_word(
     let end = analysis
         .waveforms
         .iter()
-        .filter_map(|waveform| waveform.x.last().copied())
+        .filter_map(|waveform| waveform.x.ends().map(|(_, last)| last))
         .chain(lane.times().last().copied())
         .fold(f64::NEG_INFINITY, f64::max);
     Ok(calculator::functions::EventWord {

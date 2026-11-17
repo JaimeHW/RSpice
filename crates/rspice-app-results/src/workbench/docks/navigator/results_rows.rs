@@ -1630,8 +1630,7 @@ pub(super) fn result_analysis_domain(
     }
     let sweep = sweep.to_lowercase();
     let span = first_waveform.and_then(|waveform| {
-        let start = *waveform.x.first()?;
-        let end = *waveform.x.last()?;
+        let (start, end) = waveform.x.ends()?;
         (start.is_finite() && end.is_finite()).then(|| {
             format!(
                 "{} … {}",
