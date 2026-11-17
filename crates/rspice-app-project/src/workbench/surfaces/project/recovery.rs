@@ -22,7 +22,9 @@ use rspice_simulation_contract::run_set::format_bytes;
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
      Restoring one puts it back as unsaved changes, after keeping the project as it is now \
      as a checkpoint.";
-pub const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
+/// The room over and under a checkpoint row's two lines, and between them.
+const ROW_PAD: f32 = 9.0;
+const LINE_GAP: f32 = 3.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
@@ -513,7 +515,9 @@ pub fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 keep_first(&mut intent, left_intent);
                 keep_first(&mut intent, right_intent);
             } else {
-                page::inset_column(ui, inset, content_width, |ui| {
+                // One column as tall as its cards: the page, not the column,
+                // owns the height, so no card is cut to what is left of it.
+                page::stacked_column(ui, inset, content_width, |ui| {
                     keep_first(
                         &mut intent,
                         checkpoints_card(ui, &snapshot, &mut note_draft),
@@ -547,13 +551,15 @@ fn recovery_header(
     ui.add_space(HEADER_TOP);
     let intent = page::inset_column(ui, inset, content_width, |ui| {
         let (status, problem) = snapshot.status();
+        let title_font = theme::sans(20.0, FontWeight::SemiBold);
+        let title_height = ui.fonts_mut(|fonts| fonts.row_height(&title_font));
         let (title_rect, title_response) =
-            ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
+            ui.allocate_exact_size(vec2(content_width, title_height), Sense::hover());
         let title = ui.painter().text(
             title_rect.left_center(),
             Align2::LEFT_CENTER,
             "Recovery",
-            theme::sans(20.0, FontWeight::SemiBold),
+            title_font,
             tokens.color.text,
         );
         let status_left = title.right() + 12.0;
@@ -777,11 +783,11 @@ fn row_prompt<R>(
 /// to the touch target on a tablet.
 fn prompt_control_height(ui: &Ui) -> f32 {
     let tokens = Tokens::get(ui.ctx());
-    tokens.metrics.ctl_h.max(if tokens.metrics.is_touch() {
-        tokens::TOUCH_TARGET
+    if tokens.metrics.is_touch() {
+        tokens.metrics.touch_target()
     } else {
-        0.0
-    })
+        tokens.metrics.ctl_h
+    }
 }
 
 /// The note field under a checkpoint's row and its two answers. Enter keeps
@@ -956,8 +962,10 @@ fn comparison_list(ui: &mut Ui, found: &CheckpointComparison) -> Option<Recovery
     ui.add_space(4.0);
     let width = ui.available_width();
     let kind_width = 104.0;
+    // A line of words and the room around it, at the density's type.
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&body_font())) + 4.0;
     for difference in found {
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, line), Sense::hover());
         let document = difference.document.label();
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), &document));
         ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -1068,6 +1076,27 @@ fn card_message(ui: &mut Ui, title: &str, detail: Option<&str>) {
     ui.add_space(5.0);
 }
 
+/// A checkpoint row's title and detail lines.
+fn row_title_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Medium)
+}
+
+fn detail_font() -> egui::FontId {
+    theme::mono(tokens::FS_0, FontWeight::Regular)
+}
+
+/// The least a checkpoint row beside its actions is: its two lines and the
+/// room over, between and under them, at the density's type.
+pub fn checkpoint_row_least_height(ctx: &Context) -> f32 {
+    let (title, detail) = ctx.fonts_mut(|fonts| {
+        (
+            fonts.row_height(&row_title_font()),
+            fonts.row_height(&detail_font()),
+        )
+    });
+    ROW_PAD + title + LINE_GAP + detail + ROW_PAD
+}
+
 fn title_font() -> egui::FontId {
     theme::sans(tokens::FS_2, FontWeight::Medium)
 }
@@ -1170,16 +1199,47 @@ fn checkpoint_row(
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let stacked = width < CHECKPOINT_ROW_STACK_WIDTH;
-    let control_height = tokens.metrics.ctl_h.max(if tokens.metrics.is_touch() {
-        tokens::TOUCH_TARGET
+    let control_height = prompt_control_height(ui);
+    let created = checkpoint_created(checkpoint.created_unix_ms(), now_unix_ms);
+    // The size goes to the hover: checkpoints of one project differ little,
+    // and the time is what tells two of them apart. A checkpoint the reader
+    // wrote a note on is named by it, so its reason moves here; a pinned one
+    // says so first.
+    let size = format_bytes(checkpoint.snapshot_byte_len());
+    let pinned = if checkpoint.pinned() {
+        "Pinned \u{b7} "
     } else {
-        0.0
+        ""
+    };
+    let reason = if checkpoint.note().is_some() {
+        format!("{} \u{b7} ", checkpoint.reason().label())
+    } else {
+        String::new()
+    };
+    let detail = format!(
+        "{pinned}{reason}{created} \u{b7} revision {}",
+        checkpoint.project_revision()
+    );
+    // Over its actions on a narrow card, a row's detail wraps rather than
+    // being cut: there is no pointer to hover for the rest of it.
+    let detail_galley = stacked.then(|| {
+        ui.painter().layout(
+            detail.clone(),
+            detail_font(),
+            tokens.color.text_faint,
+            (width - 2.0 * ROW_INSET).max(1.0),
+        )
     });
-    let text_height = 34.0;
+    let title_line = ui.fonts_mut(|fonts| fonts.row_height(&row_title_font()));
+    let detail_height = detail_galley.as_ref().map_or_else(
+        || ui.fonts_mut(|fonts| fonts.row_height(&detail_font())),
+        |galley| galley.size().y,
+    );
+    let text_height = title_line + LINE_GAP + detail_height;
     let height = if stacked {
-        12.0 + text_height + 6.0 + control_height + 12.0
+        ROW_PAD + text_height + ROW_PAD + control_height + ROW_PAD
     } else {
-        CHECKPOINT_ROW_HEIGHT.max(control_height + 16.0)
+        checkpoint_row_least_height(ui.ctx()).max(control_height + 16.0)
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     if selected {
@@ -1225,7 +1285,7 @@ fn checkpoint_row(
         Rect::from_min_size(
             pos2(
                 rect.left() + ROW_INSET,
-                rect.bottom() - 12.0 - control_height,
+                rect.bottom() - ROW_PAD - control_height,
             ),
             vec2(actions_width, control_height),
         )
@@ -1247,47 +1307,36 @@ fn checkpoint_row(
         actions.left() - 12.0
     };
     let text_top = if stacked {
-        rect.top() + 12.0
+        rect.top() + ROW_PAD
     } else {
         rect.center().y - text_height * 0.5
     };
     let text_width = (text_right - rect.left() - ROW_INSET).max(1.0);
-    let created = checkpoint_created(checkpoint.created_unix_ms(), now_unix_ms);
     paint_elided(
         ui,
         pos2(rect.left() + ROW_INSET, text_top),
         checkpoint.title(),
-        theme::sans(tokens::FS_1, FontWeight::Medium),
+        row_title_font(),
         tokens.color.text,
         text_width,
     );
-    // The size goes to the hover: checkpoints of one project differ little,
-    // and the time is what tells two of them apart. A checkpoint the reader
-    // wrote a note on is named by it, so its reason moves here; a pinned one
-    // says so first.
-    let size = format_bytes(checkpoint.snapshot_byte_len());
-    let pinned = if checkpoint.pinned() {
-        "Pinned \u{b7} "
-    } else {
-        ""
-    };
-    let reason = if checkpoint.note().is_some() {
-        format!("{} \u{b7} ", checkpoint.reason().label())
-    } else {
-        String::new()
-    };
-    let detail = format!(
-        "{pinned}{reason}{created} \u{b7} revision {}",
-        checkpoint.project_revision()
-    );
-    paint_elided(
-        ui,
-        pos2(rect.left() + ROW_INSET, text_top + 19.0),
-        &detail,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        tokens.color.text_faint,
-        text_width,
-    );
+    let detail_top = pos2(rect.left() + ROW_INSET, text_top + title_line + LINE_GAP);
+    match detail_galley {
+        Some(galley) => {
+            ui.painter()
+                .galley(detail_top, galley, tokens.color.text_faint);
+        }
+        None => {
+            paint_elided(
+                ui,
+                detail_top,
+                &detail,
+                detail_font(),
+                tokens.color.text_faint,
+                text_width,
+            );
+        }
+    }
 
     let mut intent = None;
     // A child, not a scope: a scope moves the list's cursor to the bottom of
@@ -1429,17 +1478,14 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
                 for artifact in &snapshot.set_aside {
                     let label = artifact.label();
                     ui.add_space(10.0);
-                    let (rect, response) =
-                        ui.allocate_exact_size(vec2(width, 16.0), Sense::hover());
-                    paint_elided(
+                    // The file's whole name, wrapped: the one thing that
+                    // tells two damaged files apart is never cut.
+                    text_block(
                         ui,
-                        rect.left_top(),
                         label,
                         theme::mono(tokens::FS_0, FontWeight::Medium),
                         tokens.color.text,
-                        width,
                     );
-                    response.on_hover_text(label);
                     text_block(
                         ui,
                         &sentence_case(artifact.reason()),
