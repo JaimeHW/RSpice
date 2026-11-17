@@ -180,6 +180,65 @@ impl<'a> Lexer<'a> {
         Ok(tokens)
     }
 
+    /// Tokenize one card, carrying on past text that does not lex.
+    ///
+    /// Each piece that fails is returned as its error with the bytes it
+    /// covers: an unterminated expression or string runs to the end of the
+    /// input, anything else to the next separator. An editor reading a card
+    /// that is being typed still sees every token after the bad one. No
+    /// newline or end-of-input token is returned.
+    pub fn tokenize_recovering(&mut self) -> Vec<Result<Token, (Span, LexError)>> {
+        let mut tokens = Vec::new();
+        while self.pos < self.input.len() {
+            self.skip_whitespace();
+            if self.pos >= self.input.len() {
+                break;
+            }
+            let remaining = &self.input[self.pos..];
+            let start = self.pos;
+            let line = self.line;
+            match self.next_token(remaining) {
+                Ok((kind, consumed)) if consumed > 0 => {
+                    let end = start + consumed;
+                    if matches!(kind, TokenKind::Newline) {
+                        self.line += 1;
+                    } else {
+                        tokens.push(Ok(Token {
+                            kind,
+                            span: Span { start, end, line },
+                            lexeme: self.input[start..end].to_string(),
+                        }));
+                    }
+                    self.pos = end;
+                }
+                result => {
+                    let error = match result {
+                        Err(error) => error,
+                        Ok(_) => LexError::UnexpectedChar(
+                            remaining.chars().next().unwrap_or('\0'),
+                            self.line,
+                        ),
+                    };
+                    let consumed = match error {
+                        LexError::UnterminatedExpression(_) | LexError::UnterminatedString(_) => {
+                            remaining.find('\n').unwrap_or(remaining.len())
+                        }
+                        _ => remaining
+                            .char_indices()
+                            .skip(1)
+                            .find(|(_, c)| is_field_separator(*c) || *c == '\n')
+                            .map_or(remaining.len(), |(at, _)| at),
+                    };
+                    let end =
+                        start + consumed.max(remaining.chars().next().map_or(1, char::len_utf8));
+                    tokens.push(Err((Span { start, end, line }, error)));
+                    self.pos = end;
+                }
+            }
+        }
+        tokens
+    }
+
     /// Whether the character before the cursor ends a name, with no blank
     /// between them.
     fn follows_name_character(&self) -> bool {

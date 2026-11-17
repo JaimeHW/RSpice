@@ -23,6 +23,12 @@ pub use connect_rules::{DeckConnectRules, DeckConnectStatement};
 mod control_source;
 pub use control_source::ControlScriptSource;
 mod data_table;
+pub mod deck_index;
+pub use deck_index::{
+    DeckCard, DeckCardKind, DeckInclude, DeckIncludeKind, DeckIndex, DeckIndexSource, DeckLocation,
+    DeckNameAt, DeckNode, DeckReference, DeckScope, DeckSymbol, DeckSymbolKind, DeckToken,
+    DeckTokenKind,
+};
 mod exp_train;
 pub mod expr;
 mod flattener;

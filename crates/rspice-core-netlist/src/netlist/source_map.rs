@@ -324,25 +324,48 @@ pub fn source_map_for_editor_as_read<'a>(
 /// read. [`source_map_for_editor_as_read`] applies what a parse skipped.
 pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     let mut map = NetlistSourceMap::default();
-    let mut logical = None;
     let mut scopes = Vec::new();
+    for_each_logical_line(
+        buffer,
+        1,
+        |raw| Some(&raw[..find_inline_comment(raw).unwrap_or(raw.len())]),
+        |line| process_logical_line(&line, &mut scopes, &mut map),
+    );
+    map
+}
+
+/// Join `buffer` into logical cards and hand each to `each`, in source order.
+///
+/// The first `skipped_lines` physical lines are not read (a root deck's title).
+/// `code_of` gives the part of a physical line before its comment, a prefix of
+/// it, or `None` for a line that is a comment as a whole; a line whose code is
+/// blank or starts with `*` is a comment too. A line whose code starts with `+`
+/// continues the card before it, joined by one space.
+pub(super) fn for_each_logical_line<'a>(
+    buffer: &'a str,
+    skipped_lines: usize,
+    code_of: impl Fn(&'a str) -> Option<&'a str>,
+    mut each: impl FnMut(MappedLine),
+) {
+    let mut logical: Option<MappedLine> = None;
     let mut offset = 0usize;
 
     for (line_index, physical) in buffer.split_inclusive('\n').enumerate() {
-        if line_index == 0 {
+        if line_index < skipped_lines {
             offset += physical.len();
             continue;
         }
 
         let raw = physical.strip_suffix('\n').unwrap_or(physical);
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
-        let code_end = find_inline_comment(raw).unwrap_or(raw.len());
-        let code = &raw[..code_end];
+        let code = code_of(raw).unwrap_or_default();
         let trimmed = code.trim_start();
         let lead = code.len() - trimmed.len();
 
         if trimmed.is_empty() || trimmed.starts_with('*') {
-            flush_logical_line(&mut logical, &mut scopes, &mut map);
+            if let Some(line) = logical.take() {
+                each(line);
+            }
             offset += physical.len();
             continue;
         }
@@ -359,7 +382,9 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
                 );
             }
         } else {
-            flush_logical_line(&mut logical, &mut scopes, &mut map);
+            if let Some(line) = logical.take() {
+                each(line);
+            }
             let mut line = MappedLine::default();
             line.push_segment(trimmed, offset + lead, line_index + 1);
             logical = Some(line);
@@ -368,26 +393,16 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
         offset += physical.len();
     }
 
-    if !buffer.ends_with('\n') && !buffer.is_empty() {
-        // `split_inclusive` already yielded the final unterminated line.
-    }
-    flush_logical_line(&mut logical, &mut scopes, &mut map);
-    map
-}
-
-fn flush_logical_line(
-    line: &mut Option<MappedLine>,
-    scopes: &mut Vec<String>,
-    map: &mut NetlistSourceMap,
-) {
-    if let Some(line) = line.take() {
-        process_logical_line(&line, scopes, map);
+    if let Some(line) = logical.take() {
+        each(line);
     }
 }
 
+/// One logical card, its continuation lines joined, with the buffer position
+/// of every byte of the joined text.
 #[derive(Default)]
-struct MappedLine {
-    text: String,
+pub(super) struct MappedLine {
+    pub(super) text: String,
     byte_offsets: Vec<usize>,
     /// One-based physical line each byte of `text` came from.
     physical_lines: Vec<usize>,
@@ -424,7 +439,15 @@ impl MappedLine {
             .extend(std::iter::repeat_n(false, segment.len()));
     }
 
-    fn original_span(&self, span: Range<usize>) -> Option<Range<usize>> {
+    /// The first and last one-based physical line the card is written on.
+    pub(super) fn physical_lines(&self) -> (usize, usize) {
+        (
+            self.physical_lines.first().copied().unwrap_or(1),
+            self.physical_lines.last().copied().unwrap_or(1),
+        )
+    }
+
+    pub(super) fn original_span(&self, span: Range<usize>) -> Option<Range<usize>> {
         if span.is_empty() || span.end > self.byte_offsets.len() {
             return None;
         }
@@ -436,7 +459,7 @@ impl MappedLine {
     /// Split a logical span into the buffer ranges it occupies, one per
     /// contiguous run on one physical line. Bytes the joiner inserted own no
     /// buffer position and end the run they follow.
-    fn original_runs(&self, span: Range<usize>) -> Vec<(Range<usize>, usize)> {
+    pub(super) fn original_runs(&self, span: Range<usize>) -> Vec<(Range<usize>, usize)> {
         let mut runs: Vec<(Range<usize>, usize)> = Vec::new();
         for index in span.start..span.end.min(self.byte_offsets.len()) {
             if self.inserted[index] {
@@ -456,7 +479,7 @@ impl MappedLine {
 
     /// The buffer range and physical line of a logical span that lies on one
     /// physical line, or `None` when it crosses a continuation.
-    fn original_run(&self, span: Range<usize>) -> Option<(Range<usize>, usize)> {
+    pub(super) fn original_run(&self, span: Range<usize>) -> Option<(Range<usize>, usize)> {
         match self.original_runs(span).as_slice() {
             [run] => Some(run.clone()),
             _ => None,
@@ -539,13 +562,13 @@ fn defines_parameters(head: &str) -> bool {
 }
 
 /// One value slot found on a logical line.
-struct LogicalValue {
+pub(super) struct LogicalValue {
     /// Name this value is assigned to, when it is the right side of `name=`.
-    name: Option<Range<usize>>,
+    pub(super) name: Option<Range<usize>>,
     /// The value as written, braces or quotes included.
-    token: Range<usize>,
+    pub(super) token: Range<usize>,
     /// The expression body, braces or quotes removed.
-    body: Range<usize>,
+    pub(super) body: Range<usize>,
 }
 
 fn collect_value_spans(
@@ -696,7 +719,7 @@ fn collect_expression_spans(
 
 /// Every value slot on a logical line: braced, quoted, and bare right sides of
 /// `name=`, plus free-standing brace and quote groups.
-fn logical_values(text: &str) -> Vec<LogicalValue> {
+pub(super) fn logical_values(text: &str) -> Vec<LogicalValue> {
     let bytes = text.as_bytes();
     let mut values = Vec::new();
     let mut pending_name = None;
@@ -1039,7 +1062,7 @@ fn reference_from_span(
     })
 }
 
-fn token_spans(line: &str) -> Vec<Range<usize>> {
+pub(super) fn token_spans(line: &str) -> Vec<Range<usize>> {
     let mut spans = Vec::new();
     let mut start = None;
     for (byte, ch) in line.char_indices() {
@@ -1057,7 +1080,7 @@ fn token_spans(line: &str) -> Vec<Range<usize>> {
     spans
 }
 
-fn is_param_boundary(token: &str) -> bool {
+pub(super) fn is_param_boundary(token: &str) -> bool {
     token.eq_ignore_ascii_case("params")
         || token.eq_ignore_ascii_case("params:")
         || token.eq_ignore_ascii_case("off")
