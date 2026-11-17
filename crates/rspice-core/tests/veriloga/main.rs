@@ -40,6 +40,8 @@ mod deck_connect_rules;
 mod device_engine_roundtrip;
 mod diode_native;
 #[cfg(feature = "veriloga")]
+mod driver_receiver_segregation;
+#[cfg(feature = "veriloga")]
 mod execution_backends;
 mod expression_stack_safety;
 #[cfg(feature = "veriloga")]

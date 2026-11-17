@@ -917,9 +917,32 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::Compile { detail })
     }
 
+    /// Segregate the connected nets a bidirectional connect module's digital
+    /// port joins: `members` are that port's bits.
+    #[doc(hidden)]
+    pub fn segregate_bits(
+        &mut self,
+        members: &[super::store::DigitalBitConnection],
+    ) -> Result<(), DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
+        self.store
+            .segregate_bits(members)
+            .map_err(|detail| DigitalRunError::Compile { detail })
+    }
+
     #[doc(hidden)]
     pub fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         self.store.connected_value(net)
+    }
+
+    /// What the design's receivers of event net `net` see; see
+    /// `DigitalSignalStore::received_value`.
+    pub(crate) fn received_value(&self, net: usize) -> Option<DigitalValue> {
+        self.store.received_value(net)
     }
 
     pub(crate) fn boundary_drive(

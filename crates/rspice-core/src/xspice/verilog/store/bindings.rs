@@ -37,6 +37,53 @@ struct BitNet {
     members: Vec<DigitalBitConnection>,
     contributions: Vec<(usize, u32)>,
     external_nets: Vec<usize>,
+    /// The net's driver-receiver segregation, when a bidirectional connect
+    /// module joins it.
+    segregation: Option<Segregation>,
+}
+
+/// Driver-receiver segregation on a net a bidirectional connect module
+/// joins (Verilog-AMS LRM 2.4 sections 7.8.4 and 9.22.5): every other
+/// driver of the net resolves together, and that resolution is what the
+/// connect module's digital port reads; the connect module's own drive, an
+/// authored module's assignment to that port or the built-in bidirectional
+/// converter's A/D half, is all the net's receivers see.
+#[derive(Clone, Default, serde::Serialize)]
+struct Segregation {
+    /// Members that are a bidirectional connect module's digital port.
+    converter_members: Vec<DigitalBitConnection>,
+    /// Their contributions: the connect module's assignments to the port.
+    converter_contributions: Vec<(usize, u32)>,
+    /// Every other member: the net's receivers, and drivers where they drive.
+    driver_members: Vec<DigitalBitConnection>,
+    /// Every other contribution: the net's drivers in the design.
+    driver_contributions: Vec<(usize, u32)>,
+    /// The external drivers that are a built-in bidirectional converter's
+    /// A/D half.
+    converter_externals: Vec<usize>,
+}
+
+impl Segregation {
+    /// A net none of whose members or contributions is a converter's yet.
+    fn all_drivers(members: &[DigitalBitConnection], contributions: &[(usize, u32)]) -> Self {
+        Self {
+            driver_members: members.to_vec(),
+            driver_contributions: contributions.to_vec(),
+            ..Self::default()
+        }
+    }
+}
+
+/// What a connected net reads as: the drive of the design `hdl`, what its
+/// receivers see, and what a converter reading the net's other drivers sees.
+/// The last two differ only on a segregated net.
+#[derive(Clone, Copy)]
+struct NetReading {
+    hdl: StrengthBit,
+    /// Every driver resolved, as XSPICE resolves an event node.
+    resolved: DigitalValue,
+    receivers: DigitalValue,
+    drivers: DigitalValue,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -54,7 +101,11 @@ struct BitTopology {
 
 pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
+    /// Each net's value as XSPICE resolves an event node: every driver.
     resolved: Vec<DigitalValue>,
+    /// Each net's value as its HDL receivers see it, which the trace
+    /// records: `resolved`, but on a segregated net the converter's drive.
+    received: Vec<DigitalValue>,
     external_values: Vec<DigitalValue>,
     other_driver_values: Vec<DigitalValue>,
     pending: Vec<Option<FourStateValue>>,
@@ -68,6 +119,7 @@ impl Clone for ConnectedBits {
         let Self {
             topology,
             resolved,
+            received,
             external_values,
             other_driver_values,
             pending,
@@ -76,6 +128,7 @@ impl Clone for ConnectedBits {
         Self {
             topology: Arc::clone(topology),
             resolved: resolved.clone(),
+            received: received.clone(),
             external_values: external_values.clone(),
             other_driver_values: other_driver_values.clone(),
             pending: pending.clone(),
@@ -87,6 +140,7 @@ impl Clone for ConnectedBits {
         let Self {
             topology,
             resolved,
+            received,
             external_values,
             other_driver_values,
             pending,
@@ -95,6 +149,7 @@ impl Clone for ConnectedBits {
         let Self {
             topology: source_topology,
             resolved: source_resolved,
+            received: source_received,
             external_values: source_external_values,
             other_driver_values: source_other_driver_values,
             pending: source_pending,
@@ -102,6 +157,7 @@ impl Clone for ConnectedBits {
         } = source;
         topology.clone_from(source_topology);
         resolved.clone_from(source_resolved);
+        received.clone_from(source_received);
         external_values.clone_from(source_external_values);
         other_driver_values.clone_from(source_other_driver_values);
         pending.clone_from(source_pending);
@@ -116,12 +172,14 @@ impl ConnectedBits {
         let Self {
             topology: _,
             resolved,
+            received,
             external_values,
             other_driver_values,
             pending,
             touched,
         } = self;
         *resolved == saved.resolved
+            && *received == saved.received
             && *external_values == saved.external_values
             && *other_driver_values == saved.other_driver_values
             && *pending == saved.pending
@@ -135,6 +193,7 @@ impl ConnectedBits {
         Ok(BitCheckpoint {
             topology: super::checkpoint::fingerprint(self.topology.as_ref())?,
             resolved: self.resolved.clone(),
+            received: self.received.clone(),
             external: self.external_values.clone(),
             other_drivers: self.other_driver_values.clone(),
         })
@@ -143,6 +202,7 @@ impl ConnectedBits {
     pub(super) fn restore_checkpoint(&self, image: &BitCheckpoint) -> Result<Self, String> {
         if image.topology != super::checkpoint::fingerprint(self.topology.as_ref())?
             || image.resolved.len() != self.resolved.len()
+            || image.received.len() != self.received.len()
             || image.external.len() != self.external_values.len()
             || image.other_drivers.len() != self.other_driver_values.len()
         {
@@ -150,6 +210,7 @@ impl ConnectedBits {
         }
         let mut restored = Self::fresh(Arc::clone(&self.topology));
         restored.resolved.clone_from(&image.resolved);
+        restored.received.clone_from(&image.received);
         restored.external_values.clone_from(&image.external);
         restored
             .other_driver_values
@@ -160,6 +221,7 @@ impl ConnectedBits {
     fn fresh(topology: Arc<BitTopology>) -> Self {
         Self {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
+            received: vec![DigitalValue::high_z(); topology.nets.len()],
             external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             other_driver_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             pending: vec![None; topology.by_signal.len()],
@@ -186,6 +248,7 @@ impl ConnectedBits {
 pub(super) struct BitCheckpoint {
     topology: [u8; 32],
     resolved: Vec<DigitalValue>,
+    received: Vec<DigitalValue>,
     external: Vec<DigitalValue>,
     other_drivers: Vec<DigitalValue>,
 }
@@ -278,6 +341,7 @@ impl DigitalSignalStore {
                     members: Vec::new(),
                     contributions: Vec::new(),
                     external_nets: Vec::new(),
+                    segregation: None,
                 });
                 index
             });
@@ -309,6 +373,96 @@ impl DigitalSignalStore {
         }
         topology.external_by_net = vec![Vec::new(); topology.nets.len()];
         self.connected = Some(ConnectedBits::fresh(Arc::new(topology)));
+        Ok(())
+    }
+
+    /// Segregate the nets that `members`, the bits of a bidirectional
+    /// connect module's digital port, join; see [`Segregation`]. Runs after
+    /// [`Self::connect_bits`] and before any process executes.
+    pub(crate) fn segregate_bits(
+        &mut self,
+        members: &[DigitalBitConnection],
+    ) -> Result<(), String> {
+        if members.is_empty() {
+            return Ok(());
+        }
+        let connected = self.connected.as_mut().ok_or("no connected bit topology")?;
+        let topology = Arc::make_mut(&mut connected.topology);
+        for member in members {
+            let index = topology
+                .by_signal
+                .get(usize::from(member.signal))
+                .into_iter()
+                .flatten()
+                .copied()
+                .find(|&index| topology.nets[index].members.contains(member))
+                .ok_or_else(|| {
+                    format!(
+                        "connect module port bit {} of signal {} joins no event net",
+                        member.bit,
+                        usize::from(member.signal)
+                    )
+                })?;
+            let net = &mut topology.nets[index];
+            let segregation = net
+                .segregation
+                .get_or_insert_with(|| Segregation::all_drivers(&net.members, &net.contributions));
+            if !segregation.converter_members.contains(member) {
+                segregation.converter_members.push(*member);
+            }
+        }
+        for net in &mut topology.nets {
+            let Some(segregation) = &mut net.segregation else {
+                continue;
+            };
+            let converter = &segregation.converter_members;
+            let owned = |&(slot, offset): &(usize, u32)| {
+                converter.iter().any(|member| {
+                    let span = self.spans[usize::from(member.signal)];
+                    (span.start..span.start + span.count).contains(&slot)
+                        && i64::from(member.bit) - self.contributions[slot].low == i64::from(offset)
+                })
+            };
+            let (converter_contributions, driver_contributions) = net
+                .contributions
+                .iter()
+                .partition(|contribution| owned(contribution));
+            segregation.converter_contributions = converter_contributions;
+            segregation.driver_contributions = driver_contributions;
+            segregation.driver_members = net
+                .members
+                .iter()
+                .filter(|member| !converter.contains(member))
+                .copied()
+                .collect();
+        }
+        Ok(())
+    }
+
+    /// Segregate the nets that the external `drivers`, a built-in
+    /// bidirectional converter's A/D half each, drive; see [`Segregation`].
+    pub(crate) fn segregate_external_bits(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), String> {
+        if drivers.is_empty() {
+            return Ok(());
+        }
+        let connected = self.connected.as_mut().ok_or("no connected bit topology")?;
+        let topology = Arc::make_mut(&mut connected.topology);
+        for driver in drivers {
+            let (net, _) = topology
+                .external_sources
+                .get(driver.0)
+                .ok_or_else(|| format!("unknown external bit driver {}", driver.0))?;
+            let net = &mut topology.nets[topology.external_nets[*net]];
+            let segregation = net
+                .segregation
+                .get_or_insert_with(|| Segregation::all_drivers(&net.members, &net.contributions));
+            if !segregation.converter_externals.contains(&driver.0) {
+                segregation.converter_externals.push(driver.0);
+            }
+        }
         Ok(())
     }
 
@@ -363,13 +517,23 @@ impl DigitalSignalStore {
                 .find_map(|member| self.forced_bit(member.signal, member.bit))
         };
         forced
-            .map_or_else(|| self.connected_strength(net), StrengthBit::strong)
+            .map_or_else(|| self.driver_strength(net), StrengthBit::strong)
             .drive()
     }
 
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         let bits = self.connected.as_ref()?;
         bits.resolved
+            .get(*bits.topology.external_nets.get(net)?)
+            .copied()
+    }
+
+    /// What the HDL receivers of the caller's event net `net` see: its
+    /// [`Self::connected_value`], but on a segregated net the converter's
+    /// drive alone.
+    pub(crate) fn received_value(&self, net: usize) -> Option<DigitalValue> {
+        let bits = self.connected.as_ref()?;
+        bits.received
             .get(*bits.topology.external_nets.get(net)?)
             .copied()
     }
@@ -400,7 +564,7 @@ impl DigitalSignalStore {
         if drivers.peek().is_none() || self.forced_connected_value(net).is_some() {
             return Some(self.net_drive(net));
         }
-        let resolved = drivers.fold(self.connected_strength(net), |resolved, value| {
+        let resolved = drivers.fold(self.driver_strength(net), |resolved, value| {
             resolved.resolve(logic_map::hdl_strength(value))
         });
         Some(resolved.drive())
@@ -627,16 +791,118 @@ impl DigitalSignalStore {
     /// their drive strengths in a design with strengths, and otherwise the
     /// table 4-1 resolution of its four-state values, driven strong.
     fn connected_hdl_drive(&self, net: &BitNet) -> StrengthBit {
+        self.hdl_drive_of(&net.contributions, &net.members)
+    }
+
+    /// [`Self::connected_hdl_drive`] of some of a net's contributions and
+    /// members.
+    fn hdl_drive_of(
+        &self,
+        contributions: &[(usize, u32)],
+        members: &[DigitalBitConnection],
+    ) -> StrengthBit {
         if self.strengths.any {
-            self.connected_strength(net)
+            self.strength_of(contributions, members)
         } else {
-            StrengthBit::strong(self.connected_four_state(net))
+            StrengthBit::strong(self.four_state_of(contributions))
         }
     }
 
-    /// A connected net's contributions under IEEE 1364-2005 table 4-1.
-    fn connected_four_state(&self, net: &BitNet) -> FourStateBit {
-        net.contributions
+    /// What a net's drivers in the design drive, at their strengths: every
+    /// contribution but a bidirectional connect module's on a segregated net.
+    fn driver_strength(&self, net: &BitNet) -> StrengthBit {
+        match &net.segregation {
+            Some(segregation) => self.strength_of(
+                &segregation.driver_contributions,
+                &segregation.driver_members,
+            ),
+            None => self.connected_strength(net),
+        }
+    }
+
+    /// How the net reads; see [`NetReading`]. A forced member decides both
+    /// readings of a segregated net.
+    fn read_connected_net(&self, connected: &ConnectedBits, net_index: usize) -> NetReading {
+        let net = &connected.topology.nets[net_index];
+        let forced = self.forced_connected_value(net);
+        let Some(segregation) = &net.segregation else {
+            let hdl = self.connected_hdl_drive(net);
+            let resolved = forced
+                .unwrap_or_else(|| self.connected_external_value(connected, net_index, hdl, None));
+            return NetReading {
+                hdl,
+                resolved,
+                receivers: resolved,
+                drivers: resolved,
+            };
+        };
+        let converters = &segregation.converter_externals;
+        let hdl = self.hdl_drive_of(
+            &segregation.converter_contributions,
+            &segregation.converter_members,
+        );
+        let receivers = forced.unwrap_or_else(|| {
+            self.external_value_with(connected, net_index, hdl, &|slot| {
+                converters.contains(&slot)
+            })
+        });
+        let drivers = forced.unwrap_or_else(|| {
+            let hdl = self.hdl_drive_of(
+                &segregation.driver_contributions,
+                &segregation.driver_members,
+            );
+            self.external_value_with(connected, net_index, hdl, &|slot| {
+                !converters.contains(&slot)
+            })
+        });
+        // XSPICE resolves an event node over every driver on it, the
+        // converter's receiving half among them; only the design's receivers
+        // are segregated. A code model reading the node, the converter's own
+        // inout port included, keeps reading it as ngspice resolves it.
+        let resolved = forced.unwrap_or_else(|| {
+            self.connected_external_value(connected, net_index, self.connected_hdl_drive(net), None)
+        });
+        NetReading {
+            hdl,
+            resolved,
+            receivers,
+            drivers,
+        }
+    }
+
+    /// What the external driver `slot` of a net, an inout one, reads of it:
+    /// every driver but itself, or on a segregated net, the other drivers
+    /// when it is the converter and the converter's drive when it is not.
+    fn observer_reading(
+        &self,
+        connected: &ConnectedBits,
+        net_index: usize,
+        slot: usize,
+        reading: NetReading,
+    ) -> DigitalValue {
+        match &connected.topology.nets[net_index].segregation {
+            None => self.connected_external_value(connected, net_index, reading.hdl, Some(slot)),
+            Some(segregation) if segregation.converter_externals.contains(&slot) => reading.drivers,
+            Some(_) => reading.receivers,
+        }
+    }
+
+    /// The bit member `member` of a net reads.
+    fn member_reading(
+        net: &BitNet,
+        member: &DigitalBitConnection,
+        reading: NetReading,
+    ) -> DigitalValue {
+        match &net.segregation {
+            Some(segregation) if segregation.converter_members.contains(member) => reading.drivers,
+            _ => reading.receivers,
+        }
+    }
+
+    /// A connected net's contributions, or some of them, under IEEE 1364-2005
+    /// table 4-1.
+    fn four_state_of(&self, contributions: &[(usize, u32)]) -> FourStateBit {
+        contributions
             .iter()
             .fold(FourStateBit::HighImpedance, |resolved, &(slot, offset)| {
                 let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
@@ -654,8 +920,18 @@ impl DigitalSignalStore {
     /// driver each member's net type adds (section 7.10): the members are one
     /// net, so a `tri0` port pulls the net it is connected to.
     fn connected_strength(&self, net: &BitNet) -> StrengthBit {
+        self.strength_of(&net.contributions, &net.members)
+    }
+
+    /// [`Self::connected_strength`] of some of a net's contributions and
+    /// members.
+    fn strength_of(
+        &self,
+        contributions: &[(usize, u32)],
+        members: &[DigitalBitConnection],
+    ) -> StrengthBit {
         let mut resolved =
-            net.contributions
+            contributions
                 .iter()
                 .fold(StrengthBit::HIGH_Z, |resolved, &(slot, offset)| {
                     let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
@@ -669,7 +945,7 @@ impl DigitalSignalStore {
                     resolved.resolve(self.contribution_bit(slot, value, offset))
                 });
         let mut seen = None;
-        for member in &net.members {
+        for member in members {
             if seen == Some(member.signal) {
                 continue;
             }
@@ -700,10 +976,22 @@ impl DigitalSignalStore {
         hdl: StrengthBit,
         excluded: Option<usize>,
     ) -> DigitalValue {
+        self.external_value_with(connected, net_index, hdl, &|slot| excluded != Some(slot))
+    }
+
+    /// [`Self::connected_external_value`] with the XSPICE drivers `include`
+    /// admits.
+    fn external_value_with(
+        &self,
+        connected: &ConnectedBits,
+        net_index: usize,
+        hdl: StrengthBit,
+        include: &dyn Fn(usize) -> bool,
+    ) -> DigitalValue {
         let drivers = || {
             connected.topology.external_by_net[net_index]
                 .iter()
-                .filter(move |&&slot| excluded != Some(slot))
+                .filter(move |&&slot| include(slot))
                 .map(|&slot| connected.external_values[slot])
                 .filter(|value| value.state != DigitalState::HighZ)
         };
@@ -746,12 +1034,12 @@ impl DigitalSignalStore {
         };
         for (index, net) in connected.topology.nets.iter().enumerate() {
             members.extend(net.members.iter().copied());
-            let hdl = self.connected_hdl_drive(net);
-            let resolved = self.connected_external_value(connected, index, hdl, None);
-            let resolved = self.forced_connected_value(net).unwrap_or(resolved);
-            if connected.resolved[index] != resolved
+            let reading = self.read_connected_net(connected, index);
+            if connected.resolved[index] != reading.resolved
+                || connected.received[index] != reading.receivers
                 || net.members.iter().any(|member| {
-                    self.values[usize::from(member.signal)].bit(member.bit) != hdl_bit(resolved)
+                    self.values[usize::from(member.signal)].bit(member.bit)
+                        != hdl_bit(Self::member_reading(net, member, reading))
                 })
             {
                 return Err(format!(
@@ -761,7 +1049,7 @@ impl DigitalSignalStore {
             }
             for &slot in &connected.topology.external_by_net[index] {
                 let expected = if connected.topology.other_driver_observers[slot] {
-                    self.connected_external_value(connected, index, hdl, Some(slot))
+                    self.observer_reading(connected, index, slot, reading)
                 } else {
                     DigitalValue::high_z()
                 };
@@ -785,16 +1073,14 @@ impl DigitalSignalStore {
     ) {
         let topology = Arc::clone(&connected.topology);
         let net = &topology.nets[net_index];
-        let hdl = self.connected_hdl_drive(net);
         // A forced member bit decides the whole connected net (IEEE 1364-2005
         // section 9.3.2): a converter reading it sees the forced value, and a
         // drive from outside the design is overridden while the force lasts.
-        let resolved = self
-            .forced_connected_value(net)
-            .unwrap_or_else(|| self.connected_external_value(connected, net_index, hdl, None));
+        let reading = self.read_connected_net(connected, net_index);
+        let resolved = reading.resolved;
         for &slot in &topology.external_by_net[net_index] {
             if topology.other_driver_observers[slot] {
-                let value = self.connected_external_value(connected, net_index, hdl, Some(slot));
+                let value = self.observer_reading(connected, net_index, slot, reading);
                 let previous = std::mem::replace(&mut connected.other_driver_values[slot], value);
                 if previous != value {
                     self.external_changes.push(ExternalNetChange::DriverInput {
@@ -806,10 +1092,15 @@ impl DigitalSignalStore {
                 }
             }
         }
+        let received = std::mem::replace(&mut connected.received[net_index], reading.receivers);
+        if received != reading.receivers {
+            for &net in &net.external_nets {
+                self.trace_resolved_bit(net, reading.receivers);
+            }
+        }
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
         if previous != resolved {
             for &net in &net.external_nets {
-                self.trace_resolved_bit(net, resolved);
                 if topology.observed[net] {
                     self.external_changes
                         .push(ExternalNetChange::Bits(DigitalBitChange {
@@ -822,9 +1113,10 @@ impl DigitalSignalStore {
             }
         }
         for member in &net.members {
+            let value = Self::member_reading(net, member, reading);
             connected
                 .edit(member.signal, &self.values[usize::from(member.signal)])
-                .set_bit(member.bit, hdl_bit(resolved));
+                .set_bit(member.bit, hdl_bit(value));
         }
     }
 

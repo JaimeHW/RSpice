@@ -743,13 +743,21 @@ impl CircuitData {
             // runtime. Preserve the previous owners until every attachment has
             // validated; a partial link must not leave standalone models as views.
             let rollback = self.mixed_signal_hosts.clone();
+            let connect_modules = self
+                .converter_insertions
+                .iter()
+                .filter(|insertion| insertion.kind == super::ConverterKind::Authored)
+                .map(|insertion| insertion.instance.clone())
+                .collect();
             let linked = (|| {
-                let mut coordinator = crate::xspice::verilog::MixedDigitalCoordinator::enroll(
-                    &mut self.mixed_signal_hosts,
-                    event_nodes,
-                    control,
-                )
-                .map_err(shared_error)?;
+                let mut coordinator =
+                    crate::xspice::verilog::MixedDigitalCoordinator::enroll_with_connect_modules(
+                        &mut self.mixed_signal_hosts,
+                        event_nodes,
+                        control,
+                        &connect_modules,
+                    )
+                    .map_err(shared_error)?;
                 let bindings = XspiceDigitalBindings::enroll_circuit(self, &mut coordinator)
                     .map_err(|error| shared_error(error.into()))?;
                 Ok::<_, SimulationError>((coordinator, bindings))
@@ -1840,9 +1848,11 @@ impl CircuitData {
 
         let mut claims: Vec<(crate::circuit::NodeId, Claim, DigitalValue)> = Vec::new();
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
+            // What the design's receivers see, which on a segregated net is
+            // the connect module's drive alone.
             claims.extend(
                 digital
-                    .event_values()
+                    .received_event_values()
                     .map(|(node, value)| (node, Claim::Resolved, value)),
             );
             // A port's deck net that a code model drives beside the port
@@ -1853,7 +1863,7 @@ impl CircuitData {
                 for host in &self.mixed_signal_hosts {
                     host.traced_port_endpoints(|deck, endpoint| {
                         if bindings.code_model_drives(endpoint)
-                            && let Some(value) = digital.event_value(endpoint)
+                            && let Some(value) = digital.received_event_value(endpoint)
                         {
                             claims.push((deck, Claim::Resolved, value));
                         }

@@ -416,6 +416,19 @@ impl MixedDigitalCoordinator {
         event_nodes: &std::collections::BTreeSet<usize>,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
+        Self::enroll_with_connect_modules(hosts, event_nodes, control, &Default::default())
+    }
+
+    /// [`Self::enroll`], where `connect_modules` names the hosts that are
+    /// inserted connect modules: a net the bidirectional digital port of one
+    /// joins is segregated (Verilog-AMS LRM 2.4 section 7.8.4).
+    #[doc(hidden)]
+    pub fn enroll_with_connect_modules(
+        hosts: &mut [MixedSignalHost],
+        event_nodes: &std::collections::BTreeSet<usize>,
+        control: &dyn rspice_veriloga::PipelineControl,
+        connect_modules: &std::collections::BTreeSet<String>,
+    ) -> Result<Self, MixedSignalError> {
         for host in hosts.iter() {
             host.require_idle("link circuit digital execution")?;
             if host.digital_started || host.state.started || host.state.digital.is_view() {
@@ -590,7 +603,24 @@ impl MixedDigitalCoordinator {
             usize,
             Vec<super::super::store::DigitalBitConnection>,
         >::new();
+        // The bits of an inserted connect module's bidirectional digital
+        // port: the nets they join are segregated (LRM 2.4 section 7.8.4).
+        let mut converter_bits = Vec::new();
         for (host, signals) in hosts.iter().zip(&port_signals) {
+            let converter = connect_modules.contains(&host.instance)
+                || crate::xspice::is_auto_bridge_name(&host.instance);
+            for port in host.event_ports.iter().filter(|port| {
+                converter
+                    && port.direction == DigitalLinkDirection::Inout
+                    && event_nodes.contains(&port.node)
+            }) {
+                if let Some(bit) = port.bit {
+                    converter_bits.push(super::super::store::DigitalBitConnection {
+                        signal: signals[usize::from(port.signal)],
+                        bit,
+                    });
+                }
+            }
             for (signal, bit, node) in host
                 .state
                 .bridges
@@ -688,6 +718,7 @@ impl MixedDigitalCoordinator {
         super::digital_edges::watch_enrolled(&mut digital, hosts, &maps);
         if !bit_groups.is_empty() {
             digital.connect_bits(&bit_groups)?;
+            digital.segregate_bits(&converter_bits)?;
         }
         for (host, view) in hosts.iter_mut().zip(views) {
             if !event_nodes.is_empty() {
@@ -937,6 +968,14 @@ impl MixedDigitalCoordinator {
         self.digital.make_mut().observe_other_drivers(drivers)
     }
 
+    #[doc(hidden)]
+    pub fn segregate_external_bits(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), DigitalRunError> {
+        self.digital.make_mut().segregate_external_bits(drivers)
+    }
+
     #[cfg(test)]
     #[doc(hidden)]
     pub fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
@@ -1106,11 +1145,32 @@ impl MixedDigitalCoordinator {
         })
     }
 
-    /// The value the event net the circuit's event node `node` carries
-    /// resolved to, or `None` for a node that is not the design's.
-    pub(crate) fn event_value(&self, node: usize) -> Option<crate::xspice::DigitalValue> {
+    /// What the design's receivers of the event net the circuit's event node
+    /// `node` carries see: the value it resolved to, or `None` for a node
+    /// that is not the design's; but on a net a
+    /// bidirectional connect module segregates, that module's drive alone.
+    pub(crate) fn received_event_value(&self, node: usize) -> Option<crate::xspice::DigitalValue> {
         let net = self.event_nodes.iter().position(|&event| event == node)?;
-        self.digital.connected_value(net)
+        self.digital.received_value(net)
+    }
+
+    /// Every event net's [`Self::received_event_value`]: the values the
+    /// event trace records.
+    pub(crate) fn received_event_values(
+        &self,
+    ) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {
+        self.event_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, &node)| {
+                (
+                    node,
+                    self.digital
+                        .received_value(index)
+                        .expect("elaborated event bit"),
+                )
+            })
+            .filter(|(node, _)| *node > 0)
     }
 
     #[doc(hidden)]

@@ -488,6 +488,23 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })
     }
 
+    /// Segregate the nets the external `drivers`, a built-in bidirectional
+    /// converter's A/D half each, drive.
+    #[doc(hidden)]
+    pub fn segregate_external_bits(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
+        self.store
+            .segregate_external_bits(drivers)
+            .map_err(|detail| DigitalRunError::ExternalExecution { detail })
+    }
+
     #[cfg(test)]
     #[doc(hidden)]
     pub fn attach_external_reals(

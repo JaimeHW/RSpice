@@ -100,10 +100,13 @@ impl XspiceDigitalBindings {
         coordinator: &mut crate::xspice::verilog::MixedDigitalCoordinator,
     ) -> Result<Option<Self>, DigitalRunError> {
         let nets: Vec<_> = coordinator.event_bindings().collect();
-        let bits = Self::enroll_with(circuit, &nets, |observed, drivers, inouts| {
+        let bits = Self::enroll_with(circuit, &nets, |observed, drivers, inouts, bidis| {
             let ids = coordinator.attach_external_bits(observed, drivers)?;
             coordinator.observe_other_drivers(
                 &inouts.iter().map(|&index| ids[index]).collect::<Vec<_>>(),
+            )?;
+            coordinator.segregate_external_bits(
+                &bidis.iter().map(|&index| ids[index]).collect::<Vec<_>>(),
             )?;
             Ok(ids)
         })?;
@@ -186,10 +189,13 @@ impl XspiceDigitalBindings {
         digital: &mut DigitalHost,
         nets: &[(NodeId, usize)],
     ) -> Result<Option<Self>, DigitalRunError> {
-        Self::enroll_with(circuit, nets, |observed, drivers, inouts| {
+        Self::enroll_with(circuit, nets, |observed, drivers, inouts, bidis| {
             let ids = digital.attach_external_bits(observed, drivers)?;
             digital.observe_other_drivers(
                 &inouts.iter().map(|&index| ids[index]).collect::<Vec<_>>(),
+            )?;
+            digital.segregate_external_bits(
+                &bidis.iter().map(|&index| ids[index]).collect::<Vec<_>>(),
             )?;
             Ok(ids)
         })
@@ -201,6 +207,7 @@ impl XspiceDigitalBindings {
         attach: impl FnOnce(
             &[usize],
             &[(usize, EventTarget)],
+            &[usize],
             &[usize],
         ) -> Result<Vec<ExternalBitDriverId>, DigitalRunError>,
     ) -> Result<Option<Self>, DigitalRunError> {
@@ -258,10 +265,18 @@ impl XspiceDigitalBindings {
             .enumerate()
             .filter_map(|(index, (_, target))| inout_sources.contains_key(target).then_some(index))
             .collect();
+        // A built-in bidirectional converter's A/D half drives the net's
+        // receivers alone (LRM 2.4 section 7.8.4).
+        let bidis: Vec<_> = inouts
+            .iter()
+            .copied()
+            .filter(|&index| converter_targets.contains(&targets[index].1))
+            .collect();
         let ids = attach(
             &by_node.values().copied().collect::<Vec<_>>(),
             &targets,
             &inouts,
+            &bidis,
         )?;
         let inout_observers = inouts
             .into_iter()
