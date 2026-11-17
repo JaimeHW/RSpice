@@ -3043,8 +3043,10 @@ fn seconds_after(text: &str, label: &str) -> f64 {
 /// above it), so the first step after the ideal edge fails however small it
 /// is. The failure names the edge with its values and time, the instance
 /// driving it, and the converter with the parameters that made the step
-/// ideal, and says what to change. The failed step lies within a minimum
-/// step of the edge.
+/// ideal, and says what to change. The converter is the default the build
+/// inserted, which the deck never wrote, so it is named as that and the
+/// change is said where a deck makes it: a connect rule. The failed step
+/// lies within a minimum step of the edge.
 #[test]
 fn a_newton_failure_at_an_ideal_dac_edge_names_the_edge_and_the_converter() {
     let model = ModelFile::hdl("ideal_step", IDEAL_STEP);
@@ -3058,10 +3060,10 @@ fn a_newton_failure_at_an_ideal_dac_edge_names_the_edge_and_the_converter() {
     let file = model.file_name().to_lowercase();
     for expected in [
         format!("on net `q` 0s -> 1s at t=1e-8s driven by xs.initial#0 (initial, {file}:5)"),
-        "into converter __rspice_auto_dac_".to_owned(),
+        "into the default d2a converter inserted for xs.q, __rspice_auto_dac_".to_owned(),
         "(d2a: trise=0, tfall=0, tdelay=0, rlo=20, rhi=20)".to_owned(),
         "the converter's step is ideal, which no solver timestep can resolve: give it a nonzero \
-         trise and tfall"
+         trise and tfall with a connect rule, `connect d2a #(.trise(...), .tfall(...));`"
             .to_owned(),
     ] {
         assert!(lowered.contains(&expected), "missing `{expected}`: {error}");

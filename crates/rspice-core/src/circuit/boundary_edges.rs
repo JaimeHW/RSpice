@@ -14,7 +14,7 @@
 //! result.
 
 use crate::Value;
-use crate::circuit::{CircuitData, ConverterInsertion};
+use crate::circuit::{CircuitData, ConverterInsertion, ConverterSource};
 use crate::xspice::{DigitalState, DigitalValue, EventInputKind, SharedXspiceInstance};
 
 /// The accepted value a net held before an instant, from the run's own
@@ -162,15 +162,32 @@ impl CircuitData {
             sentence.push_str(&format!(" driven by {}", drivers.join(", ")));
         }
         let law = ConverterLaw::of(edge.converter);
-        sentence.push_str(&format!(
-            ", into converter {}",
-            self.converter_label(edge.converter, &law)
-        ));
+        // A converter no connect rule chose is one the deck never wrote: name
+        // it as the default the build inserted, and say where its values are
+        // set, since there is no instance card to edit.
+        let inserted = self
+            .converter_record(&edge.converter.name)
+            .filter(|record| matches!(record.rules, ConverterSource::RuleSet(_)));
+        let label = self.converter_label(edge.converter, &law);
+        match inserted {
+            Some(record) => sentence.push_str(&format!(
+                ", into the default {} converter inserted for {}, {label}",
+                record.module,
+                record.port.as_deref().unwrap_or(&record.boundary),
+            )),
+            None => sentence.push_str(&format!(", into converter {label}")),
+        }
         if law.is_ideal(after.map(|value| value.state)) {
             sentence.push_str(
                 "; the converter's step is ideal, which no solver timestep can resolve: give it \
                  a nonzero trise and tfall",
             );
+            if let Some(record) = inserted {
+                sentence.push_str(&format!(
+                    " with a connect rule, `connect {} #(.trise(...), .tfall(...));`",
+                    record.module
+                ));
+            }
         }
         Some(sentence)
     }
