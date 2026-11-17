@@ -5,7 +5,9 @@
 //! that manager, and opening a view uses the normal workspace transaction.
 
 pub use super::*;
-use crate::state::{CellViewRef, ViewType};
+use std::sync::Arc;
+
+use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::project::ProjectFeature;
@@ -48,6 +50,169 @@ pub enum LibraryIntent {
 struct LibraryUsageReport {
     reference: CellViewRef,
     consumers: Vec<String>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread listed and sorted a column of the library browser.
+    pub static LIBRARY_ROW_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One library as its column lists it.
+struct LibraryRow {
+    name: String,
+    cells: String,
+    read_only: bool,
+}
+
+/// One cell of the selected library that the filter lets through.
+struct CellRow {
+    name: String,
+    views: String,
+    description: String,
+}
+
+/// One view of the selected cell. Whether it is modified is read when the
+/// row is drawn: an editor marks it without changing the catalog.
+struct ViewRow {
+    name: String,
+    view_type: ViewType,
+    path: Option<String>,
+}
+
+/// A column's rows, sorted once for the catalog content and the selection
+/// and filter they were listed for, and kept in the context's memory until
+/// one of those moves. A column draws only the rows in view.
+struct ListedRows<K, R> {
+    key: K,
+    rows: Arc<[R]>,
+}
+
+/// The rows remembered under `id` while `held` accepts their key, or the
+/// rows `list` gives, remembered under `key`.
+fn listed<K, R>(
+    ctx: &Context,
+    id: &'static str,
+    held: impl FnOnce(&K) -> bool,
+    key: impl FnOnce() -> K,
+    list: impl FnOnce() -> Vec<R>,
+) -> Arc<[R]>
+where
+    K: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+{
+    let id = egui::Id::new(id);
+    if let Some(listed) = ctx.data(|data| data.get_temp::<Arc<ListedRows<K, R>>>(id))
+        && held(&listed.key)
+    {
+        return Arc::clone(&listed.rows);
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    LIBRARY_ROW_BUILDS.with(|builds| builds.set(builds.get() + 1));
+    let rows: Arc<[R]> = list().into();
+    let listed = Arc::new(ListedRows {
+        key: key(),
+        rows: Arc::clone(&rows),
+    });
+    ctx.data_mut(|data| data.insert_temp(id, listed));
+    rows
+}
+
+/// The libraries, by name, as the manager shows them.
+fn library_rows(ctx: &Context, manager: &LibraryManager) -> Arc<[LibraryRow]> {
+    let stamp = manager.catalog().stamp();
+    let show_read_only = manager.show_read_only;
+    listed(
+        ctx,
+        "workbench.project.library.rows.libraries",
+        |held: &(u64, bool)| *held == (stamp, show_read_only),
+        || (stamp, show_read_only),
+        || {
+            manager
+                .libraries_sorted()
+                .into_iter()
+                .map(|library| LibraryRow {
+                    name: library.name.clone(),
+                    cells: library.cell_count().to_string(),
+                    read_only: library.read_only,
+                })
+                .collect()
+        },
+    )
+}
+
+/// The selected library's cells, by name, that `filter` lets through: a
+/// cell whose name, description or one of whose views' names holds it.
+fn cell_rows(ctx: &Context, manager: &LibraryManager, filter: &str) -> Arc<[CellRow]> {
+    let stamp = manager.catalog().stamp();
+    let library = manager.selected_library.as_deref();
+    listed(
+        ctx,
+        "workbench.project.library.rows.cells",
+        |held: &(u64, Option<String>, String)| {
+            held.0 == stamp && held.1.as_deref() == library && held.2 == filter
+        },
+        || (stamp, library.map(str::to_owned), filter.to_owned()),
+        || {
+            let query = filter.trim().to_ascii_lowercase();
+            library
+                .and_then(|library| manager.get_library(library))
+                .map(|library| {
+                    library
+                        .cells_sorted()
+                        .into_iter()
+                        .filter(|cell| {
+                            query.is_empty()
+                                || cell.name.to_ascii_lowercase().contains(&query)
+                                || cell.description.to_ascii_lowercase().contains(&query)
+                                || cell
+                                    .views
+                                    .values()
+                                    .any(|view| view.name.to_ascii_lowercase().contains(&query))
+                        })
+                        .map(|cell| CellRow {
+                            name: cell.name.clone(),
+                            views: cell.view_count().to_string(),
+                            description: cell.description.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        },
+    )
+}
+
+/// The selected cell's views, by name.
+fn view_rows(ctx: &Context, manager: &LibraryManager) -> Arc<[ViewRow]> {
+    let stamp = manager.catalog().stamp();
+    let library = manager.selected_library.as_deref();
+    let cell = manager.selected_cell.as_deref();
+    listed(
+        ctx,
+        "workbench.project.library.rows.views",
+        |held: &(u64, Option<String>, Option<String>)| {
+            held.0 == stamp && held.1.as_deref() == library && held.2.as_deref() == cell
+        },
+        || (stamp, library.map(str::to_owned), cell.map(str::to_owned)),
+        || {
+            manager
+                .current_cell()
+                .map(|cell| {
+                    cell.views_sorted()
+                        .into_iter()
+                        .map(|view| ViewRow {
+                            name: view.name.clone(),
+                            view_type: view.view_type,
+                            path: view
+                                .file_path
+                                .as_ref()
+                                .map(|path| path.display().to_string()),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        },
+    )
 }
 
 struct BrowserRowSpec<'a> {
@@ -164,8 +329,10 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
             .map(|library| library.name.clone())
             .or_else(|| {
                 manager
-                    .libraries_sorted()
-                    .first()
+                    .libraries_by_key()
+                    .map(|(_, library)| library)
+                    .filter(|library| manager.show_read_only || !library.read_only)
+                    .min_by(|left, right| left.name.cmp(&right.name))
                     .map(|library| library.name.clone())
             });
         if let Some(library) = preferred {
@@ -190,7 +357,13 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
             library
                 .get_cell(&active_view.cell)
                 .map(|cell| cell.name.clone())
-                .or_else(|| library.cells_sorted().first().map(|cell| cell.name.clone()))
+                .or_else(|| {
+                    library
+                        .cells
+                        .values()
+                        .min_by(|left, right| left.name.cmp(&right.name))
+                        .map(|cell| cell.name.clone())
+                })
         });
         if let Some(cell) = preferred {
             manager.select_cell(&library_name, &cell);
@@ -217,7 +390,12 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
             .and_then(|cell| {
                 cell.get_view(&active_view.view)
                     .map(|view| view.name.clone())
-                    .or_else(|| cell.views_sorted().first().map(|view| view.name.clone()))
+                    .or_else(|| {
+                        cell.views
+                            .values()
+                            .min_by(|left, right| left.name.cmp(&right.name))
+                            .map(|view| view.name.clone())
+                    })
             });
         if let Some(view) = preferred {
             manager.select_view(&library_name, &cell_name, &view);
@@ -311,19 +489,7 @@ fn library_column(
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
-    let libraries = cx
-        .model
-        .library_manager
-        .libraries_sorted()
-        .into_iter()
-        .map(|library| {
-            (
-                library.name.clone(),
-                library.cell_count(),
-                library.read_only,
-            )
-        })
-        .collect::<Vec<_>>();
+    let libraries = library_rows(ui.ctx(), &cx.model.library_manager);
     let builtin_open = cx.state.builtin_models.open;
     let selected = cx
         .model
@@ -331,28 +497,32 @@ fn library_column(
         .selected_library
         .as_deref()
         .filter(|_| !builtin_open);
-    browser_column(ui, "Library", libraries.len() + 1, width, height, |ui| {
-        let mut intent = None;
-        for (name, cells, read_only) in &libraries {
-            let cell_count = cells.to_string();
-            if browser_row(
+    // The built-in library is the last row, after the project's own.
+    virtual_browser_column(
+        ui,
+        "Library",
+        libraries.len() + 1,
+        width,
+        height,
+        |ui, index| {
+            let Some(library) = libraries.get(index) else {
+                return builtin_models::library_row(ui, &cx.state.builtin_models);
+            };
+            browser_row(
                 ui,
                 BrowserRowSpec {
                     icon: WorkbenchIcon::Folder,
-                    label: name,
-                    meta: &cell_count,
-                    status: if *read_only { "RO" } else { "RW" },
-                    selected: selected == Some(name.as_str()),
-                    read_only: *read_only,
+                    label: &library.name,
+                    meta: &library.cells,
+                    status: if library.read_only { "RO" } else { "RW" },
+                    selected: selected == Some(library.name.as_str()),
+                    read_only: library.read_only,
                 },
             )
             .clicked()
-            {
-                intent = Some(LibraryIntent::SelectLibrary(name.clone()));
-            }
-        }
-        builtin_models::library_row(ui, &cx.state.builtin_models).or(intent)
-    })
+            .then(|| LibraryIntent::SelectLibrary(library.name.clone()))
+        },
+    )
 }
 
 fn cell_column(
@@ -370,65 +540,33 @@ fn cell_column(
             height,
         );
     }
-    let selected_library = cx.model.library_manager.selected_library.clone();
-    let query = cx.state.project_library_filter.trim().to_ascii_lowercase();
-    let cells = selected_library
-        .as_deref()
-        .and_then(|library| cx.model.library_manager.get_library(library))
-        .map(|library| {
-            library
-                .cells_sorted()
-                .into_iter()
-                .filter(|cell| {
-                    query.is_empty()
-                        || cell.name.to_ascii_lowercase().contains(&query)
-                        || cell.description.to_ascii_lowercase().contains(&query)
-                        || cell
-                            .views_sorted()
-                            .iter()
-                            .any(|view| view.name.to_ascii_lowercase().contains(&query))
-                })
-                .map(|cell| {
-                    (
-                        cell.name.clone(),
-                        cell.view_count(),
-                        cell.description.clone(),
-                    )
-                })
-                .collect::<Vec<_>>()
+    let manager = &cx.model.library_manager;
+    let cells = cell_rows(ui.ctx(), manager, &cx.state.project_library_filter);
+    let selected_library = manager.selected_library.as_deref();
+    let selected_cell = manager.selected_cell.as_deref();
+    virtual_browser_column(ui, "Cell", cells.len(), width, height, |ui, index| {
+        let cell = &cells[index];
+        let response = browser_row(
+            ui,
+            BrowserRowSpec {
+                icon: WorkbenchIcon::Project,
+                label: &cell.name,
+                meta: &cell.views,
+                status: "",
+                selected: selected_cell == Some(cell.name.as_str()),
+                read_only: false,
+            },
+        );
+        let response = if cell.description.trim().is_empty() {
+            response
+        } else {
+            response.on_hover_text(cell.description.as_str())
+        };
+        let library = selected_library.filter(|_| response.clicked())?;
+        Some(LibraryIntent::SelectCell {
+            library: library.to_owned(),
+            cell: cell.name.clone(),
         })
-        .unwrap_or_default();
-    let selected_cell = cx.model.library_manager.selected_cell.as_deref();
-    browser_column(ui, "Cell", cells.len(), width, height, |ui| {
-        let mut intent = None;
-        for (name, views, description) in &cells {
-            let view_count = views.to_string();
-            let response = browser_row(
-                ui,
-                BrowserRowSpec {
-                    icon: WorkbenchIcon::Project,
-                    label: name,
-                    meta: &view_count,
-                    status: "",
-                    selected: selected_cell == Some(name.as_str()),
-                    read_only: false,
-                },
-            );
-            let response = if description.trim().is_empty() {
-                response
-            } else {
-                response.on_hover_text(description)
-            };
-            if response.clicked()
-                && let Some(library) = selected_library.as_ref()
-            {
-                intent = Some(LibraryIntent::SelectCell {
-                    library: library.clone(),
-                    cell: name.clone(),
-                });
-            }
-        }
-        intent
     })
 }
 
@@ -441,74 +579,57 @@ fn view_column(
     if cx.state.builtin_models.open {
         return builtin_models::view_column(ui, &cx.state.builtin_models, width, height);
     }
-    let selected_library = cx.model.library_manager.selected_library.clone();
-    let selected_cell = cx.model.library_manager.selected_cell.clone();
-    let views = selected_library
-        .as_deref()
-        .and_then(|library| cx.model.library_manager.get_library(library))
-        .and_then(|library| {
-            selected_cell
-                .as_deref()
-                .and_then(|cell| library.get_cell(cell))
-        })
-        .map(|cell| {
-            cell.views_sorted()
-                .into_iter()
-                .map(|view| {
-                    (
-                        view.name.clone(),
-                        view.view_type,
-                        view.modified,
-                        view.file_path.clone(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let selected_view = cx.model.library_manager.selected_view.as_deref();
-    browser_column(ui, "View", views.len(), width, height, |ui| {
-        let mut intent = None;
-        for (name, view_type, modified, path) in &views {
-            let status = if *modified { "modified" } else { "saved" };
-            let response = browser_row(
-                ui,
-                BrowserRowSpec {
-                    icon: icon_for_view(*view_type),
-                    label: name,
-                    meta: view_type.caption(),
-                    status,
-                    selected: selected_view == Some(name.as_str()),
-                    read_only: false,
-                },
-            );
-            let response = if let Some(path) = path {
-                response.on_hover_text(path.display().to_string())
-            } else {
-                response
-            };
-            if (response.clicked() || response.double_clicked())
-                && let (Some(library), Some(cell)) =
-                    (selected_library.as_ref(), selected_cell.as_ref())
-            {
-                let reference = CellViewRef::new(library, cell, name);
-                intent = Some(if response.double_clicked() {
-                    LibraryIntent::OpenView(reference, *view_type)
-                } else {
-                    LibraryIntent::SelectView(reference)
-                });
-            }
+    let manager = &cx.model.library_manager;
+    let views = view_rows(ui.ctx(), manager);
+    let selected_library = manager.selected_library.as_deref();
+    let selected_cell = manager.selected_cell.as_deref();
+    let shown_cell = manager.current_cell();
+    let selected_view = manager.selected_view.as_deref();
+    virtual_browser_column(ui, "View", views.len(), width, height, |ui, index| {
+        let view = &views[index];
+        let modified = shown_cell
+            .and_then(|cell| cell.get_view(&view.name))
+            .is_some_and(|view| view.modified);
+        let response = browser_row(
+            ui,
+            BrowserRowSpec {
+                icon: icon_for_view(view.view_type),
+                label: &view.name,
+                meta: view.view_type.caption(),
+                status: if modified { "modified" } else { "saved" },
+                selected: selected_view == Some(view.name.as_str()),
+                read_only: false,
+            },
+        );
+        let response = if let Some(path) = &view.path {
+            response.on_hover_text(path.as_str())
+        } else {
+            response
+        };
+        if !(response.clicked() || response.double_clicked()) {
+            return None;
         }
-        intent
+        let (Some(library), Some(cell)) = (selected_library, selected_cell) else {
+            return None;
+        };
+        let reference = CellViewRef::new(library, cell, &view.name);
+        Some(if response.double_clicked() {
+            LibraryIntent::OpenView(reference, view.view_type)
+        } else {
+            LibraryIntent::SelectView(reference)
+        })
     })
 }
 
-fn browser_column(
+/// A column: its header with the title and the row count, then whatever
+/// `body` draws under it, and the rule on its right.
+fn column_frame(
     ui: &mut Ui,
     title: &str,
     count: usize,
     width: f32,
     height: f32,
-    rows: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
+    body: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
 ) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
     let shown =
@@ -536,11 +657,7 @@ fn browser_column(
                 header.bottom(),
                 Stroke::new(1.0, t.color.border),
             );
-            ScrollArea::vertical()
-                .id_salt(("workbench.project.library.column", title))
-                .auto_shrink([false, false])
-                .show(ui, rows)
-                .inner
+            body(ui)
         });
     ui.painter().vline(
         shown.response.rect.right(),
@@ -548,6 +665,52 @@ fn browser_column(
         Stroke::new(1.0, t.color.border_strong),
     );
     shown.inner
+}
+
+fn column_scroll(title: &str) -> ScrollArea {
+    ScrollArea::vertical()
+        .id_salt(("workbench.project.library.column", title))
+        .auto_shrink([false, false])
+}
+
+/// A column whose rows are laid out in full: the built-in library's, whose
+/// class headings make its rows uneven.
+fn browser_column(
+    ui: &mut Ui,
+    title: &str,
+    count: usize,
+    width: f32,
+    height: f32,
+    rows: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
+) -> Option<LibraryIntent> {
+    column_frame(ui, title, count, width, height, |ui| {
+        column_scroll(title).show(ui, rows).inner
+    })
+}
+
+/// A column of `count` rows of one height, of which only those in view are
+/// laid out: `row` draws the row at an index and says what was asked of it.
+fn virtual_browser_column(
+    ui: &mut Ui,
+    title: &str,
+    count: usize,
+    width: f32,
+    height: f32,
+    mut row: impl FnMut(&mut Ui, usize) -> Option<LibraryIntent>,
+) -> Option<LibraryIntent> {
+    column_frame(ui, title, count, width, height, |ui| {
+        column_scroll(title)
+            .show_rows(ui, BROWSER_ROW_HEIGHT, count, |ui, range| {
+                let mut intent = None;
+                for index in range {
+                    if let Some(asked) = row(ui, index) {
+                        intent = Some(asked);
+                    }
+                }
+                intent
+            })
+            .inner
+    })
 }
 
 fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
@@ -641,9 +804,8 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
     let writable_library_available = cx
         .model
         .library_manager
-        .libraries_sorted()
-        .into_iter()
-        .any(|library| !library.read_only);
+        .libraries_by_key()
+        .any(|(_, library)| !library.read_only);
     let mut intent = None;
     let shown = egui::Frame::new()
         .fill(t.color.bg_panel)

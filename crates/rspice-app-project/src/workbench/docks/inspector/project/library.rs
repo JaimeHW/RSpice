@@ -7,7 +7,7 @@ use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
 use rspice_ui_kit::panels::section_header;
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::{DesignCheckStatus, Model};
+use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::design_system::property_row;
 use crate::workbench::project::commands::ProjectRequest;
 
@@ -59,7 +59,7 @@ pub fn project_library(
     };
     let usage = open_target
         .as_ref()
-        .map_or_else(Vec::new, |(reference, _)| library_usage(model, reference));
+        .map(|(reference, _)| model.cell_view_consumers(reference));
     let (checks_meta, checks) = match open_target.as_ref() {
         Some((reference, ViewType::Schematic | ViewType::Testbench)) => {
             match model.design_check_status(reference, inspector.facts) {
@@ -114,7 +114,7 @@ pub fn project_library(
     }
     // One row, naming the consumers rather than counting them and then
     // naming the first of them underneath.
-    if !usage.is_empty() {
+    if let Some(usage) = usage.filter(|usage| !usage.is_empty()) {
         property_row(ui, "Used by", &usage.join(", "));
     }
 
@@ -127,15 +127,4 @@ pub fn project_library(
     open_target.filter(|_| open).map(|(reference, view_type)| {
         ProjectInspectorAction::Shell(ProjectRequest::OpenView(reference, view_type))
     })
-}
-
-/// The schematics that place `reference`, each once.
-fn library_usage(model: &Model, reference: &CellViewRef) -> Vec<String> {
-    let mut consumers = model
-        .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
-        .into_iter()
-        .map(|usage| usage.schematic.display_path())
-        .collect::<Vec<_>>();
-    consumers.dedup();
-    consumers
 }

@@ -14,6 +14,7 @@ mod file_workflow;
 mod landing;
 mod launcher;
 mod library_changes;
+mod library_configuration_frames;
 mod library_deletion;
 mod library_inspector;
 mod library_page;

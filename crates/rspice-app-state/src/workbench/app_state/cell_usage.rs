@@ -5,11 +5,103 @@
 //! answered once. Every schematic of the project is in the workspace's
 //! buffers; the one open in the editor is read from the editor instead,
 //! because its buffer is only brought up to date when the view is left.
+//!
+//! The panels that show the answer ask it every frame, and the answer walks
+//! every component of every drawing. So each answer is remembered with the
+//! [stamps](rspice_design::stamped) of the drawings it was read from, and is
+//! read again only once one of them has moved.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use rspice_design::schematic::document::SchematicDocument;
+use rspice_project::ProjectWorkspace;
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::model::Model;
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread walked the project's drawings for a placement.
+    pub static CELL_USAGE_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Where one cell, or one view of it, is placed.
+#[derive(Debug, Default)]
+struct CellUses {
+    /// Every placed instance, by schematic and then by instance name.
+    instances: Vec<CellInstanceUse>,
+    /// The schematics those instances are placed in, each once, as paths.
+    consumers: Arc<[String]>,
+}
+
+/// One question: a library, a cell and, for one view of it, the view.
+type Query = (String, String, Option<String>);
+
+/// The answers given since the drawings last moved, and the stamps of the
+/// drawings they were read from.
+#[derive(Default)]
+struct UsageMemo {
+    drawings: Drawings,
+    answers: Vec<(Query, Arc<CellUses>)>,
+}
+
+thread_local! {
+    static MEMO: RefCell<UsageMemo> = RefCell::default();
+}
+
+/// Every drawing an answer reads, by its stamp: the one open in the editor
+/// with its reference, and every buffer by its key.
+#[derive(Default)]
+struct Drawings {
+    live: Option<(CellViewRef, u64)>,
+    buffers: HashMap<String, u64>,
+}
+
+impl Drawings {
+    fn of(model: &Model) -> Self {
+        Self {
+            live: live_drawing(&model.workspace.content)
+                .map(|reference| (reference.clone(), model.schematic.content_stamp())),
+            buffers: model
+                .workspace
+                .content
+                .schematic_buffers
+                .iter()
+                .map(|(key, schematic)| (key.clone(), schematic.content_stamp()))
+                .collect(),
+        }
+    }
+
+    /// Whether every drawing still stands as it was read, without copying
+    /// a key.
+    fn stand(&self, model: &Model) -> bool {
+        let content = &model.workspace.content;
+        let live = match (&self.live, live_drawing(content)) {
+            (None, None) => true,
+            (Some((reference, stamp)), Some(active)) => {
+                reference == active && *stamp == model.schematic.content_stamp()
+            }
+            _ => false,
+        };
+        live && self.buffers.len() == content.schematic_buffers.len()
+            && content
+                .schematic_buffers
+                .iter()
+                .all(|(key, schematic)| self.buffers.get(key) == Some(&schematic.content_stamp()))
+    }
+}
+
+/// The drawing the editor holds, when it holds a schematic: its reference is
+/// the active view's.
+fn live_drawing(content: &ProjectWorkspace) -> Option<&CellViewRef> {
+    matches!(
+        content.active_view_type(),
+        Some(ViewType::Schematic | ViewType::Testbench)
+    )
+    .then_some(&content.active_view)
+}
 
 /// One placed instance of a library cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,14 +127,57 @@ impl Model {
         cell: &str,
         view: Option<&str>,
     ) -> Vec<CellInstanceUse> {
-        let content = &self.workspace.content;
-        let live = matches!(
-            content.active_view_type(),
-            Some(ViewType::Schematic | ViewType::Testbench)
+        self.cell_uses(library, cell, view).instances.clone()
+    }
+
+    /// The schematics that place `reference`, each once, as the paths the
+    /// panels print.
+    pub fn cell_view_consumers(&self, reference: &CellViewRef) -> Arc<[String]> {
+        Arc::clone(
+            &self
+                .cell_uses(&reference.library, &reference.cell, Some(&reference.view))
+                .consumers,
         )
-        .then(|| content.active_schematic_reference());
+    }
+
+    /// The answer for one question: remembered while every drawing it was
+    /// read from stands, read afresh otherwise.
+    fn cell_uses(&self, library: &str, cell: &str, view: Option<&str>) -> Arc<CellUses> {
+        MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            if !memo.drawings.stand(self) {
+                *memo = UsageMemo {
+                    drawings: Drawings::of(self),
+                    answers: Vec::new(),
+                };
+            }
+            let remembered =
+                memo.answers
+                    .iter()
+                    .find(|((asked_library, asked_cell, asked_view), _)| {
+                        asked_library == library
+                            && asked_cell == cell
+                            && asked_view.as_deref() == view
+                    });
+            if let Some((_, uses)) = remembered {
+                return Arc::clone(uses);
+            }
+            let uses = Arc::new(self.scan_cell_uses(library, cell, view));
+            memo.answers.push((
+                (library.to_owned(), cell.to_owned(), view.map(str::to_owned)),
+                Arc::clone(&uses),
+            ));
+            uses
+        })
+    }
+
+    fn scan_cell_uses(&self, library: &str, cell: &str, view: Option<&str>) -> CellUses {
+        #[cfg(any(test, feature = "test-support"))]
+        CELL_USAGE_SCANS.with(|scans| scans.set(scans.get() + 1));
+        let content = &self.workspace.content;
+        let live = live_drawing(content);
         let mut uses = Vec::new();
-        if let Some(reference) = &live {
+        if let Some(reference) = live {
             collect(
                 self.schematic.as_ref(),
                 reference,
@@ -54,10 +189,7 @@ impl Model {
             let Some(reference) = CellViewRef::from_key(key) else {
                 continue;
             };
-            if live
-                .as_ref()
-                .is_some_and(|live| live.key().eq_ignore_ascii_case(key))
-            {
+            if live.is_some_and(|live| live.key().eq_ignore_ascii_case(key)) {
                 continue;
             }
             collect(
@@ -77,7 +209,15 @@ impl Model {
                     right.instance.to_ascii_lowercase(),
                 ))
         });
-        uses
+        let mut consumers = uses
+            .iter()
+            .map(|usage| usage.schematic.display_path())
+            .collect::<Vec<_>>();
+        consumers.dedup();
+        CellUses {
+            instances: uses,
+            consumers: consumers.into(),
+        }
     }
 
     /// Take a removed cell out of every workspace collection that names it,

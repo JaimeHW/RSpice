@@ -273,9 +273,8 @@ pub fn detail(
     let t = Tokens::get(ui.ctx());
     let model = selected_model(browser);
     let writable_library_available = libraries
-        .libraries_sorted()
-        .into_iter()
-        .any(|library| !library.read_only);
+        .libraries_by_key()
+        .any(|(_, library)| !library.read_only);
     let mut intent = None;
     let shown = egui::Frame::new()
         .fill(t.color.bg_panel)

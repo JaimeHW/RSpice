@@ -7,6 +7,8 @@
 //! Design editor. No parallel catalog, symbol, form, or mutation state lives
 //! here.
 
+use std::sync::Arc;
+
 use egui::{
     Align, Frame, Grid, Key, Layout, Margin, Modifiers, Rect, RichText, ScrollArea, Sense, Stroke,
     Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
@@ -42,13 +44,81 @@ const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
 const SURFACE_TITLE: &str = "Library, cellview, symbol and form authoring";
 const SURFACE_SUMMARY: &str = "Author this project's libraries, cells, views, terminal contracts, component forms, locks, revisions, and publication records in one place.";
 
-#[derive(Clone)]
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread projected the catalog for the manager: its header's
+    /// counts, or the symbol its Symbol & form page shows.
+    pub static CELLVIEW_PROJECTION_BUILDS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+fn count_projection_build() {
+    #[cfg(any(test, feature = "test-support"))]
+    CELLVIEW_PROJECTION_BUILDS.with(|builds| builds.set(builds.get() + 1));
+}
+
+/// The symbol the Symbol & form page shows, decoded, checked and drawn once
+/// for the catalog content and the selection it was resolved from. Whether
+/// the view has unsaved changes is read as the page draws: an editor marks
+/// that without changing the catalog.
 struct SymbolProjection {
     reference: CellViewRef,
     library_read_only: bool,
-    modified: bool,
-    definition: Result<Option<ModelBoundSymbolDefinition>, String>,
+    /// The typed definition, if the view carries one, or why it cannot be
+    /// read.
+    definition: Result<Option<TypedSymbol>, String>,
     legacy_document: Result<SymbolDocument, String>,
+}
+
+/// A typed definition and what the page derives from it.
+struct TypedSymbol {
+    definition: ModelBoundSymbolDefinition,
+    document: SymbolDocument,
+    ports: Vec<crate::state::PortSpec>,
+    validation: Result<(), String>,
+    form_errors: usize,
+    netlist_order: String,
+}
+
+/// What the projection was resolved from: the catalog content, the
+/// browser's selection and the active view.
+struct ProjectionKey {
+    stamp: u64,
+    library: Option<String>,
+    cell: Option<String>,
+    view: Option<String>,
+    active: CellViewRef,
+}
+
+impl ProjectionKey {
+    fn of(model: &Model) -> Self {
+        let manager = &model.library_manager;
+        Self {
+            stamp: manager.catalog().stamp(),
+            library: manager.selected_library.clone(),
+            cell: manager.selected_cell.clone(),
+            view: manager.selected_view.clone(),
+            active: model.workspace.content.active_view.clone(),
+        }
+    }
+
+    fn holds(&self, model: &Model) -> bool {
+        let manager = &model.library_manager;
+        self.stamp == manager.catalog().stamp()
+            && self.library == manager.selected_library
+            && self.cell == manager.selected_cell
+            && self.view == manager.selected_view
+            && self.active == model.workspace.content.active_view
+    }
+}
+
+/// The header's counts, for the catalog content and read-only filter they
+/// were counted at.
+#[derive(Clone, Copy)]
+struct CountedCatalog {
+    stamp: u64,
+    show_read_only: bool,
+    snapshot: CatalogSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +157,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> LibraryCellviewPage
 
 fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
-    let snapshot = catalog_snapshot(cx.model);
+    let snapshot = catalog_snapshot(ui.ctx(), cx.model);
     let compact = ui.available_width() <= COMPACT_BREAKPOINT;
     let shown = Frame::new()
         .fill(tokens.color.bg_panel)
@@ -146,16 +216,44 @@ struct CatalogSnapshot {
     views: usize,
 }
 
-fn catalog_snapshot(model: &Model) -> CatalogSnapshot {
-    let libraries = model.library_manager.libraries_sorted();
-    CatalogSnapshot {
+/// The libraries, cells and views the header counts, counted once for the
+/// catalog content.
+fn catalog_snapshot(ctx: &egui::Context, model: &Model) -> CatalogSnapshot {
+    let manager = &model.library_manager;
+    let stamp = manager.catalog().stamp();
+    let show_read_only = manager.show_read_only;
+    let id = egui::Id::new("library-cellview-catalog-counts");
+    if let Some(counted) = ctx.data(|data| data.get_temp::<CountedCatalog>(id))
+        && counted.stamp == stamp
+        && counted.show_read_only == show_read_only
+    {
+        return counted.snapshot;
+    }
+    count_projection_build();
+    let libraries = manager
+        .libraries_by_key()
+        .map(|(_, library)| library)
+        .filter(|library| show_read_only || !library.read_only)
+        .collect::<Vec<_>>();
+    let snapshot = CatalogSnapshot {
         libraries: libraries.len(),
         cells: libraries.iter().map(|library| library.cell_count()).sum(),
         views: libraries
             .iter()
             .map(|library| library.total_view_count())
             .sum(),
-    }
+    };
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            id,
+            CountedCatalog {
+                stamp,
+                show_read_only,
+                snapshot,
+            },
+        );
+    });
+    snapshot
 }
 
 fn header_context(
@@ -336,33 +434,61 @@ fn page_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
 }
 
 fn symbol_form_page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    let projection = symbol_projection(cx.model);
+    let projection = symbol_projection(ui.ctx(), cx.model);
     ScrollArea::vertical()
         .id_salt("library-cellview-symbol-form")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            symbol_context(ui, cx, projection.as_ref());
+            symbol_context(ui, cx, projection.as_deref());
             ui.add_space(10.0);
-            match projection {
+            match projection.as_deref() {
                 None => no_symbol_state(ui, cx),
-                Some(projection) => selected_symbol_surface(ui, cx, &projection),
+                Some(projection) => selected_symbol_surface(ui, cx, projection),
             }
             ui.add_space(16.0);
         });
 }
 
-fn symbol_projection(model: &Model) -> Option<SymbolProjection> {
+/// The symbol the page shows, remembered in the context's memory while the
+/// catalog content and the selection it was resolved from stand.
+fn symbol_projection(ctx: &egui::Context, model: &Model) -> Option<Arc<SymbolProjection>> {
+    type Remembered = Arc<(ProjectionKey, Option<Arc<SymbolProjection>>)>;
+    let id = egui::Id::new("library-cellview-symbol-projection");
+    if let Some(remembered) = ctx.data(|data| data.get_temp::<Remembered>(id))
+        && remembered.0.holds(model)
+    {
+        return remembered.1.clone();
+    }
+    count_projection_build();
+    let projection = project_symbol(model).map(Arc::new);
+    let remembered: Remembered = Arc::new((ProjectionKey::of(model), projection.clone()));
+    ctx.data_mut(|data| data.insert_temp(id, remembered));
+    projection
+}
+
+fn project_symbol(model: &Model) -> Option<SymbolProjection> {
     let reference = resolve_symbol_reference(model)?;
     let library = model.library_manager.get_library(&reference.library)?;
     let view = library
         .get_cell(&reference.cell)?
         .get_view(&reference.view)?;
+    let definition = crate::state::load_model_bound_symbol(view)
+        .map(|definition| {
+            definition.map(|definition| TypedSymbol {
+                document: crate::state::materialize_symbol_document(&definition),
+                ports: definition.pins.iter().map(|pin| pin.port_spec()).collect(),
+                validation: definition.validate().map_err(|error| error.to_string()),
+                form_errors: definition.parameter_form.validate_diagnostics().len(),
+                netlist_order: emitted_parameter_order(&definition),
+                definition,
+            })
+        })
+        .map_err(|error| error.to_string());
     Some(SymbolProjection {
         reference,
         library_read_only: library.read_only,
-        modified: view.modified,
-        definition: crate::state::load_model_bound_symbol(view).map_err(|error| error.to_string()),
+        definition,
         legacy_document: SymbolDocument::load_from_view(view),
     })
 }
@@ -424,7 +550,7 @@ fn symbol_context(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, projection: Option<&
     // contract is the case that needs no words. The rest are what is wrong
     // with the contract this view does carry.
     let contract = projection.and_then(|projection| match &projection.definition {
-        Ok(Some(definition)) if definition.validate().is_ok() => None,
+        Ok(Some(typed)) if typed.validation.is_ok() => None,
         Ok(Some(_)) => Some(("typed contract invalid", Problem::Failure)),
         Ok(None) => Some(("No typed contract", Problem::Warning)),
         Err(_) => Some(("typed metadata unreadable", Problem::Failure)),
@@ -527,7 +653,7 @@ fn selected_symbol_surface(
     ui.add_space(10.0);
 
     match &projection.definition {
-        Ok(Some(definition)) => typed_symbol_surface(ui, definition, projection),
+        Ok(Some(typed)) => typed_symbol_surface(ui, typed, projection),
         Ok(None) => legacy_symbol_surface(ui, projection),
         Err(error) => invalid_symbol_surface(ui, projection, error),
     }
@@ -536,6 +662,13 @@ fn selected_symbol_surface(
 fn symbol_actions(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, projection: &SymbolProjection) {
     let tokens = Tokens::get(ui.ctx());
     let typed = projection.definition.as_ref().is_ok_and(Option::is_some);
+    let modified = cx
+        .model
+        .library_manager
+        .get_library(&projection.reference.library)
+        .and_then(|library| library.get_cell(&projection.reference.cell))
+        .and_then(|cell| cell.get_view(&projection.reference.view))
+        .is_some_and(|view| view.modified);
     let write_block = symbol_write_block_reason(cx, projection);
     let project_block = project_write_block_reason(cx);
     let compact = ui.available_width() <= COMPACT_BREAKPOINT;
@@ -549,11 +682,13 @@ fn symbol_actions(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, projection: &Sym
         .show(ui, |ui| {
             if compact {
                 ui.vertical(|ui| {
-                    action = action_buttons(ui, projection, typed, write_block, project_block);
+                    action =
+                        action_buttons(ui, projection, modified, typed, write_block, project_block);
                 });
             } else {
                 ui.horizontal(|ui| {
-                    action = action_buttons(ui, projection, typed, write_block, project_block);
+                    action =
+                        action_buttons(ui, projection, modified, typed, write_block, project_block);
                 });
             }
         });
@@ -590,6 +725,7 @@ fn symbol_actions(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, projection: &Sym
 fn action_buttons(
     ui: &mut Ui,
     projection: &SymbolProjection,
+    modified: bool,
     typed: bool,
     write_block: Option<&'static str>,
     project_block: Option<&'static str>,
@@ -639,7 +775,7 @@ fn action_buttons(
 
     let state = if projection.library_read_only {
         "read-only library"
-    } else if projection.modified {
+    } else if modified {
         "view has unsaved changes"
     } else {
         "view synchronized"
@@ -656,9 +792,8 @@ fn project_write_block_reason(cx: &Cx<'_, ProjectFeature>) -> Option<&'static st
     } else if !cx
         .model
         .library_manager
-        .libraries_sorted()
-        .into_iter()
-        .any(|library| !library.read_only)
+        .libraries_by_key()
+        .any(|(_, library)| !library.read_only)
     {
         Some("No writable project design library is available.")
     } else {
@@ -677,39 +812,27 @@ fn symbol_write_block_reason(
     })
 }
 
-fn typed_symbol_surface(
-    ui: &mut Ui,
-    definition: &ModelBoundSymbolDefinition,
-    projection: &SymbolProjection,
-) {
-    let document = crate::state::materialize_symbol_document(definition);
-    let ports = definition
-        .pins
-        .iter()
-        .map(|pin| pin.port_spec())
-        .collect::<Vec<_>>();
+fn typed_symbol_surface(ui: &mut Ui, typed: &TypedSymbol, projection: &SymbolProjection) {
+    let definition = &typed.definition;
+    let document = &typed.document;
+    let ports = &typed.ports;
     let split = ui.available_width() >= SPLIT_BREAKPOINT;
 
     if split {
         ui.columns(2, |columns| {
-            symbol_preview_card(
-                &mut columns[0],
-                &document,
-                &ports,
-                &projection.reference.cell,
-            );
-            contract_identity_card(&mut columns[1], definition, projection);
+            symbol_preview_card(&mut columns[0], document, ports, &projection.reference.cell);
+            contract_identity_card(&mut columns[1], definition, typed, projection);
         });
     } else {
-        symbol_preview_card(ui, &document, &ports, &projection.reference.cell);
+        symbol_preview_card(ui, document, ports, &projection.reference.cell);
         ui.add_space(10.0);
-        contract_identity_card(ui, definition, projection);
+        contract_identity_card(ui, definition, typed, projection);
     }
 
     ui.add_space(10.0);
     pin_contract_table(ui, definition);
     ui.add_space(10.0);
-    parameter_form_table(ui, definition);
+    parameter_form_table(ui, definition, typed);
 }
 
 fn symbol_preview_card(
@@ -769,9 +892,10 @@ fn symbol_preview_card(
 fn contract_identity_card(
     ui: &mut Ui,
     definition: &ModelBoundSymbolDefinition,
+    typed: &TypedSymbol,
     projection: &SymbolProjection,
 ) {
-    let validation = definition.validate();
+    let validation = &typed.validation;
     section_card(
         ui,
         "Symbol contract",
@@ -806,7 +930,7 @@ fn contract_identity_card(
                     );
                 });
             if let Err(error) = validation {
-                validation_message(ui, &error.to_string());
+                validation_message(ui, error);
             }
         },
     );
@@ -905,7 +1029,7 @@ fn pin_contract_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
     );
 }
 
-fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
+fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition, typed: &TypedSymbol) {
     let field_count = definition.parameter_form.fields().count();
     section_card(
         ui,
@@ -917,7 +1041,7 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
             plural_suffix(definition.parameter_form.sections.len()),
             field_count,
             plural_suffix(field_count),
-            emitted_parameter_order(definition),
+            typed.netlist_order,
         ),
         |ui| {
             if field_count == 0 {
@@ -971,14 +1095,13 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
                             }
                         });
                 });
-            let diagnostics = definition.parameter_form.validate_diagnostics();
-            if !diagnostics.is_empty() {
+            if typed.form_errors > 0 {
                 validation_message(
                     ui,
                     &format!(
                         "{} form error{}",
-                        diagnostics.len(),
-                        plural_suffix(diagnostics.len())
+                        typed.form_errors,
+                        plural_suffix(typed.form_errors)
                     ),
                 );
             }
