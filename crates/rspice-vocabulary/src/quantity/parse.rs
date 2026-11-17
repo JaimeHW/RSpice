@@ -66,6 +66,11 @@ pub fn parse_ui_quantity(
         return Err(QuantityInputError::NonFinite);
     }
     let suffix = suffix.trim();
+    // Zero is zero in every unit, so a bare 0 needs none. An absolute
+    // temperature is the one exception: 0 °C is not 0 K.
+    if value == 0.0 && suffix.is_empty() && kind != QuantityInputKind::Temperature {
+        return Ok(0.0);
+    }
 
     let si = match kind {
         QuantityInputKind::EngineeringScalar => scaled_decimal(
@@ -436,6 +441,43 @@ mod tests {
         )
         .unwrap();
         assert!((parsed - 250e-9).abs() <= f64::EPSILON * 2.0);
+    }
+
+    /// Zero needs no unit, under either input policy and in every kind of
+    /// field but an absolute temperature, where 0 °C and 0 K differ.
+    #[test]
+    fn a_bare_zero_needs_no_unit() {
+        for time_frequency_input in [
+            TimeFrequencyInput::StrictUnitsRequired,
+            TimeFrequencyInput::InferFromFieldQuantity,
+        ] {
+            let policy = QuantityPresentationPolicy {
+                time_frequency_input,
+                ..QuantityPresentationPolicy::default()
+            };
+            for kind in [
+                QuantityInputKind::EngineeringScalar,
+                QuantityInputKind::Time,
+                QuantityInputKind::Frequency,
+                QuantityInputKind::TemperatureDelta,
+                QuantityInputKind::Angle,
+            ] {
+                for zero in ["0", "0.0", "-0", "0e3"] {
+                    let parsed = parse_ui_quantity(zero, kind, policy, UiNumberLocale::default());
+                    assert_eq!(parsed, Ok(0.0), "{zero} in a {kind:?} field");
+                    assert!(parsed.unwrap().is_sign_positive(), "{zero}");
+                }
+            }
+            assert!(
+                parse_ui_quantity(
+                    "0",
+                    QuantityInputKind::Temperature,
+                    policy,
+                    UiNumberLocale::default()
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
