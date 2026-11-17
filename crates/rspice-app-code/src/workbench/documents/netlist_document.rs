@@ -2237,7 +2237,6 @@ pub struct NetlistDocumentState {
     /// transactions that change one or more canonical project sources.
     edit_undo: Vec<NetlistEditJournalEntry>,
     edit_redo: Vec<NetlistEditJournalEntry>,
-    pub rename_dialog: language::NetlistRenameDialogState,
     pub signature_help: language::NetlistSignatureHelpState,
     pub ownership_dialog: NetlistOwnershipDialogState,
     pub lifecycle_dialog: NetlistLifecycleDialogState,
@@ -2372,7 +2371,6 @@ impl NetlistDocumentState {
     /// the document behind a modal during its opening frame.
     pub fn application_modal_open(&self) -> bool {
         self.find.open
-            || self.rename_dialog.open
             || self.ownership_dialog.open
             || self.lifecycle_dialog.transaction.is_some()
             || self.lifecycle_dialog.include_transaction.is_some()

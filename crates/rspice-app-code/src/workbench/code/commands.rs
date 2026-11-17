@@ -96,8 +96,8 @@ pub enum CodeCommand {
 /// rename Rename symbol confirmed; and, from its navigators, the library
 /// section a Netlist outline row chose, picking an include's file again,
 /// a source rail's file action and opening a placed instance of the
-/// Verilog-A cell; and, from the netlist page's dialogs, the rename, the
-/// revision restore, the external change and the import each confirmed, and
+/// Verilog-A cell; and, from the netlist page's dialogs, the revision
+/// restore, the external change and the import each confirmed, and
 /// a find window press; and, from the netlist page itself, copying an
 /// include into the project, picking its file again, validating the deck,
 /// the quick fix, the profile review, formatting and a dropped file; and
@@ -155,8 +155,6 @@ pub enum CodeRequest {
     /// Open the schematic an instance of the cell is placed in, with the
     /// instance selected and centred.
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
-    /// Commit the rename the netlist page's Rename dialog holds.
-    CommitNetlistRename,
     /// Restore the owned revision the netlist page's revision dialog has
     /// selected.
     RestoreOwnedNetlistRevision,

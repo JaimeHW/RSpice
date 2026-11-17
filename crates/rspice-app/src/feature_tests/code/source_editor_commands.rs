@@ -376,6 +376,84 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
     }
 }
 
+/// A Verilog-A editor focused with its caret on the parameter `g`.
+fn veriloga_caret_on_g() -> (egui::Context, RSpiceApp) {
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    ctx.set_os(egui::os::OperatingSystem::Windows);
+    let editor =
+        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let source = root_text(&app, bundle_id);
+    let on_g = source[..source.find("g * V").expect("a use of g")]
+        .chars()
+        .count()
+        + 1;
+    rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index(
+        &ctx, editor, on_g,
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    (ctx, app)
+}
+
+/// `key` with `modifiers` pressed and released in one frame, then a frame
+/// for what it raised.
+fn stroke(ctx: &egui::Context, app: &mut RSpiceApp, key: egui::Key, modifiers: egui::Modifiers) {
+    let release = egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: false,
+        repeat: false,
+        modifiers,
+    };
+    frame_with(ctx, app, DESKTOP, vec![self::key(key, modifiers), release]);
+    frame(ctx, app, DESKTOP);
+}
+
+/// A Verilog-A editor keeps the language group a deck does not offer: F2
+/// opens the rename of the name under the caret, Shift+F12 lists its
+/// references, and the palette lists both with those keys.
+#[test]
+fn a_verilog_a_editor_keeps_find_references_and_rename_with_their_keys() {
+    let (ctx, mut app) = veriloga_caret_on_g();
+    stroke(&ctx, &mut app, egui::Key::F2, egui::Modifiers::NONE);
+    let form = app
+        .state
+        .code
+        .code_workspace
+        .language_tools
+        .as_ref()
+        .expect("F2 opens Rename symbol");
+    assert_eq!(form.query, "g");
+
+    let (ctx, mut app) = veriloga_caret_on_g();
+    assert!(
+        app.command_availability(CodeCommand::FindReferences.key())
+            .is_available()
+    );
+    stroke(&ctx, &mut app, egui::Key::F12, egui::Modifiers::SHIFT);
+    assert!(
+        app.state.workbench.source_references.is_some(),
+        "Shift+F12 lists the references; the status line says {:?}",
+        app.state.prompt_text()
+    );
+
+    // The palette lists a command by its label without the ellipsis.
+    for (label, shortcut) in [("Find references", "Shift+F12"), ("Rename symbol", "F2")] {
+        let (ctx, mut app) = veriloga_caret_on_g();
+        app.execute_command_key(ShellCommand::CommandPalette.key());
+        app.state.workbench.command_palette.query = label.to_owned();
+        let mut output = frame(&ctx, &mut app, DESKTOP);
+        for _ in 0..6 {
+            output = frame(&ctx, &mut app, DESKTOP);
+        }
+        assert_eq!(
+            palette_shortcut(&output, label).as_deref(),
+            Some(shortcut),
+            "the palette lists {label}"
+        );
+    }
+}
+
 /// A module whose last statement continues onto a line that starts with a
 /// use of the parameter `g`, so a press anywhere left of the code on that
 /// line puts the caret on it.

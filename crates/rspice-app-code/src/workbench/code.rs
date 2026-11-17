@@ -57,8 +57,8 @@ use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 /// The code feature.
 pub struct CodeFeature;
 
-/// The source editor's right-click menu: the language group, shown only
-/// where the document's language service can answer it, then the
+/// The source editor's right-click menu: the language group, each row shown
+/// only where the document's language service can answer it, then the
 /// clipboard, then the line edits. Mutating rows are greyed on a read-only
 /// source. Every page that draws a source editor is the code feature's:
 /// the deck, Automation and a Verilog-A view.
@@ -193,12 +193,21 @@ impl CommandSet for CodeCommand {
     /// editor is the document on screen, and language navigation only where
     /// the document's language service answers it. Elsewhere they are hidden
     /// rather than offered disabled.
+    ///
+    /// A deck answers Go to definition only. Its index reads one physical
+    /// line at a time, so it misses `+` continuation lines, knows no
+    /// subcircuit scope and takes the suffix of `10n` for a name: Find
+    /// references would list the wrong text and Rename symbol would rewrite
+    /// it.
     fn offered(self, reads: &Reads<'_, CodeFeature>) -> bool {
-        !self.source_editor_only()
-            || reads
-                .wb
-                .active_source_editor
-                .is_some_and(|editor| !self.navigates_source_language() || editor.navigable)
+        if !self.source_editor_only() {
+            return true;
+        }
+        reads.wb.active_source_editor.is_some_and(|editor| {
+            !self.navigates_source_language()
+                || (editor.navigable
+                    && (self == Self::GoToDefinition || !netlist_page_on_screen(reads)))
+        })
     }
 
     /// A source editor takes its own commands, and refuses the ones that

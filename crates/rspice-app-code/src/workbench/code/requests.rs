@@ -216,20 +216,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         // Each of the netlist page's transactions commits through a
         // candidate copy, so the feature runs the body the dialog ran in
         // place over what the dialog stored.
-        CodeRequest::CommitNetlistRename => {
-            let messages = cx.wb.messages();
-            match netlist_document::language::commit_rename(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-            ) {
-                Ok(count) => cx.wb.prompt(messages.format(
-                    crate::workbench::MessageId::NetlistRenameSucceeded,
-                    &[("count", &count.to_string())],
-                )),
-                Err(error) => cx.state.netlist.rename_dialog.error = Some(error),
-            }
-        }
         CodeRequest::RestoreOwnedNetlistRevision => {
             let index = cx.state.netlist.comparison_dialog.selected_history_index;
             match netlist_document::restore_owned_revision(
@@ -556,8 +542,8 @@ fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) {
     }
 }
 
-/// Go to definition, Find references and Rename symbol from the caret of the
-/// netlist editor, through the deck's own language service.
+/// Go to definition from the caret of the netlist editor, through the deck's
+/// own language service: the only language command a deck offers.
 fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) -> Result<(), String> {
     use crate::workbench::documents::netlist_document::language as netlist;
 
@@ -569,15 +555,6 @@ fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) -> Resul
             cx.runs,
             cx.wb,
         )?),
-        CodeCommand::FindReferences => Some(netlist::find_references_at_cursor_in(
-            cx.model,
-            &mut cx.state.netlist,
-            cx.wb,
-        )?),
-        CodeCommand::RenameSymbol => {
-            netlist::begin_rename_at_cursor_in(cx.model, &mut cx.state.netlist)?;
-            None
-        }
         _ => None,
     };
     if let Some(message) = message {

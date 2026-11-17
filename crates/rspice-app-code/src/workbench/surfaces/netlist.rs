@@ -12,7 +12,6 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 pub mod generation;
-mod language;
 mod ownership;
 mod revision;
 pub mod search;
@@ -422,7 +421,6 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // The dialogs draw in the code feature's context. What one raises is
     // answered once the page has drawn.
     search::find_replace_window(ui.ctx(), cx);
-    language::rename_dialog_window(ui.ctx(), cx);
     ownership::ownership_dialog_window(ui.ctx(), cx);
     revision::comparison_dialog_window(ui.ctx(), cx);
     revision::save_source_dialog_window(ui.ctx(), cx);

@@ -836,25 +836,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 Err(error) => cx.wb.prompt(error),
             }
         }
-        Some(NetlistToolbarAction::FindReferences) => {
-            let answer =
-                crate::workbench::documents::netlist_document::language::find_references_at_cursor_in(
-                    cx.model,
-                    &mut cx.state.netlist,
-                    cx.wb,
-                );
-            cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
-        }
-        Some(NetlistToolbarAction::RenameSymbol) => {
-            if let Err(error) =
-                crate::workbench::documents::netlist_document::language::begin_rename_at_cursor_in(
-                    cx.model,
-                    &mut cx.state.netlist,
-                )
-            {
-                cx.wb.prompt(error);
-            }
-        }
         Some(NetlistToolbarAction::WorkspaceSymbols) => {
             let answer =
                 crate::workbench::documents::netlist_document::language::open_workspace_symbols(
@@ -1014,20 +995,6 @@ fn language_tools_menu(
                     ui.close();
                 }
                 if ui
-                    .button(messages.text(MessageId::NetlistFindReferences))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::FindReferences);
-                    ui.close();
-                }
-                if ui
-                    .button(messages.text(MessageId::NetlistRenameSymbol))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::RenameSymbol);
-                    ui.close();
-                }
-                if ui
                     .button(messages.text(MessageId::NetlistWorkspaceSymbols))
                     .clicked()
                 {
@@ -1183,8 +1150,6 @@ enum NetlistToolbarAction {
     SignatureHelp,
     GoToDeclaration,
     GoToDefinition,
-    FindReferences,
-    RenameSymbol,
     WorkspaceSymbols,
     Find,
     FormatDocument,
