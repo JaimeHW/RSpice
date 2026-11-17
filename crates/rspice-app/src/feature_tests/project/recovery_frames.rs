@@ -20,7 +20,7 @@ use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, create,
 };
-use rspice_app_services::workbench::lifecycle::recovery::disk_observation::{self, DiskReads};
+use rspice_app_services::workbench::lifecycle::recovery::{DiskReads, take_disk_reads};
 use rspice_app_services::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryCatalog, unique_temp_dir,
 };
@@ -174,25 +174,25 @@ fn the_launcher_recovery_page_reads_the_saved_project_once_per_selection() {
     ]);
     let ctx = offscreen();
 
-    disk_observation::take();
+    take_disk_reads();
     let first = first_seen(&ctx, &mut app);
     assert!(
         painted(&first).contains("Open recovery comparison"),
         "{}",
         painted(&first)
     );
-    assert_eq!(disk_observation::take().project_files, 1);
+    assert_eq!(take_disk_reads().project_files, 1);
     for _ in 0..IDLE_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    assert_eq!(disk_observation::take(), DiskReads::default());
+    assert_eq!(take_disk_reads(), DiskReads::default());
 
     app.state.platform.recovery_catalog.select(second);
     for _ in 0..IDLE_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
     assert_eq!(
-        disk_observation::take(),
+        take_disk_reads(),
         DiskReads {
             project_files: 1,
             ..DiskReads::default()
@@ -261,7 +261,7 @@ fn the_recovery_page_lists_its_checkpoints_off_the_frame() {
     app.state.project.project_page = ProjectPage::Recovery;
     let ctx = offscreen();
 
-    disk_observation::take();
+    take_disk_reads();
     let first = app_frame(&ctx, &mut app, Vec::new());
     assert!(
         painted(&first).contains("Listing checkpoints\u{2026}"),
@@ -272,7 +272,7 @@ fn the_recovery_page_lists_its_checkpoints_off_the_frame() {
     for _ in 0..IDLE_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    assert_eq!(disk_observation::take(), DiskReads::default());
+    assert_eq!(take_disk_reads(), DiskReads::default());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -364,12 +364,12 @@ fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
     });
     let ctx = offscreen();
 
-    disk_observation::take();
+    take_disk_reads();
     let mut text = String::new();
     for _ in 0..=IDLE_FRAMES {
         text = painted(&app_frame(&ctx, &mut app, Vec::new()));
     }
     assert!(text.contains("from 7 min ago"), "{text}");
-    assert_eq!(disk_observation::take(), DiskReads::default());
+    assert_eq!(take_disk_reads(), DiskReads::default());
     let _ = std::fs::remove_dir_all(root);
 }

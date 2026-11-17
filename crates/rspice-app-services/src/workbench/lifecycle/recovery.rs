@@ -129,7 +129,7 @@ pub struct RecoveryNotice {
 /// Per-thread counts of the disk work the recovery surfaces and the project
 /// launcher do, for the regression tests that hold an idle frame to none of
 /// it. Work on a background thread is that thread's, not the frame's.
-pub mod disk_observation {
+pub(crate) mod disk_observation {
     /// What one thread has read since it last asked.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct DiskReads {
@@ -184,6 +184,10 @@ pub mod disk_observation {
         note(|reads| reads.file_stats += 1);
     }
 }
+
+pub use disk_observation::DiskReads;
+#[cfg(any(test, feature = "test-support"))]
+pub use disk_observation::take as take_disk_reads;
 
 #[derive(Debug, Clone)]
 pub struct RecoveryCatalog {
