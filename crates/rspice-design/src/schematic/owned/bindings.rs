@@ -125,13 +125,19 @@ impl Schematic {
 }
 
 impl Schematic {
+    /// Strip the netlist identity from every placement whose master cell is
+    /// gone from its library, answering the masters that are missing. Every
+    /// frame's sync runs it, so the document is written only when a binding
+    /// still claims an identity: a sync that finds nothing to strip leaves
+    /// its stamp alone.
     pub fn revalidate_instance_bindings(&mut self, libraries: &LibraryCatalog) -> Vec<String> {
         let mut missing_masters = Vec::new();
-        for component in &mut self.document.components {
+        let mut stale = Vec::new();
+        for (index, component) in self.document.components.iter().enumerate() {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
-            let Some(binding) = component.library_cell.as_mut() else {
+            let Some(binding) = component.library_cell.as_ref() else {
                 continue;
             };
             if binding.is_executable_builtin() {
@@ -143,14 +149,28 @@ impl Schematic {
             if library.get_cell(&binding.cell).is_some() {
                 continue;
             }
-            binding.module_name = None;
-            binding.source_path = None;
-            binding.netlist_template = None;
-            binding.parameter_order.clear();
+            if binding.module_name.is_some()
+                || binding.source_path.is_some()
+                || binding.netlist_template.is_some()
+                || !binding.parameter_order.is_empty()
+            {
+                stale.push(index);
+            }
             missing_masters.push(format!(
                 "{}/{}/{}",
                 binding.library, binding.cell, binding.view
             ));
+        }
+        if !stale.is_empty() {
+            let components = &mut self.document.components;
+            for index in stale {
+                if let Some(binding) = components[index].library_cell.as_mut() {
+                    binding.module_name = None;
+                    binding.source_path = None;
+                    binding.netlist_template = None;
+                    binding.parameter_order.clear();
+                }
+            }
         }
         missing_masters.sort_unstable();
         missing_masters.dedup();

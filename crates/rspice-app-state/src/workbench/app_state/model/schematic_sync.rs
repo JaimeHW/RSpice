@@ -172,10 +172,17 @@ impl Model {
                 )
             });
         let revision_before = self.workspace.content.project.revision();
+        // Worked out on the project as it stands, and written only when it
+        // changes: an idle frame leaves the project untouched.
         let assigned = self
             .workspace
             .content
-            .assign_unowned_objects_to_active_sheet(active, &self.schematic, &recorded);
+            .stage_unowned_objects_for_active_sheet(active, &self.schematic, &recorded)
+            .and_then(|staged| {
+                staged
+                    .map(|staged| self.workspace.content.publish_sheet_membership(staged))
+                    .transpose()
+            });
         // Recorded once while it stands, the way annotation recovery is: this
         // runs on every frame's sync.
         let failure = assigned

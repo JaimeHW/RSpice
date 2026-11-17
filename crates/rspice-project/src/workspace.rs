@@ -35,6 +35,7 @@ mod reference_preparation;
 pub use catalog::PreparedPhysicalLayoutCatalog;
 pub use errors::*;
 pub use hierarchy::ProjectHierarchy;
+pub use operations::StagedSheetMembership;
 pub use reference_changes::{PreparedReferences, ReferenceChanges};
 pub use reference_preparation::{ProjectReferenceTransaction, reference_from_key};
 pub const MAX_PROJECT_VISUALIZATION_DOCUMENTS: usize = 1_024;

@@ -640,8 +640,10 @@ impl ProjectWorkspace {
             || self.project_print_mappings_dirty
             || self.hardcopy_source_sets_dirty
     }
-    /// Bind newly authored schematic objects to the currently active sheet,
-    /// returning what the reconciliation actually changed.
+    /// Work out how binding newly authored schematic objects to the
+    /// currently active sheet would change the sheet catalog, without
+    /// writing it: `None` when membership is already in step, as it nearly
+    /// always is. [`Self::publish_sheet_membership`] writes what it staged.
     ///
     /// Legacy projects with no sheet catalog remain untouched; once the
     /// user enters multi-sheet authoring, every later object receives durable
@@ -650,15 +652,12 @@ impl ProjectWorkspace {
     /// `recorded` is where the caller last saw each object. An object that a
     /// schematic undo has just brought back returns to its own sheet through
     /// it, instead of piling onto whichever sheet happens to be active.
-    pub fn assign_unowned_objects_to_active_sheet(
-        &mut self,
+    pub fn stage_unowned_objects_for_active_sheet(
+        &self,
         reference: &CellViewRef,
         schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
         recorded: &BTreeMap<u64, rspice_design_model::design_management::SheetId>,
-    ) -> Result<
-        Option<rspice_design_model::design_management::SheetReconcileReceipt>,
-        ProjectConfigurationMutationError,
-    > {
+    ) -> Result<Option<StagedSheetMembership>, ProjectConfigurationMutationError> {
         let key = reference.key();
         let Some(catalog) = self.design_management.sheet_catalog(&key) else {
             return Ok(None);
@@ -704,17 +703,38 @@ impl ProjectWorkspace {
                 Some(active_sheet_id),
             )
             .map_err(invalid_design_management)?;
-        let Some(reconciled) = reconciled else {
-            return Ok(None);
-        };
+        Ok(reconciled.map(|reconciled| StagedSheetMembership {
+            key,
+            receipt,
+            reconciled,
+        }))
+    }
 
+    /// Publish the sheet membership `staged` worked out, returning what it
+    /// changed.
+    pub fn publish_sheet_membership(
+        &mut self,
+        staged: StagedSheetMembership,
+    ) -> Result<
+        rspice_design_model::design_management::SheetReconcileReceipt,
+        ProjectConfigurationMutationError,
+    > {
         let mut candidate = (*self.design_management).clone();
         *candidate
-            .sheet_catalog_mut(&key)
-            .expect("the cloned catalog retains the validated cell/view key") = reconciled;
+            .sheet_catalog_mut(&staged.key)
+            .expect("the cloned catalog retains the validated cell/view key") = staged.reconciled;
         self.replace_design_management(candidate)?;
-        Ok(Some(receipt))
+        Ok(staged.receipt)
     }
+}
+
+/// Sheet membership worked out and not yet written: see
+/// [`ProjectWorkspace::stage_unowned_objects_for_active_sheet`].
+#[derive(Debug)]
+pub struct StagedSheetMembership {
+    key: String,
+    receipt: rspice_design_model::design_management::SheetReconcileReceipt,
+    reconciled: rspice_design_model::design_management::SheetCatalog,
 }
 
 fn invalid_design_management(

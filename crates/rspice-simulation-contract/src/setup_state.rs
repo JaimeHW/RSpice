@@ -145,6 +145,18 @@ impl SimulationSetup {
         setup
     }
 
+    /// A copy without the plan catalog's stored inactive plans, for a reader
+    /// that never consults them: each is held in full — drafts, receipts,
+    /// tombstones — and is not copied. The copy carries a stamp of its own,
+    /// and this setup is left as it came, stamp and all.
+    pub fn clone_without_inactive_plans(&mut self) -> Self {
+        let stored = std::mem::take(&mut self.document.unstamped_mut().inactive_plans);
+        let mut copy = self.clone();
+        self.document.unstamped_mut().inactive_plans = stored;
+        copy.document.touch();
+        copy
+    }
+
     /// Rebuild transient editing state after a persisted plan is restored.
     pub fn prepare_after_restore(&mut self) {
         if let Some(plan) = &mut self.analysis_plan {

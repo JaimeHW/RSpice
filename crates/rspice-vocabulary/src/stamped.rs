@@ -55,6 +55,15 @@ impl<T> Stamped<T> {
     pub fn into_inner(self) -> T {
         self.value
     }
+
+    /// Mutable access that issues no stamp, for a write its caller knows
+    /// leaves the content the stamp names as it was: state the value carries
+    /// beside that content, such as an editor's history behind a document
+    /// whose own stamp is unchanged. Anything else written through it leaves
+    /// a stale stamp; a write that is not certain goes through [`DerefMut`].
+    pub fn unstamped_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 impl<T> Deref for Stamped<T> {

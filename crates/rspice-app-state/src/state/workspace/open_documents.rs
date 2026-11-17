@@ -216,8 +216,31 @@ impl ProjectWorkspace {
             return;
         }
         let key = self.content.active_key();
-        self.insert_schematic_editor(key, schematic.clone());
-        self.content.set_active_dirty(schematic.session.is_dirty);
+        // Every frame syncs the editor here. A buffer already holding the
+        // editor's document under the same stamp holds everything a save
+        // writes of it, so taking the editor's runtime state beside it
+        // leaves the project's stamp, and so its dirty answer, alone.
+        let unchanged = self
+            .content
+            .schematic_buffers
+            .get(&key)
+            .is_some_and(|design| {
+                design.content_stamp() == schematic.editor_ref().design.content_stamp()
+            });
+        let content = if unchanged {
+            self.content.unstamped_mut()
+        } else {
+            &mut *self.content
+        };
+        self.session
+            .insert_schematic_editor(content, key, schematic.clone());
+        if self
+            .content
+            .active_dirty()
+            .is_some_and(|marked| marked != schematic.session.is_dirty)
+        {
+            self.content.set_active_dirty(schematic.session.is_dirty);
+        }
     }
 
     pub fn mark_all_clean(&mut self) {

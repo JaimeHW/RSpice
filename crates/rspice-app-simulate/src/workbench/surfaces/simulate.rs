@@ -1996,11 +1996,13 @@ struct ContractDatasets<'a> {
 /// once a frame to read one line of text would be the most expensive thing on
 /// this route.
 ///
-/// The setup view is cloned for the restore, minus its plan catalog. Every
-/// inactive plan is held there in full — drafts, receipts, tombstones — and the
-/// clone carried all of them on every frame the Analyses page drew, to read one
-/// directive line. The catalog is moved aside for the call instead and moved
-/// back before this returns; nothing on the directive route reads it
+/// The draft is projected onto a copy of the setup, minus its plan catalog.
+/// Every inactive plan is held there in full — drafts, receipts, tombstones —
+/// and a whole copy carried all of them on every frame the Analyses page drew,
+/// to read one directive line. The copy stands in for the call and the setup
+/// itself is put back as it was, stamp and all, so a frame that draws the line
+/// leaves the project as unedited as it found it; nothing on the directive
+/// route reads the catalog
 /// (`analysis_draft_directive` builds its spec from the legacy analysis slots
 /// and the options block, and the only reader of `inactive_plans` in
 /// `crate::simulation` is the campaign activator).
@@ -2013,12 +2015,14 @@ pub fn plan_statement_for(
     controller: &SimulationController,
     draft: &AnalysisDraft,
 ) -> Result<String, String> {
-    let stored_plans = std::mem::take(&mut model.sim_setup.inactive_plans);
-    let restore = model.sim_setup.clone();
-    model.sim_setup.apply_analysis_draft_projection(draft);
+    let mut projected = SimSetupState {
+        setup: model.sim_setup.setup.clone_without_inactive_plans(),
+        session: model.sim_setup.session.clone(),
+    };
+    projected.apply_analysis_draft_projection(draft);
+    let setup = std::mem::replace(&mut model.sim_setup, projected);
     let statement = controller.analysis_draft_directive(model, draft);
-    model.sim_setup = restore;
-    model.sim_setup.inactive_plans = stored_plans;
+    model.sim_setup = setup;
     statement
 }
 
