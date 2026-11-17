@@ -1,12 +1,12 @@
-//! The Overview's identity band: the project's name, its status summary, the
-//! working-state facts and the quick actions, above a full-width rule.
+//! The Overview's identity band: the project's name, its revision and where
+//! its file is, and the quick actions, above a full-width rule.
 
-use egui::{Align, Align2, Color32, Layout, Sense, Ui, pos2, vec2};
+use egui::{Align, Align2, Layout, Sense, Ui, pos2, vec2};
 
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, PROBLEM_MARK_ADVANCE as MARK_ADVANCE};
+use crate::ui::widgets::Button;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -14,33 +14,11 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::state::Workspace;
 
 use super::super::page::{self, HEADER_TOP, elide_text, paint_elided};
-use super::snapshot::{OverviewSnapshot, StatusSnapshot};
-use super::{OverviewIntent, Tone, command_gate, paint_tone_mark, singular_or_plural};
+use super::snapshot::OverviewSnapshot;
+use super::{OverviewIntent, command_gate};
 
-/// Summarise the status register beside the project name.
-///
-/// The count is of *status areas* that need attention, not of findings. Naming
-/// it "advisories" put a finding word on an area count directly above a register
-/// whose first row reports genuine advisory counts, so two unrelated numbers
-/// read as the same one. The denominator keeps the area reading unambiguous.
-/// Nothing at all when every area is current: the register below states each
-/// area, and "current · 6 areas" beside the project's name was a third copy of
-/// a fact the Project status card and its six rows already carry.
-pub(super) fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
-    let total = statuses.len();
-    let flagged = statuses
-        .iter()
-        .filter(|status| matches!(status.tone, Tone::Warn | Tone::Error))
-        .count();
-    match tone {
-        Tone::Error => format!("blocked · {flagged} of {total} areas"),
-        Tone::Warn => format!("review · {flagged} of {total} areas"),
-        Tone::Neutral => String::new(),
-    }
-}
-
-/// The identity band: project name, status summary, working-state facts, and
-/// the quick actions. It sits on the page ground above a full-width rule, the
+/// The identity band: project name, revision and file, and the quick
+/// actions. It sits on the page ground above a full-width rule, the
 /// same header rhythm as the workbench landing surfaces.
 pub(super) fn overview_header(
     ui: &mut Ui,
@@ -61,48 +39,13 @@ pub(super) fn overview_header(
             |ui| {
                 ui.set_width(content_width);
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let project_tone = if snapshot
-                    .statuses
-                    .iter()
-                    .any(|status| status.tone == Tone::Error)
-                {
-                    Tone::Error
-                } else if snapshot
-                    .statuses
-                    .iter()
-                    .any(|status| status.tone == Tone::Warn)
-                {
-                    Tone::Warn
-                } else {
-                    Tone::Neutral
-                };
-                let project_status = project_status_summary(&snapshot.statuses, project_tone);
-                let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-                let status_width = (ui
-                    .painter()
-                    .layout_no_wrap(project_status.clone(), status_font.clone(), Color32::WHITE)
-                    .size()
-                    .x
-                    + if project_tone.problem().is_some() {
-                        MARK_ADVANCE
-                    } else {
-                        0.0
-                    })
-                .min(content_width * 0.42);
+                // The name alone: what stands where is each status row's to
+                // say, and a summary of the rows beside it was the same facts
+                // a second time.
                 let title_font = theme::sans(20.0, FontWeight::SemiBold);
                 let (name_rect, name_response) =
                     ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
-                let title = elide_text(
-                    ui,
-                    &snapshot.project_name,
-                    &title_font,
-                    (content_width - status_width - 12.0).max(1.0),
-                );
-                let title_width = ui
-                    .painter()
-                    .layout_no_wrap(title.clone(), title_font.clone(), Color32::WHITE)
-                    .size()
-                    .x;
+                let title = elide_text(ui, &snapshot.project_name, &title_font, content_width);
                 ui.painter().text(
                     pos2(name_rect.left(), name_rect.center().y),
                     Align2::LEFT_CENTER,
@@ -110,56 +53,20 @@ pub(super) fn overview_header(
                     title_font,
                     tokens.color.text,
                 );
-                if !project_status.is_empty() {
-                    let status_left = (name_rect.left() + title_width + 12.0)
-                        .min((name_rect.right() - status_width).max(name_rect.left()));
-                    let advance =
-                        paint_tone_mark(ui, project_tone, status_left, name_rect.center().y + 2.0);
-                    ui.painter().text(
-                        pos2(status_left + advance, name_rect.center().y + 2.0),
-                        Align2::LEFT_CENTER,
-                        &project_status,
-                        status_font,
-                        tokens.color.text_dim,
-                    );
-                }
-                let announced_status = if project_status.is_empty() {
-                    snapshot.project_name.clone()
-                } else {
-                    format!("{} · {project_status}", snapshot.project_name)
-                };
                 name_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
                         ui.is_enabled(),
-                        format!("Project {announced_status}"),
+                        format!("Project {}", snapshot.project_name),
                     )
                 });
-                name_response.on_hover_text(format!(
-                    "Project {} · logical revision {} · schema {}",
-                    snapshot.project_id, snapshot.project_revision, snapshot.schema_version
-                ));
 
-                let state_label = if !snapshot.persistence_bound {
-                    "no saved baseline".to_owned()
-                } else if snapshot.dirty_documents == 0 {
-                    "working tree clean".to_owned()
-                } else {
-                    format!(
-                        "{} working {}",
-                        snapshot.dirty_documents,
-                        singular_or_plural(snapshot.dirty_documents, "change", "changes")
-                    )
-                };
                 let (facts_rect, _) =
                     ui.allocate_exact_size(vec2(content_width, 19.0), Sense::hover());
                 paint_elided(
                     ui,
                     pos2(facts_rect.left(), facts_rect.top() + 4.0),
-                    &format!(
-                        "main @ r{} · {} · {}",
-                        snapshot.project_revision, state_label, snapshot.path
-                    ),
+                    &header_facts(snapshot.project_revision, snapshot.location.as_deref()),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     tokens.color.text_faint,
                     content_width,
@@ -184,14 +91,10 @@ pub(super) fn overview_header(
                         });
                     }
                     if !snapshot.netlist_first {
-                        let run_label = if content_width <= 440.0 {
-                            "Run plan\u{2026}".to_owned()
-                        } else {
-                            format!("Run {}…", snapshot.run_plan_name)
-                        };
+                        // It opens the plan in Simulate; running it is Run's.
                         let command = ids::open_workspace(Workspace::Simulate);
                         let (enabled, disabled_reason) = command_gate(cx, command);
-                        let run_plan = Button::new(&run_label).enabled(enabled).show(ui);
+                        let run_plan = Button::new("Open plan").enabled(enabled).show(ui);
                         let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
                             run_plan.on_disabled_hover_text(reason)
                         });
@@ -219,7 +122,7 @@ pub(super) fn overview_header(
                         } else if cx.model.safe_mode.project_read_only() {
                             "Safe mode opened this project read-only."
                         } else if !has_writable_library {
-                            "Attach or create a writable design library first."
+                            "Create a writable design library first."
                         } else {
                             "New cell creation is unavailable."
                         });
@@ -255,6 +158,15 @@ pub(super) fn overview_header(
     });
     page::header_rule(ui);
     intent
+}
+
+/// The line under the project's name: its revision, and where its file is
+/// once it has one. Whether it has unsaved work is the Unsaved work row's.
+pub(super) fn header_facts(revision: u64, location: Option<&str>) -> String {
+    match location {
+        Some(location) => format!("Revision {revision} \u{b7} {location}"),
+        None => format!("Revision {revision}"),
+    }
 }
 
 pub fn run_plan_intent() -> OverviewIntent {

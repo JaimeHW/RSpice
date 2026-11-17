@@ -163,13 +163,26 @@ fn click_announced(
     project_frame(ctx, app, click)
 }
 
+/// The tab panels a frame published, by their accessible names.
+fn tab_panels(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::TabPanel)
+        .filter_map(|(_, node)| node.label().map(str::to_owned))
+        .collect()
+}
+
 /// The configuration chip opens the Configuration page in the frame it
-/// was clicked in: the band beside it drops the Library page's action and
-/// the page below it is the Configuration page.
+/// was clicked in: the page below the band is the Configuration page.
 #[test]
 fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
     let (ctx, mut app, settled) = settled_on(ProjectPage::Library);
-    assert!(painted_text(&settled).contains("Attach library\u{2026}"));
+    assert_eq!(tab_panels(&settled), ["Project Library"]);
 
     let clicked = click_announced(
         &ctx,
@@ -179,18 +192,7 @@ fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
     );
 
     assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
-    let painted = painted_text(&clicked);
-    assert!(!painted.contains("Attach library\u{2026}"), "{painted}");
-    let panels = clicked
-        .platform_output
-        .accesskit_update
-        .expect("the clicked frame publishes its tree")
-        .nodes
-        .into_iter()
-        .filter(|(_, node)| node.role() == egui::accesskit::Role::TabPanel)
-        .filter_map(|(_, node)| node.label().map(str::to_owned))
-        .collect::<Vec<_>>();
-    assert_eq!(panels, ["Project Configuration"]);
+    assert_eq!(tab_panels(&clicked), ["Project Configuration"]);
 }
 
 /// The chip reads the Configurations command's availability from the
@@ -610,13 +612,15 @@ fn the_overview_states_the_project_from_live_state() {
         for expected in [
             "lna-frontend-28g",
             "Project status",
-            "Execution context",
+            "Verification",
+            "Model sources",
+            "Dependencies",
+            "Unsaved work",
             "Design",
             "Recent operations",
             "Library published · analog-core-1.2.0",
             "Open top schematic",
             "CHK-007",
-            "4 retained",
         ] {
             assert!(
                 text.contains(expected),
@@ -637,7 +641,7 @@ fn the_netlist_first_overview_names_the_deck() {
     for expected in [
         "Open SPICE deck",
         "Source deck",
-        "Ownership",
+        "Not validated",
         "front_end.sp",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");

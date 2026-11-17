@@ -8,7 +8,7 @@ use crate::ui::tokens::{self, Tokens};
 
 use super::super::page::{elide_text, paint_elided};
 use super::snapshot::{ProblemSnapshot, StatusSnapshot};
-use super::{OverviewIntent, Tone, overview_card, paint_tone_mark};
+use super::{OverviewIntent, overview_card, paint_tone_mark};
 
 const STATUS_ROW_HEIGHT: f32 = 27.0;
 
@@ -17,25 +17,11 @@ pub(super) fn status_card(
     statuses: &[StatusSnapshot],
     problem: Option<&ProblemSnapshot>,
 ) -> Option<OverviewIntent> {
-    let status_tone = if statuses.iter().any(|status| status.tone == Tone::Error) {
-        Tone::Error
-    } else if statuses.iter().any(|status| status.tone == Tone::Warn) {
-        Tone::Warn
-    } else {
-        Tone::Neutral
-    };
-    // "current" on the card that holds the register is the register saying
-    // nothing is wrong twice. Only the two states a reader acts on are named.
-    overview_card(
-        ui,
-        "Project status",
-        match status_tone {
-            Tone::Error => "blocked",
-            Tone::Warn => "review required",
-            Tone::Neutral => "",
-        },
-        |ui| status_rows(ui, statuses, problem),
-    )
+    // The rows carry their own marks and words; a verdict on the card's head
+    // was the same facts once more.
+    overview_card(ui, "Project status", "", |ui| {
+        status_rows(ui, statuses, problem)
+    })
 }
 
 fn status_rows(
@@ -101,7 +87,7 @@ fn status_rows(
                 rect.left() + detail_offset,
                 rect.center().y - tokens::FS_0 * 0.5,
             ),
-            &format!("{} \u{00b7} {}", status.state, status.detail),
+            &status.text(),
             theme::sans(tokens::FS_0, FontWeight::Regular),
             detail_color,
             (width - detail_offset - 8.0).max(1.0),
@@ -110,17 +96,14 @@ fn status_rows(
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
                 status.enabled,
-                format!(
-                    "{}: {}. {}. {}",
-                    status.area, status.state, status.detail, status.action
-                ),
+                format!("{}: {}. {}", status.area, status.text(), status.action),
             )
         });
         theme::paint_focus_ring_outset(ui, &response, rect);
         let response = if status.enabled {
             response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text(format!("{}\n{}", status.detail, status.action))
+                .on_hover_text(format!("{}\n{}", status.text(), status.action))
         } else {
             response.on_hover_text(status.disabled_reason.unwrap_or("Action unavailable"))
         };

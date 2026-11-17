@@ -196,12 +196,11 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
             .iter()
             .all(|status| status.area != "Schematic checks")
     );
-    let problem = snapshot
-        .problem
-        .as_ref()
-        .expect("an unvalidated deck is a finding the strip names");
-    assert_eq!(problem.code, "NOT RUN");
-    assert_eq!(problem.path, "front_end.sp");
+    // An unvalidated deck is a state its row says, not a finding: the strip
+    // names findings only.
+    assert_eq!(snapshot.statuses[0].state(), "Not validated");
+    assert_eq!(snapshot.statuses[0].tone(), Tone::Neutral);
+    assert_eq!(snapshot.problem, None);
     assert!(objects.first().is_some_and(|object| {
         object.top && object.name == "front_end.sp" && object.kind.starts_with("SPICE deck")
     }));
@@ -226,17 +225,22 @@ fn overview_model_closure_opens_the_models_workspace() {
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
 }
 
+/// Checks that have not run are neither green nor a caution: the row says
+/// "Not run" unmarked, and the strip, which names findings, stays away.
 #[test]
-fn current_checks_without_a_retained_result_are_never_green() {
+fn checks_without_a_retained_result_read_not_run_unmarked() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.active_view = CellViewRef::new(
         &app.state.model.workspace.content.project.root_library,
         &app.state.model.workspace.content.project.top_cell,
         rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
-    let problem = problem_of(&mut app).expect("checks that have not run are a finding");
-    assert_eq!(problem.code, "NOT RUN");
-    assert_eq!(problem.tone, Tone::Warn);
+    assert_eq!(problem_of(&mut app), None);
+    let snapshot = snapshot_of(&mut app);
+    let checks = &snapshot.statuses[0];
+    assert_eq!(checks.area, "Schematic checks");
+    assert_eq!(checks.state(), "Not run");
+    assert_eq!(checks.tone(), Tone::Neutral);
 }
 
 /// A root that checks clean has no strip at all: "No current schematic

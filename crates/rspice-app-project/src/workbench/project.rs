@@ -8,6 +8,7 @@
 pub mod commands;
 pub mod configuration_state;
 pub(crate) mod dependency_status;
+pub mod health;
 pub mod library_dialogs;
 mod new_project;
 mod revision_history;

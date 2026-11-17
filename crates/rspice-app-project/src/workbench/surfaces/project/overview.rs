@@ -14,20 +14,21 @@ mod status;
 use egui::{Ui, pos2, vec2};
 
 use crate::state::command_catalog::CommandKey;
-use crate::state::{CellViewRef, SimulationRunLifecycle, ViewType};
+use crate::state::{CellViewRef, ViewType};
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::health::{lifecycle_label, lifecycle_tone};
 use crate::workbench::state::Workspace;
 
 use super::page::{self, BODY_TOP, CARD_GAP, STACK_BREAKPOINT};
 
 use activity::operations_card;
+use design::design_card;
 pub use design::{DesignObjectSnapshot, design_objects};
-use design::{context_card, design_card};
 use header::overview_header;
 pub use header::run_plan_intent;
 pub use snapshot::{
@@ -88,7 +89,9 @@ fn paint_tone_mark(ui: &Ui, tone: Tone, left: f32, center_y: f32) -> f32 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverviewIntent {
     Command(CommandKey),
-    CheckProjectRoot,
+    /// Check the cell view runs start from, which the Schematic checks row
+    /// describes: the configuration's root when one is used for runs.
+    CheckSimulationRoot,
     OpenProjectRoot,
     OpenProjectModels,
     OpenRun(usize),
@@ -100,8 +103,8 @@ impl OverviewIntent {
     pub fn raise(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::Command(key) => cx.execute(key),
-            Self::CheckProjectRoot => {
-                let root = project_root(cx.model);
+            Self::CheckSimulationRoot => {
+                let root = cx.model.workspace.content.simulation_root_reference();
                 cx.wb.outbox.push(ProjectRequest::OpenRootAndCheck(root));
             }
             Self::OpenProjectRoot => {
@@ -169,6 +172,9 @@ fn command_gate(cx: &Cx<'_, ProjectFeature>, key: CommandKey) -> (bool, Option<&
 /// the commands its rows offer. What the reader asked of it is raised as the
 /// page returns, and the shell carries it out straight after.
 pub fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    // The Unsaved work row counts what the Recovery page can bring back, from
+    // the catalogue that page lists: listed once, off the frame.
+    super::recovery::ensure_project_recovery_catalog(ui.ctx(), cx);
     let snapshot = OverviewSnapshot::capture(ui.ctx(), cx);
     let mut intent = None;
     let shown = &*cx;
@@ -218,8 +224,6 @@ fn overview_body(
                 retain_first_intent(&mut left_intent, design_card(left, cx, snapshot));
             },
             |right| {
-                retain_first_intent(&mut right_intent, context_card(right, snapshot));
-                right.add_space(CARD_GAP);
                 retain_first_intent(&mut right_intent, operations_card(right, snapshot));
             },
         );
@@ -231,8 +235,6 @@ fn overview_body(
                 intent,
                 status_card(ui, &snapshot.statuses, snapshot.problem.as_ref()),
             );
-            ui.add_space(CARD_GAP);
-            retain_first_intent(intent, context_card(ui, snapshot));
             ui.add_space(CARD_GAP);
             retain_first_intent(intent, design_card(ui, cx, snapshot));
             ui.add_space(CARD_GAP);
@@ -260,32 +262,6 @@ fn project_root(model: &Model) -> CellViewRef {
         &model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     )
-}
-
-const fn lifecycle_label(lifecycle: SimulationRunLifecycle, success: bool) -> &'static str {
-    match lifecycle {
-        SimulationRunLifecycle::LegacyUnknown => "legacy state unknown",
-        SimulationRunLifecycle::Preparing => "preparing",
-        SimulationRunLifecycle::Running => "running",
-        SimulationRunLifecycle::Cancelling => "cancelling",
-        SimulationRunLifecycle::Completed if success => "completed",
-        SimulationRunLifecycle::Completed => "completed with failures",
-        SimulationRunLifecycle::Failed => "failed",
-        SimulationRunLifecycle::Aborted => "aborted",
-        SimulationRunLifecycle::Interrupted => "interrupted",
-    }
-}
-
-const fn lifecycle_tone(lifecycle: SimulationRunLifecycle, success: bool) -> Tone {
-    match lifecycle {
-        SimulationRunLifecycle::Completed if success => Tone::Neutral,
-        SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running => Tone::Neutral,
-        SimulationRunLifecycle::Cancelling | SimulationRunLifecycle::Aborted => Tone::Warn,
-        SimulationRunLifecycle::Completed
-        | SimulationRunLifecycle::Failed
-        | SimulationRunLifecycle::Interrupted => Tone::Error,
-        SimulationRunLifecycle::LegacyUnknown => Tone::Neutral,
-    }
 }
 
 const fn singular_or_plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {

@@ -4,13 +4,17 @@
 //!
 //! # Derived on change, not on a frame
 //!
-//! What has to walk the design or the catalogues to be known — the net count,
+//! What has to walk the design or the catalogues to be known â€” the net count,
 //! the view count, the activity register, the model sources, the deck's line
-//! count, the configuration's validity — is derived once and kept in the
+//! count, the configuration's validity â€” is derived once and kept in the
 //! frame context beside the identity of what it was derived from: a content
 //! stamp, a catalogue revision, the run history's revision, a digest. A frame
 //! in which none of those moved derives nothing, so the page costs the same on
 //! a project of eight thousand instances as on an empty one.
+//!
+//! Each status row's words and mark are its subject's, from
+//! [`crate::workbench::project::health`]; the row adds only the action that
+//! addresses it.
 
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
@@ -24,6 +28,7 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::health::{self, DesignSubject, SubjectStatus};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::project::{ProjectFeature, lifecycle_view};
 use crate::workbench::state::Workspace;
@@ -48,6 +53,46 @@ pub struct StatusSnapshot {
     pub(super) disabled_reason: Option<&'static str>,
 }
 
+impl StatusSnapshot {
+    fn of(
+        area: &'static str,
+        status: SubjectStatus,
+        action: &'static str,
+        intent: OverviewIntent,
+        (enabled, disabled_reason): (bool, Option<&'static str>),
+    ) -> Self {
+        Self {
+            area,
+            state: status.state,
+            detail: status.detail,
+            action,
+            tone: status.tone,
+            intent,
+            enabled,
+            disabled_reason,
+        }
+    }
+
+    /// The row's words as the page paints them: the state, then the detail
+    /// when there is one.
+    pub fn text(&self) -> String {
+        if self.detail.is_empty() {
+            self.state.clone()
+        } else {
+            format!("{} \u{b7} {}", self.state, self.detail)
+        }
+    }
+
+    /// The row's state alone, the words the chips and the inspector repeat.
+    pub fn state(&self) -> &str {
+        &self.state
+    }
+
+    pub const fn tone(&self) -> Tone {
+        self.tone
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigurationSnapshot {
     pub configured: bool,
@@ -56,13 +101,6 @@ pub struct ConfigurationSnapshot {
     pub root: String,
     pub dut: String,
     pub tone: Tone,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelSnapshot {
-    state: String,
-    detail: String,
-    tone: Tone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,28 +136,23 @@ pub(super) struct SourceDeckSnapshot {
     pub(super) line_count: usize,
     pub(super) dependency_count: usize,
     pub(super) dependencies_sealed: bool,
-    pub(super) validation_state: String,
-    validation_detail: String,
     pub(super) validation_tone: Tone,
-    /// The one finding the strip under the status register names, or nothing
-    /// when there is no finding: a strip reading "no current diagnostics" is
-    /// a report of the absence of a problem.
+    /// The deck's worst current diagnostic, which the strip under the status
+    /// rows names; nothing while the deck has none. A deck not validated, or
+    /// changed since, is its status row's to say.
     problem: Option<ProblemSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverviewSnapshot {
     pub(super) project_name: String,
-    pub(super) project_id: String,
     pub(super) project_revision: u64,
-    pub(super) schema_version: u16,
-    pub(crate) path: String,
-    pub(super) persistence_bound: bool,
+    /// Where the project file is, or `None` before it is first saved.
+    pub(crate) location: Option<String>,
     pub descriptor_root: String,
     pub(super) simulation_root: String,
     pub(super) technology: String,
     pub(super) technology_attached: bool,
-    pub(super) dirty_documents: usize,
     pub(super) library_count: usize,
     pub(super) model_library_count: usize,
     pub(super) cell_count: usize,
@@ -134,35 +167,15 @@ pub struct OverviewSnapshot {
     pub problem: Option<ProblemSnapshot>,
     pub(super) open_documents: Vec<OpenDocumentSnapshot>,
     pub operations: Vec<OperationSnapshot>,
-    /// Every retained operation the project holds, counted from the records
-    /// rather than from the truncated list above: reporting the shown count as
-    /// the retained count would claim a project with thirty runs has five.
+    /// Every operation the project keeps, counted from the records rather
+    /// than from the truncated list above: reporting the shown count as the
+    /// kept count would claim a project with thirty runs has five.
     pub operation_total: usize,
-    pub(super) run_plan_name: String,
-    pub(super) execution_target: String,
 }
 
 fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeckSnapshot> {
     let document = model.workspace.content.netlist_document.as_ref()?;
-    let name = document
-        .provenance()
-        .imported()
-        .map(|imported| imported.origin().display_name().to_owned())
-        .or_else(|| {
-            document
-                .save_acknowledgement()
-                .map(|saved| saved.origin().display_name().to_owned())
-        })
-        .or_else(|| {
-            model
-                .workspace
-                .content
-                .netlist_source_path
-                .as_ref()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "Untitled SPICE deck".to_owned());
+    let name = health::deck_name(model)?;
     let ownership = match document.ownership() {
         DocumentOwnership::Generated => "generated",
         DocumentOwnership::Imported => "imported",
@@ -174,98 +187,47 @@ fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeck
         document.content_digest(),
         || document.source().lines().count(),
     );
-    let dependency_count = document.dependencies().len();
-    let dependencies_sealed = document.dependency_graph_is_sealed();
-    let validation = document.validation();
-    let validation_current =
-        validation.is_some_and(|report| report.content_digest() == document.content_digest());
-
-    let (validation_state, validation_detail, validation_tone, problem) = match validation {
-        None => (
-            "Not validated".to_owned(),
-            "Validate the retained source before execution".to_owned(),
-            Tone::Warn,
-            Some(ProblemSnapshot {
-                code: "NOT RUN".to_owned(),
-                message: "Validate the project source deck".to_owned(),
-                path: name.clone(),
-                tone: Tone::Warn,
-            }),
-        ),
-        Some(_) if !validation_current => (
-            "Stale".to_owned(),
-            "The source changed after the retained validation".to_owned(),
-            Tone::Warn,
-            Some(ProblemSnapshot {
-                code: "STALE".to_owned(),
-                message: "Source changed after the retained validation".to_owned(),
-                path: name.clone(),
-                tone: Tone::Warn,
-            }),
-        ),
-        Some(report) => {
-            let errors = report.error_count();
-            let warnings = report.warning_count();
-            let info = report.diagnostics().len().saturating_sub(errors + warnings);
-            let tone = if errors > 0 {
-                Tone::Error
-            } else if warnings > 0 {
-                Tone::Warn
-            } else {
-                Tone::Neutral
-            };
-            let state_label = if errors > 0 {
-                format!(
-                    "{errors} blocking {}",
-                    singular_or_plural(errors, "diagnostic", "diagnostics")
-                )
-            } else {
-                "Validated".to_owned()
-            };
-            let detail = format!(
-                "{warnings} {} · {info} information",
-                singular_or_plural(warnings, "advisory", "advisories")
-            );
-            let highest = report
+    let current = document
+        .validation()
+        .filter(|report| report.content_digest() == document.content_digest());
+    // Nothing at all when the deck validates: "No current source
+    // diagnostics" was a strip the page painted to report an absence.
+    let problem = current
+        .and_then(|report| {
+            report
                 .diagnostics()
                 .iter()
-                .max_by_key(|diagnostic| diagnostic.severity());
-            // Nothing at all when the deck validates: "No current source
-            // diagnostics" was a strip the page painted to report an absence.
-            let problem = highest.map(|diagnostic| {
-                let position = diagnostic.position();
-                ProblemSnapshot {
-                    code: diagnostic.code().map_or_else(
-                        || match diagnostic.severity() {
-                            DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
-                            DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
-                            DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
-                        },
-                        str::to_owned,
-                    ),
-                    message: diagnostic.message().to_owned(),
-                    path: format!("{}:{}:{}", name, position.line(), position.column()),
-                    tone: match diagnostic.severity() {
-                        DiagnosticSeverity::Info => Tone::Neutral,
-                        DiagnosticSeverity::Warning => Tone::Warn,
-                        DiagnosticSeverity::Error => Tone::Error,
+                .max_by_key(|diagnostic| diagnostic.severity())
+        })
+        .map(|diagnostic| {
+            let position = diagnostic.position();
+            ProblemSnapshot {
+                code: diagnostic.code().map_or_else(
+                    || match diagnostic.severity() {
+                        DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
+                        DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
+                        DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
                     },
-                }
-            });
-            (state_label, detail, tone, problem)
-        }
-    };
+                    str::to_owned,
+                ),
+                message: diagnostic.message().to_owned(),
+                path: format!("{}:{}:{}", name, position.line(), position.column()),
+                tone: match diagnostic.severity() {
+                    DiagnosticSeverity::Info => Tone::Neutral,
+                    DiagnosticSeverity::Warning => Tone::Warn,
+                    DiagnosticSeverity::Error => Tone::Error,
+                },
+            }
+        });
 
     Some(SourceDeckSnapshot {
         name,
         ownership,
         revision: document.revision().get(),
         line_count,
-        dependency_count,
-        dependencies_sealed,
-        validation_state,
-        validation_detail,
-        validation_tone,
+        dependency_count: document.dependencies().len(),
+        dependencies_sealed: document.dependency_graph_is_sealed(),
+        validation_tone: health::source_deck(model).tone,
         problem,
     })
 }
@@ -279,9 +241,7 @@ impl OverviewSnapshot {
             dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
         let netlist_first = cx.model.is_netlist_first_without_schematic();
         let source_deck = source_deck_snapshot(ctx, cx.model);
-        let configuration = configuration_snapshot(ctx, cx);
-        let checks = checks_snapshot(cx);
-        let models = model_snapshot(ctx, cx);
+        let configuration = configuration_snapshot(ctx, cx.model);
         let library_count = cx.model.library_manager.library_count();
         let model_library_count = cx.model.model_library_manager.library_count();
         let (cell_count, view_count) = derived(
@@ -295,6 +255,13 @@ impl OverviewSnapshot {
                 )
             },
         );
+        // A netlist-first project keeps its bootstrap cell pristine: it is
+        // not part of the design the reader made, so it is not counted.
+        let (library_count, cell_count, view_count) = if netlist_first {
+            bootstrap_excluded(cx.model, library_count, cell_count, view_count)
+        } else {
+            (library_count, cell_count, view_count)
+        };
         let root_reference = CellViewRef::new(
             &project.root_library,
             &project.top_cell,
@@ -327,133 +294,8 @@ impl OverviewSnapshot {
             })
         });
 
-        let latest_run_status = cx.model.simulation.retained.runs.first().map_or_else(
-            || {
-                let command = ids::open_workspace(run_destination(false, netlist_first));
-                let (enabled, disabled_reason) = command_gate(cx, command);
-                StatusSnapshot {
-                    area: "Latest run",
-                    state: "No retained run".to_owned(),
-                    detail: if netlist_first {
-                        "Run the saved deck to produce results".to_owned()
-                    } else {
-                        "Run the active plan to produce results".to_owned()
-                    },
-                    action: if netlist_first {
-                        "Open deck"
-                    } else {
-                        "Open analyses"
-                    },
-                    tone: Tone::Neutral,
-                    intent: OverviewIntent::Command(command),
-                    enabled,
-                    disabled_reason,
-                }
-            },
-            |run| {
-                let measurement_count: usize = run
-                    .analyses
-                    .iter()
-                    .map(|analysis| analysis.measurements.len())
-                    .sum();
-                let has_dataset = !run.analyses.is_empty();
-                let destination = run_destination(has_dataset, netlist_first);
-                let (enabled, disabled_reason) = command_gate(cx, ids::open_workspace(destination));
-                StatusSnapshot {
-                    area: "Latest run",
-                    state: format!(
-                        "Run {} · {}",
-                        run.id,
-                        lifecycle_label(run.lifecycle, run.success)
-                    ),
-                    detail: format!(
-                        "{} {} · {measurement_count} {} · {}",
-                        run.analyses.len(),
-                        singular_or_plural(run.analyses.len(), "analysis", "analyses"),
-                        singular_or_plural(measurement_count, "measurement", "measurements"),
-                        run.execution_target.map_or_else(
-                            || "execution target not retained".to_owned(),
-                            |target| target.label().to_owned(),
-                        )
-                    ),
-                    action: match (has_dataset, netlist_first) {
-                        (true, _) => "Open results",
-                        (false, true) => "Open deck",
-                        (false, false) => "Open analyses",
-                    },
-                    tone: lifecycle_tone(run.lifecycle, run.success),
-                    intent: OverviewIntent::OpenRun(0),
-                    enabled,
-                    disabled_reason,
-                }
-            },
-        );
-
-        let (configuration_enabled, configuration_disabled_reason) =
-            command_gate(cx, ids::CONFIGURATION_SETS);
-        let (models_enabled, models_disabled_reason) = command_gate(cx, ids::MODELS_CATALOG);
-        let primary_status = if netlist_first {
-            let (enabled, disabled_reason) =
-                command_gate(cx, ids::open_workspace(Workspace::Netlist));
-            source_deck.as_ref().map_or_else(
-                || StatusSnapshot {
-                    area: "Source deck",
-                    state: "Unavailable".to_owned(),
-                    detail: "The project has no saved source document".to_owned(),
-                    action: "Open deck",
-                    tone: Tone::Error,
-                    intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
-                    enabled,
-                    disabled_reason,
-                },
-                |deck| StatusSnapshot {
-                    area: "Source deck",
-                    state: deck.validation_state.clone(),
-                    detail: deck.validation_detail.clone(),
-                    action: "Open deck",
-                    tone: deck.validation_tone,
-                    intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
-                    enabled,
-                    disabled_reason,
-                },
-            )
-        } else {
-            let enabled = cx.platform.project_lifecycle.is_open();
-            StatusSnapshot {
-                area: "Schematic checks",
-                state: checks.state,
-                detail: checks.detail,
-                action: "Run checks",
-                tone: checks.tone,
-                intent: OverviewIntent::CheckProjectRoot,
-                enabled,
-                disabled_reason: (!enabled).then_some("no project is open"),
-            }
-        };
-        let statuses = vec![
-            primary_status,
-            StatusSnapshot {
-                area: "Configuration",
-                state: configuration.state.clone(),
-                detail: configuration.detail.clone(),
-                action: "Manage",
-                tone: configuration.tone,
-                intent: OverviewIntent::Command(ids::CONFIGURATION_SETS),
-                enabled: configuration_enabled,
-                disabled_reason: configuration_disabled_reason,
-            },
-            latest_run_status,
-            StatusSnapshot {
-                area: "Model closure",
-                state: models.state,
-                detail: models.detail,
-                action: "Inspect",
-                tone: models.tone,
-                intent: OverviewIntent::OpenProjectModels,
-                enabled: models_enabled,
-                disabled_reason: models_disabled_reason,
-            },
-        ];
+        let location = health::location(cx.model, cx.platform);
+        let statuses = status_rows(ctx, cx, netlist_first, dirty_documents, location.is_some());
         let problem = if netlist_first {
             source_deck.as_ref().map_or_else(
                 || {
@@ -501,11 +343,8 @@ impl OverviewSnapshot {
 
         Self {
             project_name: project.display_name().to_owned(),
-            project_id: project.id().to_string(),
             project_revision: project.revision().get(),
-            schema_version: project.schema_version(),
-            path: project_persistence_location(cx),
-            persistence_bound: cx.platform.project_lifecycle.binding().is_some(),
+            location,
             descriptor_root: format!("{}/{}", project.root_library, project.top_cell),
             simulation_root: configuration.root.clone(),
             technology: project.technology_binding().map_or_else(
@@ -513,7 +352,6 @@ impl OverviewSnapshot {
                 |binding| binding.display_label(),
             ),
             technology_attached: project.technology_binding().is_some(),
-            dirty_documents,
             library_count,
             model_library_count,
             cell_count,
@@ -529,10 +367,145 @@ impl OverviewSnapshot {
             open_documents,
             operations,
             operation_total,
-            run_plan_name: cx.model.sim_setup.active_plan_name().as_str().to_owned(),
-            execution_target: crate::state::ExecutionTarget::current().label().to_owned(),
         }
     }
+}
+
+/// The status rows, one per subject, each with the action that addresses it.
+fn status_rows(
+    ctx: &egui::Context,
+    cx: &Cx<'_, ProjectFeature>,
+    netlist_first: bool,
+    dirty_documents: usize,
+    saved: bool,
+) -> Vec<StatusSnapshot> {
+    let model = &*cx.model;
+    let facts = cx.runs.slot_facts(cx.peers.design().review_markers());
+    let (subject, design) = health::design(model, facts);
+    let design = match subject {
+        DesignSubject::SourceDeck => {
+            let command = ids::open_workspace(Workspace::Netlist);
+            StatusSnapshot::of(
+                subject.label(),
+                design,
+                "Open deck",
+                OverviewIntent::Command(command),
+                command_gate(cx, command),
+            )
+        }
+        DesignSubject::SchematicChecks => {
+            let enabled = cx.platform.project_lifecycle.is_open();
+            StatusSnapshot::of(
+                subject.label(),
+                design,
+                "Run checks",
+                OverviewIntent::CheckSimulationRoot,
+                (enabled, (!enabled).then_some("no project is open")),
+            )
+        }
+    };
+
+    let latest_run = match model.simulation.retained.runs.first() {
+        None => {
+            let command = ids::open_workspace(run_destination(false, netlist_first));
+            StatusSnapshot::of(
+                "Latest run",
+                health::latest_run(model),
+                if netlist_first {
+                    "Open deck"
+                } else {
+                    "Open analyses"
+                },
+                OverviewIntent::Command(command),
+                command_gate(cx, command),
+            )
+        }
+        Some(run) => {
+            let has_dataset = !run.analyses.is_empty();
+            let destination = run_destination(has_dataset, netlist_first);
+            StatusSnapshot::of(
+                "Latest run",
+                health::latest_run(model),
+                match (has_dataset, netlist_first) {
+                    (true, _) => "Open results",
+                    (false, true) => "Open deck",
+                    (false, false) => "Open analyses",
+                },
+                OverviewIntent::OpenRun(0),
+                command_gate(cx, ids::open_workspace(destination)),
+            )
+        }
+    };
+
+    let verify = ids::open_workspace(Workspace::Verify);
+    let dependencies = ProjectCommand::Page(ProjectPage::Dependencies).key();
+    let recovery = ProjectCommand::Page(ProjectPage::Recovery).key();
+    vec![
+        design,
+        StatusSnapshot::of(
+            "Configuration",
+            health::configuration(ctx, model),
+            "Manage",
+            OverviewIntent::Command(ids::CONFIGURATION_SETS),
+            command_gate(cx, ids::CONFIGURATION_SETS),
+        ),
+        latest_run,
+        StatusSnapshot::of(
+            "Verification",
+            health::verification(model),
+            "Open Verify",
+            OverviewIntent::Command(verify),
+            command_gate(cx, verify),
+        ),
+        StatusSnapshot::of(
+            "Model sources",
+            health::model_sources(ctx, model),
+            "Inspect",
+            OverviewIntent::OpenProjectModels,
+            command_gate(cx, ids::MODELS_CATALOG),
+        ),
+        StatusSnapshot::of(
+            "Dependencies",
+            health::dependencies(ctx, model),
+            "Open dependencies",
+            OverviewIntent::Command(dependencies),
+            command_gate(cx, dependencies),
+        ),
+        StatusSnapshot::of(
+            "Unsaved work",
+            health::unsaved_work(
+                dirty_documents,
+                saved,
+                &cx.state.project_checkpoint_recovery,
+            ),
+            "Open recovery",
+            OverviewIntent::Command(recovery),
+            command_gate(cx, recovery),
+        ),
+    ]
+}
+
+/// The catalogue's counts without the bootstrap cell a netlist-first project
+/// leaves pristine, nor its library when it holds nothing else.
+fn bootstrap_excluded(
+    model: &Model,
+    libraries: usize,
+    cells: usize,
+    views: usize,
+) -> (usize, usize, usize) {
+    let project = &model.workspace.content.project;
+    let Some(library) = model.library_manager.get_library(&project.root_library) else {
+        return (libraries, cells, views);
+    };
+    let Some(cell) = library.get_cell(&project.top_cell) else {
+        return (libraries, cells, views);
+    };
+    let only_cell = library.cell_count() == 1;
+    (
+        libraries.saturating_sub(usize::from(only_cell)),
+        cells.saturating_sub(1),
+        views.saturating_sub(cell.view_count()),
+    )
 }
 
 /// One retained operation, with the time it happened rather than a phrase
@@ -656,10 +629,8 @@ fn retained_operations(model: &Model) -> RetainedOperations {
                         run.analyses.len(),
                         singular_or_plural(run.analyses.len(), "analysis", "analyses"),
                         singular_or_plural(measurement_count, "measurement", "measurements"),
-                        run.execution_target.map_or_else(
-                            || "execution target not retained".to_owned(),
-                            |target| target.label().to_owned(),
-                        ),
+                        run.execution_target
+                            .map_or("engine not recorded", |target| target.label()),
                         crate::quantity::format_elapsed(run.elapsed_time),
                     ),
                     tone: lifecycle_tone(run.lifecycle, run.success),
@@ -768,126 +739,26 @@ fn retained_operations(model: &Model) -> RetainedOperations {
     }
 }
 
-pub(super) struct HealthCopy {
-    pub(super) state: String,
-    pub(super) detail: String,
-    pub(super) tone: Tone,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct DrcCounts {
-    pub(super) critical: usize,
-    pub(super) errors: usize,
-    pub(super) warnings: usize,
-    pub(super) info: usize,
-}
-
-fn project_persistence_location(cx: &Cx<'_, ProjectFeature>) -> String {
-    let fallback = || {
-        cx.model
-            .workspace
-            .content
-            .project
-            .path
-            .as_ref()
-            .map_or_else(
-                || "Not yet saved".to_owned(),
-                |path| path.display().to_string(),
-            )
-    };
-    let Some(binding) = cx.platform.project_lifecycle.binding() else {
-        return fallback();
-    };
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        binding.canonical_path.display().to_string()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        match binding {
-            crate::workbench::lifecycle::project_lifecycle::PersistenceBinding::Browser {
-                binding,
-                ..
-            } => {
-                if binding.persisted_generation == Some(binding.receipt.accepted_generation) {
-                    binding.display_name.clone()
-                } else {
-                    format!("{} · session-only browser binding", binding.display_name)
-                }
-            }
-        }
-    }
-}
-
-fn checks_snapshot(cx: &Cx<'_, ProjectFeature>) -> HealthCopy {
-    match cx
-        .model
-        .simulation_root_design_check_status(cx.runs.slot_facts(cx.peers.design().review_markers()))
-    {
-        DesignCheckStatus::Current(receipt) => {
-            let summary = receipt.result.summary();
-            drc_copy(
-                true,
-                Some(DrcCounts {
-                    critical: summary.critical,
-                    errors: summary.errors,
-                    warnings: summary.warnings,
-                    info: summary.info,
-                }),
-            )
-        }
-        DesignCheckStatus::NotRun => HealthCopy {
-            state: "Not run".to_owned(),
-            detail: "Run checks for the project-root schematic".to_owned(),
-            tone: Tone::Warn,
-        },
-        DesignCheckStatus::Stale(_) => HealthCopy {
-            state: "Stale".to_owned(),
-            detail: "Project-root inputs changed after the retained check".to_owned(),
-            tone: Tone::Warn,
-        },
-        DesignCheckStatus::Unavailable { reason, .. } => HealthCopy {
-            state: "Unavailable".to_owned(),
-            detail: reason,
-            tone: Tone::Error,
-        },
-    }
-}
-
-/// The one project-root finding the status card's strip names, or nothing.
+/// The one finding of the cell view runs start from that the status rows'
+/// strip names, or nothing. Checks not run yet, or out of date, are the
+/// Schematic checks row's to say: the strip names findings.
 pub fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
-    let root_path = format!(
-        "{}/{}",
-        cx.model.workspace.content.project.root_library,
-        cx.model.workspace.content.project.top_cell
-    );
     let result = match cx
         .model
         .simulation_root_design_check_status(cx.runs.slot_facts(cx.peers.design().review_markers()))
     {
         DesignCheckStatus::Current(receipt) => &receipt.result,
-        DesignCheckStatus::NotRun => {
-            return Some(ProblemSnapshot {
-                code: "NOT RUN".to_owned(),
-                message: "Run schematic checks for the project root".to_owned(),
-                path: root_path,
-                tone: Tone::Warn,
-            });
-        }
-        DesignCheckStatus::Stale(_) => {
-            return Some(ProblemSnapshot {
-                code: "STALE".to_owned(),
-                message: "Project-root inputs changed after the retained check".to_owned(),
-                path: root_path,
-                tone: Tone::Warn,
-            });
-        }
+        DesignCheckStatus::NotRun | DesignCheckStatus::Stale(_) => return None,
         DesignCheckStatus::Unavailable { reason, .. } => {
             return Some(ProblemSnapshot {
                 code: "UNAVAILABLE".to_owned(),
                 message: reason,
-                path: root_path,
+                path: cx
+                    .model
+                    .workspace
+                    .content
+                    .simulation_root_reference()
+                    .display_path(),
                 tone: Tone::Error,
             });
         }
@@ -919,245 +790,26 @@ const fn drc_severity_priority(severity: DrcSeverity) -> u8 {
     }
 }
 
-pub(super) fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy {
-    if !current {
-        return HealthCopy {
-            state: "Not current".to_owned(),
-            detail: "No check result describes the active schematic topology".to_owned(),
-            tone: Tone::Warn,
-        };
-    }
-    let Some(summary) = summary else {
-        return HealthCopy {
-            state: "Not run".to_owned(),
-            detail: "No retained schematic-check result".to_owned(),
-            tone: Tone::Warn,
-        };
-    };
-    let blockers = summary.critical + summary.errors;
-    if blockers > 0 {
-        HealthCopy {
-            state: format!(
-                "{blockers} blocking {}",
-                singular_or_plural(blockers, "finding", "findings")
-            ),
-            detail: format!(
-                "{} critical · {} errors · {} advisories",
-                summary.critical,
-                summary.errors,
-                summary.warnings + summary.info
-            ),
-            tone: Tone::Error,
-        }
-    } else {
-        HealthCopy {
-            state: "Passed".to_owned(),
-            detail: format!(
-                "{} {}",
-                summary.warnings + summary.info,
-                singular_or_plural(summary.warnings + summary.info, "advisory", "advisories")
-            ),
-            tone: Tone::Neutral,
-        }
-    }
-}
-
-fn configuration_snapshot(
-    ctx: &egui::Context,
-    cx: &Cx<'_, ProjectFeature>,
-) -> ConfigurationSnapshot {
-    let catalog = &cx.model.workspace.content.configuration_sets;
-    // With no configuration used for runs the project runs Default: its own
-    // top cell through the built-in view list, with no DUT instance.
-    let root = cx
-        .model
-        .workspace
-        .content
-        .simulation_root_reference()
-        .display_path();
-    // Validating proves every configuration's digest, so it is done once per
-    // edit of the catalogue rather than on every frame.
-    let validity = derived(
-        ctx,
-        "overview.configuration validity",
-        catalog.stamp(),
-        || catalog.validate().map_err(|error| error.to_string()),
-    );
-    if let Err(error) = validity {
-        let active = catalog.active();
-        return ConfigurationSnapshot {
-            configured: active.is_some(),
-            state: "Unreadable configurations".to_owned(),
-            detail: error,
-            root,
-            dut: active.map_or_else(
-                || "\u{2014}".to_owned(),
-                |configuration| configuration.dut_path().to_owned(),
-            ),
-            tone: Tone::Error,
-        };
-    }
-    let Some(active) = catalog.active() else {
-        return ConfigurationSnapshot {
-            configured: false,
-            state: "Default".to_owned(),
-            detail: "Runs use the built-in view list".to_owned(),
-            root,
-            dut: "\u{2014}".to_owned(),
-            tone: Tone::Neutral,
-        };
-    };
-    let projection = cx.model.workspace.configuration_execution_projection(
-        &cx.model.library_manager,
-        &cx.model.workspace.content.active_view,
-        &cx.model.schematic,
-    );
-    let (detail, tone) = match projection {
-        Ok(projection) => (
-            format!(
-                "{} instances bound · {} instance bindings",
-                projection.plan().bindings().len(),
-                active.overrides().len(),
-            ),
-            Tone::Neutral,
-        ),
-        Err(error) => (format!("Runs are blocked: {error}"), Tone::Error),
-    };
+/// The configuration runs use, as the Configuration row states it, with the
+/// root and the design under test the design register names.
+fn configuration_snapshot(ctx: &egui::Context, model: &Model) -> ConfigurationSnapshot {
+    let status = health::configuration(ctx, model);
+    let active = model.workspace.content.configuration_sets.active();
     ConfigurationSnapshot {
-        configured: true,
-        state: active.name().to_owned(),
-        detail,
-        root: active.root().display_path(),
-        dut: active.dut_path().to_owned(),
-        tone,
-    }
-}
-
-/// What the model catalogue holds and whether its sources can execute, as
-/// the status row states it.
-#[derive(Debug, Clone)]
-struct CatalogFacts {
-    library_count: usize,
-    model_count: usize,
-    source_count: usize,
-    source_contract_error: Option<String>,
-}
-
-fn catalog_facts(manager: &crate::state::model_library::ModelLibraryManager) -> CatalogFacts {
-    let libraries = manager.libraries_sorted();
-    let mut sources = BTreeSet::new();
-    for library in &libraries {
-        for source in &library.source_closure {
-            sources.insert(source.path.clone());
-        }
-    }
-    let source_contract_error = libraries.into_iter().find_map(|library| {
-        if !library.source_authority.has_execution_source() {
-            return None;
-        }
-        if library.root_path.is_none() {
-            return Some(format!(
-                "Model library '{}' has no root source file",
-                library.name
-            ));
-        }
-        if library.source_closure.is_empty() {
-            return Some(format!(
-                "Model library '{}' has no imported source files",
-                library.name
-            ));
-        }
-        if library.source_authority.uses_retained_bytes()
-            && library.source_closure.iter().any(|source| {
-                !library
-                    .source_contents
-                    .iter()
-                    .any(|content| content.path == source.path)
-            })
-        {
-            return Some(format!(
-                "Model library '{}' does not retain every pinned source",
-                library.name
-            ));
-        }
-        None
-    });
-    CatalogFacts {
-        library_count: manager.library_count(),
-        model_count: manager.total_model_count(),
-        source_count: sources.len(),
-        source_contract_error,
-    }
-}
-
-fn model_snapshot(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> ModelSnapshot {
-    let manager = &cx.model.model_library_manager;
-    let CatalogFacts {
-        library_count,
-        model_count,
-        source_count,
-        source_contract_error,
-    } = derived(
-        ctx,
-        "overview.model catalog",
-        manager.content_stamp(),
-        || catalog_facts(manager),
-    );
-    let scan_errors = &cx.model.pdk_config.scan_errors;
-    let binding = cx.model.workspace.content.project.technology_binding();
-    let contract_error = binding.and_then(|_| cx.model.project_technology_verdict().err());
-
-    let copy = if let Some(error) = contract_error {
-        HealthCopy {
-            state: "Contract stale".to_owned(),
-            detail: error,
-            tone: Tone::Error,
-        }
-    } else if let Some(error) = source_contract_error {
-        HealthCopy {
-            state: "Closure blocked".to_owned(),
-            detail: error,
-            tone: Tone::Error,
-        }
-    } else if let Some(first) = scan_errors.first() {
-        HealthCopy {
-            state: format!(
-                "{} scan {}",
-                scan_errors.len(),
-                singular_or_plural(scan_errors.len(), "diagnostic", "diagnostics")
-            ),
-            detail: first.clone(),
-            tone: Tone::Warn,
-        }
-    } else if library_count == 0 {
-        HealthCopy {
-            state: "No model libraries".to_owned(),
-            detail: "No loaded executable model catalog".to_owned(),
-            tone: Tone::Warn,
-        }
-    } else if binding.is_none() {
-        HealthCopy {
-            state: "Technology not attached".to_owned(),
-            detail: format!(
-                "{library_count} {} · {model_count} models · {source_count} source files",
-                singular_or_plural(library_count, "library", "libraries")
-            ),
-            tone: Tone::Neutral,
-        }
-    } else {
-        HealthCopy {
-            state: "Contract current".to_owned(),
-            detail: format!(
-                "{library_count} {} · {model_count} models · {source_count} source files",
-                singular_or_plural(library_count, "library", "libraries")
-            ),
-            tone: Tone::Neutral,
-        }
-    };
-
-    ModelSnapshot {
-        state: copy.state,
-        detail: copy.detail,
-        tone: copy.tone,
+        configured: active.is_some(),
+        state: status.state,
+        detail: status.detail,
+        // With no configuration used for runs the project runs Default: its
+        // own top cell through the built-in view list, with no DUT instance.
+        root: model
+            .workspace
+            .content
+            .simulation_root_reference()
+            .display_path(),
+        dut: active.map_or_else(
+            || "\u{2014}".to_owned(),
+            |configuration| configuration.dut_path().to_owned(),
+        ),
+        tone: status.tone,
     }
 }

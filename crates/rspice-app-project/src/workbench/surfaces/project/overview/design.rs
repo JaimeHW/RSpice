@@ -1,5 +1,4 @@
-//! The Overview's Design and Execution context cards: the register of what
-//! the project is made of, and the setup a run would use.
+//! The Overview's Design card: the register of what the project is made of.
 
 use std::collections::BTreeSet;
 
@@ -8,8 +7,7 @@ use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Problem};
-use crate::workbench::design_system::{property_row, property_row_problem};
+use crate::ui::widgets::Button;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -34,84 +32,13 @@ pub struct DesignObjectSnapshot {
     pub top: bool,
 }
 
-/// The bindings the next run executes against, stated as a property ledger.
-pub(super) fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
-    overview_card(ui, "Execution context", "", |ui| {
-        if snapshot.netlist_first {
-            let deck = snapshot.source_deck.as_ref();
-            property_row(
-                ui,
-                "Source deck",
-                deck.map_or("Unavailable", |deck| deck.name.as_str()),
-            );
-            match deck {
-                Some(deck) => property_row_problem(
-                    ui,
-                    "Validation",
-                    &deck.validation_state,
-                    deck.validation_tone.problem(),
-                ),
-                None => {
-                    property_row_problem(ui, "Validation", "Unavailable", Some(Problem::Failure))
-                }
-            };
-            property_row(
-                ui,
-                "Ownership",
-                deck.map_or("Unavailable", |deck| deck.ownership),
-            );
-        } else {
-            property_row(
-                ui,
-                "Top / DUT",
-                &format!(
-                    "{} \u{00b7} {}",
-                    snapshot.descriptor_root, snapshot.configuration.dut
-                ),
-            );
-            property_row(ui, "Testbench", &snapshot.configuration.root);
-            // "· resolved" said only that the configuration is the normal
-            // kind of configuration. The two states a reader acts on keep
-            // their word, behind the mark that carries the severity.
-            let configuration = match snapshot.configuration.tone {
-                Tone::Error => format!("{} · blocked", snapshot.configuration.state),
-                Tone::Warn => format!("{} · review required", snapshot.configuration.state),
-                Tone::Neutral => snapshot.configuration.state.clone(),
-            };
-            property_row_problem(
-                ui,
-                "Configuration",
-                &configuration,
-                snapshot.configuration.tone.problem(),
-            );
-        }
-        property_row(ui, "Execution", &snapshot.execution_target);
-        None
-    })
-}
-
 pub(super) fn design_card(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
     snapshot: &OverviewSnapshot,
 ) -> Option<OverviewIntent> {
     let objects = design_objects(snapshot);
-    let meta = if snapshot.netlist_first {
-        format!(
-            "{} key {} · netlist-first",
-            objects.len(),
-            singular_or_plural(objects.len(), "source", "sources")
-        )
-    } else {
-        format!(
-            "{} key {} · {} {}",
-            objects.len(),
-            singular_or_plural(objects.len(), "object", "objects"),
-            snapshot.cell_count,
-            singular_or_plural(snapshot.cell_count, "cell", "cells")
-        )
-    };
-    overview_card(ui, "Design", &meta, |ui| design_register(ui, cx, &objects))
+    overview_card(ui, "Design", "", |ui| design_register(ui, cx, &objects))
 }
 
 fn design_register(
@@ -238,16 +165,16 @@ pub fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> 
                     name: deck.name.clone(),
                     kind: format!("SPICE deck · {}", deck.ownership),
                     detail: format!(
-                        "rev {} · {} {} · {} {}{}",
+                        "revision {} · {} {} · {} {}{}",
                         deck.revision,
                         deck.line_count,
                         singular_or_plural(deck.line_count, "line", "lines"),
                         deck.dependency_count,
-                        singular_or_plural(deck.dependency_count, "dependency", "dependencies"),
-                        if deck.dependencies_sealed {
-                            " · sealed"
+                        singular_or_plural(deck.dependency_count, "include", "includes"),
+                        if deck.dependencies_sealed || deck.dependency_count == 0 {
+                            ""
                         } else {
-                            " · unresolved"
+                            ", not all found"
                         }
                     ),
                     tone: deck.validation_tone,

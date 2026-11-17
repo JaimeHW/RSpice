@@ -12,13 +12,15 @@ use super::{OverviewIntent, Tone, overview_card, paint_tone_mark};
 
 const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
 
-/// Describe the operations register without letting its own limit pass for the
-/// project's history: five newest rows out of thirty is never "5 retained".
+/// Describe the operations register without letting its own limit pass for
+/// the project's history: five newest rows out of thirty is never "5". A
+/// register that shows everything says nothing about its length; its rows
+/// do.
 pub(super) fn operations_meta(shown: usize, total: usize) -> String {
     if total > shown {
-        format!("{shown} of {total} retained")
+        format!("{shown} of {total}")
     } else {
-        format!("{total} retained")
+        String::new()
     }
 }
 
@@ -35,29 +37,14 @@ fn operations_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<Overv
     ui.add_space(7.0);
     let mut selected = None;
     if snapshot.operations.is_empty() {
+        // One line: the revision and whether it is saved are the header's and
+        // the Unsaved work row's to say.
         activity_row(
             ui,
-            "now",
-            "No retained project operations",
-            "Validated revisions and simulation runs will appear here",
+            "",
+            "No runs or validated revisions yet",
+            "Runs, validated revisions and library publications appear here",
             Tone::Neutral,
-            false,
-        );
-        ui.add_space(7.0);
-        activity_row(
-            ui,
-            "rev",
-            &format!("Working revision {}", snapshot.project_revision),
-            if snapshot.dirty_documents == 0 {
-                "No modified open documents"
-            } else {
-                "Working changes are not yet saved"
-            },
-            if snapshot.dirty_documents == 0 {
-                Tone::Neutral
-            } else {
-                Tone::Warn
-            },
             false,
         );
     } else {

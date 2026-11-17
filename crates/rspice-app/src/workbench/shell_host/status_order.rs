@@ -39,7 +39,7 @@ use rspice_app_workbench::workbench::chrome::status_bar::{
 use rspice_app_workbench::workbench::framework::host::{
     StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
 };
-use rspice_results::verification::{RowStatus, Sheet};
+use rspice_results::verification::RowStatus;
 
 use crate::workbench::diagnostic_routes::open_specification;
 
@@ -585,7 +585,9 @@ fn shown_rollup(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Sp
         return None;
     }
     let sheet = simulation.verification_sheet()?;
-    let words = specification_rollup(sheet)?;
+    // The Overview's Verification row says it in the same words.
+    let words =
+        rspice_app_project::workbench::project::health::verification_words(&app.state.model)?;
     let counts = sheet.summary.counts;
     Some(SpecificationRollup {
         run: run.id,
@@ -597,35 +599,6 @@ fn shown_rollup(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Sp
             .find(|row| matches!(row.status, Some(RowStatus::Fail | RowStatus::Error)))
             .map(|row| row.measurement.clone()),
     })
-}
-
-/// "3 of 4 specifications pass · 1 fails": the sheet's own counts, with the
-/// near ones passing; `None` when it judges no specification.
-fn specification_rollup(sheet: &Sheet) -> Option<String> {
-    if !sheet.is_judged() || sheet.rows.is_empty() {
-        return None;
-    }
-    let counts = sheet.summary.counts;
-    let passing = counts.pass + counts.near;
-    let mut parts = vec![match sheet.rows.len() {
-        1 => format!("{passing} of 1 specification passes"),
-        total => format!("{passing} of {total} specifications pass"),
-    }];
-    if counts.fail > 0 {
-        parts.push(format!(
-            "{} {}",
-            counts.fail,
-            if counts.fail == 1 { "fails" } else { "fail" }
-        ));
-    }
-    if counts.error > 0 {
-        parts.push(format!(
-            "{} error{}",
-            counts.error,
-            if counts.error == 1 { "" } else { "s" }
-        ));
-    }
-    Some(parts.join(" \u{b7} "))
 }
 
 impl RSpiceApp {
