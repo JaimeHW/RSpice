@@ -927,6 +927,47 @@ fn destination_lease_serializes_writers_and_reuses_one_stable_inode() {
 }
 
 #[test]
+fn a_new_file_is_published_with_nothing_beside_it_and_never_replaced() {
+    let root = unique_temp_dir("publish-new");
+    let target = root.join("state.json");
+
+    publish_new_bytes(&target, b"first").expect("publish a new file");
+    let again = publish_new_bytes(&target, b"second");
+
+    assert!(matches!(again, Err(error) if error.kind() == io::ErrorKind::AlreadyExists));
+    assert_eq!(std::fs::read(&target).expect("read the file"), b"first");
+    assert_eq!(
+        std::fs::read_dir(&root).expect("read fixture").count(),
+        1,
+        "no lease or staging file is left beside a write-once file"
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
+fn removing_a_published_file_takes_its_lease_with_it() {
+    let root = unique_temp_dir("remove-published");
+    let target = root.join("state.json");
+    compare_exchange_bytes(&target, ExpectedContent::Missing, b"first").expect("publish");
+    compare_exchange_bytes(
+        &target,
+        ExpectedContent::Digest(Sha256::digest(b"first").into()),
+        b"second",
+    )
+    .expect("replace");
+
+    remove_published(&target).expect("remove the file and its lease");
+    remove_published(&target).expect("a file already gone is not a failure");
+
+    assert_eq!(
+        std::fs::read_dir(&root).expect("read fixture").count(),
+        0,
+        "nothing of the retired file is left"
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+#[test]
 fn foreign_lease_collision_is_rejected_without_modification() {
     let root = unique_temp_dir("foreign-lease");
     let target = internal_target(&root);

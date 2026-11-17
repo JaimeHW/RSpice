@@ -1130,6 +1130,112 @@ pub fn atomic_copy(source: &Path, target: &Path) -> io::Result<()> {
     })
 }
 
+/// Durably publish `bytes` at a name nothing has been published at and no
+/// other writer will name, such as one carrying a fresh unique identifier.
+///
+/// Such a file has no predecessor to keep and no writer to wait for, so no
+/// destination lease is taken and nothing is left beside it: a folder of
+/// write-once files holds only those files. Nothing is ever replaced; a
+/// destination that is already there fails with `AlreadyExists` and is left
+/// as it was.
+pub fn publish_new_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    publish_new_bytes_impl(path, bytes, false)
+}
+
+/// [`publish_new_bytes`] for secret material: the file is readable and
+/// writable by its owner only before it is published.
+#[cfg(unix)]
+pub fn publish_new_bytes_owner_only(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    publish_new_bytes_impl(path, bytes, true)
+}
+
+fn publish_new_bytes_impl(path: &Path, bytes: &[u8], owner_only: bool) -> io::Result<()> {
+    std::fs::create_dir_all(parent_directory(path))?;
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
+    match path.symlink_metadata() {
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "'{}' is already there and is never replaced",
+                    path.display()
+                ),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let staged_digest: [u8; 32] = Sha256::digest(bytes).into();
+    let (temp, mut file) = create_unique_sibling(path)?;
+    let staged = (|| -> io::Result<()> {
+        file.write_all(bytes)?;
+        file.flush()?;
+        #[cfg(unix)]
+        if owner_only {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        file.sync_all()
+    })();
+    #[cfg(not(unix))]
+    let _ = owner_only;
+    drop(file);
+    if let Err(error) = staged {
+        remove_unpublished_temp(&temp);
+        return Err(error);
+    }
+    match move_no_replace_checked(&temp, path, staged_digest) {
+        Ok(()) => {}
+        Err(PublicationFailure::Safe(error)) => {
+            remove_unpublished_temp(&temp);
+            return Err(error);
+        }
+        Err(error @ PublicationFailure::Uncertain { .. }) => return Err(error.into_io()),
+    }
+    sync_parent_directory(parent_directory(path))
+}
+
+/// Remove a file nothing will be published at again, such as a write-once
+/// file whose unique name is being retired, and the lease a replacement of
+/// it left beside it.
+///
+/// The lease is taken first, so a writer replacing the file finishes before
+/// it goes and the evidence of an interrupted replacement is settled. The
+/// lease's pathname then goes too: on Unix while it is still held, since
+/// every writer checks after locking that the pathname still names what it
+/// locked; elsewhere once it is closed, since a writer holding it open keeps
+/// it from being deleted. A lease another writer holds open stays, harmless.
+/// A file already gone is not a failure.
+pub fn remove_published(path: &Path) -> Result<(), CompareExchangeError> {
+    let destination = resolved_destination(path);
+    let path = destination.as_path();
+    let lease = lease_path(path);
+    let held = match lease.symlink_metadata() {
+        Ok(_) => Some(DestinationLease::acquire(path)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let mut removed = match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(held) = held {
+        #[cfg(unix)]
+        let gone = std::fs::remove_file(&held.path).is_ok();
+        drop(held);
+        #[cfg(not(unix))]
+        let gone = std::fs::remove_file(&lease).is_ok();
+        removed |= gone;
+    }
+    if removed {
+        sync_parent_of(path)?;
+    }
+    Ok(())
+}
+
 /// Persist a successful metadata-only transaction such as recovery deletion.
 pub fn sync_parent_of(path: &Path) -> io::Result<()> {
     sync_parent_directory(parent_directory(path))

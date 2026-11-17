@@ -909,10 +909,10 @@ fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), S
             }
             let target_snapshot = to.join(snapshot_name);
             if !target_snapshot.exists() {
-                publish_private_file(&target_snapshot, ExpectedContent::Missing, &bytes)
+                publish_new_private_file(&target_snapshot, &bytes)
                     .map_err(|error| format!("its snapshot could not be copied: {error}"))?;
             }
-            publish_private_file(&target_manifest, ExpectedContent::Missing, &manifest_bytes)
+            publish_new_private_file(&target_manifest, &manifest_bytes)
                 .map_err(|error| format!("its manifest could not be copied: {error}"))
         })();
         match copied {
@@ -1072,7 +1072,7 @@ fn publish_native(
         return Err("project checkpoint identity collision; no state was changed".to_owned());
     }
 
-    publish_private_file(&snapshot, ExpectedContent::Missing, bytes)
+    publish_new_private_file(&snapshot, bytes)
         .map_err(|error| format!("project checkpoint snapshot publication failed: {error}"))?;
     let observed = std::fs::read(&snapshot)
         .map_err(|error| format!("project checkpoint snapshot verification failed: {error}"))?;
@@ -1084,7 +1084,7 @@ fn publish_native(
     let mut manifest_bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|error| format!("project checkpoint manifest serialization failed: {error}"))?;
     manifest_bytes.push(b'\n');
-    publish_private_file(&manifest_path, ExpectedContent::Missing, &manifest_bytes)
+    publish_new_private_file(&manifest_path, &manifest_bytes)
         .map_err(|error| format!("project checkpoint manifest publication failed: {error}"))?;
     crate::io::durable_file::sync_parent_of(&manifest_path)
         .map_err(|error| format!("project checkpoint directory sync failed: {error}"))?;
@@ -1096,6 +1096,21 @@ fn publish_native(
             snapshot,
         },
     )
+}
+
+/// Publish `bytes` as a new file at `path`, readable by its owner only. A
+/// checkpoint's files have unique names, so nothing else is written there and
+/// nothing but the file is left in the folder.
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_new_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        crate::io::durable_file::publish_new_bytes_owner_only(path, bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        crate::io::durable_file::publish_new_bytes(path, bytes)
+    }
 }
 
 /// Publish `bytes` at `path` while it holds what `expected` says, readable by
@@ -1260,14 +1275,13 @@ fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Res
 }
 
 /// Remove each file, the manifest first so a checkpoint stops being listed
-/// before its snapshot goes; a file already gone is not a failure.
+/// before its snapshot goes, with the lease an edit of it left; a file
+/// already gone is not a failure.
 #[cfg(not(target_arch = "wasm32"))]
 fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a PathBuf>, failures: &mut Vec<String>) {
     for path in paths {
-        match std::fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => failures.push(format!("'{}': {error}", path.display())),
+        if let Err(error) = crate::io::durable_file::remove_published(path) {
+            failures.push(format!("'{}': {error}", path.display()));
         }
     }
 }
