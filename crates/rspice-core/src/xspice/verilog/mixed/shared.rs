@@ -2030,7 +2030,20 @@ impl MixedDigitalCoordinator {
                 );
             }
         }
-        if !targets.is_empty() {
+        // A trial that has located an event inside its step is never
+        // accepted: it is solved again at the event's own instant, and the
+        // event is published there, on the tick nearest that instant
+        // (Verilog-AMS LRM 2.4 section 7.3.6.1). Running its consequences at
+        // this endpoint's tick first would only be undone, and anything they
+        // refuse — a zero-delay loop the event enables — would be refused at
+        // a tick that depends on the step rather than the event. The
+        // observation lane holds back the same way.
+        let refining = hosts.iter().any(|host| {
+            host.trial
+                .as_ref()
+                .is_some_and(|trial| trial.observation_refinement.is_some())
+        });
+        if !targets.is_empty() && !refining {
             let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
             cursor.published_tick = cursor.published_tick.max(tick);
             for group in targets {

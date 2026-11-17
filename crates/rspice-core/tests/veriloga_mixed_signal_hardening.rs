@@ -3119,6 +3119,49 @@ fn a_loop_an_ad_opens_beside_a_design_is_refused_at_its_bound() {
     }
 }
 
+/// A zero-delay loop that an analog event enables: the ramp crosses 0.5 V at
+/// exactly 50 ns, the `@(cross)` block sets `en`, and `y = en & ~y` can then
+/// never settle.
+const ANALOG_ENABLED_LOOP: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module zl(in, out);
+  input in; electrical in; output out; electrical out;
+  reg en; wire y;
+  initial en = 0;
+  always @(cross(V(in) - 0.5, +1)) en = 1;
+  assign y = en & ~y;
+  analog V(out) <+ transition(y ? 1.0 : 0.0, 0, 1n);
+endmodule
+";
+
+/// **A loop an analog event enables is refused at the event's tick, whatever
+/// the step.** The crossing is at 50 ns, which Verilog-AMS LRM 2.4 section
+/// 7.3.6.1 puts on tick 50000 of the 1 ps grid; the step that overshoots it
+/// ends somewhere else for each `.tran` step, and naming that endpoint's tick
+/// sent the reader to 50.061 ns or 50.125 ns depending on the step.
+#[test]
+fn a_zero_delay_loop_an_analog_event_enables_is_refused_at_the_event_tick() {
+    let model = ModelFile::hdl("analog_enabled_loop", ANALOG_ENABLED_LOOP);
+    for (step, max_step) in [("0.1n", 0.1e-9), ("1n", 1.0e-9), ("5n", 5.0e-9)] {
+        let deck = format!(
+            "* zero-delay loop enabled by an analog event\n\
+             .hdl \"{}\"\n\
+             vin in 0 pwl(0 0 100n 1)\n\
+             xz in out zl\n\
+             r1 out 0 1k\n\
+             .tran {step} 200n\n\
+             .end\n",
+            model.deck_path()
+        );
+        let error = error_for(&deck, 200.0e-9, max_step);
+        assert!(
+            error.contains("event network did not settle at tick 50000 (5e-8 s)")
+                && error.contains("zero-delay loop: xz.y -> xz.y"),
+            "step {step}: {error}"
+        );
+    }
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps
