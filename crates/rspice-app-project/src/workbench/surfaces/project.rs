@@ -15,6 +15,8 @@ mod page;
 pub mod recovery;
 mod technology;
 
+pub use technology::{AttachableTechnology, attachable_binding, attachable_technologies};
+
 use egui::{
     Align, Align2, Color32, Context, Key, Layout, Margin, Modifiers, Rect, Response, ScrollArea,
     Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2,

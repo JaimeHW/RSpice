@@ -881,7 +881,11 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
     for (title, detail, icon, primary, next) in [
         (
             "New project",
-            "Analog, RF or mixed-signal · blank top cell",
+            if cfg!(target_arch = "wasm32") {
+                "Library, top cell and technology"
+            } else {
+                "Folder, library, top cell and technology"
+            },
             WorkbenchIcon::Add,
             true,
             LandingAction::NewProject,

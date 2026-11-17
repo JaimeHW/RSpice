@@ -11,27 +11,68 @@ use rspice_app_project::workbench::app::dialogs::check_and_save_validation::{
 };
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use rspice_app_project::workbench::surfaces::project::attachable_technologies;
 #[cfg(test)]
 use rspice_app_project::workbench::workflows::project_workflow::ProjectLoadOrigin;
 #[cfg(test)]
 use rspice_app_project::workbench::workflows::project_workflow::report_lifecycle_error;
 #[cfg(test)]
 use rspice_app_services::io::ProjectSnapshot;
-use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
 use rspice_app_services::workbench::lifecycle::project_lifecycle::LifecycleSource;
 use rspice_app_state::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
-/// Open the transaction with the default library and top cell. The project
-/// name starts empty because it is the one field with no defensible default:
-/// requiring it is the point of the dialog.
+/// Open the transaction with the default location, library and top cell,
+/// and the technologies this session can attach. The project name starts
+/// empty because it is the one field with no defensible default: requiring
+/// it is the point of the dialog.
 pub(crate) fn open_new_project_dialog(state: &mut AppState) {
     state.project.new_project = NewProjectDialogState {
         open: true,
+        location: default_project_location(&state.platform.recent_files),
         library: DEFAULT_PROJECT_LIBRARY.to_owned(),
         top_cell: DEFAULT_TOP_CELL.to_owned(),
+        technologies: attachable_technologies(&state.model),
         ..NewProjectDialogState::default()
     };
+}
+
+/// Where New project offers to make the project's folder: where the most
+/// recently opened project's folder is, else the reader's documents folder.
+/// A project kept in a folder of its own name sits in its own folder, so the
+/// offer is that folder's parent; otherwise it is the file's own folder.
+#[cfg(not(target_arch = "wasm32"))]
+fn default_project_location(recent_files: &[RecentFile]) -> String {
+    recent_files
+        .iter()
+        .filter(|recent| recent.kind == RecentKind::Project)
+        .max_by_key(|recent| recent.opened_at_unix_ms)
+        .and_then(|recent| {
+            let folder = recent.path.parent()?;
+            let own_folder = folder.file_name().is_some_and(|name| {
+                recent
+                    .path
+                    .file_stem()
+                    .is_some_and(|stem| stem.eq_ignore_ascii_case(name))
+            });
+            if own_folder {
+                folder.parent()
+            } else {
+                Some(folder)
+            }
+            .map(std::path::Path::to_path_buf)
+        })
+        .or_else(dirs::document_dir)
+        .or_else(dirs::home_dir)
+        .map(|folder| folder.display().to_string())
+        .unwrap_or_default()
+}
+
+/// The browser writes a project where its first save is asked to.
+#[cfg(target_arch = "wasm32")]
+fn default_project_location(_recent_files: &[RecentFile]) -> String {
+    String::new()
 }
 
 /// Hold `action`, which takes the open project away, while the Configuration

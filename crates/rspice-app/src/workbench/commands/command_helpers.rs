@@ -474,8 +474,8 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             }
         }
         ProjectRequest::CreateProject => {
-            let params = app.state.project.new_project.params();
-            match app.state.create_new_project_with(&params) {
+            let dialog = app.state.project.new_project.clone();
+            match app.state.create_reviewed_project(&dialog) {
                 Ok(()) => app.state.project.new_project = NewProjectDialogState::default(),
                 Err(error) => app.state.project.new_project.error = Some(error),
             }

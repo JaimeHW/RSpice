@@ -24,3 +24,26 @@ fn the_slug_collapses_runs_and_never_yields_an_invalid_segment() {
         );
     }
 }
+
+/// A project name becomes a file and folder name every system takes, and the
+/// file lands in a folder of that name inside the location.
+#[test]
+fn the_project_file_is_named_for_the_project_in_a_folder_of_its_own() {
+    assert_eq!(project_file_stem("Sensor bridge"), "Sensor bridge");
+    assert_eq!(project_file_stem("A: B? <C>"), "A_ B_ _C_");
+    assert_eq!(project_file_stem("Trailing dots.."), "Trailing dots");
+    assert_eq!(project_file_stem("con"), "con_");
+    assert_eq!(project_file_stem("COM1.v2"), "COM1_.v2");
+    assert_eq!(project_file_stem("..."), "project");
+
+    let location = std::env::temp_dir();
+    let dialog = NewProjectDialogState {
+        name: "  Amp: rev B ".to_owned(),
+        location: location.display().to_string(),
+        ..NewProjectDialogState::default()
+    };
+    assert_eq!(
+        dialog.project_file(),
+        Ok(location.join("Amp_ rev B").join("Amp_ rev B.rspiceproj"))
+    );
+}

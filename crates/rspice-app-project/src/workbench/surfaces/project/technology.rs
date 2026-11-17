@@ -105,6 +105,98 @@ pub(super) fn technology_candidates(model: &Model) -> TechnologyCandidateCatalog
     catalog
 }
 
+/// A technology a project can be attached to as it stands: an attachable
+/// model library with a validated PDK package the registry accepts it with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachableTechnology {
+    /// The model library the binding pins.
+    pub model_library: String,
+    /// The PDK package, keyed as the attachment dialog keys its choices.
+    pub pdk_package: String,
+    /// What the binding is called wherever the project names its technology.
+    pub label: String,
+}
+
+/// Every pairing of an installed model library with a validated PDK package
+/// that forms a binding this session could run, as the attachment dialog
+/// offers them, for a project about to be created. A library the open
+/// project holds (an import, a pack part) stays with that project, so only
+/// the installation's own libraries are offered.
+pub fn attachable_technologies(model: &Model) -> Vec<AttachableTechnology> {
+    use crate::state::model_library::ModelSourceAuthority;
+    let packages = model.pdk_config.technology_registry.validated_packages();
+    let mut technologies = Vec::new();
+    for candidate in technology_candidates(model).candidates {
+        let installed = model
+            .model_library_manager
+            .get_library(candidate.binding.model_library())
+            .is_some_and(|library| {
+                matches!(
+                    library.source_authority,
+                    ModelSourceAuthority::BuiltIn | ModelSourceAuthority::External
+                )
+            });
+        if !installed {
+            continue;
+        }
+        for package in packages {
+            if package.runtime_compatibility().is_err() {
+                continue;
+            }
+            let Ok(binding) = candidate
+                .binding
+                .clone()
+                .with_pdk_package_metadata(package.metadata())
+            else {
+                continue;
+            };
+            if model
+                .pdk_config
+                .technology_registry
+                .validate_project_binding(&binding)
+                .is_ok()
+            {
+                technologies.push(AttachableTechnology {
+                    model_library: binding.model_library().to_owned(),
+                    pdk_package: pdk_package_key(package),
+                    label: binding.display_label(),
+                });
+            }
+        }
+    }
+    technologies
+}
+
+/// The binding `technology` names, made again from this session's catalog
+/// and registry, so what is attached is what is there now.
+pub fn attachable_binding(
+    model: &Model,
+    technology: &AttachableTechnology,
+) -> Result<ProjectTechnologyBinding, String> {
+    let library = model
+        .model_library_manager
+        .get_library(&technology.model_library)
+        .ok_or_else(|| {
+            format!(
+                "the model library \u{201c}{}\u{201d} is not in this session's catalog",
+                technology.model_library
+            )
+        })?;
+    let package = model
+        .pdk_config
+        .technology_registry
+        .validated_packages()
+        .iter()
+        .find(|package| pdk_package_key(package) == technology.pdk_package)
+        .ok_or_else(|| "its PDK package is no longer installed".to_owned())?;
+    package.runtime_compatibility()?;
+    let binding = ProjectTechnologyBinding::from_model_library(library)
+        .and_then(|binding| binding.with_pdk_package_metadata(package.metadata()))
+        .map_err(|error| error.to_string())?;
+    verify_pinned_technology_contract(&binding, model)?;
+    Ok(binding)
+}
+
 fn pdk_package_key(package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage) -> String {
     let manifest = package.manifest();
     format!(

@@ -217,6 +217,60 @@ pub fn refuse_new_project(
     Ok(())
 }
 
+/// Make the folder New project writes `file` in. A folder that already holds
+/// anything is refused, so a new project never lands among another one's
+/// files. Returns whether the folder was made here, so a creation that goes
+/// no further can take it away again.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn make_project_folder(file: &Path) -> Result<bool, String> {
+    let Some(folder) = file.parent() else {
+        return Err("The location must be a full path to a folder.".to_owned());
+    };
+    match std::fs::read_dir(folder) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                return Err(format!(
+                    "The folder \u{201c}{}\u{201d} already exists and is not empty; choose \
+                     another name or location.",
+                    folder.display()
+                ));
+            }
+            Ok(false)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(folder).map_err(|error| {
+                format!(
+                    "The folder \u{201c}{}\u{201d} could not be made: {error}.",
+                    folder.display()
+                )
+            })?;
+            Ok(true)
+        }
+        Err(error) => Err(format!(
+            "The folder \u{201c}{}\u{201d} could not be read: {error}.",
+            folder.display()
+        )),
+    }
+}
+
+/// Attach the technology New project chose to the project it just created,
+/// before anything is saved, so the project's first revision has it. A new
+/// project has no technology history to audit; changing it later on
+/// Dependencies is what records receipts. The binding is made again from
+/// this session's catalog, so what is attached is what is there now.
+pub fn attach_new_project_technology(
+    model: &mut Model,
+    technology: &crate::workbench::surfaces::project::AttachableTechnology,
+) -> Result<(), String> {
+    let binding = crate::workbench::surfaces::project::attachable_binding(model, technology)?;
+    model
+        .workspace
+        .content
+        .attach_technology(binding)
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
 /// A new project, built off to the side before it replaces the open one.
 pub struct NewProject {
     pub library_manager: crate::state::LibraryManager,

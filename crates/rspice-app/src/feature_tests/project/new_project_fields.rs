@@ -3,13 +3,17 @@
 
 use crate::workbench::app::project_transactions::open_new_project_dialog;
 use crate::workbench::app_state::AppState;
-use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use rspice_app_project::workbench::app::dialogs::project::new_project::{
+    LOCATION_WAIT, NEW_PROJECT_READY, NewProjectDialogState,
+};
 use rspice_app_state::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 
 fn opened() -> NewProjectDialogState {
     let mut state = AppState::default();
     open_new_project_dialog(&mut state);
-    state.project.new_project.clone()
+    let mut dialog = state.project.new_project.clone();
+    dialog.location = std::env::temp_dir().display().to_string();
+    dialog
 }
 
 #[test]
@@ -41,6 +45,10 @@ fn an_empty_field_says_what_create_waits_for_instead_of_refusing_it() {
     assert_eq!(dialog.footer(), Ok("Type a project name."));
 
     dialog.name = "Sensor bridge".to_owned();
+    let location = std::mem::take(&mut dialog.location);
+    assert_eq!(dialog.footer(), Ok(LOCATION_WAIT));
+    assert!(dialog.creatable().is_err(), "Create waits for a location");
+    dialog.location = location;
     dialog.library = "  ".to_owned();
     assert_eq!(dialog.footer(), Ok("Type a library name."));
     dialog.library = "afe".to_owned();
@@ -48,11 +56,22 @@ fn an_empty_field_says_what_create_waits_for_instead_of_refusing_it() {
     assert_eq!(dialog.footer(), Ok("Type a top cell name."));
 
     dialog.top_cell = "core".to_owned();
-    assert!(dialog.params().validate().is_ok());
+    assert!(dialog.creatable().is_ok());
+    assert_eq!(dialog.footer(), Ok(NEW_PROJECT_READY));
+}
+
+/// A location that is not a whole path is refused: it would land wherever
+/// the application happened to start.
+#[test]
+fn a_location_that_is_not_a_whole_path_is_refused() {
+    let mut dialog = opened();
+    dialog.name = "Sensor bridge".to_owned();
+    dialog.location = "projects".to_owned();
     assert_eq!(
         dialog.footer(),
-        Ok("Nothing is written to disk until you save.")
+        Err("The location must be a full path to a folder.".to_owned())
     );
+    assert!(dialog.creatable().is_err());
 }
 
 /// A refusal is one sentence that names its field once, in the reader's

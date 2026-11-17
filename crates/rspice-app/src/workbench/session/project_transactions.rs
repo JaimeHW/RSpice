@@ -14,6 +14,7 @@ use rspice_app_cloud::workbench::live_session::{
     CloudHandles, DiscardMirror, LiveHost, MirrorApply,
 };
 use rspice_app_code::workbench::documents::netlist_document::adopt_live_owned_source;
+use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_project::workbench::workflows::file_workflow::BrowserSchematic;
 use rspice_app_project::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
@@ -80,6 +81,57 @@ impl AppState {
             "new project",
             model_restore_errors,
         );
+        Ok(())
+    }
+
+    /// Create the project New project describes. On the desktop its folder
+    /// is made and its file written at once, with the chosen technology
+    /// attached first, so the project is on disk before its first edit and
+    /// checkpoints and autosave have a file to belong to. In the browser it
+    /// is written by its first save.
+    ///
+    /// Returns the refusal for the dialog to hold itself open beside.
+    pub(crate) fn create_reviewed_project(
+        &mut self,
+        dialog: &NewProjectDialogState,
+    ) -> Result<(), String> {
+        if let Err(refusal) = dialog.creatable() {
+            self.prompt(format!("New project not created. {refusal}"));
+            return Err(refusal);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let (file, made_folder) = match dialog
+            .project_file()
+            .and_then(|file| project_workflow::make_project_folder(&file).map(|made| (file, made)))
+        {
+            Ok(place) => place,
+            Err(refusal) => {
+                self.prompt(format!("New project not created. {refusal}"));
+                return Err(refusal);
+            }
+        };
+        if let Err(refusal) = self.create_new_project_with(&dialog.params()) {
+            #[cfg(not(target_arch = "wasm32"))]
+            if made_folder && let Some(folder) = file.parent() {
+                let _ = std::fs::remove_dir(folder);
+            }
+            return Err(refusal);
+        }
+        if let Some(technology) = &dialog.technology
+            && let Err(reason) =
+                project_workflow::attach_new_project_technology(&mut self.model, technology)
+        {
+            self.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!(
+                    "{} was not attached: {reason}. Attach a technology on Dependencies.",
+                    technology.label
+                ),
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.save_project_as_to_path(&file);
         Ok(())
     }
 
