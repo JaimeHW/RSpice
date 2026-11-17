@@ -21,6 +21,14 @@ impl Schematic {
     pub fn validated_design_content_digest(&self) -> Result<ContentDigest, ValidatedRevisionError> {
         self.validated_revision_source().design_content_digest()
     }
+    /// What changed in this drawing since `revision` was recorded: what it
+    /// adds, removes and modifies relative to that revision.
+    pub fn semantic_delta_since(
+        &self,
+        revision: &ValidatedSchematicRevision,
+    ) -> ValidatedRevisionSemanticDelta {
+        revision.semantic_delta_to_source(self.validated_revision_source())
+    }
     pub fn seed_accepted_revision_baseline(
         &mut self,
         accepted: &Schematic,

@@ -129,6 +129,31 @@ fn semantic_delta_reports_stable_object_changes() {
     assert!(delta.grid_changed);
 }
 
+/// The drawing as it stands is compared with a revision by the rules two
+/// revisions are: what it adds, removes and modifies since that revision,
+/// and nothing once it is back where the revision was.
+#[test]
+fn a_drawing_is_compared_with_a_revision_it_moved_on_from() {
+    let project_id = Uuid::new_v4();
+    let mut state = Schematic::default();
+    place(&mut state, ComponentType::Resistor, Point::new(10, 10));
+    let saved = state
+        .append_validated_revision(request(&state, project_id), || Ok(1))
+        .expect("validated revision");
+    let revision = state.document().validated_revisions.records()[0].clone();
+    assert!(state.semantic_delta_since(&revision).is_empty());
+
+    state.document.components[0].value = "2k".to_owned();
+    place(&mut state, ComponentType::Capacitor, Point::new(20, 10));
+    let delta = state.semantic_delta_since(&revision);
+    assert_eq!(delta.components.added, 1);
+    assert_eq!(delta.components.modified, 1);
+    assert_eq!(delta.components.removed, 0);
+
+    assert!(state.restore_validated_revision(saved).expect("restore"));
+    assert!(state.semantic_delta_since(&revision).is_empty());
+}
+
 #[test]
 fn migrated_baseline_preserves_prior_accepted_design() {
     let project_id = Uuid::new_v4();

@@ -375,23 +375,30 @@ impl ValidatedSchematicRevision {
     /// duplicating the immutable snapshots owned by the journal.
     #[must_use]
     pub fn semantic_delta_to(&self, newer: &Self) -> ValidatedRevisionSemanticDelta {
-        let older = &self.snapshot;
-        let newer = &newer.snapshot;
+        self.semantic_delta_to_source(newer.snapshot.source())
+    }
+
+    /// Compare this revision with a drawing it did not record, such as the
+    /// design as it stands now, by the same rules as two revisions.
+    #[must_use]
+    pub fn semantic_delta_to_source(
+        &self,
+        newer: ValidatedRevisionSource<'_>,
+    ) -> ValidatedRevisionSemanticDelta {
+        let older = self.snapshot.source();
         let (connections_added, connections_removed) =
-            unordered_delta(&older.connections, &newer.connections);
+            unordered_delta(older.connections, newer.connections);
         ValidatedRevisionSemanticDelta {
-            components: identity_delta(&older.components, &newer.components, |value| value.id),
-            wires: identity_delta(&older.wires, &newer.wires, |value| value.id),
-            buses: identity_delta(&older.buses, &newer.buses, |value| value.id),
-            bus_taps: identity_delta(&older.bus_taps, &newer.bus_taps, |value| value.id),
-            junctions: identity_delta(&older.junctions, &newer.junctions, |value| value.id),
-            net_labels: identity_delta(&older.net_labels, &newer.net_labels, |value| value.id),
-            design_notes: identity_delta(&older.design_notes, &newer.design_notes, |value| {
-                value.id
-            }),
+            components: identity_delta(older.components, newer.components, |value| value.id),
+            wires: identity_delta(older.wires, newer.wires, |value| value.id),
+            buses: identity_delta(older.buses, newer.buses, |value| value.id),
+            bus_taps: identity_delta(older.bus_taps, newer.bus_taps, |value| value.id),
+            junctions: identity_delta(older.junctions, newer.junctions, |value| value.id),
+            net_labels: identity_delta(older.net_labels, newer.net_labels, |value| value.id),
+            design_notes: identity_delta(older.design_notes, newer.design_notes, |value| value.id),
             documentation_shapes: identity_delta(
-                &older.documentation_shapes,
-                &newer.documentation_shapes,
+                older.documentation_shapes,
+                newer.documentation_shapes,
                 |value| value.id,
             ),
             connections_added,
