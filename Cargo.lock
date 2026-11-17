@@ -6211,6 +6211,7 @@ dependencies = [
  "rspice-model-library",
  "rspice-project-contract",
  "rspice-results",
+ "rspice-results-store",
  "rspice-simulation-contract",
  "rspice-veriloga",
  "rspice-vocabulary",

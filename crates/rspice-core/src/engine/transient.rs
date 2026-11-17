@@ -3671,6 +3671,28 @@ impl Engine {
             .map(|(run, _, _)| run)
     }
 
+    /// [`Self::run_tran_with_abort`] writing every accepted point to `sink`, as
+    /// [`Self::run_tran_into_sink_with_startup_mode_and_abort`] does: the run starts as the
+    /// netlist's `.TRAN` cards select.
+    pub fn run_tran_into_sink_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+        sink: &mut dyn crate::result_sink::ResultSink,
+    ) -> Result<SinkTransient, SimulationError> {
+        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
+        self.run_tran_into_sink_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            abort,
+            sink,
+        )
+    }
+
     fn inferred_transient_startup_mode(
         netlist: &Netlist,
     ) -> Result<TransientStartupMode, SimulationError> {

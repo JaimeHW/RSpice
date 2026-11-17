@@ -30,6 +30,7 @@ base64.workspace = true
 rspice-vocabulary.workspace = true
 rspice-project-contract.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-results-store.workspace = true
 rspice-design.workspace = true
 rspice-design-model.workspace = true
 rspice-simulation-contract.workspace = true

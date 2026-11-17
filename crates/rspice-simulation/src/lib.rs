@@ -34,6 +34,8 @@ pub mod project_technology;
 pub mod project_veriloga;
 pub mod result_conversion;
 pub mod results;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod results_store;
 pub mod sealed_source;
 pub mod study;
 pub mod study_document;

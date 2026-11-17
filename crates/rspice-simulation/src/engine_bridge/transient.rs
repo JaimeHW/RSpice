@@ -12,6 +12,9 @@ use crate::results::{SampledWaveform, SimulationResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_simulation_contract::config::TransientAnalysisConfig;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod stored;
+
 impl EngineBridge {
     /// Validate source/environment identity using the same materialization as execution.
     pub(crate) fn validate_transient_checkpoint(
@@ -144,6 +147,47 @@ impl EngineBridge {
             // the card's task, so the transient runs once for both.
             let capture_times =
                 crate::engine_services::state_capture_times(netlist, config.stop_time);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // The desktop writes the run's rows to a results store as it accepts them.
+                let (outcome, states) = self.run_transient_into_store(
+                    &engine,
+                    netlist,
+                    stored::StoreSpan {
+                        tstop: config.stop_time,
+                        tstep: config.step_time,
+                        max_step,
+                    },
+                    rspice_core::engine::TransientStartupMode::from_uic(config.uic),
+                    &capture_times,
+                    model_scope.signal(),
+                )?;
+                if !capture_times.is_empty() {
+                    crate::engine_services::publish_transient_states(&capture_times, states);
+                }
+                match outcome {
+                    stored::StoredOutcome::ReadBack(result) => result,
+                    stored::StoredOutcome::Stored(run) => {
+                        let (mut converted, convergence, assertions) = convert_stored_transient(
+                            &engine,
+                            netlist,
+                            run,
+                            config.start_time,
+                            abort,
+                            &|error| self.translate_error(error),
+                        )?;
+                        finish_transient(
+                            &mut converted,
+                            convergence,
+                            &hdl_output,
+                            assertions,
+                            model_scope.finish(),
+                        );
+                        return Ok(converted);
+                    }
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
             if capture_times.is_empty() {
                 engine
                     .run_tran_with_abort(netlist, config.stop_time, max_step, model_scope.signal())
@@ -178,19 +222,36 @@ impl EngineBridge {
 
         let mut converted =
             convert_transient_result(netlist, tran_result, config.start_time, abort)?;
-        if let SimulationResult::Transient {
-            convergence: slot,
-            hdl_output: records,
-            checks,
-            ..
-        } = &mut converted
-        {
-            *slot = Some(std::sync::Arc::new(convergence));
-            *records = hdl_output.collector.take();
-            *checks = crate::results::SimulationChecks::new(records, assertions)
-                .finished_by(model_scope.finish());
-        }
+        finish_transient(
+            &mut converted,
+            convergence,
+            &hdl_output,
+            assertions,
+            model_scope.finish(),
+        );
         Ok(converted)
+    }
+}
+
+/// Give a converted transient what the run left besides its rows: its convergence evidence,
+/// the HDL output it captured and its checks.
+fn finish_transient(
+    converted: &mut SimulationResult,
+    convergence: rspice_results::convergence_quality::TransientConvergenceEvidence,
+    hdl_output: &super::checks::HdlOutputCapture,
+    assertions: Vec<rspice_core::analysis::AssertionReport>,
+    finish: Option<rspice_core::ModelFinish>,
+) {
+    if let SimulationResult::Transient {
+        convergence: slot,
+        hdl_output: records,
+        checks,
+        ..
+    } = converted
+    {
+        *slot = Some(std::sync::Arc::new(convergence));
+        *records = hdl_output.collector.take();
+        *checks = crate::results::SimulationChecks::new(records, assertions).finished_by(finish);
     }
 }
 
@@ -338,26 +399,8 @@ fn convert_transient_result(
         if voltages.is_empty() {
             continue;
         }
-        let node = &tran_result.node_names[node_idx];
-        // A Verilog-A instance's own unknowns: a branch the module names is a
-        // current, and an unknown it never named is no signal. A net whose
-        // discipline's potential is not a voltage keeps its own units.
-        let (name, unit) = match tran_result
-            .instance_unknowns
-            .get(node_idx)
-            .copied()
-            .flatten()
-        {
-            None => (
-                node.clone(),
-                tran_result
-                    .potential_units
-                    .get(node_idx)
-                    .and_then(Option::as_deref)
-                    .unwrap_or("V"),
-            ),
-            Some(InstanceUnknown::BranchCurrent) => (format!("I({node})"), "A"),
-            Some(InstanceUnknown::Private) => continue,
+        let Some((name, unit)) = node_waveform(&tran_result, node_idx) else {
+            continue;
         };
 
         waveforms.insert(
@@ -387,15 +430,7 @@ fn convert_transient_result(
         if currents.is_empty() {
             continue;
         }
-        let branch = tran_result.branch_names[branch_idx].clone();
-        let name = if branch.len() >= 3
-            && (branch.starts_with("I(") || branch.starts_with("i("))
-            && branch.ends_with(')')
-        {
-            branch
-        } else {
-            format!("I({branch})")
-        };
+        let name = branch_waveform_name(&tran_result.branch_names[branch_idx]);
         waveforms.insert(
             name.clone(),
             SampledWaveform::new_time_domain_in_unit(
@@ -440,6 +475,165 @@ fn convert_transient_result(
         checks: Default::default(),
         store: None,
     })
+}
+
+/// The waveform a node's column becomes: its name and unit, or `None` for a Verilog-A
+/// instance's unknown that is no signal.
+fn node_waveform(
+    result: &rspice_core::engine::TransientResult,
+    node_idx: usize,
+) -> Option<(String, &str)> {
+    let node = &result.node_names[node_idx];
+    // A Verilog-A instance's own unknowns: a branch the module names is a
+    // current, and an unknown it never named is no signal. A net whose
+    // discipline's potential is not a voltage keeps its own units.
+    match result.instance_unknowns.get(node_idx).copied().flatten() {
+        None => Some((
+            node.clone(),
+            result
+                .potential_units
+                .get(node_idx)
+                .and_then(Option::as_deref)
+                .unwrap_or("V"),
+        )),
+        Some(InstanceUnknown::BranchCurrent) => Some((format!("I({node})"), "A")),
+        Some(InstanceUnknown::Private) => None,
+    }
+}
+
+/// The waveform name of a branch's current: `I(branch)`, unless the branch already says so.
+fn branch_waveform_name(branch: &str) -> String {
+    if branch.len() >= 3
+        && (branch.starts_with("I(") || branch.starts_with("i("))
+        && branch.ends_with(')')
+    {
+        branch.to_owned()
+    } else {
+        format!("I({branch})")
+    }
+}
+
+/// Convert a transient whose rows stay in its results store: the result's waveforms are
+/// windows of its columns over the output window, the same samples
+/// [`convert_transient_result`] copies out of an in-memory run. Its convergence evidence and
+/// `.ASSERT` reports come back beside it, as the in-memory route computes them over the whole
+/// accepted trajectory.
+#[cfg(not(target_arch = "wasm32"))]
+fn convert_stored_transient(
+    engine: &rspice_core::Engine,
+    netlist: &rspice_core::Netlist,
+    mut stored: stored::StoredTransient,
+    start_time: f64,
+    abort: &dyn AbortSignal,
+    translate: &dyn Fn(rspice_core::SimulationError) -> SimulationError,
+) -> Result<
+    (
+        SimulationResult,
+        rspice_results::convergence_quality::TransientConvergenceEvidence,
+        Vec<rspice_core::analysis::AssertionReport>,
+    ),
+    SimulationError,
+> {
+    ensure_not_aborted(abort)?;
+    let device_traces = stored.shell.device_op_traces.len();
+    // The names, counts and identities the in-memory check reads, over the first and last rows;
+    // the pass below checks every sample.
+    stored.read_span()?;
+    validate_transient_result_shape(&stored.shell)?;
+    let quality = engine.convergence_quality();
+    let scan = stored.scan(start_time, &quality.force_accepted_indices, abort)?;
+    let mut forced_times = Some(scan.forced_times);
+    let mut times_at = |_: &[usize]| -> Result<Vec<f64>, rspice_core::SimulationError> {
+        Ok(forced_times.take().unwrap_or_default())
+    };
+    let convergence =
+        rspice_results::convergence_quality::TransientConvergenceEvidence::capture_on_axis(
+            quality,
+            rspice_results::convergence_quality::SourceAxis {
+                sample_count: scan.rows,
+                start_s: scan.first,
+                stop_s: scan.last,
+                times_at: &mut times_at,
+            },
+            abort,
+        )
+        .map_err(translate)?;
+    let rows = usize::try_from(scan.rows).unwrap_or(usize::MAX);
+    let start_idx = scan.start_idx;
+    let sample_count = rows.saturating_sub(start_idx);
+    if sample_count == 0 {
+        return Err(SimulationError::SolverError(format!(
+            "transient result has no accepted sample at or after requested start time {start_time:.16e} s"
+        )));
+    }
+    let lead = match scan.lead {
+        Some((lower, upper)) => {
+            let span = upper - lower;
+            if !span.is_finite() || span <= 0.0 {
+                return Err(SimulationError::SolverError(
+                    "transient engine returned a non-increasing time axis at the requested output start"
+                        .to_owned(),
+                ));
+            }
+            Some((start_idx - 1, (start_time - lower) / span))
+        }
+        None => None,
+    };
+    let window = stored::OutputWindow {
+        start_time,
+        start_idx,
+        sample_count,
+        lead,
+    };
+    // `.MEAS TRAN` and `.ASSERT` read the whole run: it is read back for them, then dropped.
+    let measured = netlist
+        .measurements
+        .iter()
+        .any(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"));
+    let asserted = !netlist.assertions.is_empty() || !netlist.vector_files.is_empty();
+    let (measurements, assertions) = if measured || asserted {
+        stored.drop_rows(device_traces);
+        stored.read_rows()?;
+        let assertions =
+            rspice_core::analysis::evaluate_tran_assertions(netlist, &stored.shell, abort)
+                .map_err(translate)?;
+        let time = &stored.shell.time;
+        let mut filtered_time = Vec::with_capacity(sample_count + usize::from(lead.is_some()));
+        if lead.is_some() {
+            filtered_time.push(start_time);
+        }
+        filtered_time.extend_from_slice(&time[start_idx..start_idx + sample_count]);
+        let measurements = evaluate_transient_measurements(
+            netlist,
+            &stored.shell,
+            &filtered_time,
+            start_idx,
+            start_time,
+            lead.is_some(),
+            abort,
+        )?;
+        stored.drop_rows(device_traces);
+        stored.read_span()?;
+        (measurements, assertions)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let events = collect_event_history(&stored.shell, start_time, abort)?;
+    let spectra = super::recorded_fft::recorded_spectra(netlist, &stored.shell.fft_results, abort)?;
+    let (time, waveforms) = stored.waveforms(&window, abort)?;
+    let result = SimulationResult::Transient {
+        time,
+        waveforms,
+        measurements,
+        periodic_state: None,
+        convergence: Default::default(),
+        events,
+        spectra,
+        hdl_output: Vec::new(),
+        checks: Default::default(),
+        store: Some(stored.receipt),
+    };
+    Ok((result, convergence, assertions))
 }
 
 fn validate_transient_result_shape(

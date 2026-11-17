@@ -160,6 +160,18 @@ impl TransientConvergenceEvidence {
         })
     }
 
+    /// [`Self::capture`] for a transient whose time axis stays in its results store.
+    pub fn capture_on_axis(
+        quality: rspice_core::diagnostics::ConvergenceQuality,
+        axis: SourceAxis<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, rspice_core::SimulationError> {
+        Ok(Self {
+            transient: ConvergenceReport::capture_on_axis(quality, Some(axis), abort)?,
+            initialization: None,
+        })
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.transient.validate()?;
         if self.transient.time_basis.is_none() {
@@ -292,6 +304,48 @@ impl ConvergenceReport {
         abort: &dyn AbortSignal,
     ) -> Result<Self, rspice_core::SimulationError> {
         check_abort(abort)?;
+        let Some(time) = time else {
+            return Self::capture_on_axis(quality, None, abort);
+        };
+        if time.is_empty() {
+            return Err(invalid("Convergence source time axis is empty"));
+        }
+        for (index, value) in time.iter().copied().enumerate() {
+            if index.is_multiple_of(64) {
+                check_abort(abort)?;
+            }
+            if !value.is_finite() || value < 0.0 || (index > 0 && value <= time[index - 1]) {
+                return Err(invalid("Convergence source time axis is invalid"));
+            }
+        }
+        let mut times_at = |indices: &[usize]| -> Result<Vec<f64>, rspice_core::SimulationError> {
+            indices
+                .iter()
+                .map(|&index| {
+                    time.get(index).copied().ok_or_else(|| {
+                        invalid("Convergence point index is outside its source trajectory")
+                    })
+                })
+                .collect()
+        };
+        let axis = SourceAxis {
+            sample_count: time.len() as u64,
+            start_s: time[0],
+            stop_s: time[time.len() - 1],
+            times_at: &mut times_at,
+        };
+        Self::capture_on_axis(quality, Some(axis), abort)
+    }
+
+    /// [`Self::capture`] for a trajectory whose time axis is not in memory: `axis` says its
+    /// extent, already checked finite, nonnegative and increasing, and reads the time of each
+    /// force-accepted point.
+    pub fn capture_on_axis(
+        quality: rspice_core::diagnostics::ConvergenceQuality,
+        axis: Option<SourceAxis<'_>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, rspice_core::SimulationError> {
+        check_abort(abort)?;
         // Exhaustive: a new engine metric requires an explicit retention choice.
         let rspice_core::diagnostics::ConvergenceQuality {
             total_iterations,
@@ -306,39 +360,32 @@ impl ConvergenceReport {
             bypassed_device_evaluations,
             failure_diagnostic,
         } = quality;
-        let mut indices = Vec::with_capacity(force_accepted_indices.len());
-        let mut times = Vec::new();
-        if let Some(time) = time {
-            if time.is_empty() {
-                return Err(invalid("Convergence source time axis is empty"));
-            }
-            for (index, value) in time.iter().copied().enumerate() {
-                if index.is_multiple_of(64) {
-                    check_abort(abort)?;
+        let time_basis = match axis {
+            Some(axis) => {
+                let times = (axis.times_at)(&force_accepted_indices)?;
+                if times.len() != force_accepted_indices.len() {
+                    return Err(invalid(
+                        "Convergence point index is outside its source trajectory",
+                    ));
                 }
-                if !value.is_finite() || value < 0.0 || (index > 0 && value <= time[index - 1]) {
-                    return Err(invalid("Convergence source time axis is invalid"));
-                }
+                Some(ConvergenceTimeBasis {
+                    sample_count: axis.sample_count,
+                    start_s: axis.start_s,
+                    stop_s: axis.stop_s,
+                    force_accepted_times_s: times,
+                })
             }
-            times.reserve(force_accepted_indices.len());
-        }
-        for (position, index) in force_accepted_indices.into_iter().enumerate() {
-            if position.is_multiple_of(64) {
-                check_abort(abort)?;
-            }
-            indices.push(index as u64);
-            if let Some(time) = time {
-                times.push(*time.get(index).ok_or_else(|| {
-                    invalid("Convergence point index is outside its source trajectory")
-                })?);
-            }
-        }
+            None => None,
+        };
         let report = Self {
             total_iterations: total_iterations as u64,
             gmin_stepping_count: gmin_stepping_count as u64,
             source_stepping_count: source_stepping_count as u64,
             force_accepted_points: force_accepted_points as u64,
-            force_accepted_indices: indices,
+            force_accepted_indices: force_accepted_indices
+                .into_iter()
+                .map(|index| index as u64)
+                .collect(),
             max_residual,
             avg_iterations_per_solve,
             timestep_reductions: timestep_reductions as u64,
@@ -347,12 +394,7 @@ impl ConvergenceReport {
             failure_diagnostic: failure_diagnostic
                 .as_ref()
                 .map(convergence_attribution_from_core),
-            time_basis: time.map(|time| ConvergenceTimeBasis {
-                sample_count: time.len() as u64,
-                start_s: time[0],
-                stop_s: time[time.len() - 1],
-                force_accepted_times_s: times,
-            }),
+            time_basis,
         };
         report.validate_with_abort(abort)?;
         check_abort(abort)?;
@@ -430,6 +472,22 @@ impl ConvergenceReport {
         check_abort(abort)
     }
 }
+
+/// A trajectory's time axis as convergence evidence reads it: its extent, and the time of any
+/// point by its index.
+pub struct SourceAxis<'a> {
+    /// The points on the axis.
+    pub sample_count: u64,
+    /// The first point's time.
+    pub start_s: f64,
+    /// The last point's time.
+    pub stop_s: f64,
+    /// The times of the points at these indices, in order, or why they could not be read.
+    pub times_at: &'a mut TimesAt<'a>,
+}
+
+/// Reads the times of the points at some indices of a trajectory.
+pub type TimesAt<'a> = dyn FnMut(&[usize]) -> Result<Vec<f64>, rspice_core::SimulationError> + 'a;
 
 fn check_abort(abort: &dyn AbortSignal) -> Result<(), rspice_core::SimulationError> {
     if abort.is_aborted() {
