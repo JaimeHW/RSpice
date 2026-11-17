@@ -705,8 +705,6 @@ fn a_run_resuming_from_a_checkpoint_joins_the_run_it_resumes_from() {
     assert!(app.dispatch_frame().is_empty());
     app.finish_the_run();
     let runs = &app.state.model.simulation.retained.runs;
-    app.finish_the_run();
-    let runs = &app.state.model.simulation.retained.runs;
     assert_eq!(runs.len(), 2, "the run joins the one it resumes from");
     assert!(runs[0].success, "{:?}", runs[0].analyses);
     assert_eq!(
