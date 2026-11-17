@@ -721,3 +721,91 @@ fn a_d_process_program_beside_the_deck_gives_the_clis_numbers() {
     write(&dir, "deck.cir", &process_deck("toggle"));
     assert_toggles(&assert_same_transient(&dir.join("deck.cir"), "d"));
 }
+
+/// Counts the rising edges of `clk`, read from the analog node it is wired
+/// to through the default A/D, and toggles `q` onto the default D/A at each.
+const EDGE_COUNTER: &str = "`include \"disciplines.vams\"\n`timescale 1ns/1ps\n\
+module edge_counter(clk, q, nd);\n  input clk; wire clk;\n  output q; reg q;\n  \
+output nd; electrical nd;\n  integer cnt;\n  initial begin cnt = 0; q = 0; end\n  \
+always @(posedge clk) begin cnt = cnt + 1; q = ~q; end\n  analog V(nd) <+ cnt;\nendmodule\n";
+
+/// An analog `cross` on the same node and threshold. Its 1e-30 s time
+/// tolerance lands each event one representable instant past its root, so
+/// the solver chases every root of the sine from below in steps of a few
+/// ulps, sampling the A/D's input on both sides of it.
+const TIGHT_CROSS: &str = "`include \"disciplines.vams\"\n\
+module tight_cross(x, na);\n  input x; electrical x; output na; electrical na; integer ca;\n  \
+analog begin\n    @(initial_step) ca = 0;\n    \
+@(cross(V(x) - 0.9, +1, 1e-30, 1e-3)) ca = ca + 1;\n    V(na) <+ ca;\n  end\nendmodule\n";
+
+/// The digital events of `node` in the CLI's result, as (time, state).
+fn cli_events(cli: &serde_json::Value, node: &str) -> Vec<(f64, String)> {
+    cli["payload"]["digitalTraces"]
+        .as_array()
+        .expect("the CLI's digital traces")
+        .iter()
+        .find(|trace| {
+            trace["nodeName"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(node))
+        })
+        .unwrap_or_else(|| panic!("no digital trace of {node}"))["points"]
+        .as_array()
+        .expect("points")
+        .iter()
+        .map(|point| {
+            let time = point["time"].as_f64().expect("a time");
+            (time, point["state"].as_str().expect("a state").to_owned())
+        })
+        .collect()
+}
+
+/// One process execution per clock edge. `x` is 0.9 + 1.2 sin(2 pi 10 MHz
+/// t), so it rises through the A/D's 0.9 V threshold at every 100 ns from
+/// time zero: 101 rising edges up to 10.01 us, each counted once and each
+/// toggling `q` once, at that edge's instant. The tight analog crossing on
+/// the same node made the solver land on a chord's estimate of a root 0.95
+/// ps short of it, where the A/D published the edge, took it back at the
+/// next sample and published it again at the root: 102 counts.
+#[test]
+fn every_clock_edge_runs_its_process_once_under_a_tight_analog_crossing() {
+    let dir = test_dir("one-execution-per-edge");
+    write(&dir, "counter.vams", EDGE_COUNTER);
+    write(&dir, "cross.vams", TIGHT_CROSS);
+    write(
+        &dir,
+        "deck.cir",
+        "one execution per edge\n.hdl \"counter.vams\"\n.hdl \"cross.vams\"\n\
+         .param vcc=1.8\nvs x 0 sin(0.9 1.2 10meg)\nxa x na tight_cross\n\
+         xr x q nd edge_counter\nrq q 0 1k\n.tran 1n 10.02u\n.end\n",
+    );
+    let cli = cli_run(&dir.join("deck.cir"));
+    let rises: Vec<f64> = cli_events(&cli, "x")
+        .into_iter()
+        .filter(|(_, state)| state == "one")
+        .map(|(time, _)| time)
+        .collect();
+    let toggles: Vec<f64> = cli_events(&cli, "q")
+        .into_iter()
+        .skip(1)
+        .map(|(time, _)| time)
+        .collect();
+    assert_eq!(rises.len(), 101, "one rise per 100 ns: {rises:?}");
+    assert_eq!(toggles, rises, "q toggles once at each rise");
+    for (index, rise) in rises.iter().enumerate().skip(1) {
+        let root = index as f64 * 100.0e-9;
+        assert!((rise - root).abs() < 1.0e-12, "rise {index} at {rise:e}");
+    }
+    let count = cli["signals"]
+        .as_array()
+        .expect("the CLI's signals")
+        .iter()
+        .find(|signal| signal["descriptor"]["canonicalName"].as_str() == Some("v(nd)"))
+        .map(|signal| reals(&signal["values"]["samples"]))
+        .expect("v(nd)");
+    assert_eq!(
+        count.last().copied(),
+        Some(101.0),
+        "every edge counted once"
+    );
+}

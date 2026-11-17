@@ -681,8 +681,7 @@ impl HeldCrossing {
     /// `sample`, in the interval from the accepted point `start` and its
     /// sample `start_sample`.
     ///
-    /// On the crossing exactly it does: the event happened there. Past it,
-    /// it does when the chord from the accepted sample through this one meets
+    /// It does when the chord from the accepted sample through this one meets
     /// the threshold within `window` of `time`, on either side. That is a
     /// sample taken on the crossing, and which side of the threshold its last
     /// bits fall on is rounding: on a 1 V/2 ns ramp a 6.8e-14 V rounding is
@@ -696,10 +695,14 @@ impl HeldCrossing {
     /// before the chord said, and taking the chord's instant would date the
     /// event late by the chord's error (30 ps on a 1 MHz sine sampled every
     /// 10 ns).
+    ///
+    /// A candidate on the crossing's own instant is no exception. That
+    /// instant is the chord's, and a curved signal can read well short of the
+    /// threshold there: 7e-5 V, 0.95 ps, on a 10 MHz sine chorded over 2.5
+    /// ns. Decided there, the edge was published short of the threshold, the
+    /// next sample, still short, took it back, and the true crossing
+    /// published it again: one edge woke its processes twice.
     fn decides(self, time: f64, start: f64, start_sample: f64, sample: f64, window: f64) -> bool {
-        if time == self.time {
-            return true;
-        }
         let toward = self.threshold - start_sample;
         if toward == 0.0 {
             // The accepted sample sits on the threshold, so the crossing is
@@ -8657,9 +8660,16 @@ endmodule
                 "{why}"
             );
         }
+        // On the crossing's own instant the sample decides as anywhere else:
+        // there too a chord can misplace a curved signal's crossing.
+        let at_crossing = endpoint_root_window(crossing, start, floor);
         assert!(
-            located.decides(crossing, start, 0.0, 0.0, window),
-            "a candidate on the crossing is decided by it"
+            located.decides(crossing, start, 0.0, 0.5 - 6.8e-14, at_crossing),
+            "a rounding short on the crossing's own instant"
+        );
+        assert!(
+            !located.decides(crossing, start, 0.0, 0.5 - 1.0e-3, at_crossing),
+            "a sample the chord misplaced does not decide the crossing's own instant"
         );
         ledger.mark_decided(3, Some(landing));
         assert!(ledger.decided(3, landing).is_some());
