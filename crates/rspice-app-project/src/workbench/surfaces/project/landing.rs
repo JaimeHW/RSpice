@@ -120,7 +120,7 @@ fn landing_body(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, action: &mut Optio
                 .layout(Layout::top_down(Align::Min)),
         );
         left.set_clip_rect(left_rect);
-        continue_column(&mut left, cx, action);
+        continue_column(&mut left, cx, action, TableHeight::FillColumn);
 
         let mut right = ui.new_child(
             UiBuilder::new()
@@ -143,25 +143,39 @@ fn landing_body(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, action: &mut Optio
             .id_salt("workbench.project.landing.stacked")
             .auto_shrink([false, false])
             .show(&mut stacked, |ui| {
-                ui.set_min_width(content.width());
-                continue_column(ui, cx, action);
+                // The width beside the scroll bar, once the page scrolls: the
+                // content's own width ran its right edge under the bar.
+                ui.set_min_width(ui.available_width());
+                continue_column(ui, cx, action, TableHeight::AboveTheRail);
                 ui.add_space(16.0);
                 start_rail(ui, action);
             });
     }
 }
 
+/// How tall the recent table stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TableHeight {
+    /// Beside the start rail: the column's whole height, which is the page's
+    /// content.
+    FillColumn,
+    /// Above the start rail in one scrolling column: short enough that the
+    /// rail's first actions stay in view.
+    AboveTheRail,
+}
+
 fn continue_column(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LandingAction>,
+    table_height: TableHeight,
 ) {
     let candidates = cx.platform.recovery_catalog.candidates.clone();
     if !candidates.is_empty() {
         recovery_card(ui, &candidates, action);
         ui.add_space(8.0);
     }
-    recent_projects(ui, cx, action);
+    recent_projects(ui, cx, action, table_height);
 }
 
 fn recovery_card(
@@ -255,6 +269,7 @@ fn recent_projects(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LandingAction>,
+    table_height: TableHeight,
 ) {
     let t = Tokens::get(ui.ctx());
     let rows = recent_project_rows(cx.state, cx.platform);
@@ -268,9 +283,10 @@ fn recent_projects(
         } else {
             (142.0 + rows.len() as f32 * 58.0).clamp(250.0, 390.0)
         }
-    } else {
-        // The table takes the column's height: it is the page's content.
+    } else if table_height == TableHeight::FillColumn {
         ui.available_height().max(180.0)
+    } else {
+        ui.available_height().clamp(180.0, 420.0)
     };
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     ui.painter().rect(
@@ -305,7 +321,8 @@ fn recent_projects(
             .id_salt("workbench.project.landing.recents.compact")
             .auto_shrink([false, false])
             .show(&mut rows_ui, |ui| {
-                ui.set_min_width(rows_rect.width());
+                // Beside the scroll bar, not under it.
+                ui.set_min_width(ui.available_width());
                 compact_recent_header(ui);
                 if rows.is_empty() {
                     recent_empty_state(ui, no_recents);
@@ -321,7 +338,7 @@ fn recent_projects(
             .id_salt("workbench.project.landing.recents")
             .auto_shrink([false, false])
             .show(&mut rows_ui, |ui| {
-                ui.set_min_width(TABLE_MIN_WIDTH.max(rows_rect.width()));
+                ui.set_min_width(TABLE_MIN_WIDTH.max(ui.available_width()));
                 recent_table_header(ui);
                 if rows.is_empty() {
                     recent_empty_state(ui, no_recents);

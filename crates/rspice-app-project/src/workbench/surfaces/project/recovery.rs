@@ -550,10 +550,12 @@ fn checkpoint_row(
         tokens.color.text,
         text_width,
     );
+    // The size goes to the hover: checkpoints of one project differ little,
+    // and the time is what tells two of them apart.
+    let size = format_bytes(checkpoint.snapshot_byte_len());
     let detail = format!(
-        "{created} \u{b7} revision {} \u{b7} {}",
-        checkpoint.project_revision(),
-        format_bytes(checkpoint.snapshot_byte_len())
+        "{created} \u{b7} revision {}",
+        checkpoint.project_revision()
     );
     paint_elided(
         ui,
@@ -597,7 +599,7 @@ fn checkpoint_row(
         intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
     }
 
-    let row_label = format!("{}, {detail}", checkpoint.reason().label());
+    let row_label = format!("{}, {detail}, {size}", checkpoint.reason().label());
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
@@ -608,7 +610,7 @@ fn checkpoint_row(
     });
     theme::paint_focus_ring(ui, &response, rect);
     let response = response.on_hover_text(format!(
-        "{}\nCheckpoint {}",
+        "{}\n{size}\nCheckpoint {}",
         checkpoint.reason().label(),
         checkpoint.checkpoint_id()
     ));

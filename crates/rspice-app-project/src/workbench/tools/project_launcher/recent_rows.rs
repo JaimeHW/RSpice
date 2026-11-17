@@ -4,12 +4,12 @@
 //! for a file an open found gone, a way to point the row at where it went
 //! or take it off the list.
 
-use egui::{Align2, Id, Rect, Response, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
+use egui::{Id, Rect, Response, Sense, Ui, Vec2, WidgetInfo, WidgetType};
 
 use crate::services::recent_files::RecentFile;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Problem, paint_problem_mark};
+use crate::ui::theme;
+use crate::ui::tokens::Tokens;
+use crate::ui::widgets::Button;
 use crate::workbench::design_system::WorkbenchIcon;
 
 /// What the reader asked of one recent row, besides opening it.
@@ -136,39 +136,27 @@ pub(crate) fn pin_toggle(ui: &mut Ui, rect: Rect, pinned: bool, name: &str) -> b
     response.clicked()
 }
 
-/// The strip under a row whose file was not found: what happened, and the
-/// two ways on. Returns the action pressed.
+/// The strip under a row whose file was not found: the two ways on, at the
+/// row's right edge. The row's state column already says "missing" with its
+/// mark. Returns the action pressed.
 pub(crate) fn missing_strip(
     ui: &mut Ui,
     rect: Rect,
     recent: &RecentFile,
 ) -> Option<RecentRowAction> {
-    let t = Tokens::get(ui.ctx());
     let mut action = None;
     let mut strip = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     strip.spacing_mut().item_spacing.x = 6.0;
-    let (mark, _) = strip.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-    paint_problem_mark(strip.painter(), mark, Problem::Warning);
-    let message = strip.painter().text(
-        mark.right_center() + vec2(6.0, 0.0),
-        Align2::LEFT_CENTER,
-        "File not found",
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    strip.add_space(message.width() + 6.0);
-    strip.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if Button::new("Remove").show(ui).clicked() {
-            action = Some(RecentRowAction::Remove(recent.path.clone()));
-        }
-        if Button::new("Locate\u{2026}").show(ui).clicked() {
-            action = Some(RecentRowAction::Locate(recent.clone()));
-        }
-    });
+    if Button::new("Remove").show(&mut strip).clicked() {
+        action = Some(RecentRowAction::Remove(recent.path.clone()));
+    }
+    if Button::new("Locate\u{2026}").show(&mut strip).clicked() {
+        action = Some(RecentRowAction::Locate(recent.clone()));
+    }
     action
 }
 

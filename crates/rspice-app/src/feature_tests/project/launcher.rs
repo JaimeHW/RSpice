@@ -305,6 +305,156 @@ fn safe_mode_over_a_clean_project_starts_at_once() {
     assert!(!app.state.platform.project_lifecycle.is_open());
 }
 
+/// One launcher frame through the shell: the strings it painted with their
+/// rects, and every control's bounds by its accessible label.
+#[cfg(not(target_arch = "wasm32"))]
+fn launcher_frame(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    events: Vec<egui::Event>,
+) -> (Vec<(String, Rect)>, Vec<(String, Rect)>) {
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+            events,
+            ..Default::default()
+        },
+        |ui| show(ui.ctx(), app),
+    );
+    let painted = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Text(text) => Some((
+                text.galley.text().to_owned(),
+                Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            _ => None,
+        })
+        .collect();
+    let controls = output
+        .platform_output
+        .accesskit_update
+        .map(|update| {
+            update
+                .nodes
+                .into_iter()
+                .filter_map(|(_, node)| {
+                    let bounds = node.bounds()?;
+                    Some((
+                        node.label()?.to_owned(),
+                        Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        ),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (painted, controls)
+}
+
+/// A press at the middle of `rect`.
+#[cfg(not(target_arch = "wasm32"))]
+fn press(rect: Rect) -> Vec<egui::Event> {
+    let at = rect.center();
+    vec![
+        egui::Event::PointerMoved(at),
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        },
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::default(),
+        },
+    ]
+}
+
+/// Opening a recent project whose file is gone keeps the launcher open on
+/// its row, marked missing, with Locate... and Remove under it; Remove takes
+/// it off the list. Every row's date stands in one column, however short
+/// its path.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn a_missing_recent_project_keeps_the_launcher_open_on_its_row() {
+    use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
+
+    let root = rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir(
+        "launcher-missing-recent",
+    );
+    let present = root
+        .join("a much longer folder name than the other")
+        .join("bandgap.rspiceproj");
+    std::fs::create_dir_all(present.parent().expect("a folder")).expect("folder");
+    std::fs::write(&present, b"{}").expect("a project file");
+    let gone = root.join("ldo.rspiceproj");
+    let recent = |path: &std::path::Path| RecentFile {
+        kind: RecentKind::Project,
+        path: path.to_path_buf(),
+        opened_at_unix_ms: 1_760_000_000_000,
+        pinned: false,
+        missing: false,
+    };
+    let mut app = RSpiceApp::test_instance();
+    app.state.platform.recent_files = vec![recent(&present), recent(&gone)];
+    rspice_app_project::workbench::project::open_project_launcher(
+        &mut app.state.project,
+        &mut app.state.workbench,
+        &mut app.state.platform,
+    );
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let control = |controls: &[(String, Rect)], label: &str| {
+        controls
+            .iter()
+            .find(|(name, _)| name == label)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("no control {label:?} in {controls:?}"))
+    };
+
+    let mut frame = launcher_frame(&ctx, &mut app, Vec::new());
+    for _ in 0..2 {
+        frame = launcher_frame(&ctx, &mut app, Vec::new());
+    }
+    let row = control(&frame.1, "Open project ldo");
+    launcher_frame(&ctx, &mut app, press(row));
+    let (painted, controls) = launcher_frame(&ctx, &mut app, Vec::new());
+
+    assert!(app.state.project.project_launcher_open);
+    assert!(app.state.platform.recent_files[1].missing);
+    let notices = app.state.model.notices.take();
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.title == "Could not open ldo"),
+        "{notices:?}"
+    );
+    let shows = |wanted: &str| painted.iter().any(|(text, _)| text == wanted);
+    assert!(shows("missing"), "{painted:?}");
+    let dates = painted
+        .iter()
+        .filter(|(text, _)| text.starts_with("20") && text.len() == 16)
+        .map(|(_, rect)| rect.left())
+        .collect::<Vec<_>>();
+    assert_eq!(dates.len(), 2, "{painted:?}");
+    assert!((dates[0] - dates[1]).abs() < 0.5, "{dates:?}");
+
+    let remove = control(&controls, "Remove");
+    let _ = control(&controls, "Locate\u{2026}");
+    launcher_frame(&ctx, &mut app, press(remove));
+    assert_eq!(app.state.platform.recent_files.len(), 1);
+    assert_eq!(app.state.platform.recent_files[0].path, present);
+    assert!(app.state.project.project_launcher_open);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The Safe mode page states its launch scope in one line under a plain
 /// title, and never offers to start safe mode while it is already on.
 #[test]

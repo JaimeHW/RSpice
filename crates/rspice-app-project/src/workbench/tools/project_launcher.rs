@@ -1357,6 +1357,9 @@ fn project_row(
         vec2(content_width, 37.0),
         egui::Layout::top_down(Align::Min),
         |ui| {
+            // The whole width, however short the path: the columns after it
+            // start where they start on every other row.
+            ui.set_min_width(content_width);
             ui.spacing_mut().item_spacing.y = 2.0;
             // Painted, not labels: a label over the row takes the presses on its text.
             painted_label(
