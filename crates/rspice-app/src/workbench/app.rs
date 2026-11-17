@@ -547,6 +547,8 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_pack_restore(ctx);
         self.handle_shortcuts(ctx);
+        // A file dropped on the window opens before any page draws.
+        crate::workbench::shell_host::project::dropped::open_dropped_file(ctx, self);
         #[cfg(target_arch = "wasm32")]
         rspice_app_services::workbench::browser::file_import::register_text_import_repaint_context(
             ctx,

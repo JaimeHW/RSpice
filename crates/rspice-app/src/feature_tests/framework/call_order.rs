@@ -120,7 +120,13 @@ const PREPARE_FRAME: &[Step] = &[
     ),
     ("5.19", &["self.poll_browser_pdk_persistence(ctx)"]),
     ("5.20", &["self.poll_browser_pack_restore(ctx)"]),
-    ("5.21", &["self.handle_shortcuts(ctx)"]),
+    (
+        "5.21",
+        &[
+            "self.handle_shortcuts(ctx)",
+            "dropped::open_dropped_file(ctx, self)",
+        ],
+    ),
     (
         "5.22",
         &["file_import::register_text_import_repaint_context(ctx,)"],

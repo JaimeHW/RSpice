@@ -1,7 +1,6 @@
 //! The project launcher's composition over the whole application.
 
 use egui::{Context, Popup};
-use std::path::Path;
 
 use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::session::project_transactions::{SafeModeStart, start_local_safe_mode};
@@ -20,91 +19,12 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
-fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
-    let dropped = ctx.input(|input| input.raw.dropped_files.clone());
-    if dropped.is_empty() {
-        return false;
-    }
-    if dropped.len() != 1 {
-        app.state
-            .prompt("Drop one SPICE deck at a time; each opens as one netlist project.");
-        return false;
-    }
-
-    let file = &dropped[0];
-    let source_path = file.path.clone();
-    let display_name = (!file.name.trim().is_empty())
-        .then(|| file.name.clone())
-        .or_else(|| {
-            source_path
-                .as_deref()
-                .and_then(Path::file_name)
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
-    let supported = Path::new(&display_name)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "cir" | "sp" | "spice" | "net" | "ckt"
-            )
-        });
-    if !supported {
-        app.state
-            .prompt("The project launcher accepts .cir, .sp, .spice, .net, and .ckt SPICE decks.");
-        return false;
-    }
-
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            source_path
-                .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
-        }
-    };
-    match bytes {
-        Ok(bytes) => {
-            if app
-                .state
-                .stage_dropped_netlist_project(bytes, source_path, display_name)
-            {
-                dismiss_launcher(app);
-                true
-            } else {
-                false
-            }
-        }
-        Err(error) => {
-            app.state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Dropped SPICE source could not be read: {error}"),
-            );
-            false
-        }
-    }
-}
-
 /// The launcher, drawn in the project feature's context, with what the
 /// reader asked of it carried out by the shell as soon as it has drawn and
 /// before its focus is handed back.
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.project.project_launcher_open {
         show_discard_confirmation(ctx, &mut app.state.platform);
-        return;
-    }
-
-    if handle_launcher_netlist_drop(ctx, app) {
         return;
     }
 

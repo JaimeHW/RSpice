@@ -10,6 +10,7 @@ use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::recovery::recovery;
 use rspice_app_project::workbench::surfaces::project::{configuration, dependencies, overview};
 
+pub(crate) mod dropped;
 pub(crate) mod landing;
 pub(crate) mod launcher;
 pub(crate) mod library;

@@ -14,6 +14,7 @@ mod configuration_tables;
 mod configuration_transactions;
 mod dependencies;
 mod design_management;
+mod dropped;
 mod examples;
 mod file_workflow;
 mod frame_work;
