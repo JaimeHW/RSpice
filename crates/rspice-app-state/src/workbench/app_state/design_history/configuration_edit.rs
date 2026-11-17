@@ -4,9 +4,11 @@
 //! configuration, a rename, a delete or a change of what runs use, is one
 //! step holding the catalog as it was and as it became. Undo puts the catalog
 //! back and Redo forward, each as a project transaction of its own, so the
-//! project revision only moves forward. A step stands on the revision its
-//! last move left: a project change made since refuses it and says so, rather
-//! than overwriting that change.
+//! project revision only moves forward. A step stands on the catalog its
+//! last move left: a change to the configurations made since refuses it and
+//! says so, rather than overwriting that change. It pins the catalog rather
+//! than the project revision, which the step undone before it has moved on:
+//! what a step overwrites is all it guards.
 
 use super::*;
 use crate::state::ConfigurationSetCatalog;
@@ -17,8 +19,6 @@ pub struct ConfigurationEditRecord {
     description: String,
     before: ConfigurationSetCatalog,
     after: ConfigurationSetCatalog,
-    undo_guard_revision: ObjectRevision,
-    redo_guard_revision: Option<ObjectRevision>,
 }
 
 impl Model {
@@ -31,8 +31,7 @@ impl Model {
         description: impl Into<String>,
     ) -> Result<(), String> {
         let before = (*self.workspace.content.configuration_sets).clone();
-        let undo_guard_revision = self
-            .workspace
+        self.workspace
             .content
             .replace_configuration_sets(candidate)
             .map_err(|error| error.to_string())?;
@@ -44,8 +43,6 @@ impl Model {
                 description: description.into(),
                 before,
                 after,
-                undo_guard_revision,
-                redo_guard_revision: None,
             })),
         );
         Ok(())
@@ -59,14 +56,10 @@ impl ConfigurationEditRecord {
 
     pub(super) fn after_design_matches(&self, state: &Model) -> bool {
         *state.workspace.content.configuration_sets == self.after
-            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     pub(super) fn before_design_matches(&self, state: &Model) -> bool {
         *state.workspace.content.configuration_sets == self.before
-            && self
-                .redo_guard_revision
-                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     pub(super) fn validate_mutation(&self, state: &Model, operation: &str) -> Result<(), String> {
@@ -86,34 +79,32 @@ impl ConfigurationEditRecord {
     pub(super) fn apply_before(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.after_design_matches(state) {
             return Err(
-                "The configuration change cannot be undone because the project changed since."
+                "The configuration change cannot be undone because the configurations changed since."
                     .to_owned(),
             );
         }
         self.validate_mutation(state, "undone")?;
-        self.redo_guard_revision = Some(replace(state, &self.before)?);
-        Ok(())
+        replace(state, &self.before)
     }
 
     pub(super) fn apply_after(&mut self, state: &mut Model) -> Result<(), String> {
         if !self.before_design_matches(state) {
             return Err(
-                "The configuration change cannot be redone because the project changed since."
+                "The configuration change cannot be redone because the configurations changed since."
                     .to_owned(),
             );
         }
         self.validate_mutation(state, "redone")?;
-        self.undo_guard_revision = replace(state, &self.after)?;
-        Ok(())
+        replace(state, &self.after)
     }
 }
 
-fn replace(state: &mut Model, catalog: &ConfigurationSetCatalog) -> Result<ObjectRevision, String> {
-    let revision = state
+fn replace(state: &mut Model, catalog: &ConfigurationSetCatalog) -> Result<(), String> {
+    state
         .workspace
         .content
         .replace_configuration_sets(catalog.clone())
         .map_err(|error| error.to_string())?;
     state.netlist_artifacts.current_generation_input_digest = None;
-    Ok(revision)
+    Ok(())
 }

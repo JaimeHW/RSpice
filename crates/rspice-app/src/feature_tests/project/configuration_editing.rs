@@ -653,6 +653,45 @@ fn delete_counts_every_binding_and_undo_brings_the_configuration_back() {
     assert_eq!(back.cell_bindings().len(), 1);
 }
 
+/// Configuration changes undo and redo in turn: undoing one moves the
+/// project on, and the change before it still undoes.
+#[test]
+fn configuration_changes_undo_and_redo_in_turn() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    let spare = second_configuration(&mut app, "Spare", |_| {});
+    let extra = second_configuration(&mut app, "Extra", |_| {});
+    for id in [spare, extra] {
+        open_configuration_dialog(
+            &mut app.state.project.configuration_dialog,
+            &app.state.model,
+            ConfigurationDialogRequest::Delete(id),
+        );
+        let output = settle(&ctx, &mut app, Vec::new());
+        click(&ctx, &mut app, &output, Role::Button, |name| {
+            name == "Delete"
+        });
+    }
+    let present = |app: &RSpiceApp| {
+        let catalog = &app.state.model.workspace.content.configuration_sets;
+        [spare, extra].map(|id| catalog.find(id).is_some())
+    };
+    assert_eq!(present(&app), [false, false], "both deleted");
+
+    for expected in [[false, true], [true, true]] {
+        assert!(app.command_key_enabled(ids::UNDO));
+        app.execute_command_key(ids::UNDO);
+        settle(&ctx, &mut app, Vec::new());
+        assert_eq!(present(&app), expected, "Undo takes back one delete");
+    }
+    for expected in [[false, true], [false, false]] {
+        assert!(app.command_key_enabled(ids::REDO));
+        app.execute_command_key(ids::REDO);
+        settle(&ctx, &mut app, Vec::new());
+        assert_eq!(present(&app), expected, "Redo makes one delete again");
+    }
+}
+
 /// Renaming the design's top cell while the page holds edits carries the
 /// edits over: they stay, they take the new root, and Apply lands them.
 #[test]
