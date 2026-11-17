@@ -223,3 +223,65 @@ fn a_retained_model_library_attaches_without_its_original_files() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Detach sits beside Attach and takes the same checkpointed change: who
+/// detaches it starts on the person at this application, the checkpoint is
+/// written first, and the project is left with no technology and a receipt
+/// that says it was detached.
+#[test]
+fn the_technology_detaches_from_the_page_through_a_checkpoint() {
+    let (mut app, root) = attachable_project("technology-detach");
+    let user = app.cloud.review_actor(&*app.state.cloud);
+    let ctx = offscreen();
+    let dialog = open_attach_dialog(&ctx, &mut app);
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    paint_until_attached(&ctx, &mut app);
+    let page = app_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(enabled(&page, "Detach\u{2026}"), Some(true));
+
+    app_frame(&ctx, &mut app, click_on(&page, "Detach\u{2026}"));
+    app_frame(&ctx, &mut app, Vec::new());
+    let detach = app_frame(&ctx, &mut app, Vec::new());
+    let text = painted(&detach);
+    assert!(text.contains("Detach technology"), "{text}");
+    assert_eq!(announced_value(&detach, "Changed by"), Some(user.clone()));
+    app_frame(&ctx, &mut app, click_on(&detach, "Detach"));
+    let mut last = String::new();
+    for _ in 0..500 {
+        last = painted(&app_frame(&ctx, &mut app, Vec::new()));
+        if app
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_none()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let project = &app.state.model.workspace.content.project;
+    assert!(project.technology_binding().is_none(), "{last}");
+    let receipt = project
+        .technology_change_audit()
+        .last()
+        .expect("the detach is in the technology history");
+    assert_eq!(
+        receipt.action(),
+        rspice_project::ProjectTechnologyChangeAction::Detach
+    );
+    assert_eq!(receipt.actor_id(), user);
+    assert!(
+        app.state
+            .model
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message.starts_with("Detached ")),
+        "the Console records the change"
+    );
+    let page = app_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(enabled(&page, "Detach\u{2026}"), Some(false));
+    let _ = std::fs::remove_dir_all(root);
+}

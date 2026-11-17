@@ -191,6 +191,10 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     if !cx.state.technology_attachment.open {
         return;
     }
+    if cx.state.technology_attachment.detach {
+        show_technology_detach_dialog(ctx, cx);
+        return;
+    }
 
     // Proving a candidate hashes its library's retained sources, so the
     // candidates are proven when the catalogue changes, not on each repaint.
@@ -635,6 +639,81 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     }
 }
 
+/// Open the detach dialog on the project's technology, the change made and
+/// approved by the person at this application.
+pub(super) fn open_technology_detach_dialog(cx: &mut Cx<'_, ProjectFeature>) {
+    let actor = cx.peers.cloud_session().review_actor(cx.peers.cloud());
+    cx.state.technology_attachment.open_detach(actor);
+}
+
+/// Detach the project's technology: who does it and why, then the
+/// checkpoint, then the change, as attaching is done.
+fn show_technology_detach_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let pending = technology_checkpoint_pending(cx.state);
+    let label = cx
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .map(ProjectTechnologyBinding::display_label);
+    // What the simulation setup needs a technology for: runs that need one
+    // are refused once it is gone.
+    let demand = cx
+        .model
+        .technology_inputs()
+        .technology_demand()
+        .block_reason();
+    let ready = label.is_some()
+        && !pending
+        && technology_authority_fields_ready(&cx.state.technology_attachment);
+    let validation_error = cx.state.technology_attachment.validation_error.clone();
+    let dialog = Dialog::new(TECHNOLOGY_DETACH_TITLE, TECHNOLOGY_DETACH_PRIMARY)
+        .description(
+            "The project stops simulating with this technology. A recovery checkpoint is saved first.",
+        )
+        .size(DialogSize::Transaction)
+        .ghost("Cancel")
+        .primary_enabled(ready)
+        .destructive();
+    let choice =
+        technology_change_hint(dialog, pending, validation_error.as_deref()).show(ctx, |ui| {
+            property_row(
+                ui,
+                "Technology",
+                label
+                    .as_deref()
+                    .unwrap_or(crate::workbench::project::dependency_status::UNSET),
+            );
+            if let Some(demand) = demand.as_deref() {
+                ui.add_space(8.0);
+                problem_line(
+                    ui,
+                    Problem::Warning,
+                    &format!("{demand} Those runs are refused until another is attached."),
+                );
+            }
+            ui.add_space(10.0);
+            technology_change_fields(ui, &mut cx.state.technology_attachment, !pending);
+        });
+    match choice {
+        DialogChoice::Primary => {
+            let started = technology_change_authority(&cx.state.technology_attachment).and_then(
+                |authority| start_technology_change(ctx, cx, TechnologyChange::Detach, authority),
+            );
+            if let Err(error) = started {
+                cx.state.technology_attachment.validation_error = Some(error);
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            if !pending {
+                cx.state.technology_attachment.close();
+            }
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
 /// A technology dialog's one line beside its buttons, where it stays in view
 /// however far the body is scrolled: the checkpoint being written, else why
 /// the last attempt was refused.
@@ -850,7 +929,39 @@ pub(super) fn commit_technology_change(
         } => {
             commit_technology_after_checkpoint(cx, binding, context, migration_evidence, checkpoint)
         }
+        TechnologyChange::Detach => commit_detach_after_checkpoint(cx, context, checkpoint),
     }
+}
+
+/// Remove the project's technology over `checkpoint`, as one project
+/// revision whose receipt names who did it and the checkpoint.
+fn commit_detach_after_checkpoint(
+    cx: &mut Cx<'_, ProjectFeature>,
+    context: crate::state::ProjectTechnologyChangeContext,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+) -> Result<String, String> {
+    let label = cx
+        .model
+        .workspace
+        .content
+        .project
+        .technology
+        .clone()
+        .unwrap_or_default();
+    let (revision, audit_receipt) = cx
+        .model
+        .workspace
+        .content
+        .detach_technology_audited(context)
+        .map_err(|error| format!("The technology was not detached: {error}"))?;
+    cx.state.project_checkpoint_recovery.invalidate();
+    Ok(format!(
+        "Detached {label} at project revision {} (technology receipt #{}); checkpoint {} keeps revision {}.",
+        revision.get(),
+        audit_receipt.sequence(),
+        short_identity(&checkpoint.checkpoint_id().to_string()),
+        checkpoint.project_revision(),
+    ))
 }
 
 /// The receipt's evidence for a change made over `checkpoint`, which must

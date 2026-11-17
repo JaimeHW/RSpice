@@ -266,6 +266,14 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         {
             open_technology_attachment_dialog(cx);
         }
+        // Beside Attach, through the same checkpointed change.
+        if Button::new(TECHNOLOGY_DETACH_ACTION)
+            .enabled(binding.is_some())
+            .show(ui)
+            .clicked()
+        {
+            open_technology_detach_dialog(cx);
+        }
         if Button::new(model_paths).show(ui).clicked() {
             cx.execute(ids::PDK_SETTINGS);
         }

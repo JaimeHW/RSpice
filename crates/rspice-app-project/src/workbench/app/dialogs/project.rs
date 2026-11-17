@@ -19,6 +19,9 @@ pub use properties::ProjectPropertiesDialogState;
 #[derive(Debug, Clone, Default)]
 pub struct TechnologyAttachmentDialogState {
     pub open: bool,
+    /// The dialog detaches the project's technology rather than attaching
+    /// one.
+    pub(crate) detach: bool,
     pub(crate) selected_library: Option<String>,
     pub(crate) selected_pdk_package: Option<String>,
     pub(crate) actor_id: String,
@@ -37,6 +40,8 @@ pub(crate) enum TechnologyChange {
         binding: crate::state::ProjectTechnologyBinding,
         migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     },
+    /// The project's technology removed.
+    Detach,
 }
 
 /// A technology change waiting on the whole-project checkpoint written
@@ -320,6 +325,7 @@ impl TechnologyAttachmentDialogState {
     ) {
         *self = Self {
             open: true,
+            detach: false,
             selected_library,
             selected_pdk_package,
             authority_id: actor.clone(),
@@ -328,6 +334,18 @@ impl TechnologyAttachmentDialogState {
             migration_reviewed: false,
             validation_error: None,
             in_flight: None,
+        };
+    }
+
+    /// Open on detaching the project's technology, the change made and
+    /// approved by `actor`, the person at this application.
+    pub(crate) fn open_detach(&mut self, actor: String) {
+        *self = Self {
+            open: true,
+            detach: true,
+            authority_id: actor.clone(),
+            actor_id: actor,
+            ..Self::default()
         };
     }
 

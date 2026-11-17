@@ -36,6 +36,8 @@ pub const PROJECT_CLOUD_PUBLICATION_BINDING_SCHEMA_VERSION: u16 = 1;
 pub enum ProjectTechnologyChangeAction {
     Attach,
     Replace,
+    /// The project's technology removed: the receipt names no binding after.
+    Detach,
 }
 
 /// Human and authorization context captured before a project technology
@@ -167,9 +169,9 @@ pub struct ProjectTechnologyChangeReceipt {
     from_project_revision: ObjectRevision,
     to_project_revision: ObjectRevision,
     before_binding_digest: Option<ContentDigest>,
-    after_binding_digest: ContentDigest,
+    after_binding_digest: Option<ContentDigest>,
     before_binding_label: Option<String>,
-    after_binding_label: String,
+    after_binding_label: Option<String>,
     checkpoint_id: Uuid,
     checkpoint_project_revision: ObjectRevision,
     checkpoint_created_unix_ms: u64,
@@ -193,9 +195,9 @@ struct ProjectTechnologyChangeReceiptPayload<'a> {
     from_project_revision: ObjectRevision,
     to_project_revision: ObjectRevision,
     before_binding_digest: Option<ContentDigest>,
-    after_binding_digest: ContentDigest,
+    after_binding_digest: Option<ContentDigest>,
     before_binding_label: &'a Option<String>,
-    after_binding_label: &'a str,
+    after_binding_label: &'a Option<String>,
     checkpoint_id: Uuid,
     checkpoint_project_revision: ObjectRevision,
     checkpoint_created_unix_ms: u64,
@@ -273,8 +275,8 @@ impl ProjectTechnologyChangeReceipt {
     }
 
     #[must_use]
-    pub fn after_binding_label(&self) -> &str {
-        &self.after_binding_label
+    pub fn after_binding_label(&self) -> Option<&str> {
+        self.after_binding_label.as_deref()
     }
 
     #[must_use]
@@ -1135,9 +1137,9 @@ impl ProjectDescriptor {
             from_project_revision: self.revision,
             to_project_revision: next_revision,
             before_binding_digest,
-            after_binding_digest,
+            after_binding_digest: Some(after_binding_digest),
             before_binding_label: self.technology.clone(),
-            after_binding_label: label.clone(),
+            after_binding_label: Some(label.clone()),
             checkpoint_id: context.checkpoint_id,
             checkpoint_project_revision: context.checkpoint_project_revision,
             checkpoint_created_unix_ms: context.checkpoint_created_unix_ms,
@@ -1155,6 +1157,77 @@ impl ProjectDescriptor {
         let mut candidate = self.clone();
         candidate.technology = Some(label);
         candidate.technology_binding = Some(binding);
+        candidate.revision = next_revision;
+        candidate.technology_change_audit.push(receipt.clone());
+        candidate.validate()?;
+        *self = candidate;
+        Ok((next_revision, receipt))
+    }
+
+    /// Remove the project's technology and record the checkpoint-backed
+    /// authority receipt that says so, as one atomic project descriptor
+    /// revision. A project with no technology attached has nothing to
+    /// detach.
+    pub fn detach_technology_audited(
+        &mut self,
+        context: ProjectTechnologyChangeContext,
+    ) -> Result<(ObjectRevision, ProjectTechnologyChangeReceipt), ProjectDescriptorError> {
+        context.validate()?;
+        self.validate_technology_change_audit()?;
+        if self.technology_binding.is_none() {
+            return Err(ProjectDescriptorError::NoOpTechnologyChange);
+        }
+        if context.migration_evidence.is_some() {
+            return Err(ProjectDescriptorError::InvalidTechnologyMigrationEvidence(
+                "detaching a technology migrates nothing".to_owned(),
+            ));
+        }
+        if context.checkpoint_project_revision != self.revision {
+            return Err(ProjectDescriptorError::TechnologyCheckpointRevision {
+                checkpoint: context.checkpoint_project_revision.get(),
+                current: self.revision.get(),
+            });
+        }
+        if self.technology_change_audit.len() >= MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS {
+            return Err(ProjectDescriptorError::TechnologyAuditLimit {
+                maximum: MAX_PROJECT_TECHNOLOGY_CHANGE_RECEIPTS,
+            });
+        }
+        let next_revision = self.revision.next()?;
+        let mut receipt = ProjectTechnologyChangeReceipt {
+            schema_version: PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION,
+            sequence: u64::try_from(self.technology_change_audit.len())
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(ProjectDescriptorError::TechnologyAuditSequenceExhausted)?,
+            project_id: self.id,
+            action: ProjectTechnologyChangeAction::Detach,
+            actor_id: context.authority.actor_id,
+            authority_id: context.authority.authority_id,
+            reason: context.authority.reason,
+            from_project_revision: self.revision,
+            to_project_revision: next_revision,
+            before_binding_digest: technology_binding_digest(self.technology_binding.as_ref())?,
+            after_binding_digest: None,
+            before_binding_label: self.technology.clone(),
+            after_binding_label: None,
+            checkpoint_id: context.checkpoint_id,
+            checkpoint_project_revision: context.checkpoint_project_revision,
+            checkpoint_created_unix_ms: context.checkpoint_created_unix_ms,
+            checkpoint_snapshot_digest: context.checkpoint_snapshot_digest,
+            checkpoint_snapshot_byte_len: context.checkpoint_snapshot_byte_len,
+            migration_evidence: None,
+            previous_receipt_digest: self
+                .technology_change_audit
+                .last()
+                .map(ProjectTechnologyChangeReceipt::receipt_digest),
+            receipt_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        receipt.receipt_digest = receipt.calculate_digest()?;
+
+        let mut candidate = self.clone();
+        candidate.technology = None;
+        candidate.technology_binding = None;
         candidate.revision = next_revision;
         candidate.technology_change_audit.push(receipt.clone());
         candidate.validate()?;
@@ -1212,11 +1285,14 @@ impl ProjectDescriptor {
                 240,
             )?;
             validate_technology_change_reason(&receipt.reason)?;
-            validate_project_audit_text(
-                "technology_change.after_binding_label",
-                &receipt.after_binding_label,
-                1_024,
-            )?;
+            if let Some(label) = receipt.after_binding_label.as_deref() {
+                validate_project_audit_text("technology_change.after_binding_label", label, 1_024)?;
+            }
+            if receipt.after_binding_digest.is_some() != receipt.after_binding_label.is_some() {
+                return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                    "receipt[{index}] names a binding after without its label, or a label without its binding"
+                )));
+            }
             if receipt
                 .before_binding_label
                 .as_deref()
@@ -1287,6 +1363,7 @@ impl ProjectDescriptor {
                 ProjectTechnologyChangeAction::Attach => {
                     if receipt.before_binding_digest.is_some()
                         || receipt.before_binding_label.is_some()
+                        || receipt.after_binding_digest.is_none()
                     {
                         return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
                             "receipt[{index}] attach transition has a preceding binding"
@@ -1296,18 +1373,28 @@ impl ProjectDescriptor {
                 ProjectTechnologyChangeAction::Replace => {
                     if receipt.before_binding_digest.is_none()
                         || receipt.before_binding_label.is_none()
-                        || receipt.before_binding_digest == Some(receipt.after_binding_digest)
+                        || receipt.after_binding_digest.is_none()
+                        || receipt.before_binding_digest == receipt.after_binding_digest
                     {
                         return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
                             "receipt[{index}] replacement transition is invalid or a no-op"
                         )));
                     }
                 }
+                ProjectTechnologyChangeAction::Detach => {
+                    if receipt.before_binding_digest.is_none()
+                        || receipt.after_binding_digest.is_some()
+                    {
+                        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
+                            "receipt[{index}] detaches no technology, or leaves one attached"
+                        )));
+                    }
+                }
             }
             previous_receipt_digest = Some(receipt.receipt_digest);
             previous_to_revision = Some(receipt.to_project_revision);
-            previous_after_binding_digest = Some(receipt.after_binding_digest);
-            previous_after_binding_label = Some(receipt.after_binding_label.as_str());
+            previous_after_binding_digest = receipt.after_binding_digest;
+            previous_after_binding_label = receipt.after_binding_label.as_deref();
         }
 
         let final_receipt = self.technology_change_audit.last().ok_or_else(|| {
@@ -1316,8 +1403,8 @@ impl ProjectDescriptor {
             )
         })?;
         let current_digest = technology_binding_digest(self.technology_binding.as_ref())?;
-        if current_digest != Some(final_receipt.after_binding_digest)
-            || self.technology.as_deref() != Some(final_receipt.after_binding_label.as_str())
+        if current_digest != final_receipt.after_binding_digest
+            || self.technology.as_deref() != final_receipt.after_binding_label.as_deref()
         {
             return Err(ProjectDescriptorError::TechnologyAuditCorrupted(
                 "current project technology does not match the final receipt".to_owned(),

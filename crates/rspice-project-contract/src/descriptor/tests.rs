@@ -403,6 +403,68 @@ fn a_technology_change_needs_no_reason() {
     assert!(ProjectTechnologyChangeAuthority::new("", "engineer.james", "").is_err());
 }
 
+/// A context over a checkpoint of `project` as it is now.
+fn checkpoint_context(project: &ProjectDescriptor, seed: u8) -> ProjectTechnologyChangeContext {
+    ProjectTechnologyChangeContext::new(
+        ProjectTechnologyChangeAuthority::new("engineer.james", "engineer.james", "")
+            .expect("authority validates"),
+        Uuid::new_v4(),
+        project.revision(),
+        1_785_430_000_000,
+        rspice_vocabulary::product::ContentDigest::from_bytes([seed; 32]),
+        4_096,
+    )
+    .expect("checkpoint context validates")
+}
+
+/// Detaching the technology is one audited revision like attaching it: the
+/// receipt names the binding before and none after, the chain validates
+/// after a round trip, and a project can attach again after it. A project
+/// with nothing attached has nothing to detach, and a detach receipt that
+/// claims a binding after is refused as corrupt.
+#[test]
+fn a_technology_detaches_as_one_audited_revision() {
+    let mut project = ProjectDescriptor::default();
+    let binding = technology_binding_fixture();
+    assert_eq!(
+        project.detach_technology_audited(checkpoint_context(&project, 0x74)),
+        Err(ProjectDescriptorError::NoOpTechnologyChange)
+    );
+    project
+        .attach_technology_audited(binding.clone(), checkpoint_context(&project, 0x75))
+        .expect("the attachment commits");
+    let attached = project.revision();
+    let (detached, receipt) = project
+        .detach_technology_audited(checkpoint_context(&project, 0x76))
+        .expect("the detach commits");
+    assert_eq!(detached.get(), attached.get() + 1);
+    assert_eq!(receipt.action(), ProjectTechnologyChangeAction::Detach);
+    assert_eq!(receipt.sequence(), 2);
+    assert_eq!(receipt.after_binding_label(), None);
+    assert_eq!(project.technology_binding(), None);
+    assert_eq!(project.technology, None);
+    let restored: ProjectDescriptor =
+        serde_json::from_slice(&serde_json::to_vec(&project).expect("descriptor serializes"))
+            .expect("descriptor round trips");
+    restored.validate().expect("the detach chain validates");
+
+    let mut forged = serde_json::to_value(&project).expect("descriptor serializes to value");
+    forged["technology_change_audit"][1]["after_binding_label"] =
+        serde_json::Value::String("forged".to_owned());
+    let forged: ProjectDescriptor =
+        serde_json::from_value(forged).expect("forged shape deserializes");
+    assert!(matches!(
+        forged.validate(),
+        Err(ProjectDescriptorError::TechnologyAuditCorrupted(_))
+    ));
+
+    let (_, again) = project
+        .attach_technology_audited(binding, checkpoint_context(&project, 0x77))
+        .expect("a detached project attaches again");
+    assert_eq!(again.action(), ProjectTechnologyChangeAction::Attach);
+    project.validate().expect("attach after detach validates");
+}
+
 #[test]
 fn attached_technology_detects_exact_catalog_drift() {
     let root = PathBuf::from(r"C:\qualified-pdk\models.lib");

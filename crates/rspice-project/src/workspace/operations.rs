@@ -286,6 +286,27 @@ impl ProjectWorkspace {
         Ok((revision, receipt))
     }
 
+    /// Detach the project's technology. A physical layout is drawn in its
+    /// technology's layers, so a project with one keeps its technology.
+    pub fn detach_technology_audited(
+        &mut self,
+        context: ProjectTechnologyChangeContext,
+    ) -> Result<(ObjectRevision, ProjectTechnologyChangeReceipt), ProjectDescriptorError> {
+        if let Some(document) = self.physical_layout_documents().values().next() {
+            return Err(
+                ProjectDescriptorError::TechnologyConflictsWithPhysicalLayout {
+                    owner: document.owner().display_path(),
+                },
+            );
+        }
+        let before = self.project.revision();
+        let (revision, receipt) = self.project.detach_technology_audited(context)?;
+        if revision != before {
+            self.project_metadata_dirty = true;
+        }
+        Ok((revision, receipt))
+    }
+
     /// Record the cloud circuit this project publishes to.
     pub fn bind_cloud_publication(
         &mut self,

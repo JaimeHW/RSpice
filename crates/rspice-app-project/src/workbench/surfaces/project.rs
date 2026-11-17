@@ -39,11 +39,11 @@ use super::super::design_system::{WorkbenchIcon, elide_text, property_card, prop
 use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
 use crate::workbench::project::workspace_state::ProjectPage;
-use technology::open_technology_attachment_dialog;
 #[cfg(target_arch = "wasm32")]
 use technology::poll_browser_recovery_completions;
 use technology::poll_technology_change;
 pub use technology::show_technology_attachment_dialog;
+use technology::{open_technology_attachment_dialog, open_technology_detach_dialog};
 
 const PROJECT_TAB_HEIGHT: f32 = 24.0;
 /// The unsaved mark a tab or row carries, the document bar's dot, and the
@@ -93,6 +93,9 @@ const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
 const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
 const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach binding";
 const TECHNOLOGY_DIALOG_CURRENT: &str = "Binding already attached";
+const TECHNOLOGY_DETACH_ACTION: &str = "Detach\u{2026}";
+const TECHNOLOGY_DETACH_TITLE: &str = "Detach technology";
+const TECHNOLOGY_DETACH_PRIMARY: &str = "Detach";
 /// The one line a technology change states while its checkpoint is written.
 const TECHNOLOGY_CHECKPOINT_PENDING: &str = "Writing the recovery checkpoint\u{2026}";
 
@@ -889,6 +892,7 @@ mod tests {
             TECHNOLOGY_DIALOG_TITLE,
             TECHNOLOGY_DIALOG_PRIMARY,
             TECHNOLOGY_DIALOG_CURRENT,
+            TECHNOLOGY_DETACH_TITLE,
             TECHNOLOGY_CHECKPOINT_PENDING,
         ] {
             let copy = copy.to_ascii_lowercase();
