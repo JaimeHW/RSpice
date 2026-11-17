@@ -10,7 +10,9 @@
 //! and the band write it too, so each list follows it, and what the reader
 //! selects in a list is written back to it.
 
-use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS};
+use rspice_app_state::veriloga_library::{
+    BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel,
+};
 
 use super::*;
 use crate::ui::widgets::table::{
@@ -64,6 +66,67 @@ pub struct LibraryBrowserState {
     pub(super) asked_menu: Option<(BrowserColumn, egui::Pos2)>,
     /// A list held the keyboard this frame.
     pub(super) holds_keyboard: bool,
+    /// The view type the find asks for: its cells hold one, and only views
+    /// of it are listed.
+    pub view_type: Option<ViewType>,
+}
+
+/// What the context strip asks the columns to find, in every library: the
+/// filter's words in a cell's name, description or view names, and a view
+/// type the cell holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Find {
+    /// The filter's words as typed, trimmed.
+    words: String,
+    /// The same words lower-cased, as they are matched.
+    query: String,
+    view_type: Option<ViewType>,
+}
+
+impl Find {
+    pub(super) fn of(state: &ProjectState) -> Self {
+        let words = state.project_library_filter.trim();
+        Self {
+            words: words.to_owned(),
+            query: words.to_ascii_lowercase(),
+            view_type: state.library_browser.view_type,
+        }
+    }
+
+    /// Nothing is asked, so every cell and view is listed.
+    pub(super) fn is_everything(&self) -> bool {
+        self.query.is_empty() && self.view_type.is_none()
+    }
+
+    /// Whether the find turns `cell` up.
+    pub(super) fn cell(&self, cell: &crate::state::Cell) -> bool {
+        cell_matches(cell, &self.query)
+            && self
+                .view_type
+                .is_none_or(|wanted| cell.views.values().any(|view| view.view_type == wanted))
+    }
+
+    /// Whether a view of `view_type` is listed.
+    pub(super) fn view(&self, view_type: ViewType) -> bool {
+        self.view_type.is_none_or(|wanted| wanted == view_type)
+    }
+
+    /// The built-in library's models it turns up, each a Verilog-A cell.
+    pub(super) fn builtin_models(&self) -> Vec<&'static BuiltinVerilogAModel> {
+        if self.view(ViewType::VerilogA) {
+            builtin_models::shown_models(&self.query)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// What a column the find leaves empty says.
+    pub(super) fn nothing_found(&self) -> String {
+        match (self.words.as_str(), self.view_type) {
+            ("", Some(view_type)) => format!("No cells hold a {} view", view_type.caption()),
+            (words, _) => format!("No cells match \u{201c}{words}\u{201d}"),
+        }
+    }
 }
 
 /// The key the built-in library's row goes by: no project library's name.
@@ -74,8 +137,11 @@ pub(super) struct LibraryRow {
     pub(super) name: String,
     /// What the row reads: the library's display name, or its name.
     label: String,
+    /// Its cells, or those the find turns up in it.
     cells: String,
     read_only: bool,
+    /// The row is the built-in Verilog-A library's.
+    builtin: bool,
 }
 
 /// One cell of the selected library that the filter lets through.
@@ -144,31 +210,71 @@ where
     Listed { rows, keys }
 }
 
-/// The libraries, by name, as the manager shows them; the keys end with the
-/// built-in library's, whose row follows the project's own.
-pub(super) fn library_rows(ctx: &Context, manager: &LibraryManager) -> Listed<LibraryRow> {
+/// The libraries, by name, as the manager shows them, then the built-in
+/// library. While a find asks for something, only the libraries it turns a
+/// cell up in are listed, each with how many, and `kept`, the one the page
+/// shows, whatever it holds.
+pub(super) fn library_rows(
+    ctx: &Context,
+    manager: &LibraryManager,
+    find: &Find,
+    kept: Option<&str>,
+) -> Listed<LibraryRow> {
     let stamp = manager.catalog().stamp();
     listed(
         ctx,
         "workbench.project.library.rows.libraries",
-        |held: &u64| *held == stamp,
-        || stamp,
+        |held: &(u64, Find, Option<String>)| {
+            held.0 == stamp && held.1 == *find && held.2.as_deref() == kept
+        },
+        || (stamp, find.clone(), kept.map(str::to_owned)),
         || {
-            manager
+            let everything = find.is_everything();
+            let mut rows = manager
                 .libraries_sorted()
                 .into_iter()
-                .map(|library| LibraryRow {
-                    name: library.name.clone(),
-                    label: library.display_name().to_owned(),
-                    cells: library.cell_count().to_string(),
-                    read_only: library.read_only,
+                .filter_map(|library| {
+                    let found = if everything {
+                        library.cell_count()
+                    } else {
+                        library
+                            .cells
+                            .values()
+                            .filter(|cell| find.cell(cell))
+                            .count()
+                    };
+                    (everything || found > 0 || kept == Some(library.name.as_str())).then(|| {
+                        LibraryRow {
+                            name: library.name.clone(),
+                            label: library.display_name().to_owned(),
+                            cells: found.to_string(),
+                            read_only: library.read_only,
+                            builtin: false,
+                        }
+                    })
                 })
-                .collect()
+                .collect::<Vec<_>>();
+            let models = find.builtin_models().len();
+            if everything || models > 0 {
+                rows.push(LibraryRow {
+                    name: BUILTIN_VERILOGA_LIBRARY.to_owned(),
+                    label: BUILTIN_VERILOGA_LIBRARY.to_owned(),
+                    cells: models.to_string(),
+                    read_only: true,
+                    builtin: true,
+                });
+            }
+            rows
         },
         |rows| {
             rows.iter()
-                .map(|row| RowKey::from(row.name.as_str()))
-                .chain(std::iter::once(BUILTIN_KEY))
+                .map(|row| {
+                    if row.builtin {
+                        BUILTIN_KEY
+                    } else {
+                        RowKey::from(row.name.as_str())
+                    }
+                })
                 .collect()
         },
     )
@@ -176,7 +282,7 @@ pub(super) fn library_rows(ctx: &Context, manager: &LibraryManager) -> Listed<Li
 
 /// Whether `query`, lower-cased and trimmed, finds `cell`: in its name, its
 /// description or one of its views' names. An empty query finds every cell.
-pub(super) fn cell_matches(cell: &crate::state::Cell, query: &str) -> bool {
+fn cell_matches(cell: &crate::state::Cell, query: &str) -> bool {
     query.is_empty()
         || cell.name.to_ascii_lowercase().contains(query)
         || cell.description.to_ascii_lowercase().contains(query)
@@ -186,27 +292,25 @@ pub(super) fn cell_matches(cell: &crate::state::Cell, query: &str) -> bool {
             .any(|view| view.name.to_ascii_lowercase().contains(query))
 }
 
-/// The selected library's cells, by name, that `filter` lets through: a
-/// cell whose name, description or one of whose views' names holds it.
-pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, filter: &str) -> Listed<CellRow> {
+/// The selected library's cells, by name, that `find` turns up.
+pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, find: &Find) -> Listed<CellRow> {
     let stamp = manager.catalog().stamp();
     let library = manager.selected_library.as_deref();
     listed(
         ctx,
         "workbench.project.library.rows.cells",
-        |held: &(u64, Option<String>, String)| {
-            held.0 == stamp && held.1.as_deref() == library && held.2 == filter
+        |held: &(u64, Option<String>, Find)| {
+            held.0 == stamp && held.1.as_deref() == library && held.2 == *find
         },
-        || (stamp, library.map(str::to_owned), filter.to_owned()),
+        || (stamp, library.map(str::to_owned), find.clone()),
         || {
-            let query = filter.trim().to_ascii_lowercase();
             library
                 .and_then(|library| manager.get_library(library))
                 .map(|library| {
                     library
                         .cells_sorted()
                         .into_iter()
-                        .filter(|cell| cell_matches(cell, &query))
+                        .filter(|cell| find.cell(cell))
                         .map(|cell| CellRow {
                             name: cell.name.clone(),
                             views: cell.view_count().to_string(),
@@ -224,24 +328,36 @@ pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, filter: &str) -
     )
 }
 
-/// The selected cell's views, by name.
-pub(super) fn view_rows(ctx: &Context, manager: &LibraryManager) -> Listed<ViewRow> {
+/// The selected cell's views, by name, of the type `find` asks for.
+pub(super) fn view_rows(ctx: &Context, manager: &LibraryManager, find: &Find) -> Listed<ViewRow> {
     let stamp = manager.catalog().stamp();
     let library = manager.selected_library.as_deref();
     let cell = manager.selected_cell.as_deref();
+    let view_type = find.view_type;
     listed(
         ctx,
         "workbench.project.library.rows.views",
-        |held: &(u64, Option<String>, Option<String>)| {
-            held.0 == stamp && held.1.as_deref() == library && held.2.as_deref() == cell
+        |held: &(u64, Option<String>, Option<String>, Option<ViewType>)| {
+            held.0 == stamp
+                && held.1.as_deref() == library
+                && held.2.as_deref() == cell
+                && held.3 == view_type
         },
-        || (stamp, library.map(str::to_owned), cell.map(str::to_owned)),
+        || {
+            (
+                stamp,
+                library.map(str::to_owned),
+                cell.map(str::to_owned),
+                view_type,
+            )
+        },
         || {
             manager
                 .current_cell()
                 .map(|cell| {
                     cell.views_sorted()
                         .into_iter()
+                        .filter(|view| find.view(view.view_type))
                         .map(|view| ViewRow {
                             name: view.name.clone(),
                             view_type: view.view_type,
@@ -361,35 +477,38 @@ pub(super) fn library_column(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
     browser: &mut LibraryBrowserState,
+    find: &Find,
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
-    let libraries = library_rows(ui.ctx(), &cx.model.library_manager);
-    let lead = if cx.state.builtin_models.open {
+    let manager = &cx.model.library_manager;
+    let builtin_open = cx.state.builtin_models.open;
+    let shown_library = manager
+        .selected_library
+        .as_deref()
+        .filter(|_| !builtin_open);
+    let libraries = library_rows(ui.ctx(), manager, find, shown_library);
+    let lead = if builtin_open {
         Some(BUILTIN_KEY)
     } else {
-        cx.model
-            .library_manager
-            .selected_library
-            .as_deref()
-            .map(RowKey::from)
+        shown_library.map(RowKey::from)
     };
     follow_lead(&mut browser.libraries, &libraries.keys, lead);
     let count = libraries.keys.len();
+    let nothing_found = find.nothing_found();
     let columns = [
         Column::name("Library", 60.0),
         Column::number("Cells", 44.0),
         Column::words("Access", 72.0),
     ];
     let focus = browser.focusing == Some(BrowserColumn::Library);
-    let builtin_count = BUILTIN_VERILOGA_MODELS.len().to_string();
     let response = list_column(
         ui,
         "Library",
         ColumnCount {
             shown: count,
-            total: count,
-            empty: "",
+            total: manager.library_count() + 1,
+            empty: &nothing_found,
         },
         width,
         height,
@@ -400,17 +519,13 @@ pub(super) fn library_column(
                 .keys(&libraries.keys)
                 .focus(focus)
                 .max_height(body)
-                .show(ui, |row| match libraries.rows.get(row) {
-                    Some(library) => vec![
+                .show(ui, |row| {
+                    let library = &libraries.rows[row];
+                    vec![
                         Entry::text(library.label.as_str()),
                         Entry::number(library.cells.as_str()),
                         access(library.read_only),
-                    ],
-                    None => vec![
-                        Entry::text(BUILTIN_VERILOGA_LIBRARY),
-                        Entry::number(builtin_count.as_str()),
-                        access(true),
-                    ],
+                    ]
                 })
         },
     );
@@ -441,15 +556,15 @@ pub(super) fn cell_column(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
     browser: &mut LibraryBrowserState,
+    find: &Find,
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
     if cx.state.builtin_models.open {
-        return builtin_cell_column(ui, cx, browser, width, height);
+        return builtin_cell_column(ui, cx, browser, find, width, height);
     }
     let manager = &cx.model.library_manager;
-    let filter = &cx.state.project_library_filter;
-    let cells = cell_rows(ui.ctx(), manager, filter);
+    let cells = cell_rows(ui.ctx(), manager, find);
     follow_lead(
         &mut browser.cells,
         &cells.keys,
@@ -459,7 +574,7 @@ pub(super) fn cell_column(
         .current_library()
         .map_or(0, |library| library.cell_count());
     let no_match = if cells.rows.is_empty() && total > 0 {
-        format!("No cells match \u{201c}{}\u{201d}", filter.trim())
+        find.nothing_found()
     } else {
         String::new()
     };
@@ -515,6 +630,7 @@ pub(super) fn view_column(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
     browser: &mut LibraryBrowserState,
+    find: &Find,
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
@@ -522,11 +638,11 @@ pub(super) fn view_column(
         return builtin_view_column(ui, cx, browser, width, height);
     }
     let manager = &cx.model.library_manager;
-    // A cell the filter hides is not the one the page acts on: its views
+    // A cell the find hides is not the one the page acts on: its views
     // are not listed and the band offers nothing for it.
-    let cell_shown = selected_cell_shown(cx.model, &cx.state.project_library_filter);
+    let cell_shown = selected_cell_shown(cx.model, find);
     let views = if cell_shown {
-        view_rows(ui.ctx(), manager)
+        view_rows(ui.ctx(), manager, find)
     } else {
         Listed {
             rows: Arc::from([]),
@@ -541,7 +657,11 @@ pub(super) fn view_column(
     let shown_cell = manager.current_cell();
     let count = ColumnCount {
         shown: views.rows.len(),
-        total: views.rows.len(),
+        total: if cell_shown {
+            shown_cell.map_or(0, |cell| cell.view_count())
+        } else {
+            0
+        },
         empty: if cell_shown {
             "No views"
         } else {
@@ -616,12 +736,12 @@ fn builtin_cell_column(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
     browser: &mut LibraryBrowserState,
+    find: &Find,
     width: f32,
     height: f32,
 ) -> Option<LibraryIntent> {
     let builtin = &cx.state.builtin_models;
-    let filter = &cx.state.project_library_filter;
-    let shown = builtin_models::shown_models(filter);
+    let shown = find.builtin_models();
     let keys = shown
         .iter()
         .map(|model| RowKey::from(model.registry_name))
@@ -638,7 +758,7 @@ fn builtin_cell_column(
         builtin.model.as_deref().map(RowKey::from),
     );
     let no_match = if shown.is_empty() {
-        format!("No cells match \u{201c}{}\u{201d}", filter.trim())
+        find.nothing_found()
     } else {
         String::new()
     };

@@ -703,8 +703,20 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     user.app.state.workbench.activate(Workspace::Project);
     user.settle();
 
-    user.click("Verilog-A models");
-    assert!(user.find("BSIM-BULK").is_some(), "the models are listed");
+    // A listed row reads its name, then its count or version.
+    let models = rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
+    let row = |name: &str| {
+        let model = models
+            .iter()
+            .find(|model| model.name == name)
+            .expect("a built-in model");
+        format!("{}, {}", model.name, model.version)
+    };
+    user.click(&format!("Verilog-A models, {}, read-only", models.len()));
+    assert!(
+        user.find(&row("BSIM-BULK")).is_some(),
+        "the models are listed"
+    );
     let band = user.expect("Open read-only");
     let dock = user.expect("Console");
     assert!(
@@ -713,7 +725,7 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     );
     user.app.state.project.project_library_filter = "vbic".to_owned();
     user.settle();
-    user.click("VBIC 3-terminal");
+    user.click(&row("VBIC 3-terminal"));
     user.click("Copy cell…");
     let project = &user.app.state.project;
     assert!(project.copy_cell_dialog, "Copy cell opens");

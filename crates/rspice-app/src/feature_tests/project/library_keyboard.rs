@@ -254,3 +254,97 @@ fn twelve_cells_chosen_together_are_one_review_and_one_undo() {
     replay.key(Key::Z, PRIMARY | Modifiers::SHIFT);
     assert_eq!(cells(&replay), Some(0), "one Redo deletes them again");
 }
+
+/// The Library page with `analog` beside `work`: its `divider` holds a
+/// schematic, its `ldo` a schematic and a symbol.
+fn library_page_with_analog() -> Replay {
+    let mut replay = library_page();
+    let mut divider = Cell::new("divider");
+    divider.add_view(View::new("schematic", ViewType::Schematic));
+    let mut ldo = Cell::new("ldo");
+    ldo.add_view(View::new("schematic", ViewType::Schematic));
+    ldo.add_view(View::new("symbol", ViewType::Symbol));
+    let mut analog = Library::new("analog");
+    analog.add_cell(divider);
+    analog.add_cell(ldo);
+    replay.app.state.model.library_manager.add_library(analog);
+    replay.frames(Vec::new());
+    replay
+}
+
+/// The labels of the listed rows: a library's reads "name, cells".
+fn rows(controls: &[super::super::replay::Control]) -> Vec<&str> {
+    controls
+        .iter()
+        .filter(|control| control.role == Role::ListBoxOption)
+        .map(|control| control.label.as_str())
+        .collect()
+}
+
+/// The find searches every library from the keyboard: Shift+Tab reaches it
+/// from the lists, the selection moves to the first cell it turns up, the
+/// Library column lists only the libraries holding one, and Enter takes the
+/// keyboard to that cell.
+#[test]
+fn the_find_searches_every_library_and_selects_what_it_finds() {
+    let mut replay = library_page_with_analog();
+    // From the Cell column back past the Library column and the view type.
+    for _ in 0..3 {
+        replay.key(Key::Tab, Modifiers::SHIFT);
+    }
+    replay.type_text("divid");
+    assert_eq!(replay.app.state.project.project_library_filter, "divid");
+    assert_eq!(
+        selected(&replay),
+        [Some("analog"), Some("divider"), Some("schematic")],
+        "the find selects what it turns up in another library"
+    );
+    let controls = replay.frames(Vec::new());
+    let listed = rows(&controls);
+    assert!(listed.contains(&"analog, 1"), "{listed:?}");
+    assert!(
+        !listed.iter().any(|row| row.starts_with("work")),
+        "a library the find turns nothing up in is not listed: {listed:?}"
+    );
+
+    press(&mut replay, Key::Enter);
+    press(&mut replay, Key::F2);
+    let project = &replay.app.state.project;
+    assert!(
+        project.rename_cell_dialog,
+        "Enter took the keyboard to the cell"
+    );
+    assert_eq!(project.rename_cell_current, "divider");
+}
+
+/// The view type narrows the cells to those holding a view of it and the
+/// views to that type, in every library; the selected view gives way to one
+/// of the type.
+#[test]
+fn the_view_type_narrows_every_library_to_cells_holding_one() {
+    let mut replay = library_page_with_analog();
+    for _ in 0..2 {
+        replay.key(Key::Tab, Modifiers::SHIFT);
+    }
+    replay.type_text("sym");
+    assert_eq!(
+        replay.app.state.project.library_browser.view_type,
+        Some(ViewType::Symbol)
+    );
+    assert_eq!(
+        selected(&replay),
+        [Some("work"), Some("amp"), Some("symbol")],
+        "amp holds a symbol, which is now its selected view"
+    );
+    let controls = replay.frames(Vec::new());
+    let listed = rows(&controls);
+    for row in ["analog, 1", "work, 1", "amp, 2", "symbol, symbol"] {
+        assert!(listed.contains(&row), "{row:?} in {listed:?}");
+    }
+    assert!(
+        !listed
+            .iter()
+            .any(|row| row.starts_with("bias") || row.starts_with("schematic")),
+        "{listed:?}"
+    );
+}

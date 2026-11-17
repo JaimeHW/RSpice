@@ -147,6 +147,7 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
     );
     library_context(ui, cx);
 
+    let find = columns::Find::of(cx.state);
     // The lists' memory is the feature's; it is taken for the frame, so the
     // columns write it while they read the rest of the feature.
     let mut browser = std::mem::take(&mut cx.state.library_browser);
@@ -189,10 +190,11 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
             let view_width = (width - library_width - cell_width).max(220.0);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
+                let (find, height) = (&find, browser_height);
                 let library =
-                    columns::library_column(ui, read, &mut browser, library_width, browser_height);
-                let cell = columns::cell_column(ui, read, &mut browser, cell_width, browser_height);
-                let view = columns::view_column(ui, read, &mut browser, view_width, browser_height);
+                    columns::library_column(ui, read, &mut browser, find, library_width, height);
+                let cell = columns::cell_column(ui, read, &mut browser, find, cell_width, height);
+                let view = columns::view_column(ui, read, &mut browser, find, view_width, height);
                 intent = library.or(cell).or(view);
             });
         });
@@ -455,15 +457,39 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         ui.set_width(visible_workspace_width(ui));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
-            let search_width = (ui.available_width() * 0.38).clamp(180.0, 420.0);
+            let search_width = (ui.available_width() * 0.32).clamp(150.0, 380.0);
             let search = ui.add_sized(
                 [search_width, t.metrics.ctl_h],
                 egui::TextEdit::singleline(&mut cx.state.project_library_filter)
-                    .hint_text("Filter cells and views\u{2026}"),
+                    .hint_text("Find in every library\u{2026}"),
             );
             ui.ctx().accesskit_node_builder(search.id, |node| {
-                node.set_label("Filter project cells and views");
+                node.set_label("Find cells in every library");
             });
+            let mut asked = search.changed();
+            // Enter takes the keyboard to the cells the find turned up, and
+            // is spent there: the list it reaches opens nothing with it.
+            if search.lost_focus()
+                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
+            {
+                cx.state.library_browser.focus = Some(BrowserColumn::Cell);
+            }
+            let view_type = cx.state.library_browser.view_type;
+            if let Some(index) = crate::ui::widgets::select(
+                ui,
+                "workbench.project.library.view-type",
+                "View type",
+                view_type.map_or(ANY_VIEW_TYPE, |view_type| view_type.caption()),
+                &VIEW_TYPE_CHOICES,
+                VIEW_TYPE_WIDTH,
+            ) {
+                cx.state.library_browser.view_type =
+                    index.checked_sub(1).map(|index| ViewType::ALL[index]);
+                asked = true;
+            }
+            if asked {
+                select_found(ui.ctx(), cx);
+            }
             ui.separator();
             let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(0.0);
             let font = theme::mono(tokens::FS_0, FontWeight::Regular);
@@ -480,6 +506,93 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
 /// What the context strip spends beside the selection's own text: its label,
 /// the separator and the access pair.
 const CONTEXT_FIXED_WIDTH: f32 = 190.0;
+
+/// The view-type select's choice that asks for no type.
+const ANY_VIEW_TYPE: &str = "Any type";
+
+/// The view-type select's width: its longest caption and the chevron.
+const VIEW_TYPE_WIDTH: f32 = 116.0;
+
+/// The view-type select's choices: any type, then each type by its caption.
+static VIEW_TYPE_CHOICES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    std::iter::once(ANY_VIEW_TYPE)
+        .chain(ViewType::ALL.iter().map(|view_type| view_type.caption()))
+        .map(str::to_owned)
+        .collect()
+});
+
+/// Bring what the find turns up into the columns. The selected cell stays
+/// while the find turns it up; otherwise the first cell it does is selected,
+/// the shown library's before any other's, and the built-in library's first
+/// model when only that library answers. A view the find does not list
+/// gives way to the cell's first one it does.
+fn select_found(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let find = columns::Find::of(cx.state);
+    if find.is_everything() {
+        return;
+    }
+    let models = find.builtin_models();
+    let builtin = &cx.state.builtin_models;
+    if builtin.open {
+        let kept = models
+            .iter()
+            .any(|model| builtin.model.as_deref() == Some(model.registry_name));
+        if kept {
+            return;
+        }
+    }
+    let manager = &cx.model.library_manager;
+    let kept = !builtin.open && manager.current_cell().is_some_and(|cell| find.cell(cell));
+    if !kept {
+        if let Some((library, cell)) = first_found(manager, &find) {
+            cx.state.builtin_models.open = false;
+            cx.model.library_manager.select_cell(&library, &cell);
+        } else if let Some(model) = models.first() {
+            for intent in [
+                builtin_models::BuiltinModelsIntent::ShowLibrary,
+                builtin_models::BuiltinModelsIntent::SelectModel(model.registry_name),
+            ] {
+                apply_library_intent(ctx, cx, LibraryIntent::BuiltinModels(intent));
+            }
+            return;
+        } else {
+            return;
+        }
+    }
+    let manager = &mut cx.model.library_manager;
+    let listed = manager
+        .current_view()
+        .is_some_and(|view| find.view(view.view_type));
+    let first = manager.current_cell().and_then(|cell| {
+        let view = cell
+            .views_sorted()
+            .into_iter()
+            .find(|view| find.view(view.view_type))?;
+        Some((cell.name.clone(), view.name.clone()))
+    });
+    if !listed
+        && let (Some(library), Some((cell, view))) = (manager.selected_library.clone(), first)
+    {
+        manager.select_view(&library, &cell, &view);
+    }
+}
+
+/// The first cell `find` turns up: in the selected library, then in the
+/// others by name.
+fn first_found(manager: &LibraryManager, find: &columns::Find) -> Option<(String, String)> {
+    let selected = manager.selected_library.as_deref();
+    let (here, elsewhere): (Vec<_>, Vec<_>) = manager
+        .libraries_sorted()
+        .into_iter()
+        .partition(|library| Some(library.name.as_str()) == selected);
+    here.into_iter().chain(elsewhere).find_map(|library| {
+        let cell = library
+            .cells_sorted()
+            .into_iter()
+            .find(|cell| find.cell(cell))?;
+        Some((library.name.clone(), cell.name.clone()))
+    })
+}
 
 fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     let t = Tokens::get(ui.ctx());
@@ -609,10 +722,11 @@ struct Target {
 impl Target {
     fn of(model: &Model, state: &ProjectState) -> Self {
         let manager = &model.library_manager;
-        let cell_shown = selected_cell_shown(model, &state.project_library_filter);
+        let find = columns::Find::of(state);
+        let cell_shown = selected_cell_shown(model, &find);
         let cell = selected_cell(manager).filter(|_| cell_shown);
         let view = selected_view(manager)
-            .filter(|_| cell_shown)
+            .filter(|(_, view_type, _, _)| cell_shown && find.view(*view_type))
             .map(|(reference, view_type, modified, _)| (reference, view_type, modified));
         // A list's choice counts only while it leads with the selection the
         // page acts on; a selection made elsewhere stands alone.
@@ -985,11 +1099,11 @@ fn symbol_view(model: &Model, library: &str, cell: &str) -> Option<CellViewRef> 
 
 /// Whether the selected cell is one the Cell column lists: a filter can
 /// hide it, and then the page does not act on it.
-fn selected_cell_shown(model: &Model, filter: &str) -> bool {
+fn selected_cell_shown(model: &Model, find: &columns::Find) -> bool {
     model
         .library_manager
         .current_cell()
-        .is_some_and(|cell| columns::cell_matches(cell, &filter.trim().to_ascii_lowercase()))
+        .is_some_and(|cell| find.cell(cell))
 }
 
 fn selected_cell(manager: &crate::state::LibraryManager) -> Option<(String, String, bool)> {
