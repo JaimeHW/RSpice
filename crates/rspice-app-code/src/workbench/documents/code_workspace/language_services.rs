@@ -927,8 +927,7 @@ fn protected_string_lines(source: &str) -> BTreeSet<usize> {
     let mut quote: Option<char> = None;
     let mut escaped = false;
     let mut line = 0_usize;
-    let mut chars = source.char_indices().peekable();
-    while let Some((_, character)) = chars.next() {
+    for character in source.chars() {
         if quote.is_some() {
             protected.insert(line);
             if character == '\n' {
