@@ -5,7 +5,7 @@
 //! The proof hashes every retained byte of the attached model library and
 //! walks every layout shape, so a surface that shows the verdict reads
 //! [`Model::project_technology_verdict`], which proves it again only when the
-//! project's binding, the model catalogue, the validated PDK packages or the
+//! project's binding, the model libraries, the validated PDK packages or the
 //! layouts have changed since the last proof. Saving and running prove it
 //! afresh through [`Model::validate_project_technology_contract`].
 
@@ -30,7 +30,7 @@ struct ProvenContract {
     project_revision: ObjectRevision,
     binding: Option<ProjectTechnologyBinding>,
     authority_receipts: usize,
-    catalog_stamp: u64,
+    model_library_stamp: [u64; 3],
     packages: Vec<(ContentDigest, ContentDigest)>,
     layout_stamp: u64,
     verdict: Result<(), String>,
@@ -44,7 +44,7 @@ impl ProvenContract {
             project_revision: project.revision(),
             binding: project.technology_binding().cloned(),
             authority_receipts: project.technology_change_audit().len(),
-            catalog_stamp: model.model_library_manager.catalog_stamp(),
+            model_library_stamp: model.model_library_manager.content_stamp(),
             packages: package_identities(model).collect(),
             layout_stamp: model.workspace.content.physical_layout_stamp(),
             verdict,
@@ -57,7 +57,7 @@ impl ProvenContract {
         self.project_id == project.id()
             && self.project_revision == project.revision()
             && self.authority_receipts == project.technology_change_audit().len()
-            && self.catalog_stamp == model.model_library_manager.catalog_stamp()
+            && self.model_library_stamp == model.model_library_manager.content_stamp()
             && self.layout_stamp == model.workspace.content.physical_layout_stamp()
             && self.binding.as_ref() == project.technology_binding()
             && package_identities(model).eq(self.packages.iter().copied())

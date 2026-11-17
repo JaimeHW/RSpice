@@ -190,7 +190,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     let catalog = derived(
         ctx,
         "technology.candidates",
-        cx.model.model_library_manager.catalog_stamp(),
+        cx.model.model_library_manager.content_stamp(),
         || Arc::new(technology_candidates(cx.model)),
     );
     let candidates = &catalog.candidates;

@@ -41,7 +41,7 @@ impl ModelLibraryManager {
     /// # Why this is content, and not a counter
     ///
     /// A revision counter kept with the catalogue would not be sound, and the
-    /// catalogue's [`Self::catalog_stamp`] is too coarse for this key: it moves
+    /// manager's [`Self::content_stamp`] is too coarse for this key: it moves
     /// with every mutable access, presentation fields included, which is
     /// exactly what this key must ignore. The manager is replaced *wholesale*
     /// when a project is opened, when a recovery comparison is accepted, when

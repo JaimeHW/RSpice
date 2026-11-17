@@ -21,7 +21,7 @@ pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigat
     let query = nav.filter.trim().to_ascii_lowercase();
     let key = (
         nav.model.library_manager.catalog().stamp(),
-        nav.model.model_library_manager.catalog_stamp(),
+        nav.model.model_library_manager.content_stamp(),
         query.clone(),
     );
     let model: &Model = nav.model;

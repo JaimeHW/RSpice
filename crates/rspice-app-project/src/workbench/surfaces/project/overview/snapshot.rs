@@ -1100,7 +1100,7 @@ fn model_snapshot(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> ModelSnap
     } = derived(
         ctx,
         "overview.model catalog",
-        manager.catalog_stamp(),
+        manager.content_stamp(),
         || catalog_facts(manager),
     );
     let scan_errors = &cx.model.pdk_config.scan_errors;

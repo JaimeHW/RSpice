@@ -99,7 +99,7 @@ fn ledger_view(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> LedgerView {
     // nothing else.
     let catalogs = (
         cx.model.library_manager.catalog().stamp(),
-        cx.model.model_library_manager.catalog_stamp(),
+        cx.model.model_library_manager.content_stamp(),
     );
     let ledger = derived(ctx, "dependencies.ledger", catalogs, || {
         let rows = dependency_rows(cx);
