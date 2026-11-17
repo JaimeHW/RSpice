@@ -177,10 +177,7 @@ const PREPARE_FRAME: &[Step] = &[
             "ctx.request_repaint_after(std::time::Duration::from_millis(50))",
         ],
     ),
-    (
-        "5.32",
-        &[".set_active_dirty(self.state.model.schematic.session.is_dirty)"],
-    ),
+    ("5.32", &[".set_active_dirty(editor_dirty)"]),
     ("5.33", &["self.sync_window_title(ctx)"]),
     ("5.34", &["self.handle_image_export()"]),
 ];
