@@ -92,9 +92,11 @@ impl StartFrom {
                 owned(&["extracted", "schematic", "spice"]),
                 owned(&["extracted", "spice"]),
             ),
+            // Every behavioural view Default binds, after the schematic: a
+            // cell placed by its Verilog or Verilog-AMS view binds here too.
             Self::MixedSignal => (
-                owned(&["schematic", "veriloga", "spice"]),
-                owned(&["veriloga", "spice"]),
+                owned(&["schematic", "veriloga", "verilogams", "verilog", "spice"]),
+                owned(&["veriloga", "verilogams", "verilog", "spice"]),
             ),
             Self::Rf => (owned(&["schematic", "spice"]), owned(&["spice"])),
         }
