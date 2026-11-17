@@ -113,8 +113,8 @@ fn the_ngspice_diode_keeps_matched_breakdown_and_its_cubic() {
 
 /// LTspice limits high injection as `cd*sqrt(IKF/(IKF+cd))`, the law Xyce
 /// writes as `Inorm/sqrt(1+Inorm/IKF)`, on forward current alone. It adds
-/// ISR after the knee and scales IKF with AREA and M. ngspice's
-/// `cd/(1+sqrt(cd/IKF))` stays in the ngspice dialect.
+/// ISR after the knee, scales IKF with AREA and M and reads IK as IKF.
+/// ngspice's `cd/(1+sqrt(cd/IKF))` stays in the ngspice dialect.
 #[test]
 fn the_default_diode_limits_high_injection_as_ltspice_does() {
     let model = "is=1e-14 ikf=1e-3";
@@ -133,6 +133,7 @@ fn the_default_diode_limits_high_injection_as_ltspice_does() {
         ("", "is=1e-14 ikf=1e-3 n=2", 1.31, 7.0467408516e-04),
         ("10", model, 0.655, 7.0467408391e-03),
         ("m=10", model, 0.655, 7.0467408391e-03),
+        ("", "is=1e-14 ik=1e-3", 0.8, 1.6426259782e-02),
         ("", "is=1e-6 ikf=1e-5", 0.3, 1.0437709707e-03),
         ("", "is=1e-6 ikf=1e-5", -0.455, -1.0000004321e-06),
         (

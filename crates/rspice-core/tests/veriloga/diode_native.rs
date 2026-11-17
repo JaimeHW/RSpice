@@ -94,7 +94,7 @@ fn ac_branch_current(deck: &str, branch: &str, frequency: f64) -> rspice_core::C
     point.currents[index]
 }
 
-fn op_branch_current(model_tail: &str, voltage: f64) -> f64 {
+fn op_branch_current(dialect: SpiceDialect, model_tail: &str, voltage: f64) -> f64 {
     let deck = format!(
         "* diode high-injection knee oracle\n\
          .options gmin=0\n\
@@ -105,7 +105,7 @@ fn op_branch_current(model_tail: &str, voltage: f64) -> f64 {
          .end\n"
     );
     let netlist = Netlist::parse(&deck).expect("diode deck parses");
-    let mut config = SimulationConfig::default();
+    let mut config = SimulationConfig::default().with_spice_dialect(dialect);
     // Isolate the model-card high-injection knee from RSpice's internal
     // nodal conditioning floor; the deck already sets junction GMIN to zero.
     config.convergence_config.gmin_target = 0.0;
@@ -173,10 +173,12 @@ fn assert_close(label: &str, got: f64, expected: f64, rel_tol: f64, abs_tol: f64
     let tol = abs_tol.max(rel_tol * expected.abs().max(got.abs()));
     assert!(
         abs <= tol,
-        "{label}: rspice={got:.12e} ngspice46={expected:.12e} abs={abs:.3e} tol={tol:.3e}"
+        "{label}: rspice={got:.12e} reference={expected:.12e} abs={abs:.3e} tol={tol:.3e}"
     );
 }
 
+/// The default dialect's IKF follows LTspice's law instead; its pins are in
+/// `diode_ltspice_junction_law.rs`.
 #[test]
 fn diode_ikf_limits_forward_high_injection_current_like_ngspice46() {
     // ngspice-46, same one-diode .op deck, `IKF=1e-3`:
@@ -184,23 +186,34 @@ fn diode_ikf_limits_forward_high_injection_current_like_ngspice46() {
     // rolloff this bias point is -2.708299612085749e-01 A.
     assert_close(
         "IKF-limited diode source current",
-        op_branch_current("IKF=1e-3", 0.8),
+        op_branch_current(SpiceDialect::Ngspice, "IKF=1e-3", 0.8),
         -1.551_419_616_134_975e-2,
         2.0e-8,
         1.0e-10,
     );
 }
 
+/// ngspice-46 prints `Warning: ... IKF too small - model effect disabled!`
+/// and returns the no-knee current for this vendor-model corner. LTspice
+/// 17.2.4, which the default dialect follows, limits by it however small:
+/// i(V1) = -5.204020863627597e-94 with GMIN=0. That current goes as
+/// exp(V/(2*N*Vt)), 15.5 thermal voltages here, so the two tools' thermal
+/// voltages, 1.4e-6 apart, bound the agreement at 2.2e-5.
 #[test]
 fn diode_tiny_ikf_is_disabled_like_ngspice46() {
-    // ngspice-46 prints `Warning: ... IKF too small - model effect disabled!`
-    // and returns the no-knee current for this vendor-model corner.
     assert_close(
         "tiny IKF disabled diode source current",
-        op_branch_current("IKF=1e-186", 0.8),
+        op_branch_current(SpiceDialect::Ngspice, "IKF=1e-186", 0.8),
         -2.708_299_612_085_749e-1,
         2.0e-8,
         1.0e-10,
+    );
+    assert_close(
+        "tiny IKF default diode source current",
+        op_branch_current(SpiceDialect::BestAvailable, "IKF=1e-186", 0.8),
+        -5.204_020_863_627_597e-94,
+        1.0e-4,
+        0.0,
     );
 }
 
@@ -208,22 +221,34 @@ fn diode_tiny_ikf_is_disabled_like_ngspice46() {
 fn diode_ik_alias_limits_forward_high_injection_current_like_ngspice46() {
     assert_close(
         "IK alias-limited diode source current",
-        op_branch_current("IK=1e-3", 0.8),
+        op_branch_current(SpiceDialect::Ngspice, "IK=1e-3", 0.8),
         -1.551_419_616_134_975e-2,
         2.0e-8,
         1.0e-10,
     );
 }
 
+/// Neither LTspice 17.2.4 ("Unrecognized parameter \"ikr\" -- ignored")
+/// nor Xyce 7.10 has IKR, so the default dialect applies ngspice's reverse
+/// knee, `cd/(1+sqrt(cd/-IKR))` (dioload.c:496-501), to its own junction:
+/// LTspice's reverse current at -0.2 V, 9.9956164043683e-15 A, where
+/// ngspice's cubic continuation draws 9.970924740527615e-15 A.
 #[test]
 fn diode_ikr_limits_reverse_high_injection_current_like_ngspice46() {
     // ngspice-46, same one-diode .op deck, `IKR=1e-14` at Vd=-0.2:
-    // i(V1) = 4.989091488361717e-15.  Without the reverse knee this is
-    // 9.970924740527615e-15 A.
+    // i(V1) = 4.989091488361717e-15.
     assert_close(
         "IKR-limited diode source current",
-        op_branch_current("IKR=1e-14", -0.2),
+        op_branch_current(SpiceDialect::Ngspice, "IKR=1e-14", -0.2),
         4.989_091_488_361_717e-15,
+        2.0e-6,
+        1.0e-20,
+    );
+    let ltspice: f64 = 9.995_616_404_368_3e-15;
+    assert_close(
+        "IKR-limited default diode source current",
+        op_branch_current(SpiceDialect::BestAvailable, "IKR=1e-14", -0.2),
+        ltspice / (1.0 + (ltspice / 1e-14).sqrt()),
         2.0e-6,
         1.0e-20,
     );
@@ -306,11 +331,19 @@ fn diode_rsw_puts_the_sidewall_behind_its_own_resistance_like_ngspice46() {
         } else {
             2.0e-5
         };
+        // d4 is in breakdown, which the default dialect takes from LTspice
+        // 17.2.4 (no IBV matching): 6.805287012236533e-2 A. LTspice has no
+        // JSW or PJ, but d4's sidewall carries about 1e-11 A of that.
+        let breakdown = if dialect == SpiceDialect::Ngspice {
+            5.100_516_849_799e-2
+        } else {
+            6.805_287_012_236_533e-2
+        };
         for (branch, expected, tolerance) in [
             ("v1", -1.323_771_594_96e-2, rel_tol),
             ("v2", -2.006_922_698_41e-2, rel_tol),
             ("v3", -5.259_210_586_26e-2, rel_tol),
-            ("v4", 5.100_516_849_799e-2, rel_tol.max(5.0e-6)),
+            ("v4", breakdown, rel_tol.max(5.0e-6)),
         ] {
             assert_close(
                 &format!("{dialect:?} i({branch})"),

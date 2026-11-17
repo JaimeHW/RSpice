@@ -1232,7 +1232,7 @@ impl Diode {
             self.ibv_given = true;
         }
         if let Some(v) = params.get("IKF").or_else(|| params.get("IK")).copied() {
-            self.forward_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
+            self.forward_knee_current = if v.is_finite() && v > 0.0 { v } else { 0.0 };
         }
         if let Some(&v) = params.get("TIKF")
             && v.is_finite()
@@ -1993,6 +1993,13 @@ impl Diode {
                 DiodeLevel::Legacy | DiodeLevel::Pspice => multiplicity,
             }
         };
+        // ngspice disables an IKF below its EPSMIN ("IKF too small - model
+        // effect disabled", diosetup.c:110-116). LTspice 17.2.4 limits by
+        // it however small (IKF=1e-186 draws 5.2e-94 A at 0.8 V), and so
+        // does Xyce while tIKF > 0 (N_DEV_Diode.C:1280).
+        if self.ngspice_dialect && self.forward_knee_current < EPSMIN {
+            self.forward_knee_current = 0.0;
+        }
         self.forward_knee_current *= if self.xyce_dialect {
             multiplicity
         } else {
