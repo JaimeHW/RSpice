@@ -95,14 +95,14 @@ mod tests {
     /// Every file this guard reads, with the name to report it under.
     fn scanned() -> Vec<(String, PathBuf)> {
         let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let host_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app/src");
+        let host_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-design/src");
         EDITOR_FILES
             .iter()
             .map(|file| ((*file).to_owned(), crate_root.join(file)))
             .chain(
                 HOST_FILES
                     .iter()
-                    .map(|file| (format!("rspice-app/{file}"), host_root.join(file))),
+                    .map(|file| (format!("rspice-app-design/{file}"), host_root.join(file))),
             )
             .collect()
     }
