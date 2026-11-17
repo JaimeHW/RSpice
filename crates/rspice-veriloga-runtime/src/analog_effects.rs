@@ -104,10 +104,12 @@ impl AnalogTaskKind {
     }
 
     /// Whether every evaluation of an accepted point writes, rather than only
-    /// the evaluation the point is accepted with: `$debug`, `$fdisplay` and
-    /// `$fwrite`, as Spectre runs them. A rejected point still writes nothing.
+    /// the evaluation the point is accepted with: `$debug` alone. Each file
+    /// task writes as its console twin does (LRM 2.4 section 9.5.2):
+    /// `$fdisplay` and `$fwrite` once per accepted point, as `$display` and
+    /// `$write` do. A rejected point still writes nothing.
     pub fn writes_every_evaluation(self) -> bool {
-        matches!(self, Self::Debug | Self::FileDisplay | Self::FileWrite)
+        self == Self::Debug
     }
 }
 
@@ -600,6 +602,38 @@ mod tests {
         assert_eq!(journal.drain_accepted().collect::<Vec<_>>(), [call(1, 2)]);
         journal.accept_candidate().unwrap();
         assert!(journal.accepted().is_empty());
+    }
+
+    /// `$fdisplay` and `$fwrite` write once per accepted point, as `$display`
+    /// and `$write` do: two Newton evaluations of one point leave the second
+    /// one's call alone.
+    #[test]
+    fn a_file_task_writes_as_its_console_twin_does() {
+        let file = |kind: AnalogTaskKind, value: i64| AnalogTaskInvocation {
+            kind,
+            site: 3,
+            time: 0.0,
+            arguments: Box::new([
+                AnalogTaskArgument::Integer(0x8000_0003),
+                AnalogTaskArgument::Integer(value),
+            ]),
+        };
+        for kind in [AnalogTaskKind::FileDisplay, AnalogTaskKind::FileWrite] {
+            assert!(!kind.writes_every_evaluation());
+            let mut journal = AnalogEffectJournal::default();
+            for value in [1, 2] {
+                journal.begin_point(0.0);
+                journal.begin_evaluation();
+                journal.record(file(kind, value)).unwrap();
+                journal.complete_evaluation();
+            }
+            journal.accept_candidate().unwrap();
+            assert_eq!(
+                journal.drain_accepted().collect::<Vec<_>>(),
+                [file(kind, 2)],
+                "{kind:?}"
+            );
+        }
     }
 
     fn debug(value: i64, time: f64) -> AnalogTaskInvocation {

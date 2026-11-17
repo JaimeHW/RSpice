@@ -85,8 +85,8 @@ fn stdout(records: &[HdlOutputRecord]) -> Vec<String> {
         .collect()
 }
 
-/// `$debug` and `$fdisplay` to the standard output print on every evaluation
-/// of an accepted point, and `$fdisplay` to the standard error lands there.
+/// `$debug` prints, `$fdisplay` to the standard output prints there, and
+/// `$fwrite` to the standard error lands there.
 #[test]
 fn debug_and_standard_stream_file_output_print_from_accepted_points() {
     let directory = scratch("streams");
@@ -205,15 +205,13 @@ fn files_and_plusargs_are_the_runs() {
         panic!("the run completes");
     };
     let written = std::fs::read_to_string(directory.join("out.txt")).unwrap();
-    // `$fdisplay` writes at every evaluation of the accepted first point,
-    // all of them alike; `$fstrobe` once per accepted point.
+    // `$fdisplay` writes once, at the accepted first point; `$fstrobe` once
+    // per accepted point.
     let (displayed, strobed): (Vec<&str>, Vec<&str>) =
         written.lines().partition(|line| *line != "t");
-    assert!(!displayed.is_empty(), "{written}");
-    assert!(
-        displayed
-            .iter()
-            .all(|line| *line == "n=3 r=2.5 rc=2 fast=1 gain=1/7 escape=0"),
+    assert_eq!(
+        displayed,
+        ["n=3 r=2.5 rc=2 fast=1 gain=1/7 escape=0"],
         "{written}"
     );
     assert!(written.starts_with(displayed[0]), "{written}");
@@ -227,3 +225,51 @@ fn files_and_plusargs_are_the_runs() {
     );
     assert!(!directory.join("../escape.txt").exists());
 }
+
+/// `$fdisplay` writes as `$display` does, once per accepted point: an
+/// `@(initial_step)` call writes one line though the first point takes
+/// several Newton evaluations, which the `$debug` beside it counts.
+#[test]
+fn an_initial_step_file_display_writes_once_however_many_evaluations_the_point_takes() {
+    let directory = scratch("once");
+    std::fs::write(directory.join("once.va"), ONCE_PER_POINT).unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        "* one write per accepted point\n.hdl \"once.va\"\nxa q once\nr1 q 0 1k\n.end\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let collector = Arc::new(HdlOutputCollector::new());
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    config.hdl.deck_directory = Some(directory.clone());
+    Engine::new(config)
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 1e-9, 1e-11, signal)
+        })
+        .unwrap();
+    let records = collector.take();
+    let evaluations = stdout(&records)
+        .iter()
+        .filter(|text| text.starts_with("evaluation"))
+        .count();
+    assert!(
+        evaluations >= 2,
+        "the first point takes several evaluations: {records:?}"
+    );
+    let written = std::fs::read_to_string(directory.join("once.txt")).unwrap();
+    assert_eq!(written, "initial step at 0\n");
+    let file_records = records
+        .iter()
+        .filter(|record| matches!(record.stream, HdlStream::File { .. }))
+        .count();
+    assert_eq!(file_records, 1, "{records:?}");
+}
+
+/// A current source into a diode across the deck's 1k resistor: a first
+/// point Newton solves in several evaluations.
+const ONCE_PER_POINT: &str = "`include \"disciplines.vams\"\nmodule once(q); inout q; electrical q; \
+     integer fd;\nanalog begin\n@(initial_step) begin fd = $fopen(\"once.txt\", \"w\"); \
+     $fdisplay(fd, \"initial step at %g\", $abstime); $debug(\"evaluation at %g\", $abstime); \
+     end\nI(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\nend\nendmodule\n";
