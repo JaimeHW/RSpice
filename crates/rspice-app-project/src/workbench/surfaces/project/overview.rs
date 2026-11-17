@@ -175,6 +175,10 @@ pub fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     // The Unsaved work row counts what the Recovery page can bring back, from
     // the catalogue that page lists: listed once, off the frame.
     super::recovery::ensure_project_recovery_catalog(ui.ctx(), cx);
+    // The Dependencies row says what the Dependencies page says, so it reads
+    // the model files as they are on disk now, once per change, as that page
+    // does.
+    crate::workbench::project::dependency_status::refresh_source_drift(ui.ctx(), cx.model);
     let snapshot = OverviewSnapshot::capture(ui.ctx(), cx);
     let mut intent = None;
     let shown = &*cx;
