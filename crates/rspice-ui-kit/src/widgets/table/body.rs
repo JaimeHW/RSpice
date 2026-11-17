@@ -16,8 +16,8 @@ use crate::widgets::tree::{TREE_INDENT, TWIST_ROOM, paint_twist};
 
 use super::geometry::Columns;
 use super::{
-    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, Kind, TABLE_EDGE_INSET,
-    Tone, Twist, View, Words, paint_words,
+    Align, CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Ink, Kind, RowDrag,
+    TABLE_EDGE_INSET, Tone, Twist, View, Words, paint_words,
 };
 
 /// Side of the fold mark in front of a group's label.
@@ -67,6 +67,40 @@ pub(super) struct RowResponse {
     /// A press held still on the row past the longest click, under a coarse
     /// pointer: when it began and where.
     pub(super) held: Option<(f64, Pos2)>,
+    /// A row dragged out of a table was let go over this one.
+    pub(super) dropped: Option<RowDrag>,
+}
+
+/// The chip that follows the pointer while a row is dragged: the row's first
+/// words on a raised fill, over everything else on the screen.
+fn drag_chip(ui: &Ui, cells: &[Cell]) {
+    let Some(pointer) = ui.ctx().pointer_interact_pos() else {
+        return;
+    };
+    let t = Tokens::get(ui.ctx());
+    let words = cells.first().map_or("", |cell| cell.text.as_str());
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("table.drag-chip"),
+    ));
+    let galley = painter.layout_no_wrap(
+        words.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    let chip = Rect::from_min_size(
+        pointer + vec2(12.0, 8.0),
+        galley.size() + vec2(2.0 * CELL_PAD, 8.0),
+    );
+    painter.rect(
+        chip,
+        3.0,
+        t.color.bg_elevated,
+        egui::Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(chip.min + vec2(CELL_PAD, 4.0), galley, t.color.text);
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
 }
 
 impl DataTable<'_> {
@@ -88,12 +122,19 @@ impl DataTable<'_> {
             selected_column,
             stateful,
         } = place;
-        let sense = match (self.clickable, stateful) {
+        // A coarse pointer: the touch composition, or a finger the platform
+        // reports under any other.
+        let coarse = t.metrics.is_touch() || ui.input(|input| input.any_touches());
+        let mut sense = match (self.clickable, stateful) {
             (false, _) => Sense::hover(),
             // One keyboard stop for the whole table: a row is not one.
             (true, true) => Sense::CLICK,
             (true, false) => Sense::click(),
         };
+        // A finger's press and hold is the row's menu, never a drag.
+        if self.drags && self.clickable && !coarse {
+            sense |= Sense::DRAG;
+        }
         let (rect, response) =
             ui.allocate_exact_size(vec2(geometry.content_width(), height), sense);
         response.widget_info(|| {
@@ -176,13 +217,24 @@ impl DataTable<'_> {
             marked: false,
             twist: None,
             held: None,
+            dropped: None,
         };
+        if self.drags && response.dragged() {
+            response.dnd_set_drag_payload(RowDrag {
+                table: egui::Id::new(self.id),
+                row: index,
+            });
+            drag_chip(ui, cells);
+        }
+        let held_over = self.drops && response.dnd_hover_payload::<RowDrag>().is_some();
+        if self.drops
+            && let Some(drag) = response.dnd_release_payload::<RowDrag>()
+        {
+            answered.dropped = Some(*drag);
+        }
         if !ui.is_rect_visible(rect) {
             return answered;
         }
-        // A coarse pointer: the touch composition, or a finger the platform
-        // reports under any other.
-        let coarse = t.metrics.is_touch() || ui.input(|input| input.any_touches());
         if self.clickable && editor.is_none() && coarse {
             answered.held = held_press(ui, rect);
         }
@@ -190,6 +242,14 @@ impl DataTable<'_> {
             ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
         } else if self.clickable && response.hovered() {
             ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        if held_over {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                egui::Stroke::new(1.5, t.color.accent),
+                egui::StrokeKind::Inside,
+            );
         }
         let y = rect.y_range();
         // The open cell stays drawn, clipped away, while it is scrolled out

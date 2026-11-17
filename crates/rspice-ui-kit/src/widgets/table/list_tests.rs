@@ -730,3 +730,91 @@ fn an_elided_cell_shows_its_full_words_under_a_held_press() {
         }
     }
 }
+
+/// A row pressed and carried out of one list onto another's row is reported
+/// by the list it was let go over, which names the list and row it came
+/// from; the list it came from reports no click.
+#[test]
+fn a_row_dragged_onto_another_lists_row_is_reported_where_it_lands() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let columns = [Column::name("Cell", 160.0)];
+    let keys = NAMES
+        .iter()
+        .map(|name| RowKey::from(*name))
+        .collect::<Vec<_>>();
+    let (mut from, mut to) = (TableState::default(), TableState::default());
+    let mut time = 0.0;
+    let mut frame = |events: Vec<Event>| {
+        time += 0.05;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(WIDTH, HEIGHT))),
+            events,
+            time: Some(time),
+            ..Default::default()
+        };
+        let mut answers = (TableResponse::default(), TableResponse::default());
+        let (_, geometry) = pass(&ctx, input, |ui| {
+            // Each list in a column of its own, side by side.
+            let column = |left: f32| {
+                egui::UiBuilder::new()
+                    .max_rect(Rect::from_min_size(
+                        Pos2::new(left, 0.0),
+                        vec2(300.0, HEIGHT),
+                    ))
+                    .layout(egui::Layout::top_down(egui::Align::Min))
+            };
+            ui.scope_builder(column(0.0), |ui| {
+                answers.0 = DataTable::new("from", &columns, NAMES.len())
+                    .list()
+                    .state(&mut from)
+                    .keys(&keys)
+                    .drag_rows()
+                    .show(ui, |row| vec![Cell::text(NAMES[row])]);
+            });
+            ui.scope_builder(column(400.0), |ui| {
+                answers.1 = DataTable::new("to", &columns, NAMES.len())
+                    .list()
+                    .state(&mut to)
+                    .keys(&keys)
+                    .drops()
+                    .show(ui, |row| vec![Cell::text(NAMES[row])]);
+            });
+        });
+        (answers, geometry)
+    };
+    let (_, geometry) = frame(Vec::new());
+    let line = |row: usize| {
+        let mut lines = geometry.all(&format!("table.line.{row}"));
+        lines.sort_by(|left, right| left.left().total_cmp(&right.left()));
+        (lines[0].center(), lines[1].center())
+    };
+    let (source, _) = line(1);
+    let (_, target) = line(3);
+    let button = |at: Pos2, pressed: bool| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+
+    frame(vec![Event::PointerMoved(source), button(source, true)]);
+    let mut clicked = None;
+    for step in 1..=6 {
+        let at = source + (target - source) * (step as f32 / 6.0);
+        let ((dragged_from, _), _) = frame(vec![Event::PointerMoved(at)]);
+        clicked = clicked.or(dragged_from.clicked);
+    }
+    let ((released_from, landed), _) = frame(vec![button(target, false)]);
+    let (row, drag) = landed
+        .dropped
+        .expect("the list it landed on reports the drop");
+    assert_eq!(row, 3, "it landed on the row it was let go over");
+    assert!(drag.is_from("from") && !drag.is_from("to"));
+    assert_eq!(drag.row, 1, "it names the row carried");
+    assert_eq!(
+        clicked.or(released_from.clicked),
+        None,
+        "a drag is no click"
+    );
+}

@@ -509,6 +509,9 @@ pub struct TableResponse {
     /// neither opens, closes nor moves within it: a page whose lists stand
     /// side by side, as a column browser's do, moves to the neighbouring one.
     pub across: Option<isize>,
+    /// A row dragged out of a table was let go over this row: this row,
+    /// and the one dragged.
+    pub dropped: Option<(usize, RowDrag)>,
 }
 
 /// What a table is drawn as, and announced as.
@@ -551,6 +554,25 @@ pub struct DataTable<'a> {
     kind: Kind,
     /// The table takes the keyboard this frame.
     focus: bool,
+    /// A row can be dragged out under a fine pointer.
+    drags: bool,
+    /// A row takes a row dragged onto it.
+    drops: bool,
+}
+
+/// A row dragged out of a table: the table, by the name it was built with,
+/// and the row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowDrag {
+    table: egui::Id,
+    pub row: usize,
+}
+
+impl RowDrag {
+    /// Whether the row came from the table built as `DataTable::new(table, ..)`.
+    pub fn is_from(&self, table: &str) -> bool {
+        self.table == egui::Id::new(table)
+    }
 }
 
 /// Where the body is seen from this frame, in screen points: the viewport's
@@ -762,6 +784,8 @@ impl<'a> DataTable<'a> {
             lead_gutter: 0.0,
             kind: Kind::Grid,
             focus: false,
+            drags: false,
+            drops: false,
         }
     }
 
@@ -854,6 +878,21 @@ impl<'a> DataTable<'a> {
     /// holds the keyboard.
     pub fn focus(mut self, take: bool) -> Self {
         self.focus = take;
+        self
+    }
+
+    /// A row pressed and moved under a fine pointer is dragged out, a chip
+    /// with its name following the pointer, for another table that takes
+    /// drops to receive. A finger's press keeps its long-press menu.
+    pub fn drag_rows(mut self) -> Self {
+        self.drags = true;
+        self
+    }
+
+    /// A row takes a row dragged onto it: it is outlined while one is held
+    /// over it, and the release is reported as [`TableResponse::dropped`].
+    pub fn drops(mut self) -> Self {
+        self.drops = true;
         self
     }
 
@@ -1288,6 +1327,9 @@ impl<'a> DataTable<'a> {
                                 cells,
                                 open,
                             );
+                            if let Some(drag) = row.dropped {
+                                response.dropped = Some((index, drag));
+                            }
                             if let Some((start, origin)) = row.held
                                 && memory.held_press != Some(start)
                             {
