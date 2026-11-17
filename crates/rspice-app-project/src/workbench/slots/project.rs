@@ -145,8 +145,7 @@ pub struct ProjectState {
         crate::workbench::project::workspace_state::LibraryDeletionReviewState,
 
     /// The open project's properties, while their dialog is open.
-    pub project_properties:
-        crate::workbench::app::dialogs::project::properties::ProjectPropertiesDialogState,
+    pub project_properties: crate::workbench::app::dialogs::project::ProjectPropertiesDialogState,
 
     /// Reviewed identity for the project File > New is about to create.
     pub new_project: crate::workbench::app::dialogs::project::new_project::NewProjectDialogState,

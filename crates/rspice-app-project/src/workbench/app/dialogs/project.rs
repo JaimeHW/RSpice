@@ -9,7 +9,9 @@
 pub mod configuration;
 pub mod configuration_dialogs;
 pub mod new_project;
-pub mod properties;
+mod properties;
+
+pub use properties::ProjectPropertiesDialogState;
 
 /// Retained draft for the mockup-owned project technology transaction.
 /// Selection remains isolated until the primary action verifies every pinned
