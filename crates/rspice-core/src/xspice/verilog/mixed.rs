@@ -1898,6 +1898,11 @@ impl DiscreteAnalogInput {
                         selected |= 1 << bit;
                         known |= 1 << bit;
                     }
+                    // An unknown chunk bit keeps its IEEE 1364 aval (x 1, z 0)
+                    // as its value bit, so a case comparison in the analog
+                    // context tells x from z; every numeric read of the bit
+                    // still refuses it, by its clear known bit.
+                    FourStateBit::Unknown if encoded => selected |= 1 << bit,
                     _ if encoded => {}
                     _ => return None,
                 }
@@ -7060,6 +7065,59 @@ module mixed_runtime(p, n, adc, clk, q, dac);
   analog I(p, n) <+ V(p, n) / 1000.0;
 endmodule
 "#;
+
+    /// A packed read of a word holding x and z bits decodes every bit as it
+    /// did before an encoded chunk kept an x bit's value bit: a known bit
+    /// reads its value and an x or z bit refuses the read. The chunk's value
+    /// half is the word's IEEE 1364 aval, x 1 and z 0.
+    #[test]
+    fn an_encoded_chunk_keeps_x_apart_from_z_and_decodes_as_before() {
+        use rspice_veriloga_runtime::array_index::{PACKED_CHUNK_BITS, decode_packed_bit};
+        let input = DiscreteAnalogInput {
+            signal: DigitalSignalId::new(0),
+            variable: 0,
+            validity: 1,
+            selection: Some((0, 6, true)),
+            edge: None,
+            event_read: false,
+            signed: false,
+            real: false,
+            name: "v".into(),
+            analog_sample: false,
+            feeds_equations: true,
+            read_at: Vec::new(),
+        };
+        // 6'b1x0z10, most significant first.
+        let word = FourStateValue::from_bits_msb_first(&[
+            FourStateBit::One,
+            FourStateBit::Unknown,
+            FourStateBit::Zero,
+            FourStateBit::HighImpedance,
+            FourStateBit::One,
+            FourStateBit::Zero,
+        ]);
+        let encoded = input
+            .four_state_value(&word)
+            .expect("a chunk is always sampled");
+        let known = 0b10_1011u32 << PACKED_CHUNK_BITS;
+        assert_eq!(encoded, f64::from(0b11_0010 | known), "aval 110010");
+        // The chunk before: the same known half and the x bit's value bit clear.
+        let before = f64::from(0b10_0010 | known);
+        for bit in 0..6 {
+            assert_eq!(
+                decode_packed_bit(encoded, bit),
+                decode_packed_bit(before, bit),
+                "bit {bit}"
+            );
+        }
+        let decoded: Vec<_> = (0..6)
+            .map(|bit| decode_packed_bit(encoded, bit).ok())
+            .collect();
+        assert_eq!(
+            decoded,
+            [Some(0.0), Some(1.0), None, Some(0.0), None, Some(1.0)]
+        );
+    }
 
     /// A cycle is the last state returned to three times after it was left;
     /// a sequence that settles, or returns fewer times, or ends somewhere new,
