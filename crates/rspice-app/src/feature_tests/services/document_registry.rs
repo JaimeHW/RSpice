@@ -33,8 +33,6 @@ fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() 
     state.model.schematic.session.current_file =
         Some(std::path::PathBuf::from("presentation.rsch"));
     state.model.workspace.content.open_views[0].dirty = true;
-    state.model.library_manager.filter_text = "presentation filter".to_owned();
-    state.model.library_manager.show_read_only = !state.model.library_manager.show_read_only;
     state
         .model
         .library_manager
@@ -46,10 +44,8 @@ fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() 
         .and_then(|library| library.get_cell_mut(&active.cell))
         .and_then(|cell| cell.get_view_mut(&active.view))
         .expect("active view metadata");
-    view.is_open = true;
     view.modified = true;
     view.file_path = Some(std::path::PathBuf::from("presentation-only.sch"));
-    view.modified_time = Some(42);
 
     let current = snapshot(&state).expect("current snapshot");
     let mut registry = DocumentRegistry::default();

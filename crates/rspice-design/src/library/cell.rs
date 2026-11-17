@@ -17,10 +17,6 @@ pub struct Cell {
     pub views: HashMap<String, View>,
     /// Cell description/documentation
     pub description: String,
-    /// Cell category (e.g., "analog", "digital", "mixed")
-    pub category: String,
-    /// Whether cell is expanded in browser
-    pub expanded: bool,
     /// Cell-level metadata
     pub metadata: HashMap<String, String>,
 }

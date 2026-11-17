@@ -288,28 +288,12 @@ fn scrub_library_presentation(value: &mut serde_json::Value) {
         "selected_library",
         "selected_cell",
         "selected_view",
-        "filter_text",
-        "show_read_only",
         // The revision is a concurrency/audit coordinate, not independent
-        // engineering configuration. The catalog structure below is the
-        // content authority, while each view document owns its view payload.
+        // engineering configuration. The catalog structure is the content
+        // authority, while each view document owns its view payload.
         "revision",
     ] {
         manager.remove(key);
-    }
-    if let Some(libraries) = manager.get_mut("libraries").and_then(|v| v.as_object_mut()) {
-        for library in libraries.values_mut() {
-            if let Some(object) = library.as_object_mut() {
-                object.remove("expanded");
-                if let Some(cells) = object.get_mut("cells").and_then(|v| v.as_object_mut()) {
-                    for cell in cells.values_mut() {
-                        if let Some(object) = cell.as_object_mut() {
-                            object.remove("expanded");
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

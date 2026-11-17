@@ -121,12 +121,11 @@ where
 /// The libraries, by name, as the manager shows them.
 fn library_rows(ctx: &Context, manager: &LibraryManager) -> Arc<[LibraryRow]> {
     let stamp = manager.catalog().stamp();
-    let show_read_only = manager.show_read_only;
     listed(
         ctx,
         "workbench.project.library.rows.libraries",
-        |held: &(u64, bool)| *held == (stamp, show_read_only),
-        || (stamp, show_read_only),
+        |held: &u64| *held == stamp,
+        || stamp,
         || {
             manager
                 .libraries_sorted()
@@ -331,7 +330,6 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
                 manager
                     .libraries_by_key()
                     .map(|(_, library)| library)
-                    .filter(|library| manager.show_read_only || !library.read_only)
                     .min_by(|left, right| left.name.cmp(&right.name))
                     .map(|library| library.name.clone())
             });

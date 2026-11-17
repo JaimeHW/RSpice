@@ -177,9 +177,7 @@ impl LibraryCatalog {
         for library in self.libraries.values_mut() {
             for cell in library.cells.values_mut() {
                 for view in cell.views.values_mut() {
-                    view.is_open = false;
                     view.file_path = None;
-                    view.modified_time = None;
                 }
             }
         }

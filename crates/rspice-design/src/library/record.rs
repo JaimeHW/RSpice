@@ -22,8 +22,6 @@ pub struct Library {
     pub technology: String,
     /// Whether this is a read-only library
     pub read_only: bool,
-    /// Whether library is expanded in browser
-    pub expanded: bool,
     /// Library-level metadata
     pub metadata: HashMap<String, String>,
 }

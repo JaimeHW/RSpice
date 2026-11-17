@@ -584,10 +584,8 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
         .and_then(|library| library.get_cell_mut(&active.cell))
         .and_then(|cell| cell.get_view_mut(&active.view))
         .expect("active library view");
-    view.is_open = true;
     view.modified = true;
     view.file_path = Some(view_path.clone());
-    view.modified_time = Some(8_675_309);
     let governed_revision = state.model.library_manager.revision();
 
     save_native(
@@ -612,10 +610,8 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
         .and_then(|library| library.get_cell(&active.cell))
         .and_then(|cell| cell.get_view(&active.view))
         .expect("live active view");
-    assert!(live.is_open);
     assert!(!live.modified);
     assert_eq!(live.file_path.as_deref(), Some(view_path.as_path()));
-    assert_eq!(live.modified_time, Some(8_675_309));
 
     let persisted = crate::io::load_project_file(&path).expect("reload persisted project");
     assert_eq!(
@@ -630,10 +626,8 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
         .and_then(|library| library.get_cell(&active.cell))
         .and_then(|cell| cell.get_view(&active.view))
         .expect("persisted active view");
-    assert!(!persisted_view.is_open);
     assert!(!persisted_view.modified);
     assert!(persisted_view.file_path.is_none());
-    assert!(persisted_view.modified_time.is_none());
     remove_project_artifacts(&path);
 }
 

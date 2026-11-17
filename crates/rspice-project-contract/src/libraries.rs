@@ -1,4 +1,4 @@
-//! Project library catalog and its persisted selection and presentation fields.
+//! Project library catalog and its persisted selection.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::collections::HashMap;
@@ -22,21 +22,17 @@ pub struct ProjectLibraries {
     pub selected_library: Option<String>,
     pub selected_cell: Option<String>,
     pub selected_view: Option<String>,
-    pub filter_text: String,
-    pub show_read_only: bool,
 }
 
 // Preserve the existing project JSON and session RON layout and field order.
 // Serialization borrows the catalog; it does not clone engineering content.
 impl Serialize for ProjectLibraries {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut record = serializer.serialize_struct("LibraryManager", 7)?;
+        let mut record = serializer.serialize_struct("LibraryManager", 5)?;
         record.serialize_field("libraries", self.catalog.libraries())?;
         record.serialize_field("selected_library", &self.selected_library)?;
         record.serialize_field("selected_cell", &self.selected_cell)?;
         record.serialize_field("selected_view", &self.selected_view)?;
-        record.serialize_field("filter_text", &self.filter_text)?;
-        record.serialize_field("show_read_only", &self.show_read_only)?;
         record.serialize_field("revision", &self.catalog.revision())?;
         record.end()
     }
@@ -51,8 +47,6 @@ impl<'de> Deserialize<'de> for ProjectLibraries {
             selected_library: Option<String>,
             selected_cell: Option<String>,
             selected_view: Option<String>,
-            filter_text: String,
-            show_read_only: bool,
             #[serde(default)]
             revision: u64,
         }
@@ -62,8 +56,6 @@ impl<'de> Deserialize<'de> for ProjectLibraries {
             selected_library: record.selected_library,
             selected_cell: record.selected_cell,
             selected_view: record.selected_view,
-            filter_text: record.filter_text,
-            show_read_only: record.show_read_only,
         })
     }
 }
@@ -75,10 +67,7 @@ impl ProjectLibraries {
 
     /// Create a new library manager
     pub fn new() -> Self {
-        Self {
-            show_read_only: true,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Content revision, for caches over library listings.
@@ -123,11 +112,7 @@ impl ProjectLibraries {
 
     /// Get libraries sorted by name
     pub fn libraries_sorted(&self) -> Vec<&Library> {
-        let mut libraries = self.catalog.libraries_sorted();
-        if !self.show_read_only {
-            libraries.retain(|library| !library.read_only);
-        }
-        libraries
+        self.catalog.libraries_sorted()
     }
 
     /// Get the currently selected library

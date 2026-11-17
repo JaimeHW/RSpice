@@ -183,12 +183,8 @@ pub struct View {
     pub view_type: ViewType,
     /// Path to view file on disk
     pub file_path: Option<PathBuf>,
-    /// Last modified timestamp (Unix epoch)
-    pub modified_time: Option<u64>,
     /// Whether view has unsaved changes
     pub modified: bool,
-    /// Whether view is currently open
-    pub is_open: bool,
     /// View-specific metadata
     pub metadata: HashMap<String, String>,
 }
@@ -199,9 +195,7 @@ impl Default for View {
             name: String::new(),
             view_type: ViewType::Schematic,
             file_path: None,
-            modified_time: None,
             modified: false,
-            is_open: false,
             metadata: HashMap::new(),
         }
     }

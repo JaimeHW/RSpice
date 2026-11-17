@@ -48,7 +48,6 @@ pub(super) fn populated_session() -> AppState {
         .model
         .workspace
         .save_active_schematic(&state.model.schematic);
-    state.model.library_manager.filter_text = "afe".to_owned();
 
     // The plan, through the isolated execution context: an operating point
     // ahead of the transient, and a project-owned model.

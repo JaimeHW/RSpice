@@ -596,8 +596,6 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 library_manager.selected_library = None;
                 library_manager.selected_cell = None;
                 library_manager.selected_view = None;
-                library_manager.filter_text.clear();
-                library_manager.show_read_only = false;
                 let schematic_buffers = schematic_buffers
                     .into_iter()
                     .map(|(key, schematic)| {

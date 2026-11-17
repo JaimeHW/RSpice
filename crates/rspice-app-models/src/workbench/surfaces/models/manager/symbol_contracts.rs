@@ -353,9 +353,7 @@ fn parsed_symbol_views(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<ParsedSym
 /// this project's artwork. The counter is folded in anyway, so an ordinary edit
 /// changes the key even where content hashing could not tell two states apart.
 ///
-/// `show_read_only` is in the key because it decides which libraries
-/// `libraries_sorted` returns at all, and it is a plain field that no mutation
-/// counter watches. The open schematics are in it because a symbol no model
+/// The open schematics are in the key because a symbol no model
 /// binds is checked against its cell's schematic, which may stand edited in a
 /// buffer the library has not been given yet.
 fn symbol_corpus_revision<'a>(
@@ -364,7 +362,6 @@ fn symbol_corpus_revision<'a>(
     views: &mut Vec<SymbolViewSite<'a>>,
 ) {
     app.model.library_manager.revision().hash(hasher);
-    app.model.library_manager.show_read_only.hash(hasher);
     app.model.open_schematics_stamp().hash(hasher);
     for library in app.model.library_manager.libraries_sorted() {
         library.name.hash(hasher);

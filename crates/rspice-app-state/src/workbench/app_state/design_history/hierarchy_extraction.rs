@@ -328,11 +328,8 @@ fn target_cell_matches(state: &Model, reference: &CellViewRef, expected: &Cell) 
 
 fn normalized_cell(cell: &Cell) -> Option<serde_json::Value> {
     let mut cell = cell.clone();
-    cell.expanded = false;
     for view in cell.views.values_mut() {
         view.modified = false;
-        view.is_open = false;
-        view.modified_time = None;
         view.file_path = None;
     }
     serde_json::to_value(cell).ok()
