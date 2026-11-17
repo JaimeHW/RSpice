@@ -14,9 +14,7 @@ use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
 use super::geometry::Columns;
-use super::{
-    Align, CELL_PAD, DataTable, Sort, SortDirection, TABLE_HEAD_H, View, Words, paint_words,
-};
+use super::{Align, CELL_PAD, DataTable, Sort, SortDirection, View, Words, paint_words};
 
 /// The width of a sort mark, and the room it takes beside a head's words.
 const SORT_MARK_W: f32 = 7.0;
@@ -27,8 +25,10 @@ pub(super) struct HeadPlace<'g> {
     /// The band rows and the head row, allocated before the body.
     pub(super) block: Rect,
     pub(super) response: &'g egui::Response,
-    /// Height of the head row; each band row is [`TABLE_HEAD_H`].
+    /// Height of the head row.
     pub(super) height: f32,
+    /// Height of each band row over it.
+    pub(super) band_height: f32,
     pub(super) view: View,
     pub(super) geometry: &'g Columns,
     pub(super) sort: Option<Sort>,
@@ -45,6 +45,7 @@ impl DataTable<'_> {
             block,
             response,
             height,
+            band_height,
             view,
             geometry,
             sort,
@@ -65,8 +66,8 @@ impl DataTable<'_> {
             )
         });
         for (band, spans) in self.bands.iter().enumerate() {
-            let top = block.top() + band as f32 * TABLE_HEAD_H;
-            self.band(ui, band, spans, view, geometry, top..=top + TABLE_HEAD_H);
+            let top = block.top() + band as f32 * band_height;
+            self.band(ui, band, spans, view, geometry, top..=top + band_height);
         }
         let rect = Rect::from_x_y_ranges(block.x_range(), block.bottom() - height..=block.bottom());
         #[cfg(any(test, feature = "test-support"))]

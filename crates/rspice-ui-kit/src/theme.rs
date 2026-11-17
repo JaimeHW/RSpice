@@ -277,6 +277,9 @@ impl Theme {
             t.metrics = Metrics {
                 ctl_h: touch_target,
                 row_h: touch_target,
+                // A grid's touched lines take the target from `ctl_h`; the
+                // lines nobody touches keep the density's grid row.
+                grid_row_h: t.metrics.grid_row_h,
                 bar_pad: 9.0 + (touch_target - 44.0) * 0.5,
             };
         }

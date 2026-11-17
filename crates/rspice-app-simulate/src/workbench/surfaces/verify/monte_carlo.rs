@@ -29,8 +29,8 @@ use super::toolbar::{PageToolbar, RunChoice, Summary, empty_line};
 use super::verdict::{Verdict, VerdictCell};
 use super::*;
 use crate::ui::widgets::table::{
-    Cell, CellEditor, Column, DataTable, EditOutcome, RowKey, SortKey, TABLE_EDGE_INSET,
-    TABLE_HEAD_H, TABLE_ROW_H, TableState,
+    Cell, CellEditor, Column, DataTable, EditOutcome, LineHeights, RowKey, SortKey,
+    TABLE_EDGE_INSET, TABLE_HEAD_H, TABLE_ROW_H, TableState,
 };
 use crate::workbench::simulate::commands::SimulateCommand;
 
@@ -878,9 +878,9 @@ impl DetailLayout {
     /// Two halves side by side: one head band across both, the plot's title
     /// on the left and the list's column heads on the right, both halves
     /// running to the frame's foot.
-    fn beside(frame: egui::Rect) -> Self {
+    fn beside(frame: egui::Rect, band_h: f32) -> Self {
         let split = frame.right() - TRIALS_W.min(frame.width() * 0.5);
-        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), TABLE_HEAD_H));
+        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), band_h));
         Self {
             band,
             plot: egui::Rect::from_min_max(
@@ -894,10 +894,10 @@ impl DetailLayout {
     /// The histogram over the list, each the frame's full width under its own
     /// head band: a phone has no width for two halves. The list takes the
     /// height of its rows up to half the frame; the plot takes the rest.
-    fn stacked(frame: egui::Rect, failing: usize) -> Self {
+    fn stacked(frame: egui::Rect, failing: usize, band_h: f32) -> Self {
         let rows = TABLE_HEAD_H + TABLE_ROW_H * failing.max(1) as f32;
         let list_h = rows.min((frame.height() * 0.5).floor());
-        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), TABLE_HEAD_H));
+        let band = egui::Rect::from_min_size(frame.min, egui::vec2(frame.width(), band_h));
         let list =
             egui::Rect::from_min_max(egui::pos2(frame.left(), frame.bottom() - list_h), frame.max);
         Self {
@@ -936,10 +936,13 @@ fn detail_pane(ui: &mut Ui, detail: Detail<'_>, state: &mut TableState) -> Optio
     let height = ui.available_height().max(least);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let frame = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + 1.0), rect.max);
+    // The plot's band is a table band's height, so beside the list it lines
+    // up with the list's column heads at every density.
+    let band_h = LineHeights::grid(&t).band;
     let DetailLayout { band, plot, list } = if stacked {
-        DetailLayout::stacked(frame, failing.len())
+        DetailLayout::stacked(frame, failing.len(), band_h)
     } else {
-        DetailLayout::beside(frame)
+        DetailLayout::beside(frame, band_h)
     };
     #[cfg(any(test, feature = "test-support"))]
     {

@@ -1093,6 +1093,45 @@ fn touch_rows_and_heads_take_the_preferred_target() {
     );
 }
 
+/// Every line of a grid follows the density: the relaxed grid row is taller
+/// than the compact one, for heads, rows and the bands over them alike; under
+/// a coarse pointer the lines a finger presses take the target while a band
+/// keeps the density's grid row.
+#[test]
+fn a_grid_takes_its_line_heights_from_the_metrics() {
+    let columns = wide_columns(4, 120.0);
+    let bands = vec![vec![Span::new("Corner", 1, 3)]];
+    let measure = |ctx: &egui::Context| {
+        let (_, geometry, _) = frame(ctx, WIDTH, Vec::new(), |ui| {
+            DataTable::new("density", &columns, 2)
+                .bands(&bands)
+                .show(ui, wide_row(4))
+        });
+        let height = |key: &str| geometry.one(key).map(|rect| rect.height());
+        (
+            height("table.head"),
+            height("table.row"),
+            height("table.band"),
+        )
+    };
+    let compact = context();
+    assert_eq!(measure(&compact), (Some(24.0), Some(24.0), Some(24.0)));
+
+    let relaxed = egui::Context::default();
+    crate::Theme {
+        density: crate::Density::Relaxed,
+        ..crate::Theme::default()
+    }
+    .apply(&relaxed);
+    let grid = Tokens::get(&relaxed).metrics.grid_row_h;
+    assert!(grid > 24.0, "relaxed is roomier than compact");
+    assert_eq!(measure(&relaxed), (Some(grid), Some(grid), Some(grid)));
+
+    let touch = context();
+    crate::Theme::default().apply_responsive_metrics_with_target(&touch, Some(48.0));
+    assert_eq!(measure(&touch), (Some(48.0), Some(48.0), Some(24.0)));
+}
+
 #[test]
 fn a_table_without_state_draws_as_it_always_has() {
     let ctx = context();

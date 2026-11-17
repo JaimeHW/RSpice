@@ -146,6 +146,9 @@ pub struct Metrics {
     pub ctl_h: f32,
     /// Height of list/tree rows.
     pub row_h: f32,
+    /// Height of a dense grid's heads and rows under a fine pointer: an ADE
+    /// results table's, denser than a list's because a grid is read across.
+    pub grid_row_h: f32,
     /// Vertical padding inside bars.
     pub bar_pad: f32,
 }
@@ -182,11 +185,13 @@ impl Metrics {
             Density::Compact => Metrics {
                 ctl_h: 28.0,
                 row_h: 28.0,
+                grid_row_h: 24.0,
                 bar_pad: 6.0,
             },
             Density::Relaxed => Metrics {
                 ctl_h: 32.0,
                 row_h: 33.0,
+                grid_row_h: 28.0,
                 bar_pad: 9.0,
             },
         }
@@ -314,6 +319,7 @@ mod tests {
         let relaxed = Metrics::for_selection(Direction::Instrument, Density::Relaxed);
         assert!(compact.ctl_h < relaxed.ctl_h);
         assert!(compact.row_h < relaxed.row_h);
+        assert!(compact.grid_row_h < relaxed.grid_row_h);
         assert!(compact.bar_pad < relaxed.bar_pad);
     }
 

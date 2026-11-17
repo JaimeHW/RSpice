@@ -44,9 +44,11 @@ pub use state::{Group, RowKey, Selection, Sort, SortDirection, SortKey, TableSta
 use geometry::Columns;
 use state::{Line, Step, arrange, step};
 
-/// Height of a table's head band, and of each band row over it.
+/// Height of a table's head and of each band row over it at the compact
+/// density under a fine pointer, for a page that lines its own bands up with
+/// a table's; [`LineHeights`] is what a table takes under the live metrics.
 pub const TABLE_HEAD_H: f32 = 24.0;
-/// Height of one table row.
+/// Height of one table row at the compact density under a fine pointer.
 pub const TABLE_ROW_H: f32 = 24.0;
 /// Where the first column's words start and the last column's end: the panel
 /// inset, so a table's text lines up with the toolbar title over it.
@@ -62,14 +64,38 @@ const NARROW_W: f32 = 560.0;
 /// the kit's own, so a marked cell matches every other marked line.
 use crate::widgets::{PROBLEM_MARK_ADVANCE as MARK_ADVANCE, PROBLEM_MARK_SIDE as MARK_SIDE};
 
-/// The head and row heights: 24 px under a fine pointer, the touch target the
-/// preferences ask for under a coarse one.
-pub fn line_heights(t: &Tokens) -> (f32, f32) {
-    if t.metrics.is_touch() {
-        let target = t.metrics.touch_target();
-        (target, target)
-    } else {
-        (TABLE_HEAD_H, TABLE_ROW_H)
+/// The heights of a table's lines under the live metrics.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineHeights {
+    /// The row of column heads.
+    pub head: f32,
+    /// One row.
+    pub row: f32,
+    /// One band row over the head, which names a run of columns and is never
+    /// touched.
+    pub band: f32,
+}
+
+impl LineHeights {
+    /// A grid's: the density's grid row under a fine pointer; under a coarse
+    /// one the touch target the preferences ask for, for every line a finger
+    /// presses.
+    pub fn grid(t: &Tokens) -> Self {
+        let band = t.metrics.grid_row_h;
+        if t.metrics.is_touch() {
+            let target = t.metrics.touch_target();
+            Self {
+                head: target,
+                row: target,
+                band,
+            }
+        } else {
+            Self {
+                head: band,
+                row: band,
+                band,
+            }
+        }
     }
 }
 
@@ -618,7 +644,11 @@ impl<'a> DataTable<'a> {
         mut row_at: impl FnMut(usize) -> Vec<Cell>,
     ) -> TableResponse {
         let t = Tokens::get(ui.ctx());
-        let (head_h, row_h) = line_heights(&t);
+        let LineHeights {
+            head: head_h,
+            row: row_h,
+            band: band_h,
+        } = LineHeights::grid(&t);
         let mut editor = self.editor.take();
         let mut state = self.state.take();
         let mut response = TableResponse::default();
@@ -717,7 +747,7 @@ impl<'a> DataTable<'a> {
             .collect::<Vec<_>>();
 
         // Where the columns go.
-        let bands_h = TABLE_HEAD_H * self.bands.len() as f32;
+        let bands_h = band_h * self.bands.len() as f32;
         let body_max = (self.max_height - bands_h - head_h).max(row_h);
         let lines_h = row_h * lines.len() as f32;
         let bar = if lines_h > body_max + 0.5 {
@@ -968,6 +998,7 @@ impl<'a> DataTable<'a> {
                 block: head_block,
                 response: &head_response,
                 height: head_h,
+                band_height: band_h,
                 view,
                 geometry: &geometry,
                 sort,
