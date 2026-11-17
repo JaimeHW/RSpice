@@ -33,11 +33,10 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::ImportVerilogA => return Some(CodeHandOff::ImportVerilogA),
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),
-        CodeRequest::ExportNetlist(format) => {
+        CodeRequest::ExportNetlist => {
             crate::workbench::menu_bar::netlist_actions::action_export_netlist_with_io(
                 cx.model,
                 cx.wb,
-                format,
                 cx.handles.export_io,
             );
         }

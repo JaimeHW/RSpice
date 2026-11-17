@@ -212,7 +212,7 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
         generated_deck_shown,
         &[
             labelled(
-                CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+                CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
                 "Export generated deck",
             ),
@@ -240,7 +240,7 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
             ),
             ToolbarEntry::Separator,
             labelled(
-                CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+                CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
                 "Export deck copy",
             ),

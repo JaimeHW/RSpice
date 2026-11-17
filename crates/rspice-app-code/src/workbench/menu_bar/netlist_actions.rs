@@ -12,7 +12,6 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 pub fn action_export_netlist_with_io(
     model: &mut Model,
     wb: &mut WorkbenchSession,
-    format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
     // The deck the run executes, with every enabled analysis's card, so the
@@ -33,18 +32,9 @@ pub fn action_export_netlist_with_io(
         };
     record_netlist_warnings_in(model, exported.warnings.clone());
 
-    let default_name = format!(
-        "{}.{}",
-        model.export_file_stem("circuit"),
-        format.extension()
-    );
-
-    let filter_name = match format {
-        crate::io::NetlistFormat::Spectre => "Spectre Netlist",
-        crate::io::NetlistFormat::Spice => "SPICE Netlist",
-    };
-
-    let extension = format.extension();
+    let extension = "spice";
+    let default_name = format!("{}.{extension}", model.export_file_stem("circuit"));
+    let filter_name = "SPICE Netlist";
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Netlist",
@@ -60,20 +50,12 @@ pub fn action_export_netlist_with_io(
             let deck_stem = path
                 .file_stem()
                 .map_or_else(|| "netlist".into(), |stem| stem.to_string_lossy());
-            let export = match format {
-                crate::io::NetlistFormat::Spectre => super::netlist_compat::spice_to_ahdl_export(
-                    &exported.netlist,
-                    &model.workspace,
-                    &exported.model_library_veriloga,
-                    &deck_stem,
-                ),
-                crate::io::NetlistFormat::Spice => super::netlist_compat::spice_export(
-                    &exported.netlist,
-                    &model.workspace,
-                    &exported.model_library_veriloga,
-                    &deck_stem,
-                ),
-            };
+            let export = super::netlist_compat::spice_export(
+                &exported.netlist,
+                &model.workspace,
+                &exported.model_library_veriloga,
+                &deck_stem,
+            );
             let (netlist_content, sources) = (export.netlist, export.sources);
             if !sources.is_empty() && !io.saved_paths_are_reopenable() {
                 wb.prompt(

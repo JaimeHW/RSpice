@@ -281,7 +281,6 @@ define_messages! {
     NetlistExportDeck => "Export\u{2026}",
     NetlistExportTitle => "Export generated netlist",
     NetlistExportDescription => "Export the current generated revision as a deck, or as a bundle with its dependencies and a checksum manifest, without changing project source.",
-    NetlistDialect => "Dialect",
     NetlistExportDependencyBundle => "Dependencies as a .zip bundle",
     NetlistExportSourceMap => "Source map",
     NetlistImportBlockingSingular => "{count} blocking issue",

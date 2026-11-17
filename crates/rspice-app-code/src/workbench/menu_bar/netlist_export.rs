@@ -1,8 +1,8 @@
 //! Netlist menu actions.
 //!
-//! Generates the design's deck for File ▸ Export ▸ Netlist, View
-//! Netlist, and the Netlist workspace's generation and export, and
-//! records what the generator raised beside it.
+//! Generates the design's deck for File ▸ Export ▸ Netlist and the Netlist
+//! workspace's generation and export, and records what the generator raised
+//! beside it.
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -10,7 +10,6 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 pub fn action_export_generated_netlist_with_options(
     model: &mut crate::workbench::app_state::Model,
     wb: &mut crate::workbench::state::WorkbenchSession,
-    format: crate::io::NetlistFormat,
     bundle_dependencies: bool,
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -36,10 +35,6 @@ pub fn action_export_generated_netlist_with_options(
         wb.prompt("A source map is exported only with a self-contained bundle.");
         return false;
     }
-    if include_source_map && format != crate::io::NetlistFormat::Spice {
-        wb.prompt("A source map maps SPICE lines; it cannot be attached to another dialect.");
-        return false;
-    }
     if !bundle_dependencies && !artifact.dependencies().is_empty() {
         wb.prompt(
             "This netlist includes project or external files; export it as a self-contained \
@@ -48,19 +43,16 @@ pub fn action_export_generated_netlist_with_options(
         return false;
     }
     if !bundle_dependencies {
-        return publish_generated_source(model, &artifact, format, io);
+        return publish_generated_source(model, &artifact, io);
     }
 
-    let bundle =
-        match crate::io::build_generated_bundle(&artifact, format, include_source_map, |source| {
-            generated_export_source(source, format)
-        }) {
-            Ok(bundle) => bundle,
-            Err(error) => {
-                model.report_failure("Netlist bundle export failed", error.to_string());
-                return false;
-            }
-        };
+    let bundle = match crate::io::build_generated_bundle(&artifact, include_source_map) {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            model.report_failure("Netlist bundle export failed", error.to_string());
+            return false;
+        }
+    };
     let default_name = format!(
         "generated-{}.zip",
         &artifact.content_digest().to_string()[..12]
@@ -108,15 +100,11 @@ pub fn action_export_generated_netlist_with_options(
 fn publish_generated_source(
     model: &mut crate::workbench::app_state::Model,
     artifact: &crate::state::GeneratedArtifact,
-    format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
-    let source = generated_export_source(artifact.source(), format);
-    let extension = format.extension();
-    let filter_name = match format {
-        crate::io::NetlistFormat::Spectre => "Spectre Netlist",
-        crate::io::NetlistFormat::Spice => "SPICE Netlist",
-    };
+    let source = artifact.source();
+    let extension = "spice";
+    let filter_name = "SPICE Netlist";
     let default_name = format!(
         "generated-{}.{}",
         &artifact.content_digest().to_string()[..12],
@@ -139,7 +127,7 @@ fn publish_generated_source(
     crate::io::file_exchange::ensure_file_extension(&mut path, extension);
     let result = io
         .observe_destination(&path)
-        .and_then(|destination| io.write_text_file_observed(&destination, &source));
+        .and_then(|destination| io.write_text_file_observed(&destination, source));
     match result {
         Ok(()) => {
             model.record(
@@ -158,15 +146,6 @@ fn publish_generated_source(
             model.report_failure("Netlist export failed", error.to_string());
             false
         }
-    }
-}
-
-fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> String {
-    match format {
-        crate::io::NetlistFormat::Spectre => {
-            super::netlist_compat::spice_to_ahdl_compatible_netlist(source)
-        }
-        crate::io::NetlistFormat::Spice => source.to_owned(),
     }
 }
 
@@ -287,12 +266,66 @@ pub fn record_netlist_warnings_in(
 mod tests {
     use super::*;
 
+    /// What the export wrote, and where.
+    #[derive(Default)]
+    struct CaptureIo {
+        written: std::cell::RefCell<Option<(std::path::PathBuf, String)>>,
+    }
+
+    impl ExportWorkflowIo for CaptureIo {
+        fn show_save_dialog(
+            &self,
+            _config: SaveDialogConfig<'_>,
+        ) -> Result<Option<std::path::PathBuf>, String> {
+            Ok(Some(std::path::PathBuf::from("generated")))
+        }
+
+        fn write_text_file(&self, path: &std::path::Path, contents: &str) -> Result<(), String> {
+            self.written
+                .replace(Some((path.to_path_buf(), contents.to_owned())));
+            Ok(())
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &std::path::Path,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn saved_paths_are_reopenable(&self) -> bool {
+            false
+        }
+    }
+
     #[test]
     fn spice_generated_exports_preserve_exact_source_bytes() {
+        use crate::product::{ContentDigest, ObjectRevision};
+        use crate::state::{GeneratedArtifact, GeneratedProvenance, GenerationInput};
+
         let source = "title μ\r\nR1 out 0 1k\r\n.end\r\n";
-        assert_eq!(
-            generated_export_source(source, crate::io::NetlistFormat::Spice).as_bytes(),
-            source.as_bytes()
+        let artifact = GeneratedArtifact::try_from_utf8(
+            GeneratedProvenance::try_new(
+                "export-test",
+                GenerationInput::new(ObjectRevision::INITIAL, ContentDigest::from_bytes([7; 32])),
+            )
+            .expect("provenance"),
+            source.as_bytes().to_vec(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("artifact");
+        let mut model = crate::workbench::app_state::Model::session_start(
+            crate::state::pdk_config::PdkConfig::default(),
+            None,
+            rspice_app_state::workbench::workspace::restore_model_library_manager,
         );
+        let io = CaptureIo::default();
+
+        assert!(publish_generated_source(&mut model, &artifact, &io));
+        let (path, written) = io.written.take().expect("the deck is written");
+        assert_eq!(written.as_bytes(), source.as_bytes());
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("spice"));
     }
 }

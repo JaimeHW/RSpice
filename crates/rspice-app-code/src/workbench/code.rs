@@ -13,7 +13,6 @@ pub mod toolbar;
 
 use egui::Context;
 
-use crate::io::NetlistFormat;
 use crate::state::ViewType;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol;
@@ -249,7 +248,7 @@ impl CommandSet for CodeCommand {
                 }
             }
             Self::ImportVerilogA
-            | Self::ExportNetlist(_)
+            | Self::ExportNetlist
             | Self::ExportBillOfMaterials
             | Self::GenerateNetlist
             | Self::AutomationConsole => (true, UNAVAILABLE),
@@ -358,7 +357,7 @@ impl CommandSet for CodeCommand {
             Self::NewVerilogADevice => {
                 open_new_veriloga_device_form_in(cx.model, &mut cx.state.new_veriloga_device);
             }
-            Self::ExportNetlist(format) => open_export_dialog(cx, format),
+            Self::ExportNetlist => open_export_dialog(cx),
             Self::CompareGeneratedRevisions => {
                 let netlist = &mut cx.state.netlist;
                 netlist.comparison_dialog.open = true;
@@ -441,16 +440,15 @@ fn editor_takes(wb: &WorkbenchSession, command: CodeCommand) -> bool {
     }
 }
 
-/// Open the export dialog on `format` where the netlist page draws it;
-/// anywhere else the deck is exported in that format straight away.
-fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>, format: NetlistFormat) {
+/// Open the export dialog where the netlist page draws it; anywhere else the
+/// deck is exported straight away.
+fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
     if netlist_page_shown(cx.wb.workspace, &cx.state.code_workspace) {
         let dialog = &mut cx.state.netlist.export_dialog;
         dialog.open = true;
-        dialog.format = format;
         dialog.error = None;
     } else {
-        cx.wb.outbox.push(CodeRequest::ExportNetlist(format));
+        cx.wb.outbox.push(CodeRequest::ExportNetlist);
     }
 }
 

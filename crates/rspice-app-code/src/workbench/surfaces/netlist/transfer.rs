@@ -164,12 +164,6 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_,
     }
 }
 
-/// The dialects a generated deck exports in, as the Dialect select lists them.
-const EXPORT_DIALECTS: [(crate::io::NetlistFormat, &str); 2] = [
-    (crate::io::NetlistFormat::Spice, "SPICE"),
-    (crate::io::NetlistFormat::Spectre, "Spectre"),
-];
-
 /// "1 included file", "3 included files".
 fn files_phrase(count: usize) -> String {
     if count == 1 {
@@ -205,11 +199,6 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
     if requires_bundle {
         dialog.bundle_dependencies = true;
     }
-    // Source-map positions are the SPICE deck's, before translation.
-    let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
-    if !source_map_supported {
-        dialog.include_source_map = false;
-    }
     let messages = cx.wb.messages();
     let netlist = &cx.model.netlist_artifacts;
     // Each refusal is one line beside Cancel and Export… in the footer.
@@ -233,7 +222,6 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
         (None, Some(refusal)) => Err(refusal),
         (None, None) => Ok(None),
     };
-    let dialects = EXPORT_DIALECTS.map(|(_, label)| label.to_owned());
     let bundle_label = messages.text(MessageId::NetlistExportDependencyBundle);
     let source_map_label = messages.text(MessageId::NetlistExportSourceMap);
     let bundled_includes = requires_bundle.then(|| {
@@ -252,36 +240,16 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
     .primary_enabled(refusal.is_none())
     .status(status)
     .show(ctx, |rows| {
-        let current_dialect = EXPORT_DIALECTS
-            .iter()
-            .position(|(format, _)| *format == dialog.format)
-            .unwrap_or_default();
-        let dialect = rows.select_with_response(
-            &messages.text(MessageId::NetlistDialect),
-            "rspice.code.export-dialect",
-            EXPORT_DIALECTS[current_dialect].1,
-            &dialects,
-        );
-        if let Some((format, _)) = dialect
-            .picked
-            .and_then(|picked| EXPORT_DIALECTS.get(picked))
-        {
-            dialog.format = *format;
-        }
         let mut items: Vec<(&str, &mut bool)> = Vec::new();
         if !requires_bundle {
             items.push((bundle_label.as_str(), &mut dialog.bundle_dependencies));
         }
-        if source_map_supported {
-            items.push((source_map_label.as_str(), &mut dialog.include_source_map));
-        }
-        if !items.is_empty() {
-            rows.check_columns("Include", &mut items);
-        }
+        items.push((source_map_label.as_str(), &mut dialog.include_source_map));
+        rows.check_columns("Include", &mut items);
         if let Some(bundled) = &bundled_includes {
             rows.derived(bundled);
         }
-        Some(dialect.response.id)
+        None
     });
     // A source map travels in the bundle: asking for one asks for the
     // bundle, and leaving the bundle leaves the map.
@@ -298,7 +266,6 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
             if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
                 cx.model,
                 cx.wb,
-                dialog.format,
                 dialog.bundle_dependencies,
                 dialog.include_source_map,
                 cx.handles.export_io,

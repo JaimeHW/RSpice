@@ -12,7 +12,6 @@
 
 use egui::Key;
 
-use crate::io::NetlistFormat;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
@@ -34,7 +33,7 @@ pub enum CodeCommand {
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
-    ExportNetlist(NetlistFormat),
+    ExportNetlist,
     ExportBillOfMaterials,
     GenerateNetlist,
     /// Sole owner of "locate this instance in the generated deck". The
@@ -111,7 +110,7 @@ pub enum CodeRequest {
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
-    ExportNetlist(NetlistFormat),
+    ExportNetlist,
     ExportBillOfMaterials,
     GenerateNetlist,
     ShowInNetlist,
@@ -493,15 +492,14 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 39] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::ImportNetlist,
         Self::ImportVerilogA,
         Self::ImportLtspiceSchematic,
         Self::ImportQspiceSchematic,
-        Self::ExportNetlist(NetlistFormat::Spectre),
-        Self::ExportNetlist(NetlistFormat::Spice),
+        Self::ExportNetlist,
         Self::ExportBillOfMaterials,
         Self::GenerateNetlist,
         Self::ShowInNetlist,
@@ -545,10 +543,7 @@ impl CodeCommand {
             Self::ImportVerilogA => CommandKey::new("import-veriloga"),
             Self::ImportLtspiceSchematic => CommandKey::new("import-ltspice-schematic"),
             Self::ImportQspiceSchematic => CommandKey::new("import-qspice-schematic"),
-            Self::ExportNetlist(NetlistFormat::Spectre) => {
-                CommandKey::new("export-netlist-spectre")
-            }
-            Self::ExportNetlist(NetlistFormat::Spice) => CommandKey::new("export-netlist-spice"),
+            Self::ExportNetlist => CommandKey::new("export-netlist-spice"),
             Self::ExportBillOfMaterials => CommandKey::new("export-bill-of-materials"),
             Self::GenerateNetlist => CommandKey::new("generated-netlist"),
             Self::ShowInNetlist => ids::SHOW_IN_NETLIST,
@@ -715,12 +710,7 @@ impl CodeCommand {
             Self::ImportVerilogA => ("Import Verilog/Verilog-A/AMS\u{2026}", "File", imports),
             Self::ImportLtspiceSchematic => ("Import LTspice schematic\u{2026}", "File", imports),
             Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),
-            Self::ExportNetlist(NetlistFormat::Spectre) => {
-                ("Export Spectre netlist\u{2026}", "File", open)
-            }
-            Self::ExportNetlist(NetlistFormat::Spice) => {
-                ("Export SPICE netlist\u{2026}", "File", open)
-            }
+            Self::ExportNetlist => ("Export SPICE netlist\u{2026}", "File", open),
             Self::ExportBillOfMaterials => ("Export bill of materials\u{2026}", "File", open),
             Self::GenerateNetlist => (
                 "Open generated netlist",

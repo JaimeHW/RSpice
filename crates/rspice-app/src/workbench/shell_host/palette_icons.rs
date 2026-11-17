@@ -40,7 +40,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
         return match command {
             CodeCommand::ImportNetlist
             | CodeCommand::ImportVerilogA
-            | CodeCommand::ExportNetlist(_)
+            | CodeCommand::ExportNetlist
             | CodeCommand::ExportBillOfMaterials => Some(Icon::File),
             _ => None,
         };

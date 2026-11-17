@@ -2,8 +2,8 @@
 
 use rspice_app_code::workbench::surfaces::netlist::transfer::export_generated_dialog_window;
 
-/// Export is a command form: the dialect, what goes with the deck, and
-/// Export…; a refusal is its status. It used to open on a boxed paragraph
+/// Export is a command form: what goes with the deck, and Export…; a
+/// refusal is its status. It used to open on a boxed paragraph
 /// about snapshots, close on a box saying "0 external dependencies ·
 /// sealed" and "accompanied by an integrity manifest", and repeat the
 /// count in the footer.
@@ -41,7 +41,7 @@ fn export_is_a_command_form_without_the_sealing_boxes() {
         .flatten()
         .collect::<Vec<_>>();
     let says = |text: &str| names.iter().any(|name| name.contains(text));
-    assert!(says("Dialect"), "{names:?}");
+    assert!(says("Source map"), "{names:?}");
     assert!(says("Export\u{2026}"), "the primary is not Export…");
     assert!(says("Cancel"));
     for jargon in ["sealed", "integrity", "snapshot", "dependency members"] {
@@ -80,8 +80,8 @@ fn every_refusal_is_one_footer_line() {
             },
         );
         let line = painted
-            .rect_of("Dialect")
-            .expect("the Dialect row")
+            .rect_of("Source map")
+            .expect("the Source map option")
             .height();
         let rect = painted
             .rect_of(refusal)

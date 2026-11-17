@@ -2184,7 +2184,6 @@ pub fn open_netlist_save_dialog_in(
 #[derive(Debug, Clone)]
 pub struct NetlistExportDialogState {
     pub open: bool,
-    pub format: crate::io::NetlistFormat,
     pub bundle_dependencies: bool,
     pub include_source_map: bool,
     pub error: Option<String>,
@@ -2194,7 +2193,6 @@ impl Default for NetlistExportDialogState {
     fn default() -> Self {
         Self {
             open: false,
-            format: crate::io::NetlistFormat::Spice,
             bundle_dependencies: true,
             include_source_map: true,
             error: None,

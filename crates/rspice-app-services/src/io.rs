@@ -8,7 +8,6 @@
 //! - `file_exchange` - Desktop and browser file pickers, bounded reads, and
 //!   destination extensions
 //! - `schematic_io` - Schematic file save/load, and the workflows' I/O port
-//! - `netlist_export` - Netlist generation from schematic
 //! - `generated_bundle` - Portable generated-netlist archive writing
 //! - `waveform_io` - Waveform export (CSV, TSV, Touchstone)
 
@@ -16,7 +15,6 @@
 pub use rspice_output::durable_file;
 pub mod file_exchange;
 pub mod generated_bundle;
-pub mod netlist_export;
 mod project_execution;
 pub mod project_io;
 mod project_results;
@@ -28,7 +26,6 @@ pub mod waveform_io;
 
 // Re-exports
 pub use generated_bundle::build_generated_bundle;
-pub use netlist_export::NetlistFormat;
 pub use project_execution::{capture_execution_context, restore_execution_context};
 pub use project_io::{ProjectSimulationResults, ProjectSnapshot, load_project_file};
 #[cfg(any(test, feature = "test-support"))]

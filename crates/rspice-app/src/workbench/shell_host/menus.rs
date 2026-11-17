@@ -214,16 +214,7 @@ const EXPORT_MENU: &[MenuEntry] = &[
         "Image or PDF\u{2026}",
     )
     .access('I'),
-    MenuEntry::command_as(
-        CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spice).key(),
-        "SPICE netlist\u{2026}",
-    )
-    .access('S'),
-    MenuEntry::command_as(
-        CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spectre).key(),
-        "Spectre netlist\u{2026}",
-    )
-    .access('N'),
+    MenuEntry::command_as(CodeCommand::ExportNetlist.key(), "SPICE netlist\u{2026}").access('S'),
     MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}").access('D'),
     MenuEntry::command_as(
         CodeCommand::ExportBillOfMaterials.key(),
@@ -976,9 +967,7 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             CodeCommand::VerilogABuildSettings => Some(WorkbenchIcon::Sliders),
             CodeCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
             CodeCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
-            CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spice) => {
-                Some(WorkbenchIcon::Export)
-            }
+            CodeCommand::ExportNetlist => Some(WorkbenchIcon::Export),
             CodeCommand::AutomationConsole => Some(WorkbenchIcon::Terminal),
             _ => None,
         };

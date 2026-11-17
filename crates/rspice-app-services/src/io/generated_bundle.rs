@@ -15,21 +15,14 @@ struct BundleEntry {
     bytes: Vec<u8>,
 }
 
-/// `render` turns one canonical SPICE document into the dialect `format`
-/// names. The writer does not own that mapping: dialect compatibility is a
-/// menu-layer concern, and taking it as a parameter is what keeps this module
-/// below the layer that decides it.
+/// The bundle of the generated SPICE deck, with its source map when
+/// `include_source_map` asks for it.
 pub fn build_generated_bundle(
     artifact: &crate::state::GeneratedArtifact,
-    format: crate::io::NetlistFormat,
     include_source_map: bool,
-    render: impl Fn(&str) -> String,
 ) -> Result<Vec<u8>, String> {
     use crate::state::DependencyResolution;
 
-    if include_source_map && format != crate::io::NetlistFormat::Spice {
-        return Err("a source map can only be included with the generated SPICE deck".to_owned());
-    }
     let dependencies = artifact.dependencies();
     let mut ordered_dependencies = dependencies.iter().enumerate().collect::<Vec<_>>();
     ordered_dependencies.sort_by(|(_, left), (_, right)| {
@@ -96,8 +89,8 @@ pub fn build_generated_bundle(
         })
         .collect::<Vec<_>>();
     let rewritten_root = rewrite_include_locators(artifact.source(), &direct_mappings)?;
-    let main_source = render(&rewritten_root);
-    let main_name = format!("generated.{}", format.extension());
+    let main_source = rewritten_root;
+    let main_name = "generated.spice".to_owned();
     let retained_main_name = "retained/generated.spice";
     let mut entries = vec![
         BundleEntry {
@@ -149,8 +142,7 @@ pub fn build_generated_bundle(
             })?;
             child_mappings.push((include_index, child.requested_locator().to_owned(), target));
         }
-        let rewritten = rewrite_include_locators(source, &child_mappings)?;
-        let materialized = render(&rewritten);
+        let materialized = rewrite_include_locators(source, &child_mappings)?;
         let retained_entry = format!("retained/{}", entry_names[index]);
         entries.push(BundleEntry {
             name: entry_names[index].clone(),
@@ -195,7 +187,7 @@ pub fn build_generated_bundle(
         "schema": "rspice-generated-netlist-bundle/v1",
         "main": main_name,
         "main_content_digest": crate::state::content_digest(&main_source).to_string(),
-        "dialect": format.extension(),
+        "dialect": "spice",
         "retained_generated_source": retained_main_name,
         "generated_content_digest": artifact.content_digest().to_string(),
         "generator": artifact.provenance().generator(),
@@ -399,8 +391,7 @@ mod tests {
 
     use super::*;
 
-    // The writer is dialect-agnostic by construction, so these render each
-    // document unchanged and assert on the archive the writer actually built.
+    // These assert on the archive the writer actually built.
 
     fn stored_zip_entries(zip: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
         fn u16_at(bytes: &[u8], offset: usize) -> u16 {
@@ -594,13 +585,7 @@ mod tests {
         )
         .expect("artifact");
 
-        let zip = crate::io::build_generated_bundle(
-            &artifact,
-            crate::io::NetlistFormat::Spice,
-            true,
-            str::to_owned,
-        )
-        .expect("bundle");
+        let zip = crate::io::build_generated_bundle(&artifact, true).expect("bundle");
         let entries = stored_zip_entries(&zip);
         assert_eq!(
             entries.get("generated.spice").map(Vec::as_slice),
@@ -666,13 +651,7 @@ mod tests {
         )
         .expect("artifact");
 
-        let zip = crate::io::build_generated_bundle(
-            &artifact,
-            crate::io::NetlistFormat::Spice,
-            false,
-            str::to_owned,
-        )
-        .expect("bundle");
+        let zip = crate::io::build_generated_bundle(&artifact, false).expect("bundle");
         let entries = stored_zip_entries(&zip);
         assert_eq!(
             entries.get("generated.spice").map(Vec::as_slice),
@@ -710,33 +689,6 @@ mod tests {
     }
 
     #[test]
-    fn translated_bundle_rejects_generated_source_map() {
-        use crate::product::ObjectRevision;
-        use crate::state::{
-            GeneratedArtifact, GeneratedProvenance, GenerationInput, content_digest,
-        };
-        let artifact = GeneratedArtifact::try_from_utf8(
-            GeneratedProvenance::try_new(
-                "test-generator",
-                GenerationInput::new(ObjectRevision::INITIAL, content_digest("inputs")),
-            )
-            .expect("provenance"),
-            b"deck\n.end\n".to_vec(),
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("artifact");
-        let error = crate::io::build_generated_bundle(
-            &artifact,
-            crate::io::NetlistFormat::Spectre,
-            true,
-            str::to_owned,
-        )
-        .expect_err("translated coordinates are not exact");
-        assert!(error.contains("generated SPICE deck"));
-    }
-
-    #[test]
     fn generated_bundle_fails_closed_for_unresolved_dependencies() {
         use crate::product::ObjectRevision;
         use crate::state::{
@@ -758,13 +710,8 @@ mod tests {
         )
         .expect("artifact");
 
-        let error = crate::io::build_generated_bundle(
-            &artifact,
-            crate::io::NetlistFormat::Spice,
-            false,
-            str::to_owned,
-        )
-        .expect_err("unresolved dependency must block bundle");
+        let error = crate::io::build_generated_bundle(&artifact, false)
+            .expect_err("unresolved dependency must block bundle");
         assert!(error.contains("unresolved"));
     }
 }

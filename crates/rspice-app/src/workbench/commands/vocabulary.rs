@@ -22,7 +22,6 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::{LibraryCommand, ProjectCommand};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
-use rspice_app_services::io::NetlistFormat;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
@@ -347,8 +346,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::ImportResultDataset.key(),
     CloudCommand::LiveSession.key(),
     CloudCommand::PublishToWeb.key(),
-    CodeCommand::ExportNetlist(NetlistFormat::Spectre).key(),
-    CodeCommand::ExportNetlist(NetlistFormat::Spice).key(),
+    CodeCommand::ExportNetlist.key(),
     CodeCommand::ExportBillOfMaterials.key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
