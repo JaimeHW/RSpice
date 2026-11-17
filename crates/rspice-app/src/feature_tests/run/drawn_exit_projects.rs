@@ -16,7 +16,7 @@ use rspice_app_state::simulation::plan::AnalysisDraft;
 use rspice_app_state::state::{AnalysisResultPayload, ComponentType, Point, SimulationRun};
 use rspice_results::run::SimulationRunLifecycle;
 
-use crate::feature_tests::replay::{Control, PRIMARY, Replay};
+use crate::feature_tests::replay::{Control, PRIMARY, Replay, controls, only};
 use crate::workbench::RSpiceApp;
 
 /// How long one run may take before it is taken to have hung: a corpus
@@ -46,52 +46,167 @@ fn pin(pins: &Pins, name: &str) -> Point {
 }
 
 /// The application in a window large enough for the whole drawing, worked
-/// with the pointer and the keyboard alone.
+/// with the pointer and the keyboard alone, one frame per event: a press
+/// finds its control in the frame on show, as a reader's eye does, and only
+/// renders another when that frame does not show it yet.
 struct Engineer {
     replay: Replay,
+    /// The controls the last frame published.
+    shown: Vec<Control>,
+    /// Where the last frame drew the schematic canvas.
+    canvas: Option<egui::accesskit::Rect>,
+}
+
+/// A press or release of the primary button at `pos`.
+fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
 }
 
 impl Engineer {
     /// File > New project, named `name`.
     fn new_project(name: &str) -> Self {
-        let mut replay = Replay::new().sized(egui::vec2(2880.0, 1800.0));
-        replay.click("File", Role::MenuItem);
-        replay.click("New project\u{2026}", Role::MenuItem);
-        replay.click("Project name", Role::TextInput);
-        replay.type_text(name);
-        replay.click("Create project", Role::Button);
-        Self { replay }
+        let mut engineer = Self {
+            replay: Replay::new().sized(egui::vec2(2880.0, 1800.0)),
+            shown: Vec::new(),
+            canvas: None,
+        };
+        engineer.press("File", Role::MenuItem);
+        engineer.press("New project\u{2026}", Role::MenuItem);
+        engineer.press("Project name", Role::TextInput);
+        engineer.type_text(name);
+        engineer.press("Create project", Role::Button);
+        engineer
+    }
+
+    /// One frame carrying `events`; the controls it published.
+    fn step(&mut self, events: Vec<egui::Event>) -> &[Control] {
+        let tree = self
+            .replay
+            .frame(events)
+            .platform_output
+            .accesskit_update
+            .expect("a frame with AccessKit on publishes its tree");
+        if let Some(bounds) = tree.nodes.iter().find_map(|(_, node)| {
+            (node.role() == Role::Canvas)
+                .then(|| node.bounds())
+                .flatten()
+        }) {
+            self.canvas = Some(bounds);
+        }
+        self.shown = controls(&tree);
+        &self.shown
+    }
+
+    /// The one control named `label` with `role` pressed and released at its
+    /// centre, once two frames in a row have drawn it there: a popup's or a
+    /// window's first frame lays it out unseen and takes no press.
+    fn press(&mut self, label: &str, role: Role) -> &[Control] {
+        let shown = |controls: &[Control]| {
+            let mut found = controls
+                .iter()
+                .filter(|control| control.label == label && control.role == role);
+            match (found.next(), found.next()) {
+                (Some(control), None) => Some(control.center),
+                _ => None,
+            }
+        };
+        let mut before = shown(&self.shown);
+        let mut at = None;
+        for _ in 0..4 {
+            let now = shown(self.step(Vec::new()));
+            if now.is_some() && now == before {
+                at = now;
+                break;
+            }
+            before = now;
+        }
+        let at = at.unwrap_or_else(|| only(&self.shown, label, role).center);
+        self.step(vec![egui::Event::PointerMoved(at), button(at, true)]);
+        self.step(vec![button(at, false)])
+    }
+
+    fn key(&mut self, key: Key, modifiers: Modifiers) -> &[Control] {
+        let event = |pressed| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        self.step(vec![event(true), event(false)])
+    }
+
+    /// Typed text in one frame, each line break the Enter key.
+    fn type_text(&mut self, text: &str) -> &[Control] {
+        let mut events = Vec::new();
+        for (index, line) in text.split('\n').enumerate() {
+            if index > 0 {
+                for pressed in [true, false] {
+                    events.push(egui::Event::Key {
+                        key: Key::Enter,
+                        physical_key: Some(Key::Enter),
+                        pressed,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+            }
+            if !line.is_empty() {
+                events.push(egui::Event::Text(line.to_owned()));
+            }
+        }
+        self.step(events)
+    }
+
+    /// The command `label` from the palette: its key, the search cleared
+    /// and given `label`, and the row of that name pressed.
+    fn command(&mut self, label: &str) {
+        self.key(Key::K, PRIMARY);
+        self.press("Command search", Role::ComboBox);
+        self.key(Key::A, PRIMARY);
+        self.type_text(label);
+        let row = only(&self.shown, label, Role::ListBoxOption);
+        assert!(
+            !row.description.starts_with("Unavailable:"),
+            "{label}: {}",
+            row.description
+        );
+        self.press(label, Role::ListBoxOption);
     }
 
     /// The cell `cell` with its module `source` as its `view_type` view:
     /// New cell, the view written in the code editor, and Compile, which
     /// gives the cell the symbol its ports draw.
     fn module(&mut self, cell: &str, view_type: &str, source: &str) {
-        let replay = &mut self.replay;
-        replay.click("File", Role::MenuItem);
-        replay.click("New cell\u{2026}", Role::MenuItem);
-        replay.click("Cell name", Role::TextInput);
-        replay.type_text(cell);
-        replay.click("Schematic", Role::CheckBox);
+        self.press("File", Role::MenuItem);
+        self.press("New cell\u{2026}", Role::MenuItem);
+        self.press("Cell name", Role::TextInput);
+        self.type_text(cell);
+        self.press("Schematic", Role::CheckBox);
         if view_type == "Verilog-A" {
-            replay.click("Verilog-A", Role::CheckBox);
-            replay.click("Create", Role::Button);
+            self.press("Verilog-A", Role::CheckBox);
+            self.press("Create", Role::Button);
         } else {
-            replay.click("Create", Role::Button);
-            replay.click("File", Role::MenuItem);
-            replay.click("New cell view\u{2026}", Role::MenuItem);
-            replay.click("Type", Role::ComboBox);
-            replay.click(view_type, Role::ListBoxOption);
-            replay.click("Create", Role::Button);
+            self.press("Create", Role::Button);
+            self.press("File", Role::MenuItem);
+            self.press("New cell view\u{2026}", Role::MenuItem);
+            self.press("Type", Role::ComboBox);
+            self.press(view_type, Role::ListBoxOption);
+            self.press("Create", Role::Button);
         }
-        replay.click("Verilog-A/AMS source editor", Role::MultilineTextInput);
-        replay.key(Key::A, PRIMARY);
-        replay.frames(vec![egui::Event::Paste(source.to_owned())]);
-        replay.click("Compile Verilog-A/AMS (F7)", Role::Button);
+        self.press("Verilog-A/AMS source editor", Role::MultilineTextInput);
+        self.key(Key::A, PRIMARY);
+        self.step(vec![egui::Event::Paste(source.to_owned())]);
+        self.press("Compile Verilog-A/AMS (F7)", Role::Button);
         let compiled = format!("Compiled {cell}:");
         let started = Instant::now();
         loop {
-            let shown = replay.frames(Vec::new());
+            let shown = self.step(Vec::new());
             if shown
                 .iter()
                 .any(|control| control.role == Role::Status && control.label.starts_with(&compiled))
@@ -113,25 +228,18 @@ impl Engineer {
 
     /// The tab of the top cell's schematic.
     fn top_sheet(&mut self) {
-        self.replay.click("top · schematic", Role::Tab);
+        self.press("top · schematic", Role::Tab);
     }
 
     /// Where the schematic point `at` is on the screen.
     fn screen(&mut self, at: Point) -> egui::Pos2 {
-        let output = self.replay.frame(Vec::new());
-        let bounds = output
-            .platform_output
-            .accesskit_update
-            .as_ref()
-            .expect("a frame with AccessKit on publishes its tree")
-            .nodes
-            .iter()
-            .find_map(|(_, node)| {
-                (node.role() == Role::Canvas)
-                    .then(|| node.bounds())
-                    .flatten()
-            })
-            .expect("the schematic canvas");
+        let bounds = match self.canvas {
+            Some(bounds) => bounds,
+            None => {
+                self.step(Vec::new());
+                self.canvas.expect("the schematic canvas")
+            }
+        };
         let editor = &self.replay.app.state.model.schematic.session.editor;
         let x = bounds.x0 + editor.pan.0 as f64 + f64::from(at.x) * editor.zoom as f64;
         let y = bounds.y0 + editor.pan.1 as f64 + f64::from(at.y) * editor.zoom as f64;
@@ -144,29 +252,23 @@ impl Engineer {
 
     /// A press and release on the canvas at `at`, the pointer brought there
     /// first.
-    fn tap(&mut self, at: Point) -> Vec<Control> {
+    fn tap(&mut self, at: Point) -> &[Control] {
         let pos = self.screen(at);
-        let press = |pressed| egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Modifiers::NONE,
-        };
-        self.replay.frames(vec![egui::Event::PointerMoved(pos)]);
-        self.replay.frames(vec![press(true)]);
-        self.replay.frames(vec![press(false)])
+        self.step(vec![egui::Event::PointerMoved(pos)]);
+        self.step(vec![button(pos, true)]);
+        self.step(vec![button(pos, false)])
     }
 
     fn escape(&mut self) {
-        self.replay.key(Key::Escape, Modifiers::NONE);
+        self.key(Key::Escape, Modifiers::NONE);
     }
 
     /// The inspector field `label` given `text`.
     fn field(&mut self, label: &str, text: &str) {
-        self.replay.click(label, Role::TextInput);
-        self.replay.key(Key::A, PRIMARY);
-        self.replay.type_text(text);
-        let shown = self.replay.key(Key::Enter, Modifiers::NONE);
+        self.press(label, Role::TextInput);
+        self.key(Key::A, PRIMARY);
+        self.type_text(text);
+        let shown = self.key(Key::Enter, Modifiers::NONE).to_vec();
         // A refused entry is kept, outlined, in its field and never reaches
         // the design: say what refused it rather than draw on without it.
         let inline_edit = &self.replay.app.state.workbench.inline_edit;
@@ -189,12 +291,11 @@ impl Engineer {
     /// then selected and its inspector `fields` set. Its pins.
     fn place(&mut self, query: &str, row: &str, at: (i32, i32), fields: &[(&str, &str)]) -> Pins {
         let origin = Point::new(at.0, at.1);
-        self.replay.choose_command("Place instance");
-        self.replay
-            .click("Place component or cell\u{2026}", Role::TextInput);
-        self.replay.key(Key::A, PRIMARY);
-        self.replay.type_text(query);
-        self.replay.click(row, Role::Button);
+        self.command("Place instance");
+        self.press("Place component or cell\u{2026}", Role::TextInput);
+        self.key(Key::A, PRIMARY);
+        self.type_text(query);
+        self.press(row, Role::Button);
         self.tap(origin);
         self.escape();
         self.escape();
@@ -253,11 +354,11 @@ impl Engineer {
 
     /// A net label `net` on the pin at `at`.
     fn label(&mut self, at: Point, net: &str) {
-        self.replay.choose_command("Place net label");
+        self.command("Place net label");
         self.tap(at);
-        self.replay.click("Name", Role::TextInput);
-        self.replay.type_text(net);
-        self.replay.key(Key::Enter, Modifiers::NONE);
+        self.press("Name", Role::TextInput);
+        self.type_text(net);
+        self.key(Key::Enter, Modifiers::NONE);
         self.escape();
         let labels = &self.replay.app.state.model.schematic.document().net_labels;
         assert!(
@@ -270,7 +371,7 @@ impl Engineer {
 
     /// A ground symbol on the pin at `at`, hanging below it.
     fn ground(&mut self, at: Point) {
-        self.replay.choose_command("Place ground");
+        self.command("Place ground");
         self.tap(Point::new(at.x, at.y + 10));
         self.escape();
         let ground = self.last_part();
@@ -299,9 +400,9 @@ impl Engineer {
     /// The plan's transient: Simulate > Setup > Analyses, its stop and
     /// step.
     fn transient(&mut self, step: &str, stop: &str) {
-        self.replay.click("Simulate", Role::MenuItem);
-        self.replay.click("Setup", Role::MenuItem);
-        self.replay.click("Analyses", Role::MenuItem);
+        self.press("Simulate", Role::MenuItem);
+        self.press("Setup", Role::MenuItem);
+        self.press("Analyses", Role::MenuItem);
         self.field("Stop time", stop);
         self.field("Step time", step);
         let plan = self
@@ -329,7 +430,7 @@ impl Engineer {
 
     /// Run, and the run once it has ended.
     fn run(&mut self) -> SimulationRun {
-        self.replay.key(Key::F5, Modifiers::NONE);
+        self.key(Key::F5, Modifiers::NONE);
         let started = Instant::now();
         loop {
             self.replay.frame(Vec::new());
@@ -359,10 +460,10 @@ impl Engineer {
     /// Add measurement over the result on show: the command, `expression`
     /// typed into its field, and Add. The value the project keeps.
     fn measure(&mut self, expression: &str) -> f64 {
-        self.replay.choose_command("Add measurement");
-        self.replay.click("Expression", Role::TextInput);
-        self.replay.type_text(expression);
-        let shown = self.replay.click("Add", Role::Button);
+        self.command("Add measurement");
+        self.press("Expression", Role::TextInput);
+        self.type_text(expression);
+        let shown = self.press("Add", Role::Button).to_vec();
         // A form that stays open says why under its field, or in the status
         // line.
         assert!(
