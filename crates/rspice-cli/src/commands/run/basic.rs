@@ -1226,7 +1226,10 @@ fn publish_stored_transient(
 ) -> (Option<std::path::PathBuf>, Result<(), CliError>) {
     let plan = match store {
         TransientStore::Streamed | TransientStore::Fourier => stored.stream_plan(ctx, tstart),
-        TransientStore::ReadBack => Ok(None),
+        TransientStore::ReadBack => {
+            log::debug!("the transient is read back whole: a control script reads it");
+            Ok(None)
+        }
     };
     let plan = match plan {
         Ok(plan) => plan,

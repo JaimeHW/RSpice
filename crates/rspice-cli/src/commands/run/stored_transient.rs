@@ -546,20 +546,35 @@ impl StoredTransient {
             && netlist.options.output_interval_schedule.is_none();
         let rows = self.rows.rows();
         let parameters = !self.rows.parameters.is_empty();
-        if !format_streams
-            || parameters
-            || !ctx.engine.transient_rows_are_whole(netlist)
-            || prints
-            || !every_step
-            || netlist
-                .measurements
-                .iter()
-                .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
-            || !netlist.assertions.is_empty()
-            || !netlist.vector_files.is_empty()
-            || rows == 0
-            || !(tstart.is_finite() && tstart >= 0.0)
+        let whole = if !format_streams {
+            Some("its output format is written whole")
+        } else if parameters {
+            Some("it saves instance parameters")
+        } else if !ctx.engine.transient_rows_are_whole(netlist) {
+            Some("its rows are not the run's whole trajectory")
+        } else if prints {
+            Some("it has .PRINT or .PLOT cards")
+        } else if !every_step {
+            Some("it prints on an output schedule")
+        } else if netlist
+            .measurements
+            .iter()
+            .any(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
         {
+            Some("it has TRAN_CONT measures")
+        } else if !netlist.assertions.is_empty() {
+            Some("it has .ASSERT cards")
+        } else if !netlist.vector_files.is_empty() {
+            Some("it has .VEC cards")
+        } else if rows == 0 {
+            Some("it has no rows")
+        } else if !(tstart.is_finite() && tstart >= 0.0) {
+            Some("its start time is not a finite non-negative time")
+        } else {
+            None
+        };
+        if let Some(why) = whole {
+            log::debug!("the transient is read back whole: {why}");
             return Ok(None);
         }
         let probe_rows = self
@@ -1222,6 +1237,7 @@ fn probe_plan(
         &crate::abort::ProcessAbort,
     ) else {
         // The run read back whole reports the same failure the in-memory run would.
+        log::debug!("the transient is read back whole: its signals do not project");
         return Ok(None);
     };
     let events = events.map(|events| events as &dyn EventSource);
