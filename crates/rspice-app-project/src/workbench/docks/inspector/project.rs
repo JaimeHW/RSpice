@@ -11,6 +11,7 @@ use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
 
 use crate::state::command_catalog::CommandKey;
+use crate::ui::widgets::Button;
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
@@ -84,13 +85,16 @@ fn inspector_action(ui: &mut Ui, label: &str) -> bool {
     inspector_action_enabled(ui, label, true)
 }
 
+/// One of the inspector's actions: the kit's button, as the page beside it
+/// draws its own, across the inspector's width.
 fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
     let width = ui.available_width().max(1.0);
-    let response = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.add_sized([width, 28.0], egui::Button::new(label))
-        })
-        .inner;
+    let clicked = Button::new(label)
+        .enabled(enabled)
+        .min_width(width)
+        .max_width(width)
+        .show(ui)
+        .clicked();
     ui.add_space(4.0);
-    response.clicked()
+    clicked
 }
