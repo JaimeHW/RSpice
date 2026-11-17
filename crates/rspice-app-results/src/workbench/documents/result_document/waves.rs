@@ -28,7 +28,7 @@ pub use rspice_results_ui::waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 mod event_markers;
-mod expression_evaluation;
+pub(super) mod expression_evaluation;
 mod expressions;
 use rspice_results_ui::waves::extent::{self, FamilyEnvelopePlan};
 mod drop;

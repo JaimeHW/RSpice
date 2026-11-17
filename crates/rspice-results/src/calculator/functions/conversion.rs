@@ -375,6 +375,51 @@ pub fn analog_staircase(word: &EventWord) -> Result<RealValue, EvaluationError> 
     Ok(RealValue::create_waveform(x, y))
 }
 
+/// `D(name)` as `.MEASURE` reads it: the net's level, or a bus's word as an
+/// unsigned integer, as a step function through the analysis' end.
+///
+/// A step is drawn at its instant, so a crossing is dated at the step that
+/// makes it. An unknown or high-impedance stretch holds the last known value
+/// and its end is the step, which is how `.MEASURE` dates a crossing through
+/// one: 0→X→1 rises where X becomes 1, and 0→X→0 does not cross. Before its
+/// first known value the net has no samples, so nothing crosses there.
+pub fn measured_steps(word: &EventWord) -> Result<RealValue, EvaluationError> {
+    if word.times.len() != word.words.len() {
+        return Err(EvaluationError::MathError(
+            "the net's event history is malformed".to_owned(),
+        ));
+    }
+    let mut x = Vec::with_capacity(word.times.len() * 2 + 1);
+    let mut y = Vec::with_capacity(word.times.len() * 2 + 1);
+    let mut held: Option<f64> = None;
+    for (&t, bits) in word.times.iter().zip(&word.words) {
+        let Some(value) = word_value(bits, false) else {
+            continue;
+        };
+        match held {
+            Some(previous) if previous == value => continue,
+            Some(previous) => {
+                x.push(t);
+                y.push(previous);
+            }
+            None => {}
+        }
+        x.push(t);
+        y.push(value);
+        held = Some(value);
+    }
+    let Some(held) = held else {
+        return Err(EvaluationError::MathError(
+            "the net never holds a known value".to_owned(),
+        ));
+    };
+    if x.last().is_some_and(|&last| word.end > last) {
+        x.push(word.end);
+        y.push(held);
+    }
+    Ok(RealValue::create_waveform(x, y))
+}
+
 /// `analog(w)` of a value that is already a waveform reads as itself.
 pub(super) fn analog(args: Vec<RealValue>) -> Result<RealValue, EvaluationError> {
     super::check_arg_count("analog", &args, 1)?;

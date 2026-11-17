@@ -182,7 +182,7 @@ impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::Evaluat
 /// The exact history of the bus or logic net `D(name)` names: one of the
 /// reader's buses, a bus the run declared (with or without its range), or a
 /// single net.
-fn event_word(
+pub(in crate::workbench::documents::result_document) fn event_word(
     analysis: &AnalysisResult,
     lanes: Option<&EventLaneLayout>,
     signal: &str,

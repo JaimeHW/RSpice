@@ -448,7 +448,10 @@ fn kept_line(summary: &FamilyMeasurementSummary, format: impl Fn(f64) -> String)
 fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> {
     let parsed = calculator::parser::try_parse(expression)
         .map_err(|error| format!("Parse error: {error}"))?;
-    let context = calculator::WaveformsContext::new(&analysis.waveforms);
+    let context = MeasuredOperands {
+        values: calculator::WaveformsContext::new(&analysis.waveforms),
+        analysis,
+    };
     match calculator::evaluator::evaluate(&parsed, &context)
         .and_then(calculator::CalcValue::into_real)
         .map_err(|error| error.to_string())?
@@ -459,6 +462,50 @@ fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> 
             "The expression is a trace; reduce it with avg(), rms() or another scalar function."
                 .to_owned(),
         ),
+    }
+}
+
+/// An analysis' waveforms, with a digital net or bus `D(name)` read from its
+/// event history the way `.MEASURE` and the CLI read it: a step function
+/// dated at the instants the run accepted its events, never resampled onto
+/// the analog grid.
+struct MeasuredOperands<'a> {
+    values: calculator::WaveformsContext<'a>,
+    analysis: &'a AnalysisResult,
+}
+
+impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
+    fn get_waveform(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
+        match self.values.get_waveform(signal, dataset) {
+            Err(calculator::evaluator::EvaluationError::IdentifierNotFound(_))
+                if signal.starts_with("D(") =>
+            {
+                let word = self.get_event_word(signal, dataset)?;
+                calculator::functions::measured_steps(&word)
+                    .map(calculator::evaluator::CalcValue::Real)
+            }
+            read => read,
+        }
+    }
+
+    fn get_magnitude(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
+        self.values.get_magnitude(signal, dataset)
+    }
+
+    fn get_event_word(
+        &self,
+        signal: &str,
+        _dataset: Option<&str>,
+    ) -> Result<calculator::functions::EventWord, calculator::evaluator::EvaluationError> {
+        super::super::waves::expression_evaluation::event_word(self.analysis, None, signal)
     }
 }
 
@@ -531,6 +578,57 @@ mod tests {
     };
     use crate::workbench::documents::result_document::test_host::ResultsTestHost;
     use crate::workbench::state::Workspace;
+
+    /// A digital net is measured from its event history, as `.MEASURE` reads
+    /// `D(name)`: each crossing is dated at the step that makes it, and an
+    /// unknown stretch is looked through, so q's 0→X→1 rises where X becomes
+    /// 1. The form used to refuse any `D()` with "Identifier not found".
+    #[test]
+    fn a_measurement_reads_a_digital_net_as_measure_does() {
+        use crate::state::{DigitalEventPointEvidence, DigitalEventTraceEvidence, RetainedTrace};
+
+        let trace = |name: &str, points: &[(f64, u8)]| DigitalEventTraceEvidence {
+            node_name: name.to_owned(),
+            points: points
+                .iter()
+                .map(|&(time_s, value_code)| DigitalEventPointEvidence { time_s, value_code })
+                .collect(),
+        };
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(vec![RetainedTrace::new(
+                "V(a)".to_owned(),
+                vec![0.0, 40e-9],
+                vec![0.0, 1.0],
+                "#4f81bd",
+            )]);
+        analysis.result_payload = Some(crate::state::AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
+            current_impulses: None,
+            digital_traces: vec![
+                trace("clk", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
+                // 2 is X.
+                trace("q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
+            ],
+            real_traces: Vec::new(),
+            digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
+        });
+        for (expression, expected) in [
+            (
+                r#"delay(D(clk), D(q), 0.5, "rising", 1, 0.5, "rising", 1)"#,
+                4e-9,
+            ),
+            (r#"cross(D(clk), 0.5, 1, "falling")"#, 20e-9),
+            (r#"cross(D(q), 0.5, 1, "rising")"#, 14e-9),
+        ] {
+            let value = evaluate(&analysis, expression).expect(expression);
+            assert!((value - expected).abs() <= 1e-21, "{expression}: {value:e}");
+        }
+        assert!(
+            evaluate(&analysis, r#"cross(D(q), 0.5, 1, "falling")"#).is_err(),
+            "0→X→1 has no fall"
+        );
+    }
 
     /// Five Monte Carlo trials whose `gain_dc` is 1..5 dB, the third with no
     /// value.
