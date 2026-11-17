@@ -13,6 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogState;
 use crate::workbench::app_state::Model;
+use crate::workbench::project::DependencyLibrary;
 use crate::workbench::project::configuration_state::ConfigurationPageState;
 use crate::workbench::project::workspace_state::ProjectPage;
 
@@ -29,7 +30,7 @@ pub(in crate::workbench) struct ProjectNavigator<'a> {
     pub(in crate::workbench) page: ProjectPage,
     pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
     pub(in crate::workbench) configuration_dialog: &'a mut ConfigurationDialogState,
-    pub(in crate::workbench) dependency_selection: &'a mut Option<String>,
+    pub(in crate::workbench) dependency_selection: &'a mut Option<DependencyLibrary>,
     pub(in crate::workbench) checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
     pub(in crate::workbench) checkpoint_selection: &'a mut Option<String>,
     pub(in crate::workbench) model: &'a mut Model,

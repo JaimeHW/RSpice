@@ -572,7 +572,7 @@ fn the_dependency_ledger_draws_only_the_rows_in_view() {
         sized_frame(&ctx, &mut app, size);
         let text = painted(&sized_frame(&ctx, &mut app, size));
         // Every design library's ledger row names where it lives.
-        let rows = text.matches("Embedded project data").count();
+        let rows = text.matches("Project file").count();
         assert!(
             (1..60).contains(&rows),
             "{size:?}: {rows} ledger rows drawn\n{text}"

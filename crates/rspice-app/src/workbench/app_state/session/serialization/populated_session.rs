@@ -316,8 +316,6 @@ fn populate_workbench(
         .insert(WorkspaceDocumentId::NetlistComparison);
     state.project.project_page = ProjectPage::Recovery;
     state.project.project_library_filter = "afe".to_owned();
-    state.project.project_dependency_filter = "pdk".to_owned();
-    state.project.project_dependency_selection = Some("models/afe.lib".to_owned());
     state.project.project_checkpoint_selection = Some("checkpoint-2".to_owned());
     state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
     state.simulate.verification_page = VerificationPage::Reference;

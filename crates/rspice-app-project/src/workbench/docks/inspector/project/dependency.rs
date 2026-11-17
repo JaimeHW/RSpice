@@ -1,11 +1,16 @@
-//! The inspector beside the Dependencies page: the selected dependency as it
-//! resolved, and the project's technology.
+//! The inspector beside the Dependencies page: the selected library, with
+//! the status the rail and the table give it, and the project's technology.
 
 use egui::Ui;
-use rspice_ui_kit::panels::{Problem, section_header};
+use rspice_ui_kit::panels::{panel_inset, section_header};
 
-use crate::workbench::design_system::{property_row, property_row_problem};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::project::dependency_status::{
+    DependencyKind, LibraryStatus, UNSET, dependency_rows, technology_status,
+};
 
 use super::{ProjectInspector, ProjectInspectorAction, inspector_action};
 
@@ -14,73 +19,72 @@ pub(super) fn project_dependency(
     inspector: &ProjectInspector<'_>,
 ) -> Option<ProjectInspectorAction> {
     let model = inspector.model;
-    let selection = inspector
+    // The rail's rows, so the status read here is the one the rail and the
+    // table show for this library.
+    let rows = dependency_rows(ui.ctx(), model);
+    let row = inspector
         .dependency_selection
-        .clone()
-        .unwrap_or_else(|| "No dependency selected".to_owned());
-    let design_library = model.library_manager.get_library(&selection);
-    let model_library = model.model_library_manager.get_library(&selection);
+        .as_ref()
+        .and_then(|selected| rows.iter().find(|row| &row.library == selected));
 
-    section_header(ui, "Resolved dependency", None);
-    property_row(ui, "Name", &selection);
-    if let Some(library) = design_library {
-        property_row(ui, "Type", "Design library");
-        property_row(
-            ui,
-            "Access",
-            if library.read_only {
-                "read only"
-            } else {
-                "writable"
-            },
-        );
-        property_row(
-            ui,
-            "Source",
-            &library.path.as_ref().map_or_else(
-                || "in project".to_owned(),
-                |path| path.display().to_string(),
-            ),
-        );
-    } else if let Some(library) = model_library {
-        property_row(ui, "Type", "Model library");
-        property_row(ui, "Version", &library.version);
-        // A library whose model files resolve is the normal case and says
-        // nothing; one whose do not cannot simulate, which is the fact.
-        if !library.source_authority.has_execution_source() || library.source_closure.is_empty() {
-            property_row_problem(
-                ui,
-                "Model files",
-                "Not found: cannot simulate",
-                Some(Problem::Failure),
-            );
+    if let Some(row) = row {
+        section_header(ui, row.library.kind.label(), None);
+        property_row(ui, "Name", &row.library.name);
+        status_rows(ui, "Status", &row.status);
+        if row.source != UNSET {
+            property_row_path(ui, "Source", &row.source);
         }
+        if row.version != UNSET {
+            property_row(ui, "Version", &row.version);
+        }
+        if row.library.kind == DependencyKind::Design
+            && model
+                .library_manager
+                .get_library(&row.library.name)
+                .is_some_and(|library| library.read_only)
+        {
+            property_row(ui, "Access", "Read only");
+        }
+    } else {
+        section_header(ui, "Library", None);
+        detail_text(ui, "No library selected");
     }
 
-    section_header(ui, "Technology", None);
-    property_row(
-        ui,
-        "Technology",
-        if model
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .is_some()
-        {
-            "attached"
-        } else {
-            "not attached"
-        },
-    );
+    section_header(ui, "Project", None);
+    status_rows(ui, "Technology", &technology_status(model));
 
     section_header(ui, "Actions", None);
     let mut action = None;
     if inspector_action(ui, "Library manager") {
         action = Some(ProjectInspectorAction::Execute(ids::MODELS_CATALOG));
     }
-    if inspector_action(ui, "PDK and model paths\u{2026}") {
-        action = Some(ProjectInspectorAction::Execute(ids::PDK_SETTINGS));
-    }
     action
+}
+
+/// A status as one row, its mark in front of its word, and what more it has
+/// to say wrapped under it.
+fn status_rows(ui: &mut Ui, label: &str, status: &LibraryStatus) {
+    property_row_problem(ui, label, status.label, status.mark.problem());
+    if let Some(detail) = status.detail.as_deref() {
+        detail_text(ui, detail);
+    }
+}
+
+/// Words that may run longer than a property row, wrapped inside the
+/// panel's inset rather than elided.
+fn detail_text(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let inset = panel_inset(ui).round().clamp(0.0, f32::from(i8::MAX)) as i8;
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(inset, 3))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+        });
 }

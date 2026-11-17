@@ -7,11 +7,13 @@
 
 pub mod commands;
 pub mod configuration_state;
+pub(crate) mod dependency_status;
 pub mod library_dialogs;
 mod new_project;
 mod revision_history;
 pub mod workspace_state;
 
+pub use dependency_status::{DependencyKind, DependencyLibrary};
 use rspice_app_state::veriloga_library::builtin_veriloga_model;
 
 use crate::state::ViewType;

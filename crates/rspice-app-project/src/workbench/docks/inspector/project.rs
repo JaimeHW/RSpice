@@ -14,6 +14,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
+use crate::workbench::project::DependencyLibrary;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationSelection,
@@ -33,7 +34,7 @@ use recovery::project_recovery;
 pub struct ProjectInspector<'a> {
     pub page: ProjectPage,
     pub configuration: &'a mut ConfigurationPageState,
-    pub dependency_selection: &'a Option<String>,
+    pub dependency_selection: &'a Option<DependencyLibrary>,
     pub checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
     pub checkpoint_selection: &'a Option<String>,
     /// Whether the Library page shows the built-in Verilog-A library rather

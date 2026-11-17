@@ -1,88 +1,87 @@
 //! The navigator's dependency rail: the design and model libraries the
-//! project depends on, with a row meta only for the exception. The rows are
-//! built when a catalogue or the filter changes, not on every frame.
+//! project depends on, each with its status, in the table's order under the
+//! filter the table reads. The rows are built when what a status reads
+//! changes, not on every frame.
 
-use std::sync::Arc;
+use std::borrow::Cow;
 
-use egui::Ui;
+use egui::{Rect, Ui, pos2, vec2};
 
-use crate::workbench::app_state::Model;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 use crate::workbench::design_system::{WorkbenchIcon, section_header};
-use crate::workbench::surfaces::project::derived::derived;
+use crate::workbench::project::dependency_status::{
+    DependencyKind, refresh_source_drift, settle_selection, visible_dependency_rows,
+};
 
-use super::super::nav_row;
+use super::super::nav_row_response;
 use super::ProjectNavigator;
 
-/// One rail row: the library's name, its kind, the exception it carries if
-/// any, and its icon.
-type DependencyRailRow = (String, &'static str, Option<&'static str>, WorkbenchIcon);
+/// Three cells of the row's mono meta face: wider than a mark and its gap.
+const MARK_ROOM: &str = "   ";
 
 pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
-    let query = nav.filter.trim().to_ascii_lowercase();
-    let key = (
-        nav.model.library_manager.catalog().stamp(),
-        nav.model.model_library_manager.content_stamp(),
-        query.clone(),
-    );
-    let model: &Model = nav.model;
-    let rows = derived(ui.ctx(), "navigator.dependencies", key, || {
-        dependency_rail_rows(model, &query)
-    });
-    if nav.dependency_selection.is_none() {
-        *nav.dependency_selection = rows.first().map(|(name, _, _, _)| name.clone());
-    }
-    section_header(ui, "Dependencies", Some(&rows.len().to_string()));
-    for (name, _, status, icon) in rows.iter() {
-        if nav_row(
-            ui,
-            *icon,
-            name,
-            nav.dependency_selection.as_deref() == Some(name.as_str()),
-            *status,
-        ) {
-            *nav.dependency_selection = Some(name.clone());
+    // The rail draws before the page, so it is the first to bring the drift
+    // report up to the catalogue the statuses describe.
+    refresh_source_drift(ui.ctx(), nav.model);
+    let (rows, visible) = visible_dependency_rows(ui.ctx(), nav.model, nav.filter);
+    settle_selection(&rows, &visible, nav.dependency_selection);
+    section_header(ui, "Dependencies", Some(&visible.len().to_string()));
+    for &index in visible.iter() {
+        let row = &rows[index];
+        let icon = match row.library.kind {
+            DependencyKind::Design => WorkbenchIcon::Project,
+            DependencyKind::Model => WorkbenchIcon::Models,
+        };
+        let selected = nav.dependency_selection.as_ref() == Some(&row.library);
+        let problem = row.status.mark.problem();
+        // A marked status keeps the mark's room in front of its word, so the
+        // name is elided short of the mark rather than run under it.
+        let meta = match problem {
+            Some(_) => Cow::Owned(format!("{MARK_ROOM}{}", row.status.label)),
+            None => Cow::Borrowed(row.status.label),
+        };
+        let response = nav_row_response(ui, icon, &row.library.name, selected, Some(&meta));
+        if let Some(problem) = problem {
+            paint_status_mark(ui, response.rect, row.status.label, problem);
+            let announced =
+                problem.announce(&format!("{}, {}", row.library.name, row.status.label));
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    &announced,
+                )
+            });
+        }
+        if response.clicked() {
+            *nav.dependency_selection = Some(row.library.clone());
         }
     }
 }
 
-fn dependency_rail_rows(model: &Model, query: &str) -> Arc<[DependencyRailRow]> {
-    let mut rows = model
-        .library_manager
-        .libraries_sorted()
-        .into_iter()
-        // A writable design library and a model library whose sources resolve
-        // are the ordinary cases; only the exception is worth a row's meta.
-        .map(|library| {
-            (
-                library.name.clone(),
-                "Design library",
-                library.read_only.then_some("read-only"),
-                WorkbenchIcon::Project,
-            )
-        })
-        .chain(
-            model
-                .model_library_manager
-                .libraries_sorted()
-                .into_iter()
-                .map(|library| {
-                    (
-                        library.name.clone(),
-                        "Model library",
-                        (!library.source_authority.has_execution_source()
-                            || library.source_closure.is_empty())
-                        .then_some("no model files"),
-                        WorkbenchIcon::Models,
-                    )
-                }),
+/// The status's mark, set in front of the row's status word, where the
+/// table and the inspector set it in front of theirs.
+fn paint_status_mark(ui: &Ui, row: Rect, label: &str, problem: Problem) {
+    let t = Tokens::get(ui.ctx());
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
         )
-        .filter(|(name, kind, status, _)| {
-            query.is_empty()
-                || format!("{name} {kind} {}", status.unwrap_or_default())
-                    .to_ascii_lowercase()
-                    .contains(query)
-        })
-        .collect::<Vec<_>>();
-    rows.sort_by(|left, right| left.0.cmp(&right.0));
-    rows.into()
+        .size()
+        .x;
+    let right = row.right() - 8.0 - label_width - (PROBLEM_MARK_ADVANCE - PROBLEM_MARK_SIDE);
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            pos2(right - PROBLEM_MARK_SIDE * 0.5, row.center().y),
+            vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+        ),
+        problem,
+    );
 }

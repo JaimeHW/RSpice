@@ -82,6 +82,18 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
     project_lifecycle::bind_restored_project(state);
 }
 
+/// What the Project workspace shows of the project going away: the
+/// feature's selections, and its navigator's filter, which names that
+/// project's libraries, configurations and checkpoints.
+fn forget_project_presentation(state: &mut AppState) {
+    state.project.on_project_changed();
+    state
+        .workbench
+        .navigator_trees
+        .filter_mut(rspice_app_state::workbench::workspace::Workspace::Project)
+        .clear();
+}
+
 /// Accept a loaded project as the open one, after resetting what the
 /// features kept of the project it replaces.
 pub(crate) fn accept_loaded_project(
@@ -91,7 +103,7 @@ pub(crate) fn accept_loaded_project(
 ) {
     state.models.on_project_changed();
     state.model.clear_project_design_history();
-    state.project.on_project_changed();
+    forget_project_presentation(state);
     project_lifecycle::accept_loaded_project(state, baseline, binding);
 }
 
@@ -100,7 +112,7 @@ pub(crate) fn accept_loaded_project(
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
     state.models.on_project_changed();
     state.model.clear_project_design_history();
-    state.project.on_project_changed();
+    forget_project_presentation(state);
     project_lifecycle::reset_for_new_project(state);
 }
 
@@ -109,7 +121,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.models.on_project_changed();
     state.design.on_project_changed();
     state.model.clear_project_design_history();
-    state.project.on_project_changed();
+    forget_project_presentation(state);
     project_lifecycle::mark_project_closed(state);
 }
 

@@ -337,10 +337,6 @@ pub(crate) struct WorkbenchWire {
     #[serde(default)]
     project_library_filter: String,
     #[serde(default)]
-    project_dependency_filter: String,
-    #[serde(default)]
-    project_dependency_selection: Option<String>,
-    #[serde(default)]
     project_checkpoint_selection: Option<String>,
     #[serde(default)]
     library_cellview_page: LibraryCellviewPage,
@@ -441,10 +437,6 @@ pub(crate) struct WorkbenchWireRef<'a> {
     project_page: &'a ProjectPage,
     #[serde(default)]
     project_library_filter: &'a String,
-    #[serde(default)]
-    project_dependency_filter: &'a String,
-    #[serde(default)]
-    project_dependency_selection: &'a Option<String>,
     #[serde(default)]
     project_checkpoint_selection: &'a Option<String>,
     #[serde(default)]
@@ -590,8 +582,6 @@ impl<'a> WorkbenchWireRef<'a> {
             netlist_open_documents: &code.netlist_open_documents,
             project_page: &project.project_page,
             project_library_filter: &project.project_library_filter,
-            project_dependency_filter: &project.project_dependency_filter,
-            project_dependency_selection: &project.project_dependency_selection,
             project_checkpoint_selection: &project.project_checkpoint_selection,
             library_cellview_page: &project.library_cellview_page,
             verification_page: &simulate.verification_page,
@@ -641,8 +631,6 @@ impl<'a> WorkbenchWireRef<'a> {
             netlist_open_documents: self.netlist_open_documents.clone(),
             project_page: *self.project_page,
             project_library_filter: self.project_library_filter.clone(),
-            project_dependency_filter: self.project_dependency_filter.clone(),
-            project_dependency_selection: self.project_dependency_selection.clone(),
             project_checkpoint_selection: self.project_checkpoint_selection.clone(),
             library_cellview_page: *self.library_cellview_page,
             verification_page: *self.verification_page,
@@ -693,8 +681,6 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             netlist_open_documents: &wire.netlist_open_documents,
             project_page: &wire.project_page,
             project_library_filter: &wire.project_library_filter,
-            project_dependency_filter: &wire.project_dependency_filter,
-            project_dependency_selection: &wire.project_dependency_selection,
             project_checkpoint_selection: &wire.project_checkpoint_selection,
             library_cellview_page: &wire.library_cellview_page,
             verification_page: &wire.verification_page,
@@ -822,8 +808,6 @@ impl WorkbenchWire {
         state.code.netlist_open_documents = self.netlist_open_documents;
         state.project.project_page = self.project_page;
         state.project.project_library_filter = self.project_library_filter;
-        state.project.project_dependency_filter = self.project_dependency_filter;
-        state.project.project_dependency_selection = self.project_dependency_selection;
         state.project.project_checkpoint_selection = self.project_checkpoint_selection;
         state.project.library_cellview_page = self.library_cellview_page;
         state.simulate.verification_page = self.verification_page;

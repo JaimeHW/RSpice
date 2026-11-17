@@ -1,50 +1,41 @@
-//! The project dependency ledger.
+//! The libraries the project depends on, and its technology.
 //!
-//! Rows are derived from the live design-library catalog, model-source
-//! authority, and the exact technology binding accepted by the project. This
-//! module does not maintain a second lock model: export serializes the same
-//! derived view shown on screen.
+//! Every row's status is the one the rail and the inspector beside the page
+//! give the same library: all three read the rows built once per change of
+//! what a status reads, under the workspace navigator's filter, which is the
+//! page's one filter. The exported manifest serializes the same rows.
 //!
-//! The rows are built when a catalogue changes, the filter is applied when
-//! it or the rows change, and only the rows in view are laid out, so a site
-//! install with hundreds of model libraries costs a frame what ten do.
+//! Only the rows in view are laid out, so a site install with hundreds of
+//! model libraries costs a frame what ten do.
 
 use std::sync::Arc;
 
 use serde::Serialize;
 
-use super::derived::derived;
 use super::*;
-use crate::state::model_library::ModelSourceAuthority;
 use crate::workbench::design_system::property_row_toned;
+use crate::workbench::project::dependency_status::{
+    DependencyRow, UNSET, refresh_source_drift, settle_selection, technology_status,
+    visible_dependency_rows,
+};
+use crate::workbench::surfaces::project::overview::Tone;
 
 const DEPENDENCY_SPLIT_BREAKPOINT: f32 = 640.0;
 const DEPENDENCY_LEFT_SHARE: f32 = 0.40;
-/// Width under which the ledger drops its digest column.
+/// Width under which the table drops its digest column.
 const DEPENDENCY_COMPACT_WIDTH: f32 = 560.0;
 /// Shortest the split panes are ever drawn, so a very short viewport still
-/// opens a readable ledger rather than seating an action bar under a header.
+/// opens a readable table rather than seating an action bar under a header.
 const DEPENDENCY_MIN_PANE_HEIGHT: f32 = 260.0;
-/// Narrowest strip that still seats the field and the facts on one line.
-const DEPENDENCY_STRIP_ONE_LINE: f32 = 520.0;
 /// Vertical padding inside a panel's action bar.
 const DEPENDENCY_ACTION_BAR_PAD: i8 = 6;
-/// Painted in a column the resource on that row carries no value for.
-const DEPENDENCY_UNSET: &str = "\u{2014}";
 
-const LEDGER_COLUMNS: [&str; 6] = [
-    "Dependency",
-    "Type",
-    "Version",
-    "Source",
-    "Digest",
-    "Status",
-];
+const LEDGER_COLUMNS: [&str; 6] = ["Library", "Type", "Version", "Source", "Digest", "Status"];
 const LEDGER_FRACTIONS: [f32; 6] = [0.24, 0.14, 0.09, 0.26, 0.11, 0.16];
 /// Version and digest are identities rather than prose, so both take the mono
 /// face and stay comparable down the column.
 const LEDGER_MONO_COLUMNS: [usize; 2] = [2, 4];
-const LEDGER_COMPACT_COLUMNS: [&str; 5] = ["Dependency", "Type", "Version", "Source", "Status"];
+const LEDGER_COMPACT_COLUMNS: [&str; 5] = ["Library", "Type", "Version", "Source", "Status"];
 const LEDGER_COMPACT_FRACTIONS: [f32; 5] = [0.26, 0.15, 0.14, 0.24, 0.21];
 const LEDGER_COMPACT_MONO_COLUMNS: [usize; 1] = [2];
 
@@ -54,85 +45,49 @@ struct DependencyManifest {
     project_id: String,
     project_revision: u64,
     technology: Option<TechnologyManifest>,
-    resources: Vec<DependencyRow>,
+    libraries: Vec<ManifestLibrary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct TechnologyManifest {
     label: String,
     model_library: String,
-    root_source: String,
-    source_count: usize,
-    dependency_edge_count: usize,
+    model_file: String,
+    source_files: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct DependencyRow {
-    identity: String,
-    resource_type: String,
-    authority: String,
+struct ManifestLibrary {
+    name: String,
+    library_type: &'static str,
     version: String,
     source: String,
     digest: String,
-    status: String,
+    status: &'static str,
+    detail: Option<String>,
 }
 
-/// The ledger's rows, and how many of them resolved against live authority.
-#[derive(Debug, Default)]
-struct DependencyLedger {
-    rows: Vec<DependencyRow>,
-    resolved: usize,
-}
-
-/// The ledger as the strip and the table read it: its rows, built when a
-/// catalogue changes, and the rows the filter lets through, by index, chosen
-/// when the filter or the rows change.
+/// The table as the page reads it: every row, and the rows the filter lets
+/// through, by index.
 #[derive(Debug, Clone)]
 struct LedgerView {
-    ledger: Arc<DependencyLedger>,
+    rows: Arc<[DependencyRow]>,
     visible: Arc<[usize]>,
-    filter: String,
-}
-
-fn ledger_view(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> LedgerView {
-    // The design-library catalogue and the model catalogue: the rows read
-    // nothing else.
-    let catalogs = (
-        cx.model.library_manager.catalog().stamp(),
-        cx.model.model_library_manager.content_stamp(),
-    );
-    let ledger = derived(ctx, "dependencies.ledger", catalogs, || {
-        let rows = dependency_rows(cx);
-        let resolved = rows.iter().filter(|row| row_is_resolved(row)).count();
-        Arc::new(DependencyLedger { rows, resolved })
-    });
-    let filter = dependency_filter(cx);
-    let visible = derived(
-        ctx,
-        "dependencies.visible",
-        (catalogs, filter.clone()),
-        || {
-            ledger
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| row_matches(row, &filter))
-                .map(|(index, _)| index)
-                .collect::<Arc<[usize]>>()
-        },
-    );
-    LedgerView {
-        ledger,
-        visible,
-        filter,
-    }
+    filtered: bool,
 }
 
 pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    // One projection of live authority, read by the strip and the ledger
-    // alike; the exported manifest serializes the same rows.
-    let view = ledger_view(ui.ctx(), cx);
-    dependency_context_strip(ui, cx, &view);
+    // The rail draws first and does both of these; a phone width shows the
+    // page without it.
+    refresh_source_drift(ui.ctx(), cx.model);
+    let filter = cx.wb.navigator_filter().trim().to_owned();
+    let (rows, visible) = visible_dependency_rows(ui.ctx(), cx.model, &filter);
+    settle_selection(&rows, &visible, &mut cx.state.project_dependency_selection);
+    let view = LedgerView {
+        rows,
+        visible,
+        filtered: !filter.is_empty(),
+    };
     let width = visible_workspace_width(ui);
     if width < DEPENDENCY_SPLIT_BREAKPOINT {
         dependency_pane(ui, width, 0.0, |ui| {
@@ -173,90 +128,6 @@ fn dependency_pane(ui: &mut Ui, width: f32, height: f32, content: impl FnOnce(&m
         ui.set_min_height(height);
         content(ui);
     });
-}
-
-fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, view: &LedgerView) {
-    let t = Tokens::get(ui.ctx());
-    let filter = view.filter.as_str();
-    let visible = view.visible.len();
-    let total = view.ledger.rows.len();
-    let resolved = view.ledger.resolved;
-    let review = total.saturating_sub(resolved);
-    let band = (visible_workspace_width(ui) - 20.0).max(1.0);
-    // No rule under this strip: the panel header below opens with one of its
-    // own, and two hairlines a pixel apart read as one thick, uneven line.
-    egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            // A `Frame` shrinks to its content, so a band that is not told to
-            // take the width stops partway across the workspace — and the
-            // width it must take is the visible one.
-            ui.set_width(band);
-            ui.spacing_mut().item_spacing.y = 4.0;
-            if band < DEPENDENCY_STRIP_ONE_LINE {
-                // A phone-width strip gives the field its own line and drops
-                // the facts under it, rather than breaking one mid-value.
-                dependency_filter_field(ui, cx, band);
-                ui.horizontal(|ui| {
-                    dependency_context_facts(ui, resolved, review, visible, total, filter);
-                });
-                return;
-            }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                dependency_filter_field(ui, cx, (band * 0.38).clamp(180.0, 340.0));
-                ui.separator();
-                dependency_context_facts(ui, resolved, review, visible, total, filter);
-            });
-        });
-}
-
-fn dependency_filter_field(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, width: f32) {
-    let search = ui.add_sized(
-        [width, Tokens::get(ui.ctx()).metrics.ctl_h],
-        egui::TextEdit::singleline(&mut cx.state.project_dependency_filter)
-            .hint_text("Dependency, type, source, version\u{2026}"),
-    );
-    ui.ctx().accesskit_node_builder(search.id, |node| {
-        node.set_label("Filter project dependencies");
-    });
-}
-
-fn dependency_context_facts(
-    ui: &mut Ui,
-    resolved: usize,
-    review: usize,
-    visible: usize,
-    total: usize,
-    filter: &str,
-) {
-    ui.spacing_mut().item_spacing.x = 10.0;
-    context_fact(
-        ui,
-        "Closure",
-        &format!("{resolved} resolved \u{00b7} {review} review"),
-    );
-    // The ledger names its own count in its header; the ratio is only worth a
-    // fact while a filter is hiding something.
-    if !filter.is_empty() {
-        ui.separator();
-        context_fact(ui, "Filter", &format!("{visible} of {total} match"));
-    }
-}
-
-fn context_fact(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-    ui.label(
-        egui::RichText::new(value)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
 }
 
 /// A panel's action bar, seated on the floor of its pane under a rule.
@@ -305,50 +176,34 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         .project
         .technology_binding()
         .cloned();
-    // As last proven: proving it hashes the attached library's sources.
-    let contract = cx.model.project_technology_verdict();
-    let contract_ok = binding.is_some() && contract.is_ok();
-    // A pinned binding is the ordinary binding, so the header names only the
-    // one that has to be looked at.
+    // The status the inspector beside the page states. A project with no
+    // technology is ordinary unless its setup needs one, so only a status
+    // the reader has to act on is named in the header.
+    let status = technology_status(cx.model);
+    let problem = status.mark.problem();
     workspace_table_panel_header(
         ui,
-        "Technology & simulator binding",
-        if contract_ok { "" } else { "review" },
-        (!contract_ok).then_some(Problem::Warning),
+        "Technology",
+        if problem.is_some() { status.label } else { "" },
+        problem,
     );
     if let Some(binding) = binding.as_ref() {
         property_row(ui, "Technology", &binding.display_label());
         property_row(ui, "Model library", binding.model_library());
         let source = binding.root_source().display().to_string();
-        property_row(ui, "Root source", &source).on_hover_text(source.as_str());
-        let files = binding.source_closure().len();
-        let edges = binding.source_edges().len();
+        property_row(ui, "Model file", &source).on_hover_text(source.as_str());
         property_row(
             ui,
-            "Source closure",
-            &format!(
-                "{files} file{} \u{00b7} {edges} edge{}",
-                plural_suffix(files),
-                plural_suffix(edges)
-            ),
+            "Source files",
+            &binding.source_closure().len().to_string(),
         );
     } else {
         // An unset value is not a value: toning these faint keeps the reader
         // on the rows below that do report live state.
-        property_row_toned(ui, "Technology", "Not attached", t.color.text_faint);
-        property_row_toned(
-            ui,
-            "Model library",
-            "No executable model set",
-            t.color.text_faint,
-        );
-        property_row_toned(ui, "Root source", "No root source", t.color.text_faint);
-        property_row_toned(
-            ui,
-            "Source closure",
-            "No pinned source files",
-            t.color.text_faint,
-        );
+        property_row_toned(ui, "Technology", status.label, t.color.text_faint);
+        for unset in ["Model library", "Model file", "Source files"] {
+            property_row_toned(ui, unset, UNSET, t.color.text_faint);
+        }
     }
     if let Some(pin) = binding
         .as_ref()
@@ -394,11 +249,12 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         "Execution",
         crate::state::ExecutionTarget::current().label(),
     );
-    // A contract that validates says nothing: the sentence it used to paint
-    // described the checks RSpice ran, not anything the reader can act on.
-    if let Some(error) = contract.err() {
-        technology_contract_note(ui, &error);
+    // What the reader has to act on, in its own words; an attached
+    // technology that resolves, and a project that needs none, say nothing.
+    if let (Some(problem), Some(detail)) = (problem, status.detail.as_deref()) {
+        technology_note(ui, problem, detail);
     }
+    let model_paths = cx.commands.label(ids::PDK_SETTINGS);
     dependency_action_bar(ui, |ui| {
         if Button::new(TECHNOLOGY_SURFACE_ACTION)
             .accent()
@@ -407,7 +263,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         {
             open_technology_attachment_dialog(cx);
         }
-        if Button::new("Model paths\u{2026}").show(ui).clicked() {
+        if Button::new(model_paths).show(ui).clicked() {
             cx.execute(ids::PDK_SETTINGS);
         }
     });
@@ -422,9 +278,9 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     );
 }
 
-/// What stops the project's technology contract from validating, under a rule
-/// that separates it from the property list above and the buttons below.
-fn technology_contract_note(ui: &mut Ui, message: &str) {
+/// What stands in the way of the project's technology, under a rule that
+/// separates it from the property list above and the buttons below.
+fn technology_note(ui: &mut Ui, problem: Problem, message: &str) {
     let t = Tokens::get(ui.ctx());
     // `problem_line` carries the panel body's own 10 px inset, which is where
     // the property labels above it start, so the frame adds none of its own.
@@ -432,7 +288,7 @@ fn technology_contract_note(ui: &mut Ui, message: &str) {
         .inner_margin(Margin::symmetric(0, 7))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            problem_line(ui, Problem::Warning, message);
+            problem_line(ui, problem, message);
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
@@ -450,14 +306,28 @@ fn dependency_inventory(
 ) {
     let top = ui.cursor().top();
     ui.spacing_mut().item_spacing.y = 0.0;
-    workspace_table_panel_header(
-        ui,
-        "Resolved dependency ledger",
-        &format!("{} shown", view.visible.len()),
-        None,
-    );
+    // The count, out of the whole while the filter hides some; the mark of
+    // the worst status, so a library to act on is announced even when its row
+    // is scrolled away.
+    let total = view.rows.len();
+    let count = if view.filtered {
+        format!("{} of {total}", view.visible.len())
+    } else {
+        total.to_string()
+    };
+    let worst = view
+        .rows
+        .iter()
+        .map(|row| row.status.mark)
+        .max_by_key(|mark| match mark {
+            Tone::Neutral => 0,
+            Tone::Warn => 1,
+            Tone::Error => 2,
+        })
+        .and_then(Tone::problem);
+    workspace_table_panel_header(ui, "Libraries and model files", &count, worst);
     // The pane owns the column grid, not the unconstrained central panel: a
-    // ledger bound to the wrong width paints its status column underneath the
+    // table bound to the wrong width paints its status column underneath the
     // Inspector dock. Both layouts elide into the pane, so the columns are
     // always complete and the table never scrolls sideways.
     let width = pane_width.min(visible_workspace_width(ui)).max(1.0);
@@ -494,29 +364,25 @@ fn dependency_inventory(
             None,
         );
     }
-    if view.ledger.rows.is_empty() {
-        workspace_empty_table_row(
-            ui,
-            width,
-            "No design or executable model dependencies are currently registered.",
-        );
+    if view.rows.is_empty() {
+        workspace_empty_table_row(ui, width, "The project has no libraries.");
     } else if view.visible.is_empty() {
-        workspace_empty_table_row(ui, width, "No dependency matches the current filter.");
+        workspace_empty_table_row(ui, width, "No library matches the filter.");
     }
     let row_height = workspace_table_row_height(ui);
     let mut selected = None;
     let mut draw_rows = |ui: &mut Ui, range: std::ops::Range<usize>| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for &index in &view.visible[range] {
-            let row = &view.ledger.rows[index];
+            let row = &view.rows[index];
             if ledger_row(ui, cx, row, width, compact) {
-                selected = Some(row.identity.clone());
+                selected = Some(row.library.clone());
             }
         }
     };
     let count = view.visible.len();
     if count > 0 && pane_height > 0.0 {
-        // Beside the technology panel the ledger scrolls within its pane,
+        // Beside the technology panel the table scrolls within its pane,
         // above an action bar that stays in view.
         ScrollArea::vertical()
             .id_salt("workbench.project.dependencies.ledger")
@@ -524,7 +390,7 @@ fn dependency_inventory(
             .max_height(dependency_panel_free_height(ui, pane_height, top).max(row_height))
             .show_rows(ui, row_height, count, draw_rows);
     } else if count > 0 {
-        // Stacked under it, the ledger is part of the page's own scroll: a
+        // Stacked under it, the table is part of the page's own scroll: a
         // second scroll inside that one would trap a touch drag. It takes the
         // height of every row and lays out only those in the page's view.
         let (rect, _) =
@@ -545,8 +411,8 @@ fn dependency_inventory(
             );
         }
     }
-    if let Some(identity) = selected {
-        cx.state.project_dependency_selection = Some(identity);
+    if let Some(library) = selected {
+        cx.state.project_dependency_selection = Some(library);
     }
     if compact {
         ledger_grid_floor(ui, width, pane_height, top, LEDGER_COMPACT_FRACTIONS);
@@ -555,12 +421,12 @@ fn dependency_inventory(
     }
     dependency_action_bar(ui, |ui| {
         if Button::new("Export manifest\u{2026}").show(ui).clicked() {
-            export_dependency_manifest(cx);
+            export_dependency_manifest(cx, &view.rows);
         }
     });
 }
 
-/// One ledger row, and whether the reader clicked it.
+/// One table row, and whether the reader clicked it.
 fn ledger_row(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
@@ -569,17 +435,16 @@ fn ledger_row(
     compact: bool,
 ) -> bool {
     let kind = WorkspaceRowKind::body(
-        cx.state.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
+        cx.state.project_dependency_selection.as_ref() == Some(&row.library),
     );
-    let status = status_label(&row.status);
-    let problem = status_problem(&row.status);
+    let problem = row.status.mark.problem();
     let response = if compact {
         let cells = [
-            row.identity.as_str(),
-            row.resource_type.as_str(),
+            row.library.name.as_str(),
+            row.library.kind.label(),
             row.version.as_str(),
             row.source.as_str(),
-            status.as_str(),
+            row.status.label,
         ];
         workspace_table_row(
             ui,
@@ -594,12 +459,12 @@ fn ledger_row(
         .0
     } else {
         let cells = [
-            row.identity.as_str(),
-            row.resource_type.as_str(),
+            row.library.name.as_str(),
+            row.library.kind.label(),
             row.version.as_str(),
             row.source.as_str(),
             row.digest.as_str(),
-            status.as_str(),
+            row.status.label,
         ];
         workspace_table_row(
             ui,
@@ -613,17 +478,16 @@ fn ledger_row(
         )
         .0
     };
-    // Authority is the one field with no column of its own; the row still
-    // carries it rather than spending a column on a value that repeats.
-    response
-        .on_hover_text(format!(
-            "{}\nAuthority: {}\nSource: {}",
-            row.identity, row.authority, row.source
-        ))
-        .clicked()
+    // What the status has to add has no column of its own; the row carries
+    // it, as the inspector does under the status.
+    let hover = match row.status.detail.as_deref() {
+        Some(detail) => format!("{}\n{}", row.library.name, detail),
+        None => format!("{}\n{}", row.library.name, row.source),
+    };
+    response.on_hover_text(hover).clicked()
 }
 
-/// Carry the ledger's column rules down to the action bar.
+/// Carry the table's column rules down to the action bar.
 ///
 /// A table that simply stops leaves its pane looking half-drawn; continuing
 /// the grid says the columns are complete and the rows have run out.
@@ -648,150 +512,18 @@ fn ledger_grid_floor<const N: usize>(
     }
 }
 
-fn dependency_filter(cx: &Cx<'_, ProjectFeature>) -> String {
-    cx.state
-        .project_dependency_filter
-        .trim()
-        .to_ascii_lowercase()
-}
-
-/// Whether a resource is resolved against live authority, as opposed to
-/// awaiting review.
-fn row_is_resolved(row: &DependencyRow) -> bool {
-    matches!(row.status.as_str(), "accepted" | "available" | "embedded")
-}
-
-/// The mark a resource's status earns, or none.
-///
-/// A resource that resolved is the ordinary resource and reads as one. A
-/// resource the project holds only by catalog entry, or in any other state,
-/// is one the reader has to look at before a run depends on it.
-fn status_problem(status: &str) -> Option<Problem> {
-    match status {
-        "accepted" | "available" | "embedded" | "catalog only" => None,
-        _ => Some(Problem::Warning),
-    }
-}
-
-/// A status reads as a verdict in a column of verdicts, so it is capitalized
-/// like one. The serialized manifest keeps the lowercase key.
-fn status_label(status: &str) -> String {
-    let mut characters = status.chars();
-    characters.next().map_or_else(String::new, |first| {
-        first.to_uppercase().collect::<String>() + characters.as_str()
-    })
-}
-
-/// The columns of one ledger row holding a placeholder rather than a value.
+/// The columns of one table row holding a placeholder rather than a value.
 /// They take the faint tone, so an absent value never competes with a real
 /// one down the column.
 fn unset_columns<const N: usize>(cells: &[&str; N]) -> Vec<usize> {
     cells
         .iter()
         .enumerate()
-        .filter_map(|(index, cell)| (*cell == DEPENDENCY_UNSET).then_some(index))
+        .filter_map(|(index, cell)| (*cell == UNSET).then_some(index))
         .collect()
 }
 
-fn dependency_rows(cx: &Cx<'_, ProjectFeature>) -> Vec<DependencyRow> {
-    let mut rows = Vec::new();
-    for library in cx.model.library_manager.libraries_sorted() {
-        rows.push(DependencyRow {
-            identity: library.name.clone(),
-            resource_type: "Design library".to_owned(),
-            authority: if library.read_only {
-                "Read only".to_owned()
-            } else {
-                "Project writable".to_owned()
-            },
-            version: nonempty_or_dash(&library.technology),
-            source: library.path.as_ref().map_or_else(
-                || "Embedded project data".to_owned(),
-                |path| display_path(path),
-            ),
-            digest: "—".to_owned(),
-            status: if library.path.is_some() {
-                "available".to_owned()
-            } else {
-                "embedded".to_owned()
-            },
-        });
-    }
-    for library in cx.model.model_library_manager.libraries_sorted() {
-        let authority = match library.source_authority {
-            ModelSourceAuthority::BuiltIn => "Built-in catalog",
-            ModelSourceAuthority::External => "External source",
-            ModelSourceAuthority::RetainedImport { .. } => "Retained imported source",
-            ModelSourceAuthority::ProjectOwned { .. } => "Project owned",
-        };
-        let status = if !library.source_authority.has_execution_source() {
-            "catalog only"
-        } else if library.source_closure.is_empty() {
-            "source not pinned"
-        } else if library.source_contents.len() != library.source_closure.len() {
-            "retained bytes incomplete"
-        } else {
-            "accepted"
-        };
-        let digest = library
-            .source_closure
-            .iter()
-            .find(|pin| library.root_path.as_ref() == Some(&pin.path))
-            .or_else(|| library.source_closure.first())
-            .map_or_else(
-                || "—".to_owned(),
-                |pin| short_identity(&pin.digest.to_string()),
-            );
-        rows.push(DependencyRow {
-            identity: library.name.clone(),
-            resource_type: "Model library".to_owned(),
-            authority: authority.to_owned(),
-            version: nonempty_or_dash(&library.version),
-            source: library.root_path.as_ref().map_or_else(
-                || "No executable source".to_owned(),
-                |path| display_path(path),
-            ),
-            digest,
-            status: status.to_owned(),
-        });
-    }
-    rows.sort_by(|left, right| {
-        left.resource_type
-            .cmp(&right.resource_type)
-            .then_with(|| left.identity.cmp(&right.identity))
-    });
-    rows
-}
-
-fn row_matches(row: &DependencyRow, filter: &str) -> bool {
-    let filter = filter.to_ascii_lowercase();
-    filter.is_empty()
-        || [
-            &row.identity,
-            &row.resource_type,
-            &row.authority,
-            &row.version,
-            &row.source,
-            &row.digest,
-            &row.status,
-        ]
-        .iter()
-        .any(|value| value.to_ascii_lowercase().contains(&filter))
-}
-
-fn nonempty_or_dash(value: &str) -> String {
-    if value.trim().is_empty() {
-        "—".to_owned()
-    } else {
-        value.to_owned()
-    }
-}
-
-fn display_path(path: &std::path::Path) -> String {
-    path.display().to_string()
-}
-
-fn dependency_manifest(cx: &Cx<'_, ProjectFeature>) -> DependencyManifest {
+fn dependency_manifest(cx: &Cx<'_, ProjectFeature>, rows: &[DependencyRow]) -> DependencyManifest {
     let technology = cx
         .model
         .workspace
@@ -801,21 +533,31 @@ fn dependency_manifest(cx: &Cx<'_, ProjectFeature>) -> DependencyManifest {
         .map(|binding| TechnologyManifest {
             label: binding.display_label(),
             model_library: binding.model_library().to_owned(),
-            root_source: binding.root_source().display().to_string(),
-            source_count: binding.source_closure().len(),
-            dependency_edge_count: binding.source_edges().len(),
+            model_file: binding.root_source().display().to_string(),
+            source_files: binding.source_closure().len(),
         });
     DependencyManifest {
-        schema_version: 1,
+        schema_version: 2,
         project_id: cx.model.workspace.content.project.id().to_string(),
         project_revision: cx.model.workspace.content.project.revision().get(),
         technology,
-        resources: dependency_rows(cx),
+        libraries: rows
+            .iter()
+            .map(|row| ManifestLibrary {
+                name: row.library.name.clone(),
+                library_type: row.library.kind.label(),
+                version: row.version.clone(),
+                source: row.source.clone(),
+                digest: row.digest.clone(),
+                status: row.status.label,
+                detail: row.status.detail.clone(),
+            })
+            .collect(),
     }
 }
 
-fn export_dependency_manifest(cx: &mut Cx<'_, ProjectFeature>) {
-    let contents = match serde_json::to_vec_pretty(&dependency_manifest(cx)) {
+fn export_dependency_manifest(cx: &mut Cx<'_, ProjectFeature>, rows: &[DependencyRow]) {
+    let contents = match serde_json::to_vec_pretty(&dependency_manifest(cx, rows)) {
         Ok(contents) => contents,
         Err(error) => {
             cx.model.report_failure(
@@ -848,27 +590,5 @@ fn export_dependency_manifest(cx: &mut Cx<'_, ProjectFeature>) {
         Ok(Some(exported)) => cx.wb.prompt(exported),
         Ok(None) => {}
         Err(error) => cx.model.report_failure("Manifest export failed", error),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dependency_filter_matches_every_visible_field() {
-        let row = DependencyRow {
-            identity: "models_tt".to_owned(),
-            resource_type: "Model library".to_owned(),
-            authority: "Project owned".to_owned(),
-            version: "2.1".to_owned(),
-            source: "/models/tt.lib".to_owned(),
-            digest: "12ab".to_owned(),
-            status: "accepted".to_owned(),
-        };
-        assert!(row_matches(&row, "project"));
-        assert!(row_matches(&row, "tt.lib"));
-        assert!(row_matches(&row, "12AB"));
-        assert!(!row_matches(&row, "missing"));
     }
 }

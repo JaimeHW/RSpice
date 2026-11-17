@@ -831,8 +831,6 @@ mod tests {
         workbench.inspector_width_custom = true;
         workbench.split_with_results = true;
         state.project.project_library_filter = "afe".to_owned();
-        state.project.project_dependency_filter = "pdk".to_owned();
-        state.project.project_dependency_selection = Some("models/afe.lib".to_owned());
         state.simulate.selected_specification = Some("gain".to_owned());
         state.simulate.selected_design_variable = Some("rload".to_owned());
         state.simulate.selected_saved_output = Some("vout".to_owned());

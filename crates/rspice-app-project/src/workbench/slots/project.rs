@@ -183,8 +183,11 @@ pub struct ProjectState {
     /// They affect presentation only and never participate in project
     /// revisioning, execution snapshots, or recovery checkpoints.
     pub project_library_filter: String,
-    pub project_dependency_filter: String,
-    pub project_dependency_selection: Option<String>,
+    /// The library the Dependencies page's rail and inspector have selected.
+    /// It belongs to the open project, so it is neither saved in the session
+    /// nor kept when the project is replaced; the page filters by the
+    /// workspace navigator's filter.
+    pub project_dependency_selection: Option<crate::workbench::project::DependencyLibrary>,
     pub project_checkpoint_selection: Option<String>,
     /// Device-local projection retained by the Library/Cellview specialist
     /// route. Authoritative library, cellview, symbol, and form records remain
@@ -205,11 +208,12 @@ impl ProjectState {
     }
 
     /// The open project is being replaced or closed: a Check and save review
-    /// and the Configuration page's selection belong to the project going
-    /// away.
+    /// and the Configuration and Dependencies pages' selections belong to the
+    /// project going away.
     pub fn on_project_changed(&mut self) {
         self.check_and_save.close();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
+        self.project_dependency_selection = None;
     }
 }

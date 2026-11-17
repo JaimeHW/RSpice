@@ -341,9 +341,10 @@ fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
     }
 }
 
-/// Model paths… on the Dependencies page is answered as the page returns,
-/// inside the stage's step of the frame: PDK settings is open before the
-/// frame's dialogs draw, so it shows in the frame it was asked for in.
+/// The Dependencies page offers PDK settings under the command's own name,
+/// and the press is answered as the page returns, inside the stage's step
+/// of the frame: PDK settings is open before the frame's dialogs draw, so
+/// it shows in the frame it was asked for in.
 #[test]
 fn model_paths_opens_pdk_settings_before_the_frame_draws_its_dialogs() {
     let pdk_settings =
@@ -351,7 +352,8 @@ fn model_paths_opens_pdk_settings_before_the_frame_draws_its_dialogs() {
     let (ctx, mut app, settled) = settled_on(ProjectPage::Dependencies);
     assert!(!features::dialog_open(&app.state, pdk_settings));
 
-    click_announced(&ctx, &mut app, settled, "Model paths\u{2026}");
+    let label = crate::workbench::commands::vocabulary::command_registry().label(ids::PDK_SETTINGS);
+    click_announced(&ctx, &mut app, settled, label);
 
     assert!(features::dialog_open(&app.state, pdk_settings));
 }

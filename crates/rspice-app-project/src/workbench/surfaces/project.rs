@@ -88,8 +88,6 @@ fn visible_workspace_height(ui: &Ui) -> f32 {
         .max(1.0)
 }
 
-#[cfg(test)]
-const TECHNOLOGY_SURFACE_TITLE: &str = "Model-library technology contract";
 const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
 const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
 const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach binding";
@@ -901,25 +899,9 @@ fn muted(ui: &mut Ui, text: &str) {
 mod tests {
     use super::*;
 
-    fn assert_close(actual: f32, expected: f32) {
-        assert!((actual - expected).abs() <= 0.001, "{actual} != {expected}");
-    }
-
-    #[test]
-    fn workspace_table_fractions_are_complete() {
-        assert_close(
-            [0.12_f32, 0.15, 0.19, 0.10, 0.11, 0.10, 0.23]
-                .into_iter()
-                .sum(),
-            1.0,
-        );
-        assert_close([0.24_f32, 0.25, 0.17, 0.21, 0.13].into_iter().sum(), 1.0);
-    }
-
     #[test]
     fn technology_copy_does_not_claim_physical_pdk_qualification() {
         for copy in [
-            TECHNOLOGY_SURFACE_TITLE,
             TECHNOLOGY_SURFACE_ACTION,
             TECHNOLOGY_DIALOG_TITLE,
             TECHNOLOGY_DIALOG_PRIMARY,
