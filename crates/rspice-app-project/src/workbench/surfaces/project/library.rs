@@ -11,13 +11,14 @@ use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
+use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
+use crate::workbench::slots::ProjectState;
 
 pub mod builtin_models;
 pub mod columns;
 
+use columns::column_head_height;
 pub use columns::{BrowserColumn, LibraryBrowserState};
-use columns::{cell_rows, column_head_height};
 
 const MIN_BROWSER_WIDTH: f32 = 680.0;
 const USAGE_REPORT_ID: &str = "workbench.project.library.where-used";
@@ -93,6 +94,10 @@ thread_local! {
 /// intent is carried out before the detail draws. Then the reports.
 pub fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let ctx = ui.ctx().clone();
+    // What a command asked of the page since it last drew.
+    if let Some(intent) = cx.state.library_browser.queued.take() {
+        apply_library_intent(&ctx, cx, intent);
+    }
     let (intent, source_height) = library_browser(ui, cx);
     if let Some(intent) = intent {
         apply_library_intent(&ctx, cx, intent);
@@ -208,7 +213,7 @@ fn row_menu(
     if asked.is_none() && !egui::Popup::is_id_open(ctx, id) {
         return None;
     }
-    let target = Target::of(ctx, cx);
+    let target = Target::of(cx.model, &cx.state.project_library_filter);
     let builtin = cx.state.builtin_models.open;
     let mut intent = None;
     egui::Popup::new(
@@ -530,20 +535,20 @@ struct Target {
 }
 
 impl Target {
-    fn of(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Self {
-        let manager = &cx.model.library_manager;
-        let cell_shown = selected_cell_shown(ctx, cx);
+    fn of(model: &Model, filter: &str) -> Self {
+        let manager = &model.library_manager;
+        let cell_shown = selected_cell_shown(model, filter);
         let cell = selected_cell(manager).filter(|_| cell_shown);
         Self {
             top_refusal: cell
                 .as_ref()
-                .and_then(|(library, cell, _)| project_top_refusal(cx.model, library, cell)),
+                .and_then(|(library, cell, _)| project_top_refusal(model, library, cell)),
             library: manager
                 .current_library()
                 .map(|library| (library.name.clone(), library.read_only)),
             symbol: cell
                 .as_ref()
-                .and_then(|(library, cell, _)| symbol_view(cx.model, library, cell)),
+                .and_then(|(library, cell, _)| symbol_view(model, library, cell)),
             cell,
             view: selected_view(manager)
                 .filter(|_| cell_shown)
@@ -661,7 +666,7 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
 /// width the controls leave, then Library actions, Cell actions and Open.
 fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
-    let target = Target::of(ui.ctx(), cx);
+    let target = Target::of(cx.model, &cx.state.project_library_filter);
     let mut intent = None;
     let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
         ui.set_min_height(t.metrics.ctl_h);
@@ -845,17 +850,11 @@ fn symbol_view(model: &Model, library: &str, cell: &str) -> Option<CellViewRef> 
 
 /// Whether the selected cell is one the Cell column lists: a filter can
 /// hide it, and then the page does not act on it.
-fn selected_cell_shown(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> bool {
-    let manager = &cx.model.library_manager;
-    let Some(cell) = manager.current_cell() else {
-        return false;
-    };
-    let filter = &cx.state.project_library_filter;
-    filter.trim().is_empty()
-        || cell_rows(ctx, manager, filter)
-            .rows
-            .iter()
-            .any(|row| row.name == cell.name)
+fn selected_cell_shown(model: &Model, filter: &str) -> bool {
+    model
+        .library_manager
+        .current_cell()
+        .is_some_and(|cell| columns::cell_matches(cell, &filter.trim().to_ascii_lowercase()))
 }
 
 fn selected_cell(manager: &crate::state::LibraryManager) -> Option<(String, String, bool)> {
@@ -1037,6 +1036,124 @@ fn project_top_refusal(model: &Model, library: &str, cell: &str) -> Option<Strin
         return Some("The project is open read-only.".to_owned());
     }
     model.project_top_refusal(library, cell)
+}
+
+/// What a library command asks of the page, or why it cannot run now.
+/// Rename, delete, copy and where used act on the row the page's keyboard
+/// last worked in, so they need the Library page in front; publish, restore
+/// and the audit history act on the project's libraries from anywhere.
+pub fn command_intent(
+    command: LibraryCommand,
+    model: &Model,
+    state: &ProjectState,
+    page_in_front: bool,
+    project_open: bool,
+) -> Result<LibraryIntent, &'static str> {
+    let readiness = super::library_publication::PublicationReadiness::of(model, project_open);
+    let target = Target::of(model, &state.project_library_filter);
+    let builtin = &state.builtin_models;
+    let column = state.library_browser.active;
+    let writable = |read_only: bool, intent: LibraryIntent| {
+        if read_only {
+            Err("the library is read-only")
+        } else {
+            Ok(intent)
+        }
+    };
+    match command {
+        LibraryCommand::Publish => readiness
+            .publish_blocker()
+            .map_or(Ok(LibraryIntent::PublishProject), Err),
+        LibraryCommand::Restore => readiness
+            .restore_blocker()
+            .map_or(Ok(LibraryIntent::RestoreFromPublication), Err),
+        LibraryCommand::AuditHistory if project_open => Ok(LibraryIntent::ShowAuditHistory),
+        LibraryCommand::AuditHistory => Err("no project is open"),
+        _ if !page_in_front => Err("open the Library page"),
+        LibraryCommand::CopyCell if builtin.open => {
+            let chosen = builtin_models::selected_model(builtin).ok_or("select a model")?;
+            if target.writable_library_available {
+                Ok(LibraryIntent::BuiltinModels(
+                    builtin_models::BuiltinModelsIntent::CopyModel(chosen.registry_name),
+                ))
+            } else {
+                Err("every library is read-only")
+            }
+        }
+        _ if builtin.open => Err("the built-in library is read-only"),
+        LibraryCommand::CopyCell => {
+            let (library, cell, _) = target.cell.ok_or("select a cell")?;
+            if target.writable_library_available {
+                Ok(LibraryIntent::CopyCell { library, cell })
+            } else {
+                Err("every library is read-only")
+            }
+        }
+        LibraryCommand::WhereUsed => target
+            .view
+            .map(|(reference, _, _)| LibraryIntent::ReportUsage(reference))
+            .ok_or("select a view"),
+        LibraryCommand::Rename | LibraryCommand::Delete => {
+            let rename = command == LibraryCommand::Rename;
+            match column {
+                BrowserColumn::Library => {
+                    let (library, read_only) = target.library.ok_or("select a library")?;
+                    writable(
+                        read_only,
+                        if rename {
+                            LibraryIntent::RenameLibrary(library)
+                        } else {
+                            LibraryIntent::DeleteLibrary(library)
+                        },
+                    )
+                }
+                BrowserColumn::Cell => {
+                    let (library, cell, read_only) = target.cell.ok_or("select a cell")?;
+                    writable(
+                        read_only,
+                        if rename {
+                            LibraryIntent::RenameCell { library, cell }
+                        } else {
+                            LibraryIntent::DeleteCell { library, cell }
+                        },
+                    )
+                }
+                BrowserColumn::View => {
+                    let read_only = target.read_only();
+                    let (reference, _, _) = target.view.ok_or("select a view")?;
+                    writable(
+                        read_only,
+                        if rename {
+                            LibraryIntent::RenameView(reference)
+                        } else {
+                            LibraryIntent::DeleteView(reference)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// Run a library command: the Library page comes to the front and carries
+/// out what the command asks as it next draws, or the status bar says why
+/// the command cannot run.
+pub fn run_command(cx: &mut Cx<'_, ProjectFeature>, command: LibraryCommand) {
+    let page_in_front = library_page_in_front(cx.wb.workspace, cx.state);
+    let project_open = cx.platform.project_lifecycle.is_open();
+    match command_intent(command, cx.model, cx.state, page_in_front, project_open) {
+        Ok(intent) => {
+            cx.wb.activate(Workspace::Project);
+            cx.state.project_page = ProjectPage::Library;
+            cx.state.library_browser.queued = Some(intent);
+        }
+        Err(reason) => cx.wb.prompt(reason),
+    }
+}
+
+/// Whether the Library page is the one in front.
+pub fn library_page_in_front(workspace: Workspace, state: &ProjectState) -> bool {
+    workspace == Workspace::Project && state.project_page == ProjectPage::Library
 }
 
 fn library_view_usage(model: &Model, reference: &CellViewRef) -> Vec<(String, String)> {

@@ -1,15 +1,18 @@
 //! The Library page worked from the keyboard alone: the arrows and type-ahead
 //! move within a column, Left and Right between the columns, Enter opens, F2
-//! renames, Delete reviews a deletion and Shift+F10 opens a row's menu.
+//! renames, Delete reviews a deletion and Shift+F10 opens a row's menu; the
+//! page's operations are commands the palette runs.
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
-use super::super::replay::{Replay, only};
+use super::super::replay::{PRIMARY, Replay, only};
 use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::project::commands::{LibraryCommand, ProjectCommand};
 use rspice_app_project::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectPage};
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
 /// The Library page over `work`, whose `amp` holds a schematic and a symbol
 /// and `bias` a schematic, beside the read-only `ref`; `amp`'s schematic is
@@ -153,4 +156,50 @@ fn shift_f10_opens_the_rows_menu_with_the_bands_items() {
     let menu = replay.key(Key::F10, Modifiers::SHIFT);
     only(&menu, "Where used\u{2026}", Role::Button);
     only(&menu, "Rename view\u{2026}", Role::Button);
+}
+
+/// The palette from the keyboard: opened, `label` typed into its search and
+/// the row it finds run with Enter.
+fn run_from_palette(replay: &mut Replay, label: &str) {
+    replay.key(Key::K, PRIMARY);
+    replay.type_text(label);
+    press(replay, Key::Enter);
+}
+
+#[test]
+fn the_library_operations_run_from_the_command_palette() {
+    let mut replay = library_page();
+    run_from_palette(&mut replay, "Rename library, cell or view");
+    let project = &replay.app.state.project;
+    assert!(project.rename_cell_dialog, "the cell the keyboard is on");
+    assert_eq!(project.rename_cell_current, "amp");
+
+    let mut replay = library_page();
+    press(&mut replay, Key::ArrowRight);
+    run_from_palette(&mut replay, "Delete library, cell or view");
+    assert_eq!(
+        replay.app.state.project.library_deletion_review.target,
+        Some(LibraryDeletionTarget::View {
+            library: "work".to_owned(),
+            cell: "amp".to_owned(),
+            view: "schematic".to_owned(),
+        })
+    );
+
+    // Away from the page, what acts on its rows waits for it; the audit
+    // history acts on the project's libraries and opens the page.
+    let mut replay = library_page();
+    replay.app.state.project.project_page = ProjectPage::Overview;
+    let rename = ProjectCommand::Library(LibraryCommand::Rename).key();
+    assert_eq!(
+        replay.app.command_availability(rename),
+        CommandAvailability::Disabled("open the Library page")
+    );
+    run_from_palette(&mut replay, "Library audit history");
+    assert_eq!(replay.app.state.project.project_page, ProjectPage::Library);
+    let shown = replay.frames(Vec::new());
+    assert!(
+        shown.iter().any(|control| control.label == "Audit history"),
+        "the audit history opens: {shown:?}"
+    );
 }

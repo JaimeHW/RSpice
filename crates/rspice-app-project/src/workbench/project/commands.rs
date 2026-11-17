@@ -1,7 +1,7 @@
 //! The commands the project feature declares, as the registry lists them:
 //! the project launcher, the project's file commands, its cells and views,
-//! the Project workspace's pages, and the design's sheets, revision history
-//! and check-and-save.
+//! the Project workspace's pages, the Library page's operations, and the
+//! design's sheets, revision history and check-and-save.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -52,6 +52,34 @@ pub enum ProjectCommand {
     /// The open project's name, description, top cell and include paths.
     Properties,
     CheckAndSave,
+    /// One of the Library page's operations.
+    Library(LibraryCommand),
+}
+
+/// The Library page's operations, as commands: rename, copy, delete and
+/// where used act on the row the page's keyboard last worked in; publish,
+/// restore and the audit history on the project's libraries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryCommand {
+    Rename,
+    CopyCell,
+    Delete,
+    WhereUsed,
+    Publish,
+    Restore,
+    AuditHistory,
+}
+
+impl LibraryCommand {
+    pub const ALL: [Self; 7] = [
+        Self::Rename,
+        Self::CopyCell,
+        Self::Delete,
+        Self::WhereUsed,
+        Self::Publish,
+        Self::Restore,
+        Self::AuditHistory,
+    ];
 }
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -130,7 +158,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 29] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -153,6 +181,13 @@ impl ProjectCommand {
         Self::RevisionHistory,
         Self::Properties,
         Self::CheckAndSave,
+        Self::Library(LibraryCommand::Rename),
+        Self::Library(LibraryCommand::CopyCell),
+        Self::Library(LibraryCommand::Delete),
+        Self::Library(LibraryCommand::WhereUsed),
+        Self::Library(LibraryCommand::Publish),
+        Self::Library(LibraryCommand::Restore),
+        Self::Library(LibraryCommand::AuditHistory),
     ];
 
     /// The key a shortcut profile names this command by.
@@ -183,6 +218,15 @@ impl ProjectCommand {
             Self::RevisionHistory => CommandKey::new("revision-history"),
             Self::Properties => CommandKey::new("project-properties"),
             Self::CheckAndSave => CommandKey::new("check-and-save"),
+            Self::Library(LibraryCommand::Rename) => CommandKey::new("library-rename"),
+            Self::Library(LibraryCommand::CopyCell) => CommandKey::new("library-copy-cell"),
+            Self::Library(LibraryCommand::Delete) => CommandKey::new("library-delete"),
+            Self::Library(LibraryCommand::WhereUsed) => CommandKey::new("library-where-used"),
+            Self::Library(LibraryCommand::Publish) => CommandKey::new("publish-project"),
+            Self::Library(LibraryCommand::Restore) => {
+                CommandKey::new("restore-project-from-publication")
+            }
+            Self::Library(LibraryCommand::AuditHistory) => CommandKey::new("library-audit-history"),
         }
     }
 
@@ -266,6 +310,21 @@ impl ProjectCommand {
                 edits,
                 design,
                 CHECK_AND_SAVE,
+            ),
+            Self::Library(command) => (
+                match command {
+                    LibraryCommand::Rename => "Rename library, cell or view\u{2026}",
+                    LibraryCommand::CopyCell => "Copy cell\u{2026}",
+                    LibraryCommand::Delete => "Delete library, cell or view\u{2026}",
+                    LibraryCommand::WhereUsed => "Where used\u{2026}",
+                    LibraryCommand::Publish => "Publish project\u{2026}",
+                    LibraryCommand::Restore => "Restore project from publication\u{2026}",
+                    LibraryCommand::AuditHistory => "Library audit history\u{2026}",
+                },
+                "Library",
+                open,
+                global,
+                NONE,
             ),
         };
         CommandSpec {

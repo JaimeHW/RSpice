@@ -19,7 +19,7 @@ use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
-use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::commands::{LibraryCommand, ProjectCommand};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_services::io::NetlistFormat;
@@ -391,6 +391,13 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Page(ProjectPage::Configuration).key(),
     ProjectCommand::Page(ProjectPage::Dependencies).key(),
     ProjectCommand::Page(ProjectPage::Recovery).key(),
+    ProjectCommand::Library(LibraryCommand::Rename).key(),
+    ProjectCommand::Library(LibraryCommand::CopyCell).key(),
+    ProjectCommand::Library(LibraryCommand::Delete).key(),
+    ProjectCommand::Library(LibraryCommand::WhereUsed).key(),
+    ProjectCommand::Library(LibraryCommand::Publish).key(),
+    ProjectCommand::Library(LibraryCommand::Restore).key(),
+    ProjectCommand::Library(LibraryCommand::AuditHistory).key(),
     SimulateCommand::Page(SimulationPage::Analyses).key(),
     SimulateCommand::Page(SimulationPage::Excitations).key(),
     SimulateCommand::Page(SimulationPage::Variables).key(),

@@ -589,7 +589,8 @@ impl CommandSet for ProjectCommand {
     /// the pages run whenever the shell lets them through. Save needs a
     /// project or a standalone schematic to write, Save all unsaved project
     /// work, New view a cell in a writable library, and the two design
-    /// commands that edit the drawing an editable schematic in front.
+    /// commands that edit the drawing an editable schematic in front. The
+    /// Library page's operations run when the page could carry them out.
     fn availability(self, reads: &Reads<'_, ProjectFeature>) -> CommandAvailability {
         let open = reads.platform.project_lifecycle.is_open();
         let (enabled, reason) = match self {
@@ -633,6 +634,14 @@ impl CommandSet for ProjectCommand {
                 !reads.model.schematic_edit_read_only(),
                 "the active schematic is read-only",
             ),
+            Self::Library(command) => {
+                use crate::workbench::surfaces::project::library;
+                let in_front = library::library_page_in_front(reads.wb.workspace, reads.state);
+                match library::command_intent(command, reads.model, reads.state, in_front, open) {
+                    Ok(_) => (true, ""),
+                    Err(reason) => (false, reason),
+                }
+            }
             Self::ProjectLauncher
             | Self::OpenProject
             | Self::NewProject
@@ -708,6 +717,9 @@ impl CommandSet for ProjectCommand {
                 cx.wb.outbox.push(ProjectFileAction::Save);
             }
             Self::CheckAndSave => open_check_and_save_dialog(&mut check_and_save_parts(cx)),
+            Self::Library(command) => {
+                crate::workbench::surfaces::project::library::run_command(cx, command);
+            }
         }
     }
 }

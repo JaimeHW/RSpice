@@ -58,6 +58,8 @@ pub struct LibraryBrowserState {
     pub(super) drawn: Option<u64>,
     /// The column that last held the keyboard.
     pub active: BrowserColumn,
+    /// What a command asked of the page, carried out as the page next draws.
+    pub(super) queued: Option<LibraryIntent>,
     /// The row menu a column asked for this frame, and where.
     pub(super) asked_menu: Option<(BrowserColumn, egui::Pos2)>,
 }
@@ -170,6 +172,18 @@ pub(super) fn library_rows(ctx: &Context, manager: &LibraryManager) -> Listed<Li
     )
 }
 
+/// Whether `query`, lower-cased and trimmed, finds `cell`: in its name, its
+/// description or one of its views' names. An empty query finds every cell.
+pub(super) fn cell_matches(cell: &crate::state::Cell, query: &str) -> bool {
+    query.is_empty()
+        || cell.name.to_ascii_lowercase().contains(query)
+        || cell.description.to_ascii_lowercase().contains(query)
+        || cell
+            .views
+            .values()
+            .any(|view| view.name.to_ascii_lowercase().contains(query))
+}
+
 /// The selected library's cells, by name, that `filter` lets through: a
 /// cell whose name, description or one of whose views' names holds it.
 pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, filter: &str) -> Listed<CellRow> {
@@ -190,15 +204,7 @@ pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, filter: &str) -
                     library
                         .cells_sorted()
                         .into_iter()
-                        .filter(|cell| {
-                            query.is_empty()
-                                || cell.name.to_ascii_lowercase().contains(&query)
-                                || cell.description.to_ascii_lowercase().contains(&query)
-                                || cell
-                                    .views
-                                    .values()
-                                    .any(|view| view.name.to_ascii_lowercase().contains(&query))
-                        })
+                        .filter(|cell| cell_matches(cell, &query))
                         .map(|cell| CellRow {
                             name: cell.name.clone(),
                             views: cell.view_count().to_string(),
@@ -503,7 +509,7 @@ pub(super) fn view_column(
     let manager = &cx.model.library_manager;
     // A cell the filter hides is not the one the page acts on: its views
     // are not listed and the band offers nothing for it.
-    let cell_shown = selected_cell_shown(ui.ctx(), cx);
+    let cell_shown = selected_cell_shown(cx.model, &cx.state.project_library_filter);
     let views = if cell_shown {
         view_rows(ui.ctx(), manager)
     } else {
