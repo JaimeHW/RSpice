@@ -850,7 +850,7 @@ fn revert_dialog(
         "The edits not applied to {name} are dropped, and the page shows {name} as the project \
          holds it. This cannot be undone."
     );
-    Dialog::new(&format!("Revert the edits to {name}?"), "Revert")
+    Dialog::new(format!("Revert the edits to {name}?"), "Revert")
         .description("Drop the edits not applied to a configuration.")
         .size(DialogSize::Confirmation)
         .destructive()

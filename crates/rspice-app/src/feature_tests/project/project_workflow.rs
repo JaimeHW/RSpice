@@ -2183,7 +2183,7 @@ fn close_project_asks_about_configuration_edits_before_its_review() {
         .project
         .configuration
         .edit(&catalog, fixture.configuration, |definition| {
-            definition.stop_views = vec!["spice".to_owned()];
+            definition.stop_views = vec!["schematic".to_owned()];
         });
     assert!(state.project.configuration.is_dirty(&catalog));
 
