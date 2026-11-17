@@ -572,29 +572,20 @@ fn the_plain_find_command_leaves_the_navigator_filter_alone() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
-    for by_key in [false, true] {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.activate(Workspace::Design);
-        app.state.design.show_component_shelf();
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.design.show_component_shelf();
 
-        if by_key {
-            app.execute_command_key(ids::FIND_IN_DESIGN);
-        } else {
-            app.execute_command_key(ids::FIND_IN_DESIGN);
-        }
+    app.execute_command_key(ids::FIND_IN_DESIGN);
 
-        assert!(
-            !app.state.design.component_shelf_shown(),
-            "by key: {by_key}"
-        );
-        assert!(
-            app.state
-                .workbench
-                .outbox
-                .peek::<FocusNavigatorSearch>()
-                .is_some()
-        );
-    }
+    assert!(!app.state.design.component_shelf_shown());
+    assert!(
+        app.state
+            .workbench
+            .outbox
+            .peek::<FocusNavigatorSearch>()
+            .is_some()
+    );
 }
 
 /// Give the workspace an active configuration that cannot resolve: its
