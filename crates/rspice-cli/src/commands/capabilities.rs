@@ -13,6 +13,9 @@ use rspice_core::execution::{
 };
 use serde_json::{Value, json};
 
+#[cfg(test)]
+mod readme_gaps;
+
 const SCOPE: &str = "Frontend routes and representations in this build; individual circuits still require admission. This report is not numerical or platform qualification.";
 
 pub fn execute(args: CapabilitiesArgs, quiet: bool) -> Result<(), CliError> {

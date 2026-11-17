@@ -844,19 +844,20 @@ family it maps to, followed by the workflows the CLI does not offer. `--json`
 prints the `rspice.capabilities` document, also under `--quiet`, without
 reading a netlist; it adds the result-document schema and version, the format
 names and the build identity. These declarations describe adapters, not whether
-a particular circuit is admitted or numerically qualified. The CLI does not
-offer:
+a particular circuit is admitted or numerically qualified. What the command
+reports the CLI does not offer, or offers in part:
 
-- standalone remeasurement, transformation or plotting of a saved result
-  (`convert` and `compare` exist);
-- durable multi-netlist job manifests with selective retry (variants and
-  corners run in parallel within one invocation);
-- Monte Carlo checkpoint continuation or population aggregation (indexed
-  `START` batches exist);
-- conversion of a subset of an FFT spectrum;
-- strict Verilog-A LRM checking;
-- SOA, optimization, PSP, HBSP and HB-noise analyses through `run` or the flat
-  formats; they run as `study run` tasks.
+<!-- capability gaps: written from `rspice capabilities` by crates/rspice-cli/src/commands/capabilities/readme_gaps.rs -->
+
+- `soa`, `optimize`, `psp`, `hbsp`, `hbnoise` (partial): Available through typed study run requests and retained study result JSON; declarative run and flat-format adapters are not exposed.
+- `study_files` (partial): study check/plan/run prepare and execute version 1 typed task graphs with retained result JSON. Custom execution limits are enforced by basic analyses, STB, S-parameter, TF, distortion, DC mismatch, SOA, shooting PSS (including its spectrum), HB, QPSS, QPAC, QPXF, QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, HBNOISE, Fourier, recorded FFT, Envelope, and optimization; remaining advanced routes reject overrides. Study tasks refuse structured sweeps (Monte Carlo, parametric and corner specifications), and study files offer no external compiled model binding or saved-study-result conversion; run sweeps and corners from a deck with rspice run (.STEP, .MC, --monte-carlo, --corners).
+- `saved_result_processing` (unsupported): Saved results can be converted and compared, but not remeasured, transformed, or plotted by a standalone command.
+- `persistent_campaigns` (unsupported): Parallel deck variants and corners exist; a durable multi-netlist job manifest and selective retry do not.
+- `monte_carlo_continuation` (unsupported): Indexed START batches exist; checkpoint continuation and population aggregation are not exposed by the CLI.
+- `partial_spectrum_conversion` (unsupported): FFT conversion preserves a complete transform; selecting a spectral subset is rejected.
+- `veriloga_strict_lrm` (unsupported): compile-va --strict returns an unsupported-capability error.
+
+<!-- end of capability gaps -->
 
 ## Observability
 
