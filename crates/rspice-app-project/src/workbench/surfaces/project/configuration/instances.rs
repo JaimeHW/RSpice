@@ -225,6 +225,7 @@ fn filter_field(ui: &mut Ui, filter: &mut String, name: &str) {
             .id_salt(("configuration-filter", name))
             .hint_text("Filter\u{2026}")
             .font(theme::field_sans())
+            .vertical_align(egui::Align::Center)
             .margin(egui::Margin {
                 left: 6,
                 right: FILTER_CLEAR_INSET,
@@ -281,7 +282,9 @@ fn instance_columns() -> [Column; 7] {
         Column::name("Cell", 120.0).unsortable(),
         Column::words("View found", 96.0).unsortable(),
         Column::name("View to use", 110.0).unsortable(),
-        Column::words("Bound by", 132.0).unsortable(),
+        // A pattern's row says which platforms it is limited to here, so
+        // the column takes a share of the room the page has.
+        Column::name("Bound by", 132.0).unsortable(),
         Column::words("Model section", 104.0).unsortable(),
         Column::name("Status", 120.0).unsortable(),
     ]
