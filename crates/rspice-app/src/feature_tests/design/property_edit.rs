@@ -280,7 +280,7 @@ fn a_renamed_or_copied_model_bound_cell_keeps_its_typed_form() {
         let mut binding = install_definition(&mut state, &definition);
         let (library, cell) = match operation {
             "rename cell" => {
-                state
+                let (_, _pruned) = state
                     .model
                     .rename_cell("model_cells", "nmos_core", "nmos_renamed")
                     .expect("the cell is renamed");
@@ -295,7 +295,7 @@ fn a_renamed_or_copied_model_bound_cell_keeps_its_typed_form() {
                 ("model_cells", "nmos_copy")
             }
             _ => {
-                state
+                let (_, _pruned) = state
                     .model
                     .rename_library("model_cells", "cmos_cells")
                     .expect("the library is renamed");
