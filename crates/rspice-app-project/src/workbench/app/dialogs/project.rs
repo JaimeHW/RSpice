@@ -139,7 +139,7 @@ pub(crate) enum CheckpointDeletion {
 pub(crate) enum CheckpointJobKind {
     List,
     Create,
-    Compare(crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary),
+    Compare(Box<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>),
     /// A note, a pin or a deletion, then the listing after it.
     Change,
 }

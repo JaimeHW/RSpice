@@ -1418,7 +1418,7 @@ fn compare_project_checkpoint(
     let compared = checkpoint.clone();
     recovery.job = Some(CheckpointJob::start(
         ctx,
-        CheckpointJobKind::Compare(checkpoint),
+        CheckpointJobKind::Compare(Box::new(checkpoint)),
         recovery,
         move || CheckpointJobAnswer::Compared(current.matches(&compared)),
     ));

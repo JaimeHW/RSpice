@@ -53,7 +53,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
 
 /// A space in the whole units it is offered in: "512 MiB", "2 GiB".
 fn space_label(mib: u32) -> String {
-    if mib >= 1024 && mib % 1024 == 0 {
+    if mib >= 1024 && mib.is_multiple_of(1024) {
         format!("{} GiB", mib / 1024)
     } else {
         format!("{mib} MiB")
