@@ -255,6 +255,34 @@ impl ProjectWorkspace {
         })
     }
 
+    /// The catalog with each of `documents` in place of what its owner key
+    /// holds now, `None` taking the key's document away, validated whole
+    /// before anything changes.
+    pub fn prepare_replaced_physical_layout_documents(
+        &self,
+        documents: &BTreeMap<
+            String,
+            Option<rspice_design::physical_layout::PhysicalLayoutDocument>,
+        >,
+    ) -> Result<PreparedPhysicalLayoutCatalog, rspice_design::physical_layout::LayoutDocumentError>
+    {
+        let mut candidate = (*self.physical_layout_documents).clone();
+        for (key, document) in documents {
+            match document {
+                Some(document) => {
+                    candidate.insert(key.clone(), document.clone());
+                }
+                None => {
+                    candidate.remove(key);
+                }
+            }
+        }
+        validate_physical_layout_document_catalog(&candidate)?;
+        Ok(PreparedPhysicalLayoutCatalog {
+            documents: candidate,
+        })
+    }
+
     pub fn commit_prepared_physical_layout_catalog(
         &mut self,
         prepared: PreparedPhysicalLayoutCatalog,

@@ -14,15 +14,13 @@ use std::rc::Rc;
 
 use egui::Key;
 use rspice_app_services::services::recent_files::RecentKind;
-use rspice_app_state::workbench::app_state::model::WorkspacePruned;
+use rspice_app_state::workbench::app_state::model::{PreparedLibraryOperation, WorkspacePruned};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{
-    CellViewRef, PreparedProjectLibraryMutation, ProjectSourceId, VerilogACompileReceipt, ViewType,
-};
+use crate::state::{CellViewRef, ProjectSourceId, VerilogACompileReceipt, ViewType};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{Drain, Request};
 use crate::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectPage};
@@ -329,9 +327,10 @@ pub enum ProjectRequest {
     /// What deleting a cell or a view left outside its catalog change, in
     /// the order the deletion once did it: compile evidence naming a source
     /// it removed is dropped, what the catalog change left is carried out,
-    /// then the revision it reserved is published, then the placements are
-    /// removed when the reader chose that, then its own line in the log,
-    /// and the user's Verilog-A library saved when the object was in it.
+    /// the placements are removed when the reader chose that, then the
+    /// revision it reserved is published, so its step of Undo holds them,
+    /// then its own line in the log, and the user's Verilog-A library saved
+    /// when the object was in it.
     CellOrViewDeleted {
         removed_sources: Vec<ProjectSourceId>,
         pruned: WorkspacePruned,
@@ -373,15 +372,15 @@ impl Request for ProjectRequest {
 /// is published once and cannot be cloned, so every clone of the request
 /// shares this one reservation and the answer takes it.
 #[derive(Clone, Debug)]
-pub struct ReservedLibraryRevision(Rc<RefCell<Option<PreparedProjectLibraryMutation>>>);
+pub struct ReservedLibraryRevision(Rc<RefCell<Option<PreparedLibraryOperation>>>);
 
 impl ReservedLibraryRevision {
-    pub fn new(mutation: PreparedProjectLibraryMutation) -> Self {
+    pub fn new(mutation: PreparedLibraryOperation) -> Self {
         Self(Rc::new(RefCell::new(Some(mutation))))
     }
 
     /// The reservation, unless a clone of the request was answered first.
-    pub fn take(&self) -> Option<PreparedProjectLibraryMutation> {
+    pub fn take(&self) -> Option<PreparedLibraryOperation> {
         self.0.borrow_mut().take()
     }
 }

@@ -1936,17 +1936,18 @@ fn the_new_view_dialog_draws_in_the_project_context_and_what_it_raises_is_answer
 
 /// What deleting a cell or a view hands the shell is carried out in the
 /// order the deletion once did it: the compile evidence naming a source it
-/// removed dropped, what the catalog change left, the reserved revision, the
-/// placements removed when the reader chose that, the deletion's line in the
-/// log, then the Verilog-A library saved.
+/// removed dropped, what the catalog change left, the placements removed
+/// when the reader chose that, the reserved revision, which records the
+/// deletion's step of Undo with the placements in it, the deletion's line in
+/// the log, then the Verilog-A library saved.
 const CELL_OR_VIEW_DELETED: &[Step] = &[(
     "CellOrViewDeleted",
     &[
         "ProjectRequest::CellOrViewDeleted {",
         "void_veriloga_evidence(&mut app.state, &removed_sources);",
         "apply_workspace_pruned(&mut app.state, pruned);",
-        "publish_reserved_revision(app, mutation);",
         "app.state.model.remove_deleted_master_placements(",
+        "publish_reserved_revision(app, mutation);",
         "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
         "persist_global_veriloga_library(&mut app.state.model);",
     ],

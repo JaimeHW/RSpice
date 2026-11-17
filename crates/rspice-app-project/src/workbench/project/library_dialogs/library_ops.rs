@@ -394,7 +394,7 @@ impl ProjectFeature {
                 ui.add_space(8.0);
                 let t = Tokens::get(ui.ctx());
                 ui.label(
-                    egui::RichText::new("This cannot be undone.")
+                    egui::RichText::new("This can be undone with Undo.")
                         .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.warn),
                 );

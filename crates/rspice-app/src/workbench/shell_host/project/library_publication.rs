@@ -878,6 +878,7 @@ pub(crate) fn commit_project_library_publication(
             "The project changed while it was being published; publish it again.".to_owned(),
         );
     }
+    let previous = state.model.workspace.content.project.revision();
     let receipt = state
         .model
         .workspace
@@ -891,7 +892,12 @@ pub(crate) fn commit_project_library_publication(
         .model
         .netlist_artifacts
         .current_generation_input_digest = None;
-    state.model.clear_project_design_history();
+    // A publication records the design without changing it, so every step
+    // of Undo taken before it still applies.
+    let published = state.model.workspace.content.project.revision();
+    state
+        .model
+        .carry_project_history_over_revision(previous, published);
     Ok(receipt)
 }
 

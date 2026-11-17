@@ -230,7 +230,7 @@ impl ProjectFeature {
                 ui.add_space(4.0);
                 for line in [
                     "Keep placements: they stay on their sheets, still naming this master, and read as unresolved until you rebind or remove them.",
-                    "Remove placements: they come off every sheet at once, as one step you can undo. Their wires stay where they are.",
+                    "Remove placements: they come off every sheet with the deletion. Their wires stay where they are.",
                 ] {
                     ui.label(
                         egui::RichText::new(line)
@@ -243,7 +243,7 @@ impl ProjectFeature {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(
-                    "This cannot be undone.",
+                    "This can be undone with Undo.",
                 )
                 .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                 .color(t.color.warn),

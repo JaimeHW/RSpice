@@ -11,6 +11,11 @@
 //! work outside the model, which the change hands back as a
 //! [`WorkspacePruned`] for the caller to carry out before anything else
 //! reads the project.
+//!
+//! Every change is also one step of the project's Undo: what it can change
+//! is taken as the revision is reserved, and the step is recorded as the
+//! revision is published, so it holds the work the caller carried out in
+//! between as well.
 
 mod cells;
 mod libraries;
@@ -21,6 +26,7 @@ use crate::state::{
     CellViewRef, PreparedProjectLibraryMutation, ProjectLibraryMutation, ProjectSourceBundle,
     ProjectSourceFile, ProjectSourceId, ProjectSourceRole, ViewType,
 };
+use crate::workbench::app_state::design_history::LibraryOperationStart;
 
 /// What a change to the catalog leaves for the application to do outside
 /// the model, in the order of its fields: the sync's prompt is stated, the
@@ -54,7 +60,24 @@ pub struct LibraryRemoval {
     /// What the deletion leaves outside the model.
     pub pruned: WorkspacePruned,
     /// The revision reserved for the deletion.
-    pub mutation: PreparedProjectLibraryMutation,
+    pub mutation: PreparedLibraryOperation,
+}
+
+/// A library change made ready: the project revision it reserved, and what
+/// it can change as it stood before it ran, which its step of Undo puts back.
+#[must_use = "the reserved revision must be published"]
+pub struct PreparedLibraryOperation {
+    revision: PreparedProjectLibraryMutation,
+    start: Option<Box<LibraryOperationStart>>,
+}
+
+impl std::fmt::Debug for PreparedLibraryOperation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedLibraryOperation")
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Model {
@@ -124,40 +147,55 @@ impl Model {
     }
 
     /// Reserve the next project revision before a library membership
-    /// transaction publishes any live state.
+    /// transaction publishes any live state, and take what the transaction
+    /// can change as it stands, for its step of Undo.
     pub fn preflight_project_library_mutation(
         &self,
         mutation: ProjectLibraryMutation,
-    ) -> Result<PreparedProjectLibraryMutation, String> {
+    ) -> Result<PreparedLibraryOperation, String> {
         let operation = mutation.operation_label();
         if self.safe_mode.project_read_only() {
             return Err(format!(
                 "{operation} is unavailable because the project is open read-only."
             ));
         }
-        self.workspace
+        let start = self.start_library_operation(&mutation);
+        let revision = self
+            .workspace
             .content
             .project
             .prepare_library_mutation(mutation, self.library_manager.revision())
-            .map_err(|error| format!("Could not reserve {operation}: {error}"))
+            .map_err(|error| format!("Could not reserve {operation}: {error}"))?;
+        Ok(PreparedLibraryOperation { revision, start })
     }
 
     /// Publish the single project revision reserved immediately before a
-    /// successful library membership transaction.
-    pub fn publish_project_library_mutation(&mut self, prepared: PreparedProjectLibraryMutation) {
+    /// successful library membership transaction, and record the
+    /// transaction as one step of Undo. The steps before it stay; a restore
+    /// from a publication, which replaces the whole project, leaves none.
+    pub fn publish_project_library_mutation(&mut self, prepared: PreparedLibraryOperation) {
+        let PreparedLibraryOperation { revision, start } = prepared;
         let observed_library_revision = self.library_manager.revision();
         assert!(
-            observed_library_revision >= prepared.minimum_library_revision(),
+            observed_library_revision >= revision.minimum_library_revision(),
             "library mutation did not advance the library revision"
         );
+        let previous = self.workspace.content.project.revision();
         self.workspace
             .content
             .project
-            .publish_library_mutation(prepared, observed_library_revision)
+            .publish_library_mutation(revision, observed_library_revision)
             .expect("the library mutation receipt was fully preflighted");
         self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
         self.netlist_artifacts.current_generation_input_digest = None;
-        self.clear_project_design_history();
+        match start {
+            Some(start) => {
+                let published = self.workspace.content.project.revision();
+                self.carry_project_history_over_revision(previous, published);
+                self.record_library_operation(*start);
+            }
+            None => self.clear_project_design_history(),
+        }
     }
 }

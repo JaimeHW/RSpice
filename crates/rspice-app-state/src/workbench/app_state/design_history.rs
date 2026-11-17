@@ -26,12 +26,14 @@ mod component_rename;
 mod configuration_edit;
 mod hierarchy_extraction;
 mod instance_removal;
+mod library_operation;
 mod reference_preparation;
 mod simulation_setup;
 mod stimulus_readoption;
 mod veriloga_build;
 
 pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
+pub use library_operation::LibraryOperationStart;
 pub use simulation_setup::{SetupParts, SetupSnapshot};
 pub use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 
@@ -100,7 +102,7 @@ pub enum ProjectDesignBody {
     ComponentRename(Box<component_rename::ComponentRenameRecord>),
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
-    InstanceRemoval(Box<instance_removal::InstanceRemovalRecord>),
+    LibraryOperation(Box<library_operation::LibraryOperationRecord>),
     SymbolDefinition(Box<SymbolDefinitionRecord>),
     ModelDefinition(Box<ModelDefinitionRecord>),
     ModelLibraries(Box<ModelLibrariesRecord>),
@@ -781,6 +783,63 @@ impl Model {
         self.reanchor_annotation_history_revision(previous, published);
     }
 
+    /// Carry the project steps recorded before a library operation, an undo
+    /// or redo of one, or a publication over the revision it published.
+    ///
+    /// A step that names the revision it left refuses once anything else
+    /// advances the project. A library operation is a step of its own, and
+    /// Undo crosses the steps in order, so each still finds the design it
+    /// left; a publication changes no design at all. Neither may leave the
+    /// steps before it unable to undo.
+    pub fn carry_project_history_over_revision(
+        &mut self,
+        previous: ObjectRevision,
+        published: ObjectRevision,
+    ) {
+        if previous == published {
+            return;
+        }
+        self.reanchor_annotation_history_revision(previous, published);
+        let carry = |undo: &mut ObjectRevision, redo: &mut Option<ObjectRevision>| {
+            if *undo == previous {
+                *undo = published;
+            }
+            if *redo == Some(previous) {
+                *redo = Some(published);
+            }
+        };
+        let history = &mut self.project_design_history;
+        for record in history.undo.iter_mut().chain(&mut history.redo) {
+            match &mut record.body {
+                ProjectDesignBody::SymbolDefinition(record) => {
+                    carry(
+                        &mut record.undo_guard_revision,
+                        &mut record.redo_guard_revision,
+                    );
+                }
+                ProjectDesignBody::ModelDefinition(record) => {
+                    carry(
+                        &mut record.undo_guard_revision,
+                        &mut record.redo_guard_revision,
+                    );
+                }
+                ProjectDesignBody::ModelLibraries(record) => {
+                    carry(
+                        &mut record.undo_guard_revision,
+                        &mut record.redo_guard_revision,
+                    );
+                }
+                ProjectDesignBody::ModelResolutions(record) => {
+                    carry(
+                        &mut record.undo_guard_revision,
+                        &mut record.redo_guard_revision,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub(crate) fn record_symbol_definition_transaction(
         &mut self,
         entry: SymbolDefinitionHistoryEntry,
@@ -958,6 +1017,7 @@ impl Model {
         let prepared = record.body.prepare_reference_mutation(self, false)?;
         if prepared.is_none() {
             record.validate_mutation(self, "undone")?;
+            record.body.validate_crossing(self, false)?;
         }
         let destination = record.header.undo_activates().cloned();
         Ok(Some(StagedProjectStep {
@@ -978,6 +1038,7 @@ impl Model {
         let prepared = record.body.prepare_reference_mutation(self, true)?;
         if prepared.is_none() {
             record.validate_mutation(self, "redone")?;
+            record.body.validate_crossing(self, true)?;
         }
         let destination = record.header.redo_activates().cloned();
         Ok(Some(StagedProjectStep {
@@ -1203,7 +1264,7 @@ pub struct AppliedProjectStep {
 }
 
 /// What applying a history step leaves for the application, set as the step
-/// reaches each. A step is one record, and no record sets more than one.
+/// reaches each.
 #[derive(Debug, Default)]
 pub struct HistoryEffects {
     /// The selected model left the selected model library.
@@ -1280,6 +1341,16 @@ impl ProjectDesignBody {
         }
     }
 
+    /// The exact check a step makes when it is taken, beyond the one the
+    /// Edit menu asks on every frame: only a library operation's is not the
+    /// same check.
+    fn validate_crossing(&self, state: &Model, forward: bool) -> Result<(), String> {
+        match self {
+            Self::LibraryOperation(record) => record.validate_crossing(state, forward),
+            _ => Ok(()),
+        }
+    }
+
     fn include_reference_documents(&self, header: &mut RecordHeader) {
         let schematics = match self {
             Self::ComponentRename(record) => record.reference_schematics(),
@@ -1299,7 +1370,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(record) => record.after_design_matches(state),
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
             Self::DesignManagement(record) => record.after_design_matches(state),
-            Self::InstanceRemoval(record) => record.after_design_matches(state),
+            Self::LibraryOperation(record) => record.after_design_matches(state),
             Self::SymbolDefinition(record) => record.after_design_matches(state),
             Self::ModelDefinition(record) => record.after_design_matches(state),
             Self::ModelLibraries(record) => record.after_design_matches(state),
@@ -1314,7 +1385,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(record) => record.before_design_matches(state),
             Self::HierarchyExtraction(record) => record.before_design_matches(state),
             Self::DesignManagement(record) => record.before_design_matches(state),
-            Self::InstanceRemoval(record) => record.before_design_matches(state),
+            Self::LibraryOperation(record) => record.before_design_matches(state),
             Self::SymbolDefinition(record) => record.before_design_matches(state),
             Self::ModelDefinition(record) => record.before_design_matches(state),
             Self::ModelLibraries(record) => record.before_design_matches(state),
@@ -1329,7 +1400,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(record) => record.validate_mutation(state, operation),
             Self::HierarchyExtraction(record) => record.validate_mutation(state, operation),
             Self::DesignManagement(record) => record.validate_mutation(state, operation),
-            Self::InstanceRemoval(record) => record.validate_mutation(state, operation),
+            Self::LibraryOperation(record) => record.validate_mutation(state, operation),
             Self::SymbolDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelLibraries(record) => record.validate_mutation(state, operation),
@@ -1344,7 +1415,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(record) => &record.description,
             Self::HierarchyExtraction(record) => &record.description,
             Self::DesignManagement(record) => &record.description,
-            Self::InstanceRemoval(record) => &record.description,
+            Self::LibraryOperation(record) => &record.description,
             Self::SymbolDefinition(record) => &record.description,
             Self::ModelDefinition(record) => &record.description,
             Self::ModelLibraries(record) => &record.description,
@@ -1365,7 +1436,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(_) | Self::DesignManagement(_) => {
                 unreachable!("reference history is prepared before applying")
             }
-            Self::InstanceRemoval(record) => record.apply_before(state),
+            Self::LibraryOperation(record) => record.apply(state, false, effects),
             Self::SymbolDefinition(record) => record.apply_before(state),
             Self::ModelDefinition(record) => record.apply_before(state, selected_model, effects),
             Self::ModelLibraries(record) => record.apply_before(state),
@@ -1386,7 +1457,7 @@ impl ProjectDesignBody {
             Self::ComponentRename(_) | Self::DesignManagement(_) => {
                 unreachable!("reference history is prepared before applying")
             }
-            Self::InstanceRemoval(record) => record.apply_after(state),
+            Self::LibraryOperation(record) => record.apply(state, true, effects),
             Self::SymbolDefinition(record) => record.apply_after(state),
             Self::ModelDefinition(record) => record.apply_after(state, selected_model, effects),
             Self::ModelLibraries(record) => record.apply_after(state),

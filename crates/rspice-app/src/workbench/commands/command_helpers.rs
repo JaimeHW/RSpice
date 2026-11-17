@@ -442,7 +442,6 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         } => {
             void_veriloga_evidence(&mut app.state, &removed_sources);
             apply_workspace_pruned(&mut app.state, pruned);
-            publish_reserved_revision(app, mutation);
             if let Some(target) = remove_placements {
                 app.state.model.remove_deleted_master_placements(
                     target.library(),
@@ -451,6 +450,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                     &target.display_path(),
                 );
             }
+            publish_reserved_revision(app, mutation);
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);
             if persist_global_veriloga {
