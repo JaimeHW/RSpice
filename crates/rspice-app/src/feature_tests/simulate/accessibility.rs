@@ -971,8 +971,8 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
 /// not past the size requested, so a top-down block of labels collapsed to the
 /// widest label and the whole group started that much early. At an 1100-point
 /// pane the accent action ended 114 points short of the inset, and the group
-/// read as though it had been dropped in the middle of the row. Its three
-/// sibling surfaces -- automation, report authoring and Verilog-A -- each carry
+/// read as though it had been dropped in the middle of the row. Its two
+/// sibling surfaces -- report authoring and Verilog-A -- each carry
 /// the `set_width` that this one was missing.
 ///
 /// Measured at three widths, not one, because a constant offset and a

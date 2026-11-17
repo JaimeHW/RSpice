@@ -328,7 +328,6 @@ pub(crate) fn scrub_private_profile_state(value: &mut Value) {
         "recent-commands",
         "macros",
         "credentials",
-        "automation-source",
         "source-path",
         "project-identity",
         "private-state",

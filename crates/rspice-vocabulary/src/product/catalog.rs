@@ -36,14 +36,12 @@ pub enum ProductObjectKind {
     VerificationEvidence,
     #[serde(rename = "release-candidate")]
     ReleaseCandidate,
-    #[serde(rename = "automation-pipeline")]
-    AutomationPipeline,
     #[serde(rename = "model-binding")]
     ModelBinding,
 }
 
 impl ProductObjectKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 14] = [
         Self::Project,
         Self::Design,
         Self::Testbench,
@@ -57,7 +55,6 @@ impl ProductObjectKind {
         Self::VerificationPlan,
         Self::VerificationEvidence,
         Self::ReleaseCandidate,
-        Self::AutomationPipeline,
         Self::ModelBinding,
     ];
 
@@ -82,7 +79,6 @@ impl ProductObjectKind {
             Self::VerificationPlan => &VERIFICATION_PLAN,
             Self::VerificationEvidence => &VERIFICATION_EVIDENCE,
             Self::ReleaseCandidate => &RELEASE_CANDIDATE,
-            Self::AutomationPipeline => &AUTOMATION_PIPELINE,
             Self::ModelBinding => &MODEL_BINDING,
         }
     }
@@ -100,7 +96,6 @@ pub enum WorkflowOwner {
     VerificationPlanning,
     VerificationSourceDomain,
     ReleaseClosure,
-    Automation,
     ModelsAndLibraries,
 }
 
@@ -113,7 +108,6 @@ pub enum Mutability {
     VersionedPresentation,
     AppendOnlyDisposition,
     DraftThenImmutable,
-    VersionedOrchestration,
     VersionedReference,
 }
 
@@ -137,13 +131,7 @@ const PROJECT: ProductObjectContract = ProductObjectContract {
     owner: WorkflowOwner::ProjectLifecycle,
     mutability: Mutability::Versioned,
     identity: "project UUID + schema version",
-    contains: &[
-        "design",
-        "testbench",
-        "verification-plan",
-        "automation-pipeline",
-        "model-binding",
-    ],
+    contains: &["design", "testbench", "verification-plan", "model-binding"],
 };
 
 const DESIGN: ProductObjectContract = ProductObjectContract {
@@ -292,22 +280,6 @@ const RELEASE_CANDIDATE: ProductObjectContract = ProductObjectContract {
     ],
 };
 
-const AUTOMATION_PIPELINE: ProductObjectContract = ProductObjectContract {
-    kind: ProductObjectKind::AutomationPipeline,
-    stable_id: "automation-pipeline",
-    label: "Automation pipeline",
-    parent: Some(ProductObjectKind::Project),
-    owner: WorkflowOwner::Automation,
-    mutability: Mutability::VersionedOrchestration,
-    identity: "pipeline UUID + revision",
-    contains: &[
-        "command-reference",
-        "dependency",
-        "trigger",
-        "artifact-route",
-    ],
-};
-
 const MODEL_BINDING: ProductObjectContract = ProductObjectContract {
     kind: ProductObjectKind::ModelBinding,
     stable_id: "model-binding",
@@ -336,7 +308,7 @@ mod tests {
             .map(|kind| kind.stable_id())
             .collect();
         assert_eq!(ids.len(), ProductObjectKind::ALL.len());
-        assert_eq!(ProductObjectKind::ALL.len(), 15);
+        assert_eq!(ProductObjectKind::ALL.len(), 14);
 
         for kind in ProductObjectKind::ALL {
             let contract = kind.contract();

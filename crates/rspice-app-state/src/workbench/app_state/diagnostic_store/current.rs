@@ -20,7 +20,7 @@ use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::model::Model;
 
 /// The source editors' findings, as the store reads them where the editors
-/// keep them: the netlist editor's, and the Code & Automation page's.
+/// keep them: the netlist editor's, and the Verilog-A compiler's.
 ///
 /// Taken from the code feature's state by whoever holds it, since the model
 /// does not reach up into a feature for them.
