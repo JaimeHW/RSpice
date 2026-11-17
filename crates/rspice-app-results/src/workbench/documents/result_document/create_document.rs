@@ -357,6 +357,16 @@ pub fn resolve_draft<'a>(
     state: ResultsReads<'a>,
     draft: &'a CreateResultDocumentDialogState,
 ) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
+    resolve(state, draft, None)
+}
+
+/// [`resolve_draft`], binding the analysis at `analysis_index` of the run
+/// when one is named, otherwise the run's first the viewer renders.
+fn resolve<'a>(
+    state: ResultsReads<'a>,
+    draft: &'a CreateResultDocumentDialogState,
+    analysis_index: Option<usize>,
+) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
     let name = draft.name.as_str();
     if name.trim().is_empty() {
         return Err(CreateResultDocumentError::InvalidDraft(
@@ -465,10 +475,14 @@ pub fn resolve_draft<'a>(
             ));
         }
     }
-    let analysis = run.analyses.iter().find(|analysis| {
+    let renders = |analysis: &&AnalysisResult| {
         analysis_matches_viewer(viewer, analysis.analysis_type)
             && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
-    })
+    };
+    let analysis = match analysis_index {
+        Some(index) => run.analyses.get(index).filter(renders),
+        None => run.analyses.iter().find(renders),
+    }
     .ok_or_else(|| {
         CreateResultDocumentError::InvalidDraft(format!(
             "{} cannot render any retained analysis in the selected dataset without substituting a different result contract.",
@@ -722,7 +736,74 @@ fn document_tracking(
 
 /// Revalidate and commit the current draft into the project authority.
 pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateResultDocumentError> {
-    let resolved = resolve_draft(state.results_reads(), state.create_result_document)?;
+    let draft = state.create_result_document.clone();
+    let document_id = insert(state, &draft, None)?;
+    state.create_result_document.open = false;
+    state.create_result_document.validation_error = None;
+    Ok(document_id)
+}
+
+/// Create, with no dialog, the document a quick view's measurement is kept
+/// in: one pane reading the analysis at `analysis_index` of the run
+/// `dataset_id`, as the quick view shows it, in the first viewer that draws
+/// it. The quick view's expressions and scales come with it, as Create
+/// keeps them.
+pub(super) fn create_over_quick_view(
+    state: &mut ResultsParts<'_>,
+    dataset_id: DatasetId,
+    analysis_index: usize,
+) -> Result<ResultDocumentId, CreateResultDocumentError> {
+    let reads = state.results_reads();
+    let analysis = retained_run(reads, dataset_id)
+        .and_then(|run| Some((run, run.analyses.get(analysis_index)?)))
+        .ok_or_else(|| {
+            CreateResultDocumentError::InvalidDraft(
+                "The selected result is no longer retained.".to_owned(),
+            )
+        })?
+        .1;
+    let (family, viewer) = ResultDocumentFamily::ALL
+        .into_iter()
+        .find_map(|family| {
+            VIEWER_DOCUMENTS
+                .iter()
+                .find(|viewer| {
+                    family.includes(viewer)
+                        && viewer.release == ViewerReleaseClass::ReleaseTarget
+                        && analysis_matches_viewer(viewer, analysis.analysis_type)
+                        && super::persistent_document::renderer_supports_analysis(
+                            viewer.id, analysis,
+                        )
+                })
+                .map(|viewer| (family, viewer))
+        })
+        .ok_or_else(|| {
+            CreateResultDocumentError::InvalidDraft(format!(
+                "No result document draws {}.",
+                analysis.label
+            ))
+        })?;
+    let draft = CreateResultDocumentDialogState {
+        open: false,
+        name: next_document_name(reads, family),
+        name_touched: false,
+        dataset_id: Some(dataset_id),
+        family_id: family.id().to_owned(),
+        viewer_id: viewer.id.to_owned(),
+        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+        validation_error: None,
+    };
+    insert(state, &draft, Some(analysis_index))
+}
+
+/// Resolve `draft` and insert the document it describes into the project,
+/// shown in Results.
+fn insert(
+    state: &mut ResultsParts<'_>,
+    draft: &CreateResultDocumentDialogState,
+    analysis_index: Option<usize>,
+) -> Result<ResultDocumentId, CreateResultDocumentError> {
+    let resolved = resolve(state.results_reads(), draft, analysis_index)?;
     let tracking = document_tracking(
         &state.model.simulation.retained.runs,
         resolved.run,
@@ -861,7 +942,5 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
                 .to_owned(),
         ));
     }
-    state.create_result_document.open = false;
-    state.create_result_document.validation_error = None;
     Ok(document_id)
 }

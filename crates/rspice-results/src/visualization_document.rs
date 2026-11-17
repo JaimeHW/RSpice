@@ -1957,7 +1957,13 @@ pub enum MeasurementKind {
 pub struct Measurement {
     pub id: MeasurementId,
     pub pane_id: PaneId,
-    #[serde(deserialize_with = "deserialize_measurement_trace_ids")]
+    /// The traces a measurement of a kind reads. An authored one (with an
+    /// `expression`) names its signals there instead and keeps none.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_measurement_trace_ids"
+    )]
     pub trace_ids: Vec<TraceId>,
     pub kind: MeasurementKind,
     #[serde(deserialize_with = "deserialize_label_string")]
@@ -2523,7 +2529,7 @@ impl VisualizationDocument {
     /// stating any other version is refused, never migrated. Unknown
     /// extension fields are ignored; a new required meaning takes a new
     /// version.
-    pub const SCHEMA_VERSION: u16 = 13;
+    pub const SCHEMA_VERSION: u16 = 14;
 
     pub fn new(
         title: impl Into<String>,

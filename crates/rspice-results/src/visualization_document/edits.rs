@@ -189,18 +189,21 @@ pub enum DocumentEdit {
         kind: MeasurementKind,
         label: String,
     },
+    /// A measurement the reader authored: an expression reduced to one
+    /// number over the pane's result. It names the run's signals itself,
+    /// analog or digital, as `.MEASURE` and the calculator do, so it never
+    /// depends on what the pane plots.
     AddScalarMeasurement {
         pane_id: PaneId,
-        trace_ids: Vec<TraceId>,
         #[serde(deserialize_with = "deserialize_source_text_string")]
         expression: String,
         value: f64,
     },
     /// A measurement evaluated once per member of the family the pane
-    /// shows; `value` is the statistic `family` names.
+    /// shows; `value` is the statistic `family` names. Like a scalar one, it
+    /// names its signals in its expression.
     AddFamilyMeasurement {
         pane_id: PaneId,
-        trace_ids: Vec<TraceId>,
         #[serde(deserialize_with = "deserialize_source_text_string")]
         expression: String,
         value: f64,

@@ -1961,7 +1961,7 @@ fn family_summary(statistic: FamilyStatistic) -> FamilyMeasurementSummary {
 
 #[test]
 fn a_family_measurement_keeps_its_distribution_and_reads_back() {
-    let (mut document, pane, trace) = document_with_trace();
+    let (mut document, pane, _) = document_with_trace();
     let summary = family_summary(FamilyStatistic::Yield);
     assert_eq!(summary.statistic_value(), Some(60.0));
     document
@@ -1969,7 +1969,6 @@ fn a_family_measurement_keeps_its_distribution_and_reads_back() {
             document.revision(),
             vec![DocumentEdit::AddFamilyMeasurement {
                 pane_id: pane,
-                trace_ids: vec![trace],
                 expression: "avg(V(out))".to_owned(),
                 value: 60.0,
                 family: summary.clone(),
@@ -1991,43 +1990,63 @@ fn a_family_measurement_keeps_its_distribution_and_reads_back() {
     assert_eq!(decoded.measurements()[0].family.as_ref(), Some(&summary));
 }
 
-/// A Monte Carlo population is measured on each trial's own retained values,
-/// which are not traces of the pane: a family measurement may name no trace
-/// and still reads back, and a single evaluation still may not.
+/// A measurement the reader authors is bound to the result, not to what the
+/// pane plots: it names its signals, analog or digital, in its expression,
+/// as `.MEASURE` does, and keeps no trace. Removing the pane's trace leaves
+/// it standing, and a stored one that names a trace is refused.
 #[test]
-fn a_family_measurement_may_name_no_trace_and_a_single_one_may_not() {
-    let (mut document, pane, _) = document_with_trace();
-    let revision = document.revision();
-    let single = DocumentEdit::AddScalarMeasurement {
-        pane_id: pane,
-        trace_ids: Vec::new(),
-        expression: "gain_dc".to_owned(),
-        value: 3.0,
-    };
-    assert!(document.transact(revision, vec![single]).is_err());
+fn an_authored_measurement_names_its_signals_and_no_trace() {
+    let (mut document, pane, trace) = document_with_trace();
     document
         .transact(
-            revision,
-            vec![DocumentEdit::AddFamilyMeasurement {
-                pane_id: pane,
-                trace_ids: Vec::new(),
-                expression: "gain_dc".to_owned(),
-                value: 60.0,
-                family: family_summary(FamilyStatistic::Yield),
-            }],
+            document.revision(),
+            vec![
+                DocumentEdit::AddScalarMeasurement {
+                    pane_id: pane,
+                    expression: "delay(D(samp), D(eoc), 0.5, \"falling\", 1, 0.5, \"rising\", 1)"
+                        .to_owned(),
+                    value: 9e-7,
+                },
+                DocumentEdit::AddFamilyMeasurement {
+                    pane_id: pane,
+                    expression: "gain_dc".to_owned(),
+                    value: 60.0,
+                    family: family_summary(FamilyStatistic::Yield),
+                },
+            ],
+        )
+        .unwrap();
+    let mut naming_a_trace = serde_json::to_value(&document).unwrap();
+    naming_a_trace["measurements"][0]["trace_ids"] = serde_json::json!([trace]);
+    let refused = serde_json::from_value::<VisualizationDocument>(naming_a_trace).unwrap_err();
+    assert!(
+        refused.to_string().contains("names its signals"),
+        "{refused}"
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::Remove(EntityRef::Trace(trace))],
         )
         .unwrap();
     let encoded = serde_json::to_value(&document).unwrap();
+    assert!(encoded["measurements"][0].get("trace_ids").is_none());
     let decoded: VisualizationDocument = serde_json::from_value(encoded).unwrap();
-    assert!(decoded.measurements()[0].trace_ids.is_empty());
+    assert_eq!(decoded.measurements().len(), 2);
+    assert!(
+        decoded
+            .measurements()
+            .iter()
+            .all(|measurement| measurement.trace_ids.is_empty())
+    );
 }
 
 #[test]
 fn a_family_measurement_value_is_the_statistic_it_names() {
-    let (mut document, pane, trace) = document_with_trace();
+    let (mut document, pane, _) = document_with_trace();
     let add = |value: f64, family: FamilyMeasurementSummary| DocumentEdit::AddFamilyMeasurement {
         pane_id: pane,
-        trace_ids: vec![trace],
         expression: "avg(V(out))".to_owned(),
         value,
         family,

@@ -51,7 +51,8 @@ pub struct FamilyPreview {
 pub struct MeasurementPreview {
     /// The pane the measurement is kept on, or the result a quick view shows.
     pub pane: String,
-    /// The traces the pane shows, which a signal argument picks from.
+    /// The result's signals, analog and digital `D(name)`, which a signal
+    /// argument picks from.
     pub signals: Vec<String>,
     /// The unit each of `signals` reads in, in the same order, which a level
     /// of it is typed in.
@@ -61,8 +62,8 @@ pub struct MeasurementPreview {
     /// `Ok(None)` while nothing is typed, the formatted value once the
     /// expression reduces to a number, or why it does not.
     pub value: Result<Option<String>, String>,
-    /// Why Add is refused whatever the expression: a quick view keeps no
-    /// measurements.
+    /// Why Add is refused whatever the expression: no result is open to
+    /// measure.
     pub refusal: Option<String>,
     /// Present when the pane shows a family of results.
     pub family: Option<FamilyPreview>,

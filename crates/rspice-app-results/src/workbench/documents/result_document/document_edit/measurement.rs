@@ -1,9 +1,12 @@
 //! Add a scalar measurement to the pane the reader is working in.
 //!
 //! The expression is evaluated on the selected pane's bound analysis and
-//! kept with the document as `AddScalarMeasurement`, referencing the pane's
-//! traces it reads. Over a quick view the form still evaluates, so the value
-//! can be read, but nothing is kept: a quick view has no document to keep it.
+//! kept with the document as `AddScalarMeasurement`. Like `.MEASURE` and the
+//! calculator in ViVA or ADS, it is bound to the result: it names the run's
+//! signals, analog or digital `D(name)`, in its expression, and never depends
+//! on a trace the pane plots. Over a quick view, Add creates the result
+//! document that keeps it, one pane reading the analysis the quick view
+//! shows, with no detour through Create.
 //!
 //! When the pane shows a family — a sweep, corners, Monte Carlo trials, or
 //! points of one analysis solved one by one — the expression is evaluated
@@ -20,10 +23,7 @@ use rspice_results_ui::document_dialogs::measurement::{
 
 use super::*;
 use crate::analysis::calculator;
-use crate::results::visualization_document::TraceId;
-use crate::state::{AnalysisResultFamilyMetadata, RetainedTrace};
-
-const QUICK_VIEW: &str = "Create a result document to keep measurements.";
+use crate::state::{AnalysisResultFamilyMetadata, AnalysisResultPayload, RetainedTrace};
 
 /// Open Add measurement on the result the reader is looking at.
 pub fn open_measurement(state: &mut ResultsParts<'_>) {
@@ -56,14 +56,7 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             .content
             .visualization_document(document_id)?;
         let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
-        // A signal argument picks from the traces this pane's strip shows.
-        let signals = document
-            .traces()
-            .iter()
-            .filter(|trace| trace.pane_id == pane_id)
-            .map(|trace| trace.label.clone())
-            .collect::<Vec<_>>();
-        Some((format!("{} · {}", document.title(), pane.title), signals))
+        Some(format!("{} · {}", document.title(), pane.title))
     });
     let expression = draft.expression.trim();
     let digits = usize::from(
@@ -126,7 +119,6 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             None,
         ),
     };
-    let refusal = pane.is_none().then(|| QUICK_VIEW.to_owned());
     // A level is typed in its signal's unit, as the strip reads the trace.
     let unit_of = |name: &str| {
         let retained = analysis
@@ -134,6 +126,10 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             .iter()
             .find(|waveform| waveform.name == name)
             .and_then(|waveform| waveform.unit.as_deref());
+        if name.starts_with("D(") {
+            // A digital net's level is a logic value, not a voltage.
+            return String::new();
+        }
         super::super::browser_signal_unit(
             name,
             retained,
@@ -142,24 +138,9 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         .to_owned()
     };
     // A run's label already names it ("Run 1 (8:31:04 PM)"), as the
-    // navigator shows it; a number in front would name it twice. A quick
-    // view's strip can show any of the analysis's signals, offered by the
-    // names an expression reads them by: `|V(out)|` is `V(out)`, whose
-    // phase comes with it.
-    let (pane, signals) = pane.unwrap_or_else(|| {
-        let mut signals: Vec<String> = Vec::new();
-        for waveform in &analysis.waveforms {
-            let name = waveform.name.as_str();
-            let name = name
-                .strip_prefix('|')
-                .and_then(|inner| inner.strip_suffix('|'))
-                .unwrap_or(name);
-            if !name.starts_with("phase(") && !signals.iter().any(|known| known == name) {
-                signals.push(name.to_owned());
-            }
-        }
-        (format!("{} · {}", run.label, analysis.label), signals)
-    });
+    // navigator shows it; a number in front would name it twice.
+    let pane = pane.unwrap_or_else(|| format!("{} · {}", run.label, analysis.label));
+    let signals = analysis_signals(analysis);
     let signal_units = signals.iter().map(|name| unit_of(name)).collect();
     MeasurementPreview {
         pane,
@@ -167,9 +148,46 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         signal_units,
         x_unit,
         value,
-        refusal,
+        refusal: None,
         family,
     }
+}
+
+/// The signals an expression over `analysis` can read, by the names it
+/// reads them by: each analog waveform (`|V(out)|` is `V(out)`, whose phase
+/// comes with it), then each digital net and bus as `D(name)`, read from its
+/// event history as `.MEASURE` reads it.
+fn analysis_signals(analysis: &AnalysisResult) -> Vec<String> {
+    let mut signals: Vec<String> = Vec::new();
+    let mut offer = |name: String| {
+        if !signals.contains(&name) {
+            signals.push(name);
+        }
+    };
+    for waveform in &analysis.waveforms {
+        let name = waveform.name.as_str();
+        let name = name
+            .strip_prefix('|')
+            .and_then(|inner| inner.strip_suffix('|'))
+            .unwrap_or(name);
+        if !name.starts_with("phase(") {
+            offer(name.to_owned());
+        }
+    }
+    if let Some(AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        digital_buses,
+        ..
+    }) = analysis.result_payload.as_ref()
+    {
+        for trace in digital_traces {
+            offer(format!("D({})", trace.node_name));
+        }
+        for bus in digital_buses {
+            offer(format!("D({})", bus.name));
+        }
+    }
+    signals
 }
 
 /// The unit the strip reads the analysis's x-axis in, which a point on it is
@@ -187,14 +205,13 @@ fn x_unit(state: ResultsReads<'_>, run: &SimulationRun, analysis: &AnalysisResul
         )
 }
 
-/// Keep the draft's measurement on the selected pane. The form closes once
-/// it lands.
+/// Keep the draft's measurement on the selected pane. Over a quick view the
+/// document that keeps it is created first, reading the analysis the quick
+/// view shows. The form closes once it lands.
 pub(super) fn commit(
     state: &mut ResultsParts<'_>,
     draft: &MeasurementDraft,
 ) -> Result<Option<ResultDocumentDialog>, String> {
-    let document_id =
-        active_document_id(state.results_reads()).ok_or_else(|| QUICK_VIEW.to_owned())?;
     let expression = draft.expression.trim().to_owned();
     if expression.is_empty() {
         return Err("Enter an expression to measure.".to_owned());
@@ -213,33 +230,32 @@ pub(super) fn commit(
             .ok_or_else(|| "The family has no value for that statistic.".to_owned())?,
         None => evaluate(analysis, &expression)?,
     };
+    let document_id = match active_document_id(state.results_reads()) {
+        Some(document_id) => document_id,
+        None => {
+            let (dataset_id, analysis_index) = (
+                run.dataset_id,
+                run.analyses
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, analysis))
+                    .ok_or_else(|| "The selected result holds no analysis.".to_owned())?,
+            );
+            super::super::create_document::create_over_quick_view(state, dataset_id, analysis_index)
+                .map_err(|error| error.to_string())?
+        }
+    };
     let (_, pane_id) =
         super::super::persistent_document::reading_position(state.results_reads(), document_id)
             .ok_or_else(|| "The result document has no pane.".to_owned())?;
-    // A Monte Carlo population is measured on each trial's own values,
-    // which the pane does not draw as traces.
-    let per_trial = family.is_some()
-        && matches!(
-            analysis.family_metadata,
-            Some(AnalysisResultFamilyMetadata::MonteCarlo { .. })
-        );
-    let trace_ids = pane_traces(
-        project_document(state.results_reads(), document_id)?,
-        pane_id,
-        &expression,
-        per_trial,
-    )?;
     let edit = match family {
         Some(family) => DocumentEdit::AddFamilyMeasurement {
             pane_id,
-            trace_ids,
             expression,
             value,
             family,
         },
         None => DocumentEdit::AddScalarMeasurement {
             pane_id,
-            trace_ids,
             expression,
             value,
         },
@@ -509,67 +525,6 @@ impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
     }
 }
 
-/// The pane's traces the measurement reads: each signal the expression
-/// names, or the pane's first trace when it names none. A measurement of
-/// each trial's own values (`per_trial`) keeps the traces it names and may
-/// name none: its signals are the trials' variables and measurements, not
-/// traces of the pane.
-fn pane_traces(
-    document: &VisualizationDocument,
-    pane_id: PaneId,
-    expression: &str,
-    per_trial: bool,
-) -> Result<Vec<TraceId>, String> {
-    let parsed = calculator::parser::try_parse(expression)
-        .map_err(|error| format!("Parse error: {error}"))?;
-    let mut signals = Vec::new();
-    collect_signals(&parsed, &mut signals);
-    let traces = || {
-        document
-            .traces()
-            .iter()
-            .filter(move |trace| trace.pane_id == pane_id)
-    };
-    if signals.is_empty() {
-        return match traces().next() {
-            Some(trace) => Ok(vec![trace.id]),
-            None if per_trial => Ok(Vec::new()),
-            None => Err("The selected pane has no trace to keep a measurement on.".to_owned()),
-        };
-    }
-    let mut ids = Vec::new();
-    for signal in &signals {
-        match traces().find(|trace| trace.label == *signal) {
-            Some(trace) => ids.push(trace.id),
-            None if per_trial => {}
-            None => return Err(format!("{signal} is not a trace of the selected pane.")),
-        }
-    }
-    Ok(ids)
-}
-
-fn collect_signals(expression: &calculator::ast::CalculatorExpr, signals: &mut Vec<String>) {
-    use calculator::ast::CalculatorExpr;
-    match expression {
-        CalculatorExpr::WaveformRef { signal, .. } => {
-            if !signals.contains(signal) {
-                signals.push(signal.clone());
-            }
-        }
-        CalculatorExpr::BinaryOp { left, right, .. } => {
-            collect_signals(left, signals);
-            collect_signals(right, signals);
-        }
-        CalculatorExpr::UnaryOp { operand, .. } => collect_signals(operand, signals),
-        CalculatorExpr::FunctionCall { args, .. } => {
-            for argument in args {
-                collect_signals(argument, signals);
-            }
-        }
-        CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) | CalculatorExpr::Keyword(_) => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,8 +657,8 @@ mod tests {
             "3 of 5 pass (60 %)\nfails Trial 0 · seed 40, Trial 2 · seed 42"
         );
         assert_eq!(preview.value.unwrap().unwrap(), "Keeps the yield: 60 %");
-        // A quick view keeps nothing, family or not.
-        assert!(preview.refusal.is_some());
+        // Over a quick view Add is offered: it creates the document.
+        assert_eq!(preview.refusal, None);
 
         // A yield with no limit keeps nothing; a mean needs none.
         draft.lower.clear();

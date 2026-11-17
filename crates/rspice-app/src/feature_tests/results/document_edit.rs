@@ -551,9 +551,10 @@ fn measurement_preview(
     preview
 }
 
-/// A measurement added in the result viewer is kept on the selected pane,
-/// with the trace it reads, and survives a save. Only the Studio could add
-/// one; the result viewer showed them and could not make them.
+/// A measurement added in the result viewer is kept on the selected pane and
+/// survives a save. It names the signal it reads in its expression and keeps
+/// no trace. Only the Studio could add one; the result viewer showed them
+/// and could not make them.
 #[test]
 fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     let (mut app, document_id) = document_fixture("two-linked-panes");
@@ -584,15 +585,7 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     // ∫y² over the two linear segments 0 → 1 → 0 on [0, 1] is 1/3.
     let value = measurement.value.expect("the value is kept");
     assert!((value - (1.0_f64 / 3.0).sqrt()).abs() < 1e-14, "{value}");
-    let trace = document
-        .traces()
-        .iter()
-        .find(|trace| trace.id == measurement.trace_ids[0])
-        .expect("the measurement references a kept trace");
-    assert_eq!(
-        (trace.pane_id, trace.label.as_str()),
-        (panes[1].id, "V(out)")
-    );
+    assert!(measurement.trace_ids.is_empty());
     show_document(&mut app, document_id);
 }
 
@@ -615,43 +608,120 @@ fn a_measurement_must_reduce_to_a_number() {
     assert!(retained(&app, document_id).measurements().is_empty());
 }
 
-/// Over a quick view the form still evaluates, so the value can be read,
-/// but Add is refused: a quick view has no document to keep it.
+/// A transient of a mixed run: the analog net `V(a)`, and the digital nets
+/// `clk` and `q` as their event histories (value code 2 is X).
+fn mixed_run(id: u64) -> SimulationRun {
+    use rspice_app_state::state::{
+        AnalysisResultPayload, DigitalEventPointEvidence, DigitalEventTraceEvidence,
+    };
+    let net = |name: &str, points: &[(f64, u8)]| DigitalEventTraceEvidence {
+        node_name: name.to_owned(),
+        points: points
+            .iter()
+            .map(|&(time_s, value_code)| DigitalEventPointEvidence { time_s, value_code })
+            .collect(),
+    };
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new(
+                "V(a)",
+                vec![0.0, 20e-9, 40e-9],
+                vec![0.0, 1.0, 0.5],
+                "#4f81bd",
+            ),
+        ]);
+    analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+        voltage_impulses: None,
+        current_impulses: None,
+        digital_traces: vec![
+            net("clk", &[(0.0, 0), (10e-9, 1), (20e-9, 0), (30e-9, 1)]),
+            net("q", &[(0.0, 2), (5e-9, 0), (12e-9, 2), (14e-9, 1)]),
+        ],
+        real_traces: Vec::new(),
+        digital_buses: Vec::new(),
+        hdl_sources: Vec::new(),
+    });
+    let mut run = SimulationRun::new(id);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.add_analysis(analysis);
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("a synthetic run has valid unattributed provenance");
+    run
+}
+
+/// A measurement over a fresh result just works, as in ViVA or ADS. Add over
+/// the quick view creates the result document that keeps it, with no detour
+/// through Create, and each measurement names the nets it reads, analog or
+/// digital, as `.MEASURE` does, with no trace plotted. Both come back from a
+/// saved project reopened by a fresh application. The form refused Add over
+/// a quick view, and over a document refused any signal its pane did not
+/// draw as a trace, which no digital net ever was.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
+fn measurements_over_a_fresh_result_name_their_nets_and_reopen() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
+    app.state.model.simulation.retained.runs = vec![mixed_run(1)].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
 
-    let preview = measurement_preview(&mut app, "max(V(out))");
-    assert_eq!(
-        preview.refusal.as_deref(),
-        Some("Create a result document to keep measurements.")
-    );
-    // The quick view is named as the navigator names it: the run's label,
-    // which already says which run it is, then the analysis.
-    let run = app.state.model.simulation.active_run().expect("a run");
-    let analysis = app.state.model.simulation.active_analysis().expect("one");
-    assert_eq!(preview.pane, format!("{} · {}", run.label, analysis.label));
-    assert_eq!(preview.pane.matches("Run 1").count(), 1, "{}", preview.pane);
-    assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
+    let analog = "max(V(a))";
+    let preview = measurement_preview(&mut app, analog);
+    assert_eq!(preview.refusal, None);
+    for net in ["V(a)", "D(clk)", "D(q)"] {
+        assert!(preview.signals.iter().any(|signal| signal == net), "{net}");
+    }
     commit_open_dialog(&mut app.state.results_parts());
     assert!(
-        matches!(
-            app.state.results.result_document_dialog,
-            Some(ResultDocumentDialog::Measurement(_))
-        ),
-        "a refused Add leaves the form open"
+        app.state.results.result_document_dialog.is_none(),
+        "a kept measurement closes its form"
     );
-    assert!(
+    let document_id = match app.state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => *document_id,
+        shown => panic!("Add over a quick view opens the document it keeps: {shown:?}"),
+    };
+
+    let digital = r#"delay(D(clk), D(q), 0.5, "rising", 1, 0.5, "rising", 1)"#;
+    let preview = measurement_preview(&mut app, digital);
+    assert_eq!(preview.refusal, None);
+    commit_open_dialog(&mut app.state.results_parts());
+    assert!(app.state.results.result_document_dialog.is_none());
+    assert_eq!(
         app.state
             .model
             .workspace
             .content
             .visualization_documents
-            .is_empty()
+            .len(),
+        1,
+        "the second Add keeps to the document the first created"
     );
+
+    let path = std::env::temp_dir().join(format!(
+        "rspice-measurements-{}-{}.rspiceproj",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    assert!(app.state.save_project_to_path(&path), "the project saves");
+    let mut reopened = RSpiceApp::test_instance();
+    let loaded = reopened.state.load_project_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("rspiceproj.bak"));
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push(".rspice.lock");
+    let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+    assert!(loaded, "the project reopens");
+
+    let document = retained(&reopened, document_id);
+    let [first, second] = document.measurements() else {
+        panic!("both measurements reopen: {:?}", document.measurements());
+    };
+    // V(a) peaks at 1; q rises 4 ns after clk's first rise, at 14 ns.
+    for (measurement, expression, value) in [(first, analog, 1.0), (second, digital, 4e-9)] {
+        assert_eq!(measurement.expression.as_deref(), Some(expression));
+        assert!(measurement.trace_ids.is_empty(), "{measurement:?}");
+        let kept = measurement.value.expect("a value");
+        assert!((kept - value).abs() <= 1e-21, "{expression}: {kept:e}");
+    }
 }
 
 // ---------------------------------------------------------------------------

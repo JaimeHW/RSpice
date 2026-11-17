@@ -471,11 +471,11 @@ impl VisualizationDocument {
     }
 
     /// Keep one authored measurement: a single evaluation, or the
-    /// distribution of one evaluated on every member of a family.
+    /// distribution of one evaluated on every member of a family. Its
+    /// expression names the signals it reads; it references no trace.
     fn add_scalar_measurement(
         &mut self,
         pane_id: PaneId,
-        trace_ids: Vec<TraceId>,
         expression: String,
         value: f64,
         family: Option<FamilyMeasurementSummary>,
@@ -493,10 +493,7 @@ impl VisualizationDocument {
                 ),
             });
         }
-        validate_measurement_traces(trace_ids.len(), family.is_some())?;
-        for trace_id in &trace_ids {
-            self.require_trace_in_pane(*trace_id, pane_id)?;
-        }
+        self.require_pane(pane_id)?;
         if let Some(family) = &family {
             family.validate(Some(value))?;
         }
@@ -504,7 +501,7 @@ impl VisualizationDocument {
         self.measurements.push(Measurement {
             id,
             pane_id,
-            trace_ids,
+            trace_ids: Vec::new(),
             kind: MeasurementKind::Point,
             label: format!("Measurement {}", id.get()),
             expression: Some(expression),
@@ -1084,24 +1081,15 @@ impl VisualizationDocument {
             }
             DocumentEdit::AddScalarMeasurement {
                 pane_id,
-                trace_ids,
                 expression,
                 value,
-            } => self.add_scalar_measurement(pane_id, trace_ids, expression, value, None, created),
+            } => self.add_scalar_measurement(pane_id, expression, value, None, created),
             DocumentEdit::AddFamilyMeasurement {
                 pane_id,
-                trace_ids,
                 expression,
                 value,
                 family,
-            } => self.add_scalar_measurement(
-                pane_id,
-                trace_ids,
-                expression,
-                value,
-                Some(family),
-                created,
-            ),
+            } => self.add_scalar_measurement(pane_id, expression, value, Some(family), created),
             DocumentEdit::SetMarker {
                 marker_id,
                 coordinate,
@@ -1981,7 +1969,11 @@ impl VisualizationDocument {
             if let Some(family) = &measurement.family {
                 family.validate(measurement.value)?;
             }
-            validate_measurement_traces(measurement.trace_ids.len(), measurement.family.is_some())?;
+            validate_measurement_traces(
+                measurement.trace_ids.len(),
+                measurement.expression.is_some(),
+            )?;
+            self.require_pane(measurement.pane_id)?;
             for trace in &measurement.trace_ids {
                 self.require_trace_in_pane(*trace, measurement.pane_id)?;
             }

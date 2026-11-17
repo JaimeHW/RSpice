@@ -89,7 +89,7 @@ fn a_plot_against_a_signal_and_its_sweep_span_survive_a_save_and_reload() {
         )
         .unwrap();
     let saved = serde_json::to_value(&document).unwrap();
-    assert_eq!(saved["schema_version"], serde_json::json!(13));
+    assert_eq!(saved["schema_version"], serde_json::json!(14));
     assert_eq!(
         saved["xy_plots"][0]["abscissa"],
         serde_json::json!({"kind": "signal", "name": "V(in)"})
