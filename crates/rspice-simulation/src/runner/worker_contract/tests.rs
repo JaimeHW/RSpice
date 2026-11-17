@@ -403,6 +403,43 @@ fn an_engine_that_stopped_is_not_blamed_on_the_configuration() {
 }
 
 #[test]
+fn a_results_store_failure_is_not_a_circuit_error_on_either_side_of_the_worker() {
+    // What the engine raises when the store's volume fills before the run keeps a row.
+    let engine =
+        rspice_core::SimulationError::ResultSink(rspice_core::result_sink::SinkStop::DiskFull {
+            needed: None,
+            available: Some(4096),
+        });
+    let expected = SimulationError::from(engine);
+    assert_eq!(
+        expected,
+        SimulationError::ResultStorage(crate::error::ResultStorageFailure::Full {
+            available: Some(4096),
+            folder: None,
+        })
+    );
+    assert_eq!(
+        expected.to_string(),
+        "Results storage full: the results storage filled before the run kept a row (4.00 KiB free)"
+    );
+    let unwritable = SimulationError::from(rspice_core::SimulationError::ResultSink(
+        rspice_core::result_sink::SinkStop::Io("disk I/O error".to_owned()),
+    ));
+    assert_eq!(
+        unwritable.to_string(),
+        "Results storage error: disk I/O error"
+    );
+
+    for expected in [expected, unwritable] {
+        let worker = WorkerSimulationError::from(expected.clone());
+        let encoded = serde_json::to_string(&worker).expect("worker error serializes");
+        let decoded: WorkerSimulationError =
+            serde_json::from_str(&encoded).expect("worker error deserializes");
+        assert_eq!(SimulationError::from(decoded), expected);
+    }
+}
+
+#[test]
 fn output_failures_round_trip_through_worker_contract() {
     for expected in [
         SimulationError::RequestedSignalUnavailable {

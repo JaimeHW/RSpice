@@ -68,4 +68,7 @@ pub enum WorkerSimulationError {
     /// worker could not be started or could not take the request. Nothing in
     /// the design is at fault. The text is what the browser reported.
     EngineStopped(String),
+    /// The run's results could not be kept: the storage holding its results store filled or
+    /// could not be written. Nothing in the design is at fault.
+    ResultStorage(crate::result_storage::ResultStorageFailure),
 }

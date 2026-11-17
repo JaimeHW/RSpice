@@ -64,4 +64,6 @@ pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 50;
 /// 38: operating-point, DC and transient results carry the HDL severity
 ///     records and `.ASSERT` reports of their run.
 /// 39: every response names the code that ran its request (`backends`).
-pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 39;
+/// 40: a failure of the store a run writes its results to is its own error
+///     (`ResultStorage`), not a circuit error.
+pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 40;

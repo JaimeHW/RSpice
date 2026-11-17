@@ -9,6 +9,7 @@ use rspice_results::convergence_attribution::ConvergenceAttribution;
 use rspice_results::monte_carlo_checkpoint::CheckpointError;
 use rspice_results::validation::ResultSchemaMismatch;
 pub use rspice_simulation_contract::resource_failure::ResourceFailure;
+pub use rspice_simulation_contract::result_storage::ResultStorageFailure;
 use rspice_simulation_contract::worker_error::WorkerSimulationError;
 
 /// Errors that can occur during simulation
@@ -141,6 +142,14 @@ pub enum SimulationError {
         requested: usize,
         limit: usize,
     },
+
+    /// The run's results could not be kept: the storage holding its results store filled or
+    /// could not be written.
+    ///
+    /// Kept apart from [`Self::CircuitError`], where a results store's failure used to land, for
+    /// the reason [`Self::EngineStopped`] is: nothing in the design is at fault, and a reader told
+    /// it was would look there for a mistake that is not there.
+    ResultStorage(ResultStorageFailure),
 }
 
 impl std::fmt::Display for SimulationError {
@@ -211,6 +220,7 @@ impl std::fmt::Display for SimulationError {
                 f,
                 "Resource limit exceeded for {resource}: requested {requested}, limit {limit}"
             ),
+            SimulationError::ResultStorage(failure) => std::fmt::Display::fmt(failure, f),
         }
     }
 }
@@ -395,11 +405,13 @@ impl From<rspice_core::SimulationError> for SimulationError {
             // Categories this bridge has no dedicated presentation for yet.
             // They keep their full message, which already names the
             // coordinate or the artifact that failed.
+            rspice_core::SimulationError::ResultSink(stop) => {
+                SimulationError::ResultStorage(ResultStorageFailure::from_sink_stop(stop, None))
+            }
             other @ (rspice_core::SimulationError::ParameterDomain(_)
             | rspice_core::SimulationError::MaterializationMismatch(_)
             | rspice_core::SimulationError::PersistenceIncompatible(_)
-            | rspice_core::SimulationError::OutputCommitFailed(_)
-            | rspice_core::SimulationError::ResultSink(_)) => {
+            | rspice_core::SimulationError::OutputCommitFailed(_)) => {
                 SimulationError::CircuitError(other.to_string())
             }
         }
@@ -510,6 +522,7 @@ impl From<SimulationError> for WorkerSimulationError {
                 requested,
                 limit,
             },
+            SimulationError::ResultStorage(failure) => Self::ResultStorage(failure),
         }
     }
 }
@@ -601,6 +614,7 @@ impl From<WorkerSimulationError> for SimulationError {
                 requested,
                 limit,
             },
+            WorkerSimulationError::ResultStorage(failure) => Self::ResultStorage(failure),
         }
     }
 }

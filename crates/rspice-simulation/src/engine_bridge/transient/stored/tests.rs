@@ -152,19 +152,24 @@ fn a_run_whose_rows_cannot_fit_is_refused_before_it_solves_and_leaves_no_segment
         )
         .unwrap_err();
     FREE_SPACE.with(|free| *free.borrow_mut() = None);
-    let SimulationError::ResourceFailure(ResourceFailure::Allocation {
-        object,
-        bytes,
-        detail,
+    let SimulationError::ResultStorage(ResultStorageFailure::Insufficient {
+        rows,
+        needed,
+        available,
+        folder,
     }) = &error
     else {
         panic!("a typed storage refusal, got {error}");
     };
-    assert_eq!(object, STORE_OBJECT);
-    assert!(*bytes > 4096, "{error}");
-    assert!(detail.contains("refused before solving"), "{error}");
-    assert!(detail.contains("rows and the volume holding"), "{error}");
-    assert!(detail.contains("4096 bytes free"), "{error}");
+    // 300 us at a 10 ns ceiling, and six values a row.
+    assert_eq!(*rows, 30_000, "{error}");
+    assert!(*needed > 4096, "{error}");
+    assert_eq!(*available, 4096, "{error}");
+    assert!(folder.contains("rspice-results"), "{error}");
+    let message = error.to_string();
+    assert!(message.starts_with("Results storage full: "), "{message}");
+    assert!(message.contains("refused before solving"), "{message}");
+    assert!(message.contains("has 4.00 KiB free"), "{message}");
 }
 
 #[test]

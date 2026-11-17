@@ -16,7 +16,7 @@ extern "C" {
 /// answers with. The worker-contract tests in `rspice-simulation` pin both to
 /// the Rust transport constants, so a protocol bump fails natively first.
 const REQUEST_PROTOCOL: u8 = 50;
-const RESPONSE_PROTOCOL: u8 = 39;
+const RESPONSE_PROTOCOL: u8 = 40;
 
 /// One analysis request as the browser host transfers it: the shipping
 /// default execution resource policy, no dependencies and no buffers.

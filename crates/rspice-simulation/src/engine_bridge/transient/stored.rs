@@ -22,6 +22,7 @@ use rspice_results::stored_transient::{
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
 use rspice_results_store::{FileIo, SegmentReader, StoreError, StoreSink, WatchedIo, WatchedSink};
 use rspice_simulation_contract::resource_failure::ResourceFailure;
+use rspice_simulation_contract::result_storage::ResultStorageFailure;
 
 use super::super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
@@ -139,15 +140,11 @@ impl EngineBridge {
                 let _ = std::fs::remove_file(&path);
                 return Err(match refused {
                     Some((needed, available)) => {
-                        SimulationError::ResourceFailure(ResourceFailure::Allocation {
-                            object: STORE_OBJECT.to_owned(),
-                            bytes: needed,
-                            detail: format!(
-                                "refused before solving: it holds at least {:.0} rows and the \
-                                 volume holding {} has {available} bytes free",
-                                rows_needed.ceil(),
-                                dir.display()
-                            ),
+                        SimulationError::ResultStorage(ResultStorageFailure::Insufficient {
+                            rows: rows_needed.ceil() as u64,
+                            needed,
+                            available,
+                            folder: dir.display().to_string(),
                         })
                     }
                     None => self.translate_error(source),
@@ -165,14 +162,15 @@ impl EngineBridge {
             // A volume that filled before the segment held a whole chunk kept nothing.
             Ok(_) => {
                 let _ = std::fs::remove_file(&path);
-                return Err(
-                    self.translate_error(rspice_core::SimulationError::ResultSink(
+                return Err(SimulationError::ResultStorage(
+                    ResultStorageFailure::from_sink_stop(
                         stopped.unwrap_or(SinkStop::DiskFull {
                             needed: None,
-                            available: None,
+                            available: free(),
                         }),
-                    )),
-                );
+                        Some(dir.display().to_string()),
+                    ),
+                ));
             }
             Err(error) => {
                 let _ = std::fs::remove_file(&path);
@@ -207,7 +205,9 @@ impl EngineBridge {
                 free: free(),
             }),
             Some(other) => {
-                return Err(self.translate_error(rspice_core::SimulationError::ResultSink(other)));
+                return Err(SimulationError::ResultStorage(
+                    ResultStorageFailure::from_sink_stop(other, Some(dir.display().to_string())),
+                ));
             }
             None => None,
         };
@@ -556,10 +556,12 @@ fn store_failure(path: &std::path::Path, error: StoreError) -> SimulationError {
             bytes: bytes as u64,
             detail: source.to_string(),
         }),
-        error => SimulationError::SolverError(format!(
-            "the transient's results segment {} could not be read back: {error}",
-            path.display()
-        )),
+        error => SimulationError::ResultStorage(ResultStorageFailure::Io {
+            cause: format!(
+                "the transient's results segment {} could not be read back: {error}",
+                path.display()
+            ),
+        }),
     }
 }
 
