@@ -536,10 +536,11 @@ endmodule
 /// instance, which reads their resolved drive; in `split` mode each has its
 /// own. Two deck instances drive 1 and 0 onto one node through a resistive
 /// D/A that releases on x: merged reads x and leaves the 1 kohm load at 0 V,
-/// split is the two 100 ohm drivers' divider.
+/// split is the two 100 ohm drivers' divider. A shipped signature is the
+/// built-in converter, which keeps its per-driver law in either mode.
 #[test]
 fn merged_ports_of_two_deck_instances_share_one_authored_module() {
-    let run = |mode: &str| {
+    let run = |statement: &str| {
         let source = Source::new(&format!(
             r#"
 `timescale 1ns/1ps
@@ -553,7 +554,7 @@ connectmodule d2ar(d, a); input d; output a; logic d; electrical a;
   end
   analog I(a) <+ g * (V(a) - lv);
 endmodule
-connectrules mr; connect d2ar {mode}; endconnectrules
+connectrules mr; {statement} endconnectrules
 "#
         ));
         let deck = Netlist::parse(&format!(
@@ -565,10 +566,16 @@ connectrules mr; connect d2ar {mode}; endconnectrules
         let result = Engine::default().run_tran(&deck, 20e-9, 100e-12).unwrap();
         voltage(&result, "n", 15e-9)
     };
-    assert!(run("merged").abs() < 1e-9, "merged");
-    assert!(run("").abs() < 1e-9, "merged by default");
+    assert!(run("connect d2ar merged;").abs() < 1e-9, "merged");
+    assert!(run("connect d2ar;").abs() < 1e-9, "merged by default");
     let divider = 1.8 * (100.0 * 1000.0 / 1100.0) / (100.0 + 100.0 * 1000.0 / 1100.0);
-    assert!((run("split") - divider).abs() < 1e-6, "split");
+    assert!((run("connect d2ar split;") - divider).abs() < 1e-6, "split");
+    // Each port's own 20 ohm D/A: 0.9 V behind 10 ohm into 1 kohm.
+    let shipped = run("connect d2a #(.vsup(1.8));");
+    assert!(
+        (shipped - 0.9 * 1000.0 / 1010.0).abs() < 1e-6,
+        "shipped: {shipped}"
+    );
 }
 
 #[test]

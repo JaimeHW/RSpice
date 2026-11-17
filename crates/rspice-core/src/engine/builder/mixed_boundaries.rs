@@ -102,12 +102,16 @@ pub(super) fn plan_conversions(
                     host.instance_name(),
                 )?;
             }
-            // A built-in converter keeps its per-driver law; an authored
-            // module's body is the one instance the merged ports share.
+            // A built-in converter, a shipped signature's included, keeps its
+            // per-driver law; an authored module's body is the one instance
+            // the merged ports share.
             let merge_key = selected
                 .as_ref()
                 .filter(|selected| {
-                    selected.merged && selected.execution.is_some() && segment.is_none()
+                    selected.merged
+                        && selected.execution.is_some()
+                        && selected.signature().is_none()
+                        && segment.is_none()
                 })
                 .map(|selected| {
                     (
