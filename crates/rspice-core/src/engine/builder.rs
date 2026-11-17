@@ -9218,8 +9218,12 @@ impl Engine {
                     };
                     mosfet.set_body_junction_model(match self.config.spice_dialect {
                         SpiceDialect::Xyce => MosBodyJunctionModel::XyceClassicLinearizedReverse,
-                        SpiceDialect::BestAvailable | SpiceDialect::Ngspice => {
-                            MosBodyJunctionModel::NgspiceReverseClamp
+                        SpiceDialect::Ngspice => MosBodyJunctionModel::NgspiceReverseClamp,
+                        // LTspice runs a level 1-3 bulk junction on its
+                        // tangent past M/GMIN; ngspice and Xyce run the
+                        // exponential on.
+                        SpiceDialect::BestAvailable => {
+                            MosBodyJunctionModel::LtspiceForwardConductanceLimit
                         }
                     });
                     mosfet.set_ngspice_dialect(self.config.spice_dialect != SpiceDialect::Xyce);

@@ -54,8 +54,51 @@ impl Mosfet {
             return (gmin * v - isat, gmin);
         }
 
+        self.forward_junction_law(isat, v, nvt, gmin)
+    }
+
+    /// The forward exponential, on its tangent past the bulk-junction
+    /// conductance limit where that applies. The knee is where the
+    /// exponential's conductance reaches the limit, `nvt*ln(limit*nvt/IS)`,
+    /// and the current there is `limit*nvt - IS`. A knee at or below zero
+    /// bias is not taken: it needs IS above `nvt*M/GMIN`.
+    #[inline]
+    fn forward_junction_law(
+        &self,
+        isat: Value,
+        v: Value,
+        nvt: Value,
+        gmin: Value,
+    ) -> (Value, Value) {
         let expv = (v / nvt).clamp(-80.0, 80.0).exp();
-        (isat * (expv - 1.0) + gmin * v, (isat / nvt) * expv + gmin)
+        let conductance = (isat / nvt) * expv;
+        let limit = self.body_junction_conductance_limit_value();
+        if conductance > limit {
+            let knee = nvt * (limit * nvt / isat).ln();
+            if knee > 0.0 && knee < v {
+                return (
+                    limit * nvt - isat + limit * (v - knee) + gmin * v,
+                    limit + gmin,
+                );
+            }
+        }
+        (isat * (expv - 1.0) + gmin * v, conductance + gmin)
+    }
+
+    /// M/GMIN when [`MosBodyJunctionModel::LtspiceForwardConductanceLimit`]
+    /// applies to this instance, else infinite. GMIN is the junction GMIN
+    /// whether or not the caller loads it as a shunt.
+    #[inline]
+    fn body_junction_conductance_limit_value(&self) -> Value {
+        if self.body_junction_model == MosBodyJunctionModel::LtspiceForwardConductanceLimit
+            && self.legacy_bsim_model.is_none()
+            && matches!(self.level, 1..=3)
+            && self.junction_gmin > 0.0
+        {
+            self.multiplicity / self.junction_gmin
+        } else {
+            Value::INFINITY
+        }
     }
 
     /// Transient-cache form of the bulk-diode evaluator. The saturation
@@ -94,8 +137,7 @@ impl Mosfet {
             return (gmin * v - isat, gmin);
         }
 
-        let expv = (v / nvt).clamp(-80.0, 80.0).exp();
-        (isat * (expv - 1.0) + gmin * v, (isat / nvt) * expv + gmin)
+        self.forward_junction_law(isat, v, nvt, gmin)
     }
 
     #[inline]

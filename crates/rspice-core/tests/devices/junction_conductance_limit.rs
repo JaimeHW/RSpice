@@ -117,3 +117,60 @@ fn diode_breakdown_stops_steepening_at_area_m_over_gmin_as_ltspice_does() {
     let above = diode_current(SpiceDialect::BestAvailable, -11.995, "", model, 1e-12);
     assert_rel_close("BV=5 slope", (above - current) / 0.005, 1e12, 1e-6);
 }
+
+/// The current a bare NMOS draws into its bulk at `bias` volts, with drain,
+/// gate and source grounded, so both bulk junctions are forward biased.
+fn bulk_current(dialect: SpiceDialect, bias: f64, instance: &str, model: &str, gmin: f64) -> f64 {
+    let deck = format!(
+        "* bulk junction limit\nv1 b 0 {bias}\nm1 0 0 0 b nm {instance}\n.model nm nmos {model}\n\
+         .options gmin={gmin:e}\n.op\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|error| panic!("op failed: {error}\n{deck}"));
+    -result
+        .branch_current_named("v1")
+        .unwrap_or_else(|| panic!("missing v1 branch in {:?}", result.branch_names))
+}
+
+/// Each bulk junction of a level 1, 2 or 3 MOSFET runs on its tangent past
+/// M/GMIN: with the bulk at 6 V both junctions conduct, and LTspice's bulk
+/// current rises at exactly 2e12 S at the default GMIN, 2e9 S at GMIN=1e-9
+/// and 2e13 S at M=10. AD/AS with JS move only the knee (JS*AD = 1e-14 A
+/// here gives the IS=1e-14 current), and levels 2 and 3 match level 1.
+#[test]
+fn a_mos_bulk_junction_stops_steepening_at_m_over_gmin_as_ltspice_does() {
+    // (instance, model, GMIN, LTspice bulk current at 6 V, its slope there)
+    let cases = [
+        ("", "level=1 is=1e-14", 1e-12, 9.1438705394e12, 2e12),
+        ("", "level=1 is=1e-14", 1e-9, 9.5012080695e9, 2e9),
+        ("m=10", "level=1 is=1e-14", 1e-12, 9.1438705394e13, 2e13),
+        (
+            "ad=1e-10 as=1e-10",
+            "level=1 js=1e-4",
+            1e-12,
+            9.1438705394e12,
+            2e12,
+        ),
+        ("", "level=2 is=1e-14", 1e-12, 9.1438705394e12, 2e12),
+        ("", "level=3 is=1e-14", 1e-12, 9.1438705394e12, 2e12),
+    ];
+    for (instance, model, gmin, at_6, slope) in cases {
+        let label = format!("m1 {instance} ({model}) gmin={gmin:e}");
+        let current = bulk_current(SpiceDialect::BestAvailable, 6.0, instance, model, gmin);
+        assert_rel_close(&format!("{label} at 6 V"), current, at_6, 1e-6);
+        let below = bulk_current(SpiceDialect::BestAvailable, 5.995, instance, model, gmin);
+        assert_rel_close(
+            &format!("{label} slope"),
+            (current - below) / 0.005,
+            slope,
+            1e-6,
+        );
+    }
+    // ngspice and Xyce run the exponential on: 7.6e19 A at 2 V.
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let current = bulk_current(dialect, 2.0, "", "level=1 is=1e-14", 1e-12);
+        assert!(current > 1e19, "{dialect:?}: {current:e}");
+    }
+}

@@ -22,7 +22,7 @@ impl AcceptedMosfetNonlinearCheckpoint {
             || self.instance_name.is_empty()
             || self.instance_name.chars().any(char::is_whitespace)
             || self.level <= 0
-            || self.junction_model > 1
+            || self.junction_model > 2
             || self.region > 2
             || self.seed_evaluations > 2
             || self.values.iter().any(|v| !v.is_finite())
@@ -42,6 +42,7 @@ impl Mosfet {
         match self.body_junction_model {
             MosBodyJunctionModel::NgspiceReverseClamp => 0,
             MosBodyJunctionModel::XyceClassicLinearizedReverse => 1,
+            MosBodyJunctionModel::LtspiceForwardConductanceLimit => 2,
         }
     }
     #[doc(hidden)]

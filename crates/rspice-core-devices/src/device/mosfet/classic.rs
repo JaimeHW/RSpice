@@ -59,6 +59,13 @@ pub enum MosBodyJunctionModel {
     /// Xyce classic MOS reverse-bias rule: for Vj <= 0 the junction is
     /// linearized from zero bias with slope IS / Vt + GMIN.
     XyceClassicLinearizedReverse,
+    /// LTspice 17.2.4's level 1, 2 and 3 law: ngspice's reverse clamp, and
+    /// each forward bulk junction runs on its tangent past the bias where its
+    /// conductance reaches M/GMIN. A bare NMOS whose bulk sweeps to 6 V draws
+    /// exactly 1e12 S per forward junction at the default GMIN, 1e9 S at
+    /// GMIN=1e-9 and 1e13 S at M=10, at every level, while AD/AS with JS move
+    /// only the knee. ngspice and Xyce run the exponential on.
+    LtspiceForwardConductanceLimit,
 }
 
 /// Pre-computed stamp indices for O(1) matrix access (4-terminal device, but only D and S rows)
