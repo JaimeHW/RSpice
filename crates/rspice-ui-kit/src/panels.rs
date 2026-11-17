@@ -369,7 +369,21 @@ impl WorkbenchIcon {
             }
             Self::User => {
                 painter.circle_stroke(p(12.0, 8.0), 3.0 * scale, stroke);
-                painter.circle_stroke(p(12.0, 20.0), 7.0 * scale, stroke);
+                // The shoulders are the top of a circle, cut at the grid's
+                // edge, so head and body never close into a figure eight.
+                line(&[
+                    (5.0, 21.0),
+                    (5.0, 20.0),
+                    (5.53, 17.32),
+                    (7.05, 15.05),
+                    (9.32, 13.53),
+                    (12.0, 13.0),
+                    (14.68, 13.53),
+                    (16.95, 15.05),
+                    (18.47, 17.32),
+                    (19.0, 20.0),
+                    (19.0, 21.0),
+                ]);
             }
             Self::Navigator => {
                 closed(&[(4.0, 5.0), (20.0, 5.0), (20.0, 19.0), (4.0, 19.0)]);
