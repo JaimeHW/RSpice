@@ -233,7 +233,7 @@ fn an_authored_connect_module_selects_its_executable_body() {
         .unwrap();
     design.finish_selection().unwrap();
     let selected = design
-        .select_for_boundary_node(Kind::Adc, "din", "a1", "in")
+        .select_for_boundary_node(Kind::Adc, "din", "a1", "in", "logic")
         .unwrap()
         .unwrap();
     assert!(matches!(
