@@ -228,7 +228,9 @@ fn files_and_plusargs_are_the_runs() {
 
 /// `$fdisplay` writes as `$display` does, once per accepted point: an
 /// `@(initial_step)` call writes one line though the first point takes
-/// several Newton evaluations, which the `$debug` beside it counts.
+/// several Newton evaluations, which the `$debug` beside it counts. The
+/// module reads its file back and drives the number of lines it holds, which
+/// the browser worker's twin of this test reads.
 #[test]
 fn an_initial_step_file_display_writes_once_however_many_evaluations_the_point_takes() {
     let directory = scratch("once");
@@ -244,11 +246,14 @@ fn an_initial_step_file_display_writes_once_however_many_evaluations_the_point_t
     let mut config = rspice_core::SimulationConfig::default();
     config.hdl.output = Some(collector.clone());
     config.hdl.deck_directory = Some(directory.clone());
-    Engine::new(config)
+    let outcome = Engine::new(config)
         .run_with_outcome(&NoAbort, |engine, signal| {
             engine.run_tran_with_abort(&netlist, 1e-9, 1e-11, signal)
         })
         .unwrap();
+    let SimulationOutcome::Completed(result) = outcome else {
+        panic!("the run completes");
+    };
     let records = collector.take();
     let evaluations = stdout(&records)
         .iter()
@@ -259,17 +264,24 @@ fn an_initial_step_file_display_writes_once_however_many_evaluations_the_point_t
         "the first point takes several evaluations: {records:?}"
     );
     let written = std::fs::read_to_string(directory.join("once.txt")).unwrap();
-    assert_eq!(written, "initial step at 0\n");
-    let file_records = records
+    assert_eq!(written, "7\n");
+    let q = result
+        .node_names
         .iter()
-        .filter(|record| matches!(record.stream, HdlStream::File { .. }))
-        .count();
-    assert_eq!(file_records, 1, "{records:?}");
+        .position(|name| name.eq_ignore_ascii_case("q"))
+        .unwrap();
+    let lines = *result.voltages[q].last().unwrap();
+    assert!((lines - 1.0).abs() < 1e-9, "V(q) = {lines}");
 }
 
-/// A current source into a diode across the deck's 1k resistor: a first
-/// point Newton solves in several evaluations.
-const ONCE_PER_POINT: &str = "`include \"disciplines.vams\"\nmodule once(q); inout q; electrical q; \
-     integer fd;\nanalog begin\n@(initial_step) begin fd = $fopen(\"once.txt\", \"w\"); \
-     $fdisplay(fd, \"initial step at %g\", $abstime); $debug(\"evaluation at %g\", $abstime); \
-     end\nI(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\nend\nendmodule\n";
+/// A current source into a diode across the deck's 1k resistor, a first
+/// point Newton solves in several evaluations, until the module reads back
+/// how many lines its `@(initial_step)` wrote and drives that count.
+const ONCE_PER_POINT: &str = "`include \"disciplines.vams\"\nmodule once(q); inout q; electrical q;\n\
+     integer fd, k, n, a, b, c;\nanalog begin\n\
+     @(initial_step) begin fd = $fopen(\"once.txt\", \"w\"); $fdisplay(fd, \"%0d\", 7);\n\
+     $debug(\"evaluation at %g\", $abstime); $fclose(fd); end\n\
+     @(timer(0.5n)) begin k = $fopen(\"once.txt\", \"r\"); n = $fscanf(k, \"%d %d %d\", a, b, c);\n\
+     $fclose(k); end\n\
+     if (n > 0) V(q) <+ n;\n\
+     else I(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\nend\nendmodule\n";

@@ -1048,16 +1048,23 @@ fn value_returning_system_functions_run_in_the_worker() {
 
 /// `$fdisplay` writes once per accepted point in the worker, as `$display`
 /// does: an `@(initial_step)` call writes one line though the first point
-/// takes several Newton evaluations, which the `$debug` beside it counts.
+/// takes several Newton evaluations (rspice-core's
+/// `an_initial_step_file_display_writes_once_however_many_evaluations_the_point_takes`
+/// counts them for this module). The module reads its file back and drives
+/// the number of lines it holds.
 #[wasm_bindgen_test]
 fn an_initial_step_file_display_writes_once_in_the_worker() {
-    const SOURCE: &str = "`include \"disciplines.vams\"\nmodule once(q);\n  inout q;\n  \
-                          electrical q;\n  integer fd;\n  analog begin\n    \
-                          @(initial_step) begin fd = $fopen(\"once.txt\", \"w\");\n      \
-                          $fdisplay(fd, \"initial step at %g\", $abstime);\n      \
-                          $debug(\"evaluation at %g\", $abstime); end\n    \
-                          I(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\n  \
-                          end\nendmodule\n";
+    const SOURCE: &str = "`include \"disciplines.vams\"\nmodule once(q); inout q; electrical q;\n\
+                          integer fd, k, n, a, b, c;\nanalog begin\n\
+                          @(initial_step) begin fd = $fopen(\"once.txt\", \"w\"); \
+                          $fdisplay(fd, \"%0d\", 7);\n\
+                          $debug(\"evaluation at %g\", $abstime); $fclose(fd); end\n\
+                          @(timer(0.5n)) begin k = $fopen(\"once.txt\", \"r\"); \
+                          n = $fscanf(k, \"%d %d %d\", a, b, c);\n\
+                          $fclose(k); end\n\
+                          if (n > 0) V(q) <+ n;\n\
+                          else I(q) <+ 1e-14 * (limexp(V(q) / 0.02585) - 1) - 5m;\nend\n\
+                          endmodule\n";
     let (deck, runtimes) =
         deck_with_sealed_module("Worker once", &[("once.va", SOURCE)], &["once.va"], "once");
     let mut request = worker_request_json(
@@ -1073,32 +1080,31 @@ fn an_initial_step_file_display_writes_once_in_the_worker() {
     let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
         .expect("a prepared request is answered");
     let response = structured_clone(&response);
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
     let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
         js_sys::Reflect::get(&response, &"response".into()).unwrap(),
     )
     .unwrap();
-    let records = metadata["outcome"]["Success"]["Transient"]["checks"]["hdl"]
+    let transient = &metadata["outcome"]["Success"]["Transient"];
+    let v_q = transient["waveforms"]
         .as_array()
-        .unwrap_or_else(|| panic!("the run completes with its checks: {metadata}"));
-    let evaluations = records
+        .unwrap_or_else(|| panic!("{metadata}"))
         .iter()
-        .filter(|record| {
-            record["stream"] == "Stdout"
-                && record["text"]
+        .find(|trace| {
+            trace["y_unit"] == "V"
+                && trace["name"]
                     .as_str()
-                    .is_some_and(|text| text.starts_with("evaluation"))
+                    .is_some_and(|name| name.eq_ignore_ascii_case("q"))
         })
-        .count();
-    assert!(
-        evaluations >= 2,
-        "the first point takes several evaluations: {records:?}"
-    );
-    let written: Vec<&str> = records
-        .iter()
-        .filter(|record| record["stream"].get("File").is_some())
-        .filter_map(|record| record["text"].as_str())
-        .collect();
-    assert_eq!(written, ["initial step at 0\n"], "{records:?}");
+        .unwrap_or_else(|| panic!("no node voltage q: {metadata}"));
+    let lines = *transferred_series(&buffers, &v_q["y_values"])
+        .to_vec()
+        .last()
+        .unwrap();
+    assert!((lines - 1.0).abs() < 1e-9, "V(q) = {lines}");
 }
 
 /// Two files compiled as one unit, one reading its half period from a local
