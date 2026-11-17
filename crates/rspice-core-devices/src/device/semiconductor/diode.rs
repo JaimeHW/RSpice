@@ -1915,19 +1915,23 @@ impl Diode {
     /// Temperature-shifted breakdown voltage before the forward/reverse
     /// IBV/NBV matching loop.
     ///
-    /// Two shift laws live here because two dialects spell the coefficient
+    /// Two shift laws live here because the dialects spell the coefficient
     /// differently. ngspice's TCV subtracts (`BV − TCV·dt`) at TLEV=0 and
     /// scales (`BV·(1 − TCV·dt)`) otherwise; Xyce's TBV1/TBV2 scale with the
-    /// opposite sign (`BV·(1 + TBV1·dt + TBV2·dt²)`). A card that names TCV
-    /// gets ngspice's, and so does TBV1 outside the Xyce dialect, where it is
-    /// ngspice's alias of TCV (`dio.c:121`, law `diotemp.c:211-214`).
-    /// Anything else gets Xyce's, which degenerates to no shift when TBV1
-    /// and TBV2 are absent.
+    /// opposite sign (`BV·(1 + TBV1·dt + TBV2·dt²)`, N_DEV_Diode.C:1521-1522),
+    /// and so do LTspice's, which the default dialect follows: LTspice
+    /// 17.2.4's breakdown with TBV1=1e-3 and TBV2=1e-5 sits at 4.88945 V at
+    /// -40 C, 5.21945 V at 60 C and 5.63145 V at 100 C for BV=5, measured
+    /// from the model's TNOM. A card that names TCV gets ngspice's, and so
+    /// does TBV1 in the ngspice dialect, where it is ngspice's alias of TCV
+    /// (`dio.c:121`, law `diotemp.c:211-214`). Anything else gets the
+    /// scaling law, which degenerates to no shift when TBV1 and TBV2 are
+    /// absent.
     fn shifted_breakdown_voltage(&self, delta_t: Value) -> Option<Value> {
         let bv = self.bv?;
         let tcv = if self.temperature_model.tcv_given {
             Some(self.temperature_model.tcv)
-        } else if self.tbv1_given && !self.xyce_dialect {
+        } else if self.tbv1_given && self.ngspice_dialect {
             Some(self.tbv1)
         } else {
             None

@@ -9,8 +9,20 @@ use rspice_core::netlist::Netlist;
 
 /// The current a bare diode draws at `bias` volts, from an operating point.
 fn diode_current(dialect: SpiceDialect, bias: f64, instance: &str, model: &str) -> f64 {
+    diode_current_at(dialect, 27.0, bias, instance, model)
+}
+
+/// [`diode_current`] at `temperature` degrees Celsius.
+fn diode_current_at(
+    dialect: SpiceDialect,
+    temperature: f64,
+    bias: f64,
+    instance: &str,
+    model: &str,
+) -> f64 {
     let deck = format!(
-        "* diode law\nv1 a 0 {bias}\nd1 a 0 dm {instance}\n.model dm d {model}\n.op\n.end\n"
+        "* diode law\nv1 a 0 {bias}\nd1 a 0 dm {instance}\n.model dm d {model}\n\
+         .temp {temperature}\n.op\n.end\n"
     );
     let netlist = Netlist::parse(&deck).expect("deck parses");
     let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
@@ -160,5 +172,51 @@ fn the_default_diode_limits_high_injection_as_ltspice_does() {
     ] {
         let current = diode_current(SpiceDialect::Ngspice, bias, "", model);
         assert_rel_close(&format!("ngspice d1 at {bias} V"), current, expected, 1e-9);
+    }
+}
+
+/// LTspice, like Xyce, scales BV by `1 + TBV1*dt + TBV2*dt^2`, with dt
+/// measured from the model's TNOM, where ngspice reads TBV1 as its TCV,
+/// `BV - TCV*dt`. With BV=5, TBV1=1e-3 and TBV2=1e-5, LTspice's breakdown
+/// sits at 4.88945 V at -40 C, 5.21945 V at 60 C and 5.63145 V at 100 C.
+#[test]
+fn the_default_diode_scales_bv_with_tbv1_and_tbv2_as_ltspice_does() {
+    let model = "is=1e-14 bv=5 ibv=1e-10 tbv1=1e-3 tbv2=1e-5";
+    // (temperature, model, bias, LTspice current)
+    let cases = [
+        (-40.0, model, -5.0, -2.4532313656e-08),
+        (60.0, model, -5.3, -1.6602435816e-09),
+        (100.0, model, -5.8, -1.8989939531e-08),
+        (
+            100.0,
+            "is=1e-14 bv=5 ibv=1e-10 tbv1=1e-3 tbv2=1e-5 tnom=50",
+            -5.45,
+            -1.0389358593e-09,
+        ),
+        (
+            100.0,
+            "is=1e-14 bv=5 ibv=1e-10 tbv1=-2e-3",
+            -4.35,
+            -1.2930218344e-09,
+        ),
+    ];
+    for (temperature, model, bias, expected) in cases {
+        let current = diode_current_at(SpiceDialect::BestAvailable, temperature, bias, "", model);
+        assert_rel_close(
+            &format!("d1 ({model}) at {bias} V and {temperature} C"),
+            current,
+            expected,
+            1e-4,
+        );
+    }
+    // ngspice-46 at 100 C: its BV is 5 - 1e-3*73 before matching.
+    for (bias, expected) in [(-5.0, -8.28636383584e-10), (-5.2, -4.13951587158e-07)] {
+        let current = diode_current_at(SpiceDialect::Ngspice, 100.0, bias, "", model);
+        assert_rel_close(
+            &format!("ngspice d1 at {bias} V and 100 C"),
+            current,
+            expected,
+            1e-9,
+        );
     }
 }
