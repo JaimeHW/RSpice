@@ -275,6 +275,7 @@ jobs:
           --test veriloga_mixed_signal_hardening
           --test veriloga_session_holds
           --test veriloga_source_defines
+          --test veriloga_system_tasks
           --test veriloga_transient
       # A second invocation rather than one more target above: the suites in
       # the `tri_family` folder need a generated model compiled in, and adding
@@ -502,6 +503,7 @@ jobs:
           --test veriloga_mixed_signal_hardening
           --test veriloga_session_holds
           --test veriloga_source_defines
+          --test veriloga_system_tasks
           --test veriloga_transient
           -- --test-threads=1
       # The generated-model half of the interpreter lane's pair, same reason.
