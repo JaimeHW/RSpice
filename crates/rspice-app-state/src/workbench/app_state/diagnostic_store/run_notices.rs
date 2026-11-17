@@ -25,7 +25,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
 use crate::state::PreflightRemediation;
-use crate::state::{CellViewRef, InstancePath};
+use crate::state::{CellViewRef, InstancePath, ResultsStorageStop};
 
 use super::super::model::{Model, SlotFacts};
 use super::{
@@ -46,6 +46,8 @@ const MEASURE_PRODUCER: &str = "rspice.engine.measure";
 const BOUNDARY_PRODUCER: &str = "rspice.engine.boundary";
 /// The engine's own build of the deck it solves.
 const ELABORATION_PRODUCER: &str = "rspice.engine.elaboration";
+/// The store a run writes its results to, and the waveforms that read it.
+const RESULTS_PRODUCER: &str = "rspice.results.store";
 
 pub const PARAMETER_CODE: &str = "MODEL-PARAMETER-CLAMPED";
 pub const AID_CODE: &str = "RUN-CONVERGENCE-AID";
@@ -56,10 +58,12 @@ const SUPPLY_INFERRED_CODE: &str = "RUN-BOUNDARY-SUPPLY-INFERRED";
 pub const SUPPLY_DEFAULTED_CODE: &str = "RUN-BOUNDARY-SUPPLY-DEFAULTED";
 const SUPPLY_TEMPLATE_CODE: &str = "RUN-BOUNDARY-SUPPLY-TEMPLATE-STATIC";
 const DC_INDUCTOR_LOOP_CODE: &str = "RUN-DC-INDUCTOR-LOOP";
+pub const STORAGE_FULL_CODE: &str = "RUN-RESULTS-STORAGE-FULL";
+pub const COLUMN_UNREADABLE_CODE: &str = "RUN-RESULTS-COLUMN-UNREADABLE";
 
 /// Every rule code a notice record carries, which is what tells a notice
 /// from a failure in the batch they share.
-const NOTICE_CODES: [&str; 9] = [
+const NOTICE_CODES: [&str; 11] = [
     PARAMETER_CODE,
     AID_CODE,
     TIMESTEP_CODE,
@@ -69,6 +73,8 @@ const NOTICE_CODES: [&str; 9] = [
     SUPPLY_DEFAULTED_CODE,
     SUPPLY_TEMPLATE_CODE,
     DC_INDUCTOR_LOOP_CODE,
+    STORAGE_FULL_CODE,
+    COLUMN_UNREADABLE_CODE,
 ];
 
 /// The analyses, or the sweep points, one record names. Past this many, it
@@ -89,6 +95,15 @@ pub(crate) enum RunNotice {
     MeasureFailed {
         name: String,
         reason: String,
+    },
+    /// The volume holding the run's results store filled: the transient
+    /// stopped there and kept the rows it had written.
+    StorageFull(ResultsStorageStop),
+    /// A column of the run's results store that a waveform could not read:
+    /// its trace shows no samples where it could not.
+    ColumnUnreadable {
+        column: String,
+        cause: String,
     },
 }
 
@@ -242,6 +257,48 @@ impl Model {
                 })
             }))
             .collect();
+        self.raise_run_notices(analysis, raised, run_sequence, facts);
+    }
+
+    /// Record that the volume holding the run's results store filled and
+    /// stopped `stop.analysis`, keeping the rows it had written.
+    pub fn publish_results_storage_full(
+        &mut self,
+        stop: &ResultsStorageStop,
+        run_sequence: u64,
+        facts: SlotFacts,
+    ) {
+        let raised = vec![(RunNotice::StorageFull(stop.clone()), None)];
+        self.raise_run_notices(&stop.analysis, raised, run_sequence, facts);
+    }
+
+    /// Record that a waveform of `analysis` could not read its stored
+    /// `column`, in the store's words.
+    pub fn publish_unreadable_column(
+        &mut self,
+        analysis: &str,
+        column: &str,
+        cause: &str,
+        run_sequence: u64,
+        facts: SlotFacts,
+    ) {
+        let raised = vec![(
+            RunNotice::ColumnUnreadable {
+                column: column.to_owned(),
+                cause: cause.to_owned(),
+            },
+            None,
+        )];
+        self.raise_run_notices(analysis, raised, run_sequence, facts);
+    }
+
+    fn raise_run_notices(
+        &mut self,
+        analysis: &str,
+        raised: Vec<(RunNotice, Option<usize>)>,
+        run_sequence: u64,
+        facts: SlotFacts,
+    ) {
         if raised.is_empty() {
             return;
         }
@@ -471,6 +528,25 @@ impl Model {
                 format!("{name} produced no value: {reason}"),
                 Some(plan()),
             ),
+            // Nothing in the design is at fault: the reader frees space on
+            // the volume, or shortens the run, and runs it again.
+            RunNotice::StorageFull(stop) => (
+                DiagnosticLevel::Error,
+                condition.analyses.sentence(),
+                None,
+                storage_full_message(stop),
+                None,
+            ),
+            RunNotice::ColumnUnreadable { column, cause } => (
+                DiagnosticLevel::Error,
+                column.clone(),
+                None,
+                format!(
+                    "The stored samples of {column} could not be read, so its trace shows none \
+                     there: {cause}"
+                ),
+                None,
+            ),
         };
         let mut subject = DiagnosticSubject::new(project, object);
         if let Some(drawn) = &located {
@@ -571,7 +647,9 @@ fn gather<'a>(facts: &'a [RunNoticeFact], scope: &str) -> Vec<Gathered<'a>> {
                 &[][..],
                 &[][..],
             ),
-            RunNotice::MeasureFailed { .. } => (1, &[][..], &[][..]),
+            RunNotice::MeasureFailed { .. }
+            | RunNotice::StorageFull(_)
+            | RunNotice::ColumnUnreadable { .. } => (1, &[][..], &[][..]),
         };
         let index = match gathered.iter().position(|condition| condition.key == key) {
             Some(index) => index,
@@ -651,6 +729,10 @@ fn notice_key(notice: &RunNotice, scope: &str) -> FindingKey {
         RunNotice::TruncationExceeded { .. } => (TIMESTEP_PRODUCER, TRUNCATION_CODE, String::new()),
         RunNotice::MeasureFailed { name, .. } => {
             (MEASURE_PRODUCER, MEASURE_CODE, name.to_ascii_uppercase())
+        }
+        RunNotice::StorageFull(stop) => (RESULTS_PRODUCER, STORAGE_FULL_CODE, stop.folder.clone()),
+        RunNotice::ColumnUnreadable { column, .. } => {
+            (RESULTS_PRODUCER, COLUMN_UNREADABLE_CODE, column.clone())
         }
     };
     FindingKey::new(producer, code, scope, object)
@@ -763,6 +845,26 @@ fn aid_name(aid: ContinuationAid) -> &'static str {
         ContinuationAid::GateGenerationStepping => "gate generation stepping",
         _ => "a convergence aid",
     }
+}
+
+/// `Stopped at t = 2.31ms: the volume holding /tmp/rspice-results/… filled;
+/// 2310004 points kept (1.10 GiB), 84.0 MiB free`.
+pub fn storage_full_message(stop: &ResultsStorageStop) -> String {
+    use rspice_simulation_contract::run_set::format_bytes;
+    let at = stop
+        .at
+        .map(|at| format!(" at t = {}s", engineering(at)))
+        .unwrap_or_default();
+    let free = stop
+        .free
+        .map(|free| format!(", {} free", format_bytes(free)))
+        .unwrap_or_default();
+    format!(
+        "Stopped{at}: the volume holding {} filled; {} points kept ({}){free}",
+        stop.folder,
+        stop.rows,
+        format_bytes(stop.bytes)
+    )
 }
 
 fn engineering(value: f64) -> String {

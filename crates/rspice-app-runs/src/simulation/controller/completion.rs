@@ -121,6 +121,10 @@ impl SimulationController {
                     }
                 });
                 self.apply_result_side_effects(state, &sim_result);
+                // A transient its results storage stopped keeps the rows it
+                // wrote: its result stands, and the stop is said beside it.
+                let storage_stop =
+                    self.note_results_store(&sim_result, &current_label, target_run_id);
                 // A recorded FFT carries the quality of the transient it
                 // transformed, which that transient has already reported.
                 let solved_transient = match &sim_result {
@@ -180,6 +184,9 @@ impl SimulationController {
                         run_sequence,
                         facts,
                     );
+                    if let Some(stop) = &storage_stop {
+                        self.report_results_storage_full(state, stop, run_sequence);
+                    }
                     // What the run's checks reported is filed beside them,
                     // one row each. A testbench that reported an error
                     // completed all the same: its results stand, and the

@@ -190,7 +190,7 @@ pub use simulation::{
     OccurrenceProbeSpelling, OperatingPointAnnotationEvidence, OperatingPointValue,
     PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
-    RetainedSimulationState, RetainedTrace, RunHistory, RunRetention,
+    ResultsStorageStop, RetainedSimulationState, RetainedTrace, RunHistory, RunRetention,
     SavedOutputMaterializationStatus, SharedWaveformValues, SimulationCampaignMembership,
     SimulationExecutionState, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
     SimulationRunProvenance, SimulationSourceState, SimulationState, SimulationViewState,

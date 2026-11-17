@@ -295,6 +295,10 @@ impl ColumnSource for StoredColumn {
         &self.name
     }
 
+    fn store(&self) -> String {
+        self.run.path().display().to_string()
+    }
+
     fn rows(&self) -> u64 {
         self.run.rows()
     }
@@ -302,7 +306,7 @@ impl ColumnSource for StoredColumn {
     fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
         self.run
             .read(self.slot, first, out)
-            .map_err(|error| format!("{}: {error}", self.run.path().display()))
+            .map_err(|error| error.to_string())
     }
 }
 

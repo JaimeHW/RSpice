@@ -651,6 +651,15 @@ fn run_notice(state: &AppState, run_id: rspice_app_state::product::RunId) -> Opt
         // The reader's own Stop. The Console and the status bar already say
         // it, and a warning for doing what they asked would be noise.
         Lifecycle::Aborted => return None,
+        // The volume holding its results store filled: what it kept is its
+        // result, and the notice says where it stopped.
+        Lifecycle::Completed | Lifecycle::Failed if run.results_storage_stop().is_some() => (
+            ToastKind::Error,
+            format!("Run {sequence} stopped: results storage full"),
+            run.results_storage_stop()
+                .map(rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_full_message)
+                .unwrap_or_default(),
+        ),
         // A member that finished is counted in its campaign's summary; a
         // notice per member would bury the one that failed.
         Lifecycle::Completed if membership.is_some() => return None,
@@ -1625,6 +1634,42 @@ mod tests {
         let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Run 1 complete");
+    }
+
+    /// A run a full results storage stopped kept what it wrote, so it
+    /// completed, but it is not a clean completion: the notice is an error
+    /// that says where it stopped and what it kept.
+    #[test]
+    fn a_run_a_full_results_storage_stopped_is_announced_as_stopped() {
+        use rspice_app_state::state::{ResultsStorageStop, SimulationRunLifecycle as Lifecycle};
+        use rspice_app_workbench::ui::widgets::ToastKind;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let run = app.state.model.simulation.start_run();
+        run.stop_on_full_results_storage(ResultsStorageStop {
+            analysis: "Transient".to_owned(),
+            at: Some(2.31e-3),
+            rows: 2_310_004,
+            bytes: 1 << 30,
+            free: Some(84 << 20),
+            folder: "/Volumes/X/rspice-results/7-1-0".to_owned(),
+        });
+        run.lifecycle = Lifecycle::Completed;
+        let run_id = run.run_id;
+        app.state.runs.run_watch.run_started(run_id);
+
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.workbench.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Run 1 stopped: results storage full");
+        assert_eq!(activity[0].kind(), ToastKind::Error);
+        assert_eq!(
+            activity[0].message(),
+            "Stopped at t = 2.31ms: the volume holding /Volumes/X/rspice-results/7-1-0 \
+             filled; 2310004 points kept (1.00 GiB), 84.00 MiB free"
+        );
     }
 
     /// A completion with warnings is not a clean one. Its count is the run

@@ -27,6 +27,10 @@ impl ColumnSource for Column {
         self.name
     }
 
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
     fn rows(&self) -> u64 {
         self.values.len() as u64
     }
@@ -97,6 +101,7 @@ fn an_unreadable_window_shows_a_gap_and_its_failure_is_kept_for_diagnostics() {
     let values = WaveformValues::stored(column, window(0, 3, WindowLead::None)).unwrap();
     let failure = values.try_values().unwrap_err();
     assert_eq!(failure.column, "v(unreadable_window_test)");
+    assert_eq!(failure.store, "run.rsr");
     assert!(values.iter().all(|value| value.is_nan()));
     assert_eq!(values.len(), 3);
     assert_eq!(values.try_values().unwrap_err(), failure);
@@ -108,7 +113,7 @@ fn an_unreadable_window_shows_a_gap_and_its_failure_is_kept_for_diagnostics() {
     assert!(
         failure
             .to_string()
-            .contains("'v(unreadable_window_test)' could not be read: the chunk's checksum")
+            .contains("'v(unreadable_window_test)' could not be read from run.rsr: the chunk's")
     );
 }
 

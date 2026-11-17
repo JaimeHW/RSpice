@@ -84,6 +84,7 @@ mod run_inputs;
 pub use run_inputs::PreparedRunSetInputs;
 mod run_lines;
 use run_lines::write_run_line;
+mod stored_results;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_execution;
 #[cfg(any(test, feature = "test-support"))]
@@ -195,6 +196,9 @@ pub struct SimulationController {
     /// back both adaptive live presentation and a truthful partial result if
     /// the task terminates before returning a full engine result.
     live_transient: LiveTransientAccumulator,
+    /// The results store each kept transient wrote, by its segment's path: the run and the
+    /// analysis a stored column that cannot be read is said in.
+    stored_segments: HashMap<String, (u64, String)>,
 
     // =========================================================================
     // Multi-Analysis Queue
@@ -272,6 +276,7 @@ impl SimulationController {
             current_advisories: Vec::new(),
             current_engine_lines: HashMap::new(),
             live_transient: LiveTransientAccumulator::default(),
+            stored_segments: HashMap::new(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
             execution_artifacts: HashMap::new(),
@@ -301,6 +306,7 @@ impl SimulationController {
         export_io: &(impl ExportWorkflowIo + ?Sized),
     ) {
         self.reset_if_design_replaced(state);
+        self.report_unreadable_columns(state);
 
         // Handle simulation trigger
         if state.model().simulation.execution.trigger_simulation {
@@ -1627,10 +1633,10 @@ impl SimulationController {
         let completed_run_id = self.target_run_id();
         self.point_families.clear();
         let model = state.model_mut();
-        let run_success = completed_run_id
-            .and_then(|run_id| model.simulation.retained.run_by_sequence(run_id))
-            .map(|run| run.success)
-            .unwrap_or(false);
+        let completed_run =
+            completed_run_id.and_then(|run_id| model.simulation.retained.run_by_sequence(run_id));
+        let run_success = completed_run.is_some_and(|run| run.success);
+        let storage_full = completed_run.is_some_and(|run| run.results_storage_stop().is_some());
         self.live_transient.clear();
 
         if let Some(run_id) = completed_run_id
@@ -1701,7 +1707,9 @@ impl SimulationController {
         execution.active_execution = None;
         execution.abort_request = None;
 
-        execution.status = if run_success {
+        execution.status = if storage_full {
+            "Stopped: results storage full".to_string()
+        } else if run_success {
             "Complete".to_string()
         } else {
             "Completed with errors".to_string()

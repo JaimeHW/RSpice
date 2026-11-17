@@ -16,6 +16,10 @@ pub trait ColumnSource: Send + Sync {
     /// The column's name, as a failure to read it names it.
     fn name(&self) -> &str;
 
+    /// The store that holds the column, as its host names it (a segment's path), so a failure to
+    /// read it can be traced to the run that wrote it.
+    fn store(&self) -> String;
+
     /// The rows the column holds.
     fn rows(&self) -> u64;
 
@@ -52,6 +56,8 @@ pub struct StoredWindow {
 pub struct ColumnReadFailure {
     /// The column's name.
     pub column: String,
+    /// The store that holds it, as [`ColumnSource::store`] names it.
+    pub store: String,
     /// Why it could not be read.
     pub cause: String,
 }
@@ -60,8 +66,8 @@ impl fmt::Display for ColumnReadFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "the stored samples of '{}' could not be read: {}",
-            self.column, self.cause
+            "the stored samples of '{}' could not be read from {}: {}",
+            self.column, self.store, self.cause
         )
     }
 }
@@ -115,6 +121,7 @@ impl Stored {
         let StoredWindow { first, rows, lead } = self.window;
         let failed = |cause: String| ColumnReadFailure {
             column: self.source.name().to_owned(),
+            store: self.source.store(),
             cause,
         };
         let rows = usize::try_from(rows)

@@ -47,6 +47,10 @@ fn main() {
     // windowed application's reader can see it.
     rspice_app::install_studio_logger();
 
+    // Delete the results stores of runs whose RSpice ended without deleting them (a crash, a
+    // kill). The sweep runs on a thread of its own and leaves every live process's stores.
+    rspice_simulation::results_store::sweep_abandoned_stores();
+
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
     // Open the installed font files while the window is created, on a worker

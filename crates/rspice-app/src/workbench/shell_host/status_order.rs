@@ -451,8 +451,30 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
     let warnings = count(LogSeverity::Warning, "warning", "warnings");
     let errors = count(LogSeverity::Error, "error", "errors");
     let (verdict, raised, mark) = match run.lifecycle {
+        // A transient its results storage stopped kept what it wrote; the
+        // run says where it stopped and why, before any count.
+        Lifecycle::Completed | Lifecycle::Failed if run.results_storage_stop().is_some() => {
+            let at = run
+                .results_storage_stop()
+                .and_then(|stop| stop.at)
+                .map(|at| {
+                    format!(
+                        " at {}s",
+                        rspice_app_state::quantity::engineering::format_engineering_display_with(
+                            at,
+                            rspice_app_state::quantity::engineering::EngineeringPrecision::Adaptive,
+                        )
+                    )
+                })
+                .unwrap_or_default();
+            (
+                Cow::Owned(format!("stopped{at}: results storage full")),
+                errors,
+                StatusMark::Problem(Problem::Failure),
+            )
+        }
         Lifecycle::Completed => (
-            "complete",
+            Cow::Borrowed("complete"),
             warnings.clone(),
             if warnings.is_some() {
                 StatusMark::Problem(Problem::Warning)
@@ -461,13 +483,21 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
             },
         ),
         Lifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => (
-            "completed with errors",
+            Cow::Borrowed("completed with errors"),
             errors,
             StatusMark::Problem(Problem::Failure),
         ),
-        Lifecycle::Failed => ("failed", errors, StatusMark::Problem(Problem::Failure)),
-        Lifecycle::Interrupted => ("interrupted", None, StatusMark::Problem(Problem::Warning)),
-        Lifecycle::Aborted => ("stopped", None, StatusMark::None),
+        Lifecycle::Failed => (
+            Cow::Borrowed("failed"),
+            errors,
+            StatusMark::Problem(Problem::Failure),
+        ),
+        Lifecycle::Interrupted => (
+            Cow::Borrowed("interrupted"),
+            None,
+            StatusMark::Problem(Problem::Warning),
+        ),
+        Lifecycle::Aborted => (Cow::Borrowed("stopped"), None, StatusMark::None),
         _ => return None,
     };
     // A plan of several analyses says how many the run held; one analysis
@@ -726,6 +756,42 @@ mod tests {
             said,
             [format!("Run 1 complete \u{b7} 2 analyses \u{b7} {elapsed}")]
         );
+    }
+
+    /// A transient its results storage stopped kept what it wrote, so its
+    /// run completed; the run segment says where it stopped and why, in
+    /// plain text with the failure mark, before the run's count of errors.
+    #[test]
+    fn the_run_segment_says_a_full_results_storage_stopped_the_run() {
+        use rspice_app_state::state::{
+            AnalysisResult, AnalysisType, ResultsStorageStop, SimulationRun, SimulationRunLifecycle,
+        };
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        run.stop_on_full_results_storage(ResultsStorageStop {
+            analysis: "TRAN".to_owned(),
+            at: Some(2.31e-3),
+            rows: 2_310_004,
+            bytes: 1 << 30,
+            free: Some(84 << 20),
+            folder: "/Volumes/X/rspice-results/7-1-0".to_owned(),
+        });
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.elapsed_time = 0.52;
+        let (run_id, elapsed) = (run.run_id, run.elapsed_time);
+        app.state.model.simulation.retained.runs = vec![run].into();
+        app.state.runs.run_watch.last_ended = Some(run_id);
+
+        let outcome = run_outcome(&app, &EngineAvailability::Ready).expect("the run ended");
+
+        let elapsed = rspice_app_state::quantity::format_elapsed(elapsed);
+        assert_eq!(
+            outcome.text,
+            format!("Run 1 stopped at 2.31ms: results storage full \u{b7} {elapsed}")
+        );
+        assert_eq!(outcome.mark, StatusMark::Problem(Problem::Failure));
     }
 
     /// A source view has no coordinates to read out, and the project's

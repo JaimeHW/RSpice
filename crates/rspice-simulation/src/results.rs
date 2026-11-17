@@ -488,6 +488,14 @@ impl SimulationResult {
         }
     }
 
+    /// The results store a transient wrote its rows to, where it wrote one.
+    pub fn transient_store(&self) -> Option<&TransientStoreReceipt> {
+        match self {
+            Self::Transient { store, .. } => store.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn transient_convergence(
         &self,
     ) -> Option<&std::sync::Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>>
