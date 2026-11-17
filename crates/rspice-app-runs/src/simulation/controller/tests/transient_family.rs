@@ -154,10 +154,13 @@ fn retained_bytes(analyses: &[AnalysisResult]) -> usize {
 #[test]
 fn a_buck_converters_monte_carlo_trials_are_the_corpus_runners_trials() {
     let (source, path) = corpus_deck("c06-buck/deck/vdig.mc-tran.cir");
-    let run = super::super::test_execution::run_manual_batch_at(
+    // Three trials of the converter's 500 us run take a fixture's whole minute on a CI runner
+    // whose cores the whole-app exit projects beside it hold; the limit is for a hung run.
+    let run = super::super::test_execution::run_manual_batch_at_within(
         &source,
         &path,
         SimulationRunLifecycle::Completed,
+        std::time::Duration::from_secs(10 * 60),
     );
     assert_eq!(run.analyses.len(), 3);
     for (index, analysis) in run.analyses.iter().enumerate() {
