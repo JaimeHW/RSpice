@@ -1,5 +1,5 @@
-//! The Verify navigator's flow rows: one view a row, its name, what it holds
-//! and its state, led by its problem mark when it has one.
+//! The Verify navigator's flow rows: one view or run a row, its name and
+//! what it holds, led by its problem mark when it has one.
 
 use super::verify::VerificationFlowPresentation;
 use super::*;
@@ -9,23 +9,14 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::paint_problem_mark;
 
-/// A flow row's height, and where its status line sits, for `detail_lines`
-/// wrapped lines of detail and a status line or none.
+/// A flow row's height for `detail_lines` wrapped lines of detail.
 ///
-/// The label, then the detail, then the status, each on the row's own pitch; a
-/// line the flow has nothing to say on is not drawn and takes no height.
-pub(super) fn flow_row_geometry(detail_lines: usize, has_status: bool) -> (f32, f32) {
-    let detail_top = |line: usize| FLOW_DETAIL_TOP + line as f32 * FLOW_DETAIL_LINE_HEIGHT;
-    let status_top = match detail_lines {
-        0 => FLOW_DETAIL_TOP,
-        lines => FLOW_STATUS_TOP + (lines - 1) as f32 * FLOW_DETAIL_LINE_HEIGHT,
-    };
-    let last_top = if has_status {
-        status_top
-    } else {
-        detail_top(detail_lines.saturating_sub(1))
-    };
-    (last_top + (FLOW_ROW_HEIGHT - FLOW_STATUS_TOP), status_top)
+/// The label, then the detail, each on the row's own pitch. A row with no
+/// detail keeps the height of one with a line, so siblings stay even.
+pub(super) fn flow_row_geometry(detail_lines: usize) -> f32 {
+    let last_top =
+        FLOW_DETAIL_TOP + detail_lines.saturating_sub(1) as f32 * FLOW_DETAIL_LINE_HEIGHT;
+    last_top + (FLOW_ROW_HEIGHT - FLOW_STATUS_TOP)
 }
 
 pub(super) fn flow_row(
@@ -36,7 +27,6 @@ pub(super) fn flow_row(
     let VerificationFlowPresentation {
         label,
         detail,
-        status,
         problem,
     } = flow;
     let t = Tokens::get(ui.ctx());
@@ -52,13 +42,13 @@ pub(super) fn flow_row(
     } else {
         detail_galley.rows.len().max(1)
     };
-    let (row_height, status_top) = flow_row_geometry(detail_lines, !status.is_empty());
+    let row_height = flow_row_geometry(detail_lines);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
         egui::Sense::click(),
     );
     response.widget_info(|| {
-        let spoken = [label.as_str(), detail.as_str(), status.as_str()]
+        let spoken = [label.as_str(), detail.as_str()]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
@@ -100,7 +90,7 @@ pub(super) fn flow_row(
         theme::sans(tokens::FS_0, FontWeight::Medium),
         t.color.text,
     );
-    let label_top = if detail_lines == 0 && status.is_empty() {
+    let label_top = if detail_lines == 0 {
         ((row_height - label_galley.size().y) / 2.0).round()
     } else {
         FLOW_LABEL_TOP
@@ -129,15 +119,6 @@ pub(super) fn flow_row(
             egui::pos2(text_left, rect.top() + FLOW_DETAIL_TOP),
             detail_galley,
             t.color.text_faint,
-        );
-    }
-    if !status.is_empty() {
-        painter.text(
-            egui::pos2(text_left, rect.top() + status_top),
-            egui::Align2::LEFT_TOP,
-            status,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
         );
     }
     theme::paint_focus_ring(ui, &response, rect);

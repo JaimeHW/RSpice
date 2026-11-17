@@ -72,12 +72,12 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
     assert!(FLOW_DETAIL_TOP - (FLOW_LABEL_TOP + 11.0) >= 4.0);
     assert!(FLOW_STATUS_TOP - (FLOW_DETAIL_TOP + 11.0) >= 4.0);
     assert!(FLOW_ROW_HEIGHT - (FLOW_STATUS_TOP + 11.0) >= 7.0);
-    assert_eq!(flow_row_geometry(1, true), (63.0, 43.0));
-    assert_eq!(flow_row_geometry(2, true), (78.0, 58.0));
-    assert_eq!(flow_row_geometry(3, true), (93.0, 73.0));
-    // A row that states only its label and one line is one line shorter.
-    assert_eq!(flow_row_geometry(0, true), (43.0, 23.0));
-    assert_eq!(flow_row_geometry(1, false), (43.0, 43.0));
+    // A label and one line of detail; each wrapped line adds one pitch.
+    assert_eq!(flow_row_geometry(1), 43.0);
+    assert_eq!(flow_row_geometry(2), 58.0);
+    assert_eq!(flow_row_geometry(3), 73.0);
+    // A row with nothing under its name keeps its siblings' height.
+    assert_eq!(flow_row_geometry(0), 43.0);
 }
 
 #[test]
@@ -150,7 +150,6 @@ fn the_checks_flow_counts_the_checks_the_run_holds() {
     let flow =
         verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
     assert_eq!(flow.detail, "1 warning \u{b7} 1 check");
-    assert_eq!(flow.status, "");
     assert_eq!(flow.problem, Some(crate::ui::widgets::Problem::Warning));
 }
 
@@ -346,8 +345,8 @@ fn navigator_pass(
 }
 
 /// The run rows the navigator announced, top to bottom, as (what it says,
-/// where its middle is).
-fn run_rows(output: egui::FullOutput) -> Vec<(String, egui::Pos2)> {
+/// where it is).
+fn run_rows(output: egui::FullOutput) -> Vec<(String, egui::Rect)> {
     let mut rows = output
         .platform_output
         .accesskit_update
@@ -360,20 +359,22 @@ fn run_rows(output: egui::FullOutput) -> Vec<(String, egui::Pos2)> {
             label.starts_with("Run ").then(|| {
                 (
                     label,
-                    egui::pos2(
-                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
-                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
                     ),
                 )
             })
         })
         .collect::<Vec<_>>();
-    rows.sort_by(|left, right| left.1.y.total_cmp(&right.1.y));
+    rows.sort_by(|left, right| left.1.top().total_cmp(&right.1.top()));
     rows
 }
 
-/// The runs list holds the plan's runs newest first, the reference marked as
-/// such, and picking one asks for it to be the run Verify judges.
+/// The runs list holds the plan's runs newest first, each row two lines that
+/// state how its run ended whether or not Verify judges it, the reference
+/// marked on that line, and picking one asks for it to be the run Verify
+/// judges.
 #[test]
 fn the_runs_list_is_newest_first_marks_the_reference_and_picks_a_run() {
     let mut harness = SimulateTestHost::harness();
@@ -388,8 +389,13 @@ fn the_runs_list_is_newest_first_marks_the_reference_and_picks_a_run() {
         AnalysisResult::new(1, AnalysisType::Ac, label)
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)])
     };
-    let older = sealed_run(1, plan_id, source, 2, measured("older"));
-    let newer = sealed_run(2, plan_id, source, 2, measured("newer"));
+    let completed = |mut run: SimulationRun| {
+        run.restore_lifecycle(crate::state::SimulationRunLifecycle::Completed, 1.0)
+            .expect("a finite elapsed time");
+        run
+    };
+    let older = completed(sealed_run(1, plan_id, source, 2, measured("older")));
+    let newer = completed(sealed_run(2, plan_id, source, 2, measured("newer")));
     let older_id = older.run_id;
     harness.model.simulation.retained.runs = vec![older, newer].into();
     assert!(harness.model.simulation.select_run(1));
@@ -402,14 +408,38 @@ fn the_runs_list_is_newest_first_marks_the_reference_and_picks_a_run() {
     assert_eq!(ask, Default::default());
     let rows = run_rows(output);
     assert_eq!(rows.len(), 2, "{rows:?}");
-    assert!(rows[0].0.starts_with("Run 2"), "{rows:?}");
-    assert!(rows[1].0.starts_with("Run 1"), "{rows:?}");
-    assert!(rows[1].0.ends_with("reference"), "{rows:?}");
-    assert!(!rows[0].0.contains("reference"), "{rows:?}");
-    // The run Verify judges states the roll-up its views state.
-    assert!(rows[0].0.contains("no specifications"), "{rows:?}");
+    let label = |run: &SimulationRun| run.label.clone();
+    let [newer, older] = [1, 0].map(|index| label(&harness.model.simulation.retained.runs[index]));
+    // Both runs ended alike, so the selected one reads as the other does,
+    // and the reference mark joins the same line.
+    assert_eq!(rows[0].0, format!("{newer}. completed"), "{rows:?}");
+    assert_eq!(
+        rows[1].0,
+        format!("{older}. completed \u{b7} reference"),
+        "{rows:?}"
+    );
+    assert_eq!(
+        rows[0].1.height(),
+        flow_row_geometry(1),
+        "a run row is its name and one line"
+    );
+    assert_eq!(rows[1].1.height(), rows[0].1.height(), "{rows:?}");
 
-    let at = rows[1].1;
+    // Selecting the other run changes neither row's words.
+    assert!(harness.model.simulation.select_run(0));
+    let (output, _) = navigator_pass(&ctx, &mut harness, Vec::new());
+    assert_eq!(
+        run_rows(output)
+            .into_iter()
+            .map(|(said, _)| said)
+            .collect::<Vec<_>>(),
+        rows.iter()
+            .map(|(said, _)| said.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(harness.model.simulation.select_run(1));
+
+    let at = rows[1].1.center();
     let (_, ask) = navigator_pass(
         &ctx,
         &mut harness,

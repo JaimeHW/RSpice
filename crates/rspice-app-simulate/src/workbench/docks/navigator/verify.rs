@@ -80,9 +80,10 @@ pub(in crate::workbench) fn verify(
     ask
 }
 
-/// The plan's retained runs, newest first: the one Verify judges with its
-/// roll-up, every other with the word for how it ended, and the reference
-/// marked. A run's menu makes it the reference or opens it in Results.
+/// The plan's retained runs, newest first, each with the word for how it
+/// ended whether or not Verify is judging it (the views above state that
+/// judgement), and the reference marked on the same line. A run's menu makes
+/// it the reference or opens it in Results.
 fn runs(ui: &mut Ui, navigator: &VerifyNavigator<'_>, ask: &mut VerifyNavigatorAsk) {
     let model = navigator.model;
     let plan_id = model
@@ -107,18 +108,13 @@ fn runs(ui: &mut Ui, navigator: &VerifyNavigator<'_>, ask: &mut VerifyNavigatorA
     let reference = reference_run(model, navigator.simulate);
     for (index, run) in runs {
         let selected = active == Some(index);
-        let (detail, problem) = match model.simulation.verification_sheet() {
-            Some(sheet) if selected => (counts_line(sheet), counts_problem(sheet)),
-            _ => run_outcome(run),
-        };
+        let (mut detail, problem) = run_outcome(run);
+        if reference == Some(run.run_id) {
+            detail.push_str(" \u{b7} reference");
+        }
         let flow = VerificationFlowPresentation {
             label: run.label.clone(),
             detail,
-            status: if reference == Some(run.run_id) {
-                "reference".to_owned()
-            } else {
-                String::new()
-            },
             problem,
         };
         let response = ui
@@ -175,13 +171,12 @@ fn run_outcome(run: &crate::state::SimulationRun) -> (String, Option<Problem>) {
     (word.to_owned(), problem)
 }
 
-/// One view's row: its name, the one line its model has to say, and the
-/// problem it leads with.
+/// One view's or run's row: its name, the one line its model has to say,
+/// and the problem it leads with.
 #[derive(Clone)]
 pub(in crate::workbench) struct VerificationFlowPresentation {
     pub(in crate::workbench) label: String,
     pub(in crate::workbench) detail: String,
-    pub(in crate::workbench) status: String,
     pub(in crate::workbench) problem: Option<Problem>,
 }
 
@@ -205,7 +200,6 @@ pub(in crate::workbench) fn verification_flow_presentation(
     VerificationFlowPresentation {
         label: page.label().to_owned(),
         detail,
-        status: String::new(),
         problem,
     }
 }
