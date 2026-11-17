@@ -39,6 +39,7 @@ use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariable
 use rspice_vocabulary::hierarchy_path::InstancePath;
 use rspice_vocabulary::product::AnalysisInstanceId;
 
+mod added_lines;
 mod connectivity;
 mod formatting;
 #[cfg(test)]
@@ -56,6 +57,9 @@ mod subcircuits;
 mod vector_nets;
 mod xspice;
 
+pub use added_lines::{
+    AddedLineRefusal, AddedLinesRefused, added_lines_refusals, append_added_lines,
+};
 pub use instances::independent_source_card;
 pub use line_map::WrittenLine;
 use line_map::WrittenLines;

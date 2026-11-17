@@ -144,6 +144,11 @@ pub struct ProjectWorkspace {
     /// graph.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visualization_documents: Vec<rspice_results::visualization_document::VisualizationDocument>,
+    /// The lines added to each schematic design's generated netlist, at most
+    /// one block per design. Every deck generated for a design ends with its
+    /// block, so the block is generator input like the schematic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added_lines: Vec<rspice_design::added_lines::AddedLines>,
     /// Reusable stimulus definitions this project owns. Placed sources adopt
     /// them by copy and keep a provenance receipt, so nothing here is read
     /// during netlist generation or execution.
@@ -257,6 +262,7 @@ impl Default for ProjectWorkspace {
             hardcopy_source_sets: Vec::new(),
             report_documents: Vec::new(),
             visualization_documents: Vec::new(),
+            added_lines: Vec::new(),
             stimulus_library: rspice_design::stimulus_library::library::StimulusLibrary::default(),
             netlist_source: None,
             netlist_document: None,

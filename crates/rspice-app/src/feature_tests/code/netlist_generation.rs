@@ -76,3 +76,49 @@ fn a_failed_generation_states_its_reason_with_a_full_ring_and_is_not_rebuilt() {
         Some(error.as_str())
     );
 }
+
+/// The generated netlist on the Netlist workspace ends with the design's
+/// Added lines, and the next frame after they are edited shows the edit: they
+/// are generator input like the schematic.
+#[test]
+fn the_generated_netlist_shows_the_designs_added_lines_and_follows_their_edit() {
+    use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
+    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_design::added_lines::set_added_lines;
+
+    let reference = crate::workbench::examples::hierarchy_reference::build();
+    let mut app = RSpiceApp::test_instance();
+    app.state = reference.state;
+    let block = |line: &str| {
+        format!(
+            "* Added lines ({})\n{line}\n* End of added lines\n",
+            reference.top.display_path()
+        )
+    };
+    set_added_lines(
+        &mut app.state.model.workspace.content.added_lines,
+        &reference.top,
+        ".nodeset v(out)=1\n".to_owned(),
+    );
+    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    let shown = app.state.model.simulation.source.netlist_content.clone();
+    assert_eq!(
+        shown, app.state.model.netlist_artifacts.generated_source,
+        "the editor holds the generated netlist"
+    );
+    assert!(shown.contains(&block(".nodeset v(out)=1")), "{shown}");
+
+    set_added_lines(
+        &mut app.state.model.workspace.content.added_lines,
+        &reference.top,
+        ".nodeset v(out)=2\n".to_owned(),
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    let shown = app.state.model.simulation.source.netlist_content.clone();
+    assert!(shown.contains(&block(".nodeset v(out)=2")), "{shown}");
+    assert!(!shown.contains("v(out)=1"), "{shown}");
+}

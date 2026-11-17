@@ -74,6 +74,7 @@ impl ProjectFile {
                 self.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
                 self.workspace.retained_netlist_decks =
                     working.workspace.retained_netlist_decks.clone();
+                self.workspace.added_lines = working.workspace.added_lines.clone();
                 self.workspace
                     .project_sources
                     .synchronize_code_workspace_bundles_from(&working.workspace.project_sources)

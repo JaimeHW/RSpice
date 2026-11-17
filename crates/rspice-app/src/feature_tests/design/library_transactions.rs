@@ -1097,3 +1097,34 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .expect_err("a case-folded duplicate is the same view identity");
     assert!(error.contains("conflicts with an existing view"), "{error}");
 }
+
+/// A design's Added lines follow it through a rename of its cell, its view
+/// and its library, so every run of the renamed design still ends with them.
+#[test]
+fn a_renamed_design_keeps_its_added_lines() {
+    use rspice_design::added_lines::{added_lines_of, set_added_lines};
+    let mut state = state_with_populated_user_library();
+    let lines = ".nodeset v(out)=1\nK1 L1 L2 0.9".to_owned();
+    set_added_lines(
+        &mut state.model.workspace.content.added_lines,
+        &CellViewRef::new("user", "top", "schematic"),
+        lines.clone(),
+    );
+
+    state
+        .rename_cell("user", "top", "tb")
+        .expect("a writable cell renames");
+    state
+        .rename_view("user", "tb", "schematic", "sch")
+        .expect("a writable view renames");
+    state
+        .rename_library("user", "lab")
+        .expect("a writable library renames");
+
+    let blocks = &state.model.workspace.content.added_lines;
+    assert_eq!(blocks.len(), 1, "the design still has one block");
+    assert_eq!(
+        added_lines_of(blocks, &CellViewRef::new("lab", "tb", "sch")),
+        Some(lines.as_str())
+    );
+}

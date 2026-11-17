@@ -124,6 +124,7 @@ fn prepared_manual_snapshot(
         library_folders: &[],
         compilation: None,
         design_checks: Default::default(),
+        added_lines: &[],
     };
     build_prepared_manual_deck(
         &inputs,

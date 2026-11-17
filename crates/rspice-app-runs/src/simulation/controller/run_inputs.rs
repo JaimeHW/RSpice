@@ -151,6 +151,7 @@ struct RunSetReads {
     operating_points: Vec<Result<AnalysisSpec, String>>,
     checkpoint_resumes: Vec<CheckpointResume>,
     design_checks: ContentDigest,
+    added_lines: Vec<rspice_design::added_lines::AddedLines>,
 }
 
 /// What only preparing a manual deck reads, beside its text, which the
@@ -187,6 +188,7 @@ struct LiveInputs<'a> {
     design_checks: rspice_design::drc::DrcConfig,
     schematic: &'a rspice_design::schematic::document::SchematicDocument,
     schematic_topology_revision: u64,
+    added_lines: &'a [rspice_design::added_lines::AddedLines],
 }
 
 impl<'a> LiveInputs<'a> {
@@ -213,6 +215,7 @@ impl<'a> LiveInputs<'a> {
             library_folders,
             compilation,
             design_checks,
+            added_lines,
         } = super::prepared_run::run_preparation_inputs(state);
         // A run set reads the selection, the runs and the project's revision
         // through its operating points and checkpoints, and holds what they
@@ -263,6 +266,7 @@ impl<'a> LiveInputs<'a> {
             design_checks,
             schematic,
             schematic_topology_revision,
+            added_lines,
         }
     }
 }
@@ -287,6 +291,7 @@ impl RunInputIdentity {
                 .map(CheckpointResume::held)
                 .collect(),
             design_checks: design_check_digest(&live.design_checks),
+            added_lines: live.added_lines.to_vec(),
         }));
         Self::holding(live, reads)
     }
@@ -471,6 +476,7 @@ impl RunSetReads {
                 self.design_checks == design_check_digest(&live.design_checks),
                 "the design-check rules",
             ),
+            (self.added_lines == live.added_lines, "the Added lines"),
         ];
         (first, last)
     }

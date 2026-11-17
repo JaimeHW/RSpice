@@ -1,5 +1,6 @@
 //! Headless design documents, source identities, and edit transactions.
 
+pub mod added_lines;
 pub mod configuration_set;
 pub mod connectivity;
 pub mod connectivity_contract;

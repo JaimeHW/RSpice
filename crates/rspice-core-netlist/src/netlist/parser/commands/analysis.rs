@@ -169,6 +169,13 @@ impl AnalysisHead {
     }
 }
 
+/// Whether `keyword`, a dot card's first word as written (`.tran`, `.TR`),
+/// is one this parser reads as an analysis: a card that asks for a study of
+/// the circuit rather than describing it.
+pub fn is_analysis_directive(keyword: &str) -> bool {
+    AnalysisHead::parse(&keyword.to_ascii_uppercase()).is_some()
+}
+
 impl ParsedAnalysisCard {
     pub(super) fn parse(
         command: &str,
@@ -917,6 +924,18 @@ mod tests {
             assert_eq!(points(dialect, ".DISTO LIN 2 1k 4k"), 4, "{dialect:?}");
             assert_eq!(points(dialect, ".DISTO LIN 3 1k 4k"), 5, "{dialect:?}");
             assert_eq!(points(dialect, ".DISTO DEC 2 1k 4k"), 2, "{dialect:?}");
+        }
+    }
+
+    #[test]
+    fn an_analysis_directive_is_a_card_the_parser_makes_a_study_of() {
+        for keyword in [".tran", ".TR", ".ac", ".Op", ".noise", ".step", ".four"] {
+            assert!(is_analysis_directive(keyword), "{keyword}");
+        }
+        for keyword in [
+            ".nodeset", ".ic", ".param", ".options", ".model", "tran", "R1",
+        ] {
+            assert!(!is_analysis_directive(keyword), "{keyword}");
         }
     }
 }

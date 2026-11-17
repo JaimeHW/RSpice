@@ -70,6 +70,9 @@ pub struct RunPreparationInputs<'a, R, A> {
     /// rule deck and its connectivity policy — which the source-check gate
     /// judges the run by. The project's to decide, so the caller passes it.
     pub design_checks: rspice_design::drc::DrcConfig,
+    /// The project's Added lines; the configured root's block ends every
+    /// deck of the run.
+    pub added_lines: &'a [rspice_design::added_lines::AddedLines],
 }
 
 impl<R, A> RunPreparationInputs<'_, R, A> {
@@ -404,6 +407,12 @@ where
             generated.errors.join("; "),
         ));
     }
+    let generated_netlist = crate::netlist_gen::append_added_lines(
+        generated.netlist,
+        &root_reference,
+        inputs.added_lines,
+    )
+    .map_err(|refused| PreparationError::new(PreparationStage::Netlist, refused.to_string()))?;
 
     PreparationError::check_abort(abort)?;
     let model_execution_plan = sealed_models
@@ -413,7 +422,7 @@ where
     let generated_source = rspice_design::netlist_document::bind_generated_netlist_provenance(
         inputs.design_management,
         inputs.configuration_sets,
-        generated.netlist,
+        generated_netlist,
     );
     let mut netlist = crate::analysis_preparation::apply_reference_model_bindings_to_netlist(
         &generated_source,
@@ -1360,6 +1369,7 @@ mod tests {
                 library_folders: &[],
                 compilation: None,
                 design_checks: rspice_design::drc::DrcConfig::default(),
+                added_lines: &[],
             }
         }
     }

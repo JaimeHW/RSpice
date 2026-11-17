@@ -231,11 +231,19 @@ pub fn build_menu_netlist_in(
         }
         return Err(reasons);
     }
+    // The generator's own text stays for the line map, which the Added lines
+    // join as lines written for nothing.
+    let netlist = rspice_simulation::netlist_gen::append_added_lines(
+        generation.netlist.clone(),
+        &root_reference,
+        &model.workspace.content.added_lines,
+    )
+    .map_err(|refused| vec![refused.to_string()])?;
 
     let spice_netlist = model
         .workspace
         .content
-        .bind_generated_netlist_provenance(generation.netlist.clone());
+        .bind_generated_netlist_provenance(netlist);
     let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(model, &spice_netlist)
         .map_err(|error| vec![error.to_string()])?;
     let line_map = carry_line_map(&generation.netlist, generation.line_map, &spice_netlist);

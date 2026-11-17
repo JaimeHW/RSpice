@@ -141,6 +141,10 @@ impl Model {
             remap_ref(&mut open.reference);
         }
         self.workspace.content.remap_occurrence_masters(&remap_ref);
+        rspice_design::added_lines::remap_added_lines(
+            &mut self.workspace.content.added_lines,
+            &remap_ref,
+        );
 
         let remapped = self.remap_instance_bindings(|schematic| {
             schematic.rename_library_bindings(library, new_name)

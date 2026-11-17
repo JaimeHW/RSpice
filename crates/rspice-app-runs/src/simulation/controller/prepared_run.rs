@@ -116,6 +116,7 @@ fn run_preparation_inputs_reading<'a>(
         library_folders: model.library_folders(),
         compilation,
         design_checks: model.configured_root_design_check_config(),
+        added_lines: &model.workspace.content.added_lines,
     }
 }
 
@@ -162,6 +163,7 @@ struct FrozenRunInputs {
     library_folders: Vec<std::path::PathBuf>,
     compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     design_checks: rspice_design::drc::DrcConfig,
+    added_lines: Vec<rspice_design::added_lines::AddedLines>,
     /// The data-file host, which the worker reads as it is when it reads,
     /// recording what it answered so dispatch can ask again.
     source_files: super::run_inputs::RecordingSourceFiles,
@@ -229,6 +231,7 @@ impl FrozenRunPreparation {
                 library_folders: model.library_folders().to_vec(),
                 compilation: state.veriloga_compilation().cloned(),
                 design_checks: model.configured_root_design_check_config(),
+                added_lines: model.workspace.content.added_lines.clone(),
                 source_files: Default::default(),
             },
         })
@@ -297,6 +300,7 @@ impl FrozenRunInputs {
             library_folders: &self.library_folders,
             compilation: self.compilation.as_ref(),
             design_checks: self.design_checks.clone(),
+            added_lines: &self.added_lines,
         }
     }
 }
@@ -718,6 +722,12 @@ impl SimulationController {
                 generated.errors.join("; "),
             ));
         }
+        let generated_netlist = rspice_simulation::netlist_gen::append_added_lines(
+            generated.netlist,
+            &root_reference,
+            &model.workspace.content.added_lines,
+        )
+        .map_err(|refused| PreparationError::new(PreparationStage::Netlist, refused.to_string()))?;
 
         let has_project_technology = model.technology_inputs().project_technology_in_effect();
         let sealed_models = if has_project_technology {
@@ -741,7 +751,7 @@ impl SimulationController {
         let generated_source = model
             .workspace
             .content
-            .bind_generated_netlist_provenance(generated.netlist);
+            .bind_generated_netlist_provenance(generated_netlist);
         let mut source =
             rspice_simulation::analysis_preparation::apply_reference_model_bindings_to_netlist(
                 &generated_source,

@@ -2076,3 +2076,119 @@ fn the_authorized_run_receipt_seals_the_decks_hierarchy_map() {
         "the receipt seals the deck's own map rather than a second derivation"
     );
 }
+
+/// The configured root of `state`, whose Added lines its decks end with.
+fn root_design(state: &RunTestHost) -> crate::state::CellViewRef {
+    state
+        .model
+        .workspace
+        .configuration_execution_projection(
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
+        )
+        .expect("the design projects")
+        .root()
+        .clone()
+}
+
+fn add_lines(state: &mut RunTestHost, text: &str) -> crate::state::CellViewRef {
+    let design = root_design(state);
+    rspice_design::added_lines::set_added_lines(
+        &mut state.model.workspace.content.added_lines,
+        &design,
+        text.to_owned(),
+    );
+    design
+}
+
+/// Whether `deck` holds an R2 card of value `value`.
+fn holds_r2_of(deck: &str, value: &str) -> bool {
+    deck.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case("R2"))
+            && words.any(|word| word.eq_ignore_ascii_case(value))
+    })
+}
+
+/// A run, the inspected design deck and File ▸ Export ▸ Netlist all run the
+/// schematic as it is now with the design's Added lines after it: the lines
+/// ride the current generated netlist, never a copy of an older one.
+#[test]
+fn every_design_deck_holds_the_edited_schematic_and_its_added_lines() {
+    let mut state = runnable_state();
+    let design = add_lines(&mut state, ".param added_gain=2\n.options gmin=1e-13\n");
+    state.model.schematic.document_mut_for_test().components[2].value = "22k".to_owned();
+    let block = format!(
+        "* Added lines ({})\n.param added_gain=2\n.options gmin=1e-13\n* End of added lines\n",
+        design.display_path()
+    );
+
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the run prepares");
+    let inspected = SimulationController::prepare_design_netlist_for_inspection(&state.model)
+        .expect("the design deck builds");
+    let exported = SimulationController::prepare_design_netlist_for_export(&state.model)
+        .expect("the design deck exports");
+    for (route, deck) in [
+        ("run", snapshot.executable_netlist()),
+        ("inspection", inspected.as_str()),
+        ("export", exported.netlist.as_str()),
+    ] {
+        let deck = deck.replace("\r\n", "\n");
+        assert!(holds_r2_of(&deck, "22k"), "{route}: {deck}");
+        assert!(deck.contains(&block), "{route}: {deck}");
+        let end = deck
+            .lines()
+            .position(|line| line.trim().eq_ignore_ascii_case(".end"))
+            .expect("the deck ends");
+        let after_block = deck
+            .lines()
+            .position(|line| line == "* End of added lines")
+            .expect("the block closes");
+        assert!(after_block < end, "{route}: the block stands before .end");
+    }
+}
+
+/// An analysis in the Added lines stops the run, named on its line: the
+/// plan owns analyses, and a card is never dropped from what runs.
+#[test]
+fn an_analysis_in_the_added_lines_refuses_the_run_on_its_line() {
+    let mut state = runnable_state();
+    let design = add_lines(&mut state, ".param added_gain=2\n.tran 1n 1u\n");
+
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect_err("a .tran in the Added lines is refused");
+    assert_eq!(error.stage(), PreparationStage::Netlist);
+    assert_eq!(
+        error.message(),
+        format!(
+            "Added lines of {}, line 2: Analyses belong to the plan: add .tran in Simulate ▸ Analyses",
+            design.display_path()
+        )
+    );
+}
+
+#[test]
+fn dispatch_refuses_a_run_whose_added_lines_changed_after_its_check() {
+    let mut state = runnable_state();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_run_set_for_preflight(&state)
+        .expect("preflight");
+    add_lines(&mut state, ".param added_gain=2\n");
+    let error = controller
+        .consume_snapshot_for_dispatch(&state)
+        .expect_err("changed Added lines must fail closed");
+    assert_eq!(
+        error.message(),
+        format!(
+            "{} · the Added lines changed",
+            crate::simulation::controller::run_inputs::DESIGN_CHANGED_SINCE_CHECK
+        )
+    );
+}

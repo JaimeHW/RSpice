@@ -160,6 +160,7 @@ fn document_digests_with_results_cache(
             &project.workspace.netlist_descriptor,
             &project.workspace.retained_netlist_decks,
             code_workspace_sources,
+            &project.workspace.added_lines,
         ))?,
     );
 

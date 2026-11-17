@@ -2127,6 +2127,7 @@ pub fn revert_document_model(
                 baseline.file.workspace.netlist_descriptor;
             state.model.workspace.content.retained_netlist_decks =
                 baseline.file.workspace.retained_netlist_decks;
+            state.model.workspace.content.added_lines = baseline.file.workspace.added_lines;
             state
                 .model
                 .workspace

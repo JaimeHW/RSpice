@@ -707,6 +707,10 @@ impl Model {
         for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
+        rspice_design::added_lines::remap_added_lines(
+            &mut self.workspace.content.added_lines,
+            &remap_ref,
+        );
         self.workspace.content.remap_occurrence_masters(remap_ref);
 
         let remapped =

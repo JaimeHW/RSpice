@@ -76,6 +76,7 @@ use temperature::{
     replayed_temperature,
 };
 
+pub use commands::analysis::is_analysis_directive;
 pub use commands::{option_package_key_is_known, parse_save_probe};
 
 /// Apply an ordered control `option` command using the ordinary option grammar.
