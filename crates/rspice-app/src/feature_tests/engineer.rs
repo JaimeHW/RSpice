@@ -423,6 +423,90 @@ impl Engineer {
         self.press(page, Role::MenuItem);
     }
 
+    /// A new cell `cell` with a schematic, from File > New cell…, its sheet
+    /// open.
+    pub(super) fn schematic_cell(&mut self, cell: &str) {
+        self.press("File", Role::MenuItem);
+        self.press("New cell\u{2026}", Role::MenuItem);
+        self.press("Cell name", Role::TextInput);
+        self.type_text(cell);
+        self.press("Create", Role::Button);
+        self.cell_sheet(cell);
+    }
+
+    /// Pins `names` (space-separated) on the open sheet from the Create pins
+    /// form, of direction `direction` and analog, each put down at its
+    /// point in `at`. A pin names the net it stands for.
+    pub(super) fn pins(&mut self, names: &str, direction: &str, at: &[(i32, i32)]) {
+        self.command("Create pins");
+        // The form offers the next free name after the last pin's.
+        self.press("Names", Role::TextInput);
+        self.retype(names, false);
+        self.press(direction, Role::RadioButton);
+        self.press("Analog", Role::RadioButton);
+        self.press("Place", Role::Button);
+        for point in at {
+            self.tap(Point::new(point.0, point.1));
+        }
+        self.escape();
+        self.escape();
+        let placed: Vec<_> = self
+            .replay
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .filter(|part| part.kind == ComponentType::Port)
+            .map(|part| part.value.clone())
+            .collect();
+        for name in names.split_whitespace() {
+            assert!(
+                placed.iter().any(|pin| pin == name),
+                "pin {name} is placed: {placed:?}"
+            );
+        }
+    }
+
+    /// The symbol of the cell `cell` made from its open schematic.
+    pub(super) fn symbol_from_schematic(&mut self, cell: &str) {
+        self.command("Create symbol from schematic");
+        let opened = format!("/{cell}/symbol.");
+        let shown = self.step(Vec::new());
+        assert!(
+            shown
+                .iter()
+                .any(|control| control.role == Role::Status && control.label.ends_with(&opened)),
+            "the symbol of {cell} opens"
+        );
+    }
+
+    /// A measurement the plan defines with its own `.MEAS` card, from Verify:
+    /// Add specification > New measurement…, named `name`, its source set
+    /// to be defined when the plan runs, and `card` written in.
+    pub(super) fn plan_measurement(&mut self, name: &str, card: &str) {
+        self.press("Verify", Role::Button);
+        self.press("Add specification", Role::Button);
+        self.press("New measurement\u{2026}", Role::Button);
+        self.field("Name", name);
+        self.field("Measurement", name);
+        self.press("Source", Role::ComboBox);
+        self.press("Defined when the plan runs", Role::Button);
+        self.field("Card", card);
+        let model = &self.replay.app.state.model;
+        let plan = model.sim_setup.analysis_plan.as_ref().expect("a plan").id();
+        let defined = model.workspace.content.plan_data(plan).is_some_and(|data| {
+            data.specification_definitions.iter().any(|definition| {
+                definition.measurement == name
+                    && definition.define_measurement
+                    && definition.expression == card
+            })
+        });
+        assert!(defined, "the plan defines {name} as {card}");
+    }
+
     /// The design variable `name` given `value` on Design variables: Add
     /// variable, its name and expression, a dimensionless quantity, and
     /// Create variable.

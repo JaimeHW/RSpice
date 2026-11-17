@@ -105,6 +105,53 @@ fn held_at(run: &SimulationRun, name: &str, time: f64) -> f64 {
     wave.y[index]
 }
 
+/// An analog trace's samples, by its node.
+fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
+    let wave = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .find(|wave| {
+            wave.name.eq_ignore_ascii_case(node)
+                || wave.name.eq_ignore_ascii_case(&format!("V({node})"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no V({node}) in the run: {:?}",
+                run.analyses
+                    .iter()
+                    .flat_map(|analysis| &analysis.waveforms)
+                    .map(|wave| &wave.name)
+                    .collect::<Vec<_>>()
+            )
+        });
+    (&wave.x, &wave.y)
+}
+
+/// The trace's mean over `window`, its samples joined by straight lines,
+/// as the corpus measures a window mean.
+fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
+    let (x, y) = trace(run, node);
+    let at = |time: f64| {
+        let index = x.partition_point(|t| *t < time).clamp(1, x.len() - 1);
+        let (t0, t1) = (x[index - 1], x[index]);
+        y[index - 1] + (y[index] - y[index - 1]) * (time - t0) / (t1 - t0)
+    };
+    let mut points = vec![(window.0, at(window.0))];
+    points.extend(
+        x.iter()
+            .zip(y)
+            .filter(|(t, _)| **t > window.0 && **t < window.1)
+            .map(|(t, v)| (*t, *v)),
+    );
+    points.push((window.1, at(window.1)));
+    let area: f64 = points
+        .windows(2)
+        .map(|pair| (pair[1].0 - pair[0].0) * (pair[0].1 + pair[1].1) / 2.0)
+        .sum();
+    area / (window.1 - window.0)
+}
+
 /// C4, the 8-bit SAR ADC (`tests/mixed-corpus/c04-sar8`, variant `ports`):
 /// the successive-approximation register as a Verilog view, the comparator
 /// as a Verilog-A view, and the capacitor DAC, its switches and their
@@ -405,53 +452,6 @@ mod c06 {
             .to_owned()
     }
 
-    /// An analog trace's samples, by its node.
-    fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
-        let wave = run
-            .analyses
-            .iter()
-            .flat_map(|analysis| &analysis.waveforms)
-            .find(|wave| {
-                wave.name.eq_ignore_ascii_case(node)
-                    || wave.name.eq_ignore_ascii_case(&format!("V({node})"))
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "no V({node}) in the run: {:?}",
-                    run.analyses
-                        .iter()
-                        .flat_map(|analysis| &analysis.waveforms)
-                        .map(|wave| &wave.name)
-                        .collect::<Vec<_>>()
-                )
-            });
-        (&wave.x, &wave.y)
-    }
-
-    /// The trace's mean over `window`, its samples joined by straight lines,
-    /// as the corpus measures a window mean.
-    fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
-        let (x, y) = trace(run, node);
-        let at = |time: f64| {
-            let index = x.partition_point(|t| *t < time).clamp(1, x.len() - 1);
-            let (t0, t1) = (x[index - 1], x[index]);
-            y[index - 1] + (y[index] - y[index - 1]) * (time - t0) / (t1 - t0)
-        };
-        let mut points = vec![(window.0, at(window.0))];
-        points.extend(
-            x.iter()
-                .zip(y)
-                .filter(|(t, _)| **t > window.0 && **t < window.1)
-                .map(|(t, v)| (*t, *v)),
-        );
-        points.push((window.1, at(window.1)));
-        let area: f64 = points
-            .windows(2)
-            .map(|pair| (pair[1].0 - pair[0].0) * (pair[0].1 + pair[1].1) / 2.0)
-            .sum();
-        area / (window.1 - window.0)
-    }
-
     /// When the trace first crosses `level` inside `window`, rising or
     /// falling, its samples joined by straight lines.
     fn crossing(
@@ -726,5 +726,394 @@ mod c06 {
             measured,
             "vss reopens as kept"
         );
+    }
+}
+
+/// C12, the LDO testbench (`tests/mixed-corpus/c12-ldo-tb`, variant `full`):
+/// the C5 regulator drawn as a schematic cell of its own, with its pins and
+/// the symbol made from it; its BSIM4 cards added from their model file on
+/// Models & sections; the trim register as a Verilog view and the
+/// testbench as a Verilog-AMS view; the supply and static load on the top
+/// sheet; and the testbench's verdict measured by a `.MEAS` card the plan
+/// defines on Verify.
+mod c12 {
+    use egui::accesskit::Role;
+
+    use super::*;
+
+    /// When the testbench raises its verdict, after sixteen trim steps of
+    /// 100 us: ok (O6, 1 ns) and okt (O6, 1 ps).
+    const VERDICT: f64 = 1.6e-3;
+
+    /// okt as the deck measures it.
+    const OKT: &str = ".MEAS TRAN okt WHEN D(ok)=0.5 RISE=1";
+
+    /// vk.15 as the calculator writes it: V(meas)'s mean over the corpus's
+    /// window for code 15.
+    const VK15: &str = "avg(V(meas), 1.5992m, 1.5998m)";
+
+    /// vk.<k>'s window in the corpus: the testbench's reading of code `k`,
+    /// held on meas from 92.5 us after the code's latch.
+    fn window(k: usize) -> (f64, f64) {
+        let start = k as f64 * 100e-6;
+        (start + 99.2e-6, start + 99.8e-6)
+    }
+
+    /// vk.<k>'s value (O5-O1, 1 mV): V(vout) at the code-`k` operating
+    /// point, the code held (ngspice-46, `ref/c<k>.op.O5-O1.out`).
+    fn oracle(k: usize) -> f64 {
+        let text = corpus_text(&format!("c12-ldo-tb/ref/c{k}.op.O5-O1.out"));
+        let mut rows = text.lines().filter(|line| !line.starts_with('#'));
+        let header: Vec<_> = rows.next().expect("a header").split_whitespace().collect();
+        let values: Vec<_> = rows.next().expect("a row").split_whitespace().collect();
+        let column = header
+            .iter()
+            .position(|name| *name == "v(meas)")
+            .expect("v(meas)");
+        values[column].parse().expect("a number")
+    }
+
+    /// When the net `name` goes to 1.
+    fn rises(run: &SimulationRun, name: &str) -> Vec<f64> {
+        events(run, name)
+            .into_iter()
+            .filter(|(_, code)| *code == 1)
+            .map(|(time, _)| time)
+            .collect()
+    }
+
+    /// The regulator, drawn in its own cell: the reference and bias, the
+    /// error amplifier, the pass device and the trimmed feedback ladder of
+    /// `c05-ldo-trim/net/ldo_body.inc`, each net named by a label; its pins,
+    /// which name the nets they stand for; and its symbol.
+    fn regulator(e: &mut Engineer) {
+        e.schematic_cell("ldo");
+        let part = |e: &mut Engineer, query, row, at, fields: &[(&str, &str)], nets: &[&str]| {
+            let pins = e.place(query, row, at, fields);
+            e.connect(&pins, nets);
+        };
+        let two = |e: &mut Engineer, query, row, at, name: &str, value: &str, nets: &[&str]| {
+            part(
+                e,
+                query,
+                row,
+                at,
+                &[("Instance", name), ("Value", value)],
+                nets,
+            );
+        };
+        let mos = |e: &mut Engineer, row, at, name: &str, size: [&str; 3], nets: &[&str]| {
+            let model = if row == "NMOS" { "NBSIM4" } else { "PBSIM4" };
+            let mut fields = vec![
+                ("Instance", name),
+                ("Value", model),
+                ("Width, m", size[0]),
+                ("Length, m", size[1]),
+            ];
+            if size[2] != "1" {
+                fields.push(("Multiplier", size[2]));
+            }
+            part(e, row, row, at, &fields, nets);
+        };
+        let switch = |e: &mut Engineer, at, name: &str, nets: &[&str]| {
+            part(
+                e,
+                "V-Switch",
+                "V-Switch (S)",
+                at,
+                &[
+                    ("Instance", name),
+                    ("Threshold voltage, V", "0.9"),
+                    ("Hysteresis voltage, V", "0.1"),
+                    ("On resistance, Ω", "10"),
+                    ("Off resistance, Ω", "1e12"),
+                ],
+                nets,
+            );
+        };
+        let source = ("voltage source", "Voltage Source");
+        let (resistor, capacitor) = (("resistor", "Resistor"), ("capacitor", "Capacitor"));
+
+        // The reference, the bias and the error amplifier along the top.
+        two(
+            e,
+            source.0,
+            source.1,
+            (100, 150),
+            "vref",
+            "0.5",
+            &["vr0", "0"],
+        );
+        two(
+            e,
+            resistor.0,
+            resistor.1,
+            (250, 150),
+            "rref",
+            "100k",
+            &["vr0", "vref"],
+        );
+        two(
+            e,
+            capacitor.0,
+            capacitor.1,
+            (400, 150),
+            "cref",
+            "10p",
+            &["vref", "0"],
+        );
+        two(
+            e,
+            "current source",
+            "Current Source",
+            (550, 150),
+            "ibias",
+            "10u",
+            &["vin", "nb"],
+        );
+        mos(
+            e,
+            "NMOS",
+            (700, 150),
+            "mb",
+            ["2u", "1u", "1"],
+            &["nb", "nb", "0", "0"],
+        );
+        mos(
+            e,
+            "NMOS",
+            (850, 150),
+            "mt",
+            ["4u", "1u", "1"],
+            &["tail", "nb", "0", "0"],
+        );
+        mos(
+            e,
+            "NMOS",
+            (1000, 150),
+            "m1",
+            ["8u", "1u", "1"],
+            &["d1", "fb", "tail", "0"],
+        );
+        mos(
+            e,
+            "NMOS",
+            (1150, 150),
+            "m2",
+            ["8u", "1u", "1"],
+            &["og", "vref", "tail", "0"],
+        );
+        mos(
+            e,
+            "PMOS",
+            (1300, 150),
+            "m3",
+            ["4u", "1u", "1"],
+            &["d1", "d1", "vin", "vin"],
+        );
+        mos(
+            e,
+            "PMOS",
+            (1450, 150),
+            "m4",
+            ["4u", "1u", "1"],
+            &["og", "d1", "vin", "vin"],
+        );
+        // The loop probe and the pass device, then the feedback ladder and
+        // its trim switches, below.
+        two(
+            e,
+            source.0,
+            source.1,
+            (100, 400),
+            "vprobe",
+            "0",
+            &["og", "og2"],
+        );
+        mos(
+            e,
+            "PMOS",
+            (250, 400),
+            "mp",
+            ["10u", "0.2u", "60"],
+            &["vout", "og2", "vin", "vin"],
+        );
+        two(
+            e,
+            resistor.0,
+            resistor.1,
+            (400, 400),
+            "rtop",
+            "100k",
+            &["vout", "fb"],
+        );
+        two(
+            e,
+            resistor.0,
+            resistor.1,
+            (550, 400),
+            "rb0",
+            "60k",
+            &["fb", "l1"],
+        );
+        let ladder = [
+            ("rt3", "8k", "l1", "l2"),
+            ("rt2", "4k", "l2", "l3"),
+            ("rt1", "2k", "l3", "l4"),
+            ("rt0", "1k", "l4", "0"),
+        ];
+        for (index, (name, value, top, bottom)) in ladder.into_iter().enumerate() {
+            let at = (700 + 150 * index as i32, 400);
+            two(e, resistor.0, resistor.1, at, name, value, &[top, bottom]);
+        }
+        for (index, (name, top, bottom, bit)) in [
+            ("s3", "l1", "l2", "tr3"),
+            ("s2", "l2", "l3", "tr2"),
+            ("s1", "l3", "l4", "tr1"),
+            ("s0", "l4", "0", "tr0"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let at = (100 + 150 * index as i32, 650);
+            switch(e, at, name, &[top, bottom, bit, "0"]);
+        }
+        // Its pins: the supply, the output and the four trim bits.
+        e.pins("vin", "Power", &[(100, 850)]);
+        e.pins("vout", "Output", &[(250, 850)]);
+        e.pins(
+            "tr3 tr2 tr1 tr0",
+            "Input",
+            &[(400, 850), (550, 850), (700, 850), (850, 850)],
+        );
+        e.symbol_from_schematic("ldo");
+    }
+
+    /// The testbench drawn from New project to its verdict: each trim code's
+    /// reading is its operating point's, the verdict rises once at 1600 us
+    /// and the plan's `.MEAS` of it says so, and the last code's reading,
+    /// measured over the result, is kept through a save and a reopen.
+    #[test]
+    fn c12_drawn_through_the_application_reads_its_codes_and_passes_as_its_deck() {
+        // The deck route needs nothing drawn: it runs while the engineer
+        // draws.
+        let deck =
+            std::thread::spawn(|| deck_route("c12-ldo-tb/deck/full.tran.cir", "0.5u", "1.65m"));
+        let mut engineer = Engineer::new_project("ldotb");
+        let e = &mut engineer;
+        assert_eq!(
+            e.add_model_file(&corpus("c05-ldo-trim/net/models-bsim4.cir")),
+            Ok("models-bsim4".to_owned()),
+            "the BSIM4 cards bind"
+        );
+        regulator(e);
+        e.module(
+            "spi_trim",
+            "Verilog",
+            &corpus_text("c05-ldo-trim/net/spi_trim.v"),
+        );
+        e.module(
+            "tb_ldo",
+            "Verilog-AMS",
+            &corpus_text("c12-ldo-tb/net/tb_ldo_full.vams"),
+        );
+        e.variable("vcc", "1.8");
+        e.top_sheet();
+
+        // The supply and C5's static load.
+        let part = |e: &mut Engineer, query, row, at, name: &str, value: &str, nets: &[&str]| {
+            let pins = e.place(query, row, at, &[("Instance", name), ("Value", value)]);
+            e.connect(&pins, nets);
+        };
+        part(
+            e,
+            "voltage source",
+            "Voltage Source",
+            (100, 150),
+            "vin",
+            "1.8",
+            &["vin", "0"],
+        );
+        part(
+            e,
+            "resistor",
+            "Resistor",
+            (250, 150),
+            "rload",
+            "100",
+            &["vout", "0"],
+        );
+        part(
+            e,
+            "capacitor",
+            "Capacitor",
+            (400, 150),
+            "cout",
+            "1u",
+            &["vout", "co"],
+        );
+        part(
+            e,
+            "resistor",
+            "Resistor",
+            (550, 150),
+            "resr",
+            "0.1",
+            &["co", "0"],
+        );
+        // The regulator, its trim register and the testbench, each pin on
+        // the net of its own name.
+        for (cell, instance, at) in [
+            ("ldo", "xldo", (800, 500)),
+            ("spi_trim", "xtrim", (1200, 500)),
+            ("tb_ldo", "xtb", (1600, 500)),
+        ] {
+            let pins = e.place(cell, cell, at, &[("Instance", instance)]);
+            for (port, at) in &pins {
+                e.label(*at, port);
+            }
+        }
+
+        e.plan_measurement("okt", OKT);
+        e.setup_page("Save, streaming & retention policy");
+        e.press("Plan output selection mode", Role::ComboBox);
+        e.press("Save all", Role::ListBoxOption);
+        e.transient("0.5u", "1.65m");
+        let designed = e.run();
+        let deck = deck.join().expect("the deck route");
+
+        // vk.<k>: each code's reading against its operating point.
+        for k in 0..16 {
+            let app = mean(&designed, "meas", window(k));
+            assert!(
+                (app - oracle(k)).abs() <= 1e-3,
+                "code {k}: V(meas) {app} against {}, the deck's {}",
+                oracle(k),
+                mean(&deck, "meas", window(k))
+            );
+        }
+        // ok: the verdict rises once, at 1600 us; okt: the plan's .MEAS of it.
+        let rose = rises(&designed, "ok");
+        assert!(
+            rose.len() == 1 && (rose[0] - VERDICT).abs() <= 1e-9,
+            "ok rises at {rose:?}, the deck's at {:?}",
+            rises(&deck, "xtb.ok__event_0")
+        );
+        let okt = measured(&designed, "okt");
+        assert!(
+            (okt - VERDICT).abs() <= 1e-12,
+            "okt {okt:e}, the deck's {:e}",
+            measured(&deck, "okt")
+        );
+
+        // vk.15 as the calculator measures it over the result, kept through
+        // a save and a reopen.
+        let measured = e.measure(VK15);
+        assert!(
+            (measured - oracle(15)).abs() <= 1e-3,
+            "{VK15} {measured} against {}",
+            oracle(15)
+        );
+        assert_eq!(kept(&e.reopened(), VK15), measured, "vk.15 reopens as kept");
     }
 }
