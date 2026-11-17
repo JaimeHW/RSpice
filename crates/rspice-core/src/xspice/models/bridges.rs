@@ -1957,41 +1957,53 @@ impl CodeModel for BidiBridge {
             let others = (direction_request == BidiDirection::Bidirectional)
                 .then(|| ctx.other_digital_drivers("d", index))
                 .flatten();
-            let drive_input = others.map_or(digital_input, |(value, _)| value);
             let drive_time = others
                 .map(|(_, time)| time)
                 .or_else(|| ctx.input_digital_vector_event_time("d", index));
-            let direction = if direction_request == BidiDirection::Bidirectional {
-                // Driver ownership survives a takeover at the same resolved
-                // value. Standalone model callers without a circuit-provided
-                // observer retain the executed-output comparison; a scheduled
-                // ADC target may still be in flight and cannot establish it.
-                let own = ctx
-                    .committed_digital_output("d", index)
-                    .unwrap_or_else(|| DigitalValue::new(old_state, old_strength));
-                if let Some((other, _)) = others {
-                    if matches!(
-                        other.strength,
-                        DigitalStrength::HighZ | DigitalStrength::Undetermined
-                    ) {
-                        BidiDirection::Adc
-                    } else {
-                        BidiDirection::Dac
-                    }
+            // ngspice's bidirectional bridge is both converters at once: its
+            // digital side always follows the analog input, and its analog side
+            // follows the node with its own output replaced by high impedance
+            // (`cm_probe_node`), which is high impedance when nothing else
+            // drives it. Standalone model callers without a circuit-provided
+            // observer read the node instead, released when it carries only
+            // this bridge's own executed output.
+            let drive = match direction_request {
+                BidiDirection::Dac => digital_input,
+                BidiDirection::Adc => DigitalValue::high_z(),
+                BidiDirection::Bidirectional => others.map_or_else(
+                    || {
+                        let own = ctx
+                            .committed_digital_output("d", index)
+                            .unwrap_or_else(|| DigitalValue::new(old_state, old_strength));
+                        match bidi_default_effective_direction(
+                            digital_input,
+                            own.state,
+                            own.strength,
+                        ) {
+                            BidiDirection::Adc => DigitalValue::high_z(),
+                            _ => digital_input,
+                        }
+                    },
+                    |(value, _)| value,
+                ),
+            };
+            // An operating point posts each output at once, as ngspice's
+            // event load does outside a transient; the delays start with it.
+            let output_delay = |delay: Value| {
+                if ctx.is_dc_operating_point() {
+                    0.0
                 } else {
-                    bidi_default_effective_direction(digital_input, own.state, own.strength)
+                    delay
                 }
-            } else {
-                direction_request
             };
 
-            if direction == BidiDirection::Dac {
+            if direction_request == BidiDirection::Dac {
                 if commit_outputs && old_strength != DigitalStrength::HighZ {
                     ctx.set_output_digital_vector_element(
                         "d",
                         index,
                         DigitalValue::high_z(),
-                        params.rise_delay.max(params.fall_delay),
+                        output_delay(params.rise_delay.max(params.fall_delay)),
                     );
                     ctx.set_int_state(
                         BIDI_INT_OUTPUT_STATE_BASE + index,
@@ -2009,7 +2021,7 @@ impl CodeModel for BidiBridge {
                         "d",
                         index,
                         digital_value_with_strength(new_state, output_strength),
-                        bidi_digital_delay(new_state, params),
+                        output_delay(bidi_digital_delay(new_state, params)),
                     );
                     ctx.set_int_state(
                         BIDI_INT_OUTPUT_STATE_BASE + index,
@@ -2022,14 +2034,10 @@ impl CodeModel for BidiBridge {
                 }
             }
 
-            let drive = match direction {
-                BidiDirection::Adc => DigitalValue::high_z(),
-                BidiDirection::Dac | BidiDirection::Bidirectional => drive_input,
-            };
             let analog_drive =
                 bidi_drive_current(ctx, index, voltage, drive, params, layout, drive_time);
             if commit_outputs
-                && direction != BidiDirection::Adc
+                && direction_request != BidiDirection::Adc
                 && let Some(event_time) = drive_time
                 && let Some(completion_time) =
                     bidi_analog_transition_breakpoint(event_time, drive, params)

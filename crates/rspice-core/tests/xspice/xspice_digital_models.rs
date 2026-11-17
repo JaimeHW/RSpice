@@ -5765,3 +5765,119 @@ fn an_idle_clock_edging_with_a_bridged_one_leaves_its_edges_restarts() {
         assert_eq!(volts, alone.1, "{order}: V(out)");
     }
 }
+
+/// The bidirectional bridge is both converters at once, as ngspice-46's
+/// `bidi_bridge` is: its digital side always follows the analog input, from
+/// the operating point on, and its analog side follows whatever else drives
+/// the digital node. ngspice-46's eprint of `d` for each deck, run with a 5 ps
+/// maximum step so that the threshold crossings, which both tools sample at
+/// their analog time points, are not set by the step grid: a pulled-up line
+/// reads 1 from the operating point, contends to U when another driver pulls
+/// it low, follows that driver to 0 after its own fall delay, and holds its
+/// own 0 without a gap when the other driver lets go.
+fn assert_bidi_bridge_trace(deck: &str, tstop: f64, ngspice: &[(f64, &str)]) {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    for dialect in [
+        rspice_core::engine::SpiceDialect::BestAvailable,
+        rspice_core::engine::SpiceDialect::Ngspice,
+    ] {
+        let result = Engine::new(rspice_core::engine::SimulationConfig {
+            spice_dialect: dialect,
+            ..rspice_core::engine::SimulationConfig::default()
+        })
+        .run_tran(&netlist, tstop, 5.0e-12)
+        .expect("transient solves");
+        let mut trace: Vec<(f64, String)> = Vec::new();
+        for (time, token) in digital_tokens(&result, "d") {
+            if trace.last().is_none_or(|(_, last)| *last != token) {
+                trace.push((time, token));
+            }
+        }
+        assert_eq!(
+            trace
+                .iter()
+                .map(|(_, token)| token.as_str())
+                .collect::<Vec<_>>(),
+            ngspice.iter().map(|(_, token)| *token).collect::<Vec<_>>(),
+            "{dialect:?}: {trace:?}"
+        );
+        for ((time, token), (expected, _)) in trace.iter().zip(ngspice) {
+            assert!(
+                (time - expected).abs() <= 0.01e-9,
+                "{dialect:?}: {token} at {time:e}, ngspice-46 at {expected:e}: {trace:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bidi_bridge_follows_a_tristate_driver_and_holds_its_own_level_like_ngspice() {
+    assert_bidi_bridge_trace(
+        "\
+* bidi_bridge pulled up, then a tristate driver pulls it low and lets go
+vpu vpu 0 3.3
+rpu vpu a 10k
+ca a 0 1p
+abidi [a] [d] bb1
+.model bb1 bidi_bridge(direction=2 in_low=0.8 in_high=2.0 out_low=0 out_high=3.3 rise_delay=1n fall_delay=1n)
+vdin vdin 0 0
+ven ven 0 pulse(0 1 10n 0.1n 0.1n 15n 100n)
+aad [vdin ven] [din en] adc1
+.model adc1 adc_bridge(in_low=0.3 in_high=0.7 rise_delay=1p fall_delay=1p)
+atri din en d tri1
+.model tri1 d_tristate(delay=0.5n)
+ada [d] [ad] dac1
+.model dac1 dac_bridge(out_low=0 out_high=1 out_undef=0.5 t_rise=0.1n t_fall=0.1n)
+rd ad 0 1k
+.end
+",
+        60.0e-9,
+        &[
+            (0.0, "1s"),
+            (10.5335e-9, "Us"),
+            (11.931e-9, "0s"),
+            (29.4375e-9, "Us"),
+            (35.9751e-9, "1s"),
+        ],
+    );
+}
+
+#[test]
+fn bidi_bridge_follows_an_open_collector_driver_like_ngspice() {
+    assert_bidi_bridge_trace(
+        "\
+* bidi_bridge open-collector digital side, pull-up and a switch on the analog side
+vpu vpu 0 3.3
+rpu vpu a 10k
+ca a 0 1p
+s1 a 0 ctl 0 sw1
+.model sw1 sw(vt=0.5 ron=100 roff=1e9)
+vctl ctl 0 pulse(0 1 40n 0.1n 0.1n 20n 100n)
+abidi [a] [d] bb1
+.model bb1 bidi_bridge(direction=2 in_low=0.8 in_high=2.0 out_low=0 out_high=3.3 rise_delay=1n fall_delay=1n)
+vdin vdin 0 pulse(1 0 10n 0.1n 0.1n 15n 100n)
+aad [vdin] [din] adc1
+.model adc1 adc_bridge(in_low=0.3 in_high=0.7 rise_delay=1p fall_delay=1p)
+aoc din d oc1
+.model oc1 d_open_c(open_delay=1n fall_delay=0.5n)
+ada [d] [ad] dac1
+.model dac1 dac_bridge(out_low=0 out_high=1 out_undef=0.5 t_rise=0.1n t_fall=0.1n)
+rd ad 0 1k
+.end
+",
+        80.0e-9,
+        &[
+            (0.0, "1s"),
+            (10.5335e-9, "Us"),
+            (11.931e-9, "0s"),
+            (26.1335e-9, "Us"),
+            (26.1735e-9, "0s"),
+            (29.9411e-9, "Us"),
+            (36.4787e-9, "1s"),
+            (41.0725e-9, "Us"),
+            (41.1675e-9, "0s"),
+            (63.8275e-9, "Us"),
+            (70.3701e-9, "1s"),
+        ],
+    );
+}
