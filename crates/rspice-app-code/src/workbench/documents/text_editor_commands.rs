@@ -597,12 +597,17 @@ fn delete_lines(source: &mut String, lines: Range<usize>) -> StructuralEditResul
     }
 }
 
+/// Moving lines swaps the block with the line beside it, and both keep a line
+/// ending. When one of them is the file's unterminated last line, the other's
+/// ending goes between them and whichever ends up last has none, so the file
+/// still ends (or does not end) with a newline as before. The empty line after
+/// a final newline does not move: moving it would change that.
 fn move_lines_up(
     source: &mut String,
     selection: ByteSelection,
     lines: Range<usize>,
 ) -> StructuralEditResult {
-    if lines.start == 0 {
+    if lines.start == 0 || lines.is_empty() {
         return StructuralEditResult {
             changed: false,
             selection,
@@ -613,7 +618,14 @@ fn move_lines_up(
         .map_or(0, |newline| newline + 1);
     let previous = source[previous_start..lines.start].to_owned();
     let block = source[lines.clone()].to_owned();
-    source.replace_range(previous_start..lines.end, &(block + &previous));
+    let (block_text, block_ending) = split_line_ending(&block);
+    let moved = if block_ending.is_empty() {
+        let (previous_text, previous_ending) = split_line_ending(&previous);
+        format!("{block_text}{previous_ending}{previous_text}")
+    } else {
+        format!("{block}{previous}")
+    };
+    source.replace_range(previous_start..lines.end, &moved);
     let shift = lines.start - previous_start;
     StructuralEditResult {
         changed: true,
@@ -640,14 +652,42 @@ fn move_lines_down(
         .map_or(source.len(), |relative| lines.end + relative + 1);
     let block = source[lines.clone()].to_owned();
     let next = source[lines.end..next_end].to_owned();
-    source.replace_range(lines.start..next_end, &(next.clone() + &block));
+    let (next_text, next_ending) = split_line_ending(&next);
+    let (moved, block_start, block_len) = if next_ending.is_empty() {
+        let (block_text, block_ending) = split_line_ending(&block);
+        (
+            format!("{next_text}{block_ending}{block_text}"),
+            lines.start + next.len() + block_ending.len(),
+            block_text.len(),
+        )
+    } else {
+        (
+            format!("{next}{block}"),
+            lines.start + next.len(),
+            block.len(),
+        )
+    };
+    source.replace_range(lines.start..next_end, &moved);
+    // A selection that took in the block's ending ends at the block's text
+    // when the block becomes the unterminated last line.
+    let place =
+        |position: usize| (block_start + (position - lines.start)).min(block_start + block_len);
     StructuralEditResult {
         changed: true,
         selection: ByteSelection {
-            anchor: selection.anchor + next.len(),
-            cursor: selection.cursor + next.len(),
+            anchor: place(selection.anchor),
+            cursor: place(selection.cursor),
         },
     }
+}
+
+/// A line's text and its ending: `\r\n`, `\n`, or nothing for the
+/// unterminated last line.
+fn split_line_ending(line: &str) -> (&str, &str) {
+    let text = line
+        .strip_suffix('\n')
+        .map_or(line, |rest| rest.strip_suffix('\r').unwrap_or(rest));
+    line.split_at(text.len())
 }
 
 fn match_bracket(source: &str, selection: ByteSelection) -> ByteSelection {
@@ -820,6 +860,105 @@ mod tests {
         );
         assert_eq!(source, "one\ntwo\ntwo");
         assert_eq!(duplicated.selection, caret(9));
+    }
+
+    fn select(anchor: usize, cursor: usize) -> ByteSelection {
+        ByteSelection { anchor, cursor }
+    }
+
+    fn apply(
+        source: &mut String,
+        selection: ByteSelection,
+        command: StructuralCommand,
+    ) -> StructuralEditResult {
+        apply_structural_command(source, selection, EditorSyntax::Spice, command)
+    }
+
+    #[test]
+    fn moving_the_unterminated_last_line_up_keeps_both_lines_whole() {
+        let mut source = "one\ntwo\nthree".to_owned();
+        let up = apply(&mut source, caret(10), StructuralCommand::MoveLineUp);
+        assert_eq!(source, "one\nthree\ntwo");
+        assert_eq!(
+            up.selection,
+            caret(6),
+            "the caret stays on the same character"
+        );
+
+        let down = apply(&mut source, up.selection, StructuralCommand::MoveLineDown);
+        assert_eq!(source, "one\ntwo\nthree");
+        assert_eq!(down.selection, caret(10));
+    }
+
+    #[test]
+    fn moving_a_line_down_past_the_unterminated_last_line_keeps_both_lines_whole() {
+        let mut source = "R1 in out 1k\n.end".to_owned();
+        let down = apply(&mut source, caret(3), StructuralCommand::MoveLineDown);
+        assert_eq!(source, ".end\nR1 in out 1k");
+        assert_eq!(down.selection, caret(8));
+
+        let up = apply(&mut source, down.selection, StructuralCommand::MoveLineUp);
+        assert_eq!(source, "R1 in out 1k\n.end");
+        assert_eq!(up.selection, caret(3));
+    }
+
+    #[test]
+    fn moving_lines_in_a_file_with_a_final_newline_keeps_it() {
+        let mut source = "one\ntwo\nthree\n".to_owned();
+        let up = apply(&mut source, caret(9), StructuralCommand::MoveLineUp);
+        assert_eq!(source, "one\nthree\ntwo\n");
+        assert_eq!(up.selection, caret(5));
+        let down = apply(&mut source, up.selection, StructuralCommand::MoveLineDown);
+        assert_eq!(source, "one\ntwo\nthree\n");
+        assert_eq!(down.selection, caret(9));
+        let last = apply(&mut source, caret(9), StructuralCommand::MoveLineDown);
+        assert!(!last.changed);
+        assert_eq!(source, "one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn the_empty_line_after_a_final_newline_does_not_move() {
+        let mut source = "one\ntwo\n".to_owned();
+        let up = apply(&mut source, caret(8), StructuralCommand::MoveLineUp);
+        assert!(!up.changed);
+        assert_eq!(source, "one\ntwo\n");
+        assert_eq!(up.selection, caret(8));
+    }
+
+    #[test]
+    fn moving_lines_keeps_crlf_endings_whole() {
+        let mut source = "one\r\ntwo\r\nthree".to_owned();
+        let up = apply(&mut source, caret(10), StructuralCommand::MoveLineUp);
+        assert_eq!(source, "one\r\nthree\r\ntwo");
+        assert_eq!(up.selection, caret(5));
+
+        let down = apply(&mut source, caret(0), StructuralCommand::MoveLineDown);
+        assert_eq!(source, "three\r\none\r\ntwo");
+        assert_eq!(down.selection, caret(7));
+
+        let down = apply(&mut source, down.selection, StructuralCommand::MoveLineDown);
+        assert_eq!(source, "three\r\ntwo\r\none");
+        assert_eq!(down.selection, caret(12));
+    }
+
+    #[test]
+    fn a_multi_line_selection_moves_whole_and_stays_selected() {
+        let mut source = "a\nb\nc\nd".to_owned();
+        let down = apply(&mut source, select(2, 5), StructuralCommand::MoveLineDown);
+        assert_eq!(source, "a\nd\nb\nc");
+        assert_eq!(&source[4..7], "b\nc");
+        assert_eq!(down.selection, select(4, 7));
+
+        let up = apply(&mut source, down.selection, StructuralCommand::MoveLineUp);
+        assert_eq!(source, "a\nb\nc\nd");
+        assert_eq!(up.selection, select(2, 5));
+
+        // Whole lines selected through their ending: the block becomes the
+        // last line and the selection ends where its text ends.
+        let mut source = "one\ntwo\nthree".to_owned();
+        let down = apply(&mut source, select(0, 8), StructuralCommand::MoveLineDown);
+        assert_eq!(source, "three\none\ntwo");
+        assert_eq!(down.selection, select(6, 13));
     }
 
     #[test]
