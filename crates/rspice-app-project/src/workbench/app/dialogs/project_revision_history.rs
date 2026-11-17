@@ -151,11 +151,13 @@ pub(crate) struct PendingRestore {
 }
 
 /// What the rows, the artifact filter and the search were when
-/// [`ShownRows`] was worked out.
+/// [`ShownRows`] was worked out, and whether the list was a phone's, which
+/// orders its columns for a narrow screen.
 pub(crate) type ShownSource = (
     Option<ProjectAuditRowsSource>,
     ProjectRevisionArtifactFilter,
     String,
+    bool,
 );
 
 /// The rows the filter and the search show, by their place in the dialog's

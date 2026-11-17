@@ -25,7 +25,7 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::table::{
-    CELL_PAD, Cell, Column, DataTable, Group, LineHeights, RowKey, SortKey, TABLE_EDGE_INSET,
+    CELL_PAD, Cell, Column, DataTable, Group, LineHeights, RowKey, Sort, SortKey, TABLE_EDGE_INSET,
     TableResponse, TableState,
 };
 use crate::ui::widgets::{
@@ -653,10 +653,10 @@ fn revision_history_body(
     }
     dialog.record_page = false;
     filter_row(ui, dialog);
-    refresh_shown(ui, dialog, rows);
+    refresh_shown(ui, dialog, rows, phone);
     if phone {
         let height = ui.available_height();
-        let response = history_list(ui, rows, dialog, height);
+        let response = history_list(ui, rows, dialog, height, true);
         if response.clicked.is_some() || response.activate.is_some() {
             dialog.record_page = true;
         }
@@ -691,7 +691,7 @@ fn revision_history_body(
         .default_size(held)
         .size_range(range.clone())
         .show(ui, |ui| {
-            let response = history_list(ui, rows, dialog, ui.available_height());
+            let response = history_list(ui, rows, dialog, ui.available_height(), false);
             // Claimed whole, so the size egui keeps is the one dragged to.
             ui.expand_to_include_rect(ui.max_rect());
             response
@@ -774,12 +774,14 @@ fn filter_row(ui: &mut Ui, dialog: &mut ProjectRevisionHistoryDialogState) {
 
 /// The record list, `height` tall: every column any record fills, each as
 /// wide as its widest words while the list fits, newest first, one record
-/// selected. Its rows scroll inside it under a frozen head.
+/// selected. Its rows scroll inside it under a frozen head. A `narrow` list
+/// reads each row's time and then what changed, both on the screen.
 fn history_list(
     ui: &mut Ui,
     rows: &[ProjectAuditRow],
     dialog: &mut ProjectRevisionHistoryDialogState,
     height: f32,
+    narrow: bool,
 ) -> TableResponse {
     let shown = dialog.shown.clone();
     if shown.rows.is_empty() {
@@ -813,7 +815,13 @@ fn history_list(
         .iter()
         .map(|&column| WHOLE_COLUMNS[column])
         .collect::<Vec<_>>();
-    let widths = fit_widths(&shown.natural, &whole, room);
+    let mut widths = fit_widths(&shown.natural, &whole, room);
+    // A narrow list scrolls sideways under its time, but what changed takes
+    // no more than the room beside it, cut at a word, whole on its page.
+    if narrow && let Some(change) = shown.columns.iter().position(|&column| column == CHANGE) {
+        let before = widths[..change].iter().sum::<f32>();
+        widths[change] = widths[change].min((room - before).floor().max(LEAST_CUT_WIDTH));
+    }
     let columns = shown
         .columns
         .iter()
@@ -821,15 +829,18 @@ fn history_list(
         .map(|(&column, &width)| Column::words(COLUMNS[column], width))
         .collect::<Vec<_>>();
     // Frozen through the revision, so what a row is stays put while the
-    // rest scroll under it; a phone's keeps its time beside it.
-    let frozen = shown
-        .columns
-        .iter()
-        .position(|&column| column == REVISION)
-        .map_or(1, |place| place + 1);
-    let pinned = shown.columns.iter().position(|&column| column == TIME);
+    // rest scroll under it; a narrow list's through its time alone.
+    let frozen = if narrow {
+        1
+    } else {
+        shown
+            .columns
+            .iter()
+            .position(|&column| column == REVISION)
+            .map_or(1, |place| place + 1)
+    };
     let reveal = std::mem::take(&mut dialog.reveal);
-    let mut table = DataTable::new(
+    let response = DataTable::new(
         "workbench.project.revision_history",
         &columns,
         shown.rows.len(),
@@ -838,11 +849,8 @@ fn history_list(
     .keys(&shown.keys)
     .freeze(frozen)
     .max_height(height)
-    .reveal_selection(reveal);
-    if let Some(pinned) = pinned {
-        table = table.pin_when_narrow(pinned);
-    }
-    let response = table.show(ui, |index| {
+    .reveal_selection(reveal)
+    .show(ui, |index| {
         row_cells(&rows[shown.rows[index]], &shown.columns)
     });
     if response.selection_changed || response.clicked.is_some() {
@@ -919,16 +927,22 @@ fn record_pane(
             ..
         }) => {
             if delta.is_empty() {
-                inset(ui, |ui| {
-                    note(
-                        ui,
-                        if *with_current {
-                            "Nothing differs: the current design is this revision's drawing."
-                        } else {
-                            "Nothing differs: both revisions keep the same drawing."
-                        },
-                    );
-                });
+                // A revision the design still matches says so once, in the
+                // note under Restore, unless the band over the body speaks
+                // for Restore instead.
+                let said_under_restore = *with_current && row.current && blocked.is_none();
+                if !said_under_restore {
+                    inset(ui, |ui| {
+                        note(
+                            ui,
+                            if *with_current {
+                                "Nothing differs: the current design is this revision's drawing."
+                            } else {
+                                "Nothing differs: both revisions keep the same drawing."
+                            },
+                        );
+                    });
+                }
             } else {
                 named_changes(ui, delta, &mut dialog.changes);
             }
@@ -1229,16 +1243,19 @@ fn refresh_shown(
     ui: &Ui,
     dialog: &mut ProjectRevisionHistoryDialogState,
     rows: &[ProjectAuditRow],
+    narrow: bool,
 ) {
-    let current = dialog
-        .shown
-        .source
-        .as_ref()
-        .is_some_and(|(source, filter, query)| {
-            *source == dialog.rows_source
-                && *filter == dialog.artifact_filter
-                && *query == dialog.query
-        });
+    let current =
+        dialog
+            .shown
+            .source
+            .as_ref()
+            .is_some_and(|(source, filter, query, was_narrow)| {
+                *source == dialog.rows_source
+                    && *filter == dialog.artifact_filter
+                    && *query == dialog.query
+                    && *was_narrow == narrow
+            });
     if current {
         return;
     }
@@ -1249,13 +1266,33 @@ fn refresh_shown(
         .collect::<Vec<_>>();
     // The columns and their widths come from every record, so neither moves
     // while the reader filters or searches.
-    let columns = shown_columns(rows);
+    let columns = shown_columns(rows, narrow);
+    // A sort or a width the reader set stays on its column when the screen
+    // reorders the columns.
+    let before = dialog.shown.columns.clone();
+    if *before != *columns {
+        let moved = |place: usize| {
+            let column = *before.get(place)?;
+            columns.iter().position(|&now| now == column)
+        };
+        dialog.table.sort = dialog.table.sort.and_then(|sort| {
+            Some(Sort {
+                column: moved(sort.column)?,
+                ..sort
+            })
+        });
+        dialog.table.widths = std::mem::take(&mut dialog.table.widths)
+            .into_iter()
+            .filter_map(|(place, width)| Some((moved(place)?, width)))
+            .collect();
+    }
     let natural = natural_widths(ui, rows, &columns);
     dialog.shown = ShownRows {
         source: Some((
             dialog.rows_source,
             dialog.artifact_filter,
             dialog.query.clone(),
+            narrow,
         )),
         rows: shown.into(),
         keys: keys.into(),
@@ -1632,6 +1669,10 @@ const COLUMNS: [&str; 7] = [
 const KIND: usize = 0;
 const REVISION: usize = 1;
 const TIME: usize = 2;
+const ACTOR: usize = 3;
+const CHANGE: usize = 4;
+const AFFECTED: usize = 5;
+const STATUS: usize = 6;
 /// The columns whose identifiers and times are set in mono.
 const MONO_COLUMNS: [bool; 7] = [false, true, true, false, false, false, false];
 /// The columns a list too wide for its room never cuts: what a record is,
@@ -1648,9 +1689,9 @@ fn row_text(row: &ProjectAuditRow, column: usize) -> &str {
         KIND => row.kind.label(),
         REVISION => &row.revision,
         TIME => &row.time,
-        3 => &row.actor,
-        4 => &row.change,
-        5 => &row.affected_evidence,
+        ACTOR => &row.actor,
+        CHANGE => &row.change,
+        AFFECTED => &row.affected_evidence,
         _ => &row.status,
     }
 }
@@ -1679,10 +1720,17 @@ fn row_cells(row: &ProjectAuditRow, shown: &[usize]) -> Vec<Cell> {
 /// The columns, by index, that any of `rows` says something in, and the
 /// kind of record only when the rows are of more than one kind. A column no
 /// row fills (times the project never retained) would be a heading over
-/// absent marks.
-fn shown_columns(rows: &[ProjectAuditRow]) -> Vec<usize> {
+/// absent marks. A `narrow` list leads with when a record was made and what
+/// it changed, which a phone reads without scrolling sideways.
+fn shown_columns(rows: &[ProjectAuditRow], narrow: bool) -> Vec<usize> {
     let mixed = rows.iter().any(|row| row.kind != rows[0].kind);
-    (0..COLUMNS.len())
+    let order = if narrow {
+        [TIME, CHANGE, KIND, REVISION, ACTOR, AFFECTED, STATUS]
+    } else {
+        [KIND, REVISION, TIME, ACTOR, CHANGE, AFFECTED, STATUS]
+    };
+    order
+        .into_iter()
         .filter(|&column| match column {
             KIND => mixed,
             _ => rows.iter().any(|row| !row_text(row, column).is_empty()),
