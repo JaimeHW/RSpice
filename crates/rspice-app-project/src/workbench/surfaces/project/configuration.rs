@@ -87,6 +87,9 @@ fn toolbar(
     let dirty = resolution.tables.dirty;
     // While an Apply or a Use for runs is checked, neither is offered again.
     let checking = cx.state.configuration.is_checking();
+    // Edits the project changed under, in a part they change too: said at
+    // once, not when Apply is refused.
+    let out_of_date = cx.state.configuration.is_out_of_date(catalog);
     let status = binding_status(resolution);
     let mut intent = None;
     let shown = egui::Frame::new()
@@ -119,20 +122,22 @@ fn toolbar(
                     }
                     // Runs use what was applied; the tables show the edits.
                     let edits = if checking {
-                        Some("Checking\u{2026}")
+                        Some(("Checking\u{2026}", t.color.text_dim))
+                    } else if out_of_date {
+                        Some(("Edits out of date: Revert, then edit again", t.color.warn))
                     } else {
-                        dirty.then_some("Edits not applied")
+                        dirty.then_some(("Edits not applied", t.color.text_dim))
                     };
-                    if let Some(edits) = edits {
+                    if let Some((edits, color)) = edits {
                         ui.label(
                             egui::RichText::new(edits)
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
+                                .color(color),
                         );
                     }
                     if selection != ConfigurationSelection::Default {
                         if Button::new("Apply")
-                            .enabled(write_allowed && dirty && !checking)
+                            .enabled(write_allowed && dirty && !checking && !out_of_date)
                             .show(ui)
                             .clicked()
                         {

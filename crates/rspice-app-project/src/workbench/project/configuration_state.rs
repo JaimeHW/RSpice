@@ -54,6 +54,9 @@ pub struct ConfigurationDraft {
     /// The revision the edits started from. Apply commits against it, so a
     /// change made elsewhere in the meantime is refused, never overwritten.
     pub(crate) base_revision: u64,
+    /// The configuration as the project held it at that revision: what a
+    /// change made since is told apart from the edits by.
+    base: ConfigurationSetDefinition,
     pub(crate) definition: ConfigurationSetDefinition,
 }
 
@@ -126,6 +129,9 @@ pub struct ConfigurationPageState {
     /// edits it resolved without comparing them.
     draft_revision: u64,
     resolution: ResolutionCache,
+    /// The revision of the configuration the edits could not follow, so the
+    /// page does not try again every frame.
+    unfollowed: Option<u64>,
     /// The Apply or Use for runs waiting on the check that runs could
     /// execute with what it commits.
     pub(crate) check: Option<ConfigurationCheck>,
@@ -245,14 +251,15 @@ impl ConfigurationPageState {
             self.refusal = Some(plain_refusal(&error));
             return false;
         }
-        let base_revision = match &self.draft {
-            Some(draft) if draft.id == id => draft.base_revision,
-            _ => committed.revision(),
+        let (base_revision, base) = match &self.draft {
+            Some(draft) if draft.id == id => (draft.base_revision, draft.base.clone()),
+            _ => (committed.revision(), committed.definition().clone()),
         };
         self.set_draft(
             (definition != *committed.definition()).then_some(ConfigurationDraft {
                 id,
                 base_revision,
+                base,
                 definition,
             }),
         );
@@ -266,9 +273,55 @@ impl ConfigurationPageState {
     pub(crate) fn renamed(&mut self, id: ConfigurationSetId, name: &str, revision: u64) {
         if let Some(draft) = self.draft.as_mut().filter(|draft| draft.id == id) {
             draft.definition.name = name.to_owned();
+            draft.base.name = name.to_owned();
             draft.base_revision = revision;
             self.draft_revision += 1;
         }
+    }
+
+    /// Carry the edits over a change the project made to their configuration
+    /// since they began, as renaming a cell, a library, a view or an
+    /// instance does: each part of the configuration keeps the edit made to
+    /// it and takes the project's change where it was not edited. A part
+    /// both changed cannot keep both; the edits are then out of date, which
+    /// the band says at once (see [`Self::is_out_of_date`]).
+    pub(crate) fn follow(&mut self, catalog: &ConfigurationSetCatalog) {
+        let Some(draft) = &self.draft else {
+            return;
+        };
+        let Some(committed) = catalog.find(draft.id) else {
+            return;
+        };
+        let revision = committed.revision();
+        if revision == draft.base_revision || self.unfollowed == Some(revision) {
+            return;
+        }
+        let current = committed.definition();
+        let Some(definition) = carried_over(&draft.base, &draft.definition, current)
+            .filter(|definition| check_definition(definition).is_ok())
+        else {
+            self.unfollowed = Some(revision);
+            return;
+        };
+        let id = draft.id;
+        let base = current.clone();
+        self.set_draft((definition != base).then_some(ConfigurationDraft {
+            id,
+            base_revision: revision,
+            base,
+            definition,
+        }));
+    }
+
+    /// Whether the edits were made to a revision of their configuration
+    /// the project has since changed in a way they could not follow, so
+    /// Apply cannot commit them.
+    pub fn is_out_of_date(&self, catalog: &ConfigurationSetCatalog) -> bool {
+        self.draft.as_ref().is_some_and(|draft| {
+            catalog
+                .find(draft.id)
+                .is_some_and(|committed| committed.revision() != draft.base_revision)
+        })
     }
 
     /// Every change to the edits goes through here. A check running for an
@@ -314,6 +367,7 @@ impl ConfigurationPageState {
         schematic: &SchematicState,
     ) -> Arc<ConfigurationResolution> {
         let catalog: &ConfigurationSetCatalog = &workspace.content.configuration_sets;
+        self.follow(catalog);
         let selection = self.selection(catalog);
         let draft = match selection {
             ConfigurationSelection::Configuration(id) => self
@@ -1334,6 +1388,65 @@ fn top_cell_choices(workspace: &ProjectWorkspace, libraries: &LibraryManager) ->
 
 /// A refusal from the configuration model, in the page's words: what is
 /// wrong and what to do about it.
+/// `edited` carried over to `current`: each part as the edits left it where
+/// they changed it, and as `current` has it where they did not. `None` when
+/// the edits and `current` changed one part two ways.
+fn carried_over(
+    base: &ConfigurationSetDefinition,
+    edited: &ConfigurationSetDefinition,
+    current: &ConfigurationSetDefinition,
+) -> Option<ConfigurationSetDefinition> {
+    fn part<T: PartialEq + Clone>(base: &T, edited: &T, current: &T) -> Option<T> {
+        if edited == base {
+            Some(current.clone())
+        } else if current == base || current == edited {
+            Some(edited.clone())
+        } else {
+            None
+        }
+    }
+    // Every part is named, so a part added to the definition is carried
+    // over too, or the build says it is not.
+    let ConfigurationSetDefinition {
+        name,
+        root,
+        dut_path,
+        executable_view_policy,
+        stop_views,
+        unresolved_policy,
+        black_box_policy,
+        overrides,
+        cell_bindings,
+        model_profile,
+        owner,
+    } = base;
+    Some(ConfigurationSetDefinition {
+        name: part(name, &edited.name, &current.name)?,
+        root: part(root, &edited.root, &current.root)?,
+        dut_path: part(dut_path, &edited.dut_path, &current.dut_path)?,
+        executable_view_policy: part(
+            executable_view_policy,
+            &edited.executable_view_policy,
+            &current.executable_view_policy,
+        )?,
+        stop_views: part(stop_views, &edited.stop_views, &current.stop_views)?,
+        unresolved_policy: part(
+            unresolved_policy,
+            &edited.unresolved_policy,
+            &current.unresolved_policy,
+        )?,
+        black_box_policy: part(
+            black_box_policy,
+            &edited.black_box_policy,
+            &current.black_box_policy,
+        )?,
+        overrides: part(overrides, &edited.overrides, &current.overrides)?,
+        cell_bindings: part(cell_bindings, &edited.cell_bindings, &current.cell_bindings)?,
+        model_profile: part(model_profile, &edited.model_profile, &current.model_profile)?,
+        owner: part(owner, &edited.owner, &current.owner)?,
+    })
+}
+
 pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
     fn field(field: &str) -> &'static str {
         match field {

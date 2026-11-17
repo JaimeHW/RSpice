@@ -653,6 +653,87 @@ fn delete_counts_every_binding_and_undo_brings_the_configuration_back() {
     assert_eq!(back.cell_bindings().len(), 1);
 }
 
+/// Renaming the design's top cell while the page holds edits carries the
+/// edits over: they stay, they take the new root, and Apply lands them.
+#[test]
+fn edits_follow_a_rename_of_the_design_they_were_made_to() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    edit(&mut app, |definition| {
+        definition.executable_view_policy = vec!["schematic".to_owned(), "spice".to_owned()];
+    });
+    settle(&ctx, &mut app, Vec::new());
+
+    app.state
+        .rename_cell("user", "top", "top_b")
+        .expect("the top cell renames");
+    let output = settle(&ctx, &mut app, Vec::new());
+    assert!(says(&output, "Edits not applied"), "the edits stay");
+    assert!(!says(&output, OUT_OF_DATE));
+    let edited = shown(&app);
+    assert_eq!(edited.root.cell, "top_b", "the edits took the rename");
+    assert_eq!(edited.executable_view_policy, ["schematic", "spice"]);
+
+    click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Apply"
+    });
+    let output = paint_until_checked(&ctx, &mut app);
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let id = catalog.active_configuration_id().unwrap();
+    let applied = catalog.find(id).unwrap();
+    assert_eq!(applied.definition().root.cell, "top_b");
+    assert_eq!(applied.executable_view_policy(), ["schematic", "spice"]);
+    assert!(!says(&output, "Edits not applied"), "Apply landed them");
+}
+
+const OUT_OF_DATE: &str = "Edits out of date: Revert, then edit again";
+
+/// A change the project makes to a part the edits change too cannot be
+/// carried over: the band says so at once, Apply is not offered, and Revert
+/// takes the page to the project's change.
+#[test]
+fn edits_the_project_changed_under_say_so_at_once() {
+    let ctx = offscreen();
+    let mut app = page_app();
+    edit(&mut app, |definition| {
+        definition.executable_view_policy = vec!["schematic".to_owned(), "spice".to_owned()];
+    });
+    settle(&ctx, &mut app, Vec::new());
+
+    let mut catalog = (*app.state.model.workspace.content.configuration_sets).clone();
+    let id = catalog.active_configuration_id().unwrap();
+    let committed = catalog.find(id).unwrap();
+    let revision = committed.revision();
+    let mut elsewhere = committed.definition().clone();
+    elsewhere.executable_view_policy = vec!["spice".to_owned(), "schematic".to_owned()];
+    catalog.update(id, revision, elsewhere).unwrap();
+    app.state
+        .model
+        .workspace
+        .content
+        .replace_configuration_sets(catalog)
+        .unwrap();
+
+    let output = settle(&ctx, &mut app, Vec::new());
+    assert!(
+        says(&output, OUT_OF_DATE),
+        "the band says so before Apply is pressed"
+    );
+    assert!(disabled(&output, "Apply"), "Apply cannot commit them");
+    assert_eq!(
+        shown(&app).executable_view_policy,
+        ["schematic", "spice"],
+        "the edits stay until Revert"
+    );
+
+    let asked = click(&ctx, &mut app, &output, Role::Button, |name| {
+        name == "Revert"
+    });
+    let output = click_lowest(&ctx, &mut app, &asked, "Revert");
+    assert!(!says(&output, OUT_OF_DATE));
+    assert_eq!(shown(&app).executable_view_policy, ["spice", "schematic"]);
+}
+
 /// Every name, value and description one frame announced.
 fn announced(output: &egui::FullOutput) -> Vec<String> {
     output

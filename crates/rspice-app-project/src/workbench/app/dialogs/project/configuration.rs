@@ -110,6 +110,7 @@ pub fn commit_configuration(
             "A configuration is still being checked. Wait for the check to finish.".to_owned(),
         );
     }
+    page.follow(&model.workspace.content.configuration_sets);
     let applies_draft = transaction == ConfigurationTransaction::Apply;
     let renamed = match &transaction {
         ConfigurationTransaction::Rename { id, name } => Some((*id, name.clone())),
