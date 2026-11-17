@@ -20,6 +20,8 @@ pub mod netlist_export;
 mod project_execution;
 pub mod project_io;
 mod project_results;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod result_segments;
 pub mod schematic_io;
 
 pub mod waveform_io;

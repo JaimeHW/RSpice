@@ -127,12 +127,11 @@ impl RSpiceApp {
         self.state.sync_active_schematic_to_workspace();
         match self.state.save_project_scope(SaveScope::ActiveDocument) {
             SaveRequestOutcome::CanonicalComplete => {
-                // Only a browser save that is still landing keeps the
-                // revision's id; this one has landed.
+                // Only a save that is still landing keeps the revision's
+                // id; this one has landed.
                 let _ = revision_id;
                 complete_validated_save(&mut self.state, false);
             }
-            #[cfg(target_arch = "wasm32")]
             SaveRequestOutcome::CanonicalPending(transaction) => {
                 self.state.project.check_and_save.pending_transaction = Some(transaction);
                 self.state.project.check_and_save.pending_revision_id = Some(revision_id);
@@ -175,20 +174,9 @@ impl RSpiceApp {
                     "Only a project copy was produced; the active validated revision was not committed.",
                 );
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            SaveRequestOutcome::CanonicalPending(_) => rollback_validated_save(
-                &mut self.state,
-                &target_view_key,
-                original_journal,
-                expected_journal,
-                expected_design_digest,
-                original_dirty,
-                "The save did not finish; no validated revision was saved.",
-            ),
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench) fn handle_check_and_save_continuation(
         &mut self,
         event: &rspice_project::lifecycle::SaveContinuationEvent,
@@ -208,7 +196,7 @@ impl RSpiceApp {
                 } else {
                     rollback_pending_validated_save(
                         &mut self.state,
-                        "The browser save completed without a validated revision identity. Reopen the project before retrying.",
+                        "The save completed without a validated revision identity. Reopen the project before retrying.",
                     );
                 }
             }
@@ -218,14 +206,14 @@ impl RSpiceApp {
                 } else {
                     rollback_pending_validated_save(
                         &mut self.state,
-                        "The browser save completed without a validated revision identity. Reopen the project before retrying.",
+                        "The save completed without a validated revision identity. Reopen the project before retrying.",
                     );
                 }
             }
             rspice_project::lifecycle::SaveContinuationEvent::Cancelled(_) => {
                 rollback_pending_validated_save(
                     &mut self.state,
-                    "The browser save was cancelled. No validated revision was committed.",
+                    "The save was cancelled. No validated revision was committed.",
                 );
             }
             rspice_project::lifecycle::SaveContinuationEvent::Conflict(_) => {
@@ -333,7 +321,6 @@ fn rollback_validated_save(
     state.record(LogSeverity::Warning, LogSource::Studio, detail);
 }
 
-#[cfg(target_arch = "wasm32")]
 fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
     let dialog = &mut state.project.check_and_save;
     let pending = (
@@ -366,16 +353,11 @@ fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
 }
 
 fn clear_pending_save_state(state: &mut AppState) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        state.project.check_and_save.pending_transaction = None;
-        state.project.check_and_save.pending_revision_id = None;
-        state.project.check_and_save.pending_view_key = None;
-        state.project.check_and_save.pending_original_journal = None;
-        state.project.check_and_save.pending_expected_journal = None;
-        state.project.check_and_save.pending_expected_design_digest = None;
-        state.project.check_and_save.pending_original_dirty = false;
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = state;
+    state.project.check_and_save.pending_transaction = None;
+    state.project.check_and_save.pending_revision_id = None;
+    state.project.check_and_save.pending_view_key = None;
+    state.project.check_and_save.pending_original_journal = None;
+    state.project.check_and_save.pending_expected_journal = None;
+    state.project.check_and_save.pending_expected_design_digest = None;
+    state.project.check_and_save.pending_original_dirty = false;
 }

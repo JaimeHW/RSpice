@@ -1,6 +1,7 @@
 //! A run's results store as the controller reports it: a transient its volume stopped keeps its
 //! rows and says where it stopped, a stored column a waveform could not read is a finding of the
-//! run that wrote it, and a stored run saved with its project reopens with the same samples.
+//! run that wrote it, and a stored run saved with its project keeps its segment beside the file
+//! and reopens with the same samples.
 
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::{
@@ -208,7 +209,7 @@ fn a_stored_column_that_cannot_be_read_is_a_finding_of_the_run_that_wrote_it() {
 }
 
 #[test]
-fn a_stored_run_saved_with_its_project_writes_its_samples_and_reopens_to_draw() {
+fn a_stored_run_saved_with_its_project_keeps_its_segment_and_reopens_to_draw() {
     let deck = "stored run saved with its project
 V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
 R1 in out 1k
@@ -227,8 +228,43 @@ C1 out 0 10n
         "the desktop route keeps the run's samples in its store"
     );
 
-    let saved = serde_json::to_string(&crate::io::capture_simulation_results(simulation))
-        .expect("the project's results serialize");
+    // Saved, the project names the run's segment, kept beside its file, and holds none of its
+    // samples.
+    let results = crate::io::capture_simulation_results(simulation);
+    let root = std::env::temp_dir().join(format!("rspice-stored-run-saved-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let file = root.join("saved.rspiceproj");
+    rspice_app_services::io::result_segments::keep_segments_now(&results, &file)
+        .expect("the run's segment is kept beside the project");
+    let segments = results.stored_segments();
+    assert_eq!(segments.len(), 1, "one transient, one segment");
+    let saved = serde_json::to_string(&results).expect("the project's results serialize");
+    assert!(saved.contains(&segments[0].digest.to_string()));
+    // No array in it is as long as the run.
+    fn longest_array(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .map(longest_array)
+                .max()
+                .unwrap_or(0)
+                .max(items.len()),
+            serde_json::Value::Object(fields) => {
+                fields.values().map(longest_array).max().unwrap_or(0)
+            }
+            _ => 0,
+        }
+    }
+    let samples = analysis.waveforms[0].y.len();
+    let longest = longest_array(&serde_json::from_str(&saved).unwrap());
+    assert!(
+        longest < samples,
+        "an array of {longest} in a run of {samples}"
+    );
+
+    rspice_results::store_reader::keep_segments_in(
+        &rspice_formats::project_results::segment_folder(&file),
+    );
     let reopened = crate::io::simulation_state_from_results(
         serde_json::from_str(&saved).expect("the project's results parse"),
     )
@@ -251,8 +287,11 @@ C1 out 0 10n
             .collect::<Vec<_>>()
     };
     for (before, after) in analysis.waveforms.iter().zip(&back.waveforms) {
-        // The file holds the samples themselves, as it does for a run kept in memory.
-        assert!(!after.y.is_stored(), "{} reopens from the file", after.name);
+        assert!(
+            after.y.is_stored(),
+            "{} reopens from its kept segment",
+            after.name
+        );
         assert_eq!(bits(&after.x), bits(&before.x), "{}", after.name);
         assert_eq!(bits(&after.y), bits(&before.y), "{}", after.name);
     }
@@ -283,4 +322,6 @@ C1 out 0 10n
         .map(|waveform| (waveform.name.clone(), waveform.y.len()))
         .collect();
     assert_eq!(drawn, expected);
+    drop((reopened, models));
+    let _ = std::fs::remove_dir_all(&root);
 }

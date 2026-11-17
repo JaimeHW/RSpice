@@ -7,4 +7,5 @@
 //! frame; the dialogs themselves never inspect each other.
 
 pub(in crate::workbench) mod help;
+mod quit_while_saving;
 pub(in crate::workbench) mod state;

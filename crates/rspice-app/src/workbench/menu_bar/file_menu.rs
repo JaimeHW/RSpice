@@ -137,6 +137,11 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
 }
 
 fn request_exit(state: &mut AppState) {
+    // A save copying its results to another volume asks whether to wait for it first.
+    if state.results_copy_running() {
+        state.shell.quit_while_saving = true;
+        return;
+    }
     if crate::workbench::app::project_transactions::hold_for_configuration_edits(
         state,
         ConfirmationAction::Exit,

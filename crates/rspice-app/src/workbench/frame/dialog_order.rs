@@ -529,6 +529,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
+        key: DialogKey("shell.quit_while_saving"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| state.shell.quit_while_saving),
+        render: |app, ctx| app.render_quit_while_saving_dialog(ctx),
+    },
+    DialogSpec {
         key: DialogKey("shell.exit_request"),
         modality: Modality::None,
         is_open: None,

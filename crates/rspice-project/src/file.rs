@@ -1524,6 +1524,10 @@ pub fn decode_project_text(
     source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
 ) -> Result<DecodedProject, ProjectIoError> {
     validate_project_text_size(contents.len())?;
+    // A stored run's results are read from the segments the project keeps beside its file.
+    if let Some(path) = source_path {
+        rspice_results::store_reader::keep_segments_in(&crate::results::segment_folder(path));
+    }
     let mut project: ProjectFile = serde_json::from_str(contents)
         .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
     let mut load_repairs = Vec::new();
@@ -1595,6 +1599,13 @@ pub fn decode_project_text(
             "Simulation results were not restored because their persisted data is invalid: {error}. Cleared {cleared} regression baseline reference(s) that could no longer be authenticated."
         ));
     } else {
+        let missing = project.simulation_results.runs_missing_results();
+        if !missing.is_empty() {
+            project.simulation_results_warning = Some(format!(
+                "The results of {} are missing: their results store was deleted or moved outside RSpice. Those runs show no samples.",
+                missing.join(", ")
+            ));
+        }
         project.pin_regression_baseline_references();
         if let Err(error) = project.validate_regression_baseline_eligibility() {
             let cleared = project.clear_regression_baseline_references();

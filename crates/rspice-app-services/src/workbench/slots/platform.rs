@@ -47,6 +47,9 @@ pub struct PlatformState {
     /// the logical project UUID. Runtime file handles are never serialized.
     pub browser_project_binding_receipt:
         Option<crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt>,
+    /// A save keeping its results beside its file before it writes the file.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub results_save: Option<crate::workbench::lifecycle::project_lifecycle::ResultsSave>,
 }
 
 impl Default for PlatformState {
@@ -65,6 +68,8 @@ impl Default for PlatformState {
             browser_project_save_name: None,
             native_project_binding_receipt: None,
             browser_project_binding_receipt: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            results_save: None,
         }
     }
 }

@@ -108,3 +108,134 @@ fn the_tile_cache_keeps_its_budget_by_dropping_the_least_recently_used_block() {
     assert_eq!(cache.bytes(), 0);
     assert!(cache.get(&key(0)).is_none());
 }
+
+/// A saved result names a stored run's waveform and event history by its segment's digest and
+/// reads them back from the folder that keeps the segment, the same values and the same
+/// identity. A segment no folder holds reads as unavailable and names its file, keeping the
+/// identity the result was saved with, so the run's views stay bound to it.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
+    use crate::events::RealEventPointEvidence;
+    use crate::events::points::EventPoints;
+    use crate::waveform::{StoredWindow, WaveformValues, WindowLead};
+    use rspice_results_store::{EventChange, EventValue, FileIo, PlaceWays, place_segment};
+
+    let root =
+        std::env::temp_dir().join(format!("rspice-results-references-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![
+            Signal::new("v(a)", "V", SignalKind::Real),
+            Signal::new("e(ctl)", "V", SignalKind::RealEvent),
+        ],
+    };
+    let x: Vec<f64> = (0..1_000).map(|row| row as f64 / 1000.0).collect();
+    let values: Vec<f64> = x.iter().map(|&t| (t * 7.0).sin()).collect();
+    let run_path = root.join("transient-0.rsr");
+    let mut writer = SegmentWriter::create(
+        FileIo::create(&run_path).unwrap(),
+        &schema,
+        &RunMeta::default(),
+    )
+    .unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    let changes: Vec<EventChange> = (0..10)
+        .map(|i| EventChange {
+            signal: 1,
+            time: i as f64 * 0.1,
+            sequence: i,
+            value: EventValue::Real(f64::from(i) * 0.5),
+            strength: 0,
+        })
+        .collect();
+    writer.push_events(&changes).unwrap();
+    let (receipt, _) = writer.finish(RunStatus::Completed).unwrap();
+
+    let segment = Arc::new(Segment::temporary(
+        StoreReader::open_file(&run_path).unwrap(),
+        run_path,
+    ));
+    let window = StoredWindow {
+        first: 100,
+        rows: 800,
+        lead: WindowLead::Value(0.0995),
+    };
+    let stored = WaveformValues::stored(
+        SegmentColumn::new(segment.clone(), Some(0), "v(a)".to_owned()),
+        window,
+    )
+    .unwrap();
+    let history: EventPoints<RealEventPointEvidence> = EventPoints::stored(
+        SegmentEvents::new(segment.clone(), 1, "e(ctl)".to_owned()),
+        0.25,
+    )
+    .unwrap();
+    let column = ColumnReference::of(&stored).unwrap();
+    assert_eq!(column.segment, receipt.digest.to_string());
+    let written = writing_references(|| serde_json::to_string(&history).unwrap());
+    assert!(written.contains(&receipt.digest.to_string()), "{written}");
+    assert_eq!(
+        serde_json::to_string(&history)
+            .unwrap()
+            .matches("time_s")
+            .count(),
+        7,
+        "outside a save, a history is written as its points"
+    );
+
+    let folder = root.join("results").join("project");
+    place_segment(
+        segment.path(),
+        &folder,
+        &receipt.digest,
+        PlaceWays::ALL,
+        &std::sync::atomic::AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    keep_segments_in(&folder);
+    let read_back = column.values().unwrap();
+    assert_eq!(*read_back, *stored);
+    assert_eq!(
+        read_back.stored_window().unwrap().0.identity(),
+        stored.stored_window().unwrap().0.identity()
+    );
+    let events: EventPoints<RealEventPointEvidence> = serde_json::from_str(&written).unwrap();
+    assert_eq!(events.len(), 7);
+    assert_eq!(*events, *history);
+    assert_eq!(events.stored_identity(), history.stored_identity());
+
+    drop((read_back, events));
+    let gone = "0".repeat(64);
+    let missing = ColumnReference {
+        segment: gone.clone(),
+        ..column.clone()
+    }
+    .values()
+    .unwrap();
+    assert_eq!(missing.len(), stored.len());
+    let failure = missing
+        .try_values()
+        .expect_err("a missing segment reads nothing");
+    assert!(
+        failure.to_string().contains(&format!("{gone}.rsr")),
+        "{failure}"
+    );
+    assert!(
+        failure
+            .to_string()
+            .contains("deleted or moved outside RSpice"),
+        "{failure}"
+    );
+    assert_eq!(
+        missing.stored_window().unwrap().0.identity(),
+        Some(([0; 32], column.column))
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}

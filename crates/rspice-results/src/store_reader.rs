@@ -17,6 +17,19 @@ use rspice_results_store::{
     SegmentState, StoreError, Tile,
 };
 
+pub use rspice_results_store::{Digest as SegmentDigest, kept_segment_name};
+#[cfg(any(unix, windows))]
+pub use rspice_results_store::{
+    PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments,
+};
+mod references;
+pub(crate) use references::references_written;
+pub use references::{ColumnReference, EventsReference, LeadReference, writing_references};
+mod segments;
+pub use segments::{
+    MissingSegment, Segment, SegmentColumn, SegmentEvents, keep_segments_in, kept_segment,
+};
+
 /// The bytes of decoded blocks the views of every open segment keep between frames: a working
 /// set for drawing, never a bound on what a run holds. A view over rows the cache dropped reads
 /// its blocks again.

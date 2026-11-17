@@ -56,7 +56,9 @@ pub use codec::*;
 
 mod executed_deck;
 mod snapshot;
+mod stored_values;
 pub use snapshot::{ProjectSimulationResults, RestoredProjectSimulationResults};
+pub use stored_values::{StoredSegment, segment_folder};
 mod provenance;
 pub use executed_deck::ProjectExecutedDecks;
 // The rows inside are named only where a file is written by hand: production
@@ -807,7 +809,11 @@ pub struct ProjectAnalysisResult {
     /// Exact analysis-native result evidence. Schemas through v8 omitted this
     /// field; presence-aware persistence prevents a relabeled legacy document
     /// from injecting current-schema evidence.
-    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    #[serde(
+        default,
+        skip_serializing_if = "PersistedField::is_missing",
+        serialize_with = "stored_values::serialize_payload"
+    )]
     pub result_payload: PersistedField<AnalysisResultPayload>,
     /// Producer units for native scalars, introduced in result schema v38.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
@@ -1405,7 +1411,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
 }
 
 /// The result-history schema this build writes, and the only one it reads.
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 47;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 48;
 
 fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
     match analysis_type {

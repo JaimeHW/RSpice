@@ -29,6 +29,8 @@ use rspice_app_services::io::{FileWorkflowIo, ProjectSnapshot};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{self, AfterResultsKept};
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
     RevertReviewToken, has_unsaved_changes_fresh,
@@ -48,7 +50,6 @@ use rspice_app_workbench::workbench::framework::feature::ModelsPort;
 use rspice_app_workbench::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
-#[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
 
 use rspice_app_design::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
@@ -969,6 +970,71 @@ impl AppState {
     }
 }
 
+/// A save whose results are kept beside its file before the file is written.
+#[cfg(not(target_arch = "wasm32"))]
+impl AppState {
+    /// Finish the save whose results have been kept since the last frame, if one has: write
+    /// its file, or say why it was not written. Returns what the save continues with. While
+    /// the results are still being kept, asks for the frame that shows how far it got.
+    pub(crate) fn poll_results_save(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> Option<SaveContinuationEvent> {
+        self.platform.results_save.as_ref()?;
+        let Some((save, outcome)) =
+            project_lifecycle::take_finished_results_save(&mut self.platform)
+        else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            return None;
+        };
+        let transaction = save.transaction;
+        Some(match outcome {
+            Err(rspice_results::store_reader::PlaceError::Cancelled) => {
+                self.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "The save was cancelled: the project file was left as it was, and the \
+                     project keeps its unsaved changes.",
+                );
+                SaveContinuationEvent::Cancelled(transaction)
+            }
+            Err(rspice_results::store_reader::PlaceError::Io(error)) => {
+                let message = format!("the results could not be kept beside the project: {error}");
+                self.report_failure("Project save failed", message.clone());
+                SaveContinuationEvent::Failed(transaction, message)
+            }
+            Ok(()) => match save.then {
+                AfterResultsKept::Save {
+                    scope,
+                    path,
+                    authority,
+                } => match save_native_scope(self, scope, &path, authority) {
+                    Ok(()) => SaveContinuationEvent::Saved(transaction),
+                    Err(error) => SaveContinuationEvent::Failed(transaction, error),
+                },
+                AfterResultsKept::SaveAs { path } => {
+                    if self.write_project_as(&path) {
+                        SaveContinuationEvent::Saved(transaction)
+                    } else {
+                        SaveContinuationEvent::Failed(
+                            transaction,
+                            "the project was not saved as a new file".to_owned(),
+                        )
+                    }
+                }
+            },
+        })
+    }
+
+    /// Stop the save whose results are being copied: nothing of the copy is left, the project
+    /// file is untouched and the project keeps its unsaved changes.
+    pub(crate) fn cancel_results_save(&mut self) {
+        if let Some(save) = &self.platform.results_save {
+            save.placement.cancel();
+        }
+    }
+}
+
 /// Saving the project as a new file: the inspector's pending edit
 /// committed, a live mirror refused, then the copy written where the reader
 /// picks and opened in place of the project it came from.
@@ -1013,6 +1079,25 @@ impl AppState {
     /// came from keeps what was last saved to it.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn save_project_as_to_path(&mut self, path: &std::path::Path) -> bool {
+        let then = AfterResultsKept::SaveAs {
+            path: path.to_path_buf(),
+        };
+        match project_lifecycle::begin_results_save(self, path, then) {
+            // It is written once the results it names are kept beside it.
+            Ok(Some(_)) => return true,
+            Ok(None) => {}
+            Err(error) => {
+                lifecycle_error(self, error, "Project Save As failed");
+                return false;
+            }
+        }
+        self.write_project_as(path)
+    }
+
+    /// Write the project as a new file at `path`, its results already kept beside it, and
+    /// open it in place of the project it came from.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_project_as(&mut self, path: &std::path::Path) -> bool {
         if let Err(error) =
             rspice_app_services::workbench::lifecycle::project_lifecycle::save_project_copy_native(
                 self, path,
@@ -1057,6 +1142,22 @@ fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveReques
         Ok(destination) => destination,
         Err(outcome) => return outcome,
     };
+    // The results the file names are kept beside it first, off this thread: a copy to another
+    // volume takes as long as its bytes. The file is written once they are all there.
+    let then = AfterResultsKept::Save {
+        scope,
+        path: path.clone(),
+        authority,
+    };
+    match project_lifecycle::begin_results_save(state, &path, then) {
+        Ok(Some(transaction)) => return SaveRequestOutcome::CanonicalPending(transaction),
+        Ok(None) => {}
+        Err(error) => {
+            let message = error.to_string();
+            lifecycle_error(state, error, "Project save failed");
+            return SaveRequestOutcome::Failed(message);
+        }
+    }
     save_native_scope(state, scope, &path, authority)
         .map_or_else(SaveRequestOutcome::Failed, |()| {
             SaveRequestOutcome::CanonicalComplete

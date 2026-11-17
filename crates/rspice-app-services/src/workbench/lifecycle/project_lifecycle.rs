@@ -974,9 +974,16 @@ pub fn save_native(
             file,
             workspace_session,
         } = candidate;
+        // The segments the file names are in its folder before the file is written, so a
+        // project on disk never names results it cannot read.
+        keep_result_segments(&file.simulation_results, path)?;
         let published = destination.publish(&persistence::NativeStorage, file, |candidate| {
             prepare_post_save_registry(state, candidate, scope, SnapshotContent::Current)
         })?;
+        crate::io::result_segments::release_unread_segments(
+            &published.candidate.simulation_results,
+            path,
+        );
         let candidate = ProjectSnapshot {
             file: published.candidate,
             workspace_session,
@@ -997,6 +1004,93 @@ pub fn save_native(
         .authority
         .cancel_transaction();
     result
+}
+
+/// Keep every segment `results` reads beside the project file at `path`, on this thread. A
+/// save started from the application has already placed them off the interface's thread, and
+/// this finds them there.
+#[cfg(not(target_arch = "wasm32"))]
+fn keep_result_segments(
+    results: &crate::io::ProjectSimulationResults,
+    path: &Path,
+) -> Result<(), ProjectLifecycleError> {
+    crate::io::result_segments::keep_segments_now(results, path).map_err(|error| {
+        ProjectLifecycleError::Persistence(rspice_project::persistence::PersistenceError::Platform(
+            error,
+        ))
+    })
+}
+
+/// What a save does once the results it names are kept beside its file.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+pub enum AfterResultsKept {
+    /// Write the project to `path`, the save the reader asked for.
+    Save {
+        scope: SaveScope,
+        path: PathBuf,
+        authority: DestinationAuthority,
+    },
+    /// Write the project as a new file at `path` and carry on working there.
+    SaveAs { path: PathBuf },
+}
+
+/// A save in its first phase: the results it names being kept beside its file, on a thread of
+/// their own. It holds the lifecycle's transaction, so no other save, open or close starts
+/// meanwhile, and the project stays as unsaved as it was until the file is written.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+pub struct ResultsSave {
+    pub transaction: TransactionId,
+    pub then: AfterResultsKept,
+    pub placement: crate::io::result_segments::SegmentPlacement,
+}
+
+/// Start a save to `path` by keeping, off the interface's thread, the results it names that its
+/// folder does not hold yet. `None` when the folder holds them all, and the save writes now.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn begin_results_save(
+    state: &mut dyn LifecycleHost,
+    path: &Path,
+    then: AfterResultsKept,
+) -> Result<Option<TransactionId>, ProjectLifecycleError> {
+    let state = &mut state.lifecycle_parts();
+    require_open_project(state.platform)?;
+    require_project_writable(state.model)?;
+    let results = state
+        .platform
+        .project_lifecycle
+        .result_cache
+        .capture(&state.model.simulation);
+    let plan = crate::io::result_segments::segments_to_keep(&results, path);
+    if plan.is_empty() {
+        return Ok(None);
+    }
+    let transaction = state.platform.project_lifecycle.authority.begin_save()?;
+    state.platform.results_save = Some(ResultsSave {
+        transaction,
+        then,
+        placement: crate::io::result_segments::SegmentPlacement::start(
+            plan,
+            crate::io::result_segments::place_ways(),
+        ),
+    });
+    Ok(Some(transaction))
+}
+
+/// The save whose results have finished being kept, with how that went, once one has. Its
+/// transaction is let go for the save itself to take.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn take_finished_results_save(
+    platform: &mut PlatformState,
+) -> Option<(
+    ResultsSave,
+    Result<(), rspice_results::store_reader::PlaceError>,
+)> {
+    let outcome = platform.results_save.as_ref()?.placement.outcome()?;
+    let save = platform.results_save.take()?;
+    cancel_transaction_if(platform, save.transaction);
+    Some((save, outcome))
 }
 
 /// Give each symbol this save writes changed a revision of its own, dated
@@ -1075,6 +1169,7 @@ pub fn save_project_copy_native(
     state.platform.project_lifecycle.authority.begin_save()?;
     let result = (|| {
         let copy = snapshot(state)?;
+        keep_result_segments(&copy.file.simulation_results, path)?;
         destination.publish(&persistence::NativeStorage, copy.file)
     })();
     state
@@ -1958,7 +2053,6 @@ pub fn cancel_transaction(platform: &mut PlatformState) {
     platform.project_lifecycle.authority.cancel_transaction();
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn cancel_transaction_if(platform: &mut PlatformState, id: TransactionId) -> bool {
     platform
         .project_lifecycle

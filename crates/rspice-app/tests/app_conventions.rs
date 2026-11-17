@@ -1591,6 +1591,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("io.rs", "generated_bundle"),
             ("io.rs", "netlist_export"),
             ("io.rs", "project_io"),
+            ("io.rs", "result_segments"),
             ("io.rs", "schematic_io"),
             ("io.rs", "waveform_io"),
             ("io/project_io.rs", "fixtures"),

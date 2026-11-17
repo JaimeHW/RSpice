@@ -257,7 +257,8 @@ impl StatusVisibility {
             | StatusKey::Checks
             | StatusKey::Page
             | StatusKey::Zoom
-            | StatusKey::Engine => true,
+            | StatusKey::Engine
+            | StatusKey::Saving => true,
         }
     }
 }

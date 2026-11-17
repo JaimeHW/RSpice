@@ -21,6 +21,11 @@ impl AppState {
     /// a position in the stored text, goes to the log.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
+        // A stored run's results are read from the folder the session kept them in.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(folder) = rspice_app_services::io::result_segments::session_segment_folder() {
+            rspice_results::store_reader::keep_segments_in(&folder);
+        }
         Some(serde_json::from_str(&text).unwrap_or_else(|error| {
             log::warn!("the stored session did not decode: {error}");
             let mut state = Self::default();
@@ -168,7 +173,7 @@ impl AppState {
 }
 
 impl AppState {
-    fn state_safe_mode_session_snapshot(&self) -> Option<&str> {
+    pub(in crate::workbench::app_state) fn state_safe_mode_session_snapshot(&self) -> Option<&str> {
         self.model.safe_mode.preserved_session()
     }
 }

@@ -166,6 +166,8 @@ pub enum StatusKey {
     Engine,
     /// Where the application runs.
     Platform,
+    /// How far a save has copied the results it keeps beside its file.
+    Saving,
 }
 
 /// The mark in front of a status cell's text.

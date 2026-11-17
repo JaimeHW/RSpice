@@ -171,7 +171,6 @@ impl RSpiceApp {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench) fn handle_save_continuation_event(
         &mut self,
         event: rspice_project::lifecycle::SaveContinuationEvent,
@@ -202,7 +201,7 @@ impl RSpiceApp {
             self.state.record(
                 LogSeverity::Warning,
                 LogSource::Studio,
-                "The project was saved, but edits made while the browser save was pending are not in it. Review and save them before continuing.",
+                "The project was saved, but edits made while the save was pending are not in it. Review and save them before continuing.",
             );
         } else {
             self.state

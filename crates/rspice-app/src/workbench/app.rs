@@ -565,6 +565,18 @@ impl RSpiceApp {
         if let Some(event) = self.state.poll_browser_project_save() {
             self.handle_save_continuation_event(event);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(event) = self.state.poll_results_save(ctx) {
+            self.handle_save_continuation_event(event);
+        }
+        // Closing the window while a save copies its results asks, as File > Exit does.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.state.results_copy_running()
+            && ctx.input(|input| input.viewport().close_requested())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.state.shell.quit_while_saving = true;
+        }
         #[cfg(target_arch = "wasm32")]
         if let Some(opened) =
             rspice_app_project::workbench::workflows::file_workflow::poll_browser_schematic_import(

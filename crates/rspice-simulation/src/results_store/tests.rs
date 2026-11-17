@@ -1,8 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
-use rspice_results_store::{RunMeta, RunStatus, RunWriter, Schema, Signal, SignalKind};
+use rspice_results::store_reader::{SegmentBytes, StoreReader};
+use rspice_results::waveform::{ColumnSource, StoredWindow, WaveformValues, WindowLead};
+use rspice_results_store::{
+    RunMeta, RunStatus, RunWriter, Schema, SegmentReader, Signal, SignalKind,
+};
 
 use super::*;
 
@@ -103,7 +106,7 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
         reader.chunk_spans().len() > 2,
         "the rows span several chunks"
     );
-    let run = Arc::new(StoredRun::new(StoreReader::new(reader), path.clone()));
+    let run = Arc::new(StoredRun::temporary(StoreReader::new(reader), path.clone()));
     let time = StoredColumn::new(run.clone(), None, "time".to_owned());
     let out = StoredColumn::new(run.clone(), Some(0), "v(out)".to_owned());
     drop(run);
@@ -148,7 +151,7 @@ fn a_stored_waveform_tiles_fits_and_reads_cursors_from_its_store_as_from_its_val
     }
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
     let reader = SegmentReader::open(Box::new(io.into_file()) as SegmentBytes).unwrap();
-    let run = Arc::new(StoredRun::new(StoreReader::new(reader), path));
+    let run = Arc::new(StoredRun::temporary(StoreReader::new(reader), path));
     // An output window from 1.5 us past row 100: a lead between rows 100 and 101, as the
     // transient's own output start makes one.
     let start = time(100) + 0.5e-6;

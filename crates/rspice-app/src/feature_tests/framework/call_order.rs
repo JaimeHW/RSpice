@@ -142,6 +142,8 @@ const PREPARE_FRAME: &[Step] = &[
         &[
             "self.state.poll_browser_project_save()",
             "self.handle_save_continuation_event(event)",
+            "self.state.poll_results_save(ctx)",
+            "self.handle_save_continuation_event(event)",
         ],
     ),
     (
@@ -384,6 +386,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "services",
     ),
     ("features::render_dialog", "project"),
+    ("render_quit_while_saving_dialog", "shell"),
     ("process_exit_request", "shell"),
     ("show_route_overlays", "shell"),
 ];
@@ -1524,8 +1527,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        75,
-        "the frame's 73 dialog steps, the route overlays' 3 owners in place of their host"
+        76,
+        "the frame's 74 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);
@@ -1581,8 +1584,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
     }
     assert_eq!(
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
-        68,
-        "the frame draws 68 dialog steps beside its synthetic ones"
+        69,
+        "the frame draws 69 dialog steps beside its synthetic ones"
     );
 }
 

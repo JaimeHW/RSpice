@@ -318,10 +318,33 @@ impl AppState {
         read_back: bool,
     ) {
         let history = self.model.simulation.retained.runs.revision();
-        if self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
+        // A stored run's results are kept in the session's own folder first: the session names
+        // them, and this process's store is gone by the next launch. Without them the session
+        // is kept without its runs.
+        #[cfg(not(target_arch = "wasm32"))]
+        let results = self
+            .platform
+            .project_lifecycle
+            .result_cache
+            .capture(&self.model.simulation);
+        #[cfg(not(target_arch = "wasm32"))]
+        let results_kept =
+            rspice_app_services::io::result_segments::keep_session_segments(&results)
+                .inspect_err(|error| log::warn!("the session keeps no runs: {error}"))
+                .is_ok();
+        #[cfg(target_arch = "wasm32")]
+        let results_kept = true;
+        if results_kept && self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
             match offer(storage, serde_json::to_string(&*self), read_back) {
                 Offer::Kept => {
                     settle(&mut self.model, &mut self.platform, SessionKept::Whole);
+                    // Safe mode stores the session it replaced, whose runs are not these.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.state_safe_mode_session_snapshot().is_none() {
+                        rspice_app_services::io::result_segments::release_unread_session_segments(
+                            &results,
+                        );
+                    }
                     return;
                 }
                 Offer::Refused => {}
@@ -338,6 +361,13 @@ impl AppState {
             Offer::NotEncoded => return,
         };
         settle(&mut self.model, &mut self.platform, kept);
+        // A session kept without its runs reads no segment.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.state_safe_mode_session_snapshot().is_none() {
+            rspice_app_services::io::result_segments::release_unread_session_segments(
+                &Default::default(),
+            );
+        }
     }
 }
 

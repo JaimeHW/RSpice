@@ -93,12 +93,11 @@ pub struct ConfirmationDialogState {
     pub pending_recent_kind: Option<crate::services::recent_files::RecentKind>,
     /// Example name captured with a pending example load.
     pub pending_example: Option<String>,
-    /// Destructive action suspended until the exact browser save transaction
-    /// reaches a verified canonical completion.
+    /// Destructive action suspended until the exact save transaction reaches
+    /// a verified canonical completion.
     pub(crate) awaiting_canonical_save: Option<PendingConfirmationContinuation>,
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub struct PendingConfirmationContinuation {
     pub(crate) transaction: crate::product::TransactionId,
@@ -164,7 +163,6 @@ impl ConfirmationDialogState {
         });
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn take_canonical_save(
         &mut self,
         transaction: crate::product::TransactionId,
@@ -179,7 +177,6 @@ impl ConfirmationDialogState {
         self.awaiting_canonical_save.take()
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn restore_continuation_for_review(&mut self, pending: PendingConfirmationContinuation) {
         self.visible = true;
         self.pending_action = Some(pending.action);
@@ -188,7 +185,6 @@ impl ConfirmationDialogState {
         self.pending_example = pending.example;
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn cancel_awaiting_canonical_save(&mut self) -> bool {
         self.awaiting_canonical_save.take().is_some()
     }

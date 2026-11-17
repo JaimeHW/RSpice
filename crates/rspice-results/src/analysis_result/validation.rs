@@ -76,8 +76,12 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     waveform.y.len()
                 ));
             }
-            if waveform.x.iter().any(|value| !value.is_finite())
-                || waveform.y.iter().any(|value| value.is_infinite())
+            // A stored run's rows were checked as its run ended; reading them here would read
+            // the whole run, and a segment deleted outside RSpice reads none.
+            let stored = waveform.x.is_stored() || waveform.y.is_stored();
+            if !stored
+                && (waveform.x.iter().any(|value| !value.is_finite())
+                    || waveform.y.iter().any(|value| value.is_infinite()))
             {
                 return Err(format!(
                     "retained waveform '{}' contains a non-finite coordinate or infinite value",
@@ -88,6 +92,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             // Native derived PXF delay gaps must be reproducible from finite
             // retained transfer samples. A solver NaN is still invalid.
             if self.import_source.is_none()
+                && !stored
                 && waveform.has_missing_samples()
                 && !pxf::verified_group_delay(self, waveform)
             {
@@ -123,11 +128,12 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         waveform.x.len()
                     ));
                 }
-                if complex
-                    .real
-                    .iter()
-                    .chain(complex.imag.iter())
-                    .any(|value| value.is_infinite())
+                if !(complex.real.is_stored() || complex.imag.is_stored())
+                    && complex
+                        .real
+                        .iter()
+                        .chain(complex.imag.iter())
+                        .any(|value| value.is_infinite())
                 {
                     return Err(format!(
                         "retained waveform '{}' contains a non-finite complex component",

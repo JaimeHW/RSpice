@@ -6,12 +6,18 @@ use super::*;
 pub struct ProjectWaveformData {
     pub name: String,
     /// Exact samples share storage with immutable snapshots. A writer must
-    /// detach through copy-on-write before changing a draft's samples.
+    /// detach through copy-on-write before changing a draft's samples. A
+    /// stored run's are written as the window of its kept segment's column
+    /// (schema v48).
+    #[serde(
+        serialize_with = "super::stored_values::serialize_axis",
+        deserialize_with = "super::stored_values::deserialize_axis"
+    )]
     pub x: rspice_results::waveform::SharedWaveformValues,
     /// Schema v43 uses explicit nulls for unavailable samples.
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize_shared",
-        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+        serialize_with = "super::stored_values::serialize_samples",
+        deserialize_with = "super::stored_values::deserialize_samples"
     )]
     pub y: rspice_results::waveform::SharedWaveformValues,
     pub color: String,
@@ -77,6 +83,11 @@ impl ProjectWaveformData {
                 self.y.len()
             ));
         }
+        // A stored run's rows were checked as its run ended, and reading them here would read
+        // the whole run to open it.
+        if self.x.is_stored() || self.y.is_stored() {
+            return Ok(());
+        }
         require_finite_values(&self.x, &format!("{prefix}.x"))?;
         require_monotonic_non_decreasing(&self.x, &format!("{prefix}.x"))?;
         if self.y.iter().any(|value| value.is_infinite()) {
@@ -106,13 +117,13 @@ impl ProjectWaveformData {
 pub struct ProjectComplexWaveformComponents {
     pub source_name: String,
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize_shared",
-        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+        serialize_with = "super::stored_values::serialize_samples",
+        deserialize_with = "super::stored_values::deserialize_samples"
     )]
     pub real: rspice_results::waveform::SharedWaveformValues,
     #[serde(
-        serialize_with = "crate::numeric::sample_serde::serialize_shared",
-        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+        serialize_with = "super::stored_values::serialize_samples",
+        deserialize_with = "super::stored_values::deserialize_samples"
     )]
     pub imag: rspice_results::waveform::SharedWaveformValues,
 }

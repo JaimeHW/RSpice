@@ -208,6 +208,14 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         content: platform_cell,
         activate: None,
     },
+    StatusCell {
+        key: StatusKey::Saving,
+        zone: StatusZone::Trailing,
+        order: 3,
+        workspace: None,
+        content: results_save_cell,
+        activate: Some(|app, _| cancel_results_save(app)),
+    },
 ];
 
 fn prompt_cell<'a>(_: &RSpiceApp, readings: &'a StatusReadings) -> Option<StatusText<'a>> {
@@ -673,14 +681,60 @@ fn platform_cell<'a>(_: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<
     })
 }
 
+/// A save copying its results to another volume, while it copies: how far it got, and pressing
+/// it cancels the save.
+fn results_save_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let save = app.state.platform.results_save.as_ref()?;
+        let (kept, total) = save.placement.copy_progress()?;
+        Some(StatusText {
+            text: Cow::Owned(format!("Saving results {} · Cancel", saved_of(kept, total))),
+            mark: StatusMark::None,
+            control: StatusControl::Button,
+            hover: Some(Cow::Owned(format!(
+                "Copying the results to {}. Cancel leaves the project file as it was, and the \
+                 project keeps its unsaved changes.",
+                save.placement.volume()
+            ))),
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app;
+        None
+    }
+}
+
+fn cancel_results_save(app: &mut RSpiceApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    app.state.cancel_results_save();
+    #[cfg(target_arch = "wasm32")]
+    let _ = app;
+}
+
+/// `1.2 of 3.4 GB`, or `120 of 850 MB` below a gigabyte: decimal units, as the file manager
+/// counts them.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn saved_of(kept: u64, total: u64) -> String {
+    const GB: f64 = 1e9;
+    const MB: f64 = 1e6;
+    let (kept, total) = (kept as f64, total as f64);
+    if total >= GB {
+        format!("{:.1} of {:.1} GB", kept / GB, total / GB)
+    } else {
+        format!("{:.0} of {:.0} MB", kept / MB, total / MB)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// The cells read, left to right, as they did when the bar named them
     /// itself: the prompt, the checks, where the reader is, what is selected
-    /// and the page; and from the right edge in, the zoom, the engine and the
-    /// platform.
+    /// and the page; and from the right edge in, the zoom, the engine, the
+    /// platform and a save's copy of its results.
     #[test]
     fn the_status_cells_keep_todays_order() {
         let laid_out = |zone: StatusZone| {
@@ -708,6 +762,7 @@ mod tests {
                 (0, StatusKey::Zoom),
                 (1, StatusKey::Engine),
                 (2, StatusKey::Platform),
+                (3, StatusKey::Saving),
             ]
         );
     }

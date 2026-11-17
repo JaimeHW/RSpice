@@ -309,6 +309,32 @@ impl<P: EventPoint> EventPoints<P> {
         }))))
     }
 
+    /// The `len` changes of `source` at or after `from`, as a saved result states them, read
+    /// only when something asks for them.
+    pub fn stored_holding(
+        source: Arc<dyn EventHistorySource>,
+        from: f64,
+        len: u64,
+    ) -> Result<Self, String> {
+        let len = usize::try_from(len)
+            .map_err(|_| "the history holds more changes than this host can address".to_owned())?;
+        Ok(Self(Repr::Stored(Arc::new(Stored {
+            source,
+            from,
+            len,
+            points: OnceLock::new(),
+            failure: OnceLock::new(),
+        }))))
+    }
+
+    /// The stored signal the points are, if they are one.
+    pub fn stored_source(&self) -> Option<&Arc<dyn EventHistorySource>> {
+        match &self.0 {
+            Repr::Memory(_) => None,
+            Repr::Stored(stored) => Some(&stored.source),
+        }
+    }
+
     /// How many points there are, without reading a stored history.
     pub fn len(&self) -> usize {
         match &self.0 {
@@ -487,15 +513,50 @@ impl<P: EventPoint + fmt::Debug> fmt::Debug for EventPoints<P> {
     }
 }
 
+/// Points, or a stored history written as the signal of a kept segment while
+/// [`crate::store_reader::writing_references`] runs.
 impl<P: EventPoint + serde::Serialize> serde::Serialize for EventPoints<P> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if crate::store_reader::references_written()
+            && let Some(reference) = crate::store_reader::EventsReference::of(self)
+        {
+            return reference.serialize(serializer);
+        }
         self.as_slice().serialize(serializer)
     }
 }
 
-impl<'de, P: serde::Deserialize<'de>> serde::Deserialize<'de> for EventPoints<P> {
+/// Points, or a reference to the signal of a kept segment.
+impl<'de, P: EventPoint + serde::Deserialize<'de>> serde::Deserialize<'de> for EventPoints<P> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Vec::<P>::deserialize(deserializer).map(Self::from)
+        struct Visitor<P>(std::marker::PhantomData<P>);
+        impl<'de, P: EventPoint + serde::Deserialize<'de>> serde::de::Visitor<'de> for Visitor<P> {
+            type Value = EventPoints<P>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("event points, or the signal of a results store")
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                serde::Deserialize::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(|points: Vec<P>| EventPoints::from(points))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let reference: crate::store_reader::EventsReference =
+                    serde::Deserialize::deserialize(serde::de::value::MapAccessDeserializer::new(
+                        map,
+                    ))?;
+                reference.points().map_err(serde::de::Error::custom)
+            }
+        }
+        deserializer.deserialize_any(Visitor(std::marker::PhantomData))
     }
 }
 

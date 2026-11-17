@@ -30,19 +30,12 @@ pub struct CheckAndSaveDialogState {
         crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
     >,
     pub validation_error: Option<String>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_transaction: Option<crate::product::TransactionId>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_view_key: Option<String>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_original_journal: Option<crate::state::ValidatedRevisionJournal>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_expected_journal: Option<crate::state::ValidatedRevisionJournal>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_expected_design_digest: Option<crate::product::ContentDigest>,
-    #[cfg(target_arch = "wasm32")]
     pub pending_original_dirty: bool,
 }
 

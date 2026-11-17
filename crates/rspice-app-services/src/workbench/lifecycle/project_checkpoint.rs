@@ -332,6 +332,12 @@ impl CheckpointCapture {
     pub fn publish(self) -> Result<CheckpointCreated, String> {
         let (manifest, serialized) =
             seal_checkpoint(&self.project, self.reason, self.created_unix_ms)?;
+        // The results the checkpoint names are kept beside it first, as a save keeps a
+        // project's: it outlives the run's own store.
+        crate::io::result_segments::keep_segments_now(
+            &self.project.file.simulation_results,
+            &self.directory.join(&manifest.snapshot_name),
+        )?;
         let summary = publish_native(&self.directory, &manifest, serialized.as_bytes())?;
         // Retention runs only after the new manifest is committed and
         // verified. A cleanup failure never invalidates the new checkpoint.
@@ -419,6 +425,10 @@ pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
+    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    rspice_results::store_reader::keep_segments_in(
+        &rspice_formats::project_results::segment_folder(snapshot),
+    );
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
 }
@@ -428,13 +438,27 @@ pub fn recovery_copy_bytes(
     summary: &ProjectCheckpointSummary,
     destination: &Path,
 ) -> Result<Vec<u8>, String> {
+    recovery_copy_text(&recovery_copy(summary, destination)?)
+}
+
+/// The checkpoint's project as a new project at `destination`.
+#[cfg(not(target_arch = "wasm32"))]
+fn recovery_copy(
+    summary: &ProjectCheckpointSummary,
+    destination: &Path,
+) -> Result<ProjectSnapshot, String> {
     let mut project = load(summary)?;
     project.file.workspace.project = project
         .file
         .workspace
         .project
         .fork_copy_at(destination.to_path_buf());
-    let serialized = crate::io::project_io::serialize_project_file(&project)
+    Ok(project)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn recovery_copy_text(project: &ProjectSnapshot) -> Result<Vec<u8>, String> {
+    let serialized = crate::io::project_io::serialize_project_file(project)
         .map_err(|error| format!("recovery copy serialization failed: {error}"))?;
     Ok(serialized.into_bytes())
 }
@@ -444,12 +468,15 @@ pub fn publish_recovery_copy(
     summary: &ProjectCheckpointSummary,
     destination: &Path,
 ) -> Result<(), String> {
-    let bytes = recovery_copy_bytes(summary, destination)?;
+    let project = recovery_copy(summary, destination)?;
+    let bytes = recovery_copy_text(&project)?;
     let expected = crate::io::durable_file::observe_expected_content(destination)
         .map_err(|error| format!("recovery destination could not be inspected: {error}"))?;
     if !matches!(expected, crate::io::durable_file::ExpectedContent::Missing) {
         return Err("recovery copies never overwrite an existing file".to_owned());
     }
+    // The copy reads its results from beside it, as a saved project does.
+    crate::io::result_segments::keep_segments_now(&project.file.simulation_results, destination)?;
     crate::io::durable_file::compare_exchange_bytes(destination, expected, &bytes)
         .map_err(|error| format!("recovery copy publication failed: {error}"))
 }
@@ -795,6 +822,8 @@ fn prune_retention(directory: &Path, project_id: &str) -> Result<(), String> {
         .skip(MAX_RETAINED_CHECKPOINTS)
     {
         let ProjectCheckpointLocator::Native { manifest, snapshot } = checkpoint.locator;
+        // The results only this checkpoint kept go with it.
+        let _ = std::fs::remove_dir_all(rspice_formats::project_results::segment_folder(&snapshot));
         for path in [manifest, snapshot] {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}

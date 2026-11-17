@@ -30,6 +30,8 @@ mod publication;
 mod rails;
 mod recovery_comparison;
 mod recovery_frames;
+#[cfg(not(target_arch = "wasm32"))]
+mod results_save;
 mod steps;
 mod surface;
 

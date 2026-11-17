@@ -9,13 +9,11 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use rspice_results::store_reader::{SegmentBytes, StoreReader};
-use rspice_results::waveform::{ColumnSource, ColumnTile, RowsAround};
-use rspice_results_store::{FileIo, SegmentIo, SegmentReader, StoreError};
+use rspice_results_store::{FileIo, SegmentIo};
 
 /// The folder under the system's temporary folder that holds every process's stores.
 const STORES_FOLDER: &str = "rspice-results";
@@ -221,185 +219,11 @@ impl SegmentIo for TemporaryIo {
     }
 }
 
-/// A finished segment its waveforms read from, deleted with the last of them.
-pub(crate) struct StoredRun {
-    reader: StoreReader,
-    path: PathBuf,
-}
-
-impl StoredRun {
-    pub(crate) fn new(reader: StoreReader, path: PathBuf) -> Self {
-        Self { reader, path }
-    }
-
-    /// The segment file.
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(crate) fn rows(&self) -> u64 {
-        self.reader.rows()
-    }
-
-    /// The reader every column of the run shares.
-    pub(crate) fn reader(&self) -> &StoreReader {
-        &self.reader
-    }
-
-    /// Run `read` with the segment's reader.
-    pub(crate) fn with_reader<T>(
-        &self,
-        read: impl FnOnce(&mut SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
-    ) -> Result<T, StoreError> {
-        self.reader.with_reader(read)
-    }
-
-    /// Rows `first .. first + out.len()` of the x axis (`slot` `None`) or a value slot.
-    pub(crate) fn read(
-        &self,
-        slot: Option<usize>,
-        first: u64,
-        out: &mut [f64],
-    ) -> Result<(), StoreError> {
-        self.reader.read(slot, first, out)
-    }
-}
-
-impl Drop for StoredRun {
-    fn drop(&mut self) {
-        // Close the segment before deleting it: a host may refuse to delete an open file.
-        self.reader.close();
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-/// One digital or real event signal of a stored run, as its history reads it.
-pub(crate) struct StoredEventSignal {
-    run: Arc<StoredRun>,
-    signal: usize,
-    name: String,
-}
-
-impl StoredEventSignal {
-    pub(crate) fn new(run: Arc<StoredRun>, signal: usize, name: String) -> Arc<Self> {
-        Arc::new(Self { run, signal, name })
-    }
-}
-
-impl rspice_results::events::points::EventHistorySource for StoredEventSignal {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn store(&self) -> String {
-        self.run.path().display().to_string()
-    }
-
-    fn count(&self) -> Result<u64, String> {
-        self.run
-            .reader()
-            .event_count(self.signal)
-            .map_err(|error| error.to_string())
-    }
-
-    fn before(&self, t: f64) -> Result<u64, String> {
-        self.run
-            .reader()
-            .events_before(self.signal, t)
-            .map_err(|error| error.to_string())
-    }
-
-    fn span(&self, t0: f64, t1: f64) -> Result<rspice_results_store::EventSpan, String> {
-        self.run
-            .reader()
-            .events_around(self.signal, t0, t1)
-            .map_err(|error| error.to_string())
-    }
-
-    fn identity(&self) -> Option<([u8; 32], u64)> {
-        Some((
-            self.run.reader().digest()?.0,
-            u64::try_from(self.signal).ok()?,
-        ))
-    }
-}
-
-/// One column of a stored run, as a waveform reads it.
-pub(crate) struct StoredColumn {
-    run: Arc<StoredRun>,
-    /// The value slot, or `None` for the x axis.
-    slot: Option<usize>,
-    name: String,
-}
-
-impl StoredColumn {
-    pub(crate) fn new(run: Arc<StoredRun>, slot: Option<usize>, name: String) -> Arc<Self> {
-        Arc::new(Self { run, slot, name })
-    }
-}
-
-impl ColumnSource for StoredColumn {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn store(&self) -> String {
-        self.run.path().display().to_string()
-    }
-
-    fn rows(&self) -> u64 {
-        self.run.rows()
-    }
-
-    fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
-        self.run
-            .read(self.slot, first, out)
-            .map_err(|error| error.to_string())
-    }
-
-    /// The time axis: the run checked it ascends strictly before it made its waveforms.
-    fn ascending(&self) -> bool {
-        self.slot.is_none()
-    }
-
-    fn identity(&self) -> Option<([u8; 32], u64)> {
-        let column = self
-            .slot
-            .map_or(Some(0), |slot| u64::try_from(slot).ok()?.checked_add(1))?;
-        Some((self.run.reader().digest()?.0, column))
-    }
-
-    fn tile(
-        &self,
-        rows: std::ops::Range<u64>,
-        x0: f64,
-        x1: f64,
-        pixels: usize,
-    ) -> Option<Result<ColumnTile, String>> {
-        let slot = self.slot?;
-        Some(
-            self.run
-                .reader()
-                .tile(slot, rows, x0, x1, pixels)
-                .map(ColumnTile::from)
-                .map_err(|error| error.to_string()),
-        )
-    }
-
-    fn rows_around(
-        &self,
-        rows: std::ops::Range<u64>,
-        x: f64,
-    ) -> Option<Result<RowsAround, String>> {
-        let slot = self.slot?;
-        Some(
-            self.run
-                .reader()
-                .rows_around(slot, rows, x)
-                .map_err(|error| error.to_string()),
-        )
-    }
-}
+/// A finished segment its waveforms read from, deleted with the last of them
+/// ([`StoredRun::temporary`]), and its columns and event signals.
+pub(crate) use rspice_results::store_reader::{
+    Segment as StoredRun, SegmentColumn as StoredColumn, SegmentEvents as StoredEventSignal,
+};
 
 #[cfg(test)]
 pub(crate) mod tests;
