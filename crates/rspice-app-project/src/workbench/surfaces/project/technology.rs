@@ -694,7 +694,7 @@ pub(super) fn attach_technology_binding(
     {
         let checkpoint = crate::workbench::lifecycle::project_checkpoint::create(
             &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
-            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyChange,
         )?;
         commit_technology_after_checkpoint(cx, binding, authority, migration_evidence, &checkpoint)
     }
@@ -798,7 +798,7 @@ pub(super) fn start_browser_technology_checkpoint(
     let repaint = ctx.clone();
     crate::workbench::lifecycle::project_checkpoint::start_create(
         &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
-        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyChange,
         move |result| {
             BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
                 queue

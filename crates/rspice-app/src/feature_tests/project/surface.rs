@@ -668,7 +668,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     let catalog = [
         (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
         (
-            ProjectCheckpointReason::TechnologyAttachment,
+            ProjectCheckpointReason::TechnologyChange,
             2,
             2 * 3_600_000,
             47_902,
@@ -696,7 +696,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     }
     if error {
         recovery.error = Some(
-            "project recovery directory 'D:\\designs\\.rspice-recovery' could not be read: \
+            "project recovery directory 'D:\\designs\\amp.rspice-recovery' could not be read: \
              Access is denied. (os error 5)"
                 .to_owned(),
         );
@@ -734,14 +734,13 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
             "Create checkpoint",
             "Revision history\u{2026}",
             "Checkpoints",
-            "3 of 8 kept",
             "Manual checkpoint",
-            "Before technology attachment",
+            "Before technology change",
             "6 min ago \u{b7} revision 3",
             "Compare",
             "Restore\u{2026}",
             "Storage",
-            "The newest 8 checkpoints",
+            "Kept until you delete them",
         ] {
             assert!(
                 text.contains(expected),

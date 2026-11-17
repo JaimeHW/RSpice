@@ -17,7 +17,8 @@ pub(super) fn project_recovery_navigator(ui: &mut Ui, nav: &mut ProjectNavigator
         .filter(|checkpoint| {
             query.is_empty()
                 || format!(
-                    "{} {} {}",
+                    "{} {} {} {}",
+                    checkpoint.title(),
                     checkpoint.reason().label(),
                     checkpoint.project_revision(),
                     checkpoint.checkpoint_id()
@@ -47,7 +48,7 @@ pub(super) fn project_recovery_navigator(ui: &mut Ui, nav: &mut ProjectNavigator
         if nav_row(
             ui,
             WorkbenchIcon::History,
-            checkpoint.reason().label(),
+            checkpoint.title(),
             nav.checkpoint_selection.as_deref() == Some(id.as_str()),
             Some(&age),
         ) {

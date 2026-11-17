@@ -870,15 +870,19 @@ pub enum ScalarPreference {
     ParallelTaskCeiling,
     RunsKept,
     RecentFilesListed,
+    /// The disk space, in MiB, a project's automatic checkpoints are kept
+    /// inside, oldest dropped first.
+    CheckpointBudgetMib,
 }
 
 impl ScalarPreference {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::LocalParallelSlots,
         Self::DisplayedSignificantDigits,
         Self::ParallelTaskCeiling,
         Self::RunsKept,
         Self::RecentFilesListed,
+        Self::CheckpointBudgetMib,
     ];
 
     const fn stable_id(self) -> &'static str {
@@ -888,6 +892,7 @@ impl ScalarPreference {
             Self::ParallelTaskCeiling => "parallel-task-ceiling",
             Self::RunsKept => "runs-kept",
             Self::RecentFilesListed => "recent-files-listed",
+            Self::CheckpointBudgetMib => "recovery.checkpoint-budget-mib",
         }
     }
 
@@ -904,6 +909,7 @@ impl ScalarPreference {
             Self::RunsKept => 20,
             // The conventional depth of an EDA File menu.
             Self::RecentFilesListed => 8,
+            Self::CheckpointBudgetMib => 512,
         }
     }
 
@@ -914,6 +920,9 @@ impl ScalarPreference {
             Self::ParallelTaskCeiling => (1, 4096),
             Self::RunsKept => (1, 100),
             Self::RecentFilesListed => (1, 50),
+            // From one MiB to what a u32 count of MiB can say: the budget
+            // governs only automatic checkpoints, so no figure loses work.
+            Self::CheckpointBudgetMib => (1, u32::MAX),
         }
     }
 }

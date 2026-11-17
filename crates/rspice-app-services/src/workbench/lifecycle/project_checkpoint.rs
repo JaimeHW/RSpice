@@ -20,33 +20,71 @@ use crate::product::ContentDigest;
 use crate::workbench::lifecycle::project_lifecycle::LifecycleSourceMut;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, Model};
 
-const MANIFEST_SCHEMA_VERSION: u16 = 1;
+const MANIFEST_SCHEMA_VERSION: u16 = 2;
+/// A saved project's checkpoints are kept in a folder beside its file, named
+/// for it: `amp.rspiceproj` keeps them in `amp.rspice-recovery`.
 #[cfg(not(target_arch = "wasm32"))]
-const CHECKPOINT_DIRECTORY: &str = ".rspice-recovery";
+const CHECKPOINT_DIRECTORY_SUFFIX: &str = ".rspice-recovery";
 #[cfg(not(target_arch = "wasm32"))]
 const MANIFEST_SUFFIX: &str = ".checkpoint.json";
 const SNAPSHOT_SUFFIX: &str = ".rspiceproj";
-/// How many checkpoints a project keeps; creating one more removes the oldest.
-pub const MAX_RETAINED_CHECKPOINTS: usize = 8;
-#[cfg(not(target_arch = "wasm32"))]
-const MAX_RETAINED_QUARANTINE_RECORDS: usize = 8;
 #[cfg(target_arch = "wasm32")]
 const BROWSER_KEY_PREFIX: &str = "rspice.project-recovery.v1";
+const MIB: u64 = 1024 * 1024;
 
+/// Why a checkpoint was taken: by the reader, as an autosave of unsaved
+/// work, or by RSpice just before the change each other reason names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ProjectCheckpointReason {
+    #[serde(rename = "manual")]
     Manual,
-    TechnologyAttachment,
+    #[serde(rename = "before-save")]
+    Save,
+    #[serde(rename = "before-restore")]
+    Restore,
+    #[serde(rename = "before-technology-change")]
+    TechnologyChange,
+    #[serde(rename = "before-library-deletion")]
+    LibraryDeletion,
+    #[serde(rename = "before-publication-restore")]
     PublicationRestore,
+    #[serde(rename = "autosave")]
+    Autosave,
 }
 
 impl ProjectCheckpointReason {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Manual => "Manual checkpoint",
-            Self::TechnologyAttachment => "Before technology attachment",
+            Self::Save => "Before save",
+            Self::Restore => "Before restore",
+            Self::TechnologyChange => "Before technology change",
+            Self::LibraryDeletion => "Before library deletion",
             Self::PublicationRestore => "Before restore from publication",
+            Self::Autosave => "Autosave",
+        }
+    }
+}
+
+/// How long retention keeps a checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckpointRetention {
+    /// Manual and pinned checkpoints: never removed automatically.
+    UntilDeleted,
+    /// An autosave: only the newest is kept, and a save removes it.
+    UntilNextSave,
+    /// Every other automatic checkpoint: kept inside the disk budget the
+    /// Preferences set, oldest dropped first.
+    WithinBudget,
+}
+
+impl CheckpointRetention {
+    /// The rule in the words the Recovery page and its inspector use.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::UntilDeleted => "Until you delete it",
+            Self::UntilNextSave => "Until the next save",
+            Self::WithinBudget => "Within the automatic budget",
         }
     }
 }
@@ -61,6 +99,11 @@ struct ProjectCheckpointManifest {
     project_revision: u64,
     reason: ProjectCheckpointReason,
     created_unix_ms: u64,
+    /// What the reader wrote about the checkpoint, one line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    /// Kept until the reader deletes it, whatever its reason.
+    pinned: bool,
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
     snapshot_name: String,
@@ -88,6 +131,8 @@ pub struct ProjectCheckpointSummary {
     project_revision: u64,
     reason: ProjectCheckpointReason,
     created_unix_ms: u64,
+    note: Option<String>,
+    pinned: bool,
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
     locator: ProjectCheckpointLocator,
@@ -149,6 +194,31 @@ impl ProjectCheckpointSummary {
     pub const fn snapshot_digest(&self) -> ContentDigest {
         self.snapshot_digest
     }
+
+    /// What the reader wrote about the checkpoint.
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+
+    pub const fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    /// The checkpoint's name in a list: the reader's note when it has one,
+    /// otherwise its reason.
+    pub fn title(&self) -> &str {
+        self.note().unwrap_or(self.reason.label())
+    }
+
+    pub const fn retention(&self) -> CheckpointRetention {
+        if self.pinned || matches!(self.reason, ProjectCheckpointReason::Manual) {
+            CheckpointRetention::UntilDeleted
+        } else if matches!(self.reason, ProjectCheckpointReason::Autosave) {
+            CheckpointRetention::UntilNextSave
+        } else {
+            CheckpointRetention::WithinBudget
+        }
+    }
 }
 
 /// A catalog entry for a checkpoint that exists only in a test, so a surface
@@ -168,12 +238,31 @@ pub fn fixture_summary(
         project_revision,
         reason,
         created_unix_ms,
+        note: None,
+        pinned: false,
         snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
         snapshot_byte_len,
         locator: ProjectCheckpointLocator::Native {
             manifest: PathBuf::from("fixture.checkpoint.json"),
             snapshot: PathBuf::from("fixture.rspiceproj"),
         },
+    }
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+impl ProjectCheckpointSummary {
+    /// The fixture with a note written on it.
+    #[must_use]
+    pub fn with_note(mut self, note: &str) -> Self {
+        self.note = Some(note.to_owned());
+        self
+    }
+
+    /// The fixture pinned.
+    #[must_use]
+    pub const fn pinned_fixture(mut self) -> Self {
+        self.pinned = true;
+        self
     }
 }
 
@@ -265,6 +354,8 @@ fn seal_checkpoint(
         project_revision: project.file.workspace.project.revision().get(),
         reason,
         created_unix_ms,
+        note: None,
+        pinned: false,
         snapshot_digest: digest(bytes),
         snapshot_byte_len: bytes.len().try_into().unwrap_or(u64::MAX),
         snapshot_name,
@@ -300,6 +391,7 @@ pub struct CheckpointCapture {
     reason: ProjectCheckpointReason,
     created_unix_ms: u64,
     directory: PathBuf,
+    budget_bytes: u64,
 }
 
 /// What writing a checkpoint left: the checkpoint, the project's checkpoints
@@ -318,13 +410,24 @@ pub fn capture(
     reason: ProjectCheckpointReason,
 ) -> Result<CheckpointCapture, String> {
     let (project, created_unix_ms) = snapshot_now(state)?;
-    let directory = checkpoint_directory(state.lifecycle_view().model)?;
+    let model = state.lifecycle_view().model;
     Ok(CheckpointCapture {
         project,
         reason,
         created_unix_ms,
-        directory,
+        directory: checkpoint_directory(model)?,
+        budget_bytes: budget_bytes(model),
     })
+}
+
+/// The disk space automatic checkpoints are kept inside, as the Preferences
+/// set it.
+pub fn budget_bytes(model: &Model) -> u64 {
+    u64::from(
+        model.preferences.scalar(
+            rspice_app_state::workbench::preferences::ScalarPreference::CheckpointBudgetMib,
+        ),
+    ) * MIB
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -346,13 +449,14 @@ impl CheckpointCapture {
         let summary = publish_native(&self.directory, &manifest, serialized.as_bytes())?;
         // Retention runs only after the new manifest is committed and
         // verified. A cleanup failure never invalidates the new checkpoint.
-        let retention_warning = prune_retention(&self.directory, &manifest.project_id)
-            .err()
-            .map(|error| {
-                format!(
-                    "The project checkpoint was created, but older checkpoints were not all removed: {error}"
-                )
-            });
+        let retention_warning =
+            prune_retention(&self.directory, &manifest.project_id, self.budget_bytes)
+                .err()
+                .map(|error| {
+                    format!(
+                        "The project checkpoint was created, but older checkpoints were not all removed: {error}"
+                    )
+                });
         let catalog = list_directory(&self.directory, &manifest.project_id);
         Ok(CheckpointCreated {
             summary,
@@ -394,6 +498,7 @@ pub fn start_create(
     complete: impl FnOnce(Result<ProjectCheckpointSummary, String>) + 'static,
 ) -> Result<(), String> {
     let (manifest, serialized) = prepare_checkpoint(state, reason)?;
+    let budget = budget_bytes(state.lifecycle_view().model);
     let (manifest_key, snapshot_key) = browser_keys(&manifest);
     let prefix = browser_project_prefix(&manifest.project_id);
     let manifest_json = serde_json::to_string(&manifest)
@@ -407,7 +512,7 @@ pub fn start_create(
         snapshot_key,
         serialized.into_bytes(),
         manifest_json,
-        MAX_RETAINED_CHECKPOINTS,
+        move |stored| browser_retention_removals(stored, budget),
         move |result| {
             complete(result.and_then(|()| {
                 summary_from_manifest(
@@ -539,6 +644,11 @@ fn validate_manifest(manifest: &ProjectCheckpointManifest) -> Result<(), String>
     if manifest.created_unix_ms == 0 {
         return Err("project checkpoint has an invalid creation time".to_owned());
     }
+    if let Some(note) = &manifest.note
+        && normalized_note(note)?.as_ref() != Some(note)
+    {
+        return Err("project checkpoint note is not one trimmed line of text".to_owned());
+    }
     if manifest.snapshot_byte_len == 0 {
         return Err("project checkpoint snapshot is empty".to_owned());
     }
@@ -569,10 +679,76 @@ fn summary_from_manifest(
         project_revision: manifest.project_revision,
         reason: manifest.reason,
         created_unix_ms: manifest.created_unix_ms,
+        note: manifest.note,
+        pinned: manifest.pinned,
         snapshot_digest: manifest.snapshot_digest,
         snapshot_byte_len: manifest.snapshot_byte_len,
         locator,
     })
+}
+
+/// A note as it is stored: one line, trimmed, or none when it is blank.
+pub fn normalized_note(note: &str) -> Result<Option<String>, String> {
+    let note = note.trim();
+    if note.chars().any(char::is_control) {
+        return Err("a checkpoint note is one line of text".to_owned());
+    }
+    Ok((!note.is_empty()).then(|| note.to_owned()))
+}
+
+/// The positions in `checkpoints`, sorted newest first, that retention
+/// removes. Manual and pinned checkpoints are never among them. Of the
+/// autosaves only the newest stays. The other automatic checkpoints are kept
+/// newest first while they fit in `budget_bytes`, the newest of them always,
+/// and once one does not fit it goes with everything older.
+fn retention_removals(checkpoints: &[ProjectCheckpointSummary], budget_bytes: u64) -> Vec<usize> {
+    let mut removals = Vec::new();
+    let mut autosave_kept = false;
+    let mut budget_used = 0_u64;
+    let mut budget_kept_any = false;
+    let mut budget_full = false;
+    for (index, checkpoint) in checkpoints.iter().enumerate() {
+        match checkpoint.retention() {
+            CheckpointRetention::UntilDeleted => {}
+            CheckpointRetention::UntilNextSave => {
+                if autosave_kept {
+                    removals.push(index);
+                }
+                autosave_kept = true;
+            }
+            CheckpointRetention::WithinBudget => {
+                let used = budget_used.saturating_add(checkpoint.snapshot_byte_len);
+                if budget_full || (budget_kept_any && used > budget_bytes) {
+                    budget_full = true;
+                    removals.push(index);
+                } else {
+                    budget_used = used;
+                    budget_kept_any = true;
+                }
+            }
+        }
+    }
+    removals
+}
+
+/// A budget in the whole units it is chosen in: "512 MiB", "2 GiB".
+pub fn budget_label(bytes: u64) -> String {
+    let mib = bytes / MIB;
+    if mib >= 1024 && mib % 1024 == 0 {
+        format!("{} GiB", mib / 1024)
+    } else {
+        format!("{mib} MiB")
+    }
+}
+
+/// The disk space the checkpoints in `checkpoints` that the budget governs
+/// take up.
+pub fn budget_use(checkpoints: &[ProjectCheckpointSummary]) -> u64 {
+    checkpoints
+        .iter()
+        .filter(|checkpoint| checkpoint.retention() == CheckpointRetention::WithinBudget)
+        .map(ProjectCheckpointSummary::snapshot_byte_len)
+        .sum()
 }
 
 fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
@@ -592,30 +768,71 @@ pub fn storage_location(model: &Model) -> Result<PathBuf, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn checkpoint_directory(model: &Model) -> Result<PathBuf, String> {
-    let base = model
-        .workspace
-        .content
-        .project
-        .path
-        .as_deref()
-        .and_then(Path::parent)
-        .filter(|path| !path.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .or_else(|| dirs::data_local_dir().map(|path| path.join("RSpice")))
-        .ok_or_else(|| "no durable local recovery directory is available".to_owned())?;
-    let base = if base.is_absolute() {
-        base
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("current directory is unavailable: {error}"))?
-            .join(base)
+    let project = &model.workspace.content.project;
+    directory_for(project.path.as_deref(), &project.id().to_string())
+}
+
+/// The one folder a project's checkpoints are kept in: beside its file and
+/// named for it once it is saved, and under the application's data folder,
+/// named for the project, until then. Every manifest in it still names its
+/// project, so a folder shared by mistake never mixes two projects' lists.
+#[cfg(not(target_arch = "wasm32"))]
+fn directory_for(project_path: Option<&Path>, project_id: &str) -> Result<PathBuf, String> {
+    let saved = project_path.and_then(|path| {
+        let stem = path.file_stem().filter(|stem| !stem.is_empty())?;
+        let mut name = stem.to_os_string();
+        name.push(CHECKPOINT_DIRECTORY_SUFFIX);
+        Some(path.parent().unwrap_or_else(|| Path::new("")).join(name))
+    });
+    let directory = match saved {
+        Some(directory) => directory,
+        None => unsaved_root()?.join(project_id),
     };
-    // Keep the publication parent shallow. Durable publication adds a hashed
-    // lease and UUID staging suffix; nesting the project UUID here would push
-    // otherwise ordinary Windows user-profile paths past legacy MAX_PATH.
-    // Project identity remains in every authenticated manifest and catalog
-    // filtering, so checkpoints still cannot cross project ownership.
-    Ok(base.join(CHECKPOINT_DIRECTORY))
+    if directory.is_absolute() {
+        Ok(directory)
+    } else {
+        Ok(std::env::current_dir()
+            .map_err(|error| format!("current directory is unavailable: {error}"))?
+            .join(directory))
+    }
+}
+
+/// Where the checkpoints of projects not yet saved are kept.
+#[cfg(not(target_arch = "wasm32"))]
+fn unsaved_root() -> Result<PathBuf, String> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(root) = UNSAVED_ROOT.with(|root| root.borrow().clone()) {
+        return Ok(root);
+    }
+    dirs::data_local_dir()
+        .map(|path| path.join("RSpice").join("recovery"))
+        .ok_or_else(|| "no durable local recovery directory is available".to_owned())
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+thread_local! {
+    static UNSAVED_ROOT: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keep this thread's unsaved projects' checkpoints under `root` rather than
+/// the machine's application data folder, until the guard is dropped.
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+#[must_use]
+pub fn keep_unsaved_checkpoints_in(root: PathBuf) -> UnsavedCheckpointRoot {
+    UnsavedCheckpointRoot(UNSAVED_ROOT.with(|slot| slot.replace(Some(root))))
+}
+
+/// Restores where unsaved projects' checkpoints are kept when dropped.
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+pub struct UnsavedCheckpointRoot(Option<PathBuf>);
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+impl Drop for UnsavedCheckpointRoot {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        UNSAVED_ROOT.with(|slot| *slot.borrow_mut() = previous);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -823,44 +1040,71 @@ fn read_snapshot_bytes(summary: &ProjectCheckpointSummary) -> Result<Vec<u8>, St
     })
 }
 
+/// Remove what retention no longer keeps of the project's checkpoints in
+/// `directory`. Artifacts that failed verification are left for the reader:
+/// the page lists them and nothing restores from them.
 #[cfg(not(target_arch = "wasm32"))]
-fn prune_retention(directory: &Path, project_id: &str) -> Result<(), String> {
+fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Result<(), String> {
     let catalog = list_directory(directory, project_id)?;
     let mut failures = Vec::new();
-    for checkpoint in catalog
-        .checkpoints
-        .into_iter()
-        .skip(MAX_RETAINED_CHECKPOINTS)
-    {
-        let ProjectCheckpointLocator::Native { manifest, snapshot } = checkpoint.locator;
+    for index in retention_removals(&catalog.checkpoints, budget_bytes) {
+        let ProjectCheckpointLocator::Native { manifest, snapshot } =
+            &catalog.checkpoints[index].locator;
+        remove_artifacts([manifest, snapshot], &mut failures);
         // The results only this checkpoint kept go with it.
-        let _ = std::fs::remove_dir_all(rspice_formats::project_results::segment_folder(&snapshot));
-        for path in [manifest, snapshot] {
-            match std::fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => failures.push(format!("'{}': {error}", path.display())),
-            }
-        }
-    }
-    for quarantine in catalog
-        .quarantined
-        .into_iter()
-        .skip(MAX_RETAINED_QUARANTINE_RECORDS)
-    {
-        for path in quarantine.artifacts {
-            match std::fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => failures.push(format!("'{}': {error}", path.display())),
-            }
-        }
+        let _ = std::fs::remove_dir_all(rspice_formats::project_results::segment_folder(snapshot));
     }
     if failures.is_empty() {
         Ok(())
     } else {
         Err(failures.join("; "))
     }
+}
+
+/// Remove each file, the manifest first so a checkpoint stops being listed
+/// before its snapshot goes; a file already gone is not a failure.
+#[cfg(not(target_arch = "wasm32"))]
+fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a PathBuf>, failures: &mut Vec<String>) {
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("'{}': {error}", path.display())),
+        }
+    }
+}
+
+/// The manifest keys among `stored`, the project's manifests by key, whose
+/// checkpoints retention removes. A manifest that cannot be read is left
+/// where it is: the page lists it as set aside.
+#[cfg(target_arch = "wasm32")]
+fn browser_retention_removals(stored: Vec<(String, Option<String>)>, budget: u64) -> Vec<String> {
+    let mut checkpoints = stored
+        .into_iter()
+        .filter_map(|(manifest_key, text)| {
+            let manifest = serde_json::from_str::<ProjectCheckpointManifest>(&text?).ok()?;
+            let snapshot_key = manifest_key
+                .strip_suffix(".manifest")
+                .map(|stem| format!("{stem}.snapshot"))?;
+            summary_from_manifest(
+                manifest,
+                ProjectCheckpointLocator::Browser {
+                    manifest_key,
+                    snapshot_key,
+                },
+            )
+            .ok()
+        })
+        .collect::<Vec<_>>();
+    sort_newest_first(&mut checkpoints);
+    retention_removals(&checkpoints, budget)
+        .into_iter()
+        .map(|index| {
+            let ProjectCheckpointLocator::Browser { manifest_key, .. } =
+                &checkpoints[index].locator;
+            manifest_key.clone()
+        })
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1044,7 +1288,7 @@ mod tests {
         let state = ServicesHost::default();
         for reason in [
             ProjectCheckpointReason::Manual,
-            ProjectCheckpointReason::TechnologyAttachment,
+            ProjectCheckpointReason::TechnologyChange,
         ] {
             for epoch in [
                 Err("clock unavailable"),
@@ -1067,8 +1311,10 @@ mod tests {
             project_id: Uuid::new_v4().to_string(),
             project_name: "Precision reference".to_owned(),
             project_revision: 7,
-            reason: ProjectCheckpointReason::TechnologyAttachment,
+            reason: ProjectCheckpointReason::TechnologyChange,
             created_unix_ms: 42,
+            note: None,
+            pinned: false,
             snapshot_digest: ContentDigest::from_bytes([0x51; 32]),
             snapshot_byte_len: 128,
             snapshot_name: "wrong.rspiceproj".to_owned(),
@@ -1089,8 +1335,10 @@ mod tests {
             project_id: project.file.workspace.project.id().to_string(),
             project_name: project.file.workspace.project.name().to_owned(),
             project_revision: project.file.workspace.project.revision().get(),
-            reason: ProjectCheckpointReason::TechnologyAttachment,
+            reason: ProjectCheckpointReason::TechnologyChange,
             created_unix_ms: 1,
+            note: None,
+            pinned: false,
             snapshot_digest: digest(&bytes),
             snapshot_byte_len: bytes.len() as u64,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1316,7 +1564,7 @@ mod tests {
         let source_id = state.model.workspace.content.project.id();
         let source_revision = state.model.workspace.content.project.revision();
 
-        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyAttachment)
+        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyChange)
             .expect("checkpoint publishes");
         assert_eq!(checkpoint.project_revision(), source_revision.get());
         #[cfg(unix)]
@@ -1378,7 +1626,7 @@ mod tests {
             .content
             .project
             .set_path(directory.join("source.rspiceproj"));
-        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyAttachment)
+        let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyChange)
             .expect("checkpoint publishes");
         let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
         std::fs::write(snapshot, b"corrupt checkpoint").expect("corrupt owned snapshot");
@@ -1421,5 +1669,205 @@ mod tests {
         let refused = load(&catalog.checkpoints[0]).expect_err("restore verifies the bytes");
         assert!(refused.contains("integrity manifest"), "{refused}");
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// Publish one checkpoint of `state` into `directory`, dated `created`,
+    /// through the store's own write, then retention under `budget_bytes`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn publish_dated(
+        state: &ServicesHost,
+        directory: &Path,
+        reason: ProjectCheckpointReason,
+        created: u64,
+        budget_bytes: u64,
+    ) -> ProjectCheckpointSummary {
+        CheckpointCapture {
+            project: crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+                .expect("snapshot"),
+            reason,
+            created_unix_ms: created,
+            directory: directory.to_path_buf(),
+            budget_bytes,
+        }
+        .publish()
+        .expect("checkpoint publishes")
+        .summary
+    }
+
+    /// Rewrite a published checkpoint's manifest with `pinned` and `note`, as
+    /// the reader's edit leaves it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn mark(summary: &ProjectCheckpointSummary, pinned: bool, note: Option<&str>) {
+        let ProjectCheckpointLocator::Native { manifest, .. } = &summary.locator;
+        let mut stored: ProjectCheckpointManifest =
+            serde_json::from_slice(&std::fs::read(manifest).expect("manifest reads"))
+                .expect("manifest parses");
+        stored.pinned = pinned;
+        stored.note = note.map(str::to_owned);
+        std::fs::write(
+            manifest,
+            serde_json::to_vec_pretty(&stored).expect("manifest encodes"),
+        )
+        .expect("manifest writes");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn fixture_directory(label: &str) -> (ServicesHost, PathBuf) {
+        let directory = std::env::temp_dir().join(format!("rspice-{label}-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        let mut state = ServicesHost::default();
+        state
+            .model
+            .workspace
+            .content
+            .project
+            .set_path(directory.join("source.rspiceproj"));
+        (state, directory)
+    }
+
+    /// Nine checkpoints of every kind, oldest first, under a budget that
+    /// holds two snapshots: retention keeps both manual checkpoints and the
+    /// pinned one, the newest autosave, and the two newest of the others,
+    /// and removes the rest from disk.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn retention_keeps_manual_and_pinned_checkpoints_and_drops_the_oldest_automatic_ones() {
+        use ProjectCheckpointReason as Reason;
+        let (state, directory) = fixture_directory("checkpoint-retention");
+        let recovery = checkpoint_directory(&state.model).expect("directory");
+        let project =
+            crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("snapshot");
+        let plan = [
+            (Reason::Manual, false, None),
+            (Reason::TechnologyChange, false, None),
+            (Reason::Save, true, None),
+            (Reason::Autosave, false, None),
+            (Reason::LibraryDeletion, false, None),
+            (Reason::Manual, false, Some("before rewiring the bias")),
+            (Reason::Autosave, false, None),
+            (Reason::Save, false, None),
+            (Reason::PublicationRestore, false, None),
+        ];
+        let mut published = Vec::new();
+        for (index, (reason, pinned, note)) in plan.into_iter().enumerate() {
+            // Written without retention, so all nine are there to prune.
+            let (manifest, serialized) =
+                seal_checkpoint(&project, reason, 1_000 + index as u64).expect("seals");
+            let summary =
+                publish_native(&recovery, &manifest, serialized.as_bytes()).expect("publishes");
+            if pinned || note.is_some() {
+                mark(&summary, pinned, note);
+            }
+            published.push(summary);
+        }
+        assert_eq!(list(&state.model).expect("lists").checkpoints.len(), 9);
+
+        let snapshot = published[0].snapshot_byte_len();
+        prune_retention(&recovery, &published[0].project_id, 2 * snapshot).expect("prunes");
+
+        let kept = list(&state.model).expect("lists");
+        assert!(kept.quarantined.is_empty());
+        let kept = kept
+            .checkpoints
+            .iter()
+            .map(|checkpoint| (checkpoint.created_unix_ms(), checkpoint.title().to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kept,
+            [
+                (1_008, "Before restore from publication".to_owned()),
+                (1_007, "Before save".to_owned()),
+                (1_006, "Autosave".to_owned()),
+                (1_005, "before rewiring the bias".to_owned()),
+                (1_002, "Before save".to_owned()),
+                (1_000, "Manual checkpoint".to_owned()),
+            ]
+        );
+        for removed in [1, 3, 4] {
+            let ProjectCheckpointLocator::Native { manifest, snapshot } =
+                &published[removed].locator;
+            assert!(
+                !manifest.exists() && !snapshot.exists(),
+                "{removed} is on disk"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// However many automatic checkpoints follow it, a manual one is never
+    /// what retention removes.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_manual_checkpoint_survives_any_number_of_automatic_ones() {
+        use ProjectCheckpointReason as Reason;
+        let (state, directory) = fixture_directory("checkpoint-manual-survives");
+        let recovery = checkpoint_directory(&state.model).expect("directory");
+        let manual = publish_dated(&state, &recovery, Reason::Manual, 1_000, 1);
+        let automatic = [
+            Reason::Save,
+            Reason::Autosave,
+            Reason::TechnologyChange,
+            Reason::LibraryDeletion,
+            Reason::Restore,
+            Reason::PublicationRestore,
+        ];
+        for index in 0..30_u64 {
+            let reason = automatic[usize::try_from(index).expect("small") % automatic.len()];
+            publish_dated(&state, &recovery, reason, 2_000 + index, 1);
+        }
+        let kept = list(&state.model).expect("lists").checkpoints;
+        assert!(
+            kept.iter()
+                .any(|checkpoint| checkpoint.checkpoint_id() == manual.checkpoint_id()),
+            "the manual checkpoint was removed"
+        );
+        // Under a one-byte budget: the manual one, the newest autosave and
+        // the newest of the others.
+        assert_eq!(
+            kept.iter()
+                .map(ProjectCheckpointSummary::reason)
+                .collect::<Vec<_>>(),
+            [Reason::PublicationRestore, Reason::Autosave, Reason::Manual]
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// A saved project's checkpoints are kept beside its file in a folder
+    /// named for it, so two projects in one folder never share one; an
+    /// unsaved project's are kept in a folder named for the project.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn each_project_keeps_its_checkpoints_in_a_folder_of_its_own() {
+        let root = std::env::temp_dir().join(format!("rspice-checkpoint-dirs-{}", Uuid::new_v4()));
+        let id = Uuid::new_v4().to_string();
+        assert_eq!(
+            directory_for(Some(&root.join("amp.rspiceproj")), &id).expect("saved"),
+            root.join("amp.rspice-recovery")
+        );
+        assert_ne!(
+            directory_for(Some(&root.join("amp.rspiceproj")), &id).expect("saved"),
+            directory_for(Some(&root.join("bias.rspiceproj")), &id).expect("saved")
+        );
+        let _root = keep_unsaved_checkpoints_in(root.join("unsaved"));
+        assert_eq!(
+            directory_for(None, &id).expect("unsaved"),
+            root.join("unsaved").join(&id)
+        );
+    }
+
+    /// The automatic budget is the Preferences' figure, 512 MiB as shipped.
+    #[test]
+    fn the_automatic_budget_is_read_from_the_preferences() {
+        let mut state = ServicesHost::default();
+        assert_eq!(budget_bytes(&state.model), 512 * MIB);
+        state
+            .model
+            .preferences
+            .set_scalar(
+                rspice_app_state::workbench::preferences::ScalarPreference::CheckpointBudgetMib,
+                64,
+            )
+            .expect("in range");
+        assert_eq!(budget_bytes(&state.model), 64 * MIB);
     }
 }

@@ -752,7 +752,7 @@ pub(crate) fn start_browser_checkpoint_publish(
     snapshot_key: String,
     snapshot: Vec<u8>,
     manifest: String,
-    max_retained: usize,
+    retention_removals: impl FnOnce(Vec<(String, Option<String>)>) -> Vec<String> + 'static,
     complete: impl FnOnce(Result<(), String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
@@ -789,35 +789,19 @@ pub(crate) fn start_browser_checkpoint_publish(
                 );
             }
 
+            // Retention runs only after the new manifest is committed and
+            // read back; the store decides what it keeps from the manifests.
             let retention = async {
-                let mut manifests =
-                    indexed_db_matching_keys(&project_prefix, ".manifest").await?;
-                manifests.sort_by(|left, right| right.cmp(left));
-                for key in manifests.into_iter().skip(max_retained) {
-                    let snapshot = key
-                        .strip_suffix(".manifest")
-                        .map(|stem| format!("{stem}.snapshot"));
-                    indexed_db_delete(&key).await?;
-                    if let Some(snapshot) = snapshot {
-                        indexed_db_delete(&snapshot).await?;
-                    }
+                let mut stored = Vec::new();
+                for key in indexed_db_matching_keys(&project_prefix, ".manifest").await? {
+                    let text = indexed_db_get(&key).await?.and_then(|value| value.as_string());
+                    stored.push((key, text));
                 }
-                let manifest_keys = indexed_db_matching_keys(&project_prefix, ".manifest").await?;
-                let manifest_stems = manifest_keys
-                    .iter()
-                    .filter_map(|key| key.strip_suffix(".manifest"))
-                    .collect::<std::collections::HashSet<_>>();
-                let mut orphan_snapshots = indexed_db_matching_keys(&project_prefix, ".snapshot")
-                    .await?
-                    .into_iter()
-                    .filter(|key| {
-                        key.strip_suffix(".snapshot")
-                            .is_some_and(|stem| !manifest_stems.contains(stem))
-                    })
-                    .collect::<Vec<_>>();
-                orphan_snapshots.sort_by(|left, right| right.cmp(left));
-                for key in orphan_snapshots.into_iter().skip(max_retained) {
+                for key in retention_removals(stored) {
                     indexed_db_delete(&key).await?;
+                    if let Some(stem) = key.strip_suffix(".manifest") {
+                        indexed_db_delete(&format!("{stem}.snapshot")).await?;
+                    }
                 }
                 Ok::<(), String>(())
             }
@@ -826,6 +810,58 @@ pub(crate) fn start_browser_checkpoint_publish(
                 log::warn!(
                     "Browser project checkpoint committed, but retention cleanup was incomplete: {error}"
                 );
+            }
+            Ok(())
+        }
+        .await;
+        complete(result);
+    });
+}
+
+/// Rewrite one checkpoint manifest in a single transaction: `update` is
+/// handed the stored text and returns the replacement, or refuses and
+/// nothing is written.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_manifest_update(
+    key: String,
+    update: impl FnOnce(Option<String>) -> Result<String, String> + 'static,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = async {
+            let database = browser_store::open(&PROJECT_BINDINGS).await?;
+            let transaction = database.write()?;
+            let stored = transaction
+                .get(&key)
+                .await?
+                .and_then(|value| value.as_string());
+            let replacement = match update(stored) {
+                Ok(replacement) => replacement,
+                Err(error) => {
+                    transaction.abort();
+                    return Err(error);
+                }
+            };
+            transaction
+                .put(&key, &wasm_bindgen::JsValue::from_str(&replacement))
+                .await?;
+            transaction.commit().await
+        }
+        .await;
+        complete(result);
+    });
+}
+
+/// Remove checkpoint records by key, in the order given.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_checkpoint_delete(
+    keys: Vec<String>,
+    complete: impl FnOnce(Result<(), String>) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = async {
+            for key in keys {
+                indexed_db_delete(&key).await?;
             }
             Ok(())
         }

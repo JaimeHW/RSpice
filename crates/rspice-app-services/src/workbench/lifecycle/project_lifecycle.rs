@@ -12,7 +12,9 @@ mod result_cache;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::{
-    start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
+    start_browser_checkpoint_delete, start_browser_checkpoint_list,
+    start_browser_checkpoint_manifest_update, start_browser_checkpoint_publish,
+    start_browser_checkpoint_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_project::persistence::native::DestinationAuthority;

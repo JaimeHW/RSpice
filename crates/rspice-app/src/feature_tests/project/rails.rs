@@ -34,7 +34,7 @@ fn seed_recovery_catalog(state: &mut crate::workbench::app_state::AppState) {
     state.project.project_checkpoint_recovery.checkpoints = [
         (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
         (
-            ProjectCheckpointReason::TechnologyAttachment,
+            ProjectCheckpointReason::TechnologyChange,
             2,
             2 * 3_600_000,
             47_902,

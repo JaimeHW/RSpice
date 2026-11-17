@@ -549,7 +549,7 @@ def verify_checkpoint(records, started_ms, finished_ms):
     if len(manifests) != 1 or len(records) != 2:
         raise AssertionError(f"Expected one fresh checkpoint pair; got {list(records)}")
     key, manifest = manifests[0]
-    if manifest["schema_version"] != 1 or manifest["reason"] != "manual":
+    if manifest["schema_version"] != 2 or manifest["reason"] != "manual" or manifest["pinned"]:
         raise AssertionError(f"Unexpected checkpoint identity: {manifest}")
     if not started_ms <= manifest["created_unix_ms"] <= finished_ms:
         raise AssertionError(f"Checkpoint wall time is outside the observed creation interval: {manifest}")

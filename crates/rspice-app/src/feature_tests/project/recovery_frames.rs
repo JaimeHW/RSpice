@@ -392,7 +392,7 @@ fn a_checkpoint_that_cannot_be_written_raises_a_notice() {
     assert_eq!(raised(&app), 0);
 
     // The recovery folder becomes a file: nothing can be written into it.
-    let folder = root.join(".rspice-recovery");
+    let folder = root.join("idle.rspice-recovery");
     std::fs::remove_dir_all(&folder).expect("recovery folder removed");
     std::fs::write(&folder, b"not a folder").expect("a file in its place");
 

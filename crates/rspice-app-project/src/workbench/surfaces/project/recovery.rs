@@ -9,7 +9,7 @@ use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_
 pub use super::*;
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
-    MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
+    ProjectCheckpointSummary, budget_label, budget_use,
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::lifecycle_view;
@@ -58,6 +58,10 @@ struct RecoverySnapshot {
     selected: Option<String>,
     location: String,
     stored_bytes: u64,
+    /// The disk space automatic checkpoints are kept inside, and how much
+    /// of it they take.
+    budget_bytes: u64,
+    budget_used: u64,
     now_unix_ms: Option<u64>,
 }
 
@@ -108,6 +112,8 @@ impl RecoverySnapshot {
                 .iter()
                 .map(ProjectCheckpointSummary::snapshot_byte_len)
                 .sum(),
+            budget_bytes: crate::workbench::lifecycle::project_checkpoint::budget_bytes(cx.model),
+            budget_used: budget_use(&recovery.checkpoints),
             now_unix_ms: crate::time_compat::checked_unix_time_ms().ok(),
         }
     }
@@ -304,15 +310,9 @@ fn recovery_header(
 }
 
 fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIntent> {
-    let meta = if snapshot.checkpoints.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "{} of {MAX_RETAINED_CHECKPOINTS} kept",
-            snapshot.checkpoints.len()
-        )
-    };
-    page::card(ui, "Checkpoints", &meta, None, |ui| {
+    // The count is the page's state beside its title; the card does not
+    // repeat it.
+    page::card(ui, "Checkpoints", "", None, |ui| {
         if let Some(error) = &snapshot.error {
             return catalog_error(ui, error);
         }
@@ -325,8 +325,8 @@ fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<Recovery
                 ui,
                 "No checkpoints yet",
                 Some(
-                    "RSpice creates one before every technology change. Create one yourself \
-                     before an edit you may want to undo.",
+                    "RSpice takes one before each save that changes the project and before \
+                     risky changes. Create one yourself before an edit you may want to undo.",
                 ),
             );
             return None;
@@ -545,16 +545,22 @@ fn checkpoint_row(
     paint_elided(
         ui,
         pos2(rect.left() + ROW_INSET, text_top),
-        checkpoint.reason().label(),
+        checkpoint.title(),
         theme::sans(tokens::FS_1, FontWeight::Medium),
         tokens.color.text,
         text_width,
     );
     // The size goes to the hover: checkpoints of one project differ little,
-    // and the time is what tells two of them apart.
+    // and the time is what tells two of them apart. A checkpoint the reader
+    // wrote a note on is named by it, so its reason moves here.
     let size = format_bytes(checkpoint.snapshot_byte_len());
+    let reason = if checkpoint.note().is_some() {
+        format!("{} \u{b7} ", checkpoint.reason().label())
+    } else {
+        String::new()
+    };
     let detail = format!(
-        "{created} \u{b7} revision {}",
+        "{reason}{created} \u{b7} revision {}",
         checkpoint.project_revision()
     );
     paint_elided(
@@ -579,7 +585,7 @@ fn checkpoint_row(
     if compare
         .accessible_label(&format!(
             "Compare {} with the current project",
-            checkpoint.reason().label()
+            checkpoint.title()
         ))
         .show(&mut actions_ui)
         .on_hover_text("Check whether the current project still matches this checkpoint")
@@ -588,10 +594,7 @@ fn checkpoint_row(
         intent = Some(RecoveryIntent::Compare(checkpoint.clone()));
     }
     if restore
-        .accessible_label(&format!(
-            "Restore {} as a new project",
-            checkpoint.reason().label()
-        ))
+        .accessible_label(&format!("Restore {} as a new project", checkpoint.title()))
         .show(&mut actions_ui)
         .on_hover_text("Save this checkpoint as a new project file")
         .clicked()
@@ -599,7 +602,7 @@ fn checkpoint_row(
         intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
     }
 
-    let row_label = format!("{}, {detail}, {size}", checkpoint.reason().label());
+    let row_label = format!("{}, {detail}, {size}", checkpoint.title());
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
@@ -627,24 +630,28 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
     page::card(ui, "Storage", "", None, |ui| {
         ui.add_space(3.0);
         property_row_path(ui, "Location", &snapshot.location);
-        property_row(
-            ui,
-            "Keeps",
-            &format!("The newest {MAX_RETAINED_CHECKPOINTS} checkpoints"),
-        );
         // Unknown until the listing is in; "0 B" would say there is none.
-        let space_used = if snapshot.loading {
-            "Listing\u{2026}".to_owned()
+        let (space_used, budget) = if snapshot.loading {
+            ("Listing\u{2026}".to_owned(), "Listing\u{2026}".to_owned())
         } else {
-            format_bytes(snapshot.stored_bytes)
+            (
+                format_bytes(snapshot.stored_bytes),
+                format!(
+                    "{} of {}",
+                    format_bytes(snapshot.budget_used),
+                    budget_label(snapshot.budget_bytes)
+                ),
+            )
         };
         property_row(ui, "Space used", &space_used);
-        // `ProjectCheckpointReason::TechnologyAttachment` and
-        // `PublicationRestore` are the checkpoints RSpice takes on its own.
-        property_row(
-            ui,
-            "Taken automatically",
-            "Before technology changes and restores from a publication",
+        property_row(ui, "Automatic budget", &budget).on_hover_text(
+            "Automatic checkpoints are kept inside this space, the oldest dropped first. \
+             Only the newest autosave is kept, and a save removes it. Preferences set the budget.",
+        );
+        property_row(ui, "Manual and pinned", "Kept until you delete them");
+        property_row(ui, "Taken automatically", "Before saves and risky changes").on_hover_text(
+            "Before each save that changes the project, a restore, a technology change and a \
+             library deletion.",
         );
         // Integrity is a row only when it is not in order. "All checkpoints
         // verified" and "Nothing to check" were the card reporting that

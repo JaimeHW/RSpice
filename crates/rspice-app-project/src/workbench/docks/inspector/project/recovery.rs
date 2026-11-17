@@ -23,6 +23,12 @@ pub(super) fn project_recovery(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
     if let Some(checkpoint) = checkpoint {
         section_header(ui, "Selected checkpoint", None);
         property_row(ui, "Reason", checkpoint.reason().label());
+        if let Some(note) = checkpoint.note() {
+            property_row(ui, "Note", note);
+        }
+        // What retention does with it: the one fact that tells a reader
+        // whether to pin it.
+        property_row(ui, "Kept", checkpoint.retention().label());
     }
 
     let quarantined = recovery.quarantined.len();
