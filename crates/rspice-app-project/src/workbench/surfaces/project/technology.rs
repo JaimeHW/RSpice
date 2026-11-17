@@ -11,6 +11,7 @@ use std::sync::Arc;
 use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
+use crate::ui::widgets::{field_label, name_control, text_field};
 use crate::workbench::app_state::Model;
 use crate::workbench::project::commands::ProjectRequest;
 
@@ -175,9 +176,12 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
                 .map(pdk_package_key)
         })
         .or_else(|| packages.first().map(pdk_package_key));
+    // The person at this application: the signed-in account, else the
+    // license holder, else the operating system's user.
+    let actor = cx.peers.cloud_session().review_actor(cx.peers.cloud());
     cx.state
         .technology_attachment
-        .open(selected_library, selected_pdk_package);
+        .open(selected_library, selected_pdk_package, actor);
 }
 
 pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
@@ -399,37 +403,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "Change authority");
-        ui.add_enabled(
-            !checkpoint_pending,
-            egui::TextEdit::singleline(
-                &mut cx.state.technology_attachment.actor_id,
-            )
-            .hint_text("Actor ID")
-            .char_limit(240)
-            .desired_width(f32::INFINITY),
-        );
-        ui.add_enabled(
-            !checkpoint_pending,
-            egui::TextEdit::singleline(
-                &mut cx.state.technology_attachment.authority_id,
-            )
-            .hint_text("Authority ID")
-            .char_limit(240)
-            .desired_width(f32::INFINITY),
-        );
-        ui.add_enabled(
-            !checkpoint_pending,
-            egui::TextEdit::multiline(&mut cx.state.technology_attachment.reason)
-                .hint_text("Change reason")
-                .char_limit(1_024)
-                .desired_rows(2)
-                .desired_width(f32::INFINITY),
-        );
-        muted(
-            ui,
-            "Actor, authority, reason, before and after digests, and the checkpoint are recorded in the project’s technology history, which cannot be edited.",
-        );
+        technology_change_fields(ui, &mut cx.state.technology_attachment, !checkpoint_pending);
 
         ui.add_space(10.0);
         technology_dialog_label(ui, "Technology mapping");
@@ -1073,7 +1047,7 @@ pub(super) fn technology_missing_inputs(
         missing.push("a validated PDK revision");
     }
     if !authority_ready {
-        missing.push("actor, authority and reason");
+        missing.push("who changes it and who approves it");
     }
     if !contract_ready {
         missing.push("a technology mapping");
@@ -1101,12 +1075,55 @@ pub(super) fn technology_binding_gates(
     muted(ui, &format!("Still to choose: {}.", missing.join(", ")));
 }
 
+/// Who makes a technology change, who approves it and why, each a labelled
+/// field: the first two start on the person at this application, and the
+/// reason may be left empty. All three go into the project's technology
+/// history with the checkpoint.
+pub(super) fn technology_change_fields(
+    ui: &mut Ui,
+    dialog: &mut crate::workbench::app::TechnologyAttachmentDialogState,
+    enabled: bool,
+) {
+    let width = ui.available_width();
+    for (label, value, limit) in [
+        ("Changed by", &mut dialog.actor_id, 240),
+        ("Approved by", &mut dialog.authority_id, 240),
+    ] {
+        field_label(ui, label, |ui| {
+            let response = ui
+                .add_enabled_ui(enabled, |ui| {
+                    text_field(
+                        ui,
+                        egui::TextEdit::singleline(value).char_limit(limit),
+                        width,
+                    )
+                })
+                .inner;
+            name_control(ui, &response, label);
+        });
+        ui.add_space(8.0);
+    }
+    field_label(ui, "Reason (optional)", |ui| {
+        let response = ui.add_enabled(
+            enabled,
+            egui::TextEdit::multiline(&mut dialog.reason)
+                .char_limit(1_024)
+                .desired_rows(2)
+                .desired_width(width),
+        );
+        name_control(ui, &response, "Reason");
+    });
+    ui.add_space(4.0);
+    muted(
+        ui,
+        "Both names, the reason and the checkpoint are kept in the project's technology history.",
+    );
+}
+
 fn technology_authority_fields_ready(
     dialog: &crate::workbench::app::TechnologyAttachmentDialogState,
 ) -> bool {
-    !dialog.actor_id.trim().is_empty()
-        && !dialog.authority_id.trim().is_empty()
-        && !dialog.reason.trim().is_empty()
+    !dialog.actor_id.trim().is_empty() && !dialog.authority_id.trim().is_empty()
 }
 
 fn technology_change_authority(

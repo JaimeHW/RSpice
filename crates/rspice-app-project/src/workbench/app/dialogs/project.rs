@@ -283,17 +283,21 @@ impl CheckpointJobHold {
 }
 
 impl TechnologyAttachmentDialogState {
+    /// Open on `selected_library` and `selected_pdk_package`, the change
+    /// made and approved by `actor`, the person at this application, and no
+    /// reason given yet.
     pub(crate) fn open(
         &mut self,
         selected_library: Option<String>,
         selected_pdk_package: Option<String>,
+        actor: String,
     ) {
         *self = Self {
             open: true,
             selected_library,
             selected_pdk_package,
-            actor_id: String::new(),
-            authority_id: String::new(),
+            authority_id: actor.clone(),
+            actor_id: actor,
             reason: String::new(),
             migration_reviewed: false,
             validation_error: None,

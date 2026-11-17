@@ -67,8 +67,17 @@ impl ProjectTechnologyChangeAuthority {
     fn validate(&self) -> Result<(), ProjectDescriptorError> {
         validate_project_audit_text("technology_change.actor_id", &self.actor_id, 240)?;
         validate_project_audit_text("technology_change.authority_id", &self.authority_id, 240)?;
-        validate_project_audit_text("technology_change.reason", &self.reason, 1_024)
+        validate_technology_change_reason(&self.reason)
     }
+}
+
+/// A technology change's reason is the reader's to give or leave out; one
+/// that is given is held to the rules every audited text keeps.
+fn validate_technology_change_reason(reason: &str) -> Result<(), ProjectDescriptorError> {
+    if reason.is_empty() {
+        return Ok(());
+    }
+    validate_project_audit_text("technology_change.reason", reason, 1_024)
 }
 
 /// Exact checkpoint proof required to authorize one project technology
@@ -1202,7 +1211,7 @@ impl ProjectDescriptor {
                 &receipt.authority_id,
                 240,
             )?;
-            validate_project_audit_text("technology_change.reason", &receipt.reason, 1_024)?;
+            validate_technology_change_reason(&receipt.reason)?;
             validate_project_audit_text(
                 "technology_change.after_binding_label",
                 &receipt.after_binding_label,

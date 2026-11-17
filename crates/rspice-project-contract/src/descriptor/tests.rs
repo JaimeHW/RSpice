@@ -371,6 +371,38 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
         .expect("independent copy starts fresh history");
 }
 
+/// The reason for a technology change may be left out, and the receipt that
+/// records none still validates after a round trip; a reason given keeps the
+/// rules every audited text keeps.
+#[test]
+fn a_technology_change_needs_no_reason() {
+    let mut project = ProjectDescriptor::default();
+    let context = ProjectTechnologyChangeContext::new(
+        ProjectTechnologyChangeAuthority::new("engineer.james", "engineer.james", "")
+            .expect("an authority with no reason validates"),
+        Uuid::new_v4(),
+        project.revision(),
+        1_785_430_000_000,
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x73; 32]),
+        4_096,
+    )
+    .expect("checkpoint context validates");
+    project
+        .attach_technology_audited(technology_binding_fixture(), context)
+        .expect("the attachment commits");
+    let restored: ProjectDescriptor =
+        serde_json::from_slice(&serde_json::to_vec(&project).expect("descriptor serializes"))
+            .expect("descriptor round trips");
+    restored
+        .validate()
+        .expect("a receipt with no reason validates");
+
+    assert!(
+        ProjectTechnologyChangeAuthority::new("engineer.james", "engineer.james", " ").is_err()
+    );
+    assert!(ProjectTechnologyChangeAuthority::new("", "engineer.james", "").is_err());
+}
+
 #[test]
 fn attached_technology_detects_exact_catalog_drift() {
     let root = PathBuf::from(r"C:\qualified-pdk\models.lib");

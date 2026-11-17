@@ -45,6 +45,7 @@ mod results_save;
 mod steps;
 mod subject_status;
 mod surface;
+mod technology_dialog;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
