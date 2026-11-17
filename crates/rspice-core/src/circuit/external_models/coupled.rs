@@ -705,7 +705,11 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         }
         self.pending.extend(exchange.take_event_changes());
         let wave = self.wave.as_mut().expect("prepared physical Active wave");
-        wave.defer_mixed_adc = !self.analog_boundaries_ready || wave.interpolated;
+        let hold = !self.analog_boundaries_ready || wave.interpolated;
+        if wave.defer_mixed_adc && !hold {
+            wave.adcs_released_in = Some(wave.pass);
+        }
+        wave.defer_mixed_adc = hold;
         if !self.initialized {
             // An undriven shared bit starts at Z. Seed missing observation
             // entries from the state preceding the first journaled publication,

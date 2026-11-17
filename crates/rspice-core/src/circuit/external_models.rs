@@ -148,6 +148,12 @@ pub(crate) struct XspiceActiveWave {
     pass: usize,
     /// Mixed input converters wait until the trial records physical roots.
     defer_mixed_adc: bool,
+    /// The pass that first ran the mixed input converters this wave held
+    /// back. Their first outputs open the network's settle in a later pass,
+    /// as an A/D's first output opens ngspice's event iteration
+    /// (xspice/evt/evtop.c): the passes spent waiting on the analog
+    /// boundaries are not the code models' to bound.
+    adcs_released_in: Option<usize>,
     /// Interior observation waves execute event-only models. Physical fanout
     /// is returned to the circuit solver before any analog model evaluates.
     interpolated: bool,
@@ -1591,6 +1597,7 @@ impl CircuitData {
             analog_transitions: Default::default(),
             pass: 0,
             defer_mixed_adc: false,
+            adcs_released_in: None,
             interpolated: false,
             analog_feedback: false,
             restored_by_caller: false,
@@ -1791,7 +1798,10 @@ impl CircuitData {
         let current_source_values = &wave.current_source_values;
         let analog_transitions = &mut wave.analog_transitions;
         let pass = wave.pass;
-        let opens_settle = std::mem::take(&mut wave.inputs_from_hdl) || pass == 0;
+        let adcs_open = wave
+            .adcs_released_in
+            .is_some_and(|released| pass > released);
+        let opens_settle = std::mem::take(&mut wave.inputs_from_hdl) || adcs_open || pass == 0;
         let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
         let dispatch = self
@@ -2115,6 +2125,9 @@ impl CircuitData {
         // are counted again from it.
         let moved_on = drained_at > wave.settle_instant;
         wave.settle_instant = wave.settle_instant.max(drained_at);
+        if adcs_open {
+            wave.adcs_released_in = None;
+        }
         if let Err(error) = event_queue.make_mut().note_settle_pass(
             drain_through,
             opens_settle || moved_on,

@@ -3028,6 +3028,97 @@ fn a_zero_delay_loop_names_every_member_and_the_loop_they_close() {
     }
 }
 
+/// A design whose one output reaches the analog side through a D/A, which
+/// has no event output.
+const LONE_DRIVER: &str = "`timescale 1ns/1ps
+module drv(p);
+  output p;
+  wire p;
+  reg d;
+  assign p = d;
+  initial begin d = 1'bz; #10 d = 1'b1; end
+endmodule
+";
+
+/// [`LONE_DRIVER`] on `n`, beside an XSPICE chain of its own: an A/D reading
+/// a 1.8 V node into `md`, and `chain` reading `md`.
+fn beside_a_design(model: &ModelFile, chain: &str) -> String {
+    format!(
+        "* an XSPICE chain beside a design\n\
+         .hdl \"{}\" module=drv\n\
+         .param vcc=1.8\n\
+         xa n drv\n\
+         rp n 0 2.2k\n\
+         vin m 0 1.8\n\
+         rl m 0 1k\n\
+         aadc [m] [md] adcm\n\
+         .model adcm adc_bridge(in_low=0.9 in_high=0.9)\n\
+         {chain}\
+         .tran 0.1n 20n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **An A/D held for the analog boundaries opens the settle with its first
+/// output.** The coupled wave holds a design's input converters until the
+/// trial records its physical roots, and the passes spent there are not the
+/// code models' to bound: the chain's passes count from the A/D's first
+/// output, as ngspice counts them, and the chain settles within its event
+/// outputs and one more. ngspice-46, with the design through d_cosim and
+/// Icarus, settles the same chain at the operating point, `md` and `q` 1 from
+/// t = 0, in 2 analog/event alternations and 4 event passes.
+#[test]
+fn an_ad_chain_beside_a_design_settles_from_the_ads_first_output() {
+    let model = ModelFile::hdl("lone_driver", LONE_DRIVER);
+    let result = run(
+        &beside_a_design(
+            &model,
+            "abuf md q buf\n.model buf d_buffer(rise_delay=1p fall_delay=1p)\n",
+        ),
+        20.0e-9,
+        0.1e-9,
+    );
+    for net in ["md", "q"] {
+        let points = digital_points(&result, net);
+        assert_eq!(
+            points.first(),
+            Some(&(0.0, "One".to_owned())),
+            "{net}: {points:?}"
+        );
+    }
+}
+
+/// The bound still refuses a loop the A/D opens: `d1 = md xor d3` through two
+/// inverters has no settled state once the A/D reads 1, and the refusal
+/// comes at the same bound as without the design, the four event outputs
+/// and one more. ngspice-46 refuses the same loop at the operating point
+/// ("Too many iteration passes in event-driven circuits").
+#[test]
+fn a_loop_an_ad_opens_beside_a_design_is_refused_at_its_bound() {
+    let model = ModelFile::hdl("lone_driver", LONE_DRIVER);
+    let error = error_for(
+        &beside_a_design(
+            &model,
+            "ax [md d3] d1 xor\n\
+             .model xor d_xor(rise_delay=1n fall_delay=1n)\n\
+             a1 d1 d2 inv\n\
+             a2 d2 d3 inv\n\
+             .model inv d_inverter(rise_delay=1n fall_delay=1n)\n",
+        ),
+        20.0e-9,
+        0.1e-9,
+    );
+    for expected in [
+        "XSPICE event network did not settle at time 0e0 within 5 passes",
+        "AX.out fired",
+        "A1.out fired",
+        "A2.out fired",
+    ] {
+        assert!(error.contains(expected), "missing `{expected}`: {error}");
+    }
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps
