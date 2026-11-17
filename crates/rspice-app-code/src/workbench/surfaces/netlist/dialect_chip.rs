@@ -13,7 +13,7 @@
 use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::tokens::Tokens;
 use crate::workbench::documents::netlist_document::dialect::{DeckReading, Dialect, DialectHint};
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -23,8 +23,9 @@ const SELECT_ROOM: f32 = 8.0 + 24.0;
 
 /// The chip for a deck read as `reading`. It is a select of the dialects a
 /// deck can declare when the deck is `editable` and its dialect can be
-/// chosen, and the reading's name otherwise. Returns the dialect chosen this
-/// frame, when it is another than the deck's.
+/// chosen, and otherwise the reading's name in the select's face, without
+/// the well. Returns the dialect chosen this frame, when it is another than
+/// the deck's.
 pub(crate) fn dialect_chip(
     ui: &mut Ui,
     reading: DeckReading,
@@ -37,7 +38,7 @@ pub(crate) fn dialect_chip(
         let t = Tokens::get(ui.ctx());
         ui.add(egui::Label::new(
             egui::RichText::new(name)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                .font(theme::field_sans())
                 .color(t.color.text_dim),
         ))
         .on_hover_text(detail);
@@ -50,13 +51,13 @@ pub(crate) fn dialect_chip(
         .chain([&name])
         .map(|label| {
             ui.painter()
-                .layout_no_wrap(label.clone(), theme::field_mono(), t.color.text)
+                .layout_no_wrap(label.clone(), theme::field_sans(), t.color.text)
                 .size()
                 .x
         })
         .fold(0.0, f32::max)
         + SELECT_ROOM;
-    let output = crate::ui::widgets::select_mono_with_response(
+    let output = crate::ui::widgets::select_with_response(
         ui,
         "netlist-dialect",
         &messages.text(MessageId::NetlistDialect),
@@ -94,14 +95,15 @@ pub(crate) fn dialect_hint_band(
     let mut read = false;
     let mut dismiss = false;
     super::advisory_band(ui, None, |ui| {
-        ui.label(messages.format(
+        let sentence = messages.format(
             MessageId::NetlistDialectHint,
             &[
                 ("program", program.as_str()),
-                ("marker", hint.marker),
+                ("marker", CARD_SLOT),
                 ("line", line.as_str()),
             ],
-        ));
+        );
+        ui.label(with_card(ui, &sentence, hint.marker));
         read = ui
             .button(messages.format(MessageId::NetlistDialectHintRead, &[("program", &program)]))
             .clicked();
@@ -114,6 +116,36 @@ pub(crate) fn dialect_hint_band(
             .data_mut(|data| data.insert_temp(dismissed_id, true));
     }
     read.then_some(hint.dialect)
+}
+
+/// Stands in for a card's name while the sentence around it is formatted.
+const CARD_SLOT: &str = "\u{e000}";
+
+/// `sentence` with [`CARD_SLOT`] replaced by `card`: the card in the code
+/// face, the words around it in the body face, on the body's row so the
+/// sentence sits level with the buttons beside it.
+fn with_card(ui: &Ui, sentence: &str, card: &str) -> egui::text::LayoutJob {
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let code = theme::mono(body.size, FontWeight::Regular);
+    let row = ui.text_style_height(&egui::TextStyle::Body);
+    let color = ui.visuals().text_color();
+    let format = |font_id| egui::TextFormat {
+        font_id,
+        color,
+        line_height: Some(row),
+        valign: egui::Align::Center,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    match sentence.split_once(CARD_SLOT) {
+        Some((before, after)) => {
+            job.append(before, 0.0, format(body.clone()));
+            job.append(card, 0.0, format(code));
+            job.append(after, 0.0, format(body));
+        }
+        None => job.append(sentence, 0.0, format(body)),
+    }
+    job
 }
 
 #[cfg(test)]
