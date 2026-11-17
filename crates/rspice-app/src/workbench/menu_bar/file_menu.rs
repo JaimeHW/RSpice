@@ -207,8 +207,9 @@ mod tests {
             .project
             .configuration
             .edit(&catalog, fixture.configuration, |definition| {
-                definition.stop_views = vec!["spice".to_owned()];
+                definition.stop_views = vec!["schematic".to_owned()];
             });
+        assert!(state.project.configuration.is_dirty(&catalog));
         for (action, held) in [
             (FileMenuAction::NewProject, ConfirmationAction::ProjectNew),
             (FileMenuAction::OpenProject, ConfirmationAction::ProjectOpen),
