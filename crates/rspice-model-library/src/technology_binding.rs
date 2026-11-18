@@ -475,7 +475,7 @@ pub enum TechnologyBindingError {
     InvalidPdkPackage(String),
     #[error("project technology binding has no PDK package pin")]
     MissingPdkPackage,
-    #[error("PDK package '{package_id}' revision '{revision}' is not currently validated")]
+    #[error("Technology {package_id} {revision} is not installed on this computer")]
     PdkPackageUnavailable {
         package_id: String,
         revision: String,

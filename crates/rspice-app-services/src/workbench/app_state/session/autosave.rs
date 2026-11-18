@@ -250,6 +250,9 @@ pub struct RecoveredWork {
     /// The documents in which the saved project differs from the autosave,
     /// as the Recovery page's comparison states them.
     pub differences: Vec<DocumentDifference>,
+    /// What the question says when the autosave's technology is not
+    /// installed on this computer.
+    pub technology_not_installed: Option<String>,
 }
 
 /// Write an Autosave checkpoint of the open project when the interval has
@@ -586,6 +589,7 @@ fn start_browser_search(
                     autosave,
                     project: Box::new(project),
                     differences,
+                    technology_not_installed: None,
                 })
             })
     }));
@@ -659,6 +663,7 @@ fn start_native_search(model: &Model, platform: &mut PlatformState, ctx: Option<
                 autosave,
                 project: Box::new(project),
                 differences,
+                technology_not_installed: None,
             })
         })
     }));
@@ -670,7 +675,16 @@ pub fn take_recovered_work(model: &mut Model, platform: &mut PlatformState) {
         return;
     };
     match found {
-        Ok(Some(found)) if found.project_id == model.workspace.content.project.id().to_string() => {
+        Ok(Some(mut found))
+            if found.project_id == model.workspace.content.project.id().to_string() =>
+        {
+            found.technology_not_installed = found
+                .project
+                .file
+                .workspace
+                .project
+                .technology_binding()
+                .and_then(|binding| model.technology_not_installed(binding));
             platform.project_autosave.offer = Some(found);
         }
         Ok(_) => {}
@@ -851,6 +865,14 @@ pub fn recovered_work_dialog(
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(c.text),
             );
+            if let Some(notice) = &found.technology_not_installed {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(notice)
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(c.warn),
+                );
+            }
             ui.add_space(6.0);
             for difference in &found.differences {
                 ui.label(

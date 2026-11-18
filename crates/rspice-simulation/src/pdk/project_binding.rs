@@ -15,8 +15,7 @@ pub fn project_pdk_package<'a>(
     let Some(pin) = binding.pdk_package() else {
         return Err("Project technology binding has no PDK package pin.".to_owned());
     };
-    validate_project_binding(packages, binding)
-        .map_err(|error| format!("PDK project binding is unavailable: {error}"))?;
+    validate_project_binding(packages, binding).map_err(binding_unavailable)?;
     packages
         .iter()
         .find(|package| {
@@ -33,6 +32,15 @@ pub fn project_pdk_package<'a>(
             "The project's exact PDK package is not present in the current trusted runtime catalog."
                 .to_owned()
         })
+}
+
+/// Why a project's PDK binding does not resolve, as a reader is told it: a
+/// technology this computer does not have says so in its own words.
+fn binding_unavailable(error: TechnologyBindingError) -> String {
+    match error {
+        TechnologyBindingError::PdkPackageUnavailable { .. } => error.to_string(),
+        error => format!("PDK project binding is unavailable: {error}"),
+    }
 }
 
 pub fn validate_project_binding(
@@ -88,8 +96,7 @@ pub fn validate_project_technology_inputs(
     >,
 ) -> Result<(), String> {
     models.validate_attached_technology(Some(binding))?;
-    validate_project_binding(packages, binding)
-        .map_err(|error| format!("PDK project binding is unavailable: {error}"))?;
+    validate_project_binding(packages, binding).map_err(binding_unavailable)?;
     let pdk_pin = binding
         .pdk_package()
         .expect("validated project technology has an exact PDK package");

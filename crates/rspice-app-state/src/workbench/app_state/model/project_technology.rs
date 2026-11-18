@@ -107,6 +107,27 @@ impl Model {
         sealed.reference_process_model_cards(self.sim_setup.reference_pvt.process)
     }
 
+    /// What a project pinned to `binding` is told when this computer does
+    /// not have its technology installed, in the one sentence the
+    /// recovered-work question, the Overview and the Console all use; `None`
+    /// when it is installed or pins no PDK.
+    pub fn technology_not_installed(&self, binding: &ProjectTechnologyBinding) -> Option<String> {
+        let pin = binding.pdk_package()?;
+        matches!(
+            self.pdk_config
+                .technology_registry
+                .validate_project_binding(binding),
+            Err(rspice_model_library::TechnologyBindingError::PdkPackageUnavailable { .. })
+        )
+        .then(|| {
+            format!(
+                "Technology {} is not installed on this computer. Simulation is blocked until \
+                 it is installed.",
+                pin.display_label()
+            )
+        })
+    }
+
     /// Resolve the project-owned technology contract against both mutable
     /// execution catalogs. No simulation or governed save may infer authority
     /// from a display label, an active registry package, or model paths alone.

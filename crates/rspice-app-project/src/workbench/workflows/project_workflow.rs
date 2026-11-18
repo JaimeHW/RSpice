@@ -1659,7 +1659,15 @@ pub fn report_opened_project(
             path,
         );
     }
-    if let Some(error) = report.technology_block {
+    let not_installed = model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .and_then(|binding| model.technology_not_installed(binding));
+    if let Some(notice) = not_installed {
+        model.record(LogSeverity::Warning, LogSource::Studio, notice);
+    } else if let Some(error) = report.technology_block {
         model.record(
             LogSeverity::Warning,
             LogSource::Studio,

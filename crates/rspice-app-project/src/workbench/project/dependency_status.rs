@@ -682,6 +682,19 @@ pub fn technology_status(model: &Model) -> LibraryStatus {
             None => LibraryStatus::neutral("Not attached", None),
         };
     }
+    if let Some(notice) = model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .and_then(|binding| model.technology_not_installed(binding))
+    {
+        return LibraryStatus {
+            mark: Tone::Error,
+            label: "Not installed",
+            detail: Some(notice),
+        };
+    }
     // As last proven: proving it hashes the attached library's sources. A
     // binding that no longer resolves refuses every run.
     match model.project_technology_verdict() {

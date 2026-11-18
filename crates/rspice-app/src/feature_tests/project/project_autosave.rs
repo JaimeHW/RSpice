@@ -30,6 +30,8 @@ use rspice_app_state::workbench::workspace::Workspace;
 const CRASH_FOLDER: &str = "RSPICE_TEST_CRASHED_SESSION_FOLDER";
 /// Set when the crashed session's unsaved work is a new cell, not a part.
 const CRASH_NEW_CELL: &str = "RSPICE_TEST_CRASHED_SESSION_NEW_CELL";
+/// Set when the crashed session attaches a technology before its save.
+const CRASH_TECHNOLOGY: &str = "RSPICE_TEST_CRASHED_SESSION_TECHNOLOGY";
 const PROJECT: &str = "amp.rspiceproj";
 
 fn edit(app: &mut RSpiceApp, index: i32) {
@@ -95,6 +97,9 @@ fn crashed_session_child() {
     };
     let folder = PathBuf::from(folder);
     let mut app = RSpiceApp::test_instance();
+    if std::env::var_os(CRASH_TECHNOLOGY).is_some() {
+        app.state.provision_test_project_technology_contract();
+    }
     assert!(app.state.save_project_to_path(&folder.join(PROJECT)));
     if std::env::var_os(CRASH_NEW_CELL).is_some() {
         add_cell(&mut app, "crashcell");
@@ -114,11 +119,13 @@ fn crashed_session_child() {
 /// session wrote before it was killed, and how many parts the saved project
 /// has.
 fn crashed_session(label: &str) -> (PathBuf, usize) {
-    crashed_session_with(label, false)
+    crashed_session_making(label, &[])
 }
 
-/// [`crashed_session`], whose unsaved work is a new cell when `new_cell`.
-fn crashed_session_with(label: &str, new_cell: bool) -> (PathBuf, usize) {
+/// [`crashed_session`], whose session also did what each of `asked` (a
+/// `CRASH_` setting) asks: create a cell instead of a part, attach a
+/// technology.
+fn crashed_session_making(label: &str, asked: &[&str]) -> (PathBuf, usize) {
     let folder = unique_temp_dir(label);
     let mut child = std::process::Command::new(std::env::current_exe().expect("the test binary"));
     child
@@ -129,8 +136,8 @@ fn crashed_session_with(label: &str, new_cell: bool) -> (PathBuf, usize) {
             "--test-threads=1",
         ])
         .env(CRASH_FOLDER, &folder);
-    if new_cell {
-        child.env(CRASH_NEW_CELL, "1");
+    for setting in asked {
+        child.env(setting, "1");
     }
     let status = child
         .stdout(std::process::Stdio::null())
@@ -219,7 +226,10 @@ fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
         ("autosave-crash-keep-save", false),
         ("autosave-crash-keep-save-cell", true),
     ] {
-        let (folder, _) = crashed_session_with(label, new_cell);
+        let (folder, _) = crashed_session_making(
+            label,
+            if new_cell { &[CRASH_NEW_CELL] } else { &[] },
+        );
         let (mut app, ctx, asked) = open_after_crash(&folder);
         app_frame(
             &ctx,
@@ -283,7 +293,7 @@ fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
 /// lists it as new in the autosave, as the autosave holds it, not as removed.
 #[test]
 fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
-    let (folder, _) = crashed_session_with("autosave-crash-cell", true);
+    let (folder, _) = crashed_session_making("autosave-crash-cell", &[CRASH_NEW_CELL]);
     let (_app, _ctx, asked) = open_after_crash(&folder);
     let text = painted(&asked);
     assert!(
@@ -292,6 +302,42 @@ fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
         "{text}"
     );
     assert!(!text.contains("Removed since"), "{text}");
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// A crashed session whose technology this computer does not have: the
+/// question says so before anything is kept, and the Console and the
+/// Overview's Dependencies row say it in the same words.
+#[test]
+fn after_a_crash_a_technology_not_installed_here_is_said_in_the_question() {
+    let (folder, _) = crashed_session_making("autosave-crash-technology", &[CRASH_TECHNOLOGY]);
+    let (app, ctx, asked) = open_after_crash(&folder);
+    let model = &app.state.model;
+    let notice = model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .and_then(|binding| model.technology_not_installed(binding))
+        .expect("the saved project's technology is not installed here");
+    assert!(
+        notice.ends_with(
+            " is not installed on this computer. Simulation is blocked until it is installed."
+        ),
+        "{notice}"
+    );
+    assert!(painted(&asked).contains(&notice), "{}", painted(&asked));
+    assert!(
+        model
+            .log_buffer
+            .entries()
+            .any(|entry| entry.message == notice),
+        "the Console says it in the same words"
+    );
+    let dependencies =
+        rspice_app_project::workbench::project::health::dependencies(&ctx, model);
+    assert_eq!(dependencies.state, "Technology: not installed");
+    assert_eq!(dependencies.detail, notice);
     let _ = std::fs::remove_dir_all(folder);
 }
 
@@ -318,6 +364,12 @@ fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_recovery_page(
         app.state.platform.project_autosave.offer.is_none(),
         "asked once"
     );
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Recovery;
+    let shown = paint_until(&ctx, &mut app, |text| {
+        text.contains("Kept for recovery until you save \u{b7} ")
+    });
+    assert!(!painted(&shown).contains("Pinned"), "{}", painted(&shown));
     let _ = std::fs::remove_dir_all(folder);
 }
 
@@ -504,12 +556,6 @@ fn closing_the_window_leaves_unsaved_work_for_the_next_start_to_offer() {
     assert_eq!(parts(&app), saved_parts, "the saved project opened");
     assert!(
         !has_unsaved_changes_fresh(&app.state),
-    app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
-    let shown = paint_until(&ctx, &mut app, |text| {
-        text.contains("Kept for recovery until you save \u{b7} ")
-    });
-    assert!(!painted(&shown).contains("Pinned"), "{}", painted(&shown));
         "the session brought back nothing unsaved"
     );
     let ctx = offscreen();
