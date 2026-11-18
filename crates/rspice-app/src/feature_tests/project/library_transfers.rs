@@ -22,6 +22,7 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::app_state::model::{HierarchyCopy, ReferenceStatus};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
+use rspice_design::library::folder::LibraryPathForm;
 
 use super::with_cx;
 
@@ -515,6 +516,11 @@ fn a_copy_saved_in_another_folder_finds_a_library_kept_in_its_own_folder() {
             .map(|reference| reference.path.clone())
     };
     let before = path(&app);
+    assert_eq!(
+        before.as_ref().map(|path| path.form()),
+        Some(LibraryPathForm::Relative),
+        "a folder beside the project is written relative to it"
+    );
 
     let copy = elsewhere.join("copy.rspiceproj");
     assert!(
