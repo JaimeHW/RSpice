@@ -49,6 +49,9 @@ const BOTTOM_PADDING: f32 = 32.0;
 const GUTTER_MARK_SIDE: f32 = 8.0;
 /// Width of the change bar an edited line carries at the gutter's edge.
 const CHANGE_BAR_WIDTH: f32 = 2.0;
+/// The digits of the line numbers a style's gutter width holds; a text of
+/// more lines widens the gutter by a character for each digit more.
+const GUTTER_DIGITS: u32 = 5;
 /// Keep the accessibility tree proportional to what assistive technology can
 /// use interactively. Exposing an entire release-scale source file would make
 /// every caret move rebuild millions of characters of AccessKit state.
@@ -145,6 +148,7 @@ impl Default for VirtualEditorSession {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct VirtualEditorStyle<'a> {
     pub accessible_label: &'a str,
     pub messages: crate::workbench::MessageCatalog,
@@ -405,6 +409,12 @@ pub(crate) fn show_virtual_text_editor(
         session.ime = None;
     }
     session.bound_revision = source.revision();
+    let fitted = gutter_fitting(
+        style,
+        session.model.line_count(),
+        monospace_advance(ui, &style.font).max(1.0),
+    );
+    let style: &VirtualEditorStyle<'_> = &fitted;
 
     if let Some(line) = requested_line {
         let logical_line = line
@@ -1348,6 +1358,23 @@ fn advance_maximum_column_scan(session: &mut VirtualEditorSession) {
         session.maximum_columns = scan.maximum_columns;
         session.maximum_column_scan = None;
     }
+}
+
+/// `style` with a gutter wide enough for the number of the last of `lines`,
+/// in characters `char_width` wide: a deck past line 99,999 shows its line
+/// numbers whole.
+fn gutter_fitting<'s, 'a>(
+    style: &'s VirtualEditorStyle<'a>,
+    lines: usize,
+    char_width: f32,
+) -> std::borrow::Cow<'s, VirtualEditorStyle<'a>> {
+    let digits = lines.max(1).ilog10() + 1;
+    if digits <= GUTTER_DIGITS {
+        return std::borrow::Cow::Borrowed(style);
+    }
+    let mut fitted = style.clone();
+    fitted.gutter_width += (digits - GUTTER_DIGITS) as f32 * char_width;
+    std::borrow::Cow::Owned(fitted)
 }
 
 fn monospace_advance(ui: &Ui, font: &FontId) -> f32 {
