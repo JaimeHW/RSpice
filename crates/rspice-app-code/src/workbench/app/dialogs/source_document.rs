@@ -154,7 +154,7 @@ pub fn netlist_lifecycle_facts(
     let file = netlist_document::active_deck_file_in(netlist)?;
     Some(NetlistLifecycleFacts {
         logical_path: file.name(),
-        line_endings: line_ending_summary(&file.text),
+        line_endings: line_ending_summary(&file.line_ending.write(&file.text)),
         native_path: file.path.display().to_string(),
         include: netlist.active_dependency_identity.is_some(),
     })

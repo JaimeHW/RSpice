@@ -66,6 +66,31 @@ impl LineEnding {
             _ => Self::Mixed,
         }
     }
+
+    /// `text` as the editor holds it, and the separators it was written
+    /// with: every line ends in `\n`, except in a file whose lines end in
+    /// more than one way, which is kept exactly as it is.
+    #[must_use]
+    pub fn read(text: String) -> (String, Self) {
+        let ending = Self::detect(&text);
+        let text = match ending {
+            Self::CrLf => text.replace("\r\n", "\n"),
+            Self::Cr => text.replace('\r', "\n"),
+            Self::None | Self::Lf | Self::Mixed => text,
+        };
+        (text, ending)
+    }
+
+    /// `text`, as the editor holds it, with these separators again: what is
+    /// written to the file.
+    #[must_use]
+    pub fn write(self, text: &str) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::CrLf => text.replace('\n', "\r\n").into(),
+            Self::Cr => text.replace('\n', "\r").into(),
+            Self::None | Self::Lf | Self::Mixed => text.into(),
+        }
+    }
 }
 
 /// What a file on disk was when the session last read or wrote it, so a
@@ -82,7 +107,7 @@ pub struct DiskStamp {
 pub struct OpenFile {
     /// Where the file is.
     pub path: PathBuf,
-    /// Its text, with the separators it was read with.
+    /// Its text, every line ending in `\n` (see [`LineEnding::read`]).
     pub text: String,
     /// The encoding it was read in and is written back in.
     pub encoding: TextEncoding,
@@ -99,8 +124,9 @@ impl OpenFile {
     pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Result<Self, String> {
         let (text, encoding) = TextEncoding::decode(bytes)
             .map_err(|error| format!("{} could not be read: {error}", file_name(&path)))?;
+        let (text, line_ending) = LineEnding::read(text);
         Ok(Self {
-            line_ending: LineEnding::detect(&text),
+            line_ending,
             path,
             text,
             encoding,
@@ -119,6 +145,22 @@ impl OpenFile {
     #[must_use]
     pub fn key(&self) -> String {
         self.path.to_string_lossy().into_owned()
+    }
+
+    /// A UTF-8 file of `text` at `path`, read from nowhere: what a test
+    /// opens.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn in_memory(path: impl Into<PathBuf>, text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            line_ending: LineEnding::detect(&text),
+            path: path.into(),
+            text,
+            encoding: TextEncoding::Utf8,
+            disk: None,
+            dirty: false,
+        }
     }
 
     /// Replace the text with `text`; whether that changed it.
@@ -183,17 +225,9 @@ impl OpenDeck {
     #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn in_memory(path: impl Into<PathBuf>, text: impl Into<String>) -> Self {
-        let text = text.into();
         Self {
             id: DeckId::new(),
-            root: OpenFile {
-                line_ending: LineEnding::detect(&text),
-                path: path.into(),
-                text,
-                encoding: TextEncoding::Utf8,
-                disk: None,
-                dirty: false,
-            },
+            root: OpenFile::in_memory(path, text),
             includes: Vec::new(),
         }
     }
@@ -244,18 +278,24 @@ fn changed_on_disk(file: &OpenFile) -> bool {
     std::fs::read(&file.path)
         .ok()
         .and_then(|bytes| TextEncoding::decode(&bytes).ok())
-        .is_none_or(|(text, _)| crate::state::content_digest(&text) != stamp.digest)
+        .is_none_or(|(text, _)| {
+            crate::state::content_digest(&LineEnding::read(text).0) != stamp.digest
+        })
 }
 
-/// Write `file` to its path now: its text, its own separators, in its
-/// encoding, through a temporary file beside it renamed over it. A file
-/// something else changed since it was read is not overwritten.
+/// Write `file` to its path now: its text, with the separators it was read
+/// with, in its encoding, through a temporary file beside it renamed over
+/// it. A file something else changed since it was read is not overwritten.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
     let name = file.name();
+    // A file that had one line and no separator takes the editor's.
+    if file.line_ending == LineEnding::None {
+        file.line_ending = LineEnding::detect(&file.text);
+    }
     let bytes = file
         .encoding
-        .encode(&file.text)
+        .encode(&file.line_ending.write(&file.text))
         .map_err(|error| format!("{name} was not saved: {error}"))?;
     if changed_on_disk(file) {
         return Err(format!(
@@ -271,7 +311,6 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
         })?;
     file.disk = Some(disk_stamp(&file.path, &file.text));
     file.dirty = false;
-    file.line_ending = LineEnding::detect(&file.text);
     Ok(())
 }
 
