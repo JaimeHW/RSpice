@@ -258,19 +258,10 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     if !dropped.is_empty() {
         cx.wb.outbox.push(CodeRequest::OpenDroppedDeck(dropped));
     }
-    let toolbar = toolbar::code_toolbar(ui, cx);
-    // The strip aligns to the toolbar's own content rect, so the two rows keep
-    // one padding and one edge rather than each deriving a width. The strip
-    // states the run and reports what was clicked; routing that click is this
-    // surface's transaction, not the painter's.
-    match run_strip(
-        ui,
-        cx.model,
-        &cx.state.netlist,
-        cx.runs,
-        cx.wb.messages(),
-        toolbar.content,
-    ) {
+    toolbar::code_toolbar(ui, cx);
+    // The run's band states the run and reports what was clicked; routing
+    // that click is this surface's transaction, not the painter's.
+    match run_strip(ui, cx.model, &cx.state.netlist, cx.runs, cx.wb.messages()) {
         Some(RunStripAction::OpenDeckSnapshot) => {
             if !crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
                 cx.model,
@@ -489,20 +480,14 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     transfer::export_generated_dialog_window(ui.ctx(), cx);
 }
 
-/// Height of the post-run strip, matching the mockup's `.netlist-override-strip`.
+/// Height of the run's band at the least: an advisory band's row.
 pub const RUN_STRIP_HEIGHT: f32 = 24.0;
-const RUN_STRIP_PADDING_X: f32 = 8.0;
 const RUN_STRIP_GAP: f32 = 8.0;
-const RUN_STRIP_ACTION_HEIGHT: f32 = 20.0;
 const RUN_STRIP_DOT_DIAMETER: f32 = 5.0;
 const RUN_STRIP_DOT_GAP: f32 = 6.0;
-/// Width a live-state dot takes out of the chip, gap included.
-const RUN_STRIP_DOT_COLUMN: f32 = RUN_STRIP_DOT_DIAMETER + RUN_STRIP_DOT_GAP;
-/// Side of the badge's problem mark: the kit's own, so it matches every other
+/// Side of a band's problem mark: the kit's own, so it matches every other
 /// marked line in the product.
 use crate::ui::widgets::PROBLEM_MARK_SIDE as RUN_STRIP_MARK_SIDE;
-/// Width that mark takes out of the badge, gap included.
-const RUN_STRIP_MARK_COLUMN: f32 = RUN_STRIP_MARK_SIDE + RUN_STRIP_DOT_GAP;
 
 /// Which statement the strip is making about the run it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -660,102 +645,137 @@ enum RunStripAction {
     },
 }
 
-/// One 24-point row between the deck toolbar and the editor: what ran, what it
-/// ran over, and the two routes out of it. While a run is in flight the row
-/// states that and offers nothing that could race it.
+/// The band between the deck toolbar and the editor that says which run the
+/// text in front belongs to: one row in the advisory bands' recipe, its
+/// words in the interface's face, the run named once, and the routes out of
+/// it as the kit's compact buttons at the band's far end. While a run is in
+/// flight the band states that and offers nothing that could race it.
 fn run_strip(
     ui: &mut Ui,
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
     runs: &rspice_app_runs::workbench::slots::runs::RunsState,
     messages: crate::workbench::MessageCatalog,
-    toolbar_content: egui::Rect,
 ) -> Option<RunStripAction> {
     let projection = run_strip_projection(model, netlist, runs)?;
     let run_id = projection.run_id.to_string();
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(
-            toolbar_content.width() + RUN_STRIP_PADDING_X * 2.0,
-            RUN_STRIP_HEIGHT,
-        ),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    let content = egui::Rect::from_x_y_ranges(toolbar_content.x_range(), rect.y_range());
-
+    let (statement, statement_hint) = run_strip_statement(&projection, messages);
+    // A text that differs from what the run recorded is worth a mark, and
+    // a warning's: it is a difference to know about, not an error.
+    let difference = projection.verification.and_then(verification_chip);
+    // A dot marks live state only; a finished run's standing is in the
+    // words.
+    let live = projection.phase == RunStripPhase::Running;
     let mut action = None;
-    let mut actions = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(content)
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
-    );
-    actions.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
-    // An in-flight run offers nothing, and an empty right-to-left child does
-    // not report a right-hand edge — the statement takes the whole row rather
-    // than measuring itself against a cursor that never moved.
-    let offers_actions = projection.phase != RunStripPhase::Running;
-    match projection.phase {
-        RunStripPhase::Running => {}
-        RunStripPhase::Snapshot => {
-            let open_run =
-                messages.format(MessageId::NetlistRunSnapshotOpenRun, &[("id", &run_id)]);
-            if strip_button(&mut actions, &open_run, None).clicked() {
-                action = Some(RunStripAction::OpenInResults(projection.run_id));
-            }
-            if let Some(next) = task_deck_hop(&projection)
-                && let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next)
-            {
-                action = Some(hop);
-            }
-            // An executed deck has no working copy: it is the source a point
-            // was handed after expansion and corner materialization, and a
-            // diff against the deck being edited would report every one of
-            // those as an edit. The control is absent rather than offered and
-            // then refused.
-            if projection.point.is_none() {
-                let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
-                let compare_hint = messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
-                if strip_button(&mut actions, &compare, Some(&compare_hint)).clicked() {
-                    action = Some(RunStripAction::Compare);
+    advisory_band(ui, None, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
+            match projection.phase {
+                RunStripPhase::Running => {}
+                RunStripPhase::Snapshot => {
+                    let open_run =
+                        messages.format(MessageId::NetlistRunSnapshotOpenRun, &[("id", &run_id)]);
+                    if band_button(ui, &open_run, None).clicked() {
+                        action = Some(RunStripAction::OpenInResults(projection.run_id));
+                    }
+                    if let Some(next) = task_deck_hop(&projection)
+                        && let Some(hop) = task_deck_button(ui, &messages, &projection, next)
+                    {
+                        action = Some(hop);
+                    }
+                    // An executed deck has no working copy: it is the source
+                    // a point was handed after expansion and corner
+                    // materialization, and a diff against the deck being
+                    // edited would report every one of those as an edit.
+                    // The control is absent rather than offered and then
+                    // refused.
+                    if projection.point.is_none() {
+                        let compare = messages.text(MessageId::NetlistRunSnapshotCompare);
+                        let compare_hint =
+                            messages.text(MessageId::NetlistRunSnapshotCompareTooltip);
+                        if band_button(ui, &compare, Some(&compare_hint)).clicked() {
+                            action = Some(RunStripAction::Compare);
+                        }
+                    }
+                }
+                RunStripPhase::Current | RunStripPhase::Edited => {
+                    let results = messages.text(MessageId::NetlistRunStripOpenResults);
+                    if band_button(ui, &results, None).clicked() {
+                        action = Some(RunStripAction::OpenInResults(projection.run_id));
+                    }
+                    let deck = messages.text(MessageId::NetlistRunStripOpenDeck);
+                    if band_button(ui, &deck, None).clicked() {
+                        action = Some(RunStripAction::OpenDeckSnapshot);
+                    }
+                    if let Some(next) = task_deck_hop(&projection)
+                        && let Some(hop) = task_deck_button(ui, &messages, &projection, next)
+                    {
+                        action = Some(hop);
+                    }
                 }
             }
-        }
-        RunStripPhase::Current | RunStripPhase::Edited => {
-            let results = messages.text(MessageId::NetlistRunStripOpenResults);
-            if strip_button(&mut actions, &results, None).clicked() {
-                action = Some(RunStripAction::OpenInResults(projection.run_id));
+            if projection.phase != RunStripPhase::Running {
+                ui.add_space(RUN_STRIP_GAP);
             }
-            let deck = messages.text(MessageId::NetlistRunStripOpenDeck);
-            if strip_button(&mut actions, &deck, None).clicked() {
-                action = Some(RunStripAction::OpenDeckSnapshot);
-            }
-            if let Some(next) = task_deck_hop(&projection)
-                && let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next)
-            {
-                action = Some(hop);
-            }
-        }
-    }
-    let statement_right = if offers_actions {
-        (actions.min_rect().left().min(content.right()) - RUN_STRIP_GAP).max(content.left())
-    } else {
-        content.right()
-    };
-    let statement = egui::Rect::from_min_max(
-        content.left_top(),
-        egui::pos2(statement_right, content.bottom()),
-    );
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
+                if live {
+                    let t = Tokens::get(ui.ctx());
+                    let (dot, _) = ui.allocate_exact_size(
+                        egui::vec2(RUN_STRIP_DOT_DIAMETER, RUN_STRIP_DOT_DIAMETER),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().circle_filled(
+                        dot.center(),
+                        RUN_STRIP_DOT_DIAMETER / 2.0,
+                        t.color.accent,
+                    );
+                }
+                // The difference is the shorter phrase and stands after the
+                // run's name; the name yields its width first.
+                if let Some((label, hint)) = difference {
+                    let words = messages.text(label);
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    let width = ui
+                        .painter()
+                        .layout_no_wrap(words.clone(), font, egui::Color32::PLACEHOLDER)
+                        .size()
+                        .x;
+                    let reserve = RUN_STRIP_GAP + RUN_STRIP_MARK_SIDE + RUN_STRIP_DOT_GAP + width;
+                    let room = (ui.available_width() - reserve).max(0.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(egui::Label::new(&statement).truncate())
+                            .on_hover_text(&statement_hint);
+                    });
+                    ui.add_space(RUN_STRIP_GAP - RUN_STRIP_DOT_GAP);
+                    let (mark, _) = ui.allocate_exact_size(
+                        egui::vec2(RUN_STRIP_MARK_SIDE, RUN_STRIP_MARK_SIDE),
+                        egui::Sense::hover(),
+                    );
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                    ui.add(egui::Label::new(&words).truncate())
+                        .on_hover_text(messages.format(hint, &[("id", &run_id)]));
+                } else {
+                    ui.add(egui::Label::new(&statement).truncate())
+                        .on_hover_text(&statement_hint);
+                }
+            });
+        });
+    });
+    action
+}
 
-    // Which run this deck belongs to, and how it stands against it, are facts
-    // the words carry. None of the four is an alarm, so none of them is a
-    // colour: the phase is legible from the statement alone.
-    let (chip, chip_hint) = match projection.phase {
+/// What the band says about the run, once: its name and how the text in
+/// front stands against it, then the point or the deck it ran and the
+/// revision it ran at, "Run 12 input · nominal · revision 3"; and the
+/// sentence its hover gives.
+fn run_strip_statement(
+    projection: &RunStripProjection,
+    messages: crate::workbench::MessageCatalog,
+) -> (String, String) {
+    let run_id = projection.run_id.to_string();
+    let (name, hint) = match projection.phase {
         RunStripPhase::Current => (
             messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
             MessageId::NetlistRunStripCurrentTooltip,
@@ -774,83 +794,23 @@ fn run_strip(
         ),
     };
     let revision = projection.revision.to_string();
-    let (full, short) = match projection.point.as_deref() {
-        Some(point) => (
-            messages.format(
-                MessageId::NetlistRunStripExecutedPoint,
-                &[("point", point), ("revision", &revision)],
-            ),
-            messages.format(
-                MessageId::NetlistRunStripExecutedPointShort,
-                &[("point", point), ("revision", &revision)],
-            ),
+    let detail = match projection.point.as_deref() {
+        Some(point) => messages.format(
+            MessageId::NetlistRunStripExecutedPoint,
+            &[("point", point), ("revision", &revision)],
         ),
-        None => (
-            messages.format(
-                MessageId::NetlistRunStripIdentity,
-                &[("digest", &projection.deck_digest), ("revision", &revision)],
-            ),
-            messages.format(
-                MessageId::NetlistRunStripIdentityShort,
-                &[("digest", &projection.deck_digest), ("revision", &revision)],
-            ),
+        None => messages.format(
+            MessageId::NetlistRunStripIdentity,
+            &[("digest", &projection.deck_digest), ("revision", &revision)],
         ),
     };
-    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let text_width = |label: &str| {
-        ui.painter()
-            .layout_no_wrap(label.to_owned(), font.clone(), t.color.text_dim)
-            .size()
-            .x
-    };
-    // A dot marks LIVE state only. A finished run's currentness is static and
-    // the words already carry it.
-    let live = projection.phase == RunStripPhase::Running;
-    // A verdict about the deck on screen ranks with the run's identity, not
-    // with the sentence about it: the sentence yields first, and the badge
-    // yields only with the row.
-    let badge = projection.verification.and_then(verification_chip);
-    // The identifiers never clip: the labelled sentence yields to the two
-    // identifiers alone, and those yield the row entirely rather than print a
-    // half digest.
-    let badge_width = badge.map_or(0.0, |(label, _)| {
-        RUN_STRIP_MARK_COLUMN + text_width(&messages.text(label)) + RUN_STRIP_GAP
-    });
-    let chip_width =
-        if live { RUN_STRIP_DOT_COLUMN } else { 0.0 } + text_width(&chip) + badge_width;
-    let copy_budget = statement.width() - chip_width - RUN_STRIP_GAP;
-    let copy = if text_width(&full) <= copy_budget {
-        Some((full.clone(), false))
-    } else if text_width(&short) <= copy_budget {
-        Some((short, true))
-    } else {
-        None
-    };
-
-    let mut row = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(statement)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    row.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
-    run_strip_chip(&mut row, &chip, live)
-        .on_hover_text(messages.format(chip_hint, &[("id", &run_id)]));
-    if let Some((label, hint)) = badge {
-        run_strip_problem(&mut row, &messages.text(label))
-            .on_hover_text(messages.format(hint, &[("id", &run_id)]));
-    }
-    if let Some((label, abbreviated)) = copy {
-        let copy_response = row.label(
-            egui::RichText::new(&label)
-                .font(font)
-                .color(t.color.text_dim),
-        );
-        if abbreviated {
-            copy_response.on_hover_text(&full);
-        }
-    }
-
-    action
+    (
+        messages.format(
+            MessageId::NetlistRunStripStatement,
+            &[("run", &name), ("detail", &detail)],
+        ),
+        messages.format(hint, &[("id", &run_id)]),
+    )
 }
 
 /// Which task deck the strip's hop would open, or `None` when there is none
@@ -898,7 +858,7 @@ fn task_deck_button(
             ),
         )
     };
-    strip_button(ui, &label, Some(&hint))
+    band_button(ui, &label, Some(&hint))
         .clicked()
         .then_some(RunStripAction::OpenTaskDeck {
             run_id: projection.run_id,
@@ -906,13 +866,14 @@ fn task_deck_button(
         })
 }
 
-/// What the strip says about the deck below it, when there is something to
+/// What the band says about the text below it, when there is something to
 /// say.
 ///
 /// Three of the four states report that nothing is wrong — a reproduced
-/// digest, a point's own materialized source, a run that sealed no digest at
-/// all — and the strip does not spend a badge on them. The fourth is a deck
-/// the run was never authorized over, and that is the one worth a mark.
+/// digest, a point's own materialized source, a run that recorded no digest
+/// at all — and the band does not spend a mark on them. The fourth is a text
+/// that differs from the one the run recorded, and that is the one worth a
+/// warning's mark.
 const fn verification_chip(
     verification: ExecutedDeckVerification,
 ) -> Option<(MessageId, MessageId)> {
@@ -927,56 +888,10 @@ const fn verification_chip(
     }
 }
 
-/// The strip's status chip: neutral text, and a dot only while the run is
-/// live.
-fn run_strip_chip(ui: &mut Ui, label: &str, live: bool) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
-        if live {
-            let (dot, _) = ui.allocate_exact_size(
-                egui::vec2(RUN_STRIP_DOT_DIAMETER, 11.0),
-                egui::Sense::hover(),
-            );
-            ui.painter()
-                .circle_filled(dot.center(), RUN_STRIP_DOT_DIAMETER / 2.0, t.color.accent);
-        }
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_dim),
-        )
-    })
-    .inner
-}
-
-/// The strip's one badge: a failure mark, then the same neutral text as the
-/// chip beside it.
-fn run_strip_problem(ui: &mut Ui, label: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
-        let (mark, _) = ui.allocate_exact_size(
-            egui::vec2(RUN_STRIP_MARK_SIDE, RUN_STRIP_MARK_SIDE),
-            egui::Sense::hover(),
-        );
-        paint_problem_mark(ui.painter(), mark, Problem::Failure);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_dim),
-        )
-    })
-    .inner
-}
-
-fn strip_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response {
-    let response = ui.add(
-        egui::Button::new(
-            egui::RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Medium)),
-        )
-        .min_size(egui::vec2(0.0, RUN_STRIP_ACTION_HEIGHT)),
-    );
+/// One of the band's routes: the kit's compact button, with what it does on
+/// its hover when the label alone does not say.
+fn band_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response {
+    let response = crate::ui::widgets::Button::new(label).compact().show(ui);
     if let Some(hint) = hint {
         response.on_hover_text(hint)
     } else {
