@@ -140,7 +140,7 @@ const FILE_MENU: &[MenuEntry] = &[
         &[project(ProjectCommand::OpenSchematic).access('M')],
     ),
     project(ProjectCommand::OpenProject).access('O'),
-    code(CodeCommand::OpenNetlist).access('T'),
+    code(CodeCommand::OpenNetlist).access('K'),
     MenuEntry::submenu("Open recent", OPEN_RECENT_MENU).access('R'),
     Separator,
     command(ShellCommand::CloseActiveDocument).access('C'),

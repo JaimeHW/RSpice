@@ -11,16 +11,34 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 /// Opening a deck file, over the whole application state.
 impl AppState {
-    /// Ask for a deck file and open it.
+    /// Ask for a deck file and open it. A deck that could not be opened now
+    /// is refused before any file is asked for.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_deck(&mut self) -> bool {
+        let new_project = !self.platform.project_lifecycle.is_open();
+        if let Some(reason) = self.deck_open_refusal(new_project) {
+            self.prompt(reason);
+            return false;
+        }
         let Some(path) =
             rspice_app_code::workbench::workflows::netlist_workflow::show_open_deck_dialog()
         else {
             return false;
         };
-        let new_project = !self.platform.project_lifecycle.is_open();
         self.open_deck_at(&path, new_project)
+    }
+
+    /// Why no deck can be opened now: a run in progress, or a project open
+    /// read-only that the deck would be added to.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn deck_open_refusal(&self, new_project: bool) -> Option<&'static str> {
+        if self.model.simulation.execution.has_active_execution() {
+            return Some("A deck cannot be opened while a simulation is running.");
+        }
+        if !new_project && self.model.safe_mode.project_read_only() {
+            return Some("A deck cannot be added: the project is open read-only.");
+        }
+        None
     }
 
     /// A deck is a file, and the browser has no file to keep it in.
@@ -34,12 +52,8 @@ impl AppState {
     /// `new_project` says so, else in the open project.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_deck_at(&mut self, path: &std::path::Path, new_project: bool) -> bool {
-        if self.model.simulation.execution.has_active_execution() {
-            self.prompt("A deck cannot be opened while a simulation is running.");
-            return false;
-        }
-        if !new_project && self.model.safe_mode.project_read_only() {
-            self.prompt("A deck cannot be added: the project is open read-only.");
+        if let Some(reason) = self.deck_open_refusal(new_project) {
+            self.prompt(reason);
             return false;
         }
         if let Some(unsaved) = self

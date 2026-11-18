@@ -219,11 +219,12 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     );
 }
 
-/// Import deck on the empty deck page is answered in the frame of its
-/// release: on a project open read-only, that frame says why it cannot
-/// import, though the dispatcher carries it out once the page has drawn.
+/// Open deck on the empty deck page is answered in the frame of its
+/// release: on a project open read-only, that frame says why no deck can be
+/// added, before any file is asked for, though the dispatcher carries it out
+/// once the page has drawn.
 #[test]
-fn import_deck_is_answered_in_the_frame_it_is_released() {
+fn open_deck_is_answered_in_the_frame_it_is_released() {
     let mut replay = Replay::new();
     replay.app.state.model.safe_mode.activate(
         rspice_app_state::state::write_policy::LocalSafeModeOptions {
@@ -238,21 +239,21 @@ fn import_deck_is_answered_in_the_frame_it_is_released() {
     // The empty page measures its actions in an invisible pass before it
     // draws them, and the measured copies are in the tree too: the drawn
     // button is the last.
-    let import = replay
+    let open = replay
         .frames(Vec::new())
         .into_iter()
-        .rfind(|control| control.role == Role::Button && control.label == "Import deck\u{2026}")
-        .expect("the empty page offers Import deck")
+        .rfind(|control| control.role == Role::Button && control.label == "Open deck\u{2026}")
+        .expect("the empty page offers Open deck")
         .center;
     assert_eq!(
         replay.app.state.prompt_text(),
         None,
         "nothing is said before the press"
     );
-    press_and_release(&mut replay, import);
+    press_and_release(&mut replay, open);
     let said = replay.app.state.prompt_text().unwrap_or_default();
     assert!(
         said.contains("read-only"),
-        "the frame of the release says why it cannot import: {said:?}"
+        "the frame of the release says why no deck can be added: {said:?}"
     );
 }
