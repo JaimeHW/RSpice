@@ -441,14 +441,10 @@ fn conclude(
             .prepared
             .as_ref()
             .map_or(0, |prepared| prepared.task_count);
+        let warnings = report.advisories.len();
         format!(
-            "Preflight complete · 0 blocking errors · {} advisor{} · design revision {} · {} task{}",
-            report.advisories.len(),
-            if report.advisories.len() == 1 {
-                "y"
-            } else {
-                "ies"
-            },
+            "Preflight complete · 0 blocking errors · {warnings} warning{} · design revision {} · {} task{}",
+            if warnings == 1 { "" } else { "s" },
             report.project_revision,
             task_count,
             if task_count == 1 { "" } else { "s" }
