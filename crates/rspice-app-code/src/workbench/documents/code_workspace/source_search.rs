@@ -4,6 +4,7 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 
@@ -20,7 +21,7 @@ use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::CodeWorkspaceRuntimeState;
-use super::language_services::{bundle_documents, source_line_preview};
+use super::language_services::bundle_documents;
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
 pub fn source_search_query_id() -> egui::Id {
@@ -172,23 +173,188 @@ pub fn source_search_results_in(
     platform: &PlatformState,
     search: &CodeSourceSearchState,
 ) -> Result<CodeSourceSearchResults, String> {
+    let scan = scan_source_bundle(model, code, netlist, search)?;
+    Ok(scan.results(|logical_path| {
+        super::source_bundle_document_is_editable_in(
+            model,
+            code,
+            platform,
+            search.language,
+            search.bundle_id,
+            logical_path,
+        )
+    }))
+}
+
+/// [`source_search_results_in`] for a frame to draw. A search is bound to
+/// the revisions of the sources it reads, so while it stands what it finds
+/// stands too: the sources are scanned once per search, kept in `ctx`, and
+/// a frame only checks that the search still stands and who may write to
+/// each file.
+pub fn kept_source_search_results_in(
+    ctx: &egui::Context,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    platform: &PlatformState,
+    search: &CodeSourceSearchState,
+) -> Result<CodeSourceSearchResults, String> {
+    let key = ScanKey::of(code, search);
+    let kept = ctx
+        .data(|data| data.get_temp::<KeptScan>(kept_scan_id()))
+        .filter(|kept| kept.key == key);
+    let scan = if let Some(kept) = kept {
+        current_bundle(model, netlist, search)?;
+        kept.scan
+    } else {
+        let scan = Arc::new(scan_source_bundle(model, code, netlist, search)?);
+        let kept = KeptScan {
+            key,
+            scan: Arc::clone(&scan),
+        };
+        ctx.data_mut(|data| data.insert_temp(kept_scan_id(), kept));
+        scan
+    };
+    Ok(scan.results(|logical_path| {
+        super::source_bundle_document_is_editable_in(
+            model,
+            code,
+            platform,
+            search.language,
+            search.bundle_id,
+            logical_path,
+        )
+    }))
+}
+
+/// Let go of what the last search found: the search closed.
+pub fn forget_source_search_results(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<KeptScan>(kept_scan_id()));
+}
+
+fn kept_scan_id() -> egui::Id {
+    source_search_query_id().with("found")
+}
+
+/// What a search found, kept with the search it answers.
+#[derive(Clone)]
+struct KeptScan {
+    key: ScanKey,
+    scan: Arc<SourceSearchScan>,
+}
+
+/// What a scan depends on: the search, less what only a replace reads, and
+/// for a search of the open documents, which ones are open.
+#[derive(Clone, PartialEq)]
+struct ScanKey {
+    search: CodeSourceSearchState,
+    open: Vec<String>,
+}
+
+impl ScanKey {
+    fn of(code: &CodeWorkspaceRuntimeState, search: &CodeSourceSearchState) -> Self {
+        let open = if search.scope == CodeSourceSearchScope::OpenDocuments {
+            code.source_carets
+                .keys()
+                .filter(|(bundle_id, _)| *bundle_id == search.bundle_id)
+                .map(|(_, path)| path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            search: CodeSourceSearchState {
+                replacement: String::new(),
+                confirm_replace: false,
+                error: None,
+                ..search.clone()
+            },
+            open,
+        }
+    }
+}
+
+/// What a search found in its source bundle, before anything about who may
+/// write to the files.
+#[derive(Debug, Default)]
+struct SourceSearchScan {
+    documents: Vec<ScannedDocument>,
+    truncated: bool,
+}
+
+#[derive(Debug)]
+struct ScannedDocument {
+    logical_path: String,
+    /// Whether a replace may write to it at all: a project file, not the
+    /// generated deck.
+    writable: bool,
+    /// How many matches it holds.
+    found: usize,
+    /// The matches the results list shows.
+    shown: Vec<ScannedMatch>,
+}
+
+#[derive(Debug)]
+struct ScannedMatch {
+    line: usize,
+    column: usize,
+    byte_start: usize,
+    byte_end: usize,
+    line_preview: String,
+}
+
+impl SourceSearchScan {
+    /// The results, with whether `editable` lets each file be written.
+    fn results(&self, mut editable: impl FnMut(&str) -> bool) -> CodeSourceSearchResults {
+        let mut output = CodeSourceSearchResults::default();
+        for document in &self.documents {
+            let editable = document.writable && editable(&document.logical_path);
+            output.read_only_matches += document.found * usize::from(!editable);
+            output.editable_matches += document.found * usize::from(editable);
+            output.total_matches += document.found;
+            output
+                .matches
+                .extend(document.shown.iter().map(|found| CodeSourceSearchResult {
+                    logical_path: document.logical_path.clone(),
+                    line: found.line,
+                    column: found.column,
+                    byte_start: found.byte_start,
+                    byte_end: found.byte_end,
+                    line_preview: found.line_preview.clone(),
+                    editable,
+                }));
+        }
+        output.truncated = self.truncated;
+        output.display_truncated = output.total_matches > output.matches.len() || output.truncated;
+        output
+    }
+}
+
+fn scan_source_bundle(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    search: &CodeSourceSearchState,
+) -> Result<SourceSearchScan, String> {
     let bundle = current_bundle(model, netlist, search)?;
     if search.query.is_empty() {
-        return Ok(CodeSourceSearchResults::default());
+        return Ok(SourceSearchScan::default());
     }
     let options = search_options(search);
-    let mut output = CodeSourceSearchResults::default();
+    let mut scan = SourceSearchScan::default();
+    let mut total = 0_usize;
+    let mut shown = 0_usize;
     let documents = search_documents(model, code, bundle, search)?;
     for (index, document) in documents.iter().enumerate() {
         let searchable_source = searchable_document_source(document, search)?;
-        let remaining = SOURCE_SEARCH_STREAM_LIMIT.saturating_sub(output.total_matches);
+        let remaining = SOURCE_SEARCH_STREAM_LIMIT.saturating_sub(total);
         if remaining == 0 {
             for later in &documents[index..] {
                 let later_source = searchable_document_source(later, search)?;
                 if find_all_in_source_bounded(&later_source, &search.query, options, 1)
                     .is_ok_and(|found| !found.matches().is_empty())
                 {
-                    output.truncated = true;
+                    scan.truncated = true;
                     break;
                 }
             }
@@ -197,43 +363,85 @@ pub fn source_search_results_in(
         let found: BoundedFindMatches =
             find_all_in_source_bounded(&searchable_source, &search.query, options, remaining)
                 .map_err(|error| error.to_string())?;
-        let editable = document.editable
-            && super::source_bundle_document_is_editable_in(
-                model,
-                code,
-                platform,
-                search.language,
-                search.bundle_id,
-                document.logical_path,
-            );
-        output.read_only_matches += found.matches().len() * usize::from(!editable);
-        output.editable_matches += found.matches().len() * usize::from(editable);
-        output.total_matches += found.matches().len();
-        let display_remaining = SOURCE_SEARCH_RESULT_LIMIT.saturating_sub(output.matches.len());
-        output
-            .matches
-            .extend(found.matches().iter().take(display_remaining).map(|found| {
+        total += found.matches().len();
+        let mut lines = LineCursor::new(document.complete_source);
+        let document_shown = found
+            .matches()
+            .iter()
+            .take(SOURCE_SEARCH_RESULT_LIMIT.saturating_sub(shown))
+            .map(|found| {
                 let relative_range = found.byte_range();
-                let range = (document.base_byte + relative_range.start)
-                    ..(document.base_byte + relative_range.end);
-                let (line, column) = line_column_at_byte(document.complete_source, range.start);
-                CodeSourceSearchResult {
-                    logical_path: document.logical_path.to_owned(),
+                let byte_start = document.base_byte + relative_range.start;
+                let (line, column, line_preview) = lines.at(byte_start);
+                ScannedMatch {
                     line,
                     column,
-                    byte_start: range.start,
-                    byte_end: range.end,
-                    line_preview: source_line_preview(document.complete_source, line),
-                    editable,
+                    byte_start,
+                    byte_end: document.base_byte + relative_range.end,
+                    line_preview,
                 }
-            }));
+            })
+            .collect::<Vec<_>>();
+        shown += document_shown.len();
+        scan.documents.push(ScannedDocument {
+            logical_path: document.logical_path.to_owned(),
+            writable: document.editable,
+            found: found.matches().len(),
+            shown: document_shown,
+        });
         if found.truncated() {
-            output.truncated = true;
+            scan.truncated = true;
             break;
         }
     }
-    output.display_truncated = output.total_matches > output.matches.len() || output.truncated;
-    Ok(output)
+    Ok(scan)
+}
+
+/// Where a run of byte offsets in one source falls, read forward from the
+/// last one: the line, the column and the line's text for each, without
+/// reading the source from its start again for every match.
+struct LineCursor<'a> {
+    source: &'a str,
+    /// The byte the cursor has read up to.
+    byte: usize,
+    /// The one-based line holding `byte`, and where that line starts.
+    line: usize,
+    line_start: usize,
+}
+
+impl<'a> LineCursor<'a> {
+    const fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            byte: 0,
+            line: 1,
+            line_start: 0,
+        }
+    }
+
+    /// The one-based line and column of `byte`, and its line's preview.
+    fn at(&mut self, byte: usize) -> (usize, usize, String) {
+        let byte = byte.min(self.source.len());
+        if byte < self.byte {
+            *self = Self::new(self.source);
+        }
+        let read = &self.source.as_bytes()[self.byte..byte];
+        if let Some(last) = read.iter().rposition(|byte| *byte == b'\n') {
+            self.line += read.iter().filter(|byte| **byte == b'\n').count();
+            self.line_start = self.byte + last + 1;
+        }
+        self.byte = byte;
+        let column = self.source[self.line_start..byte].chars().count() + 1;
+        let line_end = self.source[self.line_start..]
+            .find('\n')
+            .map_or(self.source.len(), |end| self.line_start + end);
+        let preview = self.source[self.line_start..line_end]
+            .trim()
+            .chars()
+            .take(240)
+            .collect();
+        (self.line, column, preview)
+    }
 }
 
 pub fn commit_source_search_replace(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
@@ -597,15 +805,6 @@ fn char_to_byte(source: &str, char_index: usize) -> usize {
         .char_indices()
         .nth(char_index)
         .map_or(source.len(), |(byte, _)| byte)
-}
-
-fn line_column_at_byte(source: &str, byte: usize) -> (usize, usize) {
-    let byte = byte.min(source.len());
-    let prefix = &source[..byte];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
-    let column = source[line_start..byte].chars().count() + 1;
-    (line, column)
 }
 
 fn search_options(search: &CodeSourceSearchState) -> FindOptions {
@@ -1154,5 +1353,134 @@ mod tests {
         open_active_source_search(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(harness.state.netlist.find.open);
         assert!(harness.state.code_workspace.source_search.is_none());
+    }
+
+    /// Reading match positions forward gives each the line, column and
+    /// preview that reading the source from its start gives it, over line
+    /// breaks of both kinds, blank lines and characters of several bytes.
+    #[test]
+    fn match_positions_read_forward_agree_with_reading_from_the_start() {
+        let source = "  first \u{b5} line\r\nsecond\n\n  third gain  \nlast";
+        let mut lines = LineCursor::new(source);
+        for byte in (0..=source.len()).filter(|byte| source.is_char_boundary(*byte)) {
+            let prefix = &source[..byte];
+            let line = prefix.matches('\n').count() + 1;
+            let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+            let column = source[line_start..byte].chars().count() + 1;
+            let preview = source
+                .lines()
+                .nth(line - 1)
+                .unwrap_or_default()
+                .trim()
+                .chars()
+                .take(240)
+                .collect::<String>();
+            assert_eq!(lines.at(byte), (line, column, preview), "at byte {byte}");
+        }
+        assert_eq!(
+            lines.at(0),
+            (1, 1, "first \u{b5} line".to_owned()),
+            "a position before the last one read is read from the start"
+        );
+    }
+
+    /// The find dialog reads the sources once per search: a frame that draws
+    /// the same search, or the same search with a replacement typed, shows
+    /// what the first frame found; a new query reads them again; and once a
+    /// source changes the search is not answered from what it found.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_search_reads_its_sources_once_until_the_search_or_a_source_changes() {
+        let mut harness = veriloga_view_app();
+        let (bundle_id, root) = {
+            let bundle = harness
+                .model
+                .workspace
+                .content
+                .project_sources
+                .bundle_for_owner(&veriloga_owner())
+                .unwrap();
+            (bundle.id(), bundle.root().logical_path().to_owned())
+        };
+        open_source_search(
+            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            ProjectSourceLanguage::VerilogA,
+            &root,
+        )
+        .unwrap();
+        let mut search = harness.state.code_workspace.source_search.clone().unwrap();
+        search.query = "gain".to_owned();
+        let ctx = egui::Context::default();
+        let kept = || {
+            ctx.data(|data| data.get_temp::<KeptScan>(kept_scan_id()))
+                .map(|kept| kept.scan)
+        };
+        let found = |harness: &CodeHarness, search: &CodeSourceSearchState| {
+            kept_source_search_results_in(
+                &ctx,
+                &harness.model,
+                &harness.state.code_workspace,
+                &harness.state.netlist,
+                &harness.platform,
+                search,
+            )
+        };
+        let read_now = |harness: &CodeHarness, search: &CodeSourceSearchState| {
+            source_search_results_in(
+                &harness.model,
+                &harness.state.code_workspace,
+                &harness.state.netlist,
+                &harness.platform,
+                search,
+            )
+        };
+
+        let first = found(&harness, &search).unwrap();
+        assert_eq!(first, read_now(&harness, &search).unwrap());
+        assert_eq!(first.total_matches, 2);
+        let scan = kept().expect("the first frame keeps what it found");
+        assert_eq!(found(&harness, &search).unwrap(), first);
+        assert!(
+            Arc::ptr_eq(&kept().unwrap(), &scan),
+            "the next frame shows what the first found"
+        );
+        let mut typed = search.clone();
+        typed.replacement = "loss".to_owned();
+        assert_eq!(found(&harness, &typed).unwrap(), first);
+        assert!(
+            Arc::ptr_eq(&kept().unwrap(), &scan),
+            "a replacement typed finds nothing new"
+        );
+
+        let mut narrower = search.clone();
+        narrower.query = "gain *".to_owned();
+        let narrowed = found(&harness, &narrower).unwrap();
+        assert_eq!(narrowed, read_now(&harness, &narrower).unwrap());
+        assert_eq!(narrowed.total_matches, 1);
+        assert!(
+            !Arc::ptr_eq(&kept().unwrap(), &scan),
+            "a new query reads again"
+        );
+
+        harness
+            .model
+            .workspace
+            .content
+            .replace_project_source_bundle_file(
+                bundle_id,
+                &root,
+                "module m; endmodule\n".to_owned(),
+            )
+            .unwrap();
+        assert!(
+            found(&harness, &narrower).is_err(),
+            "a search of a source that changed is not answered from what it found"
+        );
+
+        forget_source_search_results(&ctx);
+        assert!(
+            kept().is_none(),
+            "closing the search lets go of what it found"
+        );
     }
 }

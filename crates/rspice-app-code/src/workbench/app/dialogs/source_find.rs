@@ -160,6 +160,7 @@ pub(in crate::workbench) fn render_source_find_dialog(
 ) -> bool {
     if code.source_search.is_none() {
         crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
+        code_workspace::forget_source_search_results(ctx);
         return false;
     }
     let _opening_input =
@@ -169,7 +170,8 @@ pub(in crate::workbench) fn render_source_find_dialog(
     let Some(search) = code.source_search.clone() else {
         return false;
     };
-    let results = code_workspace::source_search_results_in(model, code, netlist, platform, &search);
+    let results =
+        code_workspace::kept_source_search_results_in(ctx, model, code, netlist, platform, &search);
     let blocked = code_workspace::source_file_mutation_block_reason_in(
         model,
         code,

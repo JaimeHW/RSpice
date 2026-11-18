@@ -59,8 +59,9 @@ pub(crate) use source_navigation::{
 };
 pub use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
-    open_active_source_search, open_source_search, open_source_search_in_bundle,
-    source_search_query_id, source_search_results_in,
+    forget_source_search_results, kept_source_search_results_in, open_active_source_search,
+    open_source_search, open_source_search_in_bundle, source_search_query_id,
+    source_search_results_in,
 };
 pub use veriloga::{
     PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,
