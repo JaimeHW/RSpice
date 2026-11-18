@@ -208,6 +208,8 @@ pub(crate) struct SourceSpan {
 
 /// How much of its ink an outdated finding's mark keeps.
 const OUTDATED_MARK_OPACITY: f32 = 0.45;
+/// How far in from the view's edge a line that runs past it fades.
+const EDGE_FADE_WIDTH: f32 = 28.0;
 
 /// A row the viewport is about to paint, for the language service that lays
 /// it out. Colour is read from the line's start, never from where the view
@@ -839,12 +841,17 @@ pub(crate) fn show_virtual_text_editor(
                 });
                 // The cross-probed line is where the reader is, so it takes
                 // the active-item accent.
-                if style.cross_probe_line == Some(line.logical_line) {
-                    code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.08));
+                let row_fill = if style.cross_probe_line == Some(line.logical_line) {
+                    Some(style.accent.linear_multiply(0.08))
                 } else if is_active {
-                    code_painter.rect_filled(row_rect, 0.0, style.active_background);
+                    Some(style.active_background)
                 } else if pointer_hover.is_some_and(|pointer| row_rect.contains(pointer)) {
-                    code_painter.rect_filled(row_rect, 0.0, style.hover_background);
+                    Some(style.hover_background)
+                } else {
+                    None
+                };
+                if let Some(fill) = row_fill {
+                    code_painter.rect_filled(row_rect, 0.0, fill);
                 }
 
                 paint_selections(
@@ -889,6 +896,20 @@ pub(crate) fn show_virtual_text_editor(
                     galley,
                     style.text,
                 );
+                // A line that runs on past an edge of the view fades into it
+                // there, so a clipped line reads as one that goes on.
+                let line_right = code_origin_x
+                    + session.model.cell_at(line.logical_line, line.total_columns) as f32
+                        * char_width;
+                let shown_row = row_rect.intersect(code_clip);
+                let row_color =
+                    row_fill.map_or(style.background, |fill| style.background.blend(fill));
+                if line_right > code_clip.right() + 0.5 {
+                    paint_edge_fade(&code_painter, shown_row, true, row_color);
+                }
+                if line.total_columns > 0 && code_clip.left() > code_origin_x + 0.5 {
+                    paint_edge_fade(&code_painter, shown_row, false, row_color);
+                }
                 let first_mark = style
                     .marks
                     .partition_point(|mark| mark.line < line.logical_line);
@@ -1535,7 +1556,9 @@ fn handle_event(
             if editable && !text.is_empty() && !text.chars().any(char::is_control) =>
         {
             grow_maximum_cells_for_insertion(session, &text);
-            session.model.keystroke(Keystroke::Typing, &text, keys.now);
+            if !type_paired(&mut session.model, &text, keys.now) {
+                session.model.keystroke(Keystroke::Typing, &text, keys.now);
+            }
             if keys.syntax == EditorSyntax::VerilogA {
                 dedent_after_typing(&mut session.model, &text);
             }
@@ -1646,9 +1669,11 @@ fn apply_key_action(
         KeyAction::Delete { forward, reach } if editable => {
             match (reach, forward) {
                 (Reach::Character, false) => {
-                    session
-                        .model
-                        .keystroke(Keystroke::DeletingBackward, "", keys.now);
+                    if !delete_empty_pair(&mut session.model) {
+                        session
+                            .model
+                            .keystroke(Keystroke::DeletingBackward, "", keys.now);
+                    }
                 }
                 (Reach::Character, true) => {
                     session
@@ -1706,6 +1731,115 @@ fn apply_key_action(
         }
         _ => {}
     }
+}
+
+/// The character that closes `opening`, for the pairs typing completes:
+/// parentheses, brackets, braces and quotes.
+const fn closing_of(opening: char) -> Option<char> {
+    match opening {
+        '(' => Some(')'),
+        '[' => Some(']'),
+        '{' => Some('}'),
+        '"' => Some('"'),
+        '\'' => Some('\''),
+        _ => None,
+    }
+}
+
+/// Type `text` as one of a pair, as code editors do, and say whether it was:
+/// an opening character around each selection wraps it; at carets before a
+/// blank, a closing character or the line's end it brings its closing
+/// character with it, the caret between them (a quote only where it does
+/// not follow a word); and a closing character typed where the same one
+/// already stands steps over it.
+fn type_paired(model: &mut TextDocumentModel, text: &str, now: f64) -> bool {
+    let mut characters = text.chars();
+    let (Some(typed), None) = (characters.next(), characters.next()) else {
+        return false;
+    };
+    let selections = model.selections().to_vec();
+    let carets = selections
+        .iter()
+        .all(|selection| selection.range().is_empty());
+    let closes = matches!(typed, ')' | ']' | '}' | '"' | '\'');
+    if carets
+        && closes
+        && selections
+            .iter()
+            .all(|selection| model.char_at(selection.cursor) == Some(typed))
+    {
+        model.move_carets_typing(1);
+        return true;
+    }
+    let Some(closing) = closing_of(typed) else {
+        return false;
+    };
+    if !carets {
+        let wrapped = selections
+            .iter()
+            .map(|selection| format!("{typed}{}{closing}", model.selected_text(*selection)))
+            .collect::<Vec<_>>();
+        let lengths = wrapped
+            .iter()
+            .map(|text| text.chars().count())
+            .collect::<Vec<_>>();
+        if !model.replace_at_selections(&wrapped) {
+            return false;
+        }
+        // The text wrapped stays selected, inside its pair.
+        let inside = model
+            .selections()
+            .iter()
+            .zip(&lengths)
+            .map(|(after, length)| TextSelection {
+                anchor: after.cursor + 1 - length,
+                cursor: after.cursor - 1,
+            })
+            .collect();
+        model.set_selections(inside);
+        return true;
+    }
+    let quote = typed == closing;
+    let fits = selections.iter().all(|selection| {
+        let next = model.char_at(selection.cursor);
+        let before = selection
+            .cursor
+            .checked_sub(1)
+            .and_then(|index| model.char_at(index));
+        next.is_none_or(|next| next.is_whitespace() || matches!(next, ')' | ']' | '}' | ',' | ';'))
+            && (!quote || before.is_none_or(|before| !is_word_character(before) && before != typed))
+    });
+    if !fits || !model.keystroke(Keystroke::Typing, &format!("{typed}{closing}"), now) {
+        return false;
+    }
+    model.move_carets_typing(-1);
+    true
+}
+
+/// Backspace between the two characters of an empty pair deletes both.
+fn delete_empty_pair(model: &mut TextDocumentModel) -> bool {
+    let selections = model.selections().to_vec();
+    let in_empty_pairs = selections.iter().all(|selection| {
+        selection.range().is_empty()
+            && selection.cursor > 0
+            && model
+                .char_at(selection.cursor - 1)
+                .and_then(closing_of)
+                .is_some_and(|closing| model.char_at(selection.cursor) == Some(closing))
+    });
+    if !in_empty_pairs {
+        return false;
+    }
+    model.set_selections(
+        selections
+            .iter()
+            .map(|selection| TextSelection {
+                anchor: selection.cursor - 1,
+                cursor: selection.cursor + 1,
+            })
+            .collect(),
+    );
+    model.insert_at_selections("")
 }
 
 /// Delete from each caret to the word boundary or the line edge in the
@@ -2583,6 +2717,26 @@ fn paint_selections(
             color,
         );
     }
+}
+
+/// Fade the end of `row` at its right edge, or its left, into `background`.
+fn paint_edge_fade(painter: &egui::Painter, row: egui::Rect, right: bool, background: Color32) {
+    if row.width() <= EDGE_FADE_WIDTH {
+        return;
+    }
+    let (inner, outer) = if right {
+        (row.right() - EDGE_FADE_WIDTH, row.right())
+    } else {
+        (row.left() + EDGE_FADE_WIDTH, row.left())
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(egui::pos2(inner, row.top()), Color32::TRANSPARENT);
+    mesh.colored_vertex(egui::pos2(outer, row.top()), background);
+    mesh.colored_vertex(egui::pos2(outer, row.bottom()), background);
+    mesh.colored_vertex(egui::pos2(inner, row.bottom()), Color32::TRANSPARENT);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(mesh);
 }
 
 /// Box each place on `line` the name the reader went to is written.
