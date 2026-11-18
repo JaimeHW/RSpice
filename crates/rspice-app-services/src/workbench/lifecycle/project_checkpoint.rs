@@ -185,6 +185,9 @@ pub enum CheckpointDamage {
     Unreadable,
     /// Its record is cut short or is not one RSpice wrote.
     Record,
+    /// Its copy of the project is there but its record is not: it was cut
+    /// off while it was being written.
+    MissingRecord,
     /// The copy of the project it records is not there.
     MissingCopy,
     /// The copy of the project it records is not the one it took.
@@ -203,6 +206,10 @@ impl CheckpointDamage {
                  disconnected, reconnect it and open Recovery again; otherwise delete it."
             }
             Self::Record => "Its record is damaged, so what it holds is unknown. Delete it.",
+            Self::MissingRecord => {
+                "It was cut off while it was being written, so it has no record of what it \
+                 holds. Delete it."
+            }
             Self::MissingCopy => "The copy of the project it keeps is missing. Delete it.",
             Self::ChangedCopy => {
                 "The copy of the project it keeps has changed since it was taken, so it \
@@ -2115,7 +2122,8 @@ pub fn start_list(
                 for snapshot_key in orphan_snapshots {
                     accumulator.quarantined.push(ProjectCheckpointQuarantine {
                         label: snapshot_key.clone(),
-                        reason: "checkpoint snapshot has no committed manifest".to_owned(),
+                        damage: CheckpointDamage::MissingRecord,
+                        detail: "checkpoint snapshot has no committed manifest".to_owned(),
                         artifact_keys: vec![snapshot_key],
                     });
                 }
