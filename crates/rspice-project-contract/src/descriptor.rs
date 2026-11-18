@@ -1541,16 +1541,30 @@ impl ProjectDescriptor {
         // project. Reopening or moving a named project must not silently
         // rename it or change its logical revision.
         if self.path.is_none()
-            && self.name == default_project_name()
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            && Self::validate_name(stem).is_ok()
+            && let Some(file_name) = path.file_name().and_then(|name| name.to_str())
         {
-            // Validation above and an available next revision make this
-            // infallible for every practical project lifetime. If the
-            // revision space is exhausted, retaining the old name is safer.
-            let _ = self.rename(stem.to_owned());
+            let _ = self.name_after_file(file_name);
         }
         self.path = Some(path);
+    }
+
+    /// Name a default-named project after the file its first save writes,
+    /// `file_name`'s stem, as one revision: the browser's first save knows
+    /// its file only by the name the reader picked. Returns the name it
+    /// replaced; a project already named, or a stem that is not a valid
+    /// name, keeps its name and revision.
+    pub fn name_after_file(&mut self, file_name: &str) -> Option<String> {
+        if self.name != default_project_name() {
+            return None;
+        }
+        let stem = Path::new(file_name).file_stem()?.to_str()?;
+        Self::validate_name(stem).ok()?;
+        // Validation above and an available next revision make this
+        // infallible for every practical project lifetime. If the revision
+        // space is exhausted, retaining the old name is safer.
+        let before = self.name.clone();
+        self.rename(stem.to_owned()).ok()?;
+        Some(before)
     }
 
     /// Create the descriptor for an independent project copy.

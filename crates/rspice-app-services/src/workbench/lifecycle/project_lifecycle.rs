@@ -1427,6 +1427,11 @@ pub struct BrowserPreparedSave {
     pub suggested_name: String,
     pub handle_id: Option<u64>,
     pub source_handle_id: Option<u64>,
+    /// The project's first save in this browser, of the project itself: a
+    /// file the reader picks for it names a default-named project.
+    pub first_save: bool,
+    /// The name a first save replaced with its file's, once it has.
+    pub named_from: Option<String>,
 }
 
 /// What a browser save writes.
@@ -1556,7 +1561,9 @@ pub fn prepare_browser_save(
             workspace_session,
             suggested_name,
             handle_id,
+            first_save: !project_copy && source_handle_id.is_none(),
             source_handle_id,
+            named_from: None,
         })
     })();
     if result.is_err() {
@@ -1605,6 +1612,8 @@ pub fn browser_open_file_picker_supported() -> bool {
     persistence::browser_open_file_picker_supported()
 }
 
+/// Write `bytes` through the browser, to the file `target` holds or one the
+/// reader picks.
 #[cfg(target_arch = "wasm32")]
 pub fn start_browser_write(
     target: BrowserWriteTarget,
@@ -1613,7 +1622,55 @@ pub fn start_browser_write(
     bytes: Vec<u8>,
     complete: impl FnOnce(persistence::BrowserWriteResult) + 'static,
 ) -> Result<(), String> {
-    persistence::start_browser_write(target, persist_binding, suggested_name, bytes, complete)
+    if bytes.len() as u64 > crate::io::project_io::BROWSER_FILE_BYTES {
+        return Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned());
+    }
+    persistence::start_browser_write(
+        target,
+        persist_binding,
+        suggested_name,
+        bytes,
+        |bytes, _| Ok(std::mem::take(bytes)),
+        |_, result| complete(result),
+    )
+}
+
+/// Write a project save through the browser. A first save to a file the
+/// reader picks names a default-named project after that file before its
+/// bytes are produced, as a desktop save names it after its path, so the
+/// file holds the name it is saved under.
+#[cfg(target_arch = "wasm32")]
+pub fn start_browser_project_write(
+    prepared: BrowserPreparedSave,
+    persist_binding: bool,
+    complete: impl FnOnce(BrowserPreparedSave, persistence::BrowserWriteResult) + 'static,
+) -> Result<(), String> {
+    if prepared.save.bytes().len() as u64 > crate::io::project_io::BROWSER_FILE_BYTES {
+        return Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned());
+    }
+    let target = BrowserWriteTarget {
+        handle_id: prepared.handle_id,
+        intent: prepared.save.intent().clone(),
+    };
+    let name = prepared.suggested_name.clone();
+    persistence::start_browser_write(
+        target,
+        persist_binding,
+        &name,
+        prepared,
+        |prepared, picked| {
+            if let Some(file_name) = picked
+                && prepared.first_save
+            {
+                prepared.named_from = prepared
+                    .save
+                    .name_after_file(file_name)
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(prepared.save.take_bytes())
+        },
+        complete,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1676,6 +1733,7 @@ pub fn complete_browser_save(
     let BrowserPreparedSave {
         save,
         workspace_session,
+        named_from,
         ..
     } = prepared;
     let completion = {
@@ -1693,6 +1751,15 @@ pub fn complete_browser_save(
             )?
     };
     if let Some(completion) = completion {
+        // The file the save picked named the project; the open project takes
+        // the name the file now holds, as a desktop save's does.
+        if let Some(before) = named_from {
+            let parts = &mut state.lifecycle_parts();
+            let project = &mut parts.model.workspace.content.project;
+            if project.name() == before {
+                let _ = project.rename(completion.candidate.workspace.project.name().to_owned());
+            }
+        }
         let candidate = ProjectSnapshot {
             file: completion.candidate,
             workspace_session,

@@ -911,19 +911,11 @@ fn start_browser_project_save(
         }
     }
 
-    let target = crate::workbench::lifecycle::project_lifecycle::BrowserWriteTarget {
-        handle_id: prepared.handle_id,
-        intent: prepared.save.intent().clone(),
-    };
-    let name = prepared.suggested_name.clone();
-    let bytes = prepared.save.take_bytes();
     let transaction = prepared.save.transaction();
-    match crate::workbench::lifecycle::project_lifecycle::start_browser_write(
-        target,
+    match crate::workbench::lifecycle::project_lifecycle::start_browser_project_write(
+        prepared,
         !project_copy,
-        &name,
-        bytes,
-        move |result| {
+        move |prepared, result| {
             BROWSER_PROJECT_SAVE_RESULTS.with(|queue| {
                 queue
                     .borrow_mut()
@@ -970,6 +962,7 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
     let transaction = completion.prepared.save.transaction();
     let saved_scope = completion.prepared.save.scope();
     let saved_document = completion.prepared.save.saved_document().clone();
+    let named_from = completion.prepared.named_from.clone();
     if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
         parts.lifecycle.model,
         parts.lifecycle.platform,
@@ -1063,10 +1056,10 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
                     },
                 );
                 if !project_copy {
-                    parts.workbench.prompt(format!(
-                        "Saved {}",
-                        parts.lifecycle.model.workspace.content.project.name()
-                    ));
+                    let name = parts.lifecycle.model.workspace.content.project.name();
+                    parts
+                        .workbench
+                        .prompt(saved_prompt(named_from.as_deref().unwrap_or(name), name));
                     continuation = Some(canonical_save_continuation_event(
                         &parts,
                         transaction,

@@ -58,6 +58,44 @@ fn prepare(
     (prepared, project_id, publication)
 }
 
+/// The first browser save of an untitled project names it after the file
+/// the reader picked, as a desktop save names it after its path: the bytes
+/// written hold the name, the publication of those bytes is accepted, and
+/// the candidate adopted carries it. A named project and a copy keep theirs.
+#[test]
+fn a_first_browser_save_names_an_untitled_project_after_the_picked_file() {
+    let mut lifecycle = ProjectLifecycle::default();
+    let (mut prepared, project_id, mut publication) = prepare(&mut lifecycle, false);
+    let staged_revision = prepared.candidate().workspace.project.revision();
+    assert_eq!(
+        prepared.name_after_file("Amplifier.rspiceproj").unwrap(),
+        Some("Untitled Project".to_owned())
+    );
+    let bytes = prepared.take_bytes();
+    let written: ProjectFile = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(written.workspace.project.name(), "Amplifier");
+    assert_eq!(
+        written.workspace.project.revision(),
+        staged_revision.next().unwrap(),
+        "the name is one revision"
+    );
+    assert_eq!(
+        prepared.name_after_file("Other.rspiceproj").unwrap(),
+        None,
+        "a named project keeps its name"
+    );
+    publication.receipt.accepted_digest = digest_bytes(&bytes);
+    let adopted = lifecycle
+        .complete_browser_save(prepared, &project_id, None, publication, || {})
+        .unwrap()
+        .expect("the save is adopted");
+    assert_eq!(adopted.candidate.workspace.project.name(), "Amplifier");
+
+    let mut lifecycle = ProjectLifecycle::default();
+    let (mut copy, _, _) = prepare(&mut lifecycle, true);
+    assert_eq!(copy.name_after_file("Amplifier.rspiceproj").unwrap(), None);
+}
+
 #[test]
 fn late_browser_completion_preserves_the_current_transaction() {
     for context_only in [false, true] {

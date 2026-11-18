@@ -103,6 +103,34 @@ impl PreparedBrowserSave {
     pub fn take_bytes(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.staged.bytes)
     }
+
+    /// The serialized project, as it will be written.
+    pub fn bytes(&self) -> &[u8] {
+        &self.staged.bytes
+    }
+
+    /// Name a default-named project after `file_name`, the file the reader
+    /// picked for its first save, as a desktop save names it after its path,
+    /// and serialize it again: the file written holds the name, and the
+    /// candidate adopted is the one written. Returns the name it replaced;
+    /// a copy, or a project already named, is written as it was staged.
+    pub fn name_after_file(
+        &mut self,
+        file_name: &str,
+    ) -> Result<Option<String>, ProjectLifecycleError> {
+        if self.staged.project_copy {
+            return Ok(None);
+        }
+        let mut candidate = self.staged.candidate.clone();
+        let Some(before) = candidate.workspace.project.name_after_file(file_name) else {
+            return Ok(None);
+        };
+        let (bytes, staged_digest) = serialized_project(&candidate)?;
+        self.staged.candidate = candidate;
+        self.staged.bytes = bytes;
+        self.staged.staged_digest = staged_digest;
+        Ok(Some(before))
+    }
 }
 
 pub struct BrowserSavePublication {

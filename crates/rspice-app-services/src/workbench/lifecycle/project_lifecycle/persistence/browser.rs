@@ -81,14 +81,15 @@ pub(super) enum BrowserWriteStart {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) async fn run_browser_write(
+pub(super) async fn run_browser_write<P>(
     operation: BrowserWriteStart,
     suggested_name: &str,
     persist_binding: bool,
-    bytes: &[u8],
+    payload: &mut P,
+    bytes_for: impl FnOnce(&mut P, Option<&str>) -> Result<Vec<u8>, String>,
 ) -> BrowserWriteResult {
     let prepared = match operation {
-        BrowserWriteStart::Existing { handle, target } => (handle, target, false),
+        BrowserWriteStart::Existing { handle, target } => (handle, target, false, None),
         BrowserWriteStart::Picker { picker, target } => {
             let handle = match wasm_bindgen_futures::JsFuture::from(picker).await {
                 Ok(handle) => handle,
@@ -100,10 +101,13 @@ pub(super) async fn run_browser_write(
             if let Err(error) = validate_browser_write_handle(&handle, true) {
                 return BrowserWriteResult::Failed(error.into());
             }
+            let picked = js_sys::Reflect::get(&handle, &wasm_bindgen::JsValue::from_str("name"))
+                .ok()
+                .and_then(|name| name.as_string());
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
             target.handle_id = Some(handle_id);
-            (handle, target, true)
+            (handle, target, true, picked)
         }
         BrowserWriteStart::Opfs { target } => {
             let handle = match open_opfs_binding_handle(target.intent.binding_id, true).await {
@@ -116,10 +120,25 @@ pub(super) async fn run_browser_write(
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
             target.handle_id = Some(handle_id);
-            (handle, target, true)
+            (handle, target, true, None)
         }
     };
-    let (handle, target, newly_registered) = prepared;
+    let (handle, target, newly_registered, picked) = prepared;
+    let bytes = match bytes_for(payload, picked.as_deref()) {
+        Ok(bytes) if bytes.len() as u64 > crate::io::project_io::BROWSER_FILE_BYTES => {
+            Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned())
+        }
+        produced => produced,
+    };
+    let bytes = match bytes {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            if newly_registered {
+                release_browser_handle(target.handle_id.expect("registered browser handle"));
+            }
+            return BrowserWriteResult::Failed(error.into());
+        }
+    };
     let lock = match acquire_browser_web_lock(
         target.intent.binding_id,
         persist_binding || target.intent.backend == BrowserBindingBackend::Opfs,
@@ -135,7 +154,7 @@ pub(super) async fn run_browser_write(
         }
     };
     let result =
-        run_browser_write_locked(&handle, &target, suggested_name, persist_binding, bytes).await;
+        run_browser_write_locked(&handle, &target, suggested_name, persist_binding, &bytes).await;
     let release = release_browser_web_lock(lock).await;
     if let Err(error) = release {
         log::warn!("browser canonical lock release reported an error: {error}");

@@ -221,19 +221,22 @@ pub(crate) fn browser_opfs_supported() -> bool {
 /// user activation. Existing handles are resolved only through the live
 /// registry, permission is rechecked, current bytes are compared, and the
 /// written bytes are read back before success is reported.
+///
+/// The bytes are `payload`'s, produced by `bytes_for` once the file is
+/// known: given the name of the file the reader picked, when a picker chose
+/// it, so what is written can be named after it. `complete` gets the payload
+/// back with the result.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_write(
+pub(crate) fn start_browser_write<P: 'static>(
     target: BrowserWriteTarget,
     persist_binding: bool,
     suggested_name: &str,
-    bytes: Vec<u8>,
-    complete: impl FnOnce(BrowserWriteResult) + 'static,
+    mut payload: P,
+    bytes_for: impl FnOnce(&mut P, Option<&str>) -> Result<Vec<u8>, String> + 'static,
+    complete: impl FnOnce(P, BrowserWriteResult) + 'static,
 ) -> Result<(), String> {
     use wasm_bindgen::JsCast as _;
 
-    if bytes.len() as u64 > crate::io::project_io::BROWSER_FILE_BYTES {
-        return Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned());
-    }
     target.intent.validate_generation()?;
     let operation = if let Some(handle_id) = target.handle_id {
         let handle = resolve_browser_handle(handle_id)?;
@@ -262,8 +265,15 @@ pub(crate) fn start_browser_write(
     let suggested_name = suggested_name.to_owned();
 
     wasm_bindgen_futures::spawn_local(async move {
-        let result = run_browser_write(operation, &suggested_name, persist_binding, &bytes).await;
-        complete(result);
+        let result = run_browser_write(
+            operation,
+            &suggested_name,
+            persist_binding,
+            &mut payload,
+            bytes_for,
+        )
+        .await;
+        complete(payload, result);
     });
     Ok(())
 }
