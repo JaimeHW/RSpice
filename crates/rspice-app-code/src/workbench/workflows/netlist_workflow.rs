@@ -17,7 +17,7 @@ mod tests;
 
 pub use find::apply_netlist_find_step;
 #[cfg(not(target_arch = "wasm32"))]
-pub use platform::show_open_deck_dialog;
+pub use platform::{show_new_deck_dialog, show_open_deck_dialog};
 
 pub const NETLIST_FILTER: (&str, &[&str]) = (
     "SPICE Deck",

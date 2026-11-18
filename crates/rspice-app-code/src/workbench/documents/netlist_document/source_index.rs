@@ -65,7 +65,10 @@ pub(super) fn root_deck_path(model: &Model, netlist: &NetlistDocumentState) -> P
     content
         .decks
         .first()
-        .map(|deck| deck.file_path(content.project.data_root()))
+        .map(|deck| {
+            deck.file_path(content.project.data_root())
+                .unwrap_or_else(|| PathBuf::from(deck.name()))
+        })
         .unwrap_or_default()
 }
 

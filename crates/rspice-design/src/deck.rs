@@ -2,7 +2,9 @@
 //!
 //! A deck on the desktop is a file. The project keeps where it is and
 //! nothing of its text; the file is read when the deck opens or runs and
-//! written when it is saved.
+//! written when it is saved. The browser and the tablet have no file system,
+//! so there the project keeps the deck's text, and the text of the files its
+//! include lines read.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -49,6 +51,69 @@ pub enum DeckSource {
     /// A file. Relative to the project folder, written with `/`, when the
     /// file is under it; absolute otherwise.
     File { path: PathBuf },
+    /// Text kept in the project, where there is no file system to keep a
+    /// deck in.
+    Stored(StoredDeck),
+}
+
+/// A deck the project keeps as text, with the files its include lines read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredDeck {
+    /// The file name the deck is shown, run and exported under.
+    pub name: String,
+    /// The exact text, with the line separators it was written with.
+    pub text: String,
+    /// The encoding the deck is exported in.
+    pub encoding: TextEncoding,
+    /// The files its include lines read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<StoredDeckFile>,
+}
+
+/// A file a stored deck's include lines read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredDeckFile {
+    /// Where the file is, relative to the deck, written with `/` and never
+    /// above the deck's own folder.
+    pub path: String,
+    /// The exact text, with the line separators it was written with.
+    pub text: String,
+    /// The encoding the file is exported in.
+    pub encoding: TextEncoding,
+}
+
+impl StoredDeck {
+    /// A new deck called `name`: a title line naming it, and `.end`.
+    #[must_use]
+    pub fn new(name: &str) -> Self {
+        let title = name.rsplit_once('.').map_or(name, |(stem, _)| stem).trim();
+        Self {
+            name: name.to_owned(),
+            text: format!("* {title}\n\n.end\n"),
+            encoding: TextEncoding::Utf8,
+            files: Vec::new(),
+        }
+    }
+}
+
+/// The first `deck<N>.cir` that none of `taken` is called: the name a new
+/// stored deck takes.
+#[must_use]
+pub fn new_stored_deck_name<'a, I>(taken: I) -> String
+where
+    I: IntoIterator<Item = &'a str> + Clone,
+{
+    (1_u32..)
+        .map(|number| format!("deck{number}.cir"))
+        .find(|name| {
+            !taken
+                .clone()
+                .into_iter()
+                .any(|other| other.eq_ignore_ascii_case(name))
+        })
+        .unwrap_or_else(|| "deck.cir".to_owned())
 }
 
 impl ProjectDeck {
@@ -64,31 +129,62 @@ impl ProjectDeck {
         }
     }
 
-    /// The deck's file, resolved against `project_folder` when it is stored
-    /// relative.
+    /// A new deck the project keeps as text.
     #[must_use]
-    pub fn file_path(&self, project_folder: Option<&Path>) -> PathBuf {
-        let DeckSource::File { path } = &self.source;
-        match project_folder {
+    pub fn stored(deck: StoredDeck) -> Self {
+        Self {
+            id: DeckId::new(),
+            source: DeckSource::Stored(deck),
+        }
+    }
+
+    /// The deck's file, resolved against `project_folder` when it is stored
+    /// relative; `None` for a deck the project keeps as text.
+    #[must_use]
+    pub fn file_path(&self, project_folder: Option<&Path>) -> Option<PathBuf> {
+        let DeckSource::File { path } = &self.source else {
+            return None;
+        };
+        Some(match project_folder {
             Some(folder) if path.is_relative() => plain_path(folder).join(path),
             _ => path.clone(),
-        }
+        })
     }
 
     /// Whether the deck is the file at `path`, however either is spelled.
     #[must_use]
     pub fn is_file(&self, path: &Path, project_folder: Option<&Path>) -> bool {
-        plain_path(&self.file_path(project_folder)) == plain_path(path)
+        self.file_path(project_folder)
+            .is_some_and(|file| plain_path(&file) == plain_path(path))
+    }
+
+    /// The deck the project keeps as text, when it is one.
+    #[must_use]
+    pub const fn stored_deck(&self) -> Option<&StoredDeck> {
+        match &self.source {
+            DeckSource::Stored(deck) => Some(deck),
+            DeckSource::File { .. } => None,
+        }
+    }
+
+    /// The deck the project keeps as text, to change, when it is one.
+    pub fn stored_deck_mut(&mut self) -> Option<&mut StoredDeck> {
+        match &mut self.source {
+            DeckSource::Stored(deck) => Some(deck),
+            DeckSource::File { .. } => None,
+        }
     }
 
     /// The name the deck is shown and run under: its file name.
     #[must_use]
     pub fn name(&self) -> String {
-        let DeckSource::File { path } = &self.source;
-        path.file_name().map_or_else(
-            || path.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        )
+        match &self.source {
+            DeckSource::File { path } => path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
+            DeckSource::Stored(deck) => deck.name.clone(),
+        }
     }
 }
 
@@ -247,7 +343,10 @@ mod tests {
             json,
             serde_json::json!({"kind": "file", "path": "decks/amp.cir"})
         );
-        assert_eq!(deck.file_path(Some(&folder)), folder.join("decks/amp.cir"));
+        assert_eq!(
+            deck.file_path(Some(&folder)),
+            Some(folder.join("decks/amp.cir"))
+        );
         assert_eq!(deck.name(), "amp.cir");
     }
 
@@ -259,7 +358,9 @@ mod tests {
         let folder = PathBuf::from(r"\\?\C:\work\amp");
         let file = PathBuf::from(r"C:\work\amp\decks\amp.cir");
         let deck = ProjectDeck::for_file(&file, Some(&folder));
-        let DeckSource::File { path } = &deck.source;
+        let DeckSource::File { path } = &deck.source else {
+            panic!("a deck opened from a file is a file");
+        };
         assert_eq!(path, &PathBuf::from("decks/amp.cir"));
         assert!(deck.is_file(&file, Some(&folder)));
         assert!(deck.is_file(
@@ -276,9 +377,51 @@ mod tests {
         let folder = root.join("projects").join("amp");
         let file = root.join("elsewhere").join("tb.sp");
         let deck = ProjectDeck::for_file(&file, Some(&folder));
-        let DeckSource::File { path } = &deck.source;
+        let DeckSource::File { path } = &deck.source else {
+            panic!("a deck opened from a file is a file");
+        };
         assert_eq!(path, &file);
-        assert_eq!(deck.file_path(Some(&folder)), file);
+        assert_eq!(deck.file_path(Some(&folder)), Some(file));
+    }
+
+    #[test]
+    fn a_stored_deck_keeps_its_text_and_files_in_the_project_file() {
+        let mut stored = StoredDeck::new("amp_tb.cir");
+        stored.files.push(StoredDeckFile {
+            path: "models/amp.lib".to_owned(),
+            text: ".model qn npn\r\n".to_owned(),
+            encoding: TextEncoding::Latin1,
+        });
+        let deck = ProjectDeck::stored(stored);
+        let json = serde_json::to_value(&deck.source).expect("deck source serializes");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "kind": "stored",
+                "name": "amp_tb.cir",
+                "text": "* amp_tb\n\n.end\n",
+                "encoding": "utf8",
+                "files": [{
+                    "path": "models/amp.lib",
+                    "text": ".model qn npn\r\n",
+                    "encoding": "latin1",
+                }],
+            })
+        );
+        let read: DeckSource = serde_json::from_value(json).expect("deck source reads back");
+        assert_eq!(read, deck.source);
+        assert_eq!(deck.name(), "amp_tb.cir");
+        assert_eq!(deck.file_path(None), None);
+        assert!(!deck.is_file(Path::new("amp_tb.cir"), None));
+    }
+
+    #[test]
+    fn a_new_stored_deck_takes_the_first_name_no_deck_has() {
+        assert_eq!(new_stored_deck_name(["deck2.cir"]), "deck1.cir");
+        assert_eq!(
+            new_stored_deck_name(["DECK1.cir", "deck2.cir"]),
+            "deck3.cir"
+        );
     }
 
     #[test]

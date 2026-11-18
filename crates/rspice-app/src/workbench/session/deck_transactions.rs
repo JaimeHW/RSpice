@@ -29,9 +29,92 @@ impl AppState {
         self.open_deck_at(&path, new_project)
     }
 
+    /// New deck: on the desktop, ask where its file goes, write a title line
+    /// and `.end` there and open it; where there is no file system, a deck
+    /// the project keeps as text. A deck that could not be added now is
+    /// refused before any file is asked for.
+    pub(crate) fn new_deck(&mut self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.new_stored_deck()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let new_project = !self.platform.project_lifecycle.is_open();
+            if let Some(reason) = self.deck_open_refusal(new_project) {
+                self.prompt(reason);
+                return false;
+            }
+            let folder = self
+                .model
+                .workspace
+                .content
+                .project
+                .data_root()
+                .map(std::path::Path::to_path_buf)
+                .or_else(dirs::document_dir);
+            let Some(path) =
+                rspice_app_code::workbench::workflows::netlist_workflow::show_new_deck_dialog(
+                    folder.as_deref(),
+                )
+            else {
+                return false;
+            };
+            let deck = rspice_app_state::state::StoredDeck::new(
+                &path
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            );
+            if let Err(error) = std::fs::write(&path, deck.text) {
+                self.prompt(format!("{} could not be written: {error}", path.display()));
+                return false;
+            }
+            self.open_deck_at(&path, new_project)
+        }
+    }
+
+    /// Add a new deck the project keeps as text and bring it to the front,
+    /// in a new project around it when none is open: what New deck makes
+    /// where there is no file system.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn new_stored_deck(&mut self) -> bool {
+        let new_project = !self.platform.project_lifecycle.is_open();
+        if let Some(reason) = self.deck_open_refusal(new_project) {
+            self.prompt(reason);
+            return false;
+        }
+        let mut candidate = self.clone();
+        if new_project {
+            candidate.create_netlist_project(&rspice_app_state::state::new_stored_deck_name(
+                std::iter::empty::<&str>(),
+            ));
+        }
+        let name = match rspice_app_code::workbench::documents::deck_files::new_stored_deck(
+            &mut candidate.model,
+            &mut candidate.code.netlist,
+            &mut candidate.code.netlist_open_documents,
+            &mut candidate.runs,
+        ) {
+            Ok(name) => name,
+            Err(error) => {
+                self.prompt(error);
+                return false;
+            }
+        };
+        candidate
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
+        self.commit_candidate(candidate);
+        self.record(
+            rspice_app_state::diagnostics::LogSeverity::Info,
+            rspice_app_state::diagnostics::LogSource::Netlist,
+            format!("Created deck {name}."),
+        );
+        true
+    }
+
     /// Why no deck can be opened now: a run in progress, or a project open
     /// read-only that the deck would be added to.
-    #[cfg(not(target_arch = "wasm32"))]
     fn deck_open_refusal(&self, new_project: bool) -> Option<&'static str> {
         if self.model.simulation.execution.has_active_execution() {
             return Some("A deck cannot be opened while a simulation is running.");

@@ -81,14 +81,14 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::Save => {
             // The deck, or an include of it, in front of the Netlist page is
-            // a file of its own: Save writes it.
+            // a file of its own: Save writes it. A deck the project keeps as
+            // text is saved with the project.
             #[cfg(not(target_arch = "wasm32"))]
             if state.workbench.workspace
                 == rspice_app_state::workbench::workspace::Workspace::Netlist
-                && rspice_app_code::workbench::documents::netlist_document::active_deck_file_in(
+                && rspice_app_code::workbench::documents::deck_files::shown_file_is_on_disk(
                     &state.code.netlist,
                 )
-                .is_some()
             {
                 if let Err(error) =
                     rspice_app_code::workbench::documents::deck_files::save_shown_file(

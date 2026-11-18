@@ -1271,13 +1271,14 @@ pub fn manual_source_inputs_in<'a>(
     deck: Option<crate::simulation::ManualDeck<'a>>,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'a>, PreparationError> {
     Ok(match deck {
-        Some(deck) => {
-            let crate::simulation::DeckOrigin::File(path) = deck.origin;
-            crate::simulation::execution::preparation::ManualSourceInputs {
-                source: deck.text,
-                origin: Some(path),
-            }
-        }
+        Some(deck) => crate::simulation::execution::preparation::ManualSourceInputs {
+            source: deck.text,
+            // A deck the project keeps as text has no folder to read from.
+            origin: match deck.origin {
+                crate::simulation::DeckOrigin::File(path) => Some(path),
+                crate::simulation::DeckOrigin::Stored { .. } => None,
+            },
+        },
         None => crate::simulation::execution::preparation::ManualSourceInputs {
             source: model.simulation.source.netlist_content.as_str(),
             origin: model.schematic.session.current_file.as_deref(),

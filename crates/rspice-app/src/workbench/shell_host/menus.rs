@@ -123,15 +123,16 @@ pub(in crate::workbench) const fn application_menu_entries(
 /// File makes, opens, closes, keeps, brings in and sends out: the project,
 /// its cells and the documents open on them.
 ///
-/// Its 25 rows have 21 letters among their labels to give as access keys:
-/// Save a copy and Project properties (whose every letter an earlier row
-/// holds), Save all (which has its key) and Live session (shown only to a
-/// signed-in account) go without.
+/// Its 26 rows have 21 letters among their labels to give as access keys:
+/// New deck, Save a copy and Project properties (whose every letter an
+/// earlier row holds), Save all (which has its key) and Live session (shown
+/// only to a signed-in account) go without.
 const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::NewProject).access('N'),
     project(ProjectCommand::NewCell).access('W'),
     project(ProjectCommand::NewView).access('V'),
     code(CodeCommand::NewVerilogADevice).access('G'),
+    code(CodeCommand::NewDeck),
     Separator,
     // A schematic file is opened as a document of its own only on the start
     // screen; inside a project it is imported as a new cell view.

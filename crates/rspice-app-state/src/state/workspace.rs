@@ -44,7 +44,9 @@ pub use design_intent::*;
 pub use design_projection::*;
 pub use hierarchy::*;
 pub(crate) use reference_preparation::SchematicReferenceTransaction;
-pub use rspice_design::deck::{DeckId, DeckSource, ProjectDeck, TextEncoding};
+pub use rspice_design::deck::{
+    DeckId, DeckSource, ProjectDeck, StoredDeck, StoredDeckFile, TextEncoding, new_stored_deck_name,
+};
 pub use rspice_design::library::ProjectLibraryMutation;
 pub use rspice_design::occurrence::DocumentOccurrence;
 pub use rspice_project::*;

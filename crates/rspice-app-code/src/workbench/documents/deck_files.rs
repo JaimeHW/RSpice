@@ -6,6 +6,11 @@
 //! back, in its own encoding and with its own line separators, when it is
 //! saved. An include the deck reads is a file too, opened on its own tab
 //! and saved the same way.
+//!
+//! Where there is no file system, the project keeps a deck's text
+//! ([`StoredDeck`](crate::state::StoredDeck)) and the text of the files its
+//! include lines read. An edit to one of those is the project's at once,
+//! and saving the project keeps it.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,7 +18,7 @@ use std::path::{Path, PathBuf};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use crate::state::{DeckId, NetlistDocumentId, TextEncoding};
+use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::state::WorkspaceDocumentId;
 
@@ -182,9 +187,38 @@ pub struct OpenDeck {
     pub id: DeckId,
     pub root: OpenFile,
     pub includes: Vec<OpenFile>,
+    /// For a deck the project keeps as text, the files its include lines
+    /// read, as the project keeps them; `None` for a deck that is a file.
+    pub stored_files: Option<Vec<StoredDeckFile>>,
 }
 
 impl OpenDeck {
+    /// The deck `id` the project keeps as `deck`. Its file is named by the
+    /// deck's name and read from nowhere.
+    #[must_use]
+    pub fn from_stored(id: DeckId, deck: &StoredDeck) -> Self {
+        let (text, line_ending) = LineEnding::read(deck.text.clone());
+        Self {
+            id,
+            root: OpenFile {
+                path: PathBuf::from(&deck.name),
+                text,
+                encoding: deck.encoding,
+                line_ending,
+                disk: None,
+                dirty: false,
+            },
+            includes: Vec::new(),
+            stored_files: Some(deck.files.clone()),
+        }
+    }
+
+    /// Whether the project keeps the deck as text rather than as a file.
+    #[must_use]
+    pub const fn is_stored(&self) -> bool {
+        self.stored_files.is_some()
+    }
+
     /// The identity the deck's tabs go by.
     #[must_use]
     pub fn tab_id(&self) -> NetlistDocumentId {
@@ -230,6 +264,7 @@ impl OpenDeck {
             id: DeckId::new(),
             root: OpenFile::in_memory(path, text),
             includes: Vec::new(),
+            stored_files: None,
         }
     }
 }
@@ -326,9 +361,102 @@ pub fn save_shown_file(netlist: &mut NetlistDocumentState) -> Result<(), String>
     let file = netlist
         .open_deck
         .as_mut()
+        .filter(|deck| !deck.is_stored())
         .and_then(|deck| deck.file_mut(include.as_deref()))
         .ok_or_else(|| "The file is no longer open.".to_owned())?;
     save_file(file)
+}
+
+/// Whether the file in front of the Netlist workspace is a file on disk,
+/// which Save writes: a deck that is a file, or an include of one. A deck
+/// the project keeps as text is saved with the project.
+#[must_use]
+pub fn shown_file_is_on_disk(netlist: &NetlistDocumentState) -> bool {
+    netlist
+        .open_deck
+        .as_ref()
+        .is_some_and(|deck| !deck.is_stored())
+        && crate::workbench::documents::netlist_document::active_deck_file_in(netlist).is_some()
+}
+
+/// Put an edit to the file `include` names, or to the deck itself, of a
+/// deck the project keeps as text into the project at once, with the file's
+/// own line separators: the project then has unsaved changes, and nothing
+/// waits for a Save of the file. A deck that is a file waits for Save.
+pub fn keep_stored_edit(model: &mut Model, deck: &mut OpenDeck, include: Option<&str>) {
+    let OpenDeck {
+        id,
+        root,
+        includes,
+        stored_files: Some(files),
+    } = deck
+    else {
+        return;
+    };
+    let file = match include {
+        None => root,
+        Some(key) => match includes.iter_mut().find(|file| file.key() == key) {
+            Some(file) => file,
+            None => return,
+        },
+    };
+    file.dirty = false;
+    let text = file.line_ending.write(&file.text).into_owned();
+    if let Some(key) = include
+        && let Some(stored) = files.iter_mut().find(|stored| stored.path == key)
+    {
+        stored.text.clone_from(&text);
+    }
+    let content = &mut *model.workspace.content;
+    let Some(stored) = content
+        .decks
+        .iter_mut()
+        .find(|deck| deck.id == *id)
+        .and_then(crate::state::ProjectDeck::stored_deck_mut)
+    else {
+        return;
+    };
+    match include {
+        None => stored.text = text,
+        Some(key) => {
+            if let Some(stored) = stored.files.iter_mut().find(|stored| stored.path == key) {
+                stored.text = text;
+            }
+        }
+    }
+    content.decks_dirty = true;
+}
+
+/// Add a new deck the project keeps as text, named `deck<N>.cir` after the
+/// first number no deck has, and bring it to the front: what New deck makes
+/// where there is no file system. Its name, or why there is none: the deck
+/// open before it goes, so one with unsaved edits stops this.
+pub fn new_stored_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+) -> Result<String, String> {
+    if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
+        return Err(format!(
+            "Save {} before opening another deck.",
+            unsaved.name()
+        ));
+    }
+    let content = &mut *model.workspace.content;
+    let names = content
+        .decks
+        .iter()
+        .map(crate::state::ProjectDeck::name)
+        .collect::<Vec<_>>();
+    let name = crate::state::new_stored_deck_name(names.iter().map(String::as_str));
+    let stored = StoredDeck::new(&name);
+    let deck = crate::state::ProjectDeck::stored(stored.clone());
+    let open = OpenDeck::from_stored(deck.id, &stored);
+    content.decks.push(deck);
+    content.decks_dirty = true;
+    install_open_deck(model, netlist, open_documents, runs, open);
+    Ok(name)
 }
 
 /// Open the deck at `path`: add it to the project unless it is one of the
@@ -388,14 +516,42 @@ pub fn open_deck(
             id,
             root,
             includes: Vec::new(),
+            stored_files: None,
         },
     );
     Ok(())
 }
 
+/// The project's deck `deck`, opened: its text as the project keeps it, or
+/// its file read from disk. A file is not read where there is no file
+/// system, and the refusal says where to open it.
+fn read_project_deck(
+    deck: &crate::state::ProjectDeck,
+    project_folder: Option<&Path>,
+) -> Result<OpenDeck, String> {
+    if let Some(stored) = deck.stored_deck() {
+        return Ok(OpenDeck::from_stored(deck.id, stored));
+    }
+    let path = deck.file_path(project_folder).unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        read_file(&path).map(|root| OpenDeck {
+            id: deck.id,
+            root,
+            includes: Vec::new(),
+            stored_files: None,
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    Err(format!(
+        "{} is a file on the desktop ({}). Open the project on the desktop to edit or run it.",
+        deck.name(),
+        path.display()
+    ))
+}
+
 /// Open the project's first deck when the project has decks and none is
 /// open, once per project: a deck that cannot be read is reported once.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn open_project_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -405,27 +561,17 @@ pub fn open_project_deck(
     if netlist.open_deck.is_some() {
         return;
     }
-    let Some(deck) = model.workspace.content.decks.first().cloned() else {
+    let Some(deck) = model.workspace.content.decks.first() else {
         return;
     };
     if netlist.unreadable_deck == Some(deck.id) {
         return;
     }
-    let path = deck.file_path(model.workspace.content.project.data_root());
-    match read_file(&path) {
-        Ok(root) => install_open_deck(
-            model,
-            netlist,
-            open_documents,
-            runs,
-            OpenDeck {
-                id: deck.id,
-                root,
-                includes: Vec::new(),
-            },
-        ),
+    let id = deck.id;
+    match read_project_deck(deck, model.workspace.content.project.data_root()) {
+        Ok(open) => install_open_deck(model, netlist, open_documents, runs, open),
         Err(error) => {
-            netlist.unreadable_deck = Some(deck.id);
+            netlist.unreadable_deck = Some(id);
             model.record(
                 crate::diagnostics::LogSeverity::Error,
                 crate::diagnostics::LogSource::Netlist,
@@ -498,10 +644,28 @@ pub fn show_include(
         .as_mut()
         .ok_or_else(|| "No deck is open.".to_owned())?;
     if deck.include(&key).is_none() {
-        #[cfg(not(target_arch = "wasm32"))]
-        deck.includes.push(read_file(path)?);
-        #[cfg(target_arch = "wasm32")]
-        return Err(format!("{} is not open.", file_name(path)));
+        // A deck the project keeps as text reads its includes from what the
+        // project keeps beside it.
+        if let Some(files) = &deck.stored_files {
+            let stored = files
+                .iter()
+                .find(|file| file.path == key)
+                .ok_or_else(|| format!("{} is not kept with this deck.", file_name(path)))?;
+            let (text, line_ending) = LineEnding::read(stored.text.clone());
+            deck.includes.push(OpenFile {
+                path: path.to_path_buf(),
+                text,
+                encoding: stored.encoding,
+                line_ending,
+                disk: None,
+                dirty: false,
+            });
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            deck.includes.push(read_file(path)?);
+            #[cfg(target_arch = "wasm32")]
+            return Err(format!("{} is not open.", file_name(path)));
+        }
     }
     let root = deck.tab_id();
     let text = deck

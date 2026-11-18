@@ -225,10 +225,14 @@ impl OverviewSnapshot {
 
 fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
     let deck = model.workspace.content.decks.first()?;
-    let crate::state::DeckSource::File { path } = &deck.source;
+    // A deck the project keeps as text has no path; its row says so.
+    let path = match &deck.source {
+        crate::state::DeckSource::File { path } => path.to_string_lossy().into_owned(),
+        crate::state::DeckSource::Stored(_) => "kept in the project".to_owned(),
+    };
     Some(SourceDeckSnapshot {
         name: deck.name(),
-        path: path.to_string_lossy().into_owned(),
+        path,
     })
 }
 

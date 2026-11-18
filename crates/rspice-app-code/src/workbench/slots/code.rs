@@ -107,7 +107,10 @@ pub fn manual_deck_in(netlist: &NetlistDocumentState) -> Option<ManualDeck<'_>> 
                 .and_then(std::ffi::OsStr::to_str)
                 .unwrap_or("deck"),
             text: &deck.root.text,
-            origin: DeckOrigin::File(&deck.root.path),
+            origin: match &deck.stored_files {
+                Some(files) => DeckOrigin::Stored { files },
+                None => DeckOrigin::File(&deck.root.path),
+            },
         })
 }
 

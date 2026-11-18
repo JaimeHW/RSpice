@@ -80,6 +80,10 @@ pub struct ManualDeck<'a> {
 pub enum DeckOrigin<'a> {
     /// A file on disk.
     File(&'a std::path::Path),
+    /// Text the project keeps, with the files its include lines read.
+    Stored {
+        files: &'a [rspice_design::deck::StoredDeckFile],
+    },
 }
 
 /// A [`ManualDeck`] that owns what it names, for a host that keeps a copy.
@@ -87,7 +91,14 @@ pub enum DeckOrigin<'a> {
 pub struct ManualDeckCopy {
     pub name: String,
     pub text: String,
-    pub path: std::path::PathBuf,
+    pub origin: DeckOriginCopy,
+}
+
+/// A [`DeckOrigin`] that owns what it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeckOriginCopy {
+    File(std::path::PathBuf),
+    Stored(Vec<rspice_design::deck::StoredDeckFile>),
 }
 
 impl ManualDeckCopy {
@@ -98,17 +109,23 @@ impl ManualDeckCopy {
             || path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
         );
-        Self { name, text, path }
+        Self {
+            name,
+            text,
+            origin: DeckOriginCopy::File(path),
+        }
     }
 
     /// A copy of `deck`.
     #[must_use]
     pub fn of(deck: ManualDeck<'_>) -> Self {
-        let DeckOrigin::File(path) = deck.origin;
         Self {
             name: deck.name.to_owned(),
             text: deck.text.to_owned(),
-            path: path.to_path_buf(),
+            origin: match deck.origin {
+                DeckOrigin::File(path) => DeckOriginCopy::File(path.to_path_buf()),
+                DeckOrigin::Stored { files } => DeckOriginCopy::Stored(files.to_vec()),
+            },
         }
     }
 
@@ -118,7 +135,20 @@ impl ManualDeckCopy {
         ManualDeck {
             name: &self.name,
             text: &self.text,
-            origin: DeckOrigin::File(&self.path),
+            origin: match &self.origin {
+                DeckOriginCopy::File(path) => DeckOrigin::File(path),
+                DeckOriginCopy::Stored(files) => DeckOrigin::Stored { files },
+            },
+        }
+    }
+
+    /// Where the run's findings say their lines are: the deck's file, or the
+    /// name of a deck the project keeps as text.
+    #[must_use]
+    pub fn findings_path(self) -> std::path::PathBuf {
+        match self.origin {
+            DeckOriginCopy::File(path) => path,
+            DeckOriginCopy::Stored(_) => std::path::PathBuf::from(self.name),
         }
     }
 }

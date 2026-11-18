@@ -28,6 +28,7 @@ use crate::workbench::state::Workspace;
 pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<CodeHandOff> {
     match request {
         CodeRequest::OpenNetlist => return Some(CodeHandOff::OpenNetlist),
+        CodeRequest::NewDeck => return Some(CodeHandOff::NewDeck),
         CodeRequest::ImportVerilogA => return Some(CodeHandOff::ImportVerilogA),
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),

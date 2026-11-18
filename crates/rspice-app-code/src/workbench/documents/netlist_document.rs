@@ -190,6 +190,7 @@ fn replace_deck_files_impl(
         if let Some(file) = deck.file_mut(replacement.include()) {
             file.edit(replacement.replacement.clone());
         }
+        super::deck_files::keep_stored_edit(model, deck, replacement.include());
     }
     if let Some(file) = active_deck_file_in(netlist) {
         model.simulation.source.netlist_content = file.text.clone();
@@ -295,16 +296,16 @@ pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, tex
         return false;
     }
     let include = netlist.active_dependency_identity.clone();
-    let Some(file) = netlist
-        .open_deck
-        .as_mut()
-        .and_then(|deck| deck.file_mut(include.as_deref()))
-    else {
+    let Some(deck) = netlist.open_deck.as_mut() else {
         return false;
     };
-    if !file.edit(text.clone()) {
+    if !deck
+        .file_mut(include.as_deref())
+        .is_some_and(|file| file.edit(text.clone()))
+    {
         return false;
     }
+    super::deck_files::keep_stored_edit(model, deck, include.as_deref());
     model.simulation.source.netlist_content = text;
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();

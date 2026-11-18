@@ -87,8 +87,8 @@ pub mod simulation {
     pub use controller::SimulationController;
     pub use rspice_simulation::results::{SampledWaveform, SimulationResult};
     pub use run_host::{
-        DeckOrigin, ManualDeck, ManualDeckCopy, ProjectCompileReceipt, RunHost, ViewerHost,
-        ViewerReading,
+        DeckOrigin, DeckOriginCopy, ManualDeck, ManualDeckCopy, ProjectCompileReceipt, RunHost,
+        ViewerHost, ViewerReading,
     };
     // Test-only aliases for private modules: execution reaches the bridge and
     // these helpers through their module paths.

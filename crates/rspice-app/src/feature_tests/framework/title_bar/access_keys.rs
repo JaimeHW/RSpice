@@ -13,7 +13,8 @@ use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
 /// Rows that go without an access key, each because its menu has no letter
 /// left to give it (see the menu's own note): a command's row by its id, a
 /// submenu's by its label.
-const KEYLESS_ROWS: [&str; 7] = [
+const KEYLESS_ROWS: [&str; 8] = [
+    "new-deck",
     "save-all",
     "save-project-copy",
     "project-properties",

@@ -338,6 +338,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::NewCell.key(),
     ProjectCommand::NewView.key(),
     CodeCommand::NewVerilogADevice.key(),
+    CodeCommand::NewDeck.key(),
     ProjectCommand::OpenSchematic.key(),
     CodeCommand::OpenNetlist.key(),
     CodeCommand::ImportVerilogA.key(),

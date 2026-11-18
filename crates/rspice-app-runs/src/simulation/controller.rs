@@ -569,7 +569,8 @@ impl SimulationController {
             None => manual_deck.as_ref().map(|deck| deck.name.clone()),
         };
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
-            model.simulation.source.manual_deck_path = manual_deck.map(|deck| deck.path);
+            model.simulation.source.manual_deck_path =
+                manual_deck.map(crate::simulation::ManualDeckCopy::findings_path);
         }
         if let Some(cross_probe) = cross_probe
             && campaign_membership.is_none()

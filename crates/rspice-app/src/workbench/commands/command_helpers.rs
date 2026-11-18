@@ -273,6 +273,9 @@ pub(in crate::workbench) fn run_project_file_action(
 pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_off: CodeHandOff) {
     match hand_off {
         CodeHandOff::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
+        CodeHandOff::NewDeck => {
+            app.state.new_deck();
+        }
         CodeHandOff::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
         CodeHandOff::ImportLtspiceSchematic => {
             import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Ltspice)

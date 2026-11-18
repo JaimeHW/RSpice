@@ -255,8 +255,9 @@ pub use workspace::{
     RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
     SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
-    SpecPointScope, SpecificationDefinition, SpecificationPolicy, SpecificationRole, TextEncoding,
-    UNGROUPED_NAME, default_view_search_order, group_namer,
+    SpecPointScope, SpecificationDefinition, SpecificationPolicy, SpecificationRole, StoredDeck,
+    StoredDeckFile, TextEncoding, UNGROUPED_NAME, default_view_search_order, group_namer,
+    new_stored_deck_name,
 };
 
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};

@@ -241,6 +241,10 @@ impl CommandSet for CodeCommand {
                     "decks open from files on the desktop"
                 },
             ),
+            Self::NewDeck => (
+                !execution_active,
+                "an active simulation execution still owns the project",
+            ),
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
                 match foreign_import_refusal_in(model, reads.platform) {
                     Some(refusal) => (false, refusal),
@@ -417,6 +421,7 @@ impl CommandSet for CodeCommand {
             // the shell carries it out over the whole application as its
             // table did, straight after this call returns.
             Self::OpenNetlist => cx.wb.outbox.push(CodeRequest::OpenNetlist),
+            Self::NewDeck => cx.wb.outbox.push(CodeRequest::NewDeck),
             Self::ImportVerilogA => cx.wb.outbox.push(CodeRequest::ImportVerilogA),
             Self::ImportLtspiceSchematic => {
                 cx.wb.outbox.push(CodeRequest::ImportLtspiceSchematic);

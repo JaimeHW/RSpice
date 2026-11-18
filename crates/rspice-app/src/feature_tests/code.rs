@@ -29,6 +29,7 @@ mod source_document;
 mod source_editor_commands;
 mod source_find;
 mod source_language_tools;
+mod stored_deck;
 mod veriloga_build_settings;
 mod veriloga_cell_source;
 mod veriloga_design;

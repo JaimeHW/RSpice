@@ -182,7 +182,6 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
     };
 
     // A project with decks opens its first one, which the page then shows.
-    #[cfg(not(target_arch = "wasm32"))]
     crate::workbench::documents::deck_files::open_project_deck(
         cx.model,
         &mut cx.state.netlist,
@@ -320,25 +319,33 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             if cx.state.netlist.open_deck.is_none()
                 && cx.model.netlist_artifacts.generated_document.is_none()
             {
-                let mut open_deck = false;
+                use crate::workbench::code::commands::CodeCommand;
+                let mut pressed = None;
                 empty_state_with_actions(
                     ui,
                     WorkbenchIcon::Netlist,
                     &messages.text(MessageId::NetlistEmptyWorkspaceTitle),
                     &messages.text(MessageId::NetlistEmptyWorkspaceDescription),
                     |ui| {
-                        // A deck is a file, so only the desktop opens one.
-                        if cfg!(not(target_arch = "wasm32")) {
-                            open_deck = ui
+                        if ui
+                            .button(CodeCommand::NewDeck.declared_spec().label)
+                            .clicked()
+                        {
+                            pressed = Some(CodeCommand::NewDeck);
+                        }
+                        // A deck file opens only where there are files.
+                        if cfg!(not(target_arch = "wasm32"))
+                            && ui
                                 .button(messages.text(MessageId::NetlistOpenDeck))
-                                .clicked();
+                                .clicked()
+                        {
+                            pressed = Some(CodeCommand::OpenNetlist);
                         }
                     },
                 );
-                if open_deck {
-                    // The dispatcher carries the open out once the page has
-                    // drawn.
-                    cx.execute(crate::workbench::code::commands::CodeCommand::OpenNetlist.key());
+                if let Some(command) = pressed {
+                    // The dispatcher carries it out once the page has drawn.
+                    cx.execute(command.key());
                 }
             } else {
                 let title = messages.text(MessageId::NetlistGeneratedUnavailable);
