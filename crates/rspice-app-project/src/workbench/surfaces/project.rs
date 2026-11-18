@@ -691,7 +691,21 @@ fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, problem: O
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let height = tokens.metrics.row_h + tokens.metrics.bar_pad;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    // A screen reader has the title and the fact whole, cut or not, with
+    // the mark's severity in front when there is one.
+    let said = if meta.is_empty() {
+        title.to_owned()
+    } else {
+        format!("{title}: {meta}")
+    };
+    let announcement = match problem {
+        Some(problem) => problem.announce(&said),
+        None => said,
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
     ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel);
     ui.painter().hline(
         rect.x_range(),
