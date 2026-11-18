@@ -124,6 +124,10 @@ fn place(app: &mut RSpiceApp) {
     });
 }
 
+/// A step of an edit history: its name, what it does, and whether the
+/// project reads unsaved after it.
+type HistoryStep<'a> = (&'a str, &'a dyn Fn(&mut RSpiceApp), bool);
+
 /// Idle frames compare nothing and write nothing back, on the canvas and on
 /// the Project pages; a part placed on the drawing is compared once, from
 /// that one drawing, read unsaved from where it stands in its history with
@@ -202,7 +206,7 @@ fn an_edit_and_its_undo_are_read_from_the_history_without_a_digest() {
             app.last_window_title
         );
     };
-    let steps: [(&str, &dyn Fn(&mut RSpiceApp), bool); 4] = [
+    let steps: [HistoryStep<'_>; 4] = [
         ("place", &place, true),
         ("undo", &undo, false),
         ("redo", &redo, true),
@@ -227,7 +231,7 @@ fn an_edit_and_its_undo_are_read_from_the_history_without_a_digest() {
     );
     idle(&mut replay, WARM_UP_FRAMES);
     read(&replay, "the save", false);
-    let steps: [(&str, &dyn Fn(&mut RSpiceApp), bool); 2] = [
+    let steps: [HistoryStep<'_>; 2] = [
         ("undo past the save", &undo, true),
         ("redo back to it", &redo, false),
     ];
