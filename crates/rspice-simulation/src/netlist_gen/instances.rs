@@ -818,6 +818,38 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
 
+                // A configuration may run another cell in this placement's
+                // place. Its terminals meet the drawn pins by name, never by
+                // position, so the drawing's points are laid out in its order.
+                let retargeted = component.library_cell.as_ref().is_some_and(|placed| {
+                    !placed.library.eq_ignore_ascii_case(&binding.library)
+                        || !placed.cell.eq_ignore_ascii_case(&binding.cell)
+                });
+                if retargeted {
+                    let node_names = match self.retargeted_terminal_nodes(
+                        &terminals,
+                        terminal_order,
+                        &instance_name,
+                    ) {
+                        Ok(nodes) => nodes,
+                        Err(pin) => {
+                            self.errors.push(format!(
+                                "Cell instance '{}' is bound to {}/{}/{}, which has no pin {pin}",
+                                component.name, binding.library, binding.cell, binding.view
+                            ));
+                            return None;
+                        }
+                    };
+                    self.card_nets.clone_from(&node_names);
+                    return self.cell_instance_card(
+                        component,
+                        &binding,
+                        &instance_name,
+                        &node_names,
+                        indexed_master,
+                    );
+                }
+
                 // The interface names the conductors and the drawing supplies
                 // one point per interface terminal, so the two agree exactly
                 // when they carry the same number of terminals — the widths
@@ -849,79 +881,13 @@ impl<'a> NetlistGenerator<'a> {
                 let node_names = self.vector_terminal_nodes(terminal_order, &terminal_points);
                 self.card_nets.clone_from(&node_names);
 
-                // A schematic master is named by the deck's one master index —
-                // never by the binding, which does not know which of several
-                // closures of its cell view this occurrence resolved to. A
-                // model-bound master keeps its own engine module name. An
-                // instance bound to a model card names the card, which names
-                // its module.
-                let bound_card = binding
-                    .model_card
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|card| !card.is_empty())
-                    .map(str::to_owned);
-                let subckt_name = bound_card.or(indexed_master).unwrap_or_else(|| {
-                    binding
-                        .module_name
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or(binding.cell.as_str())
-                        .to_owned()
-                });
-                if subckt_name.is_empty() {
-                    self.errors.push(format!(
-                        "Cell instance '{}' ({}/{}/{}) has no netlist master/module name",
-                        component.name, binding.library, binding.cell, binding.view
-                    ));
-                    return None;
-                }
-
-                let nodes = node_names.join(" ");
-                if let Some(template) = binding.netlist_template.as_deref() {
-                    let params = match model_bound_instance_params(&binding, &component.params) {
-                        Ok(params) => params,
-                        Err(error) => {
-                            self.errors.push(format!(
-                                "Cell instance '{}' ({}/{}/{}) has invalid typed parameters: {error}",
-                                component.name, binding.library, binding.cell, binding.view
-                            ));
-                            return None;
-                        }
-                    };
-                    match render_model_bound_instance_template(
-                        template,
-                        &instance_name,
-                        &nodes,
-                        &subckt_name,
-                        &params,
-                    ) {
-                        Ok(line) => Some(line),
-                        Err(error) => {
-                            self.errors.push(format!(
-                                "Cell instance '{}' ({}/{}/{}) has an invalid netlist template: {error}",
-                                component.name, binding.library, binding.cell, binding.view
-                            ));
-                            None
-                        }
-                    }
-                } else {
-                    let params = match self.cell_instance_parameters(component, &binding) {
-                        Ok(params) => params,
-                        Err(error) => {
-                            self.errors.push(error);
-                            return None;
-                        }
-                    };
-                    let multiplicity = component
-                        .multiplicity
-                        .map(|multiplicity| format!(" m={multiplicity}"))
-                        .unwrap_or_default();
-                    Some(format!(
-                        "{instance_name} {nodes} {subckt_name}{params}{multiplicity}"
-                    ))
-                }
+                self.cell_instance_card(
+                    component,
+                    &binding,
+                    &instance_name,
+                    &node_names,
+                    indexed_master,
+                )
             }
 
             // Legacy enum-backed XSPICE components: A name <shaped ports>
@@ -1316,6 +1282,91 @@ impl<'a> NetlistGenerator<'a> {
             "{} {} {} {}",
             instance_name, positive_node, node_names[1], specification
         ))
+    }
+
+    /// The card for a cell instance whose nodes are known: named by the
+    /// master it resolved to, carrying its parameters.
+    fn cell_instance_card(
+        &mut self,
+        component: &Component,
+        binding: &rspice_design::schematic::component::LibraryCellInstance,
+        instance_name: &str,
+        node_names: &[String],
+        indexed_master: Option<String>,
+    ) -> Option<String> {
+        // A schematic master is named by the deck's one master index —
+        // never by the binding, which does not know which of several
+        // closures of its cell view this occurrence resolved to. A
+        // model-bound master keeps its own engine module name. An
+        // instance bound to a model card names the card, which names
+        // its module.
+        let bound_card = binding
+            .model_card
+            .as_deref()
+            .map(str::trim)
+            .filter(|card| !card.is_empty())
+            .map(str::to_owned);
+        let subckt_name = bound_card.or(indexed_master).unwrap_or_else(|| {
+            binding
+                .module_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(binding.cell.as_str())
+                .to_owned()
+        });
+        if subckt_name.is_empty() {
+            self.errors.push(format!(
+                "Cell instance '{}' ({}/{}/{}) has no netlist master/module name",
+                component.name, binding.library, binding.cell, binding.view
+            ));
+            return None;
+        }
+
+        let nodes = node_names.join(" ");
+        if let Some(template) = binding.netlist_template.as_deref() {
+            let params = match model_bound_instance_params(binding, &component.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) has invalid typed parameters: {error}",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                    return None;
+                }
+            };
+            match render_model_bound_instance_template(
+                template,
+                instance_name,
+                &nodes,
+                &subckt_name,
+                &params,
+            ) {
+                Ok(line) => Some(line),
+                Err(error) => {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) has an invalid netlist template: {error}",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                    None
+                }
+            }
+        } else {
+            let params = match self.cell_instance_parameters(component, binding) {
+                Ok(params) => params,
+                Err(error) => {
+                    self.errors.push(error);
+                    return None;
+                }
+            };
+            let multiplicity = component
+                .multiplicity
+                .map(|multiplicity| format!(" m={multiplicity}"))
+                .unwrap_or_default();
+            Some(format!(
+                "{instance_name} {nodes} {subckt_name}{params}{multiplicity}"
+            ))
+        }
     }
 }
 

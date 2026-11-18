@@ -159,6 +159,7 @@ fn source_replacement_uses_the_requested_corner(
                     stop_view: None,
                     model_section: Some(section.to_owned()),
                     eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+                    target: None,
                 }];
             }
             workspace

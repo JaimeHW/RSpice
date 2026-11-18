@@ -421,6 +421,7 @@ fn project_file_round_trips_configuration_execution_authority() {
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Browser],
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,

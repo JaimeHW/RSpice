@@ -28,6 +28,7 @@ fn binding(library: &str, cell: &str, views: &[&str]) -> ConfigurationCellBindin
         cell: cell.to_owned(),
         executable_views: views.iter().map(|view| (*view).to_owned()).collect(),
         stop_view: None,
+        target: None,
     }
 }
 

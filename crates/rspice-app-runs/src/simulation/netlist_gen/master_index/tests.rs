@@ -873,6 +873,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
@@ -1035,6 +1036,7 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
                 eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
@@ -1146,4 +1148,142 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
     assert!(result.netlist.contains(".MODEL a1_model astate"));
     assert!(result.netlist.lines().any(|line| line.starts_with("A1 ")));
     rspice_core::Netlist::parse(&result.netlist).expect("configured built-in deck parses");
+}
+
+/// A configuration that runs another library's cell in a placement's place
+/// netlists that cell: the instance names its master, each drawn pin reaches
+/// the terminal of the same name in the cell's own order, and a terminal the
+/// drawing does not place is left on a node nothing else touches.
+#[test]
+fn a_cell_bound_in_a_placements_place_meets_its_pins_by_name() {
+    let mut libraries = LibraryManager::new();
+    let mut user = Library::new("user");
+    let mut top_cell = Cell::new("top");
+    top_cell.add_view(View::new("schematic", ViewType::Schematic));
+    user.add_cell(top_cell);
+    libraries.add_library(user);
+    for (library, cell) in [("work", "div"), ("vendor", "div_fast")] {
+        let mut entry = Library::new(library);
+        let mut master = Cell::new(cell);
+        master.add_view(View::new("schematic", ViewType::Schematic));
+        entry.add_cell(master);
+        libraries.add_library(entry);
+    }
+
+    // The vendor's cell declares the placed pins in the other order and a
+    // trim pin of its own, tied to ground through a resistor.
+    let mut fast = SchematicState::default();
+    place_port(&mut fast, "b", Point::new(20, 0));
+    fast.add_component(ComponentType::Resistor, Point::new(30, 0));
+    place_port(&mut fast, "a", Point::new(60, 0));
+    place_port(&mut fast, "trim", Point::new(120, 0));
+    fast.add_component(ComponentType::Resistor, Point::new(130, 0));
+    fast.add_component(ComponentType::Ground, Point::new(160, 10));
+
+    let mut workspace = ProjectWorkspace::default();
+    workspace.insert_schematic_editor(
+        CellViewRef::new("work", "div", "schematic").key(),
+        div_master(),
+    );
+    workspace.insert_schematic_editor(
+        CellViewRef::new("vendor", "div_fast", "schematic").key(),
+        fast,
+    );
+    let top = top_with_instance(&["a", "b"]);
+    workspace.insert_schematic_editor(workspace.content.active_view.key(), top.clone());
+
+    let active = workspace.content.active_view.clone();
+    let id = workspace
+        .content
+        .configuration_sets
+        .create(ConfigurationSetDefinition {
+            name: "Vendor divider".to_owned(),
+            root: active.clone(),
+            dut_path: "/X1".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            cell_bindings: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "test".to_owned(),
+        })
+        .expect("configuration creates");
+    let deck = |workspace: &ProjectWorkspace| {
+        let projection = workspace
+            .configuration_execution_projection(&libraries, &active, &top)
+            .expect("the configuration resolves into an execution plan");
+        let hierarchy =
+            HierarchySource::from_execution_projection(libraries.catalog(), &projection);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().expect("root schematic"),
+            &[],
+            &hierarchy,
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
+        );
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        (projection, result.netlist)
+    };
+
+    // Unbound, the card states each drawn pin's node in the placed cell's
+    // order: a, then b.
+    let (_, unbound) = deck(&workspace);
+    let drawn = instance_line(&unbound, "X1")
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(drawn.len(), 4, "the placed card: {drawn:?}");
+    assert_ne!(drawn[1], drawn[2], "a and b are different nodes");
+
+    let committed = workspace
+        .content
+        .configuration_sets
+        .find(id)
+        .expect("the configuration exists");
+    let revision = committed.revision();
+    let mut definition = committed.definition().clone();
+    definition
+        .cell_bindings
+        .push(rspice_design::configuration_set::ConfigurationCellBinding {
+            library: "work".to_owned(),
+            cell: "div".to_owned(),
+            executable_views: Vec::new(),
+            stop_view: None,
+            target: Some(rspice_design::configuration_set::BindingTarget::new(
+                "vendor", "div_fast",
+            )),
+        });
+    workspace
+        .content
+        .configuration_sets
+        .update(id, revision, definition)
+        .expect("the binding holds");
+
+    let (projection, bound) = deck(&workspace);
+    let x1 = projection
+        .plan()
+        .binding(&instance_path("/X1"))
+        .expect("X1 binding");
+    assert_eq!(
+        x1.resolved_reference(),
+        &CellViewRef::new("vendor", "div_fast", "schematic")
+    );
+    assert_eq!(
+        subckt_headers(&bound),
+        vec![".subckt div_fast b a trim".to_owned()],
+        "only the bound cell is defined:\n{bound}"
+    );
+    let card = instance_line(&bound, "X1")
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        card,
+        ["X1", &drawn[2], &drawn[1], "nc_X1_trim", "div_fast"],
+        "b's node, then a's, then a node of trim's own:\n{bound}"
+    );
+    rspice_core::Netlist::parse(&bound).expect("the bound deck parses");
 }

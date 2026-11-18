@@ -105,6 +105,57 @@ impl<'a> NetlistGenerator<'a> {
         }
         nodes
     }
+
+    /// Deck nodes for an instance a configuration runs another cell for, in
+    /// that cell's terminal order.
+    ///
+    /// The drawn pins meet the bound cell's by name, as a switch master's
+    /// terminals meet the instance's: a drawn pin's conductors go to the
+    /// terminal of the same name wherever the cell declares it. A terminal the
+    /// drawing does not place is left unconnected on a node of its own,
+    /// named for the instance and the pin, so it can never short to anything.
+    /// A drawn pin the cell has no terminal for is an error the resolver
+    /// refuses first; meeting one here names it rather than dropping it.
+    pub(super) fn retargeted_terminal_nodes(
+        &self,
+        drawn: &[(String, Point)],
+        order: &[String],
+        instance_name: &str,
+    ) -> Result<Vec<String>, String> {
+        let stem = rspice_design::hierarchy::port_fit::pin_stem;
+        if let Some((pin, _)) = drawn.iter().find(|(pin, _)| {
+            !order
+                .iter()
+                .any(|name| stem(name).eq_ignore_ascii_case(&stem(pin)))
+        }) {
+            return Err(pin.clone());
+        }
+        let mut nodes = Vec::with_capacity(order.len());
+        for name in order {
+            let own = stem(name);
+            match drawn
+                .iter()
+                .find(|(pin, _)| stem(pin).eq_ignore_ascii_case(&own))
+            {
+                Some((_, point)) => {
+                    nodes.extend(self.vector_terminal_nodes(std::slice::from_ref(name), &[*point]))
+                }
+                None => {
+                    let base = format!("nc_{instance_name}_{own}");
+                    match declared_vector(name) {
+                        Some(declaration) => nodes.extend(
+                            declaration
+                                .members()
+                                .into_iter()
+                                .map(|member| deck_bit_name(&base, member.index)),
+                        ),
+                        None => nodes.push(base),
+                    }
+                }
+            }
+        }
+        Ok(nodes)
+    }
 }
 
 /// One interface name and the conductors it contributes, for a message that

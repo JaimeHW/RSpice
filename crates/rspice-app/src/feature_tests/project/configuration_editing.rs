@@ -259,6 +259,7 @@ fn an_inspector_edit_keeps_what_the_cell_binding_chose() {
             cell: "amp".to_owned(),
             executable_views: vec!["extracted".to_owned(), "schematic".to_owned()],
             stop_view: Some("schematic".to_owned()),
+            target: None,
         });
     });
     select_row(&mut app, ConfigurationRow::Instance("/X1".to_owned()));
@@ -646,6 +647,7 @@ fn delete_counts_every_binding_and_undo_brings_the_configuration_back() {
             cell: "amp".to_owned(),
             executable_views: vec!["schematic".to_owned()],
             stop_view: None,
+            target: None,
         });
     });
     open_configuration_dialog(
@@ -846,6 +848,7 @@ fn an_unsaved_configuration_row_is_named_without_the_dots_room() {
             cell: "amp".to_owned(),
             executable_views: vec!["schematic".to_owned()],
             stop_view: None,
+            target: None,
         });
     });
     let output = settle(&ctx, &mut app, Vec::new());

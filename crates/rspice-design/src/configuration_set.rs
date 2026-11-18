@@ -44,6 +44,11 @@ pub struct ConfigurationSetOverride {
     pub model_section: Option<String>,
     #[serde(default = "default_configuration_platforms")]
     pub eligible_platforms: Vec<ConfigurationPlatform>,
+    /// The cell that runs in the instance's place; `None` runs the cell it
+    /// places. Only a binding naming one instance holds one: a pattern names
+    /// instances of many cells, and no one cell fits them all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<BindingTarget>,
 }
 
 /// Ordered view list for every instance of one library cell.
@@ -59,6 +64,45 @@ pub struct ConfigurationCellBinding {
     pub cell: String,
     pub executable_views: Vec<String>,
     pub stop_view: Option<String>,
+    /// The cell that runs in place of every instance of this one; `None`
+    /// runs the cell itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<BindingTarget>,
+}
+
+/// Another cell a binding puts in the place of the one the design places,
+/// from any library the project reaches: a behavioural model for a
+/// transistor-level block, or the same cell from another library.
+///
+/// The binding's view list is searched in this cell, and the cell must hold
+/// every pin the placement connects, by name, width and direction; a pin of
+/// its own the placement does not connect is left unconnected, as Virtuoso's
+/// netlister leaves a switch master's extra terminal. Library and cell are
+/// names, so a library held in the project and one it references bind alike.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BindingTarget {
+    pub library: String,
+    pub cell: String,
+}
+
+impl BindingTarget {
+    pub fn new(library: impl Into<String>, cell: impl Into<String>) -> Self {
+        Self {
+            library: library.into(),
+            cell: cell.into(),
+        }
+    }
+
+    /// Whether this names `library`/`cell`, as the catalog folds names.
+    pub fn names(&self, library: &str, cell: &str) -> bool {
+        self.library.eq_ignore_ascii_case(library) && self.cell.eq_ignore_ascii_case(cell)
+    }
+
+    /// `library/cell`, as the page and its sentences name a cell.
+    pub fn display_path(&self) -> String {
+        format!("{}/{}", self.library, self.cell)
+    }
 }
 
 /// Editable semantic definition. Stable identity, revision, lineage, and
@@ -442,6 +486,11 @@ impl ConfigurationSetCatalog {
                     },
                     |binding| binding.cell = new_cell.to_owned(),
                 )
+                | remap_binding_targets(
+                    definition,
+                    |target| target.names(library, old_cell),
+                    |target| target.cell = new_cell.to_owned(),
+                )
         })
     }
 
@@ -472,6 +521,14 @@ impl ConfigurationSetCatalog {
                         to_cell.clone_into(&mut binding.cell);
                     },
                 )
+                | remap_binding_targets(
+                    definition,
+                    |target| target.names(from_library, from_cell),
+                    |target| {
+                        to_library.clone_into(&mut target.library);
+                        to_cell.clone_into(&mut target.cell);
+                    },
+                )
         })
     }
 
@@ -494,6 +551,11 @@ impl ConfigurationSetCatalog {
                     &mut definition.cell_bindings,
                     |binding| binding.library.eq_ignore_ascii_case(from_library),
                     |binding| binding.library = to_library.to_owned(),
+                )
+                | remap_binding_targets(
+                    definition,
+                    |target| target.library.eq_ignore_ascii_case(from_library),
+                    |target| target.library = to_library.to_owned(),
                 )
         })
     }
@@ -913,11 +975,21 @@ fn normalize_definition(mut definition: ConfigurationSetDefinition) -> Configura
             .map(|section| section.trim().to_owned());
         scoped.eligible_platforms.sort();
         scoped.eligible_platforms.dedup();
+        normalize_target(&mut scoped.target);
     }
     sort_overrides(&mut definition.overrides);
     for binding in &mut definition.cell_bindings {
         binding.library = binding.library.trim().to_owned();
         binding.cell = binding.cell.trim().to_owned();
+        normalize_target(&mut binding.target);
+        // A cell bound to itself runs itself: that is no target.
+        if binding
+            .target
+            .as_ref()
+            .is_some_and(|target| target.names(&binding.library, &binding.cell))
+        {
+            binding.target = None;
+        }
         binding.executable_views = binding
             .executable_views
             .drain(..)
@@ -930,6 +1002,14 @@ fn normalize_definition(mut definition: ConfigurationSetDefinition) -> Configura
     }
     sort_cell_bindings(&mut definition.cell_bindings);
     definition
+}
+
+/// A target is stored trimmed, as a cell binding's own names are.
+fn normalize_target(target: &mut Option<BindingTarget>) {
+    if let Some(named) = target.as_mut() {
+        named.library = named.library.trim().to_owned();
+        named.cell = named.cell.trim().to_owned();
+    }
 }
 
 /// Store overrides in the one order the catalog recognizes.
@@ -960,6 +1040,33 @@ fn sort_cell_bindings(bindings: &mut [ConfigurationCellBinding]) {
             .cmp(&cell_binding_key(&right.library, &right.cell))
             .then_with(|| (&left.library, &left.cell).cmp(&(&right.library, &right.cell)))
     });
+}
+
+/// Rename the cell every binding that names one runs in its placement's
+/// place, where `names` says it is the cell renamed or moved.
+fn remap_binding_targets(
+    definition: &mut ConfigurationSetDefinition,
+    names: impl Fn(&BindingTarget) -> bool,
+    rename: impl Fn(&mut BindingTarget),
+) -> bool {
+    let mut changed = false;
+    let targets = definition
+        .overrides
+        .iter_mut()
+        .filter_map(|binding| binding.target.as_mut())
+        .chain(
+            definition
+                .cell_bindings
+                .iter_mut()
+                .filter_map(|binding| binding.target.as_mut()),
+        );
+    for target in targets {
+        if names(target) {
+            rename(target);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Rewrite every cell binding the selector names, then restore the stored
@@ -1054,6 +1161,14 @@ fn validate_definition(
                 scoped.instance_path.clone(),
             ));
         }
+        if let Some(target) = scoped.target.as_ref() {
+            if InstancePath::parse(&scoped.instance_path).is_err() {
+                return Err(ConfigurationSetError::PatternBindingTarget(
+                    scoped.instance_path.clone(),
+                ));
+            }
+            validate_binding_target(target)?;
+        }
     }
     for (index, left) in patterns.iter().enumerate() {
         for (offset, right) in patterns.iter().enumerate().skip(index + 1) {
@@ -1069,10 +1184,11 @@ fn validate_definition(
 }
 
 /// A cell binding is refused on the same terms as an override: stored in
-/// canonical order, unique per cell, and naming a non-empty ordered view list
-/// whose stop view is one of its own views; a cell binding is its view list,
-/// so one that names none is no binding. Whether the cell exists is not
-/// asked; a binding for a cell the hierarchy never reaches binds nothing.
+/// canonical order, unique per cell, and naming an ordered view list whose
+/// stop view is one of its own views. A cell binding is its view list and the
+/// cell it runs in place of its own, so one that names neither is no binding.
+/// Whether the cell exists is not asked; a binding for a cell the hierarchy
+/// never reaches binds nothing.
 fn validate_cell_bindings(
     bindings: &[ConfigurationCellBinding],
 ) -> Result<(), ConfigurationSetError> {
@@ -1095,7 +1211,7 @@ fn validate_cell_bindings(
         validate_view_policy(
             "configuration.cell-binding.executable-views",
             &binding.executable_views,
-            true,
+            binding.target.is_none(),
         )?;
         if let Some(stop_view) = binding.stop_view.as_deref() {
             validate_executable_view("configuration.cell-binding.stop-view", stop_view)?;
@@ -1105,8 +1221,16 @@ fn validate_cell_bindings(
                 &binding.executable_views,
             )?;
         }
+        if let Some(target) = binding.target.as_ref() {
+            validate_binding_target(target)?;
+        }
     }
     Ok(())
+}
+
+fn validate_binding_target(target: &BindingTarget) -> Result<(), ConfigurationSetError> {
+    validate_cell_binding_name("configuration.binding-target.library", &target.library)?;
+    validate_cell_binding_name("configuration.binding-target.cell", &target.cell)
 }
 
 fn validate_cell_binding_name(
@@ -1435,6 +1559,8 @@ pub enum ConfigurationSetError {
     UnsortedOverridePaths,
     #[error("scoped override {0:?} must authorize at least one execution platform")]
     NoEligiblePlatforms(String),
+    #[error("pattern binding {0:?} names instances of many cells and cannot bind them to one cell")]
+    PatternBindingTarget(String),
     #[error("{field} name {name:?} is invalid: {reason}")]
     InvalidCellBindingName {
         field: &'static str,
@@ -1479,6 +1605,7 @@ mod tests {
                 stop_view: Some("spice".to_owned()),
                 model_section: Some("tt".to_owned()),
                 eligible_platforms: all_configuration_platforms(),
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
@@ -1763,6 +1890,7 @@ mod tests {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
+                target: None,
             },
             ConfigurationSetOverride {
                 instance_path: "/XAFE".to_owned(),
@@ -1770,6 +1898,7 @@ mod tests {
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
+                target: None,
             },
         ];
         catalog
@@ -1785,6 +1914,7 @@ mod tests {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
+                target: None,
             },
             ConfigurationSetOverride {
                 instance_path: "/XAFE/*".to_owned(),
@@ -1792,6 +1922,7 @@ mod tests {
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
                 eligible_platforms: all_configuration_platforms(),
+                target: None,
             },
         ];
         assert!(matches!(
@@ -1905,6 +2036,7 @@ mod tests {
             stop_view: Some("spice".to_owned()),
             model_section: None,
             eligible_platforms: all_configuration_platforms(),
+            target: None,
         }
     }
 

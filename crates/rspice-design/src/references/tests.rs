@@ -48,6 +48,8 @@ fn shared_master_renames_prepare_probes_without_mutating_sources() {
             rule: HierarchyBindingRule::Default,
             diagnostic: None,
             warnings: Vec::new(),
+            placed: None,
+            placed_ports: Vec::new(),
         }],
         total_instances: 3,
         resolved_instances: 3,

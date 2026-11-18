@@ -344,6 +344,7 @@ fn instance_binding(path: &str, list: &[&str], stop: Option<&str>) -> Configurat
         stop_view: stop.map(str::to_owned),
         model_section: None,
         eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+        target: None,
     }
 }
 
@@ -353,6 +354,7 @@ fn cell_binding(cell: &str, list: &[&str], stop: Option<&str>) -> ConfigurationC
         cell: cell.to_owned(),
         executable_views: views(list),
         stop_view: stop.map(str::to_owned),
+        target: None,
     }
 }
 

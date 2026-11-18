@@ -214,6 +214,7 @@ fn large_project(label: &str, components: usize) -> (RSpiceApp, PathBuf) {
             stop_view: None,
             model_section: None,
             eligible_platforms: vec![ConfigurationPlatform::Desktop],
+            target: None,
         })
         .collect::<Vec<_>>();
     overrides.sort_by_key(|binding| binding.instance_path.to_lowercase());

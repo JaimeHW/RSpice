@@ -603,6 +603,7 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
                     ConfigurationPlatform::Desktop,
                     ConfigurationPlatform::Browser,
                 ],
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,

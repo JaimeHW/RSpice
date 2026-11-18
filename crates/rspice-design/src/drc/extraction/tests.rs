@@ -829,6 +829,7 @@ fn a_rebound_occurrence_is_checked_with_what_it_instantiates() {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: crate::configuration_set::ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,

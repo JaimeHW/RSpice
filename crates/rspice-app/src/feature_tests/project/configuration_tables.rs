@@ -255,6 +255,7 @@ fn pattern_bindings_are_rows_of_the_tree() {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             });
         }
     });

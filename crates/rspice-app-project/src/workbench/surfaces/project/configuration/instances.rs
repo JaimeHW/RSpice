@@ -323,6 +323,7 @@ fn add_pattern_binding(definition: &mut ConfigurationSetDefinition) -> String {
         stop_view: None,
         model_section: None,
         eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+        target: None,
     });
     pattern
 }
@@ -544,6 +545,7 @@ fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
     match status {
         HierarchyBindingStatus::Resolved | HierarchyBindingStatus::Modified => None,
         HierarchyBindingStatus::Unresolved => Some("no view found"),
+        HierarchyBindingStatus::Incompatible => Some("pins do not fit"),
         HierarchyBindingStatus::Recursive => Some("instantiates itself"),
         HierarchyBindingStatus::DepthLimit => Some("hierarchy too deep"),
         HierarchyBindingStatus::InstanceLimit => Some("too many instances"),

@@ -102,14 +102,12 @@ pub fn materialize_authoritative_source_binding(
         path: source_path,
         project_veriloga,
     } = source_view_source(library, cell, view, project_id, project_sources, libraries)?;
-    let ports = metadata_terminal_ports(&view.metadata)
-        .or_else(|| metadata_terminal_ports(&cell.metadata))
-        .ok_or_else(|| {
-            format!(
-                "authoritative source view {}/{}/{} has no terminal contract",
-                library.name, cell.name, view.name
-            )
-        })?;
+    let ports = source_view_ports(cell, view).ok_or_else(|| {
+        format!(
+            "authoritative source view {}/{}/{} has no terminal contract",
+            library.name, cell.name, view.name
+        )
+    })?;
     let terminal_order = ports
         .iter()
         .map(|port| port.name.as_str())
@@ -297,6 +295,31 @@ pub fn project_veriloga_binding_for_view(
         selected_module,
         source_key,
         netlist_alias,
+    })
+}
+
+/// The pins one source view declares, as resolution binds them: the view's
+/// own terminal contract, else its cell's. `None` when neither states one.
+pub fn source_view_ports(cell: &Cell, view: &View) -> Option<Vec<PortSpec>> {
+    metadata_terminal_ports(&view.metadata).or_else(|| metadata_terminal_ports(&cell.metadata))
+}
+
+/// The pins a placement connects, in the order it places them, with the
+/// direction each was placed with where the placement kept one; a pin whose
+/// direction it did not keep states none.
+pub(super) fn placed_ports(binding: Option<&LibraryCellInstance>) -> Vec<PortSpec> {
+    let Some(binding) = binding else {
+        return Vec::new();
+    };
+    binding.interface().unwrap_or_else(|| {
+        binding
+            .terminal_order
+            .iter()
+            .map(|name| PortSpec {
+                name: name.clone(),
+                direction: crate::schematic::port::PortDirection::InOut,
+            })
+            .collect()
     })
 }
 
@@ -494,6 +517,7 @@ mod tests {
                 stop_view: Some("spice".to_owned()),
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             },
             ConfigurationSetOverride {
                 instance_path: "/Xcritical".to_owned(),
@@ -501,6 +525,7 @@ mod tests {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             },
         ];
         let selected = selected_configuration_override(&overrides, "/xCRITICAL")

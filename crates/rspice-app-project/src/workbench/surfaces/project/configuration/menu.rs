@@ -447,17 +447,20 @@ fn paste(
                 return;
             };
             let key = path.fold_key();
+            let existing = definition.overrides.iter().position(|existing| {
+                InstancePath::parse(&existing.instance_path)
+                    .is_ok_and(|exact| exact.fold_key() == key)
+            });
+            // The cell a row is bound to is its own, and stays.
             let binding = ConfigurationSetOverride {
                 instance_path: path.to_string(),
                 executable_views: copied.views.clone(),
                 stop_view: copied.stop.clone(),
                 model_section: copied.model_section.clone(),
                 eligible_platforms: platforms,
+                target: existing.and_then(|index| definition.overrides[index].target.clone()),
             };
-            match definition.overrides.iter().position(|existing| {
-                InstancePath::parse(&existing.instance_path)
-                    .is_ok_and(|exact| exact.fold_key() == key)
-            }) {
+            match existing {
                 Some(index) => definition.overrides[index] = binding,
                 None => definition.overrides.push(binding),
             }
@@ -476,16 +479,18 @@ fn paste(
             }
         }
         ConfigurationRow::Cell { library, cell } => {
+            let existing = definition.cell_bindings.iter().position(|existing| {
+                existing.library.eq_ignore_ascii_case(library)
+                    && existing.cell.eq_ignore_ascii_case(cell)
+            });
             let binding = ConfigurationCellBinding {
                 library: library.clone(),
                 cell: cell.clone(),
                 executable_views: copied.views.clone(),
                 stop_view: copied.stop.clone(),
+                target: existing.and_then(|index| definition.cell_bindings[index].target.clone()),
             };
-            match definition.cell_bindings.iter().position(|existing| {
-                existing.library.eq_ignore_ascii_case(library)
-                    && existing.cell.eq_ignore_ascii_case(cell)
-            }) {
+            match existing {
                 Some(index) => definition.cell_bindings[index] = binding,
                 None => definition.cell_bindings.push(binding),
             }

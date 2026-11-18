@@ -287,6 +287,7 @@ fn an_override_pattern_is_measured_against_the_instances_the_walk_reached() {
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             }],
             cell_bindings: Vec::new(),
             model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,

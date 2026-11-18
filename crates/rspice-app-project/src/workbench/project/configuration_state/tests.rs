@@ -144,6 +144,7 @@ fn view_to_use_puts_a_view_first_and_inherited_keeps_the_rest_of_the_binding() {
         stop_view: Some("spice".to_owned()),
         model_section: None,
         eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+        target: None,
     });
 
     set_instance_view(&mut definition, "/X1", Some("extracted"));
@@ -208,6 +209,7 @@ fn an_instance_inherits_in_the_order_the_resolver_binds() {
         cell: "amp".to_owned(),
         executable_views: vec!["extracted".to_owned(), "spice".to_owned()],
         stop_view: Some("extracted".to_owned()),
+        target: None,
     });
     assert_eq!(
         inherited_views(&definition, "/X1", amp),
@@ -242,6 +244,7 @@ fn an_instance_inherits_in_the_order_the_resolver_binds() {
             stop_view: None,
             model_section: None,
             eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
+            target: None,
         },
     );
     assert_eq!(
@@ -270,6 +273,8 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
         used_review_fallback: false,
         diagnostic: None,
         warnings: Vec::new(),
+        placed: None,
+        placed_ports: Vec::new(),
     };
     let hierarchy = HierarchyResolution {
         bindings: vec![

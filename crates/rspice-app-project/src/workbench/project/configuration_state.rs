@@ -1137,6 +1137,7 @@ pub(crate) fn apply_cell_binding_change(
                 cell: cell.to_owned(),
                 executable_views: inherited.to_vec(),
                 stop_view: None,
+                target: None,
             });
             definition.cell_bindings.len() - 1
         }
@@ -1188,6 +1189,7 @@ pub fn set_cell_view(
                     cell: cell.to_owned(),
                     executable_views: vec![view.to_owned()],
                     stop_view: None,
+                    target: None,
                 });
             }
         }
@@ -1256,6 +1258,7 @@ pub fn set_instance_view(
             stop_view: None,
             model_section: None,
             eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+            target: None,
         }),
     }
 }
@@ -1307,6 +1310,7 @@ pub(crate) fn apply_binding_change(
                 stop_view: None,
                 model_section: None,
                 eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+                target: None,
             });
             definition.overrides.len() - 1
         }
@@ -1557,6 +1561,8 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
             "configuration.cell-binding.cell" => "A cell binding's cell",
             "configuration.cell-binding.executable-views" => "A cell binding's view list",
             "configuration.cell-binding.stop-view" => "A cell binding's stop view",
+            "configuration.binding-target.library" => "The library bound to",
+            "configuration.binding-target.cell" => "The cell bound to",
             _ => "A field",
         }
     }
@@ -1613,6 +1619,9 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
                 "{path} is allowed on no platform. Set Only on to Any platform, Desktop or Browser."
             )
         }
+        ConfigurationSetError::PatternBindingTarget(pattern) => format!(
+            "{pattern} names instances of many cells, so it cannot bind them to one cell. Bind each instance, or the cell."
+        ),
         ConfigurationSetError::InvalidModelSection(section) => {
             format!("{section} is not a model section name.")
         }

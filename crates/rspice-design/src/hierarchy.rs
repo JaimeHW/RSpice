@@ -21,8 +21,8 @@
 //! would be a second answer to the same question.
 
 use crate::configuration_set::{
-    ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSet, ConfigurationSetId,
-    ConfigurationSetOverride, UnresolvedBindingPolicy, cell_binding_key,
+    BindingTarget, ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSet,
+    ConfigurationSetId, ConfigurationSetOverride, UnresolvedBindingPolicy, cell_binding_key,
 };
 use crate::library::{Cell, Library, LibraryCatalog, View, ViewType};
 use crate::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceRegistry};
@@ -42,15 +42,18 @@ use std::path::{Path, PathBuf};
 
 mod bill_of_materials;
 mod materialize;
+pub mod port_fit;
 mod source;
 use materialize::*;
 pub use materialize::{
     DEFAULT_STOP_VIEW_TYPES, SourceViewSource, hierarchy_stop_view,
     materialize_authoritative_source_binding, metadata_value, project_veriloga_binding_for_view,
-    source_view_source,
+    source_view_ports, source_view_source,
 };
 pub use source::HierarchySource;
 
+#[cfg(test)]
+mod binding_target_tests;
 #[cfg(test)]
 mod tests;
 
@@ -448,6 +451,9 @@ pub enum HierarchyBindingStatus {
     Resolved,
     Modified,
     Unresolved,
+    /// The configuration binds the instance to another cell whose pins do
+    /// not fit the ones it places.
+    Incompatible,
     Recursive,
     DepthLimit,
     InstanceLimit,
@@ -459,6 +465,7 @@ impl HierarchyBindingStatus {
             Self::Resolved => "resolved",
             Self::Modified => "modified",
             Self::Unresolved => "unresolved",
+            Self::Incompatible => "incompatible",
             Self::Recursive => "recursive",
             Self::DepthLimit => "depth limit",
             Self::InstanceLimit => "instance limit",
@@ -478,9 +485,10 @@ impl HierarchyBindingStatus {
             Self::Resolved => 0,
             Self::Modified => 1,
             Self::Unresolved => 2,
-            Self::Recursive => 3,
-            Self::DepthLimit => 4,
-            Self::InstanceLimit => 5,
+            Self::Incompatible => 3,
+            Self::Recursive => 4,
+            Self::DepthLimit => 5,
+            Self::InstanceLimit => 6,
         }
     }
 }
@@ -503,6 +511,13 @@ pub enum HierarchyBindingRule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedHierarchyBinding {
     pub reference: CellViewRef,
+    /// The cell view the instances place, when the configuration runs
+    /// another cell in their place; `None` when `reference` is of the cell
+    /// they place.
+    pub placed: Option<CellViewRef>,
+    /// The pins the instances place, in the order they place them: what a
+    /// cell bound in their place has to fit. Empty for the design root.
+    pub placed_ports: Vec<PortSpec>,
     pub purpose: String,
     pub view_search_order: Vec<String>,
     pub stop_view: Option<String>,
@@ -591,6 +606,9 @@ struct BindingRowOutcome<'a> {
     status: HierarchyBindingStatus,
     used_review_fallback: bool,
     diagnostic: Option<String>,
+    /// The cell view the instance places, when the configuration ran
+    /// another cell in its place: what its bindings are looked up by.
+    placed: Option<CellViewRef>,
 }
 
 impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D, F> {
@@ -808,6 +826,29 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             return;
         }
 
+        // A built-in device is the engine's, not a library cell: there is no
+        // cell of the project's in whose place another could run, so a
+        // binding naming one is refused here rather than ignored.
+        if let Some(placed) = binding
+            && placed.is_executable_builtin()
+            && let Some(target) = self.configured_target(&requested, instance_path, is_root)
+        {
+            let diagnostic = format!(
+                "{instance_path} is a built-in device, so it cannot be bound to {}; remove the binding",
+                target.display_path()
+            );
+            let row = self.binding_row(
+                requested,
+                binding,
+                instance_path,
+                depth,
+                is_root,
+                (HierarchyBindingStatus::Incompatible, Some(diagnostic)),
+            );
+            self.upsert(row, instance_path);
+            return;
+        }
+
         // Compiled code models are executable leaves, not project library
         // masters.  Resolve their frozen catalog contract directly so an
         // active configuration cannot turn a valid placement into an
@@ -825,12 +866,25 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             return;
         }
 
+        // A binding to another cell searches that cell for the views the
+        // placed one's bindings name: the view list stays the placement's,
+        // the cell it is searched in is the target. The target stands in for
+        // the placement it replaces, so nothing the placement copied from its
+        // own cell (its pin order, its model card) reaches the target's.
+        let target = self
+            .configured_target(&requested, instance_path, is_root)
+            .map(|target| CellViewRef::new(&target.library, &target.cell, &requested.view));
+        let stand_in = target
+            .as_ref()
+            .map(|target| LibraryCellInstance::new(&target.library, &target.cell, &target.view));
+        let placement = stand_in.as_ref().or(binding);
+        let searched = target.as_ref().unwrap_or(&requested);
         let search_order =
             self.view_search_order(&requested, &requested.view, is_root, instance_path);
         let configured_model_section = self.configured_model_section(instance_path);
         let (master, resolution_error) = match self.resolve_master(
-            &requested,
-            binding,
+            searched,
+            placement,
             &search_order,
             configured_model_section.as_deref(),
         ) {
@@ -840,7 +894,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         let resolved_reference = master
             .as_ref()
             .and_then(|(_, reference)| reference.clone())
-            .unwrap_or_else(|| requested.clone());
+            .unwrap_or_else(|| searched.clone());
         let used_review_fallback = master.is_some()
             && self.used_review_fallback(
                 &requested,
@@ -872,6 +926,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                     status: HierarchyBindingStatus::Recursive,
                     used_review_fallback: false,
                     diagnostic: Some(format!("recursive hierarchy: {chain}")),
+                    placed: target.as_ref().map(|_| requested.clone()),
                 },
             );
             self.upsert(row, instance_path);
@@ -899,12 +954,37 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 resolution_error.or_else(|| {
                     Some(format!(
                         "{} has no {} view",
-                        hierarchy_display_path(&requested),
+                        hierarchy_display_path(searched),
                         view_alternatives(&search_order)
                     ))
                 }),
             ),
         };
+        // The target is measured against the pins this occurrence places,
+        // every time the hierarchy resolves: a cell that fitted when it was
+        // bound and stopped fitting since binds nothing and says which pins.
+        let mut warnings = Vec::new();
+        if target.is_some()
+            && status.is_resolved()
+            && let Some(bound) = master
+                .as_ref()
+                .and_then(|master| master.materialized_binding.as_ref())
+        {
+            let fit = port_fit::port_fit(
+                &placed_ports(binding),
+                &bound.interface().unwrap_or_default(),
+            );
+            let cell = hierarchy_display_path(&resolved_reference);
+            match fit.refusal() {
+                Some(pins) => {
+                    status = HierarchyBindingStatus::Incompatible;
+                    diagnostic = Some(format!(
+                        "{cell} no longer fits {instance_path}: {pins}. Bind it to a cell that holds its pins, or remove the binding"
+                    ));
+                }
+                None => warnings.extend(fit.unconnected_warning(&cell)),
+            }
+        }
 
         let current_platform = ConfigurationPlatform::current();
         if !self.configured_platform_eligible(instance_path, current_platform) {
@@ -971,7 +1051,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         };
 
         let resolved_view_type = master.as_ref().and_then(|value| value.view_type);
-        let matched_stop = self.matched_stop_view(&resolved_reference, instance_path);
+        let matched_stop =
+            self.matched_stop_view(&requested, &resolved_reference.view, instance_path);
         // A stop is executable only when the selected view is itself a
         // materialized terminal implementation. Treating a schematic as a black
         // box would emit an X-instance without any defining source, so the walk
@@ -981,7 +1062,6 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // The design root is not a boundary candidate: a configuration that
         // stopped at it would netlist nothing, so a stop naming its view says
         // nothing about the root.
-        let mut warnings = Vec::new();
         if let Some(stop) = matched_stop.as_deref()
             && !stop_boundary
             && !is_root
@@ -1027,6 +1107,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 status,
                 used_review_fallback,
                 diagnostic,
+                placed: target.as_ref().map(|_| requested.clone()),
             },
         );
         if let Some(section) = model_section {
@@ -1038,7 +1119,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             self.resolved_instances += 1;
         }
 
-        if stop_boundary {
+        // A cell that does not fit binds nothing, so nothing under it runs.
+        if stop_boundary || status == HierarchyBindingStatus::Incompatible {
             return;
         }
 
@@ -1256,6 +1338,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 status,
                 used_review_fallback: false,
                 diagnostic,
+                placed: None,
             },
         )
     }
@@ -1274,16 +1357,20 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             status,
             used_review_fallback,
             diagnostic,
+            placed,
         } = outcome;
+        // The bindings that govern a row are the placed cell's, whichever
+        // cell runs; what the placement copied from its own cell describes
+        // nothing about another one.
+        let governed = placed.as_ref().unwrap_or(&reference);
+        let own = binding.filter(|_| placed.is_none());
         let search_order = self.view_search_order(
-            &reference,
+            governed,
             binding.map_or(reference.view.as_str(), |value| value.view.as_str()),
             is_root,
             instance_path,
         );
-        let source_bound = binding
-            .and_then(|value| value.source_path.as_ref())
-            .is_some();
+        let source_bound = own.and_then(|value| value.source_path.as_ref()).is_some();
         let terminal_view = master
             .as_ref()
             .and_then(|value| value.view_type)
@@ -1305,7 +1392,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // the view it spells, and an unresolved row still shows which stop its
         // ordered search would reach.
         let stop_view = if self.configuration.is_some() {
-            self.configured_stop_views(&reference, instance_path)
+            self.configured_stop_views(governed, instance_path)
                 .into_iter()
                 .find(|stop| {
                     stop.eq_ignore_ascii_case(&reference.view)
@@ -1325,8 +1412,14 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             })
         };
         ResolvedHierarchyBinding {
-            model_section: self.model_section(&reference, binding, instance_path),
-            rule: self.binding_rule(&reference, instance_path),
+            model_section: self.model_section(&reference, own, instance_path),
+            rule: self.binding_rule(governed, instance_path),
+            placed_ports: if is_root {
+                Vec::new()
+            } else {
+                placed_ports(binding)
+            },
+            placed,
             reference,
             purpose: purpose.to_owned(),
             view_search_order: search_order,
@@ -1357,6 +1450,10 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     /// binding for its master's library and cell, then the configuration's
     /// global view list. An override that names no views inherits them, so
     /// setting its model section or platforms never changes its view.
+    ///
+    /// A binding that runs another cell chose the row even where it names no
+    /// views of its own: the instance's own binding when it names one, else
+    /// its cell's. The views it inherits are still searched in that cell.
     fn configured_view_list(
         &self,
         configuration: &'a ConfigurationSet,
@@ -1369,13 +1466,22 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 &scoped.executable_views,
             );
         }
-        if let Some(binding) = self.configured_cell_binding(master) {
-            return (HierarchyBindingRule::CellBinding, &binding.executable_views);
-        }
-        (
-            HierarchyBindingRule::ViewList,
-            configuration.executable_view_policy(),
-        )
+        let cell_binding = self.configured_cell_binding(master);
+        let views = cell_binding
+            .map(|binding| binding.executable_views.as_slice())
+            .filter(|views| !views.is_empty())
+            .unwrap_or(configuration.executable_view_policy());
+        let own_target = self
+            .configured_override(instance_path)
+            .is_some_and(|scoped| scoped.target.is_some());
+        let rule = if own_target {
+            HierarchyBindingRule::InstanceBinding
+        } else if cell_binding.is_some() {
+            HierarchyBindingRule::CellBinding
+        } else {
+            HierarchyBindingRule::ViewList
+        };
+        (rule, views)
     }
 
     /// The most specific override matching one instance that names views:
@@ -1409,6 +1515,30 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         self.cell_bindings
             .get(&cell_binding_key(&master.library, &master.cell))
             .copied()
+    }
+
+    /// The cell an instance of `placed` at `instance_path` runs in its
+    /// place, in the precedence its view list follows: its own binding's
+    /// target, then its cell binding's. `None` runs the placed cell. The
+    /// design root is the deck itself and is never replaced.
+    fn configured_target(
+        &self,
+        placed: &CellViewRef,
+        instance_path: &InstancePath,
+        is_root: bool,
+    ) -> Option<&'a BindingTarget> {
+        if is_root {
+            return None;
+        }
+        let configuration = self.configuration?;
+        let own =
+            selected_configuration_override(configuration.overrides(), &instance_path.to_string())
+                .and_then(|scoped| scoped.target.as_ref());
+        own.or_else(|| {
+            self.configured_cell_binding(placed)
+                .and_then(|binding| binding.target.as_ref())
+        })
+        .filter(|target| !target.names(&placed.library, &placed.cell))
     }
 
     fn configured_primary_views(
@@ -1509,12 +1639,13 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     /// [`hierarchy_stop_view`] is the one authority on it.
     fn matched_stop_view(
         &self,
-        resolved: &CellViewRef,
+        placed: &CellViewRef,
+        resolved_view: &str,
         instance_path: &InstancePath,
     ) -> Option<String> {
-        self.configured_stop_views(resolved, instance_path)
+        self.configured_stop_views(placed, instance_path)
             .into_iter()
-            .find(|stop| stop.eq_ignore_ascii_case(&resolved.view))
+            .find(|stop| stop.eq_ignore_ascii_case(resolved_view))
     }
 
     fn model_section(
@@ -1867,8 +1998,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // naturally through their ordered views, stop, model, and fallback
         // fields below, and so do rows a different rule chose.
         let key = format!(
-            "{}|{}|{}|{}|{}|{:?}",
+            "{}|{}|{}|{}|{}|{}|{:?}",
             row.reference.key().to_ascii_lowercase(),
+            row.placed
+                .as_ref()
+                .map(|placed| placed.key().to_ascii_lowercase())
+                .unwrap_or_default(),
             row.view_search_order.join(",").to_ascii_lowercase(),
             row.stop_view
                 .as_deref()

@@ -225,6 +225,7 @@ fn an_idle_configuration_page_resolves_and_walks_nothing() {
             cell: format!("retired_{index:03}"),
             executable_views: vec!["schematic".to_owned()],
             stop_view: None,
+            target: None,
         });
     };
     app.state
