@@ -524,3 +524,32 @@ fn announces(output: &egui::FullOutput, label: &str, value: &str) -> bool {
         .iter()
         .any(|node| node.label == label && node.value == value)
 }
+
+/// The Overview's inspector names the configuration the next run uses: once
+/// the plan names one of its own, that one, as the Analyses page's select
+/// says, while the project's mark stays where it was.
+#[test]
+fn the_overview_inspector_names_the_configuration_the_plan_runs() {
+    let ctx = offscreen();
+    let (mut app, reference, _) = analyses_app();
+    let output = settle(&ctx, &mut app, Vec::new());
+    pick(&ctx, &mut app, &output, "Configuration", VENDOR);
+    assert_eq!(marked(&app), Some(reference), "the project's mark stays");
+
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let output = settle(&ctx, &mut app, Vec::new());
+    assert!(
+        announces(&output, "Configuration", VENDOR),
+        "the inspector names the plan's configuration: {:#?}",
+        nodes(&output)
+            .iter()
+            .filter(|node| node.label == "Configuration")
+            .map(|node| node.value.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !announces(&output, "Configuration", REFERENCE),
+        "and not the one marked for runs"
+    );
+}

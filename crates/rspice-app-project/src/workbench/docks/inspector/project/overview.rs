@@ -44,13 +44,9 @@ pub(super) fn project_overview(
                     project.project.root_library, project.project.top_cell
                 ),
             );
-            // With no configuration used for runs, runs use Default: the
-            // project's own top cell through the built-in view list.
-            property_row(
-                ui,
-                "Testbench",
-                &project.simulation_root_reference().display_path(),
-            );
+            // What the next run elaborates: the root of the configuration the
+            // active plan runs, the project's own top cell under Default.
+            property_row(ui, "Testbench", &model.plan_root_reference().display_path());
             property_row_problem(
                 ui,
                 "Configuration",

@@ -160,7 +160,9 @@ pub fn source_deck(model: &Model) -> SubjectStatus {
     SubjectStatus::neutral("Checked at run", name)
 }
 
-/// The configuration runs use, and whether a run can be netlisted through
+/// The configuration the next run uses: the one the active plan names, else
+/// the one the project marks for runs, as the Analyses page's select and
+/// the run's receipt name it; and whether a run can be netlisted through
 /// it. Proving every configuration's digest is done once per edit of the
 /// catalogue, not on every frame.
 pub fn configuration(ctx: &egui::Context, model: &Model) -> SubjectStatus {
@@ -171,24 +173,34 @@ pub fn configuration(ctx: &egui::Context, model: &Model) -> SubjectStatus {
         catalog.stamp(),
         || catalog.validate().map_err(|error| error.to_string()),
     );
-    let active = catalog.active();
     if let Err(error) = validity {
         return SubjectStatus::new(
             Tone::Error,
-            active.map_or("Default", |configuration| configuration.name()),
+            catalog
+                .active()
+                .map_or("Default", |configuration| configuration.name()),
             format!("The configurations cannot be read: {error}"),
         );
     }
-    let Some(active) = active else {
-        // With none used for runs the project runs Default: its own top cell
-        // through the built-in view list.
+    let plan = match model
+        .workspace
+        .plan_configuration_sets(model.sim_setup.design_configuration)
+    {
+        Ok(plan) => plan,
+        Err(error) => {
+            return SubjectStatus::new(
+                Tone::Error,
+                "Deleted configuration",
+                format!("Runs are blocked: {error}"),
+            );
+        }
+    };
+    let Some(active) = plan.active() else {
+        // With none named or used for runs the plan runs Default: the
+        // project's own top cell through the built-in view list.
         return SubjectStatus::neutral("Default", "Runs use the built-in view list");
     };
-    let projection = model.workspace.configuration_execution_projection(
-        &model.library_manager,
-        &model.workspace.content.active_view,
-        &model.schematic,
-    );
+    let projection = model.plan_execution_projection();
     match projection {
         Ok(projection) => SubjectStatus::neutral(
             active.name(),
