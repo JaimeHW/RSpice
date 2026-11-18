@@ -450,6 +450,25 @@ fn an_instance_binding_beats_a_cell_binding_which_beats_the_view_list() {
     assert_eq!(global.stop_view.as_deref(), Some("schematic"));
 }
 
+/// An override names its instance in any case, as paths compare: the one
+/// spelled `/x2` governs `X2`, and beats a wildcard over the same level.
+#[test]
+fn an_override_spelled_in_another_case_still_governs_its_instance() {
+    let mut definition = bound_configuration(&["schematic"], &["schematic"]);
+    definition.overrides = vec![
+        instance_binding("/*", &["fast"], None),
+        instance_binding("/x2", &["slow"], Some("slow")),
+    ];
+    let resolution = resolve_bound(Some(definition));
+
+    let named = row(&resolution, "/X2");
+    assert_eq!(named.reference, CellViewRef::new("work", "amp", "slow"));
+    assert_eq!(named.stop_view.as_deref(), Some("slow"));
+    assert_eq!(named.rule, HierarchyBindingRule::InstanceBinding);
+    let patterned = row(&resolution, "/X1");
+    assert_eq!(patterned.reference, CellViewRef::new("work", "amp", "fast"));
+}
+
 #[test]
 fn reviewed_fallback_follows_the_cell_binding_that_won() {
     let mut definition = bound_configuration(&["schematic"], &[]);

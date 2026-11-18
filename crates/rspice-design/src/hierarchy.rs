@@ -596,6 +596,11 @@ struct HierarchyResolver<'a, D, F> {
     cell_bindings: HashMap<(String, String), &'a ConfigurationCellBinding>,
     /// Each override's pattern, parsed once.
     patterns: Vec<Option<InstancePathPattern>>,
+    /// The overrides whose pattern names every position, by the folded path
+    /// it names, so a lookup tries only those naming the instance; the rest
+    /// hold a wildcard and are tried against every instance.
+    named_overrides: HashMap<String, Vec<usize>>,
+    wildcard_overrides: Vec<usize>,
     rows: Vec<ResolvedHierarchyBinding>,
     row_indices: HashMap<String, usize>,
     /// One node per distinct occurrence context, in the order the walk made
@@ -650,6 +655,26 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         root: CellViewRef,
         configuration: Option<&'a ConfigurationSet>,
     ) -> Self {
+        let patterns = configuration
+            .map(|configuration| {
+                configuration
+                    .overrides()
+                    .iter()
+                    .map(|scoped| InstancePathPattern::parse(&scoped.instance_path).ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut named_overrides = HashMap::<String, Vec<usize>>::new();
+        let mut wildcard_overrides = Vec::new();
+        for (at, pattern) in patterns.iter().enumerate() {
+            let Some(pattern) = pattern else {
+                continue;
+            };
+            match named_path_key(pattern) {
+                Some(key) => named_overrides.entry(key).or_default().push(at),
+                None => wildcard_overrides.push(at),
+            }
+        }
         Self {
             context,
             root,
@@ -672,15 +697,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                         .collect()
                 })
                 .unwrap_or_default(),
-            patterns: configuration
-                .map(|configuration| {
-                    configuration
-                        .overrides()
-                        .iter()
-                        .map(|scoped| InstancePathPattern::parse(&scoped.instance_path).ok())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            patterns,
+            named_overrides,
+            wildcard_overrides,
             rows: Vec::new(),
             row_indices: HashMap::new(),
             nodes: Vec::new(),
@@ -1588,20 +1607,25 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
 
     /// The most specific of the overrides `admits` that matches one
     /// instance, over the patterns parsed once for the whole resolution: a
-    /// lookup runs for every row, so it must not parse the catalog again.
+    /// lookup runs several times for every row, so it tries only the
+    /// overrides that name the instance and those holding a wildcard, in
+    /// catalog order, as a walk of every override would.
     fn most_specific_override(
         &self,
         instance_path: &InstancePath,
         admits: impl Fn(&ConfigurationSetOverride) -> bool,
     ) -> Option<&ConfigurationSetOverride> {
-        self.overrides
-            .iter()
-            .zip(&self.patterns)
-            .filter(|(scoped, _)| admits(scoped))
-            .filter_map(|(scoped, pattern)| {
-                let pattern = pattern.as_ref()?;
-                pattern
-                    .matches(instance_path)
+        let mut candidates = self.wildcard_overrides.clone();
+        if let Some(named) = self.named_overrides.get(&instance_path.fold_key()) {
+            candidates.extend(named);
+            candidates.sort_unstable();
+        }
+        candidates
+            .into_iter()
+            .filter_map(|at| {
+                let scoped = &self.overrides[at];
+                let pattern = self.patterns[at].as_ref()?;
+                (admits(scoped) && pattern.matches(instance_path))
                     .then(|| (scoped, pattern.specificity()))
             })
             .max_by_key(|(_, specificity)| *specificity)
@@ -2150,6 +2174,23 @@ fn segment_matches(segment: &PatternSegment, name: &str) -> bool {
         PatternSegment::Star => true,
         PatternSegment::Name(expected) => fold(expected) == fold(name),
     }
+}
+
+/// The folded path a pattern names when it pins every position by name, as
+/// [`InstancePath::fold_key`] spells it; `None` for one holding a wildcard.
+fn named_path_key(pattern: &InstancePathPattern) -> Option<String> {
+    if pattern.is_root() {
+        return Some("/".to_owned());
+    }
+    let mut key = String::new();
+    for segment in pattern.segments() {
+        let PatternSegment::Name(name) = segment else {
+            return None;
+        };
+        key.push('/');
+        key.push_str(&fold(name));
+    }
+    Some(key)
 }
 
 /// The paths reported missing from the expanded hierarchy: by their folded
