@@ -371,6 +371,14 @@ impl DeckIndex {
         })
     }
 
+    /// The definition of kind `kind` a reader in `scope` binds `name` to:
+    /// the innermost scope that defines it decides.
+    #[must_use]
+    pub fn resolve(&self, kind: DeckSymbolKind, name: &str, scope: usize) -> Option<usize> {
+        self.scope_chain(scope)
+            .find_map(|level| self.resolve_in_scope(kind, name, level))
+    }
+
     /// The parameters a reader in `scope` sees, one per name: each the
     /// definition the engine binds there.
     #[must_use]
@@ -459,6 +467,35 @@ impl DeckIndex {
             .collect::<Vec<_>>();
         binding(kind, &candidates, &self.symbols, &HashSet::new())
     }
+}
+
+/// The names a probe's parentheses hold, each with its span in the lexed
+/// text, and the token after its closing parenthesis. `open` is the token
+/// of the opening one.
+fn probe_arguments(
+    tokens: &[super::lexer::Token],
+    open: usize,
+) -> (Vec<(String, Range<usize>)>, usize) {
+    let mut names = Vec::new();
+    let mut depth = 0usize;
+    let mut index = open;
+    while let Some(token) = tokens.get(index) {
+        index += 1;
+        match token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            TokenKind::Ident(_) | TokenKind::Number(_) if depth == 1 => {
+                names.push((token.lexeme.clone(), token.span.start..token.span.end));
+            }
+            _ => {}
+        }
+    }
+    (names, index)
 }
 
 /// The definition among `candidates`, all of one name in one scope, that
@@ -892,7 +929,44 @@ impl Builder {
                 self.read_spectre_instance(state, line, &fields, card_index, scope);
             }
             DeckCardKind::Instance => self.read_instance(state, line, &fields, card_index, scope),
+            DeckCardKind::Output | DeckCardKind::Measurement | DeckCardKind::Analysis => {
+                self.read_parameters(state, line, card_index, scope, false);
+                self.read_probes(state, line, card_index, scope);
+            }
             _ => self.read_parameters(state, line, card_index, scope, false),
+        }
+    }
+
+    /// The nodes the `V()` probes of a card name outside its values:
+    /// `.print tran v(out)`, `.meas ac peak max v(out)`, `.tf v(out,ref) vin`.
+    /// A probe inside a braced or quoted value is read with the value.
+    fn read_probes(&mut self, state: &FileState<'_>, line: &MappedLine, card: usize, scope: usize) {
+        let tokens = Lexer::new(&line.text)
+            .tokenize_recovering()
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        let mut index = 0;
+        while index < tokens.len() {
+            let token = &tokens[index];
+            index += 1;
+            let TokenKind::Ident(_) = token.kind else {
+                continue;
+            };
+            if !token.lexeme.eq_ignore_ascii_case("v")
+                || !tokens
+                    .get(index)
+                    .is_some_and(|next| matches!(next.kind, TokenKind::LParen))
+            {
+                continue;
+            }
+            let (probed, after) = probe_arguments(&tokens, index);
+            index = after;
+            for (node, span) in probed {
+                if let Some(span) = line.original_span(span) {
+                    self.push_node(&node, scope, state.location(span), card);
+                }
+            }
         }
     }
 
@@ -1003,20 +1077,15 @@ impl Builder {
                 .get(index)
                 .is_some_and(|next| matches!(next.kind, TokenKind::LParen));
             if called && (name.eq_ignore_ascii_case("v") || name.eq_ignore_ascii_case("i")) {
-                let mut depth = 0usize;
-                while index < tokens.len() {
-                    match tokens[index].kind {
-                        TokenKind::LParen => depth += 1,
-                        TokenKind::RParen => {
-                            depth = depth.saturating_sub(1);
-                            if depth == 0 {
-                                index += 1;
-                                break;
-                            }
+                let (probed, after) = probe_arguments(&tokens, index);
+                index = after;
+                if name.eq_ignore_ascii_case("v") {
+                    for (node, span) in probed {
+                        let span = body.start + span.start..body.start + span.end;
+                        if let Some(span) = line.original_span(span) {
+                            self.push_node(&node, scope, state.location(span), card);
                         }
-                        _ => {}
                     }
-                    index += 1;
                 }
                 continue;
             }

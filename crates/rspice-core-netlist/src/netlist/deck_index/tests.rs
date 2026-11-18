@@ -480,3 +480,52 @@ fn a_spice_line_ending_in_a_backslash_is_not_continued() {
     let index = index(deck);
     assert_eq!(instance_names(&index), ["R1", "R2"]);
 }
+
+#[test]
+fn a_voltage_probe_names_the_nodes_it_reads_and_a_current_probe_none() {
+    let deck = "probes\nR1 out a 1k\nB1 b 0 V={v(out)*2}\n.tran 1n 10n\n\
+                .print tran v(out) v(a,b) i(R1)\n.meas tran pk max v(out)\n.end\n";
+    let index = index(deck);
+    let probed = index
+        .nodes()
+        .iter()
+        // Past B1's own terminals: what the probes name.
+        .filter(|node| (node.location.line, node.location.column) > (3, 6))
+        .map(|node| {
+            (
+                node.name.as_str(),
+                node.location.line,
+                &deck[node.location.span.clone()],
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        probed,
+        [
+            ("out", 3, "out"),
+            ("out", 5, "out"),
+            ("a", 5, "a"),
+            ("b", 5, "b"),
+            ("out", 6, "out"),
+        ]
+    );
+    assert!(index.nodes().iter().all(|node| node.name != "R1"));
+}
+
+#[test]
+fn a_name_resolves_through_the_scopes_a_reader_sees() {
+    let deck = "scopes\n.param w=1\n.subckt cell a b\n.param l=2\nR1 a b {w*l}\n.ends\n.end\n";
+    let index = index(deck);
+    let inner = index.scope_on_line(0, 5);
+    let w = index.resolve(DeckSymbolKind::Parameter, "W", inner);
+    assert_eq!(
+        w.map(|symbol| index.symbols()[symbol].location.line),
+        Some(2)
+    );
+    assert!(index.resolve(DeckSymbolKind::Parameter, "l", 0).is_none());
+    assert!(
+        index
+            .resolve(DeckSymbolKind::Parameter, "l", inner)
+            .is_some()
+    );
+}
