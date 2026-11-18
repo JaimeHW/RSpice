@@ -21,6 +21,25 @@ use super::ProjectNavigator;
 /// Three cells of the row's mono meta face: wider than a mark and its gap.
 pub(super) const MARK_ROOM: &str = "   ";
 
+/// A status as a rail row has room for: whole while it fits in half the
+/// row, mark included, else cut after a whole word, so the name beside it
+/// keeps its share. The table and the inspector state it whole.
+pub(super) fn rail_status<'a>(ui: &Ui, label: &'a str, marked: bool) -> Cow<'a, str> {
+    let mark = if marked { PROBLEM_MARK_ADVANCE } else { 0.0 };
+    let room = (ui.available_width() * 0.5 - mark).max(0.0);
+    let shown = crate::workbench::design_system::elide_at_words(
+        ui,
+        label,
+        &theme::mono(tokens::FS_0, FontWeight::Regular),
+        room,
+    );
+    if shown == label {
+        Cow::Borrowed(label)
+    } else {
+        Cow::Owned(shown)
+    }
+}
+
 pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
     // The rail draws before the page, so it is the first to bring the drift
     // report up to the catalogue the statuses describe.
@@ -36,15 +55,21 @@ pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigat
         };
         let selected = nav.dependency_selection.as_ref() == Some(&row.library);
         let problem = row.status.mark.problem();
+        let shown = rail_status(ui, row.status.label, problem.is_some());
         // A marked status keeps the mark's room in front of its word, so the
         // name is elided short of the mark rather than run under it.
         let meta = match problem {
-            Some(_) => Cow::Owned(format!("{MARK_ROOM}{}", row.status.label)),
-            None => Cow::Borrowed(row.status.label),
+            Some(_) => Cow::Owned(format!("{MARK_ROOM}{shown}")),
+            None => shown.clone(),
         };
         let response = nav_row_response(ui, icon, &row.library.name, selected, Some(&meta));
+        let response = if shown == row.status.label {
+            response
+        } else {
+            response.on_hover_text(row.status.label)
+        };
         if let Some(problem) = problem {
-            paint_status_mark(ui, response.rect, row.status.label, problem);
+            paint_status_mark(ui, response.rect, &shown, problem);
             let announced =
                 problem.announce(&format!("{}, {}", row.library.name, row.status.label));
             response.widget_info(|| {

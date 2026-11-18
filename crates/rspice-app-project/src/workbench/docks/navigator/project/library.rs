@@ -20,7 +20,7 @@ use crate::workbench::surfaces::project::library::builtin_models::BuiltinModelsI
 
 use super::super::{nav_row, nav_row_response};
 use super::ProjectNavigator;
-use super::dependencies::{MARK_ROOM, paint_status_mark};
+use super::dependencies::{MARK_ROOM, paint_status_mark, rail_status};
 
 /// The rail's rows; a click is returned as the Library page's own intent,
 /// so the rail and the page's column select the same way.
@@ -74,9 +74,10 @@ pub(super) fn project_library_navigator(
         // dependency rail does.
         let exception = exceptions.get(name);
         let problem = exception.and_then(|exception| exception.mark.problem());
-        let meta = exception.map(|exception| match problem {
-            Some(_) => Cow::Owned(format!("{MARK_ROOM}{}", exception.label)),
-            None => Cow::Borrowed(exception.label.as_str()),
+        let shown = exception.map(|exception| rail_status(ui, &exception.label, problem.is_some()));
+        let meta = shown.as_ref().map(|shown| match problem {
+            Some(_) => Cow::Owned(format!("{MARK_ROOM}{shown}")),
+            None => shown.clone(),
         });
         let response = nav_row_response(
             ui,
@@ -89,11 +90,19 @@ pub(super) fn project_library_navigator(
             selected == Some(name.as_str()),
             meta.as_deref(),
         );
-        if let (Some(problem), Some(exception)) = (problem, exception) {
-            paint_status_mark(ui, response.rect, &exception.label, problem);
+        if let (Some(problem), Some(shown)) = (problem, shown.as_deref()) {
+            paint_status_mark(ui, response.rect, shown, problem);
         }
-        let response = match exception.and_then(|exception| exception.detail.as_deref()) {
-            Some(detail) => response.on_hover_text(detail),
+        // The detail under the pointer, or the status whole when the row
+        // had room for only part of it.
+        let hover = exception.and_then(|exception| {
+            exception.detail.as_deref().or_else(|| {
+                (shown.as_deref() != Some(exception.label.as_str()))
+                    .then_some(exception.label.as_str())
+            })
+        });
+        let response = match hover {
+            Some(hover) => response.on_hover_text(hover),
             None => response,
         };
         if response.clicked() {

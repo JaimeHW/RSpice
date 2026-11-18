@@ -614,33 +614,55 @@ fn revision(revision: Option<u64>) -> String {
 
 /// A list of changed cellviews, flush to the dialog's edges: library, cell,
 /// view, the revision loaded and the one on disk, and where each stands.
+/// A dialog too narrow for six columns, on a phone, names each cellview by
+/// its path and its two revisions on one line, so where it stands is on
+/// screen without scrolling sideways.
 fn cellview_table(
     ui: &mut Ui,
     id: &str,
     rows: &[RefreshRow],
     table: &mut TableState,
-    heads: (&str, &str),
+    heads: (&str, &str, &str),
+    status_width: f32,
     status: impl Fn(&RefreshRow) -> Cell,
 ) {
-    let columns = [
+    let narrow = ui.available_width() < NARROW_LIST;
+    let wide = [
         Column::name("Library", 90.0),
         Column::name("Cell", 90.0),
         Column::name("View", 80.0),
         Column::number(heads.0, 64.0),
         Column::number(heads.1, 64.0),
-        Column::words("Status", 150.0),
+        Column::words(heads.2, status_width),
     ];
+    let compact = [
+        Column::name("Cellview", 110.0),
+        Column::number("Revision", 76.0),
+        Column::words(heads.2, status_width),
+    ];
+    let columns: &[Column] = if narrow { &compact } else { &wide };
     let keys = rows
         .iter()
         .map(|row| row_key(&row.library, &row.file))
         .collect::<Vec<_>>();
-    let _ = DataTable::new(id, &columns, rows.len())
+    let _ = DataTable::new(id, columns, rows.len())
         .state(table)
         .keys(&keys)
         .multi_select()
         .show(ui, |index| {
             let row = &rows[index];
             let (cell, view) = cell_and_view(&row.file);
+            if narrow {
+                return vec![
+                    Cell::text(format!("{}/{cell}/{view}", row.library)),
+                    Cell::number(format!(
+                        "{} \u{2192} {}",
+                        revision(row.loaded),
+                        revision(row.on_disk)
+                    )),
+                    status(row),
+                ];
+            }
             vec![
                 Cell::text(row.library.as_str()),
                 Cell::text(cell),
@@ -652,15 +674,38 @@ fn cellview_table(
         });
 }
 
+/// Narrower than this, a list of cellviews takes three columns, not six.
+const NARROW_LIST: f32 = 560.0;
+
 fn changed_status(row: &RefreshRow) -> Cell {
+    let (label, problem) = changed_words(row);
+    Cell::problem(label, problem)
+}
+
+fn changed_words(row: &RefreshRow) -> (&'static str, Problem) {
     if row.edited {
-        Cell::problem(
+        (
             rspice_design::library::folder::CHANGED_SINCE_EDITING,
             Problem::Failure,
         )
     } else {
-        Cell::problem("Changed", Problem::Warning)
+        ("Changed", Problem::Warning)
     }
+}
+
+/// The least width of the lists' last column, its head's, and the most, as
+/// a share of the dialog's body: between them it fits its widest words.
+const STATUS_LEAST: f32 = 72.0;
+const STATUS_MOST: f32 = 0.45;
+
+/// The width of a list's last column, fitted to `statuses` in `ui`.
+fn last_column_width<'a>(ui: &Ui, statuses: impl IntoIterator<Item = (&'a str, bool)>) -> f32 {
+    crate::workbench::project::dependency_status::status_column_width(
+        ui,
+        STATUS_LEAST,
+        ui.available_width() * STATUS_MOST,
+        statuses,
+    )
 }
 
 impl ProjectFeature {
@@ -791,12 +836,14 @@ fn refresh_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
     let table = &mut cx.state.library_files.table;
     let choice = dialog.show(ctx, |ui| {
         if !empty {
+            let width = last_column_width(ui, rows.iter().map(|row| (changed_words(row).0, true)));
             cellview_table(
                 ui,
                 "workbench.project.library-files.refresh",
                 &rows,
                 table,
-                ("Loaded", "On disk"),
+                ("Loaded", "On disk", "Status"),
+                width,
                 changed_status,
             );
         }
@@ -873,18 +920,23 @@ fn changed_on_disk_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
         dialog = dialog.hint(error);
     }
     let choice = dialog.show(ctx, |ui| {
+        // Every row here changed on disk since its edits began, as the
+        // title says: the column states what is chosen for each, and Save
+        // refuses each not yet chosen.
+        let width = last_column_width(ui, [("Not chosen", true), ("Keep my version", false)]);
         cellview_table(
             ui,
             "workbench.project.library-files.changed-on-disk",
             &rows,
             table,
-            ("Loaded", "On disk"),
+            ("Loaded", "On disk", "Choice"),
+            width,
             |row| {
                 let index = rows.iter().position(|each| each == row).unwrap_or_default();
                 if kept_rows[index] {
-                    Cell::text("Keep my version at the next save")
+                    Cell::text("Keep my version")
                 } else {
-                    changed_status(row)
+                    Cell::problem("Not chosen", Problem::Failure)
                 }
             },
         );
@@ -1105,12 +1157,14 @@ fn moved_on_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
     }
     let table = &mut cx.state.library_files.table;
     let choice = dialog.show(ctx, |ui| {
+        let width = last_column_width(ui, [("Changed", true)]);
         cellview_table(
             ui,
             "workbench.project.library-files.moved-on",
             &rows,
             table,
-            ("Published", "In folder"),
+            ("Published", "In folder", "Status"),
+            width,
             |_| Cell::problem("Changed", Problem::Warning),
         );
     });

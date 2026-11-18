@@ -20,7 +20,7 @@ use crate::ui::widgets::table::{
     Selection, TableResponse, TableState,
 };
 use crate::workbench::project::dependency_status::{
-    RowException, cell_exception, library_exceptions, view_exception,
+    RowException, cell_exception, library_exceptions, status_column_width, view_exception,
 };
 
 /// One of the page's three columns.
@@ -503,6 +503,24 @@ fn exception(found: Option<&RowException>) -> Entry {
     found.map_or_else(Entry::empty, RowException::entry)
 }
 
+/// The width a status column takes in a list `width` wide: its widest
+/// exception whole, up to half the list.
+fn status_width<'a>(
+    ui: &Ui,
+    least: f32,
+    width: f32,
+    exceptions: impl IntoIterator<Item = &'a RowException>,
+) -> f32 {
+    status_column_width(
+        ui,
+        least,
+        width * 0.5,
+        exceptions
+            .into_iter()
+            .map(|found| (found.label.as_str(), found.mark.problem().is_some())),
+    )
+}
+
 pub(super) fn library_column(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
@@ -527,10 +545,19 @@ pub(super) fn library_column(
     follow_lead(&mut browser.libraries, &libraries.keys, lead);
     let count = libraries.keys.len();
     let nothing_found = find.nothing_found();
+    let status = status_width(
+        ui,
+        72.0,
+        width,
+        libraries
+            .rows
+            .iter()
+            .filter_map(|library| exceptions.get(&library.name)),
+    );
     let columns = [
         Column::name("Library", 60.0),
         Column::number("Cells", 44.0),
-        Column::words("Status", 72.0),
+        Column::words("Status", status),
     ];
     let focus = browser.focusing == Some(BrowserColumn::Library);
     let response = list_column(
@@ -630,10 +657,20 @@ pub(super) fn cell_column(
         .selected_library
         .as_deref()
         .filter(|library| manager.is_referenced(library));
+    let exceptions = shown_library.map_or_else(Vec::new, |library| {
+        cells
+            .rows
+            .iter()
+            .map(|cell| cell_exception(cx.model, library, &cell.name))
+            .collect()
+    });
     let columns = [
         Column::name("Cell", 60.0),
         Column::number("Views", 44.0),
-        Column::words("Status", 72.0),
+        Column::words(
+            "Status",
+            status_width(ui, 72.0, width, exceptions.iter().flatten()),
+        ),
     ];
     let columns = &columns[..if shown_library.is_some() { 3 } else { 2 }];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
@@ -657,10 +694,8 @@ pub(super) fn cell_column(
                     },
                     Entry::number(cell.views.as_str()),
                 ];
-                if let Some(library) = shown_library {
-                    entries.push(exception(
-                        cell_exception(cx.model, library, &cell.name).as_ref(),
-                    ));
+                if shown_library.is_some() {
+                    entries.push(exception(exceptions[row].as_ref()));
                 }
                 entries
             })
@@ -727,10 +762,25 @@ pub(super) fn view_column(
             "No cell selected"
         },
     };
+    // A view kept in a library's own folder prints its exception first: a
+    // change on disk outranks the edits made here.
+    let exceptions = views
+        .rows
+        .iter()
+        .map(|view| {
+            let found = shown_cell.and_then(|cell| cell.get_view(&view.name));
+            shown_names
+                .zip(found)
+                .and_then(|((library, cell), found)| view_exception(cx.model, library, cell, found))
+        })
+        .collect::<Vec<_>>();
     let columns = [
         Column::name("View", 60.0),
         Column::words("Type", 92.0),
-        Column::words("State", 68.0),
+        Column::words(
+            "State",
+            status_width(ui, 68.0, width, exceptions.iter().flatten()),
+        ),
     ];
     let focus = browser.focusing == Some(BrowserColumn::View);
     let response = list_column(ui, "View", count, width, height, |ui, body| {
@@ -748,11 +798,7 @@ pub(super) fn view_column(
         .show(ui, |row| {
             let view = &views.rows[row];
             let found = shown_cell.and_then(|cell| cell.get_view(&view.name));
-            // A view kept in a library's own folder prints its exception
-            // first: a change on disk outranks the edits made here.
-            let file_exception = shown_names.zip(found).and_then(|((library, cell), found)| {
-                view_exception(cx.model, library, cell, found)
-            });
+            let file_exception = exceptions[row].as_ref();
             let name = Entry::text(view.name.as_str());
             vec![
                 match &view.path {
@@ -761,7 +807,7 @@ pub(super) fn view_column(
                 },
                 Entry::text(view.view_type.caption()),
                 if file_exception.is_some() {
-                    exception(file_exception.as_ref())
+                    exception(file_exception)
                 } else if found.is_some_and(|view| view.modified) {
                     Entry::text("modified")
                 } else {

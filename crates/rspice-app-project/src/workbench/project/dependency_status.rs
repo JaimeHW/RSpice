@@ -182,6 +182,43 @@ impl RowException {
     }
 }
 
+/// The width a column of statuses takes: its widest words whole, a mark
+/// and the cell's padding included. Never under `least`, the head's own,
+/// nor over `most`, past which the longest is cut after a whole word and
+/// its detail shows under the pointer.
+pub fn status_column_width<'a>(
+    ui: &egui::Ui,
+    least: f32,
+    most: f32,
+    statuses: impl IntoIterator<Item = (&'a str, bool)>,
+) -> f32 {
+    let font = crate::ui::theme::sans(
+        crate::ui::tokens::FS_0,
+        crate::ui::theme::FontWeight::Regular,
+    );
+    let mut measured = std::collections::BTreeMap::new();
+    for (label, marked) in statuses {
+        let mark = if marked {
+            crate::ui::widgets::PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        };
+        let entry = measured.entry(label).or_insert(mark);
+        *entry = entry.max(mark);
+    }
+    let widest = measured
+        .into_iter()
+        .map(|(label, mark)| {
+            ui.painter()
+                .layout_no_wrap(label.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+                + mark
+        })
+        .fold(0.0_f32, f32::max);
+    (widest.ceil() + 2.0 * crate::ui::widgets::table::CELL_PAD + 2.0).clamp(least, most.max(least))
+}
+
 /// Every design library's row exception, by name, derived again only when
 /// the catalogue, the references or what this session read of their folders
 /// changes, so an idle frame reads them for nothing.
