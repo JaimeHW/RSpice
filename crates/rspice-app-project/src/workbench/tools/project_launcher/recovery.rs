@@ -22,17 +22,22 @@ pub(super) fn recovery_page(
         layout,
         None,
     );
-    let footer_height = launcher_footer_reserve(
-        ui,
-        layout,
+    // With nothing listed, the one action that applies is Safe mode: the
+    // others act on a selection there cannot be.
+    let empty = cx.platform.recovery_catalog.candidates.is_empty()
+        && cx.platform.recovery_catalog.projects.is_empty();
+    let footer_buttons: &[(&str, bool)] = if empty {
+        &[("Safe mode\u{2026}", false)]
+    } else {
         &[
             ("Discard selected autosave…", false),
             ("Safe mode\u{2026}", false),
             #[cfg(not(target_arch = "wasm32"))]
             ("Save as new project\u{2026}", false),
             ("Open recovery comparison", true),
-        ],
-    );
+        ]
+    };
+    let footer_height = launcher_footer_reserve(ui, layout, footer_buttons);
     let regions = launcher_page_regions(ui, footer_height);
     let mut body_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -153,6 +158,12 @@ pub(super) fn recovery_page(
 
     let selected = cx.platform.recovery_catalog.selected().cloned();
     launcher_page_footer(ui, layout, regions.footer, |ui| {
+        if empty {
+            if Button::new("Safe mode\u{2026}").show(ui).clicked() {
+                *action = Some(LauncherAction::Page(ProjectLauncherPage::SafeMode));
+            }
+            return;
+        }
         let can_discard = selected
             .as_ref()
             .is_some_and(RecoveryCandidate::can_discard);

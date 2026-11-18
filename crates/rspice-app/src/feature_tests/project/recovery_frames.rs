@@ -614,3 +614,31 @@ fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
     assert!(painted(&overview).contains(&format!("{after} \u{b7} ")));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// With nothing to recover, the launcher's Recovery page offers the one
+/// action that applies, Safe mode, and none that acts on a selection there
+/// cannot be.
+#[test]
+fn the_empty_launcher_recovery_page_offers_only_safe_mode() {
+    let mut app = RSpiceApp::test_instance();
+    open_project_launcher(
+        &mut app.state.project,
+        &mut app.state.workbench,
+        &mut app.state.platform,
+    );
+    app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
+    *app.state.platform.recovery_catalog = RecoveryCatalog::fixture(Vec::new());
+    let ctx = offscreen();
+    let shown = paint_until(&ctx, &mut app, |text| {
+        text.contains("No interrupted work found")
+    });
+    let text = painted(&shown);
+    assert!(text.contains("Safe mode\u{2026}"), "{text}");
+    for dead in [
+        "Discard selected autosave",
+        "Open recovery comparison",
+        "Save as new project",
+    ] {
+        assert!(!text.contains(dead), "{dead:?} offered over nothing:\n{text}");
+    }
+}
