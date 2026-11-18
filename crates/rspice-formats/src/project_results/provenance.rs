@@ -299,6 +299,11 @@ pub struct ProjectPreparedRunReceipt {
     /// migration never invents rows for a run that executed without one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hierarchy_map: Vec<ProjectHierarchyMapRow>,
+    /// The hierarchy configuration the run elaborated, by identity, its name
+    /// then and its revision. Absent for a manual deck and for a run recorded
+    /// before runs named it; never invented for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<rspice_results::run_receipt::RunConfiguration>,
 }
 
 impl ProjectPreparedRunReceipt {
@@ -367,6 +372,7 @@ impl ProjectPreparedRunReceipt {
             tasks,
         })
         .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
+        .map(|receipt| receipt.with_configuration(self.configuration))
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
@@ -411,6 +417,7 @@ impl From<&PreparedRunReceipt> for ProjectPreparedRunReceipt {
                 .iter()
                 .map(ProjectHierarchyMapRow::from)
                 .collect(),
+            configuration: receipt.configuration().cloned(),
         }
     }
 }

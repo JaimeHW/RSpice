@@ -387,6 +387,22 @@ impl HierarchyMapRow {
     }
 }
 
+/// The hierarchy configuration a run elaborated, as it stood when the run was
+/// prepared: what the run's details and the project's activity name it by,
+/// and what tells a result from a configuration that changed since apart.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunConfiguration {
+    /// The configuration's identity; `None` is the built-in default view
+    /// search order, which is no configuration of the project's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<rspice_design_model::primitives::ConfigurationSetId>,
+    /// Its name when the run was prepared.
+    pub name: String,
+    /// The revision it ran at.
+    pub revision: u64,
+}
+
 /// Durable authority for a run created from one consumed prepared snapshot.
 ///
 /// The complete task graph remains present even when execution is aborted or
@@ -406,6 +422,7 @@ pub struct PreparedRunReceipt {
     specification_policy: PreparedSpecificationPolicy,
     tasks: Vec<PreparedRunTaskReceipt>,
     hierarchy_map: Vec<HierarchyMapRow>,
+    configuration: Option<RunConfiguration>,
 }
 
 /// Input facts admitted by the validated prepared-run receipt constructor.
@@ -562,6 +579,7 @@ impl PreparedRunReceipt {
             specification_policy,
             tasks,
             hierarchy_map: Vec::new(),
+            configuration: None,
         })
     }
 
@@ -592,6 +610,21 @@ impl PreparedRunReceipt {
         }
         self.hierarchy_map = hierarchy_map;
         Ok(self)
+    }
+
+    /// Seals the configuration the run elaborated onto the receipt. Absent
+    /// for a manual deck, which elaborates no hierarchy, and for every run
+    /// recorded before runs named their configuration.
+    #[must_use]
+    pub fn with_configuration(mut self, configuration: Option<RunConfiguration>) -> Self {
+        self.configuration = configuration;
+        self
+    }
+
+    /// The configuration this run elaborated, as it stood when it ran.
+    #[must_use]
+    pub const fn configuration(&self) -> Option<&RunConfiguration> {
+        self.configuration.as_ref()
     }
 
     #[must_use]

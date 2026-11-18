@@ -167,6 +167,7 @@ where
     W: AsRef<rspice_results::waveform::RetainedWaveform> + 'a,
 {
     let root_reference = execution_projection.root().clone();
+    let configuration = run_configuration(&execution_projection, inputs.configuration_sets);
     let root_schematic = execution_projection
         .root_schematic()
         .expect("a successful execution projection has a materialized root");
@@ -617,11 +618,30 @@ where
             }),
             touchstone_export,
             sealed_source_dependencies,
+            configuration: Some(configuration),
         },
         rspice_core::ResourceLimits::default(),
         abort,
         progress,
     )
+}
+
+/// The configuration `projection` was elaborated under, named as `catalog`
+/// names it now: the run records it by identity, its name and its revision.
+fn run_configuration(
+    projection: &rspice_design::projection::DesignProjection,
+    catalog: &rspice_design::configuration_set::ConfigurationSetCatalog,
+) -> rspice_results::run_receipt::RunConfiguration {
+    let plan = projection.plan();
+    let id = plan.configuration_id();
+    rspice_results::run_receipt::RunConfiguration {
+        id,
+        name: id.and_then(|id| catalog.find(id)).map_or_else(
+            || "Default".to_owned(),
+            |configuration| configuration.name().to_owned(),
+        ),
+        revision: plan.configuration_revision(),
+    }
 }
 
 /// A manual deck composed and expanded as its run executes it, before the
@@ -1030,6 +1050,7 @@ pub fn build_prepared_manual_deck<R, A>(
         cross_probe: None,
         touchstone_export,
         sealed_source_dependencies,
+        configuration: None,
     })
     .map(|snapshot| match source_lines {
         Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),

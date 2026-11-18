@@ -39,6 +39,7 @@ struct RunReceiptFacts<'a> {
     project_model_sources: &'a [PreparedModelSourceIdentity],
     specifications: &'a [PreparedSpecification],
     specification_policy: &'a PreparedSpecificationPolicy,
+    configuration: Option<&'a rspice_results::run_receipt::RunConfiguration>,
 }
 
 /// The exact facts one task contributes to a prepared-run receipt.
@@ -99,6 +100,7 @@ fn seal_prepared_run_receipt<'a>(
         tasks,
     })
     .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
+    .map(|receipt| receipt.with_configuration(run.configuration.cloned()))
     .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
 }
 
@@ -136,6 +138,7 @@ impl PreparedRunSnapshot {
                 project_model_sources: &self.project_model_sources,
                 specifications: &self.specifications,
                 specification_policy: &self.specification_policy,
+                configuration: self.configuration.as_ref(),
             },
             self.tasks.iter().map(|task| ReceiptTaskFacts {
                 instance_id: task.instance_id,
@@ -166,6 +169,7 @@ impl AuthorizedRunDispatch {
                 project_model_sources: &self.project_model_sources,
                 specifications: &self.specifications,
                 specification_policy: &self.specification_policy,
+                configuration: self.configuration.as_ref(),
             },
             self.tasks.iter().map(|task| ReceiptTaskFacts {
                 instance_id: task.instance_id,

@@ -369,6 +369,7 @@ pub fn prepare_headless_run(
             cross_probe: None,
             touchstone_export: input.touchstone_export,
             sealed_source_dependencies,
+            configuration: None,
         },
         expanded_limits,
         abort,

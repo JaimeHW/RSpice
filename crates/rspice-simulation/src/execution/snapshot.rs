@@ -635,6 +635,7 @@ pub struct AuthorizedRunDispatch {
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
     hierarchy_map: Vec<HierarchyMapRow>,
+    configuration: Option<rspice_results::run_receipt::RunConfiguration>,
 }
 
 /// Opaque task/netlist pair accepted by the runner's sole production start.
@@ -940,6 +941,9 @@ pub(crate) struct SnapshotParts {
     pub(crate) cross_probe: Option<CrossProbeSnapshot>,
     pub(crate) touchstone_export: TouchstoneExportPolicy,
     pub(crate) sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    /// The hierarchy configuration the deck was elaborated under; absent for
+    /// a manual deck, which elaborates none.
+    pub(crate) configuration: Option<rspice_results::run_receipt::RunConfiguration>,
 }
 
 /// Whether analysis-owned cards are already present in an authored deck or
@@ -1005,6 +1009,7 @@ pub struct PreparedRunSnapshot {
     cross_probe: Option<CrossProbeSnapshot>,
     touchstone_export: TouchstoneExportPolicy,
     sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    configuration: Option<rspice_results::run_receipt::RunConfiguration>,
     /// The file and line that wrote each line of `executable_netlist`, when
     /// it expanded included files; what every task's reported location is
     /// read back through.
@@ -1732,6 +1737,7 @@ impl PreparedRunSnapshot {
             cross_probe: parts.cross_probe,
             touchstone_export: parts.touchstone_export,
             sealed_source_dependencies: parts.sealed_source_dependencies,
+            configuration: parts.configuration,
             source_lines: None,
         };
 
@@ -1909,6 +1915,7 @@ impl PreparedRunSnapshot {
             manual_source: self.manual_source,
             cross_probe: self.cross_probe,
             hierarchy_map,
+            configuration: self.configuration,
         })
     }
 }

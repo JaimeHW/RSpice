@@ -268,6 +268,7 @@ fn prepare_declaration(
         touchstone_export: TouchstoneExportPolicy::disabled(),
         sealed_source_dependencies: Vec::new(),
         hdl_deck_directory: None,
+        configuration: None,
     };
     PreparedRunSnapshot::new(parts).map_err(|error| error.to_string())
 }
