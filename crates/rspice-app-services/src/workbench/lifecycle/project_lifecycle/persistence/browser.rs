@@ -875,6 +875,8 @@ pub(crate) fn start_browser_checkpoint_publish(
     complete: impl FnOnce(Result<(), String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
+        let writing =
+            crate::workbench::lifecycle::project_checkpoint::CheckpointInFlight::new(&snapshot_key);
         let result = async {
             indexed_db_add_unique(
                 &snapshot_key,
@@ -919,6 +921,7 @@ pub(crate) fn start_browser_checkpoint_publish(
             Ok(())
         }
         .await;
+        drop(writing);
         complete(result);
     });
 }
@@ -938,6 +941,8 @@ async fn prune_browser_checkpoints(
         stored.push((key, text));
     }
     for key in removals(stored) {
+        let _removing =
+            crate::workbench::lifecycle::project_checkpoint::CheckpointInFlight::new(&key);
         indexed_db_delete(&key).await?;
         if let Some(stem) = key.strip_suffix(".manifest") {
             indexed_db_delete(&format!("{stem}.snapshot")).await?;
@@ -999,47 +1004,17 @@ pub(crate) fn start_browser_checkpoint_delete(
     complete: impl FnOnce(Result<(), String>) + 'static,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
+        let _removing = keys
+            .iter()
+            .map(|key| {
+                crate::workbench::lifecycle::project_checkpoint::CheckpointInFlight::new(key)
+            })
+            .collect::<Vec<_>>();
         let result = async {
-            for key in keys {
-                indexed_db_delete(&key).await?;
+            for key in &keys {
+                indexed_db_delete(key).await?;
             }
             Ok(())
-        }
-        .await;
-        complete(result);
-    });
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_checkpoint_list(
-    project_prefix: String,
-    mut visit: impl FnMut(String, Option<String>, String, Option<Vec<u8>>) + 'static,
-    complete: impl FnOnce(Result<Vec<String>, String>) + 'static,
-) {
-    wasm_bindgen_futures::spawn_local(async move {
-        let result = async {
-            let manifest_keys = indexed_db_matching_keys(&project_prefix, ".manifest").await?;
-            let mut paired_snapshot_keys = std::collections::HashSet::new();
-            for manifest_key in manifest_keys {
-                let Some(stem) = manifest_key.strip_suffix(".manifest") else {
-                    continue;
-                };
-                let snapshot_key = format!("{stem}.snapshot");
-                paired_snapshot_keys.insert(snapshot_key.clone());
-                let manifest = indexed_db_get(&manifest_key)
-                    .await?
-                    .and_then(|value| value.as_string());
-                let snapshot = indexed_db_get(&snapshot_key)
-                    .await?
-                    .map(|value| js_sys::Uint8Array::new(&value).to_vec());
-                visit(manifest_key, manifest, snapshot_key, snapshot);
-            }
-            let orphan_snapshots = indexed_db_matching_keys(&project_prefix, ".snapshot")
-                .await?
-                .into_iter()
-                .filter(|key| !paired_snapshot_keys.contains(key))
-                .collect::<Vec<_>>();
-            Ok(orphan_snapshots)
         }
         .await;
         complete(result);

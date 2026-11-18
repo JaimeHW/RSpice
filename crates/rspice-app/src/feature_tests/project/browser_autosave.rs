@@ -26,11 +26,12 @@ use rspice_app_project::workbench::project::library_dialogs::new_cell::create_ne
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
 use rspice_app_services::workbench::app_state::session::browser_session::RUNS_KEY;
 use rspice_app_services::workbench::lifecycle::durable_records::{
-    BrowserRecords, DurableRecords, KeptInMemory, MemoryOrigin, MemoryRecords, block_on,
-    forget_browser_tasks, keep_browser_records_in, run_browser_tasks,
+    BrowserRecords, DurableRecords, KeptInMemory, MemoryOrigin, MemoryRecords, Record, RecordError,
+    RecordFuture, block_on, forget_browser_tasks, keep_browser_records_in, run_browser_tasks,
 };
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
-    CHECKPOINT_ENCODINGS, ProjectCheckpointReason, capture_for_records, list_records,
+    CHECKPOINT_ENCODINGS, ProjectCheckpointCatalog, ProjectCheckpointReason, capture_for_records,
+    catalog_records, list_records,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
@@ -445,6 +446,87 @@ fn in_the_browser_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
         "{text}"
     );
     assert!(!text.contains("Removed since"), "{text}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A browser's checkpoint records that list the project's checkpoints just
+/// before each manifest is written: the moment a checkpoint's project is
+/// stored and its record is not, as a listing the Recovery page starts
+/// while a checkpoint is being written meets it.
+struct ListsMidWrite {
+    records: Rc<MemoryRecords>,
+    project_id: String,
+    listed: std::cell::RefCell<Vec<ProjectCheckpointCatalog>>,
+}
+
+impl DurableRecords for ListsMidWrite {
+    fn get<'a>(&'a self, key: &'a str) -> RecordFuture<'a, Option<Record>> {
+        self.records.get(key)
+    }
+
+    fn put<'a>(&'a self, key: &'a str, record: Record) -> RecordFuture<'a, ()> {
+        Box::pin(async move {
+            if key.ends_with(".manifest") {
+                let catalog = catalog_records(&*self.records, &self.project_id)
+                    .await
+                    .map_err(RecordError::Failed)?;
+                self.listed.borrow_mut().push(catalog);
+            }
+            self.records.put(key, record).await
+        })
+    }
+
+    fn delete<'a>(&'a self, key: &'a str) -> RecordFuture<'a, ()> {
+        self.records.delete(key)
+    }
+
+    fn keys(&self) -> RecordFuture<'_, Vec<String>> {
+        self.records.keys()
+    }
+}
+
+/// The checkpoints are listed while an autosave is being written, its
+/// project stored and its record not yet: nothing is damaged, the
+/// checkpoint written before is listed whole, and once the write is done
+/// the new autosave is listed in its place.
+#[test]
+fn in_the_browser_a_checkpoint_being_written_is_not_listed_as_damaged() {
+    let origin = MemoryOrigin::new(None);
+    let checkpoints = origin.store();
+    let (mut app, root) = saved_project("browser-autosave-listing");
+    let project_id = app.state.model.workspace.content.project.id().to_string();
+    let lists = Rc::new(ListsMidWrite {
+        records: Rc::clone(&checkpoints),
+        project_id: project_id.clone(),
+        listed: std::cell::RefCell::default(),
+    });
+    let _kept = keep_browser_records_in(BrowserRecords {
+        session: origin.store() as Rc<dyn DurableRecords>,
+        checkpoints: Rc::clone(&lists) as Rc<dyn DurableRecords>,
+    });
+    let ctx = offscreen();
+    edit(&mut app, 1);
+    autosave_interval_passes(&ctx, &mut app);
+    edit(&mut app, 2);
+    autosave_interval_passes(&ctx, &mut app);
+
+    let listed = lists.listed.borrow();
+    assert_eq!(listed.len(), 2, "each autosave was listed mid-write");
+    for catalog in listed.iter() {
+        assert!(
+            catalog.quarantined.is_empty(),
+            "a checkpoint being written was called damaged: {:?}",
+            catalog.quarantined
+        );
+    }
+    assert_eq!(
+        listed[1].checkpoints.len(),
+        1,
+        "the autosave written before is listed whole"
+    );
+    let after = block_on(catalog_records(&*checkpoints, &project_id)).expect("listed");
+    assert!(after.quarantined.is_empty(), "{:?}", after.quarantined);
+    assert_eq!(after.checkpoints.len(), 1, "the newer autosave replaced it");
     let _ = std::fs::remove_dir_all(root);
 }
 

@@ -117,7 +117,6 @@ struct ProjectCheckpointManifest {
     saved_generation: Option<u64>,
 }
 
-#[cfg(target_arch = "wasm32")]
 impl ProjectCheckpointManifest {
     /// The checkpoint's name and when it was taken, as its row would state
     /// them, for a quarantine of it.
@@ -248,6 +247,28 @@ pub struct ProjectCheckpointQuarantine {
 }
 
 impl ProjectCheckpointQuarantine {
+    /// A damaged checkpoint in the browser's records, found under `keys`.
+    fn in_records(
+        label: String,
+        named: Option<(String, u64)>,
+        damage: CheckpointDamage,
+        detail: String,
+        keys: Vec<String>,
+    ) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = keys;
+        Self {
+            label,
+            named,
+            damage,
+            detail,
+            #[cfg(not(target_arch = "wasm32"))]
+            artifacts: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            artifact_keys: keys,
+        }
+    }
+
     /// The artifact that failed verification: its checkpoint identity when its
     /// manifest could be read, otherwise the file or key it was found under.
     pub fn label(&self) -> &str {
@@ -1919,6 +1940,7 @@ async fn write_checkpoint_records(
     snapshot: &[u8],
     manifest: &str,
 ) -> Result<(), RecordError> {
+    let _writing = CheckpointInFlight::new(snapshot_key);
     records
         .put(snapshot_key, Record::Bytes(snapshot.to_vec()))
         .await?;
@@ -1947,6 +1969,7 @@ async fn prune_records(
         }
     }
     for manifest_key in browser_retention_removals(stored, budget, false) {
+        let _removing = CheckpointInFlight::new(&manifest_key);
         records.delete(&manifest_key).await?;
         if let Some(stem) = manifest_key.strip_suffix(".manifest") {
             records.delete(&format!("{stem}.snapshot")).await?;
@@ -2054,6 +2077,7 @@ pub async fn delete_records(
         .locator
         .record_keys()
         .ok_or("the checkpoint is kept on disk, not in the browser's storage")?;
+    let _removing = CheckpointInFlight::new(snapshot_key);
     records.delete(manifest_key).await?;
     records.delete(snapshot_key).await?;
     Ok(())
@@ -2081,14 +2105,123 @@ pub async fn edit_records(
     Ok(())
 }
 
-#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// The snapshot keys of the checkpoints this session is writing or
+    /// removing in the browser's records.
+    static CHECKPOINTS_IN_FLIGHT: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A checkpoint this session is writing or removing in the browser's
+/// records, its snapshot and manifest each a write of its own, until this
+/// drops: a listing that meets it half written or half removed leaves it
+/// out instead of calling it damaged.
+pub(crate) struct CheckpointInFlight(String);
+
+impl CheckpointInFlight {
+    /// The checkpoint whose snapshot or manifest is stored under `key`.
+    pub(crate) fn new(key: &str) -> Self {
+        let snapshot_key = key
+            .strip_suffix(".manifest")
+            .map_or_else(|| key.to_owned(), |stem| format!("{stem}.snapshot"));
+        CHECKPOINTS_IN_FLIGHT.with(|keys| keys.borrow_mut().push(snapshot_key.clone()));
+        Self(snapshot_key)
+    }
+
+    fn holds(snapshot_key: &str) -> bool {
+        CHECKPOINTS_IN_FLIGHT.with(|keys| keys.borrow().iter().any(|key| key == snapshot_key))
+    }
+}
+
+impl Drop for CheckpointInFlight {
+    fn drop(&mut self) {
+        CHECKPOINTS_IN_FLIGHT.with(|keys| {
+            let mut keys = keys.borrow_mut();
+            if let Some(index) = keys.iter().position(|key| *key == self.0) {
+                keys.swap_remove(index);
+            }
+        });
+    }
+}
+
+/// The project's checkpoints in the browser's records, newest first, and
+/// those that are damaged: a manifest that does not read or is misfiled, a
+/// snapshot missing or changed, a snapshot with no manifest. The keys are
+/// read once, so a checkpoint is judged as one moment holds it; one this
+/// session is writing or removing is left out while it is half done.
+pub async fn catalog_records(
+    records: &dyn DurableRecords,
+    project_id: &str,
+) -> Result<ProjectCheckpointCatalog, String> {
+    let prefix = browser_project_prefix(project_id);
+    let keys = records
+        .keys()
+        .await?
+        .into_iter()
+        .filter(|key| key.starts_with(&prefix))
+        .collect::<Vec<_>>();
+    let mut accumulator = BrowserCheckpointAccumulator {
+        project_id: project_id.to_owned(),
+        checkpoints: Vec::new(),
+        quarantined: Vec::new(),
+    };
+    let mut paired = std::collections::HashSet::new();
+    for manifest_key in &keys {
+        let Some(stem) = manifest_key.strip_suffix(".manifest") else {
+            continue;
+        };
+        let snapshot_key = format!("{stem}.snapshot");
+        paired.insert(snapshot_key.clone());
+        let manifest = records.get(manifest_key).await?.and_then(Record::into_text);
+        let snapshot = records
+            .get(&snapshot_key)
+            .await?
+            .and_then(Record::into_bytes);
+        let damaged = accumulator.quarantined.len();
+        visit_browser_checkpoint_record(
+            &mut accumulator,
+            manifest_key.clone(),
+            manifest,
+            snapshot_key.clone(),
+            snapshot,
+        );
+        if CheckpointInFlight::holds(&snapshot_key) {
+            accumulator.quarantined.truncate(damaged);
+        }
+    }
+    for snapshot_key in keys {
+        if !snapshot_key.ends_with(".snapshot")
+            || paired.contains(&snapshot_key)
+            || CheckpointInFlight::holds(&snapshot_key)
+        {
+            continue;
+        }
+        accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                snapshot_key.clone(),
+                None,
+                CheckpointDamage::MissingRecord,
+                "checkpoint snapshot has no committed manifest".to_owned(),
+                vec![snapshot_key],
+            ));
+    }
+    sort_newest_first(&mut accumulator.checkpoints);
+    accumulator
+        .quarantined
+        .sort_by(|left, right| right.label.cmp(&left.label));
+    Ok(ProjectCheckpointCatalog {
+        checkpoints: accumulator.checkpoints,
+        quarantined: accumulator.quarantined,
+    })
+}
+
 struct BrowserCheckpointAccumulator {
     project_id: String,
     checkpoints: Vec<ProjectCheckpointSummary>,
     quarantined: Vec<ProjectCheckpointQuarantine>,
 }
 
-#[cfg(target_arch = "wasm32")]
 fn visit_browser_checkpoint_record(
     accumulator: &mut BrowserCheckpointAccumulator,
     manifest_key: String,
@@ -2097,57 +2230,67 @@ fn visit_browser_checkpoint_record(
     snapshot: Option<Vec<u8>>,
 ) {
     let Some(value) = value else {
-        accumulator.quarantined.push(ProjectCheckpointQuarantine {
-            label: manifest_key.clone(),
-            named: None,
-            damage: CheckpointDamage::Record,
-            detail: "checkpoint manifest is not a JSON string".to_owned(),
-            artifact_keys: vec![manifest_key, snapshot_key],
-        });
+        accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                manifest_key.clone(),
+                None,
+                CheckpointDamage::Record,
+                "checkpoint manifest is not a JSON string".to_owned(),
+                vec![manifest_key, snapshot_key],
+            ));
         return;
     };
     let manifest = match serde_json::from_str::<ProjectCheckpointManifest>(&value) {
         Ok(manifest) => manifest,
         Err(error) => {
-            accumulator.quarantined.push(ProjectCheckpointQuarantine {
-                label: manifest_key.clone(),
-                named: None,
-                damage: CheckpointDamage::Record,
-                detail: format!("checkpoint manifest is invalid: {error}"),
-                artifact_keys: vec![manifest_key, snapshot_key],
-            });
+            accumulator
+                .quarantined
+                .push(ProjectCheckpointQuarantine::in_records(
+                    manifest_key.clone(),
+                    None,
+                    CheckpointDamage::Record,
+                    format!("checkpoint manifest is invalid: {error}"),
+                    vec![manifest_key, snapshot_key],
+                ));
             return;
         }
     };
     if manifest.project_id != accumulator.project_id {
-        accumulator.quarantined.push(ProjectCheckpointQuarantine {
-            label: manifest_key.clone(),
-            named: manifest.named(),
-            damage: CheckpointDamage::Misfiled,
-            detail: "checkpoint key ownership and manifest project identity disagree".to_owned(),
-            artifact_keys: vec![manifest_key, snapshot_key],
-        });
+        accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                manifest_key.clone(),
+                manifest.named(),
+                CheckpointDamage::Misfiled,
+                "checkpoint key ownership and manifest project identity disagree".to_owned(),
+                vec![manifest_key, snapshot_key],
+            ));
         return;
     }
     let (expected_manifest_key, expected_snapshot_key) = browser_keys(&manifest);
     if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
-        accumulator.quarantined.push(ProjectCheckpointQuarantine {
-            label: manifest.checkpoint_id.to_string(),
-            named: manifest.named(),
-            damage: CheckpointDamage::Misfiled,
-            detail: "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
-            artifact_keys: vec![manifest_key, snapshot_key],
-        });
+        accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                manifest.checkpoint_id.to_string(),
+                manifest.named(),
+                CheckpointDamage::Misfiled,
+                "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
+                vec![manifest_key, snapshot_key],
+            ));
         return;
     }
     let Some(snapshot) = snapshot else {
-        accumulator.quarantined.push(ProjectCheckpointQuarantine {
-            label: manifest.checkpoint_id.to_string(),
-            named: manifest.named(),
-            damage: CheckpointDamage::MissingCopy,
-            detail: "checkpoint snapshot is missing".to_owned(),
-            artifact_keys: vec![manifest_key, snapshot_key],
-        });
+        accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                manifest.checkpoint_id.to_string(),
+                manifest.named(),
+                CheckpointDamage::MissingCopy,
+                "checkpoint snapshot is missing".to_owned(),
+                vec![manifest_key, snapshot_key],
+            ));
         return;
     };
     let summary = match summary_from_manifest(
@@ -2159,75 +2302,47 @@ fn visit_browser_checkpoint_record(
     ) {
         Ok(summary) => summary,
         Err(error) => {
-            accumulator.quarantined.push(ProjectCheckpointQuarantine {
-                label: manifest_key.clone(),
-                named: None,
-                damage: CheckpointDamage::Record,
-                detail: error,
-                artifact_keys: vec![manifest_key, snapshot_key],
-            });
+            accumulator
+                .quarantined
+                .push(ProjectCheckpointQuarantine::in_records(
+                    manifest_key.clone(),
+                    None,
+                    CheckpointDamage::Record,
+                    error,
+                    vec![manifest_key, snapshot_key],
+                ));
             return;
         }
     };
     match validate_snapshot_bytes(&summary, &snapshot) {
         Ok(_) => accumulator.checkpoints.push(summary),
-        Err(error) => accumulator.quarantined.push(ProjectCheckpointQuarantine {
-            label: summary.checkpoint_id.to_string(),
-            named: summary.named(),
-            damage: CheckpointDamage::ChangedCopy,
-            detail: error,
-            artifact_keys: vec![manifest_key, snapshot_key],
-        }),
+        Err(error) => accumulator
+            .quarantined
+            .push(ProjectCheckpointQuarantine::in_records(
+                summary.checkpoint_id.to_string(),
+                summary.named(),
+                CheckpointDamage::ChangedCopy,
+                error,
+                vec![manifest_key, snapshot_key],
+            )),
     }
 }
 
+/// List the open project's checkpoints in the browser's records, off the
+/// frame.
 #[cfg(target_arch = "wasm32")]
 pub fn start_list(
     model: &Model,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
     let project_id = model.workspace.content.project.id().to_string();
-    let prefix = browser_project_prefix(&project_id);
-    let accumulator = std::rc::Rc::new(std::cell::RefCell::new(BrowserCheckpointAccumulator {
-        project_id,
-        checkpoints: Vec::new(),
-        quarantined: Vec::new(),
-    }));
-    let visit_accumulator = std::rc::Rc::clone(&accumulator);
-    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_list(
-        prefix,
-        move |manifest_key, value, snapshot_key, snapshot| {
-            visit_browser_checkpoint_record(
-                &mut visit_accumulator.borrow_mut(),
-                manifest_key,
-                value,
-                snapshot_key,
-                snapshot,
-            );
-        },
-        move |result| {
-            complete(result.map(|orphan_snapshots| {
-                let mut accumulator = accumulator.borrow_mut();
-                for snapshot_key in orphan_snapshots {
-                    accumulator.quarantined.push(ProjectCheckpointQuarantine {
-                        label: snapshot_key.clone(),
-                        named: None,
-                        damage: CheckpointDamage::MissingRecord,
-                        detail: "checkpoint snapshot has no committed manifest".to_owned(),
-                        artifact_keys: vec![snapshot_key],
-                    });
-                }
-                sort_newest_first(&mut accumulator.checkpoints);
-                accumulator
-                    .quarantined
-                    .sort_by(|left, right| right.label.cmp(&left.label));
-                ProjectCheckpointCatalog {
-                    checkpoints: std::mem::take(&mut accumulator.checkpoints),
-                    quarantined: std::mem::take(&mut accumulator.quarantined),
-                }
-            }));
-        },
-    );
+    let Some(records) = crate::workbench::lifecycle::durable_records::browser_records() else {
+        complete(Err("this browser keeps no checkpoints".to_owned()));
+        return;
+    };
+    wasm_bindgen_futures::spawn_local(async move {
+        complete(catalog_records(&*records.checkpoints, &project_id).await);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
