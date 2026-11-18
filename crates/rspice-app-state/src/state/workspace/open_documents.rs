@@ -157,31 +157,35 @@ impl ProjectWorkspace {
             return;
         }
         let key = self.content.active_key();
-        // Every frame syncs the editor here. A buffer already holding the
-        // editor's document under the same stamp holds everything a save
-        // writes of it, so taking the editor's runtime state beside it
-        // leaves the project's stamp, and so its dirty answer, alone.
-        let unchanged = self
-            .content
-            .schematic_buffers
-            .get(&key)
-            .is_some_and(|design| {
-                design.content_stamp() == schematic.editor_ref().design.content_stamp()
-            });
-        let content = if unchanged {
-            self.content.unstamped_mut()
-        } else {
-            &mut *self.content
-        };
-        self.session
-            .insert_schematic_editor(content, key, schematic.clone());
+        self.insert_active_editor(key, schematic.clone());
         if self
             .content
             .active_dirty()
             .is_some_and(|marked| marked != schematic.session.is_dirty)
         {
-            self.content.set_active_dirty(schematic.session.is_dirty);
+            self.content
+                .unstamped_mut()
+                .set_active_dirty(schematic.session.is_dirty);
         }
+    }
+
+    /// Write the open editor back to the active view's buffer under `key`.
+    ///
+    /// The project's working content takes the editor's drawing in place of
+    /// this buffer while a schematic or testbench view is active, so the
+    /// write changes nothing a save or a dirty answer reads: the project's
+    /// stamp, and the answer held for it, stay where they were. A tab's
+    /// unsaved mark is no content either, and is written the same way.
+    pub fn insert_active_editor(&mut self, key: String, schematic: SchematicState) {
+        debug_assert!(
+            self.content
+                .active_view_type()
+                .is_some_and(is_schematic_like)
+                && key == self.content.active_key(),
+            "only the active drawing's buffer is superseded by the editor"
+        );
+        self.session
+            .insert_schematic_editor(self.content.unstamped_mut(), key, schematic);
     }
 
     pub fn mark_all_clean(&mut self) {

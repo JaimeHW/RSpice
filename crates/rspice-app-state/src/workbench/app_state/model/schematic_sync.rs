@@ -66,7 +66,7 @@ impl Model {
                 // Window projection may retain a live gesture in a runtime
                 // buffer; it must not publish symbols or sheet transactions.
                 self.workspace
-                    .insert_schematic_editor(active.key(), self.schematic.clone());
+                    .insert_active_editor(active.key(), self.schematic.clone());
                 return None;
             }
             prompt = self.reconcile_active_sheet_membership(&active);

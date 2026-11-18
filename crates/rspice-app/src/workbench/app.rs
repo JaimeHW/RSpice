@@ -629,8 +629,8 @@ impl RSpiceApp {
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
-        // The tab's mark is written only when it moves: an idle frame leaves
-        // the project's stamp, and the dirty answer held for it, as it was.
+        // The tab's mark is no working content: writing it leaves the
+        // project's stamp, and the dirty answer held for it, as it was.
         let editor_dirty = self.state.model.schematic.session.is_dirty;
         if matches!(
             self.state.model.workspace.content.active_view_type(),
@@ -650,6 +650,7 @@ impl RSpiceApp {
                 .model
                 .workspace
                 .content
+                .unstamped_mut()
                 .set_active_dirty(editor_dirty);
         }
         self.sync_window_title(ctx);
