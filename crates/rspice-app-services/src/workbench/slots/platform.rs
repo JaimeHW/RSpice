@@ -15,7 +15,7 @@ pub struct PlatformState {
     /// The open project's autosave: its timer, the checkpoint being written
     /// and the recovered work an open found. Transient.
     #[cfg(not(target_arch = "wasm32"))]
-    pub project_autosave: crate::workbench::app_state::session::autosave::ProjectAutosave,
+    pub project_autosave: Box<crate::workbench::app_state::session::autosave::ProjectAutosave>,
     /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
     /// next to the project file and never touch it.
     pub autosave_minutes: u8,
@@ -27,7 +27,7 @@ pub struct PlatformState {
     pub session_kept: crate::services::session::SessionKept,
     /// The scanned native checkpoint catalog the Project Launcher's recovery
     /// page lists. Runtime state, never project or user preferences.
-    pub recovery_catalog: crate::workbench::lifecycle::recovery::RecoveryCatalog,
+    pub recovery_catalog: Box<crate::workbench::lifecycle::recovery::RecoveryCatalog>,
     /// Transactional document registry, accepted project baseline, and
     /// canonical persistence identity. Runtime-only apart from whether a
     /// project is open; session recovery keeps the working set separately and

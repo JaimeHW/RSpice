@@ -174,7 +174,7 @@ fn the_launcher_recovery_page_reads_the_saved_project_once_per_selection() {
     );
     app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
     let second = root.join("bias.rsp.autosave");
-    app.state.platform.recovery_catalog = RecoveryCatalog::fixture(vec![
+    *app.state.platform.recovery_catalog = RecoveryCatalog::fixture(vec![
         RecoveryCandidate::fixture(root.join("amp.rsp"), root.join("amp.rsp.autosave"), "amp"),
         RecoveryCandidate::fixture(root.join("bias.rsp"), second.clone(), "bias"),
     ]);

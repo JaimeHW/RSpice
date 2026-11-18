@@ -2375,7 +2375,7 @@ mod tests {
             restore_target(row, &harness.model),
             Ok((row.schematic_revision.unwrap(), Some(amp.clone())))
         );
-        harness.state.project_revision_history = ProjectRevisionHistoryDialogState {
+        *harness.state.project_revision_history = ProjectRevisionHistoryDialogState {
             open: true,
             authority: Some(SchematicEditAuthority::capture(&harness.model)),
             expected_journal: harness
@@ -2436,7 +2436,7 @@ mod tests {
             let read_at_open = schematic.document().validated_revisions.clone();
             schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
             append(schematic, "Add resistor");
-            harness.state.project_revision_history = ProjectRevisionHistoryDialogState {
+            *harness.state.project_revision_history = ProjectRevisionHistoryDialogState {
                 open: true,
                 authority: Some(SchematicEditAuthority::capture(&harness.model)),
                 expected_journal: if journal_moved {

@@ -1566,7 +1566,7 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, cx: &mut Cx<'_, Pro
         let recovery = &mut cx.state.project_checkpoint_recovery;
         #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
         let job_hold = recovery.job_hold.take();
-        *recovery = Default::default();
+        **recovery = Default::default();
         recovery.project_id = Some(project_id.clone());
         #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
         {

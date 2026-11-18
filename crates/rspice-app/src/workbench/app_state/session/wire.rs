@@ -812,7 +812,7 @@ impl WorkbenchWire {
         state.project.library_cellview_page = self.library_cellview_page;
         state.simulate.verification_page = self.verification_page;
         state.simulate.simulation_page = self.simulation_page;
-        state.simulate.verification = self.verification;
+        *state.simulate.verification = self.verification;
         state.models.models_page = self.models_page;
         state.models.models_view = self.models_view;
         state.simulate.active_analysis = self.active_analysis;

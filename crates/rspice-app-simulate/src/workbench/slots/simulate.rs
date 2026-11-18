@@ -16,7 +16,7 @@ pub struct SimulateState {
     pub verification_page: crate::state::VerificationPage,
     /// Selected Simulation Studio setup route.
     pub simulation_page: crate::state::SimulationPage,
-    pub verification: crate::workbench::state::VerificationSessionState,
+    pub verification: Box<crate::workbench::state::VerificationSessionState>,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
     pub active_analysis: usize,

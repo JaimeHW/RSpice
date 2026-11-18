@@ -171,10 +171,10 @@ pub struct ProjectState {
     pub check_and_save: crate::workbench::app::dialogs::check_and_save::CheckAndSaveDialogState,
 
     /// Project-owned sheet, variant, annotation, and hierarchy manager.
-    pub design_management: DesignManagementDialogState,
+    pub design_management: Box<DesignManagementDialogState>,
 
     /// Hash-linked validated schematic revisions and semantic audit workflow.
-    pub project_revision_history: ProjectRevisionHistoryDialogState,
+    pub project_revision_history: Box<ProjectRevisionHistoryDialogState>,
 
     /// Project-owned technology attachment transaction.
     pub technology_attachment:
@@ -182,7 +182,7 @@ pub struct ProjectState {
 
     /// Cached, integrity-verified full-project recovery catalog.
     pub project_checkpoint_recovery:
-        crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
+        Box<crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState>,
 
     /// The Project Launcher is an application-level modal, not a workspace.
     pub project_launcher_open: bool,
