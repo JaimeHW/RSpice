@@ -166,7 +166,12 @@ pub(super) fn show(
     let asked = workbench.outbox.take::<ShowValueAtCaret>().is_some();
     if asked {
         let messages = workbench.messages();
+        // A caret that ends a name reads that name first: `{w|}` is about
+        // `w`, not the braces around it.
         let card = match caret.checked_sub(1) {
+            Some(before) if ends_word(&model.simulation.source.netlist_content, caret) => {
+                hover_card_at(ctx, model, netlist, messages, &[before, caret])
+            }
             Some(before) => hover_card_at(ctx, model, netlist, messages, &[caret, before]),
             None => hover_card_at(ctx, model, netlist, messages, &[caret]),
         };
@@ -231,6 +236,14 @@ pub(super) fn show(
         });
     let height = shown.response.rect.height();
     ctx.data_mut(|data| data.insert_temp(id.with("height"), height));
+}
+
+/// Whether a word character stands just before character `caret` of
+/// `text` and none at it.
+fn ends_word(text: &str, caret: usize) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut around = text.chars().skip(caret.saturating_sub(1));
+    caret > 0 && around.next().is_some_and(word) && !around.next().is_some_and(word)
 }
 
 /// How far below the caret's line the editor puts the point popovers hang

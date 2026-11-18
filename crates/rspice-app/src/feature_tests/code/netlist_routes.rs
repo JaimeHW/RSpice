@@ -164,20 +164,23 @@ fn painted(output: &egui::FullOutput) -> Vec<String> {
         .collect()
 }
 
-/// Ctrl+Shift+`key`, pressed, as a Linux keyboard gives it.
-fn ctrl_shift(key: egui::Key) -> egui::Event {
-    egui::Event::Key {
-        key,
-        physical_key: Some(key),
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers {
-            ctrl: true,
-            shift: true,
-            command: true,
-            ..egui::Modifiers::NONE
-        },
-    }
+/// Ctrl+Shift+`key`, pressed and let go, as a Linux keyboard gives it: a
+/// key never let go is held, and a held key's next press is a repeat.
+fn ctrl_shift(key: egui::Key) -> Vec<egui::Event> {
+    [true, false]
+        .map(|pressed| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                ctrl: true,
+                shift: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        })
+        .to_vec()
 }
 
 /// The deck's editor focused with its caret at character `caret`.
@@ -192,8 +195,9 @@ fn caret_at(ctx: &egui::Context, app: &mut RSpiceApp, caret: usize) {
 
 /// Ctrl+Shift+H with the caret on a parameter a card reads shows the card a
 /// hover there shows, `w = 2u` and where `w` is defined, at the caret, and
-/// says it on the status line; the card is not there before the key, and
-/// moving the caret takes it away.
+/// says it on the status line; the card is not there before the key, moving
+/// the caret takes it away, and just after the name the key reads the name
+/// rather than the braces around it.
 #[test]
 fn show_value_shows_at_the_caret_what_a_hover_there_shows() {
     let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
@@ -205,7 +209,7 @@ fn show_value_shows_at_the_caret_what_a_hover_there_shows() {
         "no card before it is asked for"
     );
 
-    frame_with(&ctx, &mut app, DESKTOP, vec![ctrl_shift(egui::Key::H)]);
+    frame_with(&ctx, &mut app, DESKTOP, ctrl_shift(egui::Key::H));
     let shown = frame(&ctx, &mut app, DESKTOP);
     let texts = painted(&shown);
     assert!(
@@ -217,6 +221,22 @@ fn show_value_shows_at_the_caret_what_a_hover_there_shows() {
         "the card says where the value comes from: {texts:?}"
     );
     assert_eq!(app.state.prompt_text(), Some("w = 2u · defined line 2"));
+
+    // Just after the name the caret still reads the name, not the braces
+    // around it.
+    caret_at(&ctx, &mut app, reader + 1);
+    assert!(
+        !painted(&frame(&ctx, &mut app, DESKTOP))
+            .iter()
+            .any(|text| text == "= 2u"),
+        "the card left when the caret moved"
+    );
+    frame_with(&ctx, &mut app, DESKTOP, ctrl_shift(egui::Key::H));
+    let texts = painted(&frame(&ctx, &mut app, DESKTOP));
+    assert!(
+        texts.iter().any(|text| text == "defined line 2"),
+        "the name's card, with where it is defined: {texts:?}"
+    );
 
     caret_at(&ctx, &mut app, reader + 4);
     let moved = frame(&ctx, &mut app, DESKTOP);
