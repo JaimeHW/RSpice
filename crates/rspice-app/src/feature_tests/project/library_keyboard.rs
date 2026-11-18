@@ -519,3 +519,40 @@ fn on_a_phone_the_band_keeps_open_on_the_screen() {
     );
     only(&controls, "Cell actions", Role::Button);
 }
+
+/// Ctrl+Z on the Library page undoes the last library operation, however
+/// it was made, and Ctrl+Shift+Z redoes it: the Library Manager's Undo is
+/// the one Undo. A press alone, with the modifier carried only on the event
+/// and no physical key, as some platforms send it, undoes as well.
+#[test]
+fn ctrl_z_on_the_library_page_undoes_the_last_library_operation() {
+    let mut replay = library_page();
+    let cells = |replay: &Replay| {
+        let work = replay.app.state.model.library_manager.get_library("work");
+        [
+            work.and_then(|library| library.get_cell("bias")).is_some(),
+            work.and_then(|library| library.get_cell("trim")).is_some(),
+        ]
+    };
+    replay
+        .app
+        .state
+        .rename_cell("work", "bias", "trim")
+        .expect("the cell is renamed");
+    replay.frames(Vec::new());
+    assert_eq!(cells(&replay), [false, true]);
+
+    replay.key(Key::Z, PRIMARY);
+    assert_eq!(cells(&replay), [true, false], "Ctrl+Z undoes the rename");
+    replay.key(Key::Z, PRIMARY | Modifiers::SHIFT);
+    assert_eq!(cells(&replay), [false, true], "Ctrl+Shift+Z redoes it");
+
+    replay.frames(vec![egui::Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    }]);
+    assert_eq!(cells(&replay), [true, false], "a bare press undoes it too");
+}
