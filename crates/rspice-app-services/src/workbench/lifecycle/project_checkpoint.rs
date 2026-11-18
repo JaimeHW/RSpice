@@ -117,6 +117,16 @@ struct ProjectCheckpointManifest {
     saved_generation: Option<u64>,
 }
 
+#[cfg(target_arch = "wasm32")]
+impl ProjectCheckpointManifest {
+    /// The checkpoint's name and when it was taken, as its row would state
+    /// them, for a quarantine of it.
+    fn named(&self) -> Option<(String, u64)> {
+        let title = self.note.as_deref().unwrap_or(self.reason.label());
+        Some((title.to_owned(), self.created_unix_ms))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProjectCheckpointLocator {
     #[cfg(not(target_arch = "wasm32"))]
@@ -225,6 +235,9 @@ impl CheckpointDamage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectCheckpointQuarantine {
     label: String,
+    /// The checkpoint's name and when it was taken, when its record could
+    /// be read.
+    named: Option<(String, u64)>,
     damage: CheckpointDamage,
     /// The store's own account of it, for the Console.
     detail: String,
@@ -239,6 +252,17 @@ impl ProjectCheckpointQuarantine {
     /// manifest could be read, otherwise the file or key it was found under.
     pub fn label(&self) -> &str {
         &self.label
+    }
+
+    /// The checkpoint's name, as its row named it, when its record could be
+    /// read.
+    pub fn title(&self) -> Option<&str> {
+        self.named.as_ref().map(|(title, _)| title.as_str())
+    }
+
+    /// When the checkpoint was taken, when its record could be read.
+    pub fn created_unix_ms(&self) -> Option<u64> {
+        self.named.as_ref().map(|(_, created)| *created)
     }
 
     /// What is wrong with it.
@@ -312,6 +336,11 @@ impl ProjectCheckpointSummary {
         self.note().unwrap_or(self.reason.label())
     }
 
+    /// Its name and when it was taken, for a quarantine of it.
+    fn named(&self) -> Option<(String, u64)> {
+        Some((self.title().to_owned(), self.created_unix_ms))
+    }
+
     pub const fn retention(&self) -> CheckpointRetention {
         if self.pinned || matches!(self.reason, ProjectCheckpointReason::Manual) {
             CheckpointRetention::UntilDeleted
@@ -378,9 +407,21 @@ pub fn fixture_quarantine(
 ) -> ProjectCheckpointQuarantine {
     ProjectCheckpointQuarantine {
         label: label.to_owned(),
+        named: None,
         damage,
         detail: detail.to_owned(),
         artifacts: Vec::new(),
+    }
+}
+
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+impl ProjectCheckpointQuarantine {
+    /// The same artifact, its record naming it `title`, taken at
+    /// `created_unix_ms`.
+    #[must_use]
+    pub fn named_fixture(mut self, title: &str, created_unix_ms: u64) -> Self {
+        self.named = Some((title.to_owned(), created_unix_ms));
+        self
     }
 }
 
@@ -1537,6 +1578,7 @@ fn list_directory_for(
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "checkpoint manifest".to_owned()),
+            named: None,
             damage,
             detail,
             artifacts: vec![path.clone()],
@@ -1575,6 +1617,7 @@ fn list_directory_for(
                 Err((damage, detail)) => {
                     quarantined.push(ProjectCheckpointQuarantine {
                         label: summary.checkpoint_id.to_string(),
+                        named: summary.named(),
                         damage,
                         detail,
                         artifacts: summary
@@ -1590,6 +1633,7 @@ fn list_directory_for(
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "checkpoint manifest".to_owned()),
+                named: None,
                 damage: CheckpointDamage::Record,
                 detail: error,
                 artifacts: vec![path],
@@ -2017,6 +2061,7 @@ fn visit_browser_checkpoint_record(
     let Some(value) = value else {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest_key.clone(),
+            named: None,
             damage: CheckpointDamage::Record,
             detail: "checkpoint manifest is not a JSON string".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
@@ -2028,6 +2073,7 @@ fn visit_browser_checkpoint_record(
         Err(error) => {
             accumulator.quarantined.push(ProjectCheckpointQuarantine {
                 label: manifest_key.clone(),
+                named: None,
                 damage: CheckpointDamage::Record,
                 detail: format!("checkpoint manifest is invalid: {error}"),
                 artifact_keys: vec![manifest_key, snapshot_key],
@@ -2038,6 +2084,7 @@ fn visit_browser_checkpoint_record(
     if manifest.project_id != accumulator.project_id {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest_key.clone(),
+            named: manifest.named(),
             damage: CheckpointDamage::Misfiled,
             detail: "checkpoint key ownership and manifest project identity disagree".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
@@ -2048,6 +2095,7 @@ fn visit_browser_checkpoint_record(
     if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest.checkpoint_id.to_string(),
+            named: manifest.named(),
             damage: CheckpointDamage::Misfiled,
             detail: "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
@@ -2057,6 +2105,7 @@ fn visit_browser_checkpoint_record(
     let Some(snapshot) = snapshot else {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest.checkpoint_id.to_string(),
+            named: manifest.named(),
             damage: CheckpointDamage::MissingCopy,
             detail: "checkpoint snapshot is missing".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
@@ -2074,6 +2123,7 @@ fn visit_browser_checkpoint_record(
         Err(error) => {
             accumulator.quarantined.push(ProjectCheckpointQuarantine {
                 label: manifest_key.clone(),
+                named: None,
                 damage: CheckpointDamage::Record,
                 detail: error,
                 artifact_keys: vec![manifest_key, snapshot_key],
@@ -2085,6 +2135,7 @@ fn visit_browser_checkpoint_record(
         Ok(_) => accumulator.checkpoints.push(summary),
         Err(error) => accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: summary.checkpoint_id.to_string(),
+            named: summary.named(),
             damage: CheckpointDamage::ChangedCopy,
             detail: error,
             artifact_keys: vec![manifest_key, snapshot_key],
@@ -2122,6 +2173,7 @@ pub fn start_list(
                 for snapshot_key in orphan_snapshots {
                     accumulator.quarantined.push(ProjectCheckpointQuarantine {
                         label: snapshot_key.clone(),
+                        named: None,
                         damage: CheckpointDamage::MissingRecord,
                         detail: "checkpoint snapshot has no committed manifest".to_owned(),
                         artifact_keys: vec![snapshot_key],

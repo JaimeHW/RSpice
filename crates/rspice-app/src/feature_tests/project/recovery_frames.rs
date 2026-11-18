@@ -399,6 +399,45 @@ fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text(
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A damaged checkpoint whose record still reads is named as its row was, by
+/// its name and when it was taken, never by its identity.
+#[test]
+fn a_damaged_checkpoint_is_named_by_its_name_and_time() {
+    let (mut app, root) = saved_project("recovery-page-damaged-named");
+    create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
+    let folder = root.join("idle.rspice-recovery");
+    let copy = std::fs::read_dir(&folder)
+        .expect("the recovery folder lists")
+        .map(|entry| entry.expect("an entry").path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "rspiceproj")
+        })
+        .expect("a checkpoint keeps a copy of the project");
+    std::fs::remove_file(&copy).expect("the copy goes missing");
+
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Recovery;
+    let ctx = offscreen();
+    let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
+    let text = painted(&listed);
+    let damaged = &app.state.project.project_checkpoint_recovery.quarantined[0];
+    assert_eq!(damaged.title(), Some("Manual checkpoint"));
+    let taken = rspice_app_state::time_compat::utc_stamp(
+        damaged
+            .created_unix_ms()
+            .expect("its record says when it was taken"),
+    );
+    assert!(text.contains("Manual checkpoint"), "{text}");
+    assert!(text.contains(&taken), "{taken} missing:\n{text}");
+    assert!(
+        text.contains("The copy of the project it keeps is missing. Delete it."),
+        "{text}"
+    );
+    assert!(!text.contains(damaged.label()), "{text}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Whether each checkpoint row's Restore… can be pressed, top to bottom.
 fn restores_offered(output: &egui::FullOutput) -> Vec<bool> {
     let Some(update) = output.platform_output.accesskit_update.as_ref() else {

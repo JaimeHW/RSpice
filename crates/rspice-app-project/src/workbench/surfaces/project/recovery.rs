@@ -1484,24 +1484,40 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
                 for artifact in &snapshot.set_aside {
                     let label = artifact.label();
                     ui.add_space(10.0);
-                    // The file's whole name, wrapped: the one thing that
-                    // tells two damaged files apart is never cut.
-                    text_block(
-                        ui,
-                        label,
-                        theme::mono(tokens::FS_0, FontWeight::Medium),
-                        tokens.color.text,
-                    );
+                    // A checkpoint whose record still reads is named as its
+                    // row named it: by its name and when it was taken.
+                    // Anything else is named by its file's or record's whole
+                    // name, wrapped: the one thing that tells two of them
+                    // apart is never cut.
+                    let name = match (artifact.title(), artifact.created_unix_ms()) {
+                        (Some(title), Some(created)) => {
+                            text_block(ui, title, row_title_font(), tokens.color.text);
+                            text_block(
+                                ui,
+                                &checkpoint_created(created, snapshot.now_unix_ms),
+                                detail_font(),
+                                tokens.color.text_faint,
+                            );
+                            format!("{title} from {}", crate::time_compat::utc_stamp(created))
+                        }
+                        _ => {
+                            text_block(
+                                ui,
+                                label,
+                                theme::mono(tokens::FS_0, FontWeight::Medium),
+                                tokens.color.text,
+                            );
+                            format!("checkpoint {label}")
+                        }
+                    };
                     text_block(ui, artifact.problem(), body_font(), tokens.color.text_dim);
                     ui.add_space(6.0);
                     let deletion = CheckpointDeletion::SetAside(label.to_owned());
                     if snapshot.delete_review.as_ref() == Some(&deletion) {
                         let answer = delete_prompt(
                             ui,
-                            &format!(
-                                "Delete the damaged checkpoint {label}? It cannot be brought back."
-                            ),
-                            &format!("Delete {label}"),
+                            &format!("Delete the damaged {name}? It cannot be brought back."),
+                            &format!("Delete the damaged {name}"),
                             snapshot.busy,
                         );
                         keep_first(
@@ -1517,7 +1533,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
                     } else if Button::new("Delete\u{2026}")
                         .enabled(!snapshot.busy)
                         .min_height(height)
-                        .accessible_label(&format!("Delete {label}"))
+                        .accessible_label(&format!("Delete the damaged {name}"))
                         .show(ui)
                         .clicked()
                     {
