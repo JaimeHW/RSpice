@@ -150,6 +150,41 @@ pub(crate) fn project_name_refusal(error: rspice_project::ProjectDescriptorError
     }
 }
 
+/// A project name as a file and folder name every system takes: the
+/// characters Windows refuses folded to `_`, no trailing dot or space, and
+/// a reserved device name given a `_` after it.
+pub(crate) fn project_file_stem(name: &str) -> String {
+    let folded: String = name
+        .chars()
+        .map(|character| {
+            if character.is_control() || "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect();
+    let trimmed = folded.trim_end_matches(['.', ' ']).trim_start();
+    if trimmed.is_empty() {
+        return "project".to_owned();
+    }
+    let device = trimmed
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((device.starts_with("COM") || device.starts_with("LPT"))
+            && device.len() == 4
+            && device.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        let (device, rest) = trimmed.split_at(device.len());
+        format!("{device}_{rest}")
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 /// Why `value` cannot name a project's `field` (its library or top cell), as
 /// one sentence.
 pub(crate) fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
@@ -449,16 +484,21 @@ fn seed_new_project_drawing_sheet_default(
     }
 }
 
+/// The file name a save offers: the project's own file, the file the browser
+/// opened it from, or else one named for the project, as New project names
+/// the file it writes on the desktop. A project made in the browser has no
+/// file until its first save, so that save is where its name comes from.
 pub fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
-    model
-        .workspace
-        .content
-        .project
+    let project = &model.workspace.content.project;
+    project
         .path
         .as_deref()
         .and_then(file_name_string)
         .or_else(|| platform.browser_project_save_name.clone())
-        .unwrap_or_else(|| "untitled.rspiceproj".to_string())
+        .unwrap_or_else(|| {
+            let stem = project_file_stem(project.name());
+            format!("{stem}.rspiceproj")
+        })
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

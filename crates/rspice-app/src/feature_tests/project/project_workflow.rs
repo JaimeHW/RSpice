@@ -744,6 +744,25 @@ fn create_new_project_clears_stale_specialized_viewer_caches() {
 }
 
 #[test]
+fn a_new_project_without_a_file_offers_its_own_name_at_its_first_save() {
+    let mut state = AppState::default();
+    state
+        .create_new_project_with(&NewProjectParams {
+            name: "Bandgap: v2".to_owned(),
+            root_library: "bandgap".to_owned(),
+            top_cell: "core".to_owned(),
+        })
+        .expect("a validated identity creates a project");
+    assert!(state.model.workspace.content.project.path.is_none());
+
+    assert_eq!(
+        project_save_dialog_default_name(&state.model, &state.platform),
+        "Bandgap_ v2.rspiceproj",
+        "the first save names the file for the project, as New project does on the desktop"
+    );
+}
+
+#[test]
 fn create_new_project_resets_project_owned_plan_and_model_context() {
     use rspice_app_state::simulation::plan::AnalysisKind;
     use rspice_app_state::state::model_library::{ModelLibrary, ModelLibraryManager};

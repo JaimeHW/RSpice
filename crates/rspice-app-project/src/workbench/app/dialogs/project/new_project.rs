@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use crate::state::workspace::DEFAULT_PROJECT_LIBRARY;
 use crate::workbench::surfaces::project::AttachableTechnology;
 use crate::workbench::workflows::project_workflow::{
-    NewProjectParams, project_name_refusal, validate_identity_segment,
+    NewProjectParams, project_file_stem, project_name_refusal, validate_identity_segment,
 };
 
 /// What the Location field says while it is empty.
@@ -257,41 +257,6 @@ impl NewProjectDialogState {
 pub const NO_TECHNOLOGY: &str = "None";
 
 const PROJECT_FILE_EXTENSION: &str = "rspiceproj";
-
-/// A project name as a file and folder name every system takes: the
-/// characters Windows refuses folded to `_`, no trailing dot or space, and
-/// a reserved device name given a `_` after it.
-fn project_file_stem(name: &str) -> String {
-    let folded: String = name
-        .chars()
-        .map(|character| {
-            if character.is_control() || "<>:\"/\\|?*".contains(character) {
-                '_'
-            } else {
-                character
-            }
-        })
-        .collect();
-    let trimmed = folded.trim_end_matches(['.', ' ']).trim_start();
-    if trimmed.is_empty() {
-        return "project".to_owned();
-    }
-    let device = trimmed
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_uppercase();
-    let reserved = matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || ((device.starts_with("COM") || device.starts_with("LPT"))
-            && device.len() == 4
-            && device.as_bytes()[3].is_ascii_digit());
-    if reserved {
-        let (device, rest) = trimmed.split_at(device.len());
-        format!("{device}_{rest}")
-    } else {
-        trimmed.to_owned()
-    }
-}
 
 /// Mirror a project name into a library-name segment: lowercase, every
 /// character the persisted key format rejects folded to `_`, runs collapsed,
