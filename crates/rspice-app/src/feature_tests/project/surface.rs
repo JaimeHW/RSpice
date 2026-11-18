@@ -242,10 +242,12 @@ fn the_configuration_chip_is_held_while_a_project_operation_runs() {
 
 /// The detail under the Library browser shows the view a click in the
 /// browser selects, in the frame that took the click: what the reader
-/// asked of the browser is carried out before the detail draws.
+/// asked of the browser is carried out before the detail draws. The band
+/// offers to open the view selected, by its kind; its path is the
+/// inspector's to state.
 #[test]
 fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_clicked_in() {
-    use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
+    use rspice_app_state::state::{Cell, Library, View, ViewType};
     let (ctx, mut app, _) = settled_on(ProjectPage::Library);
     let mut library = Library::new("frame_test");
     let mut cell = Cell::new("divider");
@@ -259,11 +261,10 @@ fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_cli
     for _ in 0..2 {
         settled = project_frame(&ctx, &mut app, Vec::new());
     }
-    let first = CellViewRef::new("frame_test", "divider", "schematic_a").display_path();
-    let second = CellViewRef::new("frame_test", "divider", "symbol_b").display_path();
+    let (first, second) = ("Open schematic", "Open symbol");
     let painted = painted_text(&settled);
     assert!(
-        painted.contains(&first) && !painted.contains(&second),
+        painted.contains(first) && !painted.contains(second),
         "{painted}"
     );
 
@@ -274,7 +275,10 @@ fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_cli
         Some("symbol_b")
     );
     let painted = painted_text(&clicked);
-    assert!(painted.contains(&second), "{painted}");
+    assert!(
+        painted.contains(second) && !painted.contains(first),
+        "{painted}"
+    );
 }
 
 /// The label of the control `output` announces whose label starts with
