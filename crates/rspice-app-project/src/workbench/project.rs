@@ -445,6 +445,11 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
                 &library,
             );
         }
+        Some(ProjectInspectorAction::LibraryFile(intent)) => {
+            crate::workbench::project::library_dialogs::library_files::run_library_file_intent(
+                cx, intent,
+            );
+        }
         None => {}
     }
 }

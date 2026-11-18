@@ -9,9 +9,16 @@ use rspice_ui_kit::panels::section_header;
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::DesignCheckStatus;
-use crate::workbench::design_system::{property_row, property_row_path};
+use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::{LibraryFile, OnDisk};
+use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
+use crate::workbench::project::dependency_status::{
+    DependencyLibrary, library_status, view_exception,
+};
+use crate::workbench::project::library_dialogs::library_files::{LibraryFileIntent, lock_holder};
 
+use super::dependency::{design_facts, mode_action, status_rows};
 use super::{ProjectInspector, ProjectInspectorAction, inspector_action_enabled};
 
 /// The selection in the built-in Verilog-A library. Nothing here acts: the
@@ -38,20 +45,13 @@ pub fn project_library(
     let library_path = library
         .and_then(|item| model.library_manager.reference(&item.name))
         .map_or_else(
-            || "In this project".to_owned(),
+            || "Project file".to_owned(),
             |reference| {
                 reference
                     .path
                     .shown(rspice_design::library::folder::HostPlatform::current())
             },
         );
-    let technology = library.map_or("unbound", |item| {
-        if item.technology.trim().is_empty() {
-            "unbound"
-        } else {
-            item.technology.as_str()
-        }
-    });
     // What the page's find hides is not the page's selection: the band
     // asks for a view, and so does this panel.
     let cell = model
@@ -133,6 +133,29 @@ pub fn project_library(
     if let Some(saved) = view.and_then(|item| item.saved_at).and_then(saved_time) {
         property_row(ui, "Saved", &saved);
     }
+    // A view kept in a library's own folder: its revisions, and who holds
+    // its file. Another holder's lock can be broken from here.
+    let mut break_lock = None;
+    if let (Some(library), Some(cell), Some(view)) = (library, cell, view)
+        && model.library_manager.is_referenced(&library.name)
+    {
+        let file = LibraryFile::cell_view(&cell.name, view);
+        if let Some(exception) = view_exception(model, &library.name, &cell.name, view) {
+            property_row_problem(ui, "Status", &exception.label, exception.mark.problem());
+        }
+        if let Some(revision) = revision_text(model, &library.name, &file) {
+            property_row(ui, "Revision", &revision);
+        }
+        if let Some(lock) = model.library_lock_elsewhere(&library.name, &file) {
+            property_row(ui, "Lock", &lock_holder(lock));
+            break_lock = Some(LibraryFileIntent::BreakLock {
+                library: library.name.clone(),
+                file,
+            });
+        } else if model.held_library_lock(&library.name, &file).is_some() {
+            property_row(ui, "Lock", "Held here");
+        }
+    }
 
     section_header(ui, "Library", None);
     if let Some(description) = library
@@ -141,12 +164,20 @@ pub fn project_library(
     {
         property_row(ui, "Description", description);
     }
-    if technology != "unbound" {
-        property_row(ui, "Technology", technology);
+    if let Some(item) = library {
+        status_rows(
+            ui,
+            "Status",
+            &library_status(model, &DependencyLibrary::design(&item.name)),
+        );
     }
     // Cut from the middle, so the folder the library is kept in stays in
-    // view however narrow the panel.
-    property_row_path(ui, "Location", &library_path);
+    // view however narrow the panel: as written, then where that resolves
+    // here, its access and its technology.
+    property_row_path(ui, "Source", &library_path);
+    if let Some(item) = library {
+        design_facts(ui, model, &item.name);
+    }
     // A view nobody has edited is in its normal state.
     if view.is_some_and(|item| item.modified) {
         property_row(ui, "State", "modified");
@@ -167,6 +198,14 @@ pub fn project_library(
     // Library properties in the library column, Cell properties beside a
     // cell or a view: the page's Properties command, on what it acts on.
     let properties = inspector_action_enabled(ui, "Properties\u{2026}", library.is_some());
+    let mode = library.and_then(|item| mode_action(ui, model, &item.name));
+    let broken = match break_lock {
+        Some(intent) if inspector_action_enabled(ui, "Break lock\u{2026}", true) => Some(intent),
+        _ => None,
+    };
+    if let Some(intent) = mode.or(broken) {
+        return Some(ProjectInspectorAction::LibraryFile(intent));
+    }
     // No "Where used & impact…": it wrote the consumers to the console, and
     // the "Used by" row above names them in place. No "Revision history…"
     // either — it is a project-level dialog, and the Project overview
@@ -179,6 +218,29 @@ pub fn project_library(
     open_target.filter(|_| open).map(|(reference, view_type)| {
         ProjectInspectorAction::Shell(ProjectRequest::OpenView(reference, view_type))
     })
+}
+
+/// A file's revisions: the one loaded here, the one on disk when it moved
+/// on, and the one the project was saved with when that differs.
+fn revision_text(model: &Model, library: &str, file: &LibraryFile) -> Option<String> {
+    let session = model.library_files.library(library)?.files.get(file)?;
+    let loaded = session.loaded.map(|loaded| loaded.revision);
+    let mut parts = vec![match loaded {
+        Some(revision) => format!("{revision} loaded"),
+        None => "Not loaded".to_owned(),
+    }];
+    if let OnDisk::Changed(on_disk) = &session.on_disk {
+        parts.push(format!("{} on disk", on_disk.revision));
+    }
+    if let Some(saved) = model
+        .library_manager
+        .reference(library)?
+        .saved_revision(file)
+        .filter(|saved| Some(saved.revision) != loaded)
+    {
+        parts.push(format!("saved with {}", saved.revision));
+    }
+    Some(parts.join(" \u{00b7} "))
 }
 
 /// When a save last wrote a view with a change, on the reader's clock, as

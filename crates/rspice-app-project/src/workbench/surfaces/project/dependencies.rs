@@ -23,6 +23,9 @@ use crate::workbench::project::dependency_status::{
     DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_status_key,
     refresh_source_drift, settle_selection, technology_status, visible_dependency_rows,
 };
+use crate::workbench::project::library_dialogs::library_files::{
+    LibraryFileIntent, library_file_blocker, library_file_label, run_library_file_intent,
+};
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
@@ -433,12 +436,17 @@ const STATUS_COLUMN: usize = 4;
 
 /// One library's cells, in the ledger's column order.
 fn ledger_cells(row: &DependencyRow) -> Vec<Cell> {
-    // The file, by name: a path cut short at its end shows only the folders
-    // every row shares. Its hover, and the inspector, give the whole path.
-    let file = std::path::Path::new(&row.source)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(&row.source);
+    // A model library's file, by name: a path cut short at its end shows
+    // only the folders every row shares. Its hover, and the inspector, give
+    // the whole path. A design library's source is the path as written, a
+    // root and a name or a path relative to the project, or Project file.
+    let file = match row.library.kind {
+        DependencyKind::Design => row.source.as_str(),
+        DependencyKind::Model => std::path::Path::new(&row.source)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&row.source),
+    };
     // A design library has no version: what its row once showed there was
     // the technology it names, which the inspector states as that.
     let version = if row.library.kind == DependencyKind::Design || row.version == UNSET {
@@ -601,7 +609,7 @@ fn ledger_menu(
 }
 
 /// What the reader can ask of one row of the ledger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum LedgerAction {
     /// The library in its own workspace: a design library on the Library
     /// page, a model library in Models.
@@ -614,11 +622,17 @@ enum LedgerAction {
     Reload,
     /// Take it out of the project.
     Remove,
+    /// A design library's command over library folders: for one kept in a
+    /// folder of its own, Show in folder, Relink…, Refresh…, Embed in
+    /// project and Detach library…; for an embedded one, Move to its own
+    /// folder….
+    File(LibraryFileIntent),
 }
 
 impl LedgerAction {
-    const fn label(self, library: &DependencyLibrary) -> &'static str {
+    fn label(&self, library: &DependencyLibrary) -> &'static str {
         match (self, library.kind) {
+            (Self::File(intent), _) => library_file_label(intent),
             (Self::Open, DependencyKind::Design) => "Open in Library",
             (Self::Open, DependencyKind::Model) => "Open in Models",
             (Self::Reveal, _) => "Show in folder",
@@ -635,13 +649,43 @@ impl LedgerAction {
 /// and read again; one read from a file, or whose bytes the project kept
 /// from one, can be read from another file. A browser has no folder to show
 /// and no file to read, so it offers only what the project itself holds.
+/// A design library kept in a folder of its own is detached, never deleted;
+/// an embedded one can be moved to a folder of its own or deleted.
 fn ledger_actions(
     cx: &Cx<'_, ProjectFeature>,
     library: &DependencyLibrary,
 ) -> Vec<(LedgerAction, bool)> {
     let mut actions = vec![(LedgerAction::Open, true)];
     match library.kind {
-        DependencyKind::Design => actions.push((LedgerAction::Remove, true)),
+        DependencyKind::Design => {
+            let name = &library.name;
+            let referenced = cx.model.library_manager.is_referenced(name);
+            let files = if !referenced {
+                vec![LibraryFileIntent::MoveToFolder(name.clone())]
+            } else if cfg!(target_arch = "wasm32") {
+                vec![
+                    LibraryFileIntent::ReadFromFolder(name.clone()),
+                    LibraryFileIntent::Refresh,
+                    LibraryFileIntent::Embed(name.clone()),
+                    LibraryFileIntent::Detach(name.clone()),
+                ]
+            } else {
+                vec![
+                    LibraryFileIntent::ShowInFolder(name.clone()),
+                    LibraryFileIntent::Relink(name.clone()),
+                    LibraryFileIntent::Refresh,
+                    LibraryFileIntent::Embed(name.clone()),
+                    LibraryFileIntent::Detach(name.clone()),
+                ]
+            };
+            for intent in files {
+                let enabled = library_file_blocker(cx.model, &intent).is_none();
+                actions.push((LedgerAction::File(intent), enabled));
+            }
+            if !referenced {
+                actions.push((LedgerAction::Remove, true));
+            }
+        }
         DependencyKind::Model => {
             let Some(found) = cx.model.model_library_manager.get_library(&library.name) else {
                 return actions;
@@ -691,6 +735,16 @@ fn run_ledger_action(
     library: &DependencyLibrary,
     action: LedgerAction,
 ) {
+    // Delete on a library kept in a folder of its own detaches it.
+    let action = match action {
+        LedgerAction::Remove
+            if library.kind == DependencyKind::Design
+                && cx.model.library_manager.is_referenced(&library.name) =>
+        {
+            LedgerAction::File(LibraryFileIntent::Detach(library.name.clone()))
+        }
+        action => action,
+    };
     let offered = ledger_actions(cx, library)
         .into_iter()
         .any(|(offered, enabled)| offered == action && enabled);
@@ -713,6 +767,9 @@ fn run_ledger_action(
             }
         }
         (LedgerAction::Remove, DependencyKind::Model) => remove_model_library(cx, &library.name),
+        (LedgerAction::File(intent), DependencyKind::Design) => {
+            run_library_file_intent(cx, intent);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         (LedgerAction::Reveal, DependencyKind::Model) => reveal_model_library(cx, &library.name),
         #[cfg(not(target_arch = "wasm32"))]

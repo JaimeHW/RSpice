@@ -9,12 +9,16 @@ use rspice_ui_kit::panels::{panel_inset, section_header};
 use crate::state::model_library::ModelSourceAuthority;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
 use crate::workbench::project::dependency_status::{
     DependencyKind, LibraryStatus, UNSET, dependency_rows, shown_path,
 };
+use crate::workbench::project::library_dialogs::library_files::{
+    LibraryFileIntent, library_file_blocker, library_file_label,
+};
 
-use super::{ProjectInspector, ProjectInspectorAction, inspector_action};
+use super::{ProjectInspector, ProjectInspectorAction, inspector_action, inspector_action_enabled};
 
 pub(super) fn project_dependency(
     ui: &mut Ui,
@@ -51,6 +55,11 @@ pub(super) fn project_dependency(
         if inspector_action(ui, label) {
             return Some(ProjectInspectorAction::OpenDependency(row.library.clone()));
         }
+        if row.library.kind == DependencyKind::Design
+            && let Some(intent) = mode_action(ui, model, &row.library.name)
+        {
+            return Some(ProjectInspectorAction::LibraryFile(intent));
+        }
     } else {
         section_header(ui, "Library", None);
         detail_text(ui, "No library selected");
@@ -58,24 +67,46 @@ pub(super) fn project_dependency(
     None
 }
 
-/// What a design library's row has no column for: the technology it is
-/// drawn for, and whether it can be changed.
-fn design_facts(ui: &mut Ui, model: &crate::workbench::app_state::Model, name: &str) {
+/// What a design library's row has no column for: the folder a library
+/// kept in a folder of its own resolves to here, whether it can be changed,
+/// and the technology it is drawn for.
+pub(super) fn design_facts(ui: &mut Ui, model: &crate::workbench::app_state::Model, name: &str) {
     let Some(library) = model.library_manager.get_library(name) else {
         return;
     };
-    if !library.technology.is_empty() {
-        property_row(ui, "Attached technology", &library.technology);
+    if let Some(folder) = model.library_folder(name) {
+        property_row_path(ui, "Resolves to", &shown_path(folder));
     }
     property_row(
         ui,
         "Access",
         if library.read_only {
-            "Read only"
+            LibraryMode::ReadOnly.label()
         } else {
-            "Editable"
+            LibraryMode::Editable.label()
         },
     );
+    if !library.technology.is_empty() {
+        property_row(ui, "Attached technology", &library.technology);
+    }
+}
+
+/// Make editable or Make read-only, for a library kept in a folder of its
+/// own: the command its Access row states the result of.
+pub(super) fn mode_action(
+    ui: &mut Ui,
+    model: &crate::workbench::app_state::Model,
+    name: &str,
+) -> Option<LibraryFileIntent> {
+    let reference = model.library_manager.reference(name)?;
+    let mode = if reference.mode.is_editable() {
+        LibraryMode::ReadOnly
+    } else {
+        LibraryMode::Editable
+    };
+    let intent = LibraryFileIntent::SetMode(name.to_owned(), mode);
+    let enabled = library_file_blocker(model, &intent).is_none();
+    inspector_action_enabled(ui, library_file_label(&intent), enabled).then_some(intent)
 }
 
 /// What a model library's row has no column for: on whose authority it is
@@ -108,7 +139,7 @@ fn model_facts(ui: &mut Ui, model: &crate::workbench::app_state::Model, name: &s
 /// A status as one row, its mark in front of its word, and what more a
 /// problem has to say wrapped under it. A sound status's detail is a count
 /// of files or where the library comes from, which the rows under it state.
-fn status_rows(ui: &mut Ui, label: &str, status: &LibraryStatus) {
+pub(super) fn status_rows(ui: &mut Ui, label: &str, status: &LibraryStatus) {
     let problem = status.mark.problem();
     property_row_problem(ui, label, status.label, problem);
     if let (Some(_), Some(detail)) = (problem, status.detail.as_deref()) {

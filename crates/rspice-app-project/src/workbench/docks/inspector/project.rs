@@ -81,6 +81,9 @@ pub enum ProjectInspectorAction {
     Shell(ProjectRequest),
     /// Open this dependency where it is edited, as its row's Open does.
     OpenDependency(DependencyLibrary),
+    /// A command over a library kept in a folder of its own: its mode, or
+    /// Break lock… on one of its files.
+    LibraryFile(crate::workbench::project::library_dialogs::library_files::LibraryFileIntent),
 }
 
 pub(in crate::workbench) fn project(
