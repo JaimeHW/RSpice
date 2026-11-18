@@ -350,7 +350,7 @@ fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
     );
     let (caret, listed) = (netlist.cursor_char_index, netlist.completion_index);
     let mut stepped = Vec::new();
-    for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
+    for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
         press(&mut replay, key);
         let output = replay.frame(Vec::new());
         assert!(draws_the_menu(&output), "{key:?} keeps the menu open");
@@ -358,7 +358,13 @@ fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
     }
     assert_eq!(
         stepped,
-        ["Go to definition", FIND_REFERENCES, "Go to definition"].map(|row| Some(row.to_owned())),
+        [
+            "Show value",
+            "Go to definition",
+            FIND_REFERENCES,
+            "Go to definition"
+        ]
+        .map(|row| Some(row.to_owned())),
         "the arrows step the menu's rows"
     );
     let netlist = &replay.app.state.code.netlist;
@@ -382,8 +388,9 @@ fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
     );
 }
 
-/// Enter on the row the arrows stepped to chooses it: Go to definition
-/// puts the caret on the subcircuit's definition by the next frame.
+/// Enter on the row the arrows stepped to chooses it: the arrows land on
+/// Show value, the first row, then Go to definition, which Enter takes and
+/// which puts the caret on the subcircuit's definition by the next frame.
 #[test]
 fn enter_chooses_the_row_the_arrows_stepped_to() {
     let mut replay = deck_page();
@@ -391,8 +398,14 @@ fn enter_chooses_the_row_the_arrows_stepped_to() {
     press(&mut replay, Key::ArrowDown);
     assert_eq!(
         focused_row(&replay.frame(Vec::new())).as_deref(),
-        Some("Go to definition"),
+        Some("Show value"),
         "the arrow steps to the first row"
+    );
+    press(&mut replay, Key::ArrowDown);
+    assert_eq!(
+        focused_row(&replay.frame(Vec::new())).as_deref(),
+        Some("Go to definition"),
+        "the next arrow steps to the row below"
     );
     press(&mut replay, Key::Enter);
     assert!(
