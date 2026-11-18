@@ -237,7 +237,7 @@ impl TextDocumentModel {
     }
 
     /// The whole text as one string: a copy, for tests to compare.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn to_source(&self) -> String {
         self.text.to_string()
     }
