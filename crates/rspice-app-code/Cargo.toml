@@ -33,7 +33,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
-similar = "2.7"
+similar = "3.2"
 web-time.workspace = true
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 ropey.workspace = true
