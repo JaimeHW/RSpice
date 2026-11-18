@@ -36,6 +36,14 @@ fn typed(replay: &mut Replay, text: &str) {
     replay.frame(vec![egui::Event::Text(text.to_owned())]);
 }
 
+/// More than a second with no keystroke: the editor's next keystroke starts
+/// an undo step of its own.
+fn pause(replay: &mut Replay) {
+    for _ in 0..11 {
+        replay.frame(Vec::new());
+    }
+}
+
 /// One frame of undo, or of redo.
 fn undo(replay: &mut Replay) {
     replay.frame(key(Key::Z, PRIMARY));
@@ -128,23 +136,32 @@ fn a_keystroke_is_committed_in_its_frame_and_the_next_frame_keeps_caret_and_sele
     );
 }
 
-/// Undo and redo in the editor step what was typed, one typed run at a time,
-/// and each step is committed by the end of its frame.
+/// Undo and redo in the editor step what was typed a word at a time, as the
+/// editor groups typing, and each step is committed by the end of its frame.
 #[test]
 fn undo_and_redo_step_what_was_typed_as_the_editor_groups_it() {
     let mut replay = Replay::new();
     author_deck(&mut replay);
+    pause(&mut replay);
     let before = committed(&replay);
     let end = before.chars().count();
-    for text in ["a", "b", "c"] {
+    for text in ["a", "b", " ", "c", "d"] {
         typed(&mut replay, text);
     }
-    assert_eq!(committed(&replay), format!("{before}abc"));
+    assert_eq!(committed(&replay), format!("{before}ab cd"));
 
     undo(&mut replay);
-    assert_eq!(committed(&replay), format!("{before}ab"), "the first undo");
+    assert_eq!(
+        committed(&replay),
+        format!("{before}ab"),
+        "the first undo takes the last word back with the space before it"
+    );
     undo(&mut replay);
-    assert_eq!(committed(&replay), format!("{before}a"), "the second undo");
+    assert_eq!(
+        committed(&replay),
+        before,
+        "the second undo takes the first word back"
+    );
     redo(&mut replay);
     assert_eq!(committed(&replay), format!("{before}ab"), "the redo");
 
@@ -157,25 +174,35 @@ fn undo_and_redo_step_what_was_typed_as_the_editor_groups_it() {
     assert_eq!(caret(&replay), end + 2, "the caret follows the redone text");
 }
 
-/// One typed run is one undo step, and two runs in one frame are two.
+/// A word typed across frames is one undo step, two of its keys in one frame
+/// among them, and a pause in typing starts the next step.
 #[test]
-fn each_typed_run_is_its_own_undo_step_even_two_in_one_frame() {
+fn a_word_typed_across_frames_is_one_undo_step_and_a_pause_starts_the_next() {
     let mut replay = Replay::new();
     author_deck(&mut replay);
+    pause(&mut replay);
     let before = committed(&replay);
     typed(&mut replay, "de");
     replay.frame(vec![
         egui::Event::Text("f".to_owned()),
         egui::Event::Text("g".to_owned()),
     ]);
-    assert_eq!(committed(&replay), format!("{before}defg"));
+    pause(&mut replay);
+    typed(&mut replay, "h");
+    assert_eq!(committed(&replay), format!("{before}defgh"));
 
     undo(&mut replay);
-    assert_eq!(committed(&replay), format!("{before}def"));
+    assert_eq!(
+        committed(&replay),
+        format!("{before}defg"),
+        "the pause started a step"
+    );
     undo(&mut replay);
-    assert_eq!(committed(&replay), format!("{before}de"));
-    undo(&mut replay);
-    assert_eq!(committed(&replay), before, "the run of two is one step");
+    assert_eq!(
+        committed(&replay),
+        before,
+        "the word typed across frames is one step"
+    );
 }
 
 /// Past the editor's own history, undo steps the deck's own last edit back
