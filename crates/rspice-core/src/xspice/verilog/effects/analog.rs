@@ -21,9 +21,7 @@ use rspice_veriloga_runtime::{
 };
 
 use super::files::scan::{self, ScanContext};
-use super::files::{
-    FD_FLAG, HandleImage, HdlFileOptions, HdlFiles, OpenFailure, WriteTarget, text_bytes,
-};
+use super::files::{HandleImage, HdlFileOptions, HdlFiles, OpenFailure, WriteTarget, text_bytes};
 use super::plusargs;
 use crate::config::HdlRunConfig;
 
@@ -110,8 +108,8 @@ impl AnalogHdlFiles {
         Self {
             options,
             scope: scope.to_owned(),
-            accepted: HdlFiles::default(),
-            candidate: HdlFiles::default(),
+            accepted: HdlFiles::for_instance(scope),
+            candidate: HdlFiles::for_instance(scope),
             raised: Vec::new(),
             warnings: Vec::new(),
         }
@@ -119,7 +117,7 @@ impl AnalogHdlFiles {
 
     /// Hand the accepted table's journal to the run's store.
     fn release(&mut self) -> Vec<String> {
-        self.accepted.release(&self.options.store)
+        self.accepted.release(&self.options)
     }
 }
 
@@ -221,7 +219,7 @@ impl AnalogFileTable for AnalogHdlFiles {
                     writes.push(AnalogFileWrite::Warning(message));
                 }
             }
-            Some(text) => match self.accepted.write_targets(descriptor) {
+            Some(text) => match self.accepted.write_targets(&self.options, descriptor) {
                 Err(message) => writes.push(AnalogFileWrite::Warning(message)),
                 Ok(targets) => {
                     let bytes = text_bytes(text);
@@ -233,19 +231,14 @@ impl AnalogFileTable for AnalogHdlFiles {
                             WriteTarget::Stderr => {
                                 writes.push(AnalogFileWrite::Stderr(text.to_owned()));
                             }
-                            WriteTarget::Descriptor(_) | WriteTarget::Channel(_) => {
-                                let Some(file) = self.accepted.target_file(target) else {
+                            file => {
+                                let Some((handle, name)) = self.accepted.write_file(&file, &bytes)
+                                else {
                                     continue;
                                 };
-                                let name = file.name.to_string();
-                                self.accepted.write(target, &bytes);
                                 writes.push(AnalogFileWrite::File {
-                                    handle: match target {
-                                        WriteTarget::Descriptor(slot) => FD_FLAG | slot as u32,
-                                        WriteTarget::Channel(bit) => 1 << bit,
-                                        _ => 0,
-                                    },
-                                    name,
+                                    handle,
+                                    name: name.to_string(),
                                     text: text.to_owned(),
                                 });
                             }

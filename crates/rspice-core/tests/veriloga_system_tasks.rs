@@ -489,3 +489,100 @@ fn file_names_and_formats_come_from_string_parameters_and_variables() {
         ]
     );
 }
+
+/// A module whose first point of every analysis opens a file descriptor and
+/// a multichannel descriptor in write mode and writes a line to each.
+const EVERY_ANALYSIS: &str = "`include \"disciplines.vams\"\nmodule log(x); inout x; electrical x;\n\
+     integer fd, mcd;\nanalog begin\n\
+     @(initial_step) begin fd = $fopen(\"log.txt\", \"w\"); mcd = $fopen(\"channel.txt\");\n\
+     $fdisplay(fd, \"analysis\"); $fdisplay(mcd, \"analysis\"); end\n\
+     I(x) <+ V(x) / 1k;\nend\nendmodule\n";
+
+/// LRM 2.4 section 9.5.1.1: "If a file is opened in a write mode in the
+/// first analysis and reopened in that write mode in following analysis,
+/// then content written from the following analyses shall be appended to the
+/// content written during the previous analyses." An `.op` and a `.tran`
+/// on one engine write both their lines to each file; another engine is
+/// another run, whose first analysis empties them.
+#[test]
+fn a_later_analysis_of_a_run_appends_to_what_an_earlier_one_wrote() {
+    let directory = scratch("analyses");
+    std::fs::write(directory.join("log.va"), EVERY_ANALYSIS).unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        "* every analysis writes\n.hdl \"log.va\"\nv1 s 0 1\nxa s log\n.end\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.deck_directory = Some(directory.clone());
+    let read = |file: &str| std::fs::read_to_string(directory.join(file)).unwrap();
+    let engine = Engine::new(config.clone());
+    engine.run_dc_op(&netlist).unwrap();
+    engine
+        .run_tran_with_abort(&netlist, 1e-9, 1e-10, &NoAbort)
+        .unwrap();
+    assert_eq!(read("log.txt"), "analysis\nanalysis\n");
+    assert_eq!(read("channel.txt"), "analysis\nanalysis\n");
+    Engine::new(config).run_dc_op(&netlist).unwrap();
+    assert_eq!(read("log.txt"), "analysis\n");
+    assert_eq!(read("channel.txt"), "analysis\n");
+}
+
+/// A design whose digital half opens a file descriptor and a multichannel
+/// descriptor, and whose analog half opens a file descriptor; each half
+/// writes through every one of them.
+const SHARED_DESCRIPTORS: &str = "`include \"disciplines.vams\"\n`timescale 1ns/1ns\n\
+     module share(p, n); inout p, n; electrical p, n;\n\
+     reg clk; integer count, fd, mcd, afd;\n\
+     initial begin clk = 0; count = 0; fd = $fopen(\"digital_fd.txt\", \"w\");\n\
+     mcd = $fopen(\"digital_mcd.txt\"); end\n\
+     always #5 clk = ~clk;\n\
+     always @(posedge clk) begin count = count + 1;\n\
+     $fdisplay(fd, \"digital %0d\", count); $fdisplay(mcd, \"digital %0d\", count);\n\
+     if (count > 1) $fdisplay(afd, \"digital %0d\", count); end\n\
+     analog begin\n@(initial_step) afd = $fopen(\"analog_fd.txt\", \"w\");\n\
+     @(timer(7n, 10n)) begin $fdisplay(fd, \"analog %g\", $abstime * 1e9);\n\
+     $fdisplay(mcd, \"analog %g\", $abstime * 1e9); $fdisplay(afd, \"analog %g\", $abstime * 1e9); end\n\
+     I(p, n) <+ V(p, n) / 1000000.0;\nend\nendmodule\n";
+
+/// LRM 2.4 section 9.5.1.2: "The file I/O system functions and tasks in both
+/// the analog and digital contexts can use file descriptors opened in either
+/// context, if the file descriptors are opened for writing or appending."
+/// Each file holds both halves' lines in the order the run wrote them.
+#[test]
+fn the_analog_and_digital_halves_write_through_each_others_descriptors() {
+    let directory = scratch("shared");
+    std::fs::write(directory.join("share.va"), SHARED_DESCRIPTORS).unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        "* shared descriptors\nx1 p 0 share\nrp p 0 1meg\n.va \"share.va\" share\n.end\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let collector = Arc::new(HdlOutputCollector::new());
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    config.hdl.deck_directory = Some(directory.clone());
+    Engine::new(config)
+        .run_tran_with_abort(&netlist, 40e-9, 1e-9, &NoAbort)
+        .unwrap();
+    let records = collector.take();
+    assert!(
+        records
+            .iter()
+            .all(|record| !matches!(record.stream, HdlStream::Diagnostic { .. })),
+        "{records:?}"
+    );
+    let read = |file: &str| std::fs::read_to_string(directory.join(file)).unwrap();
+    let both =
+        "digital 1\nanalog 7\ndigital 2\nanalog 17\ndigital 3\nanalog 27\ndigital 4\nanalog 37\n";
+    assert_eq!(read("digital_fd.txt"), both);
+    assert_eq!(read("digital_mcd.txt"), both);
+    assert_eq!(
+        read("analog_fd.txt"),
+        both.strip_prefix("digital 1\n").unwrap()
+    );
+}

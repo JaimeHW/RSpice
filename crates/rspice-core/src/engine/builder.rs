@@ -6567,7 +6567,7 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         built
             .circuit
-            .configure_analog_hdl(&self.config.hdl)
+            .configure_analog_hdl(&self.config.hdl, &self.hdl_run_files)
             .map_err(SimulationError::Circuit)?;
         if default_ports.is_empty()
             && (transient_stop_time.is_none() || !stop_time_reshapes(&built.circuit))
@@ -11698,7 +11698,7 @@ impl Engine {
                 coordinator.set_interval_event_limit(
                     self.config.resource_limits.max_mixed_interval_events,
                 );
-                coordinator.configure_hdl(&self.config.hdl);
+                coordinator.configure_hdl(&self.config.hdl, &self.hdl_run_files);
             }
             if circuit.has_coupled_event_nets() {
                 // Explicit and generated converters share the same physical

@@ -773,16 +773,19 @@ impl MixedDigitalCoordinator {
     }
 
     /// Install the run's HDL options and output receiver before execution
-    /// starts.
-    #[doc(hidden)]
-    pub fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
+    /// starts; `run` holds the files the run's earlier analyses wrote.
+    pub(crate) fn configure_hdl(
+        &mut self,
+        config: &crate::config::HdlRunConfig,
+        run: &std::sync::Arc<super::super::effects::files::HdlRunFiles>,
+    ) {
         use super::super::effects::files::HdlFileOptions;
         self.hdl_output = config.output.clone();
         let digital = self.digital.make_mut();
         digital.configure_effects(super::super::effects::HdlEffectsConfig {
             plusargs: config.plusargs.clone(),
             seed: config.seed,
-            files: HdlFileOptions::for_run(config),
+            files: HdlFileOptions::for_run(config, run),
         });
         if !config.path_delays {
             digital.drop_path_delays();

@@ -77,6 +77,9 @@ pub struct Engine {
     /// True when the configuration already includes the target netlist's
     /// options and any higher-precedence runtime overrides.
     config_is_resolved: bool,
+    /// The files this engine's analyses opened for writing: a later
+    /// analysis appends to them (LRM 2.4 section 9.5.1.1).
+    pub(super) hdl_run_files: std::sync::Arc<crate::xspice::verilog::effects::files::HdlRunFiles>,
     #[cfg(feature = "parallel")]
     parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
     /// Reusable narrow pool for the short, memory-bound classic-MOS kernel.
@@ -276,6 +279,7 @@ impl Engine {
             config,
             config_error,
             config_is_resolved: false,
+            hdl_run_files: std::sync::Arc::default(),
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
             #[cfg(feature = "parallel")]
@@ -304,6 +308,7 @@ impl Engine {
             config,
             config_error: None,
             config_is_resolved: false,
+            hdl_run_files: std::sync::Arc::default(),
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
             #[cfg(feature = "parallel")]
@@ -332,6 +337,7 @@ impl Engine {
             config,
             config_error,
             config_is_resolved: true,
+            hdl_run_files: std::sync::Arc::default(),
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
             #[cfg(feature = "parallel")]
@@ -362,6 +368,7 @@ impl Engine {
             config,
             config_error: None,
             config_is_resolved: true,
+            hdl_run_files: std::sync::Arc::default(),
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
             #[cfg(feature = "parallel")]
@@ -661,6 +668,7 @@ impl Engine {
         // would be dropped with the temporary and `convergence_quality` would
         // report a clean run no matter what the solver actually did.
         resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        resolved_engine.hdl_run_files = std::sync::Arc::clone(&self.hdl_run_files);
         #[cfg(feature = "veriloga")]
         {
             resolved_engine.compiler_diagnostics =
@@ -739,6 +747,7 @@ impl Engine {
     ) -> Result<Self, SimulationConfigError> {
         let mut resolved_engine = Self::try_new_with_resolved_config(config)?;
         resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        resolved_engine.hdl_run_files = std::sync::Arc::clone(&self.hdl_run_files);
         #[cfg(feature = "veriloga")]
         {
             resolved_engine.compiler_diagnostics =

@@ -31,6 +31,17 @@
 //! output and error and opened files from 3, lowest free first; a
 //! multichannel descriptor is one bit of 1 to 30, with bit 0 the standard
 //! output.
+//!
+//! The digital design and every Verilog-A instance of an analysis keep their
+//! own tables but share one set of numbers ([`SharedDescriptors`]), and a
+//! write through a number another table opened for writing goes to its file
+//! (LRM 2.4 section 9.5.1.2).
+//!
+//! # Analyses
+//!
+//! A file one analysis of a run opened in a write mode, a later analysis
+//! that opens it in that mode appends to ([`HdlRunFiles`], LRM 2.4 section
+//! 9.5.1.1).
 
 mod calls;
 pub(crate) mod readmem;
@@ -49,6 +60,8 @@ pub(crate) const STDOUT: u32 = FD_FLAG | 1;
 pub(crate) const STDERR: u32 = FD_FLAG | 2;
 /// The first descriptor slot an `$fopen` hands out.
 const FIRST_SLOT: usize = 3;
+/// The last; a checkpoint holds no slot past it.
+const LAST_SLOT: usize = 1 << 20;
 /// Multichannel bits 1 to 30 are files; bit 0 is the standard output.
 const CHANNEL_BITS: usize = 31;
 
@@ -95,6 +108,10 @@ pub(crate) enum FileOp {
     },
     /// Write at the end (`"a"` handles).
     Append { path: PathBuf, bytes: Vec<u8> },
+    /// Write at the end through a descriptor another table opened (LRM 2.4
+    /// section 9.5.1.2). The handle that opened it numbers its positions
+    /// without these bytes, so its later positioned writes land after them.
+    Shared { path: PathBuf, bytes: Vec<u8> },
     /// Shorten to `length`: a resumed checkpoint discards what was written
     /// after it.
     Truncate { path: PathBuf, length: u64 },
@@ -108,6 +125,7 @@ impl FileOp {
             Self::Create { path, .. }
             | Self::Write { path, .. }
             | Self::Append { path, .. }
+            | Self::Shared { path, .. }
             | Self::Truncate { path, .. }
             | Self::Close { path } => path,
         }
@@ -129,7 +147,9 @@ impl FileOp {
                 }
                 content[start..end].copy_from_slice(bytes);
             }
-            Self::Append { bytes, .. } => content.extend_from_slice(bytes),
+            Self::Append { bytes, .. } | Self::Shared { bytes, .. } => {
+                content.extend_from_slice(bytes);
+            }
             Self::Truncate { length, .. } => {
                 content.truncate(usize::try_from(*length).unwrap_or(usize::MAX));
             }
@@ -153,6 +173,43 @@ struct StoreState {
     /// Files a [`HdlFileTarget::Disk`] store keeps open between commits.
     #[cfg(not(target_arch = "wasm32"))]
     open: BTreeMap<PathBuf, std::fs::File>,
+    /// How many bytes writes through another table's descriptor put into
+    /// each file since it was last emptied: where the opening handle's
+    /// positions start.
+    shared: BTreeMap<PathBuf, u64>,
+}
+
+impl StoreState {
+    /// `op` where it lands in the file: a positioned write moves past the
+    /// bytes other tables wrote through the handle's descriptor.
+    fn place(&mut self, op: FileOp) -> FileOp {
+        match op {
+            FileOp::Create {
+                ref path,
+                truncate: true,
+            } => {
+                self.shared.remove(path);
+                op
+            }
+            FileOp::Shared {
+                ref path,
+                ref bytes,
+            } => {
+                *self.shared.entry(path.clone()).or_default() += bytes.len() as u64;
+                op
+            }
+            FileOp::Write {
+                path,
+                offset,
+                bytes,
+            } => FileOp::Write {
+                offset: offset + self.shared.get(&path).copied().unwrap_or(0),
+                path,
+                bytes,
+            },
+            op => op,
+        }
+    }
 }
 
 impl HdlFileStore {
@@ -238,6 +295,7 @@ impl HdlFileStore {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut failures = Vec::new();
         for op in ops {
+            let op = state.place(op);
             match self.target {
                 HdlFileTarget::Memory => {
                     let content = state.memory.entry(op.path().to_path_buf()).or_default();
@@ -290,7 +348,7 @@ fn apply_on_disk(open: &mut BTreeMap<PathBuf, std::fs::File>, op: &FileOp) -> st
             file.seek(SeekFrom::Start(*offset))?;
             file.write_all(bytes)
         }
-        FileOp::Append { path, bytes } => {
+        FileOp::Append { path, bytes } | FileOp::Shared { path, bytes } => {
             handle(open, path, false)?;
             let file = open.get_mut(path.as_path()).expect("opened above");
             file.seek(SeekFrom::End(0))?;
@@ -324,6 +382,165 @@ pub(crate) struct HdlFileOptions {
     /// `--hdl-unrestricted-io`: writes may leave the run directory.
     pub unrestricted: bool,
     pub store: Arc<HdlFileStore>,
+    /// The files earlier analyses of the run opened for writing.
+    run: Arc<HdlRunFiles>,
+    /// This analysis, among the run's.
+    analysis: u64,
+    /// The descriptors the analysis's file tables hand out.
+    shared: Arc<SharedDescriptors>,
+}
+
+/// The files a simulation run's analyses opened in a write mode. LRM 2.4
+/// section 9.5.1.1: "If a file is opened in a write mode in the first
+/// analysis and reopened in that write mode in following analysis, then
+/// content written from the following analyses shall be appended to the
+/// content written during the previous analyses." An engine keeps one for
+/// every analysis it performs, an `.op` and the `.tran` after it alike, and
+/// each analysis's options take the next analysis number from it. Once an
+/// earlier analysis has opened a path in a mode, every later open of it in
+/// that mode appends, so no analysis empties what an earlier one wrote.
+#[derive(Debug, Default)]
+pub(crate) struct HdlRunFiles {
+    state: Mutex<RunFilesState>,
+}
+
+#[derive(Debug, Default)]
+struct RunFilesState {
+    /// How many analyses have taken options.
+    analyses: u64,
+    /// Each path opened in a write mode that empties it: the mode, and the
+    /// first analysis that opened it so.
+    written: BTreeMap<PathBuf, (OpenMode, u64)>,
+}
+
+impl HdlRunFiles {
+    fn state(&self) -> std::sync::MutexGuard<'_, RunFilesState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn next_analysis(&self) -> u64 {
+        let mut state = self.state();
+        state.analyses += 1;
+        state.analyses
+    }
+
+    /// The mode `analysis` opens `path` in when it asks for `mode`, which
+    /// writes and empties the file: appending instead, when an earlier
+    /// analysis opened the path in that mode.
+    fn reopen(&self, path: &Path, mode: OpenMode, analysis: u64) -> OpenMode {
+        let mut state = self.state();
+        let first = state
+            .written
+            .entry(path.to_path_buf())
+            .or_insert((mode, analysis));
+        if first.0 != mode {
+            *first = (mode, analysis);
+        }
+        if first.1 == analysis {
+            mode
+        } else {
+            OpenMode {
+                append: true,
+                truncate: false,
+                ..mode
+            }
+        }
+    }
+}
+
+/// The descriptors every file table of an analysis hands out: the digital
+/// design's and each Verilog-A instance's. LRM 2.4 section 9.5.1.2: "The
+/// file I/O system functions and tasks in both the analog and digital
+/// contexts can use file descriptors opened in either context, if the file
+/// descriptors are opened for writing or appending." So no two tables hand
+/// out one number, and a write through a number another table holds for
+/// writing goes to that table's file.
+///
+/// `$fopen` runs in a trial the solver may reject, so a number is kept for
+/// the table's open of that ordinal: the retried trial's open gets the
+/// number the rejected one got. It is let go once the table's accepted state
+/// no longer holds it.
+#[derive(Debug, Default)]
+pub(crate) struct SharedDescriptors {
+    held: Mutex<BTreeMap<u32, Holder>>,
+}
+
+#[derive(Debug, Clone)]
+struct Holder {
+    /// The table's name: the instance's, or empty for the digital design.
+    table: Arc<str>,
+    /// The table's count of opens before the one the number was handed out
+    /// for.
+    ordinal: u64,
+    /// Where a write through the number goes, when it was opened for
+    /// writing: the path and the name the design gave it.
+    writes: Option<(PathBuf, Arc<str>)>,
+}
+
+impl SharedDescriptors {
+    fn held(&self) -> std::sync::MutexGuard<'_, BTreeMap<u32, Holder>> {
+        self.held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The number `table`'s open of `ordinal` gets: the one an earlier
+    /// attempt at that open got, else the first of `free` no table holds.
+    fn hand_out(
+        &self,
+        table: &Arc<str>,
+        ordinal: u64,
+        descriptor: bool,
+        free: impl IntoIterator<Item = u32>,
+        writes: Option<(PathBuf, Arc<str>)>,
+    ) -> Option<u32> {
+        let mut held = self.held();
+        let kept = held
+            .iter()
+            .find(|(_, holder)| holder.table == *table && holder.ordinal == ordinal)
+            .map(|(number, _)| *number);
+        let number = match kept {
+            Some(number) if (number & FD_FLAG != 0) == descriptor => number,
+            _ => {
+                if let Some(number) = kept {
+                    held.remove(&number);
+                }
+                // `free` is what this table does not hold; a number only it
+                // handed out is free once it no longer holds it.
+                free.into_iter()
+                    .find(|number| held.get(number).is_none_or(|holder| holder.table == *table))?
+            }
+        };
+        held.insert(
+            number,
+            Holder {
+                table: Arc::clone(table),
+                ordinal,
+                writes,
+            },
+        );
+        Some(number)
+    }
+
+    /// Let go of each number `table` handed out that `holds` says it no
+    /// longer holds.
+    fn settle(&self, table: &Arc<str>, holds: impl Fn(u32) -> bool) {
+        self.held()
+            .retain(|number, holder| holder.table != *table || holds(*number));
+    }
+
+    /// Where a write through `number` goes when another table than `table`
+    /// opened it for writing.
+    fn writes_elsewhere(&self, table: &Arc<str>, number: u32) -> Option<(PathBuf, Arc<str>)> {
+        let held = self.held();
+        let holder = held.get(&number)?;
+        if holder.table == *table {
+            return None;
+        }
+        holder.writes.clone()
+    }
 }
 
 impl Default for HdlFileOptions {
@@ -341,6 +558,9 @@ impl PartialEq for HdlFileOptions {
         self.run_directory == other.run_directory
             && self.unrestricted == other.unrestricted
             && Arc::ptr_eq(&self.store, &other.store)
+            && Arc::ptr_eq(&self.run, &other.run)
+            && self.analysis == other.analysis
+            && Arc::ptr_eq(&self.shared, &other.shared)
     }
 }
 
@@ -368,22 +588,30 @@ impl HdlFileOptions {
             run_directory: normalize(&run_directory),
             unrestricted,
             store,
+            run: Arc::default(),
+            analysis: 0,
+            shared: Arc::default(),
         }
     }
 
-    /// A run's options: relative paths resolve against the explicit run
-    /// directory, else the deck's directory, and writes land in a fresh store
-    /// on the platform's default target.
-    pub(crate) fn for_run(config: &crate::config::HdlRunConfig) -> Self {
+    /// The options of one analysis of a run: relative paths resolve against
+    /// the explicit run directory, else the deck's directory, writes land in
+    /// a fresh store on the platform's default target, and a file an earlier
+    /// analysis of `run` opened for writing is appended to.
+    pub(crate) fn for_run(config: &crate::config::HdlRunConfig, run: &Arc<HdlRunFiles>) -> Self {
         let directory = config
             .run_directory
             .as_deref()
             .or(config.deck_directory.as_deref());
-        Self::new(
-            directory,
-            config.unrestricted_io,
-            Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
-        )
+        Self {
+            analysis: run.next_analysis(),
+            run: Arc::clone(run),
+            ..Self::new(
+                directory,
+                config.unrestricted_io,
+                Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
+            )
+        }
     }
 
     /// The path a design's file name names, for reading.
@@ -674,7 +902,7 @@ impl OpenFile {
 }
 
 /// Where a write goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WriteTarget {
     Stdout,
     Stderr,
@@ -682,6 +910,13 @@ pub(crate) enum WriteTarget {
     Descriptor(usize),
     /// A multichannel descriptor's bit.
     Channel(usize),
+    /// A descriptor, or one bit of a multichannel descriptor, another table
+    /// opened for writing (LRM 2.4 section 9.5.1.2).
+    Shared {
+        handle: u32,
+        path: PathBuf,
+        name: Arc<str>,
+    },
 }
 
 /// What a read of `name` says when the file is not there.
@@ -710,6 +945,11 @@ pub(crate) enum OpenFailure {
 /// The open files of a running design.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HdlFiles {
+    /// The table's name among the analysis's: the Verilog-A instance's, or
+    /// empty for the digital design.
+    table: Arc<str>,
+    /// How many opens the table has made, which keys the number each gets.
+    opens: u64,
     /// Indexed by a file descriptor's low bits; 0 to 2 stay empty.
     descriptors: Vec<Option<OpenFile>>,
     /// Indexed by a multichannel descriptor's bit; 0 stays empty.
@@ -727,6 +967,8 @@ impl HdlFiles {
     /// writing is never called repeating.
     pub(crate) fn same_step_state(&self, saved: &Self) -> bool {
         let Self {
+            table: _,
+            opens,
             descriptors,
             channels,
             pending,
@@ -739,21 +981,44 @@ impl HdlFiles {
                     _ => false,
                 })
         };
-        same(descriptors, &saved.descriptors)
+        *opens == saved.opens
+            && same(descriptors, &saved.descriptors)
             && same(channels, &saved.channels)
             && *pending == saved.pending
+    }
+
+    /// The table of the Verilog-A instance `name`.
+    pub(crate) fn for_instance(name: &str) -> Self {
+        Self {
+            table: Arc::from(name),
+            ..Self::default()
+        }
+    }
+
+    /// Whether the table holds `number` open.
+    fn holds(&self, number: u32) -> bool {
+        let slot = if number & FD_FLAG != 0 {
+            self.descriptors.get((number & !FD_FLAG) as usize)
+        } else {
+            self.channels.get(number.trailing_zeros() as usize)
+        };
+        slot.is_some_and(Option::is_some)
     }
 
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
 
-    /// Hand the journal to the store; the failures, for warnings.
-    pub(crate) fn release(&mut self, store: &HdlFileStore) -> Vec<String> {
+    /// Hand the journal to the store, and let go of the numbers the table no
+    /// longer holds; the failures, for warnings.
+    pub(crate) fn release(&mut self, options: &HdlFileOptions) -> Vec<String> {
         if self.pending.is_empty() {
             return Vec::new();
         }
-        store.apply(std::mem::take(&mut self.pending))
+        options
+            .shared
+            .settle(&self.table, |number| self.holds(number));
+        options.store.apply(std::mem::take(&mut self.pending))
     }
 
     pub(crate) fn journal(&mut self, op: FileOp) {
@@ -827,6 +1092,11 @@ impl HdlFiles {
         } else {
             options.resolve_read(name).map_err(OpenFailure::Warn)?
         };
+        let mode = if mode.truncate {
+            options.run.reopen(&path, mode, options.analysis)
+        } else {
+            mode
+        };
         let existing = if mode.read || mode.existing || mode.append {
             self.view(options, &path, name)
                 .map_err(|error| OpenFailure::Warn(format!("cannot read `{name}`: {error}")))?
@@ -860,43 +1130,50 @@ impl HdlFiles {
         if !mode.read && mode.append {
             file.length = length;
         }
+        let writes = mode.write.then(|| (path.clone(), Arc::clone(&file.name)));
         if mode.write {
             self.journal(FileOp::Create {
                 path,
                 truncate: mode.truncate,
             });
         }
-        if channel {
-            if self.channels.len() < CHANNEL_BITS {
-                self.channels.resize(CHANNEL_BITS, None);
-            }
-            let Some(bit) = (1..CHANNEL_BITS).find(|bit| self.channels[*bit].is_none()) else {
-                self.pending.pop();
-                return Err(OpenFailure::Warn(
-                    "every multichannel descriptor (30) is open".into(),
-                ));
-            };
-            self.channels[bit] = Some(file);
-            Ok(1 << bit)
+        let ordinal = self.opens;
+        self.opens += 1;
+        let number = if channel {
+            let free = (1..CHANNEL_BITS)
+                .filter(|bit| self.channels.get(*bit).is_none_or(Option::is_none))
+                .map(|bit| 1u32 << bit);
+            options
+                .shared
+                .hand_out(&self.table, ordinal, false, free, writes)
         } else {
-            if self.descriptors.len() < FIRST_SLOT {
-                self.descriptors.resize(FIRST_SLOT, None);
+            let free = (FIRST_SLOT..=LAST_SLOT)
+                .filter(|slot| self.descriptors.get(*slot).is_none_or(Option::is_none))
+                .map(|slot| FD_FLAG | slot as u32);
+            options
+                .shared
+                .hand_out(&self.table, ordinal, true, free, writes)
+        };
+        let Some(number) = number else {
+            if mode.write {
+                self.pending.pop();
             }
-            let slot = match (FIRST_SLOT..self.descriptors.len())
-                .find(|slot| self.descriptors[*slot].is_none())
-            {
-                Some(slot) => slot,
-                None => {
-                    self.descriptors.push(None);
-                    self.descriptors.len() - 1
-                }
-            };
-            if slot as u32 >= FD_FLAG {
-                return Err(OpenFailure::Warn("no file descriptor is free".into()));
-            }
-            self.descriptors[slot] = Some(file);
-            Ok(FD_FLAG | slot as u32)
+            return Err(OpenFailure::Warn(if channel {
+                "every multichannel descriptor (30) is open".into()
+            } else {
+                "no file descriptor is free".into()
+            }));
+        };
+        let (table, index) = if channel {
+            (&mut self.channels, number.trailing_zeros() as usize)
+        } else {
+            (&mut self.descriptors, (number & !FD_FLAG) as usize)
+        };
+        if table.len() <= index {
+            table.resize(index + 1, None);
         }
+        table[index] = Some(file);
+        Ok(number)
     }
 
     /// `$fclose`: close a file descriptor, or every file of a multichannel
@@ -941,8 +1218,24 @@ impl HdlFiles {
         })
     }
 
-    /// Where a write to `descriptor` goes (`$fdisplay` and its kin).
-    pub(crate) fn write_targets(&self, descriptor: u32) -> Result<Vec<WriteTarget>, String> {
+    /// Where a write to `descriptor` goes (`$fdisplay` and its kin): this
+    /// table's files, and the files other tables of the analysis opened for
+    /// writing under the number or its bits.
+    pub(crate) fn write_targets(
+        &self,
+        options: &HdlFileOptions,
+        descriptor: u32,
+    ) -> Result<Vec<WriteTarget>, String> {
+        let elsewhere = |number: u32| {
+            options
+                .shared
+                .writes_elsewhere(&self.table, number)
+                .map(|(path, name)| WriteTarget::Shared {
+                    handle: number,
+                    path,
+                    name,
+                })
+        };
         if descriptor & FD_FLAG != 0 {
             return match descriptor {
                 STDOUT => Ok(vec![WriteTarget::Stdout]),
@@ -952,46 +1245,58 @@ impl HdlFiles {
                     let slot = (descriptor & !FD_FLAG) as usize;
                     match self.descriptors.get(slot).and_then(Option::as_ref) {
                         Some(file) if file.mode.write => Ok(vec![WriteTarget::Descriptor(slot)]),
-                        _ => Err(invalid_descriptor(descriptor)),
+                        Some(_) => Err(invalid_descriptor(descriptor)),
+                        None => elsewhere(descriptor)
+                            .map(|target| vec![target])
+                            .ok_or_else(|| invalid_descriptor(descriptor)),
                     }
                 }
             };
         }
-        if descriptor == 0 || !self.channel_bits_open(descriptor, true) {
+        if descriptor == 0 {
             return Err(invalid_channel(descriptor));
         }
-        Ok((0..CHANNEL_BITS)
+        (0..CHANNEL_BITS)
             .filter(|bit| descriptor >> bit & 1 == 1)
             .map(|bit| {
                 if bit == 0 {
-                    WriteTarget::Stdout
+                    Some(WriteTarget::Stdout)
+                } else if self.channels.get(bit).is_some_and(Option::is_some) {
+                    Some(WriteTarget::Channel(bit))
                 } else {
-                    WriteTarget::Channel(bit)
+                    elsewhere(1 << bit)
                 }
             })
-            .collect())
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| invalid_channel(descriptor))
     }
 
-    /// The handle a write target names, for its record.
-    pub(crate) fn target_file(&self, target: WriteTarget) -> Option<&OpenFile> {
-        match target {
-            WriteTarget::Descriptor(slot) => self.descriptors.get(slot)?.as_ref(),
-            WriteTarget::Channel(bit) => self.channels.get(bit)?.as_ref(),
-            WriteTarget::Stdout | WriteTarget::Stderr => None,
-        }
-    }
-
-    /// Write to a file target; the standard streams are the caller's.
-    pub(crate) fn write(&mut self, target: WriteTarget, bytes: &[u8]) {
-        let file = match target {
-            WriteTarget::Descriptor(slot) => self.descriptors.get_mut(slot),
-            WriteTarget::Channel(bit) => self.channels.get_mut(bit),
-            WriteTarget::Stdout | WriteTarget::Stderr => None,
+    /// Write to a file target: the handle and the file name its record
+    /// carries. The standard streams are the caller's.
+    pub(crate) fn write_file(
+        &mut self,
+        target: &WriteTarget,
+        bytes: &[u8],
+    ) -> Option<(u32, Arc<str>)> {
+        let (handle, file) = match target {
+            WriteTarget::Descriptor(slot) => (
+                FD_FLAG | *slot as u32,
+                self.descriptors.get_mut(*slot)?.as_mut()?,
+            ),
+            WriteTarget::Channel(bit) => (1 << bit, self.channels.get_mut(*bit)?.as_mut()?),
+            WriteTarget::Shared { handle, path, name } => {
+                self.journal(FileOp::Shared {
+                    path: path.clone(),
+                    bytes: bytes.to_vec(),
+                });
+                return Some((*handle, Arc::clone(name)));
+            }
+            WriteTarget::Stdout | WriteTarget::Stderr => return None,
         };
-        if let Some(Some(file)) = file {
-            let op = file.write(bytes);
-            self.journal(op);
-        }
+        let name = Arc::clone(&file.name);
+        let op = file.write(bytes);
+        self.journal(op);
+        Some((handle, name))
     }
 
     /// The open file a read-side call names.
@@ -1107,8 +1412,12 @@ impl HdlFiles {
         options: &HdlFileOptions,
         images: &[HandleImage],
     ) -> Result<(), String> {
-        *self = Self::default();
-        for image in images {
+        *self = Self {
+            table: Arc::clone(&self.table),
+            ..Self::default()
+        };
+        options.shared.settle(&self.table, |_| false);
+        for (index, image) in images.iter().enumerate() {
             let path = PathBuf::from(&image.path);
             if image.mode.write && !options.unrestricted && !options.confines(&normalize(&path)) {
                 return Err(format!(
@@ -1152,9 +1461,28 @@ impl HdlFiles {
             file.pushback.clone_from(&image.pushback);
             file.eof = image.eof;
             file.error = image.error;
+            let writes = image
+                .mode
+                .write
+                .then(|| (file.path.clone(), Arc::clone(&file.name)));
+            options
+                .shared
+                .hand_out(
+                    &self.table,
+                    u64::MAX - index as u64,
+                    image.descriptor & FD_FLAG != 0,
+                    [image.descriptor],
+                    writes,
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "checkpointed descriptor 0x{:08x} is another table's",
+                        image.descriptor
+                    )
+                })?;
             if image.descriptor & FD_FLAG != 0 {
                 let slot = (image.descriptor & !FD_FLAG) as usize;
-                if !(FIRST_SLOT..=1 << 20).contains(&slot) {
+                if !(FIRST_SLOT..=LAST_SLOT).contains(&slot) {
                     return Err(format!(
                         "checkpointed file descriptor 0x{:08x} is not one $fopen hands out",
                         image.descriptor

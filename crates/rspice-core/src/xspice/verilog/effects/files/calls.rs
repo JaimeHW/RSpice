@@ -241,7 +241,7 @@ impl HdlEffects {
                     let Some(descriptor) = self.descriptor_or_warn(plan, site, args, clock) else {
                         return Ok(outcome);
                     };
-                    if let Err(message) = self.files.write_targets(descriptor) {
+                    if let Err(message) = self.files.write_targets(&self.config.files, descriptor) {
                         self.warn(plan, site, clock, &message);
                     }
                 }
@@ -492,7 +492,7 @@ impl HdlEffects {
         descriptor: u32,
         text: &str,
     ) {
-        let targets = match self.files.write_targets(descriptor) {
+        let targets = match self.files.write_targets(&self.config.files, descriptor) {
             Ok(targets) => targets,
             Err(message) => {
                 self.warn(plan, site, clock, &message);
@@ -508,19 +508,14 @@ impl HdlEffects {
                 WriteTarget::Stderr => {
                     self.record(plan, site, clock, HdlStream::Stderr, text.to_owned());
                 }
-                WriteTarget::Descriptor(_) | WriteTarget::Channel(_) => {
-                    let Some(file) = self.files.target_file(target) else {
+                file => {
+                    let Some((handle, name)) = self.files.write_file(&file, &bytes) else {
                         continue;
                     };
                     let stream = HdlStream::File {
-                        handle: match target {
-                            WriteTarget::Descriptor(slot) => super::FD_FLAG | slot as u32,
-                            WriteTarget::Channel(bit) => 1 << bit,
-                            _ => 0,
-                        },
-                        path: file.name.to_string(),
+                        handle,
+                        path: name.to_string(),
                     };
-                    self.files.write(target, &bytes);
                     self.record(plan, site, clock, stream, text.to_owned());
                 }
             }

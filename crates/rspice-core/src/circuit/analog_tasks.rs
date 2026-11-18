@@ -11,6 +11,7 @@ impl CircuitData {
     pub(crate) fn configure_analog_hdl(
         &mut self,
         config: &crate::config::HdlRunConfig,
+        run: &std::sync::Arc<crate::xspice::verilog::effects::files::HdlRunFiles>,
     ) -> Result<(), String> {
         use crate::xspice::verilog::effects::{analog, files::HdlFileOptions};
         let files = self
@@ -18,7 +19,7 @@ impl CircuitData {
             .mixed_digital_coordinator
             .as_ref()
             .map_or_else(
-                || HdlFileOptions::for_run(config),
+                || HdlFileOptions::for_run(config, run),
                 |coordinator| coordinator.hdl_file_options().clone(),
             );
         for device in self.veriloga_devices.iter_mut() {

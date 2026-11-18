@@ -130,11 +130,11 @@ fn descriptors_are_numbered_lowest_free_first() {
         Err(invalid_descriptor(0x8000_000f))
     );
     assert_eq!(
-        files.write_targets(0x4000_0000),
+        files.write_targets(&options, 0x4000_0000),
         Err(invalid_channel(0x4000_0000))
     );
     assert_eq!(
-        files.write_targets(1 | 2 | 4).unwrap(),
+        files.write_targets(&options, 1 | 2 | 4).unwrap(),
         [
             WriteTarget::Stdout,
             WriteTarget::Channel(1),
@@ -184,25 +184,25 @@ fn writes_land_at_commit_and_a_rolled_back_trial_writes_nothing() {
     let options = options(&run, HdlFileTarget::Disk);
     let mut files = HdlFiles::default();
     let descriptor = files.open(&options, "log.txt", Some("w")).unwrap();
-    let target = files.write_targets(descriptor).unwrap()[0];
-    files.write(target, b"one\n");
+    let target = files.write_targets(&options, descriptor).unwrap().remove(0);
+    files.write_file(&target, b"one\n");
     assert!(!run.join("log.txt").exists(), "nothing before the commit");
-    assert!(files.release(&options.store).is_empty());
+    assert!(files.release(&options).is_empty());
     assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\n");
 
     let accepted = files.clone();
-    files.write(target, b"rejected\n");
+    files.write_file(&target, b"rejected\n");
     files.close(descriptor).unwrap();
     files = accepted;
-    assert!(files.release(&options.store).is_empty());
+    assert!(files.release(&options).is_empty());
     assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\n");
 
-    files.write(target, b"two\n");
+    files.write_file(&target, b"two\n");
     files.close(descriptor).unwrap();
     // Read back before the commit: the journal is visible to the design.
     let again = files.open(&options, "log.txt", Some("r")).unwrap();
     assert_eq!(read_all(files.reader(again).unwrap()), b"one\ntwo\n");
-    assert!(files.release(&options.store).is_empty());
+    assert!(files.release(&options).is_empty());
     assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\ntwo\n");
 }
 
@@ -212,18 +212,18 @@ fn a_memory_store_keeps_writes_off_the_disk() {
     let options = options(&run, HdlFileTarget::Memory);
     let mut files = HdlFiles::default();
     let descriptor = files.open(&options, "log.txt", Some("w")).unwrap();
-    let target = files.write_targets(descriptor).unwrap()[0];
-    files.write(target, b"kept\n");
+    let target = files.write_targets(&options, descriptor).unwrap().remove(0);
+    files.write_file(&target, b"kept\n");
     files.close(descriptor).unwrap();
-    files.release(&options.store);
+    files.release(&options);
     assert!(!run.join("log.txt").exists());
     assert_eq!(
         options.store.written(&run.join("log.txt")).as_deref(),
         Some(&b"kept\n"[..])
     );
     let again = files.open(&options, "log.txt", Some("a+")).unwrap();
-    let target = files.write_targets(again).unwrap()[0];
-    files.write(target, b"more\n");
+    let target = files.write_targets(&options, again).unwrap().remove(0);
+    files.write_file(&target, b"more\n");
     assert!(files.reader(again).unwrap().seek(0, 0));
     assert_eq!(read_all(files.reader(again).unwrap()), b"kept\nmore\n");
 }
@@ -237,25 +237,25 @@ fn a_restored_checkpoint_truncates_writes_after_it() {
     let mut files = HdlFiles::default();
     let descriptor = files.open(&options, "log.txt", Some("w")).unwrap();
     let channel = files.open(&options, "mcd.txt", None).unwrap();
-    let target = files.write_targets(descriptor).unwrap()[0];
-    files.write(target, b"one\n");
-    files.write(
-        WriteTarget::Channel(channel.trailing_zeros() as usize),
+    let target = files.write_targets(&options, descriptor).unwrap().remove(0);
+    files.write_file(&target, b"one\n");
+    files.write_file(
+        &WriteTarget::Channel(channel.trailing_zeros() as usize),
         b"m1\n",
     );
-    files.release(&options.store);
+    files.release(&options);
     let image = files.capture().unwrap();
-    files.write(target, b"after\n");
-    files.release(&options.store);
+    files.write_file(&target, b"after\n");
+    files.release(&options);
     assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\nafter\n");
 
     let mut resumed = HdlFiles::default();
     resumed.restore(&options, &image).unwrap();
-    resumed.write(target, b"two\n");
-    resumed.release(&options.store);
+    resumed.write_file(&target, b"two\n");
+    resumed.release(&options);
     assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\ntwo\n");
     assert_eq!(std::fs::read(run.join("mcd.txt")).unwrap(), b"m1\n");
-    assert_eq!(resumed.write_targets(channel).unwrap().len(), 1);
+    assert_eq!(resumed.write_targets(&options, channel).unwrap().len(), 1);
 }
 
 #[test]
@@ -275,7 +275,53 @@ fn a_restored_read_handle_must_find_the_file_it_was_reading() {
     assert!(error.contains("changed since it was saved"), "{error}");
     // A checkpoint is taken at a released boundary.
     let written = files.open(&options, "w.txt", Some("w")).unwrap();
-    let target = files.write_targets(written).unwrap()[0];
-    files.write(target, b"x");
+    let target = files.write_targets(&options, written).unwrap().remove(0);
+    files.write_file(&target, b"x");
     assert!(files.capture().is_err());
+}
+
+/// LRM 2.4 section 9.5.1.2: the tables of one analysis hand out distinct
+/// numbers, and a write through a number another table opened for writing
+/// lands in its file, after what that table wrote and before what it writes
+/// next. A rejected trial's retried open gets the number the first attempt
+/// got.
+#[test]
+fn tables_of_one_analysis_share_their_descriptors() {
+    let run = scratch("shared");
+    let options = options(&run, HdlFileTarget::Disk);
+    let mut digital = HdlFiles::default();
+    let mut analog = HdlFiles::for_instance("x1");
+    let fd = digital.open(&options, "log.txt", Some("w")).unwrap();
+    let mcd = digital.open(&options, "mcd.txt", None).unwrap();
+    let saved = analog.clone();
+    let rejected = analog.open(&options, "own.txt", Some("w")).unwrap();
+    analog = saved;
+    let own = analog.open(&options, "own.txt", Some("w")).unwrap();
+    assert_eq!((fd, mcd, own), (0x8000_0003, 2, 0x8000_0004));
+    assert_eq!(rejected, own);
+    let target = digital.write_targets(&options, fd).unwrap().remove(0);
+    digital.write_file(&target, b"digital 1\n");
+    digital.release(&options);
+    for descriptor in [fd, mcd | 1] {
+        let targets = analog.write_targets(&options, descriptor).unwrap();
+        for target in targets
+            .iter()
+            .filter(|target| **target != WriteTarget::Stdout)
+        {
+            assert!(matches!(target, WriteTarget::Shared { .. }), "{target:?}");
+            analog.write_file(target, b"analog\n");
+        }
+    }
+    analog.release(&options);
+    digital.write_file(&target, b"digital 2\n");
+    digital.release(&options);
+    let read = |file: &str| std::fs::read_to_string(run.join(file)).unwrap();
+    assert_eq!(read("log.txt"), "digital 1\nanalog\ndigital 2\n");
+    assert_eq!(read("mcd.txt"), "analog\n");
+    // A read-only descriptor is not shared.
+    let input = digital.open(&options, "log.txt", Some("r")).unwrap();
+    assert_eq!(
+        analog.write_targets(&options, input),
+        Err(invalid_descriptor(input))
+    );
 }

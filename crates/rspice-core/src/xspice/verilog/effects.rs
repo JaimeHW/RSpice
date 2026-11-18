@@ -394,7 +394,7 @@ impl HdlEffects {
     /// the run's files; called when a trial commits. A file the host cannot
     /// write is reported as a warning record at the end.
     pub(crate) fn drain_journal(&mut self) -> Vec<HdlOutputRecord> {
-        let failures = self.files.release(&self.config.files.store);
+        let failures = self.files.release(&self.config.files);
         let mut records = std::mem::take(&mut self.journal);
         if !failures.is_empty() {
             let (tick, seconds) = records
