@@ -702,6 +702,16 @@ pub enum ParseError {
         outside: bool,
     },
 
+    /// A file a source directive names is in none of the folders its search
+    /// looked in. `looked_in` names each folder once, a folder in or beside
+    /// the deck's by its path from it, and is empty for a file named by its
+    /// full path. The include that met it says at which line.
+    #[error("{requested} not found{}", folders_looked_in(.looked_in))]
+    SourceNotFound {
+        requested: String,
+        looked_in: Vec<String>,
+    },
+
     #[error("Unknown device type: {0}")]
     UnknownDevice(String),
 
@@ -801,7 +811,10 @@ impl ParseError {
             Self::MissingDeviceModel(error) => Some(NetlistSourceLocation::in_memory(error.line)),
             Self::AnalysisCard(error) => Some(error.source_location()),
             Self::UndefinedMutualInductorReference(error) => Some(error.origin.clone()),
-            Self::ResourceLimit(_)
+            // The include that met a missing file locates it, as a syntax
+            // failure at the line that names the file.
+            Self::SourceNotFound { .. }
+            | Self::ResourceLimit(_)
             | Self::UnknownDevice(_)
             | Self::InvalidNode(_)
             | Self::DuplicateSubcircuitPortBinding(_)
@@ -826,6 +839,16 @@ fn located(origin: &Option<NetlistSourceLocation>) -> String {
     origin
         .as_ref()
         .map_or_else(String::new, |origin| format!("{origin}: "))
+}
+
+/// The folders a search for a missing file looked in, as its refusal
+/// names them after the file.
+fn folders_looked_in(folders: &[String]) -> String {
+    if folders.is_empty() {
+        String::new()
+    } else {
+        format!(" (looked in {})", folders.join(", "))
+    }
 }
 
 /// Where a file a deck kept as text names is not.
@@ -3305,6 +3328,12 @@ impl Netlist {
                         ParseWithAbortError::from(ParseError::Syntax {
                             line: origin.line,
                             message: format!("{message}, named at {origin}"),
+                        })
+                    }
+                    ParseWithAbortError::Parse(missing @ ParseError::SourceNotFound { .. }) => {
+                        ParseWithAbortError::from(ParseError::Syntax {
+                            line: origin.line,
+                            message: format!("{missing}, named at {origin}"),
                         })
                     }
                     other => other,

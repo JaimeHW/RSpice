@@ -970,11 +970,11 @@ impl XyceTestRunner {
             .parent()
             .ok_or_else(|| format!("{label} deck has no execution directory"))?;
         Self::require_missing_library_dependency_absent(label, deck_path, execution_dir)?;
-        // The resolver names the whole ordered chain it walked, so the exact
-        // tail depends on how many candidates that host produced. The typed
-        // failure, the line, and the execution-directory candidate are the
-        // contract; the rest of the chain is evidence. Diagnostics show a
-        // canonical drive path without its Windows verbatim `\\?\` prefix.
+        // The refusal names the file, then each folder looked in once: the
+        // deck's folder, which is also the execution directory, comes first.
+        // The typed failure, the line and that folder are the contract; the
+        // rest of the list is evidence. Diagnostics show a canonical drive
+        // path without its Windows verbatim `\\?\` prefix.
         let shown = |path: &Path| {
             let text = path.display().to_string();
             match text.strip_prefix(r"\\?\") {
@@ -983,10 +983,9 @@ impl XyceTestRunner {
             }
         };
         let expected_message = format!(
-            "{}:3: .lib resolution failed: Include file not found: plugh.lib (searched ",
+            "{}:3: plugh.lib not found (looked in the deck's folder",
             shown(deck_path)
         );
-        let expected_candidate = shown(&execution_dir.join("plugh.lib"));
         match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             source,
             deck_path,
@@ -994,9 +993,7 @@ impl XyceTestRunner {
             Some(execution_dir),
         ) {
             Err(ParseError::Syntax { line, message })
-                if line == 3
-                    && message.starts_with(&expected_message)
-                    && message.contains(&expected_candidate) => {}
+                if line == 3 && message.starts_with(&expected_message) => {}
             Err(error) => {
                 return Err(format!(
                     "{label} produced the wrong typed missing-library failure: expected line 3 / {expected_message:?}, got {error:?}"

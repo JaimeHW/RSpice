@@ -324,7 +324,13 @@ fn live_lint_reports_missing_include_at_root_directive() {
     assert_eq!(diagnostics[0].line, Some(1));
     assert_eq!(diagnostics[0].source_line, Some(1));
     assert_eq!(diagnostics[0].source_path.as_deref(), Some(root.as_path()));
-    assert!(diagnostics[0].message.contains("Include file not found"));
+    assert!(
+        diagnostics[0]
+            .message
+            .starts_with("missing.inc not found (looked in the deck's folder"),
+        "{}",
+        diagnostics[0].message
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -622,49 +622,33 @@ impl IncludeResolution {
 /// every configured search path has missed.
 const CONVENTIONAL_LIBRARY_DIRECTORIES: [&str; 4] = ["lib", "models", "../lib", "../models"];
 
-/// The directive family a failed resolution names.
-///
-/// `.include`/`.inc`/`.lib` and the Verilog-A source directives — `.va`,
-/// `.veriloga`, `.hdl`, `.vams`, `.verilog`, `.ahdl_include`, and the Spectre
-/// `ahdl_include` that lowers to them — walk one chain. Only the noun in a refusal differs,
-/// so a deck can never disagree with itself about what a relative path means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SourceDirectiveKind {
-    Include,
-    VerilogSource,
-}
-
-impl SourceDirectiveKind {
-    /// The refusal that names the whole chain it walked.
-    const fn chain_failure(self) -> &'static str {
-        match self {
-            Self::Include => "Include file not found",
-            Self::VerilogSource => "Verilog-A source file not found",
-        }
+/// A folder a search for a missing file looked in, as the reader of the
+/// deck in `deck_folder` knows it: the deck's folder, a folder in it or
+/// beside it by its path from the deck (`lib/`, `../models/`), or else its
+/// full path.
+fn describe_folder(folder: &Path, deck_folder: &Path) -> String {
+    let folder = lexically_normalize_path(folder);
+    let deck_folder = lexically_normalize_path(deck_folder);
+    if folder == deck_folder {
+        return "the deck's folder".to_owned();
     }
-
-    /// The refusal for a path that named its own location and was not there.
-    const fn absolute_failure(self) -> &'static str {
-        match self {
-            Self::Include => "File not found",
-            Self::VerilogSource => "Verilog-A source file not found",
+    let from = |base: &Path, up: &str| {
+        let rest = folder.strip_prefix(base).ok()?;
+        let mut text = up.to_owned();
+        for part in rest.components() {
+            text.push_str(&part.as_os_str().to_string_lossy());
+            text.push('/');
         }
-    }
-}
-
-/// The ordered chain, written out for a failure message.
-fn describe_search_chain(tried: &[IncludeSearchCandidate]) -> String {
-    tried
-        .iter()
-        .map(|candidate| {
-            format!(
-                "{} ({})",
-                display_source_path(&candidate.path),
-                candidate.stage
-            )
+        Some(text)
+    };
+    let related = folder.is_absolute() == deck_folder.is_absolute();
+    related
+        .then(|| {
+            from(&deck_folder, "")
+                .or_else(|| deck_folder.parent().and_then(|parent| from(parent, "../")))
         })
-        .collect::<Vec<_>>()
-        .join("; ")
+        .flatten()
+        .unwrap_or_else(|| display_source_path(&folder))
 }
 
 /// One exact external source edge resolved by [`IncludeProcessor`]. The source
@@ -878,7 +862,8 @@ impl IncludeProcessor {
     /// Create a new include processor
     ///
     /// # Arguments
-    /// * `base_path` - Path to the main netlist file (or its directory)
+    /// * `base_path` - Path to the main netlist file (or its directory). A
+    ///   path that is no folder on disk is the file's, saved or not yet.
     pub fn new(base_path: &Path) -> Self {
         Self::new_with_execution_dir(base_path, None)
     }
@@ -891,10 +876,12 @@ impl IncludeProcessor {
     /// upstream wrapper tests can intentionally run a deck from another
     /// directory.
     pub fn new_with_execution_dir(base_path: &Path, execution_dir: Option<&Path>) -> Self {
-        let base_dir = if base_path.is_file() {
-            base_path.parent().unwrap_or(Path::new(".")).to_path_buf()
-        } else {
+        // A deck read before it is saved names a file that is not on disk
+        // yet; its includes still resolve from the folder it names.
+        let base_dir = if base_path.is_dir() {
             base_path.to_path_buf()
+        } else {
+            base_path.parent().unwrap_or(Path::new(".")).to_path_buf()
         };
         Self::with_base_dir(base_dir, execution_dir)
     }
@@ -1342,12 +1329,7 @@ impl IncludeProcessor {
         filename: &str,
         abort: &dyn AbortSignal,
     ) -> Result<IncludeResolution, ParseWithAbortError> {
-        self.resolve_source_from_with_abort(
-            owner_path,
-            filename,
-            SourceDirectiveKind::Include,
-            abort,
-        )
+        self.resolve_source_from_with_abort(owner_path, filename, abort)
     }
 
     /// Resolve a Verilog-A source directive through the chain `.include` walks.
@@ -1364,12 +1346,7 @@ impl IncludeProcessor {
         filename: &str,
         abort: &dyn AbortSignal,
     ) -> Result<IncludeResolution, ParseWithAbortError> {
-        self.resolve_source_from_with_abort(
-            owner_path,
-            filename,
-            SourceDirectiveKind::VerilogSource,
-            abort,
-        )
+        self.resolve_source_from_with_abort(owner_path, filename, abort)
     }
 
     /// Read the Verilog-A source a directive on line `directive_line` of
@@ -1415,13 +1392,17 @@ impl IncludeProcessor {
         self.sealed_sources.is_some()
     }
 
-    /// The one chain every external source directive walks. `kind` decides
-    /// only what a refusal calls the thing it could not find.
+    /// The one chain every external source directive walks:
+    /// `.include`/`.inc`/`.lib` and the Verilog-A source directives (`.va`,
+    /// `.veriloga`, `.hdl`, `.vams`, `.verilog`, `.ahdl_include`, and the
+    /// Spectre `ahdl_include` that lowers to them), so a deck can never
+    /// disagree with itself about what a relative path means. A file found
+    /// nowhere is [`ParseError::SourceNotFound`], naming each folder looked
+    /// in once.
     fn resolve_source_from_with_abort(
         &self,
         owner_path: &Path,
         filename: &str,
-        kind: SourceDirectiveKind,
         abort: &dyn AbortSignal,
     ) -> Result<IncludeResolution, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
@@ -1447,15 +1428,9 @@ impl IncludeProcessor {
                     candidate,
                 ));
             }
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "{}: {} (searched {} ({}))",
-                    kind.chain_failure(),
-                    clean_name,
-                    candidate.display(),
-                    IncludeSearchStage::DriveRelative
-                ),
+            return Err(ParseError::SourceNotFound {
+                requested: clean_name.to_owned(),
+                looked_in: vec![describe_folder(&self.base_dir, &self.base_dir)],
             }
             .into());
         }
@@ -1468,9 +1443,9 @@ impl IncludeProcessor {
                     path.to_path_buf(),
                 ));
             }
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!("{}: {}", kind.absolute_failure(), clean_name),
+            return Err(ParseError::SourceNotFound {
+                requested: clean_name.to_owned(),
+                looked_in: Vec::new(),
             }
             .into());
         }
@@ -1481,42 +1456,36 @@ impl IncludeProcessor {
         // conventional library directories beside the including file.
         let relative_path = spice_relative_path(clean_name);
         let mut chain = Vec::with_capacity(7 + self.lib_paths.len());
-        chain.push((
-            IncludeSearchStage::IncludingFile,
-            base_dir.join(&relative_path),
-        ));
-        chain.push((
-            IncludeSearchStage::TopLevel,
-            self.base_dir.join(&relative_path),
-        ));
-        chain.push((
-            IncludeSearchStage::Execution,
-            self.execution_dir.join(&relative_path),
-        ));
+        chain.push((IncludeSearchStage::IncludingFile, base_dir.to_path_buf()));
+        chain.push((IncludeSearchStage::TopLevel, self.base_dir.clone()));
+        chain.push((IncludeSearchStage::Execution, self.execution_dir.clone()));
         for (index, lib_path) in self.lib_paths.iter().enumerate() {
-            chain.push((
-                IncludeSearchStage::LibraryPath(index),
-                lib_path.join(&relative_path),
-            ));
+            chain.push((IncludeSearchStage::LibraryPath(index), lib_path.clone()));
         }
         for common in CONVENTIONAL_LIBRARY_DIRECTORIES {
             chain.push((
                 IncludeSearchStage::Conventional(common),
-                base_dir.join(common).join(&relative_path),
+                base_dir.join(common),
             ));
         }
 
         let mut seen = HashSet::new();
         let mut tried = Vec::with_capacity(chain.len());
+        let mut looked_in = Vec::with_capacity(chain.len());
         let mut winner = None;
-        for (index, (stage, candidate)) in chain.into_iter().enumerate() {
+        for (index, (stage, folder)) in chain.into_iter().enumerate() {
             poll_parse_abort(abort, index)?;
+            let candidate = folder.join(&relative_path);
             if !seen.insert(lexically_normalize_path(&candidate)) {
                 continue;
             }
             let exists = candidate.exists();
             if exists && winner.is_none() {
                 winner = Some((stage, candidate.clone()));
+            }
+            let place = describe_folder(&folder, &self.base_dir);
+            if !looked_in.contains(&place) {
+                looked_in.push(place);
             }
             tried.push(IncludeSearchCandidate {
                 stage,
@@ -1526,14 +1495,9 @@ impl IncludeProcessor {
         }
 
         let Some((stage, resolved)) = winner else {
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "{}: {} (searched {})",
-                    kind.chain_failure(),
-                    clean_name,
-                    describe_search_chain(&tried)
-                ),
+            return Err(ParseError::SourceNotFound {
+                requested: clean_name.to_owned(),
+                looked_in,
             }
             .into());
         };
@@ -2110,6 +2074,18 @@ fn include_error_at(
             origin: Some(_), ..
         } => {
             return error;
+        }
+        // A file found in none of the folders looked in is said plainly,
+        // at the line that names it.
+        ParseError::SourceNotFound { .. } => {
+            return ParseError::Syntax {
+                line: source_line,
+                message: format!(
+                    "{}:{}: {error}",
+                    display_source_path(source_path),
+                    source_line
+                ),
+            };
         }
         // The line that names a file a deck kept as text does not have is
         // where the file is missing, however deep the include is.
@@ -3492,9 +3468,6 @@ R1 1 0 {selected}
         for dir in [&deck_dir, &first, &second] {
             std::fs::create_dir_all(dir).expect("create search-path fixture directory");
         }
-        // The deck has to exist: the processor takes its top-level directory
-        // from the path only when that path names a file, and the chain's
-        // shape depends on that directory.
         let deck_path = deck_dir.join("top.cir");
         std::fs::write(&deck_path, "search path fixture\n.end\n").expect("write fixture deck");
         (root, deck_path, first, second)
@@ -3582,38 +3555,92 @@ R1 1 0 {selected}
         );
     }
 
+    /// A file nothing holds is named with each folder looked in once: the
+    /// deck's folder and those in or beside it by their paths from the deck,
+    /// and a folder elsewhere by its full path.
     #[test]
-    fn missing_include_failure_names_every_candidate_it_tried() {
+    fn a_missing_include_names_each_folder_it_looked_in_once() {
         let (_root, deck_path, first, second) = search_path_fixture("trace-failure");
+        let elsewhere = unique_include_temp_dir("trace-failure-elsewhere");
 
         let mut processor = IncludeProcessor::new(&deck_path);
         processor.add_lib_path(first.clone());
         processor.add_lib_path(second.clone());
+        processor.add_lib_path(elsewhere.clone());
 
         let error = processor
             .resolve_include_from_with_abort(&deck_path, "absent.lib", &NoAbort)
             .expect_err("no chain stage holds the file");
-        let ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) = error else {
-            panic!("a missing include is a syntax failure");
+        let ParseWithAbortError::Parse(ParseError::SourceNotFound {
+            requested,
+            looked_in,
+        }) = error
+        else {
+            panic!("a missing include is not found: {error:?}");
         };
 
-        assert!(message.starts_with("Include file not found: absent.lib (searched "));
-        for expected in [
-            deck_path
-                .parent()
-                .expect("deck directory")
-                .join("absent.lib"),
-            first.join("absent.lib"),
-            second.join("absent.lib"),
-        ] {
-            assert!(
-                message.contains(&expected.display().to_string()),
-                "the failure must name {}: {message}",
-                expected.display()
-            );
-        }
-        assert!(message.contains("search path 1"));
-        assert!(message.contains("search path 2"));
+        assert_eq!(requested, "absent.lib");
+        assert_eq!(
+            looked_in,
+            [
+                "the deck's folder".to_owned(),
+                "../first/".to_owned(),
+                "../second/".to_owned(),
+                display_source_path(&lexically_normalize_path(&elsewhere)),
+                "lib/".to_owned(),
+                "models/".to_owned(),
+                "../lib/".to_owned(),
+                "../models/".to_owned(),
+            ]
+        );
+    }
+
+    /// A deck read before it is saved names a file not on disk yet. Its
+    /// includes resolve from the folder that file is in, never from a folder
+    /// of the file's own name.
+    #[test]
+    fn the_folder_of_a_deck_not_on_disk_is_searched_as_a_folder() {
+        let root = unique_include_temp_dir("unsaved-deck");
+        let deck_dir = root.join("deck");
+        let parts = deck_dir.join("parts");
+        std::fs::create_dir_all(&parts).expect("create the deck's folders");
+        std::fs::write(deck_dir.join("corners.lib"), "Rcorner 1 0 1\n").expect("write library");
+        let deck_path = deck_dir.join("deck.cir");
+
+        let processor = IncludeProcessor::new(&deck_path);
+        let resolution = processor
+            .resolve_include_from_with_abort(&parts.join("part.inc"), "corners.lib", &NoAbort)
+            .expect("the deck's folder holds the library");
+
+        assert_eq!(resolution.stage(), IncludeSearchStage::TopLevel);
+        assert_eq!(resolution.resolved(), deck_dir.join("corners.lib"));
+    }
+
+    /// A `.lib` nothing holds says so at its line, the file first and then
+    /// the folders looked in, without the deck's own path among them.
+    #[test]
+    fn a_missing_library_says_at_its_line_where_it_looked() {
+        let root = unique_include_temp_dir("missing-library");
+        let deck_dir = root.join("deck");
+        std::fs::create_dir_all(&deck_dir).expect("create the deck's folder");
+        let deck_path = deck_dir.join("deck.cir");
+
+        let error = IncludeProcessor::new(&deck_path)
+            .expand_content("* bench\n.lib \"corners.lib\" tt\n.end\n", &deck_path)
+            .expect_err("nothing holds the library");
+        let ParseError::Syntax { line, message } = error else {
+            panic!("the refusal is located: {error:?}");
+        };
+
+        assert_eq!(line, 2);
+        assert_eq!(
+            message,
+            format!(
+                "{}:2: corners.lib not found (looked in the deck's folder, lib/, models/, \
+                 ../lib/, ../models/)",
+                display_source_path(&deck_path)
+            )
+        );
     }
 
     #[test]
@@ -3655,20 +3682,14 @@ R1 1 0 {selected}
         let error = processor
             .resolve_verilog_source_from_with_abort(&deck_path, "absent.va", &NoAbort)
             .expect_err("no chain stage holds the file");
-        let ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) = error else {
-            panic!("a missing Verilog-A source is a syntax failure");
+        let ParseWithAbortError::Parse(error @ ParseError::SourceNotFound { .. }) = error else {
+            panic!("a missing Verilog-A source is not found: {error:?}");
         };
-        assert!(
-            message.starts_with("Verilog-A source file not found: absent.va (searched "),
-            "{message}"
+        assert_eq!(
+            error.to_string(),
+            "absent.va not found (looked in the deck's folder, ../first/, lib/, models/, \
+             ../lib/, ../models/)"
         );
-        for expected in [deck_dir.join("absent.va"), first.join("absent.va")] {
-            assert!(
-                message.contains(&expected.display().to_string()),
-                "the failure must name {}: {message}",
-                expected.display()
-            );
-        }
     }
 
     /// Reading a Verilog-A source walks the same chain, returns the bytes the

@@ -771,7 +771,7 @@ endmodule
         );
         assert!(message.contains("r31_absent_library.va"), "{message}");
         assert!(
-            message.contains("Verilog-A source file not found"),
+            message.contains("r31_absent_library.va not found (looked in the deck's folder"),
             "{message}"
         );
     }
