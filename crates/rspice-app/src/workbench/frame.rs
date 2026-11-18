@@ -276,13 +276,25 @@ fn show_toasts(
     // the middle of the window, where a page draws its data. Hung under the
     // toolbar beside the right dock, a run's notice covered the top of the
     // waveform's lanes.
-    let bottom_chrome = if layout.show_phone_navigation {
+    let bottom_bar = if layout.show_phone_navigation {
         layout.phone_navigation_height
     } else if layout.show_status_bar {
         layout.status_bar_height
     } else {
         0.0
     };
+    // The bottom dock's strip counts as that chrome too. Its Expand and
+    // Maximize buttons are at its right end, in the corner the notices stand
+    // in: standing on the status bar, an error notice, which stays until it is
+    // dismissed, covered the very button that opens the Console it points to.
+    // Counted whether the dock is closed, open or maximized, so the stack
+    // stays put when the dock moves.
+    let dock_strip = if layout.show_console_strip {
+        docks::console::strip_height(ctx)
+    } else {
+        0.0
+    };
+    let bottom_chrome = bottom_bar + dock_strip;
     state
         .workbench
         .toasts
