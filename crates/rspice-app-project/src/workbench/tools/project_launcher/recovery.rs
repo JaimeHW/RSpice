@@ -325,6 +325,7 @@ pub(super) fn recovery_row(
     layout: LauncherLayout,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
+    let (row_height, lines) = super::two_line_row_height(ui);
     let response = Frame::new()
         .fill(if selected {
             t.color.bg_hover
@@ -334,7 +335,7 @@ pub(super) fn recovery_row(
         .inner_margin(Margin::ZERO)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_height(54.0);
+            ui.set_height(row_height);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 11.0;
                 let (radio_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
@@ -358,11 +359,11 @@ pub(super) fn recovery_row(
                 let trailing_width = if layout.compact { 64.0 } else { 211.0 };
                 let content_width = (ui.available_width() - trailing_width - 11.0).max(1.0);
                 ui.allocate_ui_with_layout(
-                    vec2(content_width, 54.0),
+                    vec2(content_width, row_height),
                     egui::Layout::top_down(Align::Min).with_cross_align(Align::Min),
                     |ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.add_space(7.0);
+                        ui.spacing_mut().item_spacing.y = super::LINE_GAP;
+                        ui.add_space((row_height - lines) * 0.5);
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} · interrupted session",
@@ -380,7 +381,7 @@ pub(super) fn recovery_row(
                 );
                 if !layout.compact {
                     ui.add_sized(
-                        [130.0, 54.0],
+                        [130.0, row_height],
                         egui::Label::new(
                             egui::RichText::new(&candidate.age)
                                 .font(theme::sans(tokens::FS_2, FontWeight::Regular))
@@ -392,7 +393,7 @@ pub(super) fn recovery_row(
                 // nothing; one that does not earns a failure mark.
                 let (state, problem) = candidate_state(candidate.integrity.is_recoverable());
                 let (cell, _) = ui.allocate_exact_size(
-                    vec2(if layout.compact { 64.0 } else { 70.0 }, 54.0),
+                    vec2(if layout.compact { 64.0 } else { 70.0 }, row_height),
                     Sense::hover(),
                 );
                 let galley = ui.painter().layout_no_wrap(

@@ -126,10 +126,6 @@ const LAUNCHER_DESKTOP_WIDTH: f32 = 1180.0;
 const LAUNCHER_DESKTOP_HEIGHT: f32 = 650.0;
 const LAUNCHER_VIEWPORT_INSET: f32 = 28.0;
 const LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH: f32 = 760.0;
-/// One line: brand mark, wordmark, and the 28 pt close control.
-const LAUNCHER_HEADER_HEIGHT: f32 = 48.0;
-/// The 44 pt touch close control with 4 pt above and below it.
-const LAUNCHER_COMPACT_HEADER_HEIGHT: f32 = 52.0;
 /// The launcher names the release. The build hash behind it is Help ▸ About's
 /// to give, where a reader goes to quote it in a report.
 pub const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
@@ -141,8 +137,6 @@ pub const LAUNCHER_TOUCH_MAX_WIDTH: f32 = 820.0;
 const LAUNCHER_TOUCH_TARGET: f32 = 44.0;
 const LAUNCHER_SEARCH_MAX_WIDTH: f32 = 420.0;
 const LAUNCHER_SORT_WIDTH: f32 = 145.0;
-const LAUNCHER_ROW_MIN_HEIGHT: f32 = 47.0;
-const LAUNCHER_GROUP_HEIGHT: f32 = 27.0;
 const LAUNCHER_SEGMENT_MIN_WIDTH: f32 = 54.0;
 const SAFE_MODE_OPTION_HEIGHT: f32 = 54.0;
 
@@ -154,7 +148,6 @@ pub struct LauncherLayout {
     edge_to_edge: bool,
     pub compact: bool,
     phone: bool,
-    pub header_height: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -218,14 +211,48 @@ impl LauncherLayout {
             edge_to_edge,
             compact,
             phone: viewport.width() <= LAUNCHER_PHONE_MAX_WIDTH,
-            header_height: if compact {
-                LAUNCHER_COMPACT_HEADER_HEIGHT
-            } else {
-                LAUNCHER_HEADER_HEIGHT
-            },
         }
     }
 }
+
+/// The identity line's height: its close control with a bar's padding over
+/// and under it, the control a finger's reach where targets are large.
+pub fn launcher_header_height(t: &Tokens, large_targets: bool) -> f32 {
+    launcher_close_side(t, large_targets) + 2.0 * t.metrics.bar_pad
+}
+
+/// The close control's side: a control at the density's height, or a
+/// finger's reach where targets are large.
+fn launcher_close_side(t: &Tokens, large_targets: bool) -> f32 {
+    if large_targets {
+        t.metrics.touch_target()
+    } else {
+        t.metrics.ctl_h
+    }
+}
+
+/// A two-line row's height and the height of its two lines (a name over a
+/// smaller line under it, `LINE_GAP` apart): the lines with a bar's padding
+/// over and under them, never under a finger's reach in a touch
+/// composition, so density, a larger target or larger text grows the row
+/// instead of crowding it.
+fn two_line_row_height(ui: &Ui) -> (f32, f32) {
+    let metrics = Tokens::get(ui.ctx()).metrics;
+    let name = theme::sans(tokens::FS_2, FontWeight::SemiBold);
+    let detail = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let lines =
+        ui.fonts_mut(|fonts| fonts.row_height(&name) + fonts.row_height(&detail)) + LINE_GAP;
+    let row = lines + 2.0 * metrics.bar_pad;
+    let row = if metrics.is_touch() {
+        row.max(metrics.touch_target())
+    } else {
+        row
+    };
+    (row, lines)
+}
+
+/// The space between a two-line row's name and the line under it.
+const LINE_GAP: f32 = 2.0;
 
 /// What one pass of the launcher leaves the shell: what the reader asked of
 /// it, and where focus goes back to once it closes.
@@ -257,12 +284,7 @@ pub fn launcher(
     let surface_rect = layout.surface;
     let edge_to_edge = layout.edge_to_edge;
     let size = surface_rect.size();
-    // A touch-sized close control needs the compact track at any width.
-    let header_height = if large_targets {
-        layout.header_height.max(LAUNCHER_COMPACT_HEADER_HEIGHT)
-    } else {
-        layout.header_height
-    };
+    let header_height = launcher_header_height(&t, large_targets);
     let regions = LauncherSurfaceRegions::resolve(surface_rect, header_height);
 
     let area = egui::Area::new(Id::new("workbench.project_launcher"))
@@ -678,11 +700,7 @@ fn launcher_header(
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     close = Some(
                         IconButton::new(Icon::Close)
-                            .side(if large_targets {
-                                Tokens::get(ui.ctx()).metrics.touch_target()
-                            } else {
-                                28.0
-                            })
+                            .side(launcher_close_side(&t, large_targets))
                             .tooltip("Close project launcher (Esc)")
                             .show(ui),
                     );
@@ -883,7 +901,7 @@ fn project_group_header(ui: &mut Ui, label: &str, count: usize) {
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(13, 0))
         .show(ui, |ui| {
-            ui.set_height(LAUNCHER_GROUP_HEIGHT);
+            ui.set_height(t.metrics.grid_row_h);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(label)
@@ -1299,8 +1317,9 @@ fn project_row(
     } else {
         0.0
     };
+    let (row_height, cell_height) = two_line_row_height(ui);
     let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width(), LAUNCHER_ROW_MIN_HEIGHT + strip_height),
+        vec2(ui.available_width(), row_height + strip_height),
         if enabled {
             Sense::click()
         } else {
@@ -1321,15 +1340,15 @@ fn project_row(
         );
     }
     let horizontal_padding = if layout.phone { 9.0 } else { 13.0 };
-    let main = Rect::from_min_size(rect.min, vec2(rect.width(), LAUNCHER_ROW_MIN_HEIGHT));
-    let inner = main.shrink2(vec2(horizontal_padding, 5.0));
+    let main = Rect::from_min_size(rect.min, vec2(rect.width(), row_height));
+    let inner = main.shrink2(vec2(horizontal_padding, (row_height - cell_height) * 0.5));
     let mut row = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
             .layout(egui::Layout::left_to_right(Align::Center)),
     );
     row.spacing_mut().item_spacing.x = 9.0;
-    let (icon_column, _) = row.allocate_exact_size(vec2(31.0, 37.0), Sense::hover());
+    let (icon_column, _) = row.allocate_exact_size(vec2(31.0, cell_height), Sense::hover());
     let icon_rect = Rect::from_center_size(icon_column.center(), Vec2::splat(27.0));
     // A project that cannot be opened from here is faint, not red: the state
     // column says why, with a mark when the file is missing.
@@ -1358,13 +1377,13 @@ fn project_row(
     let trailing_width = date_width + state_width + pin_width + 2.0 * 9.0;
     let content_width = (row.available_width() - trailing_width - 9.0).max(1.0);
     row.allocate_ui_with_layout(
-        vec2(content_width, 37.0),
+        vec2(content_width, cell_height),
         egui::Layout::top_down(Align::Min),
         |ui| {
             // The whole width, however short the path: the columns after it
             // start where they start on every other row.
             ui.set_min_width(content_width);
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.spacing_mut().item_spacing.y = LINE_GAP;
             // Painted, not labels: a label over the row takes the presses on its text.
             painted_label(
                 ui,
@@ -1391,7 +1410,7 @@ fn project_row(
     );
     if !layout.compact {
         row.allocate_ui_with_layout(
-            vec2(date_width, 37.0),
+            vec2(date_width, cell_height),
             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
             |ui| {
                 painted_label(
@@ -1405,7 +1424,7 @@ fn project_row(
         );
     }
     let state = recent_project_state(entry.available, missing, cfg!(target_arch = "wasm32"));
-    let (state_cell, _) = row.allocate_exact_size(vec2(state_width, 37.0), Sense::hover());
+    let (state_cell, _) = row.allocate_exact_size(vec2(state_width, cell_height), Sense::hover());
     if let Some((text, problem)) = state {
         let galley = row.painter().layout_no_wrap(
             text.to_owned(),
@@ -1438,7 +1457,7 @@ fn project_row(
             t.color.text_dim,
         );
     }
-    let (pin_cell, _) = row.allocate_exact_size(vec2(pin_width, 37.0), Sense::hover());
+    let (pin_cell, _) = row.allocate_exact_size(vec2(pin_width, cell_height), Sense::hover());
     let mut row_action =
         recent_rows::pin_toggle(&mut row, pin_cell, entry.recent.pinned, &entry.name)
             .then(|| RecentRowAction::TogglePin(entry.recent.path.clone()));
@@ -1869,7 +1888,7 @@ mod tests {
     #[test]
     fn launcher_surface_is_one_header_track_over_the_body() {
         let surface = Rect::from_min_size(egui::pos2(130.0, 125.0), vec2(1180.0, 650.0));
-        let regions = LauncherSurfaceRegions::resolve(surface, LAUNCHER_HEADER_HEIGHT);
+        let regions = LauncherSurfaceRegions::resolve(surface, 48.0);
 
         assert_eq!(
             regions.header,

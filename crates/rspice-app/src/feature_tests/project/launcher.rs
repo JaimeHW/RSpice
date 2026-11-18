@@ -10,7 +10,7 @@ use crate::workbench::shell_host::project::launcher::dismiss_launcher;
 use crate::workbench::shell_host::project::launcher::show;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::tools::project_launcher::{
-    LAUNCHER_VERSION_LABEL, LauncherLayout,
+    LAUNCHER_VERSION_LABEL, LauncherLayout, launcher_header_height,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -178,7 +178,8 @@ fn an_empty_project_list_centres_its_message_and_actions() {
 fn launcher_header_names_the_product_and_states_safe_mode_only_while_active() {
     for size in [vec2(1280.0, 800.0), vec2(390.0, 844.0)] {
         let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
-        let header_bottom = layout.surface.top() + layout.header_height;
+        let header_bottom = layout.surface.top()
+            + launcher_header_height(&rspice_app_workbench::ui::tokens::Tokens::default(), false);
         for safe_mode in [false, true] {
             let painted = painted_launcher_page(size, safe_mode, ProjectLauncherPage::Projects);
             let context = format!("{}x{}, safe mode {safe_mode}: {painted:?}", size.x, size.y);
