@@ -1,5 +1,6 @@
-//! The size of the text in the source editors. The preference holds it, every
-//! editor reads it here, and an editor's zoom keys ask for a step of it.
+//! The size of the text in the source editors, and whether their lines wrap.
+//! The preferences hold both, every editor reads them here, and an editor's
+//! zoom keys ask for a step of the size.
 
 use egui::{Context, Id};
 
@@ -14,6 +15,21 @@ fn size_id() -> Id {
 
 fn zoom_id() -> Id {
     Id::new("rspice.editor-font.zoom")
+}
+
+fn wrap_id() -> Id {
+    Id::new("rspice.editor-font.wrap")
+}
+
+/// Set whether the editors wrap lines too long for the view from this
+/// frame on.
+pub fn publish_wrap(ctx: &Context, wrap: bool) {
+    ctx.data_mut(|data| data.insert_temp(wrap_id(), wrap));
+}
+
+/// Whether the editors wrap lines too long for the view.
+pub(crate) fn wraps(ctx: &Context) -> bool {
+    ctx.data(|data| data.get_temp(wrap_id())).unwrap_or(false)
 }
 
 /// Set the size the editors draw at from this frame on.

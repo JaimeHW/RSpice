@@ -114,6 +114,12 @@ pub const SOURCE_FOLDING_MENU: &[MenuEntry] = &[
     code(CodeCommand::UnfoldAll).access('U'),
 ];
 
+/// The View menu's rows while a source editor is the document on screen.
+pub const SOURCE_VIEW_ROWS: &[MenuEntry] = &[
+    MenuEntry::submenu("Folding", SOURCE_FOLDING_MENU).access('L'),
+    code(CodeCommand::ToggleWordWrap).access('W'),
+];
+
 /// The source editor's right-click menu: the language group first, as the
 /// name under the pointer is what a right-click most often asks about, then
 /// the way to the schematic and the waveforms, the history, the clipboard,

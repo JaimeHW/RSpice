@@ -211,6 +211,7 @@ pub(super) fn update_accesskit_text_state(
     editor_id: egui::Id,
     response: &Response,
     model: &TextDocumentModel,
+    rows: &super::wrap::Rows,
     editable: bool,
     tab_moves_focus: bool,
     style: &VirtualEditorStyle<'_>,
@@ -233,6 +234,7 @@ pub(super) fn update_accesskit_text_state(
                 .map(|row| row.saturating_sub(window.line - first_line))
         })
         .unwrap_or(0);
+    let visible_row = rows.first_row_of(visible_row);
     let char_width = monospace_advance(ui, &style.font).max(1.0);
     egui::text_selection::accesskit_text::update_accesskit_for_text_widget(
         ui.ctx(),

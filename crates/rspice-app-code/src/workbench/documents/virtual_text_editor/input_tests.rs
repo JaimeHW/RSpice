@@ -979,3 +979,49 @@ fn a_read_only_text_is_searched_but_offers_no_replace() {
     assert!(!says(&shown, "Replace all"), "nothing to replace in");
     assert!(!says(&shown, "Replace with"));
 }
+
+#[test]
+fn a_wrapped_line_takes_the_rows_it_needs_and_the_caret_steps_along_them() {
+    let source = format!("{}\nnext\n", "word ".repeat(60));
+    let mut bench = Bench::new(&source, true);
+    crate::workbench::documents::editor_font::publish_wrap(&bench.context, true);
+    bench.focus();
+    let _ = bench.frame(Vec::new());
+    let session = bench.session();
+    let rows = session.rows.count(&session.model);
+    assert!(rows >= 6, "the long line takes four rows or more: {rows}");
+    let second = session.rows.span(&session.model, 1).expect("a second row");
+    assert!(
+        second.line == 0 && !second.first,
+        "the line runs on: {second:?}"
+    );
+    let content = egui::scroll_area::State::load(&bench.context, session.scroll_id.unwrap())
+        .unwrap()
+        .offset;
+    assert_eq!(content.x, 0.0, "wrapped text never scrolls sideways");
+
+    let down = bench.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        (down.cursor_line, down.cursor_char_index),
+        (0, second.columns.start),
+        "Down goes to the line's next row"
+    );
+    let at = cell(&bench, 1, 2);
+    let _ = bench.frame(pointer(at, Some(true), false));
+    let clicked = bench.frame(pointer(at, Some(false), false));
+    assert_eq!(
+        clicked.cursor_char_index,
+        second.columns.start + 2,
+        "a click on the second row lands on that stretch of the line"
+    );
+    assert_caret_in_view(&clicked, "a caret on a wrapped row");
+
+    crate::workbench::documents::editor_font::publish_wrap(&bench.context, false);
+    let _ = bench.frame(Vec::new());
+    let session = bench.session();
+    assert_eq!(
+        session.rows.count(&session.model),
+        3,
+        "unwrapped, a row a line"
+    );
+}

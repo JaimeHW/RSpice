@@ -11,6 +11,7 @@ mod context_menu;
 mod find_bar;
 mod keymap;
 mod touch;
+mod wrap;
 
 pub(crate) use accessibility::bounded_accessible_text;
 #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
@@ -102,6 +103,8 @@ struct VirtualEditorSession {
     caret_moved_at: f64,
     touch: touch::TouchGesture,
     find: find_bar::FindBar,
+    /// The rows the text is laid into, one a line or wrapped.
+    rows: wrap::Rows,
 }
 
 /// How a caret that moved is brought into view.
@@ -159,6 +162,7 @@ impl Default for VirtualEditorSession {
             caret_moved_at: 0.0,
             touch: touch::TouchGesture::default(),
             find: find_bar::FindBar::default(),
+            rows: wrap::Rows::default(),
         }
     }
 }
@@ -464,6 +468,19 @@ pub(crate) fn show_virtual_text_editor(
         monospace_advance(ui, &style.font).max(1.0),
     );
     let style: &VirtualEditorStyle<'_> = &fitted;
+    // Wrapped, the rows are laid out for the width the view had when last
+    // drawn, and again for its own width once it knows it.
+    let wrap_width = super::editor_font::wraps(ui.ctx()).then(|| {
+        wrap::wrap_cells(
+            session
+                .viewport_size
+                .map_or_else(|| ui.available_width(), |size| size.x),
+            style.gutter_width + style.code_left_padding,
+            RIGHT_PADDING,
+            monospace_advance(ui, &style.font).max(1.0),
+        )
+    });
+    session.rows.fit(&session.model, wrap_width);
 
     if let Some(line) = requested_line {
         let logical_line = line
@@ -602,6 +619,7 @@ pub(crate) fn show_virtual_text_editor(
             reveal = Some(Reveal::CenterIfOutside);
             session.caret_moved_at = ui.input(|input| input.time);
         }
+        session.rows.refresh(&session.model);
         let scroll_offset = planned_scroll_offset(
             ui.ctx(),
             &session,
@@ -618,6 +636,15 @@ pub(crate) fn show_virtual_text_editor(
         }
         scroll_area.show_viewport(ui, |ui, viewport| {
             session.viewport_size = Some(viewport.size());
+            if session.rows.wraps() {
+                let width = wrap::wrap_cells(
+                    viewport.width(),
+                    style.gutter_width + style.code_left_padding,
+                    RIGHT_PADDING,
+                    char_width,
+                );
+                session.rows.fit(&session.model, Some(width));
+            }
             let content_size = content_size(&session, style, char_width).max(viewport.size());
             ui.set_min_size(content_size);
             let content_rect = egui::Rect::from_min_size(ui.min_rect().min, content_size);
@@ -663,7 +690,15 @@ pub(crate) fn show_virtual_text_editor(
 
             let pointer_position = response.interact_pointer_pos();
             let hit = |session: &VirtualEditorSession, pointer| {
-                hit_test(&session.model, pointer, origin, viewport, style, char_width)
+                hit_test(
+                    &session.model,
+                    &session.rows,
+                    pointer,
+                    origin,
+                    viewport,
+                    style,
+                    char_width,
+                )
             };
             // A finger may be about to scroll, so only a mouse or a pen
             // places the caret as it goes down; a tap places it when it
@@ -735,8 +770,15 @@ pub(crate) fn show_virtual_text_editor(
                 && let Some(pointer) = pointer_position
                 && let Some((anchor_line, anchor_column)) = session.drag_anchor
             {
-                let (line, column) =
-                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                let (line, column) = hit_test(
+                    &session.model,
+                    &session.rows,
+                    pointer,
+                    origin,
+                    viewport,
+                    style,
+                    char_width,
+                );
                 if session.column_drag {
                     let anchor_cell = session.model.cell_at(anchor_line, anchor_column) as f32;
                     let cell = hit_cell(pointer, origin, viewport, style, char_width);
@@ -800,14 +842,43 @@ pub(crate) fn show_virtual_text_editor(
                 session.preferred_column = None;
             }
 
-            let viewport_lines = session.model.viewport(
-                first_row,
-                row_count,
-                first_cell,
-                cell_count,
-                ROW_OVERSCAN,
-                COLUMN_OVERSCAN,
-            );
+            let wrapped = session.rows.wraps();
+            let viewport_lines = if wrapped {
+                let end =
+                    (first_row + row_count + ROW_OVERSCAN).min(session.rows.count(&session.model));
+                (first_row.saturating_sub(ROW_OVERSCAN)..end)
+                    .filter_map(|row| {
+                        let span = session.rows.span(&session.model, row)?;
+                        let line =
+                            session
+                                .model
+                                .wrapped_row(row, span.line, span.columns.clone())?;
+                        Some((line, span))
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                session
+                    .model
+                    .viewport(
+                        first_row,
+                        row_count,
+                        first_cell,
+                        cell_count,
+                        ROW_OVERSCAN,
+                        COLUMN_OVERSCAN,
+                    )
+                    .into_iter()
+                    .map(|line| {
+                        let span = wrap::RowSpan {
+                            line: line.logical_line,
+                            columns: 0..usize::MAX,
+                            first: true,
+                            last: true,
+                        };
+                        (line, span)
+                    })
+                    .collect()
+            };
             let sticky_gutter_left = origin.x + viewport.left();
             let sticky_separator = sticky_gutter_left + style.gutter_width;
             let lanes = GutterLanes::of(style);
@@ -838,11 +909,18 @@ pub(crate) fn show_virtual_text_editor(
             if let Some(pointer) = pointer_hover
                 .filter(|pointer| ui.clip_rect().contains(*pointer) && pointer.x > sticky_separator)
             {
-                let (line, column) =
-                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                let (line, column) = hit_test(
+                    &session.model,
+                    &session.rows,
+                    pointer,
+                    origin,
+                    viewport,
+                    style,
+                    char_width,
+                );
                 hover_char_index = Some(session.model.char_at_line_column(line, column));
             }
-            for line in viewport_lines {
+            for (line, span) in viewport_lines {
                 let row_top =
                     origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
                 let row_rect = egui::Rect::from_min_size(
@@ -852,6 +930,34 @@ pub(crate) fn show_virtual_text_editor(
                 if !row_rect.intersects(ui.clip_rect()) {
                     continue;
                 }
+                // A wrapped row draws its stretch of the line from the
+                // code's edge, clipped to that stretch.
+                let (row_origin_x, row_painter, row_mark_painter) = if wrapped {
+                    let row_origin_x = code_origin_x - line.first_cell as f32 * char_width;
+                    let left = if span.first {
+                        code_clip.left()
+                    } else {
+                        code_origin_x
+                    };
+                    let right = if span.last {
+                        code_clip.right()
+                    } else {
+                        row_origin_x
+                            + session.model.cell_at(line.logical_line, span.columns.end) as f32
+                                * char_width
+                    };
+                    let clip = code_clip.intersect(egui::Rect::from_x_y_ranges(
+                        left..=right.max(left),
+                        code_clip.y_range(),
+                    ));
+                    (
+                        row_origin_x,
+                        code_painter.with_clip_rect(clip),
+                        mark_painter.with_clip_rect(clip),
+                    )
+                } else {
+                    (code_origin_x, code_painter.clone(), mark_painter.clone())
+                };
                 let one_based_line = line.logical_line + 1;
                 let is_active = session.model.selections().iter().any(|selection| {
                     session.model.line_column_for_char(selection.cursor).0 == line.logical_line
@@ -872,30 +978,30 @@ pub(crate) fn show_virtual_text_editor(
                 }
 
                 paint_selections(
-                    &code_painter,
+                    &row_painter,
                     &session.model,
                     line.logical_line,
                     row_rect,
-                    code_origin_x,
+                    row_origin_x,
                     char_width,
                     style.selection_background,
                 );
                 paint_occurrences(
-                    &code_painter,
+                    &row_painter,
                     &session.model,
                     style,
                     line.logical_line,
                     row_rect,
-                    code_origin_x,
+                    row_origin_x,
                     char_width,
                 );
                 find_bar::paint_matches(
-                    &code_painter,
+                    &row_painter,
                     &session.model,
                     &session.find,
                     line.logical_line,
                     row_rect,
-                    code_origin_x,
+                    row_origin_x,
                     char_width,
                     style,
                 );
@@ -915,9 +1021,9 @@ pub(crate) fn show_virtual_text_editor(
                     });
                     fonts.layout_job(job)
                 });
-                code_painter.galley(
+                row_painter.galley(
                     egui::pos2(
-                        code_origin_x + line.first_cell as f32 * char_width,
+                        row_origin_x + line.first_cell as f32 * char_width,
                         row_top + (style.line_height - galley.size().y) * 0.5,
                     ),
                     galley,
@@ -931,10 +1037,10 @@ pub(crate) fn show_virtual_text_editor(
                 let shown_row = row_rect.intersect(code_clip);
                 let row_color =
                     row_fill.map_or(style.background, |fill| style.background.blend(fill));
-                if line_right > code_clip.right() + 0.5 {
+                if !wrapped && line_right > code_clip.right() + 0.5 {
                     paint_edge_fade(&code_painter, shown_row, true, row_color);
                 }
-                if line.total_columns > 0 && code_clip.left() > code_origin_x + 0.5 {
+                if !wrapped && line.total_columns > 0 && code_clip.left() > code_origin_x + 0.5 {
                     paint_edge_fade(&code_painter, shown_row, false, row_color);
                 }
                 let first_mark = style
@@ -945,10 +1051,10 @@ pub(crate) fn show_virtual_text_editor(
                     .take_while(|mark| mark.line == line.logical_line);
                 for mark in line_marks {
                     paint_source_mark(
-                        &mark_painter,
+                        &row_mark_painter,
                         &session.model,
                         mark,
-                        code_origin_x,
+                        row_origin_x,
                         row_top + style.line_height - 2.5,
                         char_width,
                         style,
@@ -959,19 +1065,27 @@ pub(crate) fn show_virtual_text_editor(
                 // the line is a mark in its own lane left of the number; an
                 // edited line is a change bar at the gutter's edge; a
                 // folded line's mark is in the lane at the code's edge.
-                let problem = line_problem(line.logical_line);
+                // A line's number and its problem stand beside its first
+                // row; an edit's bar runs beside all of them.
+                let problem = if span.first {
+                    line_problem(line.logical_line)
+                } else {
+                    None
+                };
                 let number_color = if is_active {
                     style.text_dim
                 } else {
                     style.text_faint
                 };
-                ui.painter().text(
-                    egui::pos2(sticky_gutter_left + lanes.number_right, row_rect.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    one_based_line.to_string(),
-                    style.font.clone(),
-                    number_color,
-                );
+                if span.first {
+                    ui.painter().text(
+                        egui::pos2(sticky_gutter_left + lanes.number_right, row_rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        one_based_line.to_string(),
+                        style.font.clone(),
+                        number_color,
+                    );
+                }
                 if let Some(problem) = problem {
                     paint_problem_mark(
                         &gutter_mark_painter,
@@ -1020,8 +1134,15 @@ pub(crate) fn show_virtual_text_editor(
                 && let Some(pointer) = response.interact_pointer_pos()
                 && pointer.x <= sticky_separator
             {
-                let (line, _) =
-                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                let (line, _) = hit_test(
+                    &session.model,
+                    &session.rows,
+                    pointer,
+                    origin,
+                    viewport,
+                    style,
+                    char_width,
+                );
                 session.model.unfold_at_line(line);
             }
 
@@ -1053,7 +1174,7 @@ pub(crate) fn show_virtual_text_editor(
                 let logical_line = line
                     .saturating_sub(1)
                     .min(session.model.line_count().saturating_sub(1));
-                if let Some(visible_row) = session.model.visible_row_for_logical_line(logical_line)
+                if let Some((visible_row, _)) = session.rows.row_of(&session.model, logical_line, 0)
                 {
                     // The line's start, where the caret is put: centred
                     // down the view, and the view back at the first column.
@@ -1127,6 +1248,7 @@ pub(crate) fn show_virtual_text_editor(
         editor_id,
         &response,
         &session.model,
+        &session.rows,
         editable,
         tab_moves_focus,
         style,
@@ -1179,12 +1301,24 @@ fn primary_caret_anchor(
     style: &VirtualEditorStyle<'_>,
 ) -> Option<egui::Pos2> {
     let cursor = session.model.selections().last()?.cursor;
-    let (line, cell) = session.model.line_cell_for_char(cursor);
-    let visible_row = session.model.visible_row_for_logical_line(line)?;
+    let (visible_row, cell) = row_cell_for_char(session, cursor)?;
     Some(egui::pos2(
         code_origin_x + cell as f32 * char_width,
         origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
     ))
+}
+
+/// Where `char_index` is drawn: its row, and the display cell it starts at
+/// along that row. `None` while its line is folded away.
+fn row_cell_for_char(session: &VirtualEditorSession, char_index: usize) -> Option<(usize, usize)> {
+    let (line, column) = session.model.line_column_for_char(char_index);
+    let (row, start) = session.rows.row_of(&session.model, line, column)?;
+    let start_cell = if start == 0 {
+        0
+    } else {
+        session.model.cell_at(line, start)
+    };
+    Some((row, session.model.cell_at(line, column) - start_cell))
 }
 
 /// Replace characters `range` with `text` as one undoable edit, the caret
@@ -1264,13 +1398,19 @@ fn content_size(
     style: &VirtualEditorStyle<'_>,
     char_width: f32,
 ) -> Vec2 {
-    let visible_rows = session.model.visible_line_count().max(1);
-    Vec2::new(
+    let rows = session.rows.count(&session.model).max(1);
+    // Wrapped, the text is as wide as the view, so it never scrolls sideways.
+    let width = if session.rows.wraps() {
+        0.0
+    } else {
         style.gutter_width
             + style.code_left_padding
             + session.maximum_cells as f32 * char_width
-            + RIGHT_PADDING,
-        style.top_padding + visible_rows as f32 * style.line_height + BOTTOM_PADDING,
+            + RIGHT_PADDING
+    };
+    Vec2::new(
+        width,
+        style.top_padding + rows as f32 * style.line_height + BOTTOM_PADDING,
     )
 }
 
@@ -1282,8 +1422,7 @@ fn caret_content_rect(
     char_width: f32,
 ) -> Option<egui::Rect> {
     let cursor = session.model.selections().last()?.cursor;
-    let (line, cell) = session.model.line_cell_for_char(cursor);
-    let row = session.model.visible_row_for_logical_line(line)?;
+    let (row, cell) = row_cell_for_char(session, cursor)?;
     Some(egui::Rect::from_min_size(
         egui::pos2(
             style.gutter_width + style.code_left_padding + cell as f32 * char_width,
@@ -1534,20 +1673,24 @@ fn monospace_advance(ui: &Ui, font: &FontId) -> f32 {
 /// The line under `pointer` and the column whose start is nearest it.
 fn hit_test(
     model: &TextDocumentModel,
+    rows: &wrap::Rows,
     pointer: egui::Pos2,
     origin: egui::Pos2,
     viewport: egui::Rect,
     style: &VirtualEditorStyle<'_>,
     char_width: f32,
 ) -> (usize, usize) {
-    let visible_row = ((pointer.y - origin.y - style.top_padding) / style.line_height)
+    let row = ((pointer.y - origin.y - style.top_padding) / style.line_height)
         .floor()
         .max(0.0) as usize;
-    let logical_line = model
-        .logical_line_for_visible_row(visible_row)
-        .unwrap_or_else(|| model.line_count().saturating_sub(1));
     let cell = hit_cell(pointer, origin, viewport, style, char_width);
-    (logical_line, model.column_nearest_cell(logical_line, cell))
+    match rows.span(model, row) {
+        Some(span) => (span.line, span.column_at(model, cell)),
+        None => {
+            let line = model.line_count().saturating_sub(1);
+            (line, model.column_nearest_cell(line, cell))
+        }
+    }
 }
 
 /// The display cell under `pointer`, with the fraction of it the pointer is
@@ -2419,28 +2562,35 @@ fn is_word_character(character: char) -> bool {
 
 /// Move every caret `delta` rows on screen, so a folded region counts as the
 /// one row it shows.
+/// Move each caret `delta` rows, keeping to the display cell along its row
+/// that vertical moves keep. Wrapped, a row is a stretch of a line.
 fn move_vertical(session: &mut VirtualEditorSession, delta: isize, extend: bool) {
+    session.rows.refresh(&session.model);
     let selections = session.model.selections().to_vec();
     let mut moved = Vec::with_capacity(selections.len());
-    let last_row = session.model.visible_line_count().saturating_sub(1);
+    let last_row = session.rows.count(&session.model).saturating_sub(1);
     for selection in selections {
-        let (line, cell) = session.model.line_cell_for_char(selection.cursor);
-        let preferred = *session.preferred_column.get_or_insert(cell);
-        let target_line = session
-            .model
-            .visible_row_for_logical_line(line)
-            .and_then(|row| {
-                session
-                    .model
-                    .logical_line_for_visible_row(row.saturating_add_signed(delta).min(last_row))
-            })
-            .unwrap_or_else(|| {
-                line.saturating_add_signed(delta)
-                    .min(session.model.line_count().saturating_sub(1))
-            });
-        let column = session
-            .model
-            .column_nearest_cell(target_line, preferred as f32);
+        let row_cell = row_cell_for_char(session, selection.cursor);
+        let target = row_cell.and_then(|(row, cell)| {
+            let preferred = *session.preferred_column.get_or_insert(cell);
+            let span = session.rows.span(
+                &session.model,
+                row.saturating_add_signed(delta).min(last_row),
+            )?;
+            Some((span.line, span.column_at(&session.model, preferred as f32)))
+        });
+        // A caret in a folded line moves by whole lines.
+        let (target_line, column) = target.unwrap_or_else(|| {
+            let (line, cell) = session.model.line_cell_for_char(selection.cursor);
+            let preferred = *session.preferred_column.get_or_insert(cell);
+            let line = line
+                .saturating_add_signed(delta)
+                .min(session.model.line_count().saturating_sub(1));
+            (
+                line,
+                session.model.column_nearest_cell(line, preferred as f32),
+            )
+        });
         let cursor = session.model.char_at_line_column(target_line, column);
         moved.push(TextSelection {
             anchor: if extend { selection.anchor } else { cursor },
@@ -2827,8 +2977,7 @@ fn paint_carets_and_ime(
     let caret_visible = !blinking || (since_moved * 2.0).fract() < 0.62;
     let mut primary_caret_rect = None;
     for selection in session.model.selections() {
-        let (line, cell) = session.model.line_cell_for_char(selection.cursor);
-        let Some(visible_row) = session.model.visible_row_for_logical_line(line) else {
+        let Some((visible_row, cell)) = row_cell_for_char(session, selection.cursor) else {
             continue;
         };
         let x = code_origin_x + cell as f32 * char_width;
@@ -2846,13 +2995,25 @@ fn paint_carets_and_ime(
         for range in &composition.preedit_ranges {
             let (line, start_column) = session.model.line_column_for_char(range.start);
             let (_, end_column) = session.model.line_column_for_char(range.end);
-            let Some(visible_row) = session.model.visible_row_for_logical_line(line) else {
+            let Some((visible_row, row_start)) =
+                session.rows.row_of(&session.model, line, start_column)
+            else {
                 continue;
+            };
+            let row_start_cell = if row_start == 0 {
+                0
+            } else {
+                session.model.cell_at(line, row_start)
             };
             let y =
                 origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height - 1.0;
             let x = |column: usize| {
-                code_origin_x + session.model.cell_at(line, column) as f32 * char_width
+                code_origin_x
+                    + session
+                        .model
+                        .cell_at(line, column)
+                        .saturating_sub(row_start_cell) as f32
+                        * char_width
             };
             ui.painter().hline(
                 x(start_column)..=x(end_column),

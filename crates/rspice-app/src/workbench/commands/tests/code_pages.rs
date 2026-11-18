@@ -129,3 +129,37 @@ fn view_zoom_sizes_the_text_of_the_source_editor_in_front() {
         "the smallest size goes no smaller"
     );
 }
+
+/// View > Word wrap switches every source editor's wrap, and back.
+#[test]
+fn view_word_wrap_switches_the_source_editors_wrap() {
+    use rspice_app_state::workbench::preferences::TogglePreference;
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Netlist;
+    app.state.workbench.active_source_editor = Some(
+        rspice_app_code::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: egui::Id::new("wrapped-source"),
+            editable: false,
+            navigable: true,
+            can_undo: false,
+            can_redo: false,
+            has_selection: false,
+        },
+    );
+    let key = CodeCommand::ToggleWordWrap.key();
+    let wraps = |app: &RSpiceApp| {
+        app.state
+            .model
+            .preferences
+            .toggle(TogglePreference::EditorWordWrap)
+    };
+    assert!(!wraps(&app), "lines run on until asked to wrap");
+    assert!(
+        app.command_key_enabled(key),
+        "a read-only document wraps too"
+    );
+    app.execute_command_key(key);
+    assert!(wraps(&app));
+    app.execute_command_key(key);
+    assert!(!wraps(&app));
+}

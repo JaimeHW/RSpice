@@ -55,8 +55,7 @@ fn handle_roots(
         return None;
     }
     let root = |index: usize| {
-        let (line, cell) = session.model.line_cell_for_char(index);
-        let row = session.model.visible_row_for_logical_line(line)?;
+        let (row, cell) = super::row_cell_for_char(session, index)?;
         Some(egui::pos2(
             origin.x + style.gutter_width + style.code_left_padding + cell as f32 * char_width,
             origin.y + style.top_padding + (row + 1) as f32 * style.line_height,
@@ -99,8 +98,15 @@ pub(super) fn drag_selection_handles(
             && let Some(pointer) = response.interact_pointer_pos()
         {
             let target = pointer - Vec2::new(0.0, knob.y - root.y + style.line_height * 0.5);
-            let (line, column) =
-                hit_test(&session.model, target, origin, viewport, style, char_width);
+            let (line, column) = hit_test(
+                &session.model,
+                &session.rows,
+                target,
+                origin,
+                viewport,
+                style,
+                char_width,
+            );
             let fixed = if end == 0 { range.end } else { range.start };
             dragged = Some(TextSelection {
                 anchor: fixed,

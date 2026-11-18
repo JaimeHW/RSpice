@@ -90,6 +90,9 @@ pub enum CodeCommand {
     UnfoldAtCaret,
     FoldAll,
     UnfoldAll,
+    /// Wrap the lines too long for the view in every source editor, or let
+    /// them run on.
+    ToggleWordWrap,
     /// Language navigation from the caret of the active source editor, for
     /// languages whose language service answers it.
     GoToDefinition,
@@ -386,6 +389,8 @@ const UNFOLD_AT_CARET: &[ShortcutBinding] = &[primary(
     chord(Key::CloseBracket, true, false, true, "Ctrl+Shift+]"),
     ALL,
 )];
+const TOGGLE_WORD_WRAP: &[ShortcutBinding] =
+    &[primary(chord(Key::Z, false, true, false, "Alt+Z"), ALL)];
 // F12 opens a browser's developer tools, so definition and references are
 // desktop keys. F2 is Rename selection on a schematic and Rename symbol in
 // a focused source editor; as with Ctrl+D the focused surface decides.
@@ -442,7 +447,7 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::NewDeck,
@@ -481,6 +486,7 @@ impl CodeCommand {
         Self::UnfoldAtCaret,
         Self::FoldAll,
         Self::UnfoldAll,
+        Self::ToggleWordWrap,
         Self::GoToDefinition,
         Self::FindReferences,
         Self::RenameSymbol,
@@ -532,6 +538,7 @@ impl CodeCommand {
             Self::UnfoldAtCaret => CommandKey::new("unfold-at-caret"),
             Self::FoldAll => CommandKey::new("fold-all"),
             Self::UnfoldAll => CommandKey::new("unfold-all"),
+            Self::ToggleWordWrap => CommandKey::new("toggle-word-wrap"),
             Self::GoToDefinition => CommandKey::new("go-to-definition"),
             Self::FindReferences => CommandKey::new("find-references"),
             Self::RenameSymbol => CommandKey::new("rename-symbol"),
@@ -621,6 +628,7 @@ impl CodeCommand {
             | Self::UnfoldAtCaret
             | Self::FoldAll
             | Self::UnfoldAll
+            | Self::ToggleWordWrap
             | Self::GoToDefinition
             | Self::FindReferences
             | Self::RenameSymbol
@@ -652,6 +660,7 @@ impl CodeCommand {
             Self::PreviousProblem => PREVIOUS_PROBLEM,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
+            Self::ToggleWordWrap => TOGGLE_WORD_WRAP,
             Self::GoToDefinition => GO_TO_DEFINITION,
             Self::FindReferences => FIND_REFERENCES,
             Self::RenameSymbol => RENAME_SYMBOL,
@@ -722,6 +731,7 @@ impl CodeCommand {
             Self::UnfoldAtCaret => ("Unfold at caret", "View", palette),
             Self::FoldAll => ("Fold all", "View", palette),
             Self::UnfoldAll => ("Unfold all", "View", palette),
+            Self::ToggleWordWrap => ("Word wrap", "View", palette),
             Self::GoToDefinition => ("Go to definition", "Code", palette),
             Self::FindReferences => ("Find references", "Code", palette),
             Self::RenameSymbol => ("Rename symbol\u{2026}", "Code", palette),

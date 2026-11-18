@@ -604,6 +604,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::UnfoldAtCaret.key(),
     CodeCommand::FoldAll.key(),
     CodeCommand::UnfoldAll.key(),
+    CodeCommand::ToggleWordWrap.key(),
     CodeCommand::GoToDefinition.key(),
     CodeCommand::FindReferences.key(),
     CodeCommand::RenameSymbol.key(),

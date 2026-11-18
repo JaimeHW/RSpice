@@ -482,6 +482,13 @@ impl RSpiceApp {
             ctx,
             self.state.model.preferences.editor_font_size(),
         );
+        rspice_app_code::workbench::documents::editor_font::publish_wrap(
+            ctx,
+            self.state
+                .model
+                .preferences
+                .toggle(rspice_app_state::workbench::preferences::TogglePreference::EditorWordWrap),
+        );
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         let system_contrast = (self.read_system_contrast)();

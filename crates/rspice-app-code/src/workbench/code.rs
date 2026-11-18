@@ -47,11 +47,14 @@ use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::{CodeCommand, CodeRequest};
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
+use rspice_app_state::workbench::preferences::TogglePreference;
 
 /// The code feature.
 pub struct CodeFeature;
 
-pub use source_menus::{SOURCE_EDIT_MENU, SOURCE_EDITOR_MENU, SOURCE_FOLDING_MENU};
+pub use source_menus::{
+    SOURCE_EDIT_MENU, SOURCE_EDITOR_MENU, SOURCE_FOLDING_MENU, SOURCE_VIEW_ROWS,
+};
 
 impl Feature for CodeFeature {
     type State = CodeState;
@@ -220,6 +223,15 @@ impl CommandSet for CodeCommand {
             .is_some_and(|editor| !self.navigates_source_language() || editor.navigable)
     }
 
+    fn checked(self, reads: &Reads<'_, CodeFeature>) -> Option<bool> {
+        (self == Self::ToggleWordWrap).then(|| {
+            reads
+                .model
+                .preferences
+                .toggle(TogglePreference::EditorWordWrap)
+        })
+    }
+
     /// A source editor takes its own commands, and refuses the ones that
     /// would change a read-only document's text. Each window the deck draws
     /// is offered only on the Netlist workspace. Find and Manage act on every
@@ -365,6 +377,8 @@ impl CommandSet for CodeCommand {
                 UNAVAILABLE,
             ),
             Self::VerilogAOpenSymbol => (can_open_veriloga_symbol(model), UNAVAILABLE),
+            // Wrap is every source editor's, read-only or not.
+            Self::ToggleWordWrap => (true, UNAVAILABLE),
             // Every source editor can be stepped through, read-only or not.
             Self::NextProblem | Self::PreviousProblem | Self::ShowProblemAtCaret => (
                 reads.wb.active_source_editor.is_some(),
@@ -414,6 +428,15 @@ impl CommandSet for CodeCommand {
             }
             // The focused editor's page takes the step as it draws.
             Self::NextProblem => cx.wb.outbox.push(ProblemStep::Next),
+            Self::ToggleWordWrap => {
+                let wraps = cx
+                    .model
+                    .preferences
+                    .toggle(TogglePreference::EditorWordWrap);
+                cx.model
+                    .preferences
+                    .set_toggle(TogglePreference::EditorWordWrap, !wraps);
+            }
             Self::PreviousProblem => cx.wb.outbox.push(ProblemStep::Previous),
             Self::ShowProblemAtCaret => cx.wb.outbox.push(ProblemStep::AtCaret),
             // Asked of the source editor on screen, which refuses an edit of

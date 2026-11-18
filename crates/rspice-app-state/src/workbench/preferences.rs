@@ -796,10 +796,11 @@ pub enum TogglePreference {
     CanvasEdgePan,
     WaveMinorGrid,
     KeepSaveBackup,
+    EditorWordWrap,
 }
 
 impl TogglePreference {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -813,6 +814,7 @@ impl TogglePreference {
         Self::CanvasEdgePan,
         Self::WaveMinorGrid,
         Self::KeepSaveBackup,
+        Self::EditorWordWrap,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -830,14 +832,16 @@ impl TogglePreference {
             Self::CanvasEdgePan => "canvas-edge-pan",
             Self::WaveMinorGrid => "wave-minor-grid",
             Self::KeepSaveBackup => "keep-save-backup",
+            Self::EditorWordWrap => "editor-word-wrap",
         }
     }
 
     /// Off by default for the three that cost something the author did not
     /// ask for: an animation budget, a diagnostics upload, and a design-check
     /// pass on every save. An inverted wheel is off because it is the
-    /// exception, not the convention, and the minor grid because a waveform
-    /// view has always started without it.
+    /// exception, not the convention, the minor grid because a waveform
+    /// view has always started without it, and word wrap because a deck's
+    /// columns read best unbroken.
     const fn default_value(self) -> bool {
         !matches!(
             self,
@@ -846,6 +850,7 @@ impl TogglePreference {
                 | Self::RunDesignChecksOnSave
                 | Self::InvertWheelZoom
                 | Self::WaveMinorGrid
+                | Self::EditorWordWrap
         )
     }
 }

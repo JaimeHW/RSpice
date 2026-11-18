@@ -6,7 +6,7 @@
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
-use rspice_app_code::workbench::code::{SOURCE_EDIT_MENU, SOURCE_FOLDING_MENU};
+use rspice_app_code::workbench::code::{SOURCE_EDIT_MENU, SOURCE_VIEW_ROWS};
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
@@ -359,11 +359,9 @@ const VIEW_MENU: &[MenuEntry] = &[
     Separator,
     MenuEntry::submenu("Project", PROJECT_PAGES_MENU).access('J'),
     Separator,
-    // Folding, offered while a source editor is the document on screen.
-    MenuEntry::Only(
-        MenuContext::SourceEditor,
-        &[MenuEntry::submenu("Folding", SOURCE_FOLDING_MENU).access('L')],
-    ),
+    // Folding and word wrap, offered while a source editor is the document
+    // on screen.
+    MenuEntry::Only(MenuContext::SourceEditor, SOURCE_VIEW_ROWS),
     command_as(ShellCommand::ToggleFocusMode, "Focus mode").access('M'),
     command_as(ShellCommand::ToggleFullScreen, "Full screen").access('U'),
 ];

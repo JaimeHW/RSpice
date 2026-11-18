@@ -360,7 +360,6 @@ impl TextDocumentModel {
         &self.selections
     }
 
-    #[cfg(test)]
     pub fn folds(&self) -> &[FoldRegion] {
         &self.folds
     }
@@ -947,6 +946,74 @@ impl TextDocumentModel {
                 })
             })
             .collect()
+    }
+
+    /// Push onto `breaks`, in order, the columns where `line` breaks to fit
+    /// rows `width` cells wide. A row ends after the last blank that fits,
+    /// or, in a run without one, after the last character that fits. Blanks
+    /// hang past the edge rather than start a row.
+    pub fn wrap_columns(&self, line: usize, width: usize, breaks: &mut Vec<usize>) {
+        let Some(content) = self.line_content_char_range(line) else {
+            return;
+        };
+        let width = width.max(1);
+        let text = self.text.slice(content.clone());
+        if content.len() <= width && one_cell_a_character(text) {
+            return;
+        }
+        let (mut start, mut start_cell) = (0, 0);
+        let mut after_blank: Option<(usize, usize)> = None;
+        let mut at = 0;
+        for (column, character) in text.chars().enumerate() {
+            let cells = char_cells(character, at);
+            let blank = character.is_whitespace();
+            while !blank && column > start && at + cells - start_cell > width {
+                let (column_break, cell_break) = after_blank
+                    .take()
+                    .filter(|(after, _)| *after > start)
+                    .unwrap_or((column, at));
+                breaks.push(column_break);
+                start = column_break;
+                start_cell = cell_break;
+            }
+            if blank {
+                after_blank = Some((column + 1, at + cells));
+            }
+            at += cells;
+        }
+    }
+
+    /// Row `row` of a wrapped view: columns `columns` of `logical_line`.
+    pub fn wrapped_row(
+        &self,
+        row: usize,
+        logical_line: usize,
+        columns: Range<usize>,
+    ) -> Option<ViewportLine> {
+        let content = self.line_content_char_range(logical_line)?;
+        let total_columns = content.len();
+        let start = columns.start.min(total_columns);
+        let end = columns.end.clamp(start, total_columns);
+        let folded_line_count = if start == 0 {
+            self.folds
+                .binary_search_by_key(&logical_line, |fold| fold.start_line)
+                .ok()
+                .map_or(0, |index| self.folds[index].hidden_line_count())
+        } else {
+            0
+        };
+        Some(ViewportLine {
+            visible_row: row,
+            logical_line,
+            first_column: start,
+            first_cell: self.cell_at(logical_line, start),
+            text: self
+                .text
+                .slice((content.start + start)..(content.start + end))
+                .to_string(),
+            total_columns,
+            folded_line_count,
+        })
     }
 
     pub fn line_column_for_char(&self, char_index: usize) -> (usize, usize) {
@@ -1573,5 +1640,23 @@ mod tests {
         assert_eq!(viewport.len(), 400);
         assert_eq!(viewport.first().unwrap().logical_line, 2_499_800);
         assert_eq!(viewport.last().unwrap().logical_line, 2_500_199);
+    }
+
+    #[test]
+    fn a_line_wraps_after_the_last_blank_that_fits_and_a_long_word_where_it_must() {
+        let model = TextDocumentModel::from_source(
+            "alpha beta gamma delta\nabcdefghijklmnopqrstuvwxy\nshort\n",
+        );
+        let breaks = |line| {
+            let mut breaks = Vec::new();
+            model.wrap_columns(line, 10, &mut breaks);
+            breaks
+        };
+        // "alpha beta " | "gamma " | "delta": a blank hangs past the edge.
+        assert_eq!(breaks(0), vec![11, 17]);
+        assert_eq!(breaks(1), vec![10, 20], "a word wider than a row is cut");
+        assert!(breaks(2).is_empty(), "a line that fits stays whole");
+        let row = model.wrapped_row(1, 0, 11..17).expect("a row of the line");
+        assert_eq!((row.text.as_str(), row.first_cell), ("gamma ", 11));
     }
 }

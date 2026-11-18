@@ -701,6 +701,7 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
             "  Unfold at caret | unfold-at-caret | Ctrl+Shift+] | on",
             "  Fold all | fold-all |  | on",
             "  Unfold all | unfold-all |  | on",
+            "Word wrap | toggle-word-wrap | Alt+Z | on | unchecked",
             "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
             "Full screen | full-screen | F11 | on | unchecked",
         ],
