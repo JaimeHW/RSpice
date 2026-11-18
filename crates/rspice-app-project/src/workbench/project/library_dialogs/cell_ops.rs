@@ -9,7 +9,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::ImportedInclude;
 use crate::state::{
     CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
-    ProjectSourceLanguage, ProjectSourceOwner,
+    ProjectSourceOwner,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
@@ -255,7 +255,6 @@ fn create_cell_from_builtin_model(
         .collect::<Result<Vec<_>, String>>()?;
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
         source.root.as_str(),
         root.as_str(),
         files,

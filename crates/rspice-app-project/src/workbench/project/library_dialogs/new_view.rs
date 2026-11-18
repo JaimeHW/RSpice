@@ -568,7 +568,6 @@ fn create_hdl_cell_view(
     );
     let mut bundle = match crate::state::ProjectSourceBundle::try_new(
         crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-        crate::state::ProjectSourceLanguage::VerilogA,
         root_path,
         source,
         [],
