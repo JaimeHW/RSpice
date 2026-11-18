@@ -710,3 +710,40 @@ fn an_operation_edited_since_refuses_to_undo() {
     assert!(refusal.contains("edited since"), "{refusal}");
     assert!(Standing::of(&app).differences(&standing).is_empty());
 }
+
+/// Undoing the rename of a library of 5,000 cells takes all 5,000 out of the
+/// project in one step, and revalidates each drawing against the catalog
+/// once rather than once for every cell that went.
+#[test]
+fn undoing_a_five_thousand_cell_library_rename_revalidates_each_drawing_once() {
+    let mut app = app_with_parts();
+    let mut bulk = Library::new("bulk");
+    for n in 0..5_000 {
+        let mut cell = Cell::new(format!("cell{n:04}").as_str());
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        bulk.add_cell(cell);
+    }
+    app.state.model.library_manager.add_library(bulk);
+    app.state
+        .rename_library("bulk", "blocks")
+        .expect("the library is renamed");
+    let drawings = app.state.model.workspace.content.schematic_buffers.len() + 1;
+
+    rspice_design::schematic::owned::reset_binding_revalidation_count();
+    app.execute_command_key(ids::UNDO);
+    let revalidations = rspice_design::schematic::owned::binding_revalidation_count();
+
+    let library_manager = &app.state.model.library_manager;
+    assert!(library_manager.get_library("blocks").is_none());
+    assert_eq!(
+        library_manager
+            .get_library("bulk")
+            .map(|library| library.cell_count()),
+        Some(5_000),
+        "Undo puts the library back under its name"
+    );
+    assert_eq!(
+        revalidations, drawings as u64,
+        "each of the {drawings} drawings is revalidated once"
+    );
+}

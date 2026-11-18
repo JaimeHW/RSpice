@@ -15,7 +15,7 @@
 //! of them has moved.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rspice_design::schematic::document::SchematicDocument;
@@ -312,23 +312,46 @@ impl Model {
         library: &str,
         cell: &str,
     ) -> CellRemovalScope {
-        let active_removed = self.workspace.content.active_view.library == library
-            && self.workspace.content.active_view.cell == cell;
-        let prefix = format!("{library}/{cell}/");
+        self.drop_workspace_references_to_cells(&[(library.to_owned(), cell.to_owned())])
+    }
+
+    /// Take a set of removed cells out of every workspace collection that
+    /// names one of them, in one pass: each drawing is revalidated once
+    /// against the catalog they have already left, however many went.
+    pub fn drop_workspace_references_to_cells(
+        &mut self,
+        removed: &[(String, String)],
+    ) -> CellRemovalScope {
+        let removed = removed
+            .iter()
+            .map(|(library, cell)| (library.as_str(), cell.as_str()))
+            .collect::<HashSet<_>>();
+        let names_removed = |reference: &CellViewRef| {
+            removed.contains(&(reference.library.as_str(), reference.cell.as_str()))
+        };
+        // A buffer's key spells its cell view, whose segments hold no slash.
+        let keys_removed = |key: &str| {
+            let mut segments = key.splitn(3, '/');
+            matches!(
+                (segments.next(), segments.next(), segments.next()),
+                (Some(library), Some(cell), Some(_)) if removed.contains(&(library, cell))
+            )
+        };
+        let active_removed = names_removed(&self.workspace.content.active_view);
         self.workspace
             .content
             .schematic_buffers
-            .retain(|key, _| !key.starts_with(&prefix));
+            .retain(|key, _| !keys_removed(key));
         self.workspace
             .session
             .schematic_sessions
-            .retain(|key, _| !key.starts_with(&prefix));
+            .retain(|key, _| !keys_removed(key));
         let orphaned_layouts = self
             .workspace
             .content
             .physical_layout_documents()
             .values()
-            .filter(|document| document.owner().library == library && document.owner().cell == cell)
+            .filter(|document| names_removed(document.owner()))
             .map(|document| document.owner().clone())
             .collect::<Vec<_>>();
         for owner in orphaned_layouts {
@@ -339,7 +362,7 @@ impl Model {
         self.workspace
             .content
             .open_views
-            .retain(|open| open.reference.library != library || open.reference.cell != cell);
+            .retain(|open| !names_removed(&open.reference));
         let libraries = &self.library_manager;
         for schematic in self.workspace.content.schematic_buffers.values_mut() {
             schematic.revalidate_instance_bindings(libraries.catalog());
@@ -347,9 +370,7 @@ impl Model {
         let hierarchy_pruned = self
             .workspace
             .content
-            .retain_valid_occurrences(|reference| {
-                reference.library != library || reference.cell != cell
-            });
+            .retain_valid_occurrences(|reference| !names_removed(reference));
         CellRemovalScope {
             active_removed,
             hierarchy_pruned,

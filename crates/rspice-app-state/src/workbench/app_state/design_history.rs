@@ -40,7 +40,7 @@ pub use library_operation::LibraryOperationStart;
 pub use simulation_setup::{SetupParts, SetupSnapshot};
 pub use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::state::workspace::{ReferenceChanges, SchematicReferenceTransaction};
 use compensation::{DocumentCompensation, RecordHeader};
@@ -1152,9 +1152,7 @@ impl Model {
         // describe the same design.
         self.workspace.save_active_schematic(&self.schematic);
         let stranded = placements_of_masters(self, &removed);
-        for (library, cell) in &removed {
-            self.prune_workspace_after_history_removed_cell(library, cell);
-        }
+        self.prune_workspace_after_history_removed_cells(&removed);
         stranded
     }
 
@@ -1229,7 +1227,9 @@ impl Model {
         true
     }
 
-    /// Take a cell a project-history step removed out of the workspace.
+    /// Take the cells a project-history step removed out of the workspace,
+    /// all in one pass: the active drawing is revalidated once, however many
+    /// cells the step took away.
     ///
     /// Three things the deletion command does are wrong at this seam, because
     /// the step is still in flight. Synchronizing the active drawing reconciles
@@ -1243,8 +1243,8 @@ impl Model {
     /// extraction restores tabs, breadcrumbs and the active view itself. What
     /// is left is the part no record covers — the placements standing in
     /// drawings the record never named, the active one included.
-    fn prune_workspace_after_history_removed_cell(&mut self, library: &str, cell: &str) {
-        self.drop_workspace_references_to_cell(library, cell);
+    fn prune_workspace_after_history_removed_cells(&mut self, removed: &[(String, String)]) {
+        self.drop_workspace_references_to_cells(removed);
         self.schematic
             .revalidate_instance_bindings(&self.library_manager);
     }
@@ -1976,6 +1976,10 @@ fn restore_placement_binding(schematic: &mut SchematicState, placement: &Strande
 /// Every placement of one of `masters` in the workspace, with the identity it
 /// currently carries — the exact set the sweep for those masters will clear.
 fn placements_of_masters(state: &Model, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
+    let masters = masters
+        .iter()
+        .map(|(library, cell)| (library.as_str(), cell.as_str()))
+        .collect::<HashSet<_>>();
     let mut stranded = Vec::new();
     for (document, schematic) in &state.workspace.content.schematic_buffers {
         for component in &schematic.document().components {
@@ -1985,10 +1989,7 @@ fn placements_of_masters(state: &Model, masters: &[(String, String)]) -> Vec<Str
             let Some(binding) = component.library_cell.as_ref() else {
                 continue;
             };
-            if !masters
-                .iter()
-                .any(|(library, cell)| binding.library == *library && binding.cell == *cell)
-            {
+            if !masters.contains(&(binding.library.as_str(), binding.cell.as_str())) {
                 continue;
             }
             stranded.push(StrandedPlacement {

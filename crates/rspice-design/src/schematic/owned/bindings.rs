@@ -5,6 +5,26 @@ use super::super::{component::LibraryCellInstance, identity::DocumentRepair};
 use super::Schematic;
 use crate::library::LibraryCatalog;
 
+// Count of drawings revalidated against the cell catalog since the last
+// reset, so a test can assert that taking a set of cells out of a project
+// revalidates each drawing once, however many cells went.
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+thread_local! {
+    static REVALIDATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The drawings revalidated against the cell catalog on this thread since the
+/// last reset.
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+pub fn binding_revalidation_count() -> u64 {
+    REVALIDATIONS.with(std::cell::Cell::get)
+}
+
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+pub fn reset_binding_revalidation_count() {
+    REVALIDATIONS.with(|count| count.set(0));
+}
+
 impl Schematic {
     fn remap_bindings(&mut self, rebind: impl Fn(&mut LibraryCellInstance) -> bool) -> usize {
         let mut remapped = 0;
@@ -150,6 +170,8 @@ impl Schematic {
     /// still claims an identity: a sync that finds nothing to strip leaves
     /// its stamp alone.
     pub fn revalidate_instance_bindings(&mut self, libraries: &LibraryCatalog) -> Vec<String> {
+        #[cfg(any(test, feature = "schematic-test-fixtures"))]
+        REVALIDATIONS.with(|count| count.set(count.get().wrapping_add(1)));
         let mut missing_masters = Vec::new();
         let mut stale = Vec::new();
         for (index, component) in self.document.components.iter().enumerate() {

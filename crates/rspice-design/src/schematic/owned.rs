@@ -9,6 +9,8 @@ use super::identity::{DocumentRepair, SchematicIdentity};
 use rspice_design_model::design_management::SheetId;
 mod annotations;
 mod bindings;
+#[cfg(any(test, feature = "schematic-test-fixtures"))]
+pub use bindings::{binding_revalidation_count, reset_binding_revalidation_count};
 pub mod bulk_edit;
 mod buses;
 mod hierarchy;
