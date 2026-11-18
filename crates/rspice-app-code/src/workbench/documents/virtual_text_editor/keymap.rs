@@ -333,7 +333,7 @@ mod tests {
                         ..Modifiers::NONE
                     };
                     if chord.primary {
-                        modifiers = modifiers | control(os);
+                        modifiers |= control(os);
                     }
                     let taken = key_action(os, chord.key, modifiers).is_some()
                         || kept(os).contains(&(chord.key, modifiers));
