@@ -63,6 +63,13 @@ def has_control(browser, label):
     return any(control["label"] == label for control in controls(browser.snapshot()))
 
 
+def stop_label(browser):
+    """The Stop control's name while a run is active: the verb and its key."""
+    labels = [control["label"] for control in controls(browser.snapshot())
+              if control["role"] == "button" and control["label"].startswith("Stop ")]
+    return labels[0] if len(labels) == 1 else None
+
+
 def run_deck_label(browser):
     """The run control while a deck is what Run runs, named for that deck."""
     labels = [control["label"] for control in controls(browser.snapshot())
@@ -115,12 +122,12 @@ def run(browser, fault, cancel_startup=False):
     browser.capture("starting")
     author_deck(browser)
     browser.click(run_deck_label(browser), "button")
-    wait_for(lambda: has_control(browser, "Stop"), "the queued manual deck")
+    wait_for(lambda: stop_label(browser), "the queued manual deck")
     if not has_control(browser, "Engine starting"):
         raise AssertionError("A queued request advertised progress before worker initialization")
     browser.capture("queued-before-failure")
     if cancel_startup:
-        browser.click("Stop", "button")
+        browser.click(stop_label(browser), "button")
     fault.release.set()
     # A failed engine announces its severity before its state; a stopped one has none.
     retry_label = "Engine stopped" if cancel_startup else "Error: Engine unavailable"
@@ -136,7 +143,7 @@ def run(browser, fault, cancel_startup=False):
                 and browser.script("return window.__RSPICE_SIM_WORKER_READY === true"))
 
     wait_for(ready, "explicit engine retry", 120)
-    if has_control(browser, "Stop"):
+    if stop_label(browser):
         raise AssertionError("Retrying engine startup queued a simulation")
     if not browser.script("return window.__RSPICE_SIM_WORKER_READY === true"):
         raise AssertionError("Retry did not publish actual worker readiness")
